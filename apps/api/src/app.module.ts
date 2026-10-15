@@ -101,6 +101,9 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
+import { AiOriginalScenesController } from "./modules/ai-native/scenes/original-scenes.controller";
+import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS } from "./modules/ai-native/ai-native-application.providers";
+import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 
 @Module({
   imports: [
@@ -111,6 +114,8 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     DatabaseModule
   ],
   controllers: [
+    AiOriginalScenesController,
+    StaffInspectionAssistController,
     HealthController,
     OpenApiController,
     AuthController,
@@ -146,6 +151,9 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     PlatformDemoRequestController
   ],
   providers: [
+    ApiAuthGuard,
+    AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
+    ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     AuthService,
     PlatformService,
     PlatformRepository,
@@ -219,7 +227,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     },
     {
       provide: APP_GUARD,
-      useClass: ApiAuthGuard
+      useExisting: ApiAuthGuard
     }
   ]
 })

@@ -18,7 +18,7 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
-import { AiTaskWorkbench } from "@/features/ai-native/AiTaskWorkbench";
+import { OrderFactsEntry } from "@/features/ai-native/OrderFactsEntry";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
 import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
 import { CarrierShipmentPanel } from "./CarrierShipmentPanel";
@@ -106,7 +106,6 @@ const SERVICE_START_ORDER_STATUSES = [
 
 // B13 页面装配仅保留入口；服务端能力交付前不得由本地页面开关启用。
 // 该常量不是租户权限或授权依据，后续应由服务端能力投影替换。
-const AI_NATIVE_ORDER_ENTRY_ENABLED = false as const;
 
 const serviceOccurrenceTotalQuantity = (row: RentalOrderServiceOccurrence) => Number.isInteger(row.quantity) && row.quantity > 0 ? row.quantity : 1;
 const serviceOccurrenceExecutedQuantity = (row: RentalOrderServiceOccurrence) => Math.min(
@@ -122,8 +121,6 @@ export function RentalOrderDetailPage() {
   const { t, locale } = useLocale();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const tenantId = useAuthStore((state) => state.tenant?.tenantId);
-  const workspaceId = useAuthStore((state) => state.currentWorkspaceId);
   const canViewFunding = hasPermission("rental-os:order:view") || hasPermission("rental-os:order:settle");
   const canRevealSensitive = hasPermission("rental-os:customer:reveal-sensitive");
   const canSettleFunding = hasPermission("rental-os:order:settle");
@@ -677,12 +674,7 @@ export function RentalOrderDetailPage() {
 
   return <>
     <PageHeader title={detail?.orderNo ?? t("订单详情")} description={t("订单保存价格、优惠、规则、日历、服务条款和履约检查快照。" )} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回列表")}</Button>} />
-    {AI_NATIVE_ORDER_ENTRY_ENABLED ? <AiTaskWorkbench
-      context={{ audience: "operator", tenantId, workspaceId }}
-      selectedTaskId={id || null}
-      visible
-      enabled={false}
-    /> : null}
+    {id && detail && <OrderFactsEntry key={id} orderId={id} />}
     <QueryState loading={order.isLoading} error={order.error}>{detail && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Space wrap>
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}

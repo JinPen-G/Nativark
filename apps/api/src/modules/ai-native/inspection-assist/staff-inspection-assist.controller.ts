@@ -1,4 +1,4 @@
-import { Body, Controller, HttpException, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Optional, Param, Post, Req } from '@nestjs/common';
 import { AI_STAFF_INSPECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { z } from 'zod';
 import type { StaffInspectionRequestFactory } from './inspection-assist.composition';
@@ -7,6 +7,7 @@ import { withInspectionRequestSignal, respondInspectionHttp, type InspectionHttp
 
 export const AI_STAFF_INSPECTION_REQUESTS = Symbol('AI_STAFF_INSPECTION_REQUESTS');
 export const AI_STAFF_INSPECTION_ENABLED = Symbol('AI_STAFF_INSPECTION_ENABLED');
+export const AI_STAFF_INSPECTION_OPERATIONS = Symbol('AI_STAFF_INSPECTION_OPERATIONS');
 const operations = new Set<string>(Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations));
 const evidenceFingerprint = z.object({ target: inspectionTargetSchema.extend({ templateId: inspectionId }).strict(),
   refs: z.array(z.object({ attachmentId: inspectionId, attachmentRevision: z.number().int().min(1).max(999) }).strict()).max(100) }).strict();
@@ -16,13 +17,19 @@ const evidenceFingerprint = z.object({ target: inspectionTargetSchema.extend({ t
 @Controller(AI_STAFF_INSPECTION_HTTP_DRAFT.basePath)
 export class StaffInspectionAssistController {
   constructor(@Inject(AI_STAFF_INSPECTION_REQUESTS) private readonly requests: StaffInspectionRequestFactory,
-    @Inject(AI_STAFF_INSPECTION_ENABLED) private readonly enabled: boolean) {}
+    @Inject(AI_STAFF_INSPECTION_ENABLED) private readonly enabled: boolean,
+    @Optional() @Inject(AI_STAFF_INSPECTION_OPERATIONS) private readonly permittedOperations?: readonly string[]) {}
 
   @Post(':operation')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   consume(@Req() request: InspectionHttpRequest, @Param('operation') operation: string, @Body() body: unknown) {
     return respondInspectionHttp(async () => {
       if (this.enabled !== true) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
       if (!operations.has(operation)) throw new HttpException({ code: 'AI_INVALID_INPUT', retryable: false }, 400);
+      if (this.permittedOperations && !this.permittedOperations.includes(operation)) {
+        throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+      }
       // Snapshot before the first await; original service schemas reject caller
       // identity, raw model output and arbitrary configuration/URL properties.
       const input = structuredClone(body);

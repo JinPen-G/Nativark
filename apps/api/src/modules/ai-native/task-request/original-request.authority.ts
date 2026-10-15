@@ -77,7 +77,9 @@ export class AiCurrentOriginalRequestAuthority implements AiOriginalRequestAutho
     return after;
   }
   private async policy(body: AiSceneRequestBody) {
-    const rule = this.rule(body.sceneCode), access = await this.read(body, rule.sceneVersion);
+    // Check the persisted entry policy BEFORE collecting business material.
+    // Merely registering the standard host must not enable disabled scenes.
+    const rule = this.rule(body.sceneCode), access = await this.current();
     if (!rule.audiences.includes(access.context.audience as 'operator' | 'staff') || !('access' in access.context)
       || rule.requiredPermissions.some(permission => !('access' in access.context) || !access.context.access.permissions.includes(permission))) throw denied();
     let row;
@@ -90,6 +92,8 @@ export class AiCurrentOriginalRequestAuthority implements AiOriginalRequestAutho
     try { entitlement = await this.entitlements.read(access.context.scope.tenantId, 'ai.native.use'); }
     catch { throw unavailable(); }
     if (entitlement.entitlements.length !== 1 || !entitlement.entitlements[0].available) throw unavailable();
+    const resource = await this.read(body, rule.sceneVersion);
+    if (resource.scopeId !== access.scopeId || originalIdentityHash(resource.context) !== originalIdentityHash(access.context)) throw denied();
     return { ...access, sceneVersion: rule.sceneVersion, policyRevision: row.revision,
       policyHash: requestFingerprint({ rule, plan: { revision: row.revision, expiresAt: row.expiresAt.toISOString(), allowedTools: row.allowedTools, limits: row.limits }, entitlement }),
       expiresAt: new Date(Math.min(row.expiresAt.getTime(), this.clock().getTime() + rule.maxInputAgeMs)).toISOString() };

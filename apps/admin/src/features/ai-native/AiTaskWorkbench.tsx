@@ -11,6 +11,7 @@ import { MemoryPreferences, type MemoryPreference } from "./MemoryPreferences";
 import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary";
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
 import { consumePolledEvents } from "./polling-consumer";
+import { safeDisplayText } from "./safe-display";
 import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
 export type AiWorkbenchContext = Readonly<{
@@ -35,6 +36,8 @@ export type AiTaskDetailProjection = Readonly<{
   actionStatus?: ActionLifecycle;
   eventTimeline?: EventTimelineState;
   events?: readonly DisplayEventInput[];
+  /** Feature-local rows projected from authorized business facts, not model text. */
+  factRows?: readonly { label: string; value: string }[];
 }>;
 
 export type AiTaskDetailReader = (
@@ -241,6 +244,13 @@ export function AiTaskWorkbench({
               />
             )}
             {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
+            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权订单事实">
+              <h3>当前受权订单事实（非模型生成）</h3>
+              <dl>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
+                <dt>{safeDisplayText(row.label, 100)}</dt><dd style={{ overflowWrap: "anywhere" }}>{safeDisplayText(row.value, 1000)}</dd>
+              </div>)}</dl>
+              <p>读取事实不代表模型已执行、审批已通过、资金已结算或业务已完成。未加载的资料请在原页面核对。</p>
+            </section>}
             {detailSynchronized && currentDetail.fields && <MissingFieldsPanel fields={currentDetail.fields} draft={currentDetail.draft ?? {}} readOnly />}
             {detailSynchronized && currentDetail.proposal && <ProposalPreview proposal={currentDetail.proposal} />}
             {detailSynchronized && currentDetail.proposalRef && (
