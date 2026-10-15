@@ -15,6 +15,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { buildDrillDatabaseName, isDrillDatabase, redact, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, verifyClone } = require("./restore-core.cjs");
+const { assertRestoreAiBarrier, readRetentionCertificates } = require("./ai-retention.cjs");
 const { ROOT, requireTarget, requireAdminTarget, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 function arg(name) {
@@ -93,6 +94,10 @@ void (() => {
     const drillTables = verified.targetTables;
     const drillMigrations = verified.targetMigrations;
     const rows = verified.sampled;
+    const certificateFile = arg('ai-retention-certificates');
+    const certificates = certificateFile ? readRetentionCertificates(path.resolve(ROOT, certificateFile)) : undefined;
+    assertRestoreAiBarrier(statement => sql(admin, statement), drill,
+      crypto.createHash('sha256').update(body).digest('hex'), certificates, process.env.OPS_AI_RETENTION_PUBLIC_KEY);
 
     log(`  ✓ 表数量一致：${drillTables}`);
     log(`  ✓ 已应用迁移一致：${drillMigrations}`);

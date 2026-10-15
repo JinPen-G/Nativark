@@ -20,6 +20,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { buildCloneDatabaseName, quoteSqlString, redact, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, SAMPLE_TABLES } = require("./restore-core.cjs");
+const { assertRestoreAiBarrier, readRetentionCertificates } = require("./ai-retention.cjs");
 const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 const arg = (name) => {
@@ -82,8 +83,19 @@ void (async () => {
   }
 
   let legacyDb;
+  const finalizing = arg('finalize-ai');
   try {
-    legacyDb = buildCloneDatabaseName(target.database, "legacy");
+    if (finalizing) {
+      const journalFile = path.resolve(ROOT, finalizing), allowed = path.join(ROOT, 'output') + path.sep;
+      const stat = fs.lstatSync(journalFile);
+      if (!journalFile.startsWith(allowed) || stat.isSymbolicLink() || !stat.isFile() || stat.size > 8192) throw new OpsTargetError('恢复接续记录不合法');
+      const journal = JSON.parse(fs.readFileSync(journalFile, 'utf8'));
+      const expectedPrefix = buildCloneDatabaseName(target.database, 'legacy', new Date('2000-01-01T00:00:00Z')).slice(0, -14);
+      if (journal.version !== 'ops-ai-restore-1' || journal.baseDatabase !== target.database || journal.backupSha256 !== actual
+        || typeof journal.database !== 'string' || !journal.database.startsWith(expectedPrefix)
+        || !/^[0-9]{14}$/u.test(journal.database.slice(expectedPrefix.length))) throw new OpsTargetError('恢复接续记录与专用库/原备份不匹配');
+      legacyDb = journal.database;
+    } else legacyDb = buildCloneDatabaseName(target.database, "legacy");
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
     return;
@@ -93,19 +105,25 @@ void (async () => {
   log(`OPS-01C 造历史源库：${path.relative(ROOT, file)}（原库 ${sourceName}）→ ${legacyDb}`);
   let created = false;
   try {
-    if (sql(admin, `SHOW DATABASES LIKE '${legacyDb}'`)) {
+    if (!finalizing && sql(admin, `SHOW DATABASES LIKE '${legacyDb}'`)) {
       throw new OpsTargetError(`目标库 ${legacyDb} 已存在，拒绝复用既有库`);
     }
-    sql(admin, `CREATE DATABASE \`${legacyDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-    created = true;
+    if (!finalizing) {
+      sql(admin, `CREATE DATABASE \`${legacyDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      created = true;
 
-    // 与演练走同一套内核：改写 + 拒绝仍指向原库的可执行语句。
-    // 无 `--databases` 的备份里本来就没有 USE / 限定名，这一步等于**证明**了
-    // 这份备份不可能写回原库——而不是我们假设它不会。
-    const script = rewriteBackupForTarget(text, sourceName, legacyDb);
-    const load = runMysql("mysql", admin, [legacyDb], { input: script });
-    if (load.status !== 0) {
-      throw new OpsTargetError(`导入失败：${redact(String(load.stderr ?? ""), secrets)}`);
+      // 与演练走同一套内核：改写 + 拒绝仍指向原库的可执行语句。
+      // 无 `--databases` 的备份里本来就没有 USE / 限定名，这一步等于**证明**了
+      // 这份备份不可能写回原库——而不是我们假设它不会。
+      const script = rewriteBackupForTarget(text, sourceName, legacyDb);
+      const load = runMysql("mysql", admin, [legacyDb], { input: script });
+      if (load.status !== 0) {
+        throw new OpsTargetError(`导入失败：${redact(String(load.stderr ?? ""), secrets)}`);
+      }
+    } else {
+      if (!sql(admin, `SHOW DATABASES LIKE '${legacyDb}'`)) throw new OpsTargetError('待接续的恢复库不存在');
+      created = true;
+      log('  AI恢复接续：不再导入/覆盖原备份，只检查重放证明后决定是否授权');
     }
 
     const tables = Number(sql(admin, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${legacyDb}'`));
@@ -123,6 +141,16 @@ void (async () => {
 
     // 应用账号要能连上它：后续演练里 API 以应用账号连接克隆库，
     // 而克隆库的校验需要同时读源库与克隆库。授权在清理阶段回收。
+    if (!finalizing && Number(sql(admin, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${legacyDb}' AND table_name='ai_tasks'`))) {
+      const directory = path.join(ROOT, 'output'); fs.mkdirSync(directory, { recursive: true });
+      const journalFile = path.join(directory, `ops-ai-restore-${legacyDb}.json`);
+      fs.writeFileSync(journalFile, JSON.stringify({ version: 'ops-ai-restore-1', database: legacyDb,
+        baseDatabase: target.database, backupSha256: actual }, null, 2), { flag: 'wx' });
+      log(`  隐私重放完成后，用同一 --file 加 --finalize-ai ${path.relative(ROOT, journalFile)} 与 --ai-retention-certificates 接续；不会重复导入。`);
+    }
+    const certificateFile = arg('ai-retention-certificates');
+    const certificates = certificateFile ? readRetentionCertificates(path.resolve(ROOT, certificateFile)) : undefined;
+    assertRestoreAiBarrier(statement => sql(admin, statement), legacyDb, actual, certificates, process.env.OPS_AI_RETENTION_PUBLIC_KEY);
     sql(admin, `GRANT ALL PRIVILEGES ON \`${legacyDb}\`.* TO ${applicationAccount}`);
     sql(admin, "FLUSH PRIVILEGES");
 
