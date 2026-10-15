@@ -165,6 +165,23 @@ export interface ConsumableStockConsumption {
 
 export type RentalFactTx = Prisma.TransactionClient;
 
+/** Internal bounded read port; not a replacement for the existing manual list. */
+export interface RentalInspectionPageQuery { limit: number; cursor?: string; }
+export interface RentalInspectionPage {
+  items: RentalInspectionRecord[]; nextCursor: string | null; coverage: 'page_not_total';
+}
+export function parseRentalInspectionPageQuery(value: RentalInspectionPageQuery): RentalInspectionPageQuery {
+  const input = structuredClone(value);
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).some(key => !['limit', 'cursor'].includes(key))
+    || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 50
+    || (input.cursor !== undefined && (typeof input.cursor !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(input.cursor)))) {
+    throw new BadRequestException('检查记录分页参数无效');
+  }
+  return input;
+}
+
 export interface InventoryLockTarget {
   itemGroupId: string;
   inventoryMode: RentalInventoryMode;
@@ -247,6 +264,7 @@ export interface RentalCoreFactStore {
   assignWorkOrder(tenantId: string, workOrderId: string, assigneeId?: string, assigneeName?: string, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   transitionWorkOrder(tenantId: string, workOrderId: string, action: "start" | "submit" | "review" | "cancel", operator: string, input?: { result?: string; attachments?: string[]; decision?: "approved" | "rejected"; reason?: string }, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   listInspections(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalInspectionRecord[]>;
+  listInspectionsPage?(tenantId: string, orderId: string, query: RentalInspectionPageQuery, tx?: RentalFactTx): Promise<RentalInspectionPage>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
   correctInspectionUsage(
     tenantId: string,
@@ -2299,6 +2317,23 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toInspectionRecord(row));
+  }
+
+  async listInspectionsPage(tenantId: string, orderId: string, value: RentalInspectionPageQuery, tx?: RentalFactTx): Promise<RentalInspectionPage> {
+    const query = parseRentalInspectionPageQuery(value), client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const where = { tenantId, workspaceId, orderId };
+    if (query.cursor) {
+      const cursor = await client.rentalInspectionRecord.findFirst({ where: { ...where, id: query.cursor }, select: { id: true } });
+      if (!cursor || cursor.id !== query.cursor) throw new BadRequestException('检查记录分页游标不属于当前订单');
+    }
+    const rows = await client.rentalInspectionRecord.findMany({ where: { ...where,
+      ...(query.cursor ? { id: { gt: query.cursor } } : {}) }, orderBy: { id: 'asc' }, take: query.limit + 1 });
+    if (rows.length > query.limit + 1 || rows.some(row => row.tenantId !== tenantId
+      || row.workspaceId !== workspaceId || row.orderId !== orderId)
+      || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException('检查记录分页来源不一致');
+    const items = rows.slice(0, query.limit).map(row => this.toInspectionRecord(row));
+    return { items, nextCursor: rows.length > query.limit ? items[items.length - 1].id : null, coverage: 'page_not_total' };
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {

@@ -132,6 +132,9 @@ import {
   type AssetStatusChange,
   type InventoryLockTarget,
   type RentalFactTx,
+  parseRentalInspectionPageQuery,
+  type RentalInspectionPageQuery,
+  type RentalInspectionPage,
   type RentalCoreFactStore,
   type RentalUniqueAttributeClaim,
   type StockQuarantineChange,
@@ -2762,6 +2765,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     this.state(tenantId);
     await this.requireOrder(tenantId, orderId);
     return this.factStore.listInspections(tenantId, orderId);
+  }
+
+  /** Bounded persisted observations; original order access and workspace are
+   * still required. No pricing, inspection submission or liability decision. */
+  async listInspectionsPage(tenantId: string, orderId: string, value: RentalInspectionPageQuery): Promise<RentalInspectionPage> {
+    const query = parseRentalInspectionPageQuery(value), workspaceId = this.workspaceOf(tenantId);
+    const order = await this.requireOrder(tenantId, orderId);
+    if (order.id !== orderId || order.tenantId !== tenantId) throw new ForbiddenException('订单不属于当前租户');
+    if (!this.factStore.listInspectionsPage) throw new ServiceUnavailableException('检查记录持久分页读取不可用');
+    const page = structuredClone(await this.factStore.listInspectionsPage(tenantId, orderId, query));
+    if (workspaceId !== this.workspaceOf(tenantId) || page.coverage !== 'page_not_total'
+      || !Array.isArray(page.items) || page.items.length > query.limit
+      || new Set(page.items.map(item => item.id)).size !== page.items.length
+      || page.items.some(item => item.tenantId !== tenantId || item.orderId !== orderId)
+      || (page.nextCursor !== null && (!page.items.length || page.nextCursor !== page.items[page.items.length - 1].id))) {
+      throw new ServiceUnavailableException('检查记录分页来源不一致');
+    }
+    return page;
   }
 
   async correctInspectionUsage(
