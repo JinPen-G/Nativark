@@ -15,9 +15,9 @@ import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.
 import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders,
+import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
   type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
-import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS } from './scenes/original-scenes.controller';
+import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
@@ -84,4 +84,17 @@ export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: originalSceneInjection,
   useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
     composeRequestBoundOriginalTaskRecoveryReaders(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
+};
+
+/** Explicit owner/manager CAS, not a side effect of listing/creating a task.
+ * This standard host can manage read policies only; execution/approval and
+ * unknown reconciliation remain with their separate trusted assemblies. */
+export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
+  provide: AI_ORIGINAL_TASK_ACTION_POLICIES, inject: originalSceneInjection,
+  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
+    composeRequestBoundOriginalTaskActionPolicies(originalSceneDependencies(...args), {
+      enabled: true, audience: 'operator', ttlMs: 120000,
+      templates: (['read_metadata', 'read_events', 'read_step_terminal'] as const)
+        .map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'] }))
+    })
 };

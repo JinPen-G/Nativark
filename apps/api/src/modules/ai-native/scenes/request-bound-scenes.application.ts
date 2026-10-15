@@ -572,7 +572,11 @@ export function composeRequestBoundOriginalTaskActionPolicies(
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, parsed.data, async (root, command) => {
         const input = configureSchema.parse(command), found = await target(root, input.original, input.operation);
-        const now = root.clock().getTime(), expiry = Math.min(Date.parse(found.expiresAt), now + ttlMs);
+        // Current manager + current original-resource access can authorize
+        // another short observation window after the creation input expires.
+        // That must not refresh input, execution, takeover or approval rights.
+        const observation = ['read_metadata', 'read_events', 'read_step_terminal'].includes(found.template.operation);
+        const now = root.clock().getTime(), expiry = observation ? now + ttlMs : Math.min(Date.parse(found.expiresAt), now + ttlMs);
         if (!Number.isFinite(expiry) || expiry <= now) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const policy = await root.policies.put({ taskId: found.taskId,
           operation: found.template.operation as AiTaskActionPolicyMutation['operation'],

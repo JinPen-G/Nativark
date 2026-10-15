@@ -1,7 +1,7 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2031,6 +2031,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,
+    summary: 'Current manager and same-owner original-resource access required. Standard host only manages read_metadata/read_events/read_step_terminal, with bounded expiry and revision CAS. No execution, approval, new input or financial permission.',
+    requestSchema: objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
+      operation: { type: 'string', enum: ['read_metadata', 'read_events', 'read_step_terminal'] },
+      ...(action === 'read' ? {} : { expectedRevision: action === 'configure'
+        ? { oneOf: [{ type: 'null' }, { type: 'integer', minimum: 1, maximum: 4294967294 }] }
+        : { type: 'integer', minimum: 1, maximum: 4294967293 } }) },
+      action === 'read' ? ['original', 'operation'] : ['original', 'operation', 'expectedRevision'], false) })),
   ...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
       cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
