@@ -22,9 +22,12 @@ const records = z.array(z.object({ id, tenantId: id, orderId: id,
 /** Existing order inspection read only. No result JSON, attachment URLs,
  * operators, responsibility inference or charge calculation leaves this port. */
 export class AiOrderInspectionFactsService {
-  constructor(private readonly core: Pick<RentalCoreService, 'getOrder' | 'listInspections'>,
+  constructor(private readonly core: Pick<RentalCoreService, 'getOrder' | 'listInspectionsPage'>,
     private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
-    private readonly clock: () => Date = () => new Date()) {}
+    private readonly clock: () => Date = () => new Date()) {
+    if (typeof core?.getOrder !== 'function' || typeof core?.listInspectionsPage !== 'function'
+      || typeof authority?.withOrderRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  }
 
   async read(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
@@ -33,7 +36,12 @@ export class AiOrderInspectionFactsService {
       const scope = structuredClone(context.scope);
       const before = order.parse(await this.core.getOrder(scope.tenantId, orderId));
       if (before.id !== orderId || before.tenantId !== scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
-      const current = records.parse(await this.core.listInspections(scope.tenantId, orderId));
+      const page = await this.core.listInspectionsPage(scope.tenantId, orderId, { limit: 50 });
+      const current = records.parse(page?.items);
+      if (page.coverage !== 'page_not_total' || !(page.nextCursor === null || id.safeParse(page.nextCursor).success)
+        || (page.nextCursor !== null && (current.length !== 50 || page.nextCursor !== current.at(-1)?.id))) {
+        throw new ModelGatewayError('INVALID_RESPONSE');
+      }
       if (new Set(current.map(row => row.id)).size !== current.length
         || current.some(row => row.orderId !== orderId || row.tenantId !== scope.tenantId)) throw new ModelGatewayError('FORBIDDEN');
       if (Buffer.byteLength(JSON.stringify(current), 'utf8') > 32768) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
@@ -44,7 +52,9 @@ export class AiOrderInspectionFactsService {
       return { scope, audience: context.audience, orderId,
         sourceOrderUpdatedAt: before.updatedAt, observedAt: observed.toISOString(),
         records: current.map(({ tenantId: _tenant, orderId: _order, ...row }) => row),
-        coverage: 'partial' as const, queryBound: 'original_core_query_not_bounded_by_this_projection' as const,
+        coverage: 'partial' as const, pageCoverage: page.coverage,
+        truncated: page.nextCursor !== null, nextCursor: page.nextCursor,
+        queryBound: 'persisted_core_page_limit_plus_one' as const, queryLimit: 50, queryPages: 1,
         semantics: 'recorded_inspection_and_review_only_not_liability_or_settlement' as const,
         attachments: 'not_loaded' as const, execution: 'not_attempted' as const };
     });
