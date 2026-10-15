@@ -243,6 +243,22 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 
 必要原API strict noEmit1024files、0diagnostics/exit0，diff check0，无tests/fixture/脚本变更。证据是原影子任务与人类办理/原键恢复，不是退款执行、模型建议、通知发送或Core修复。关闭待办不改变原检查事实；未调用真实DB/存储/HTTP/模型/支付，不安装、生产启用或调整AIN完成率。
 
+## 20261015 识别保存关联与失效后的原键恢复
+
+主线正式移交本路径唯一写入权后，在固定9435d0bd开工；中断恢复仍该HEAD，五个原源码WIP和新内部association文件均本线所有，无他人tracked/index修改，不追主线活动HEAD。改动仅inspection-assist六个源码及本记录，无shared/schema/迁移或tests/fixture/脚本变更。
+
+InspectionRecognitionResultService.save在原collect验证当前Task/原冻结输入、result artifact、dispatch及usage之后产生服务器内部RecognitionSaveAssociation，绑定原target/draft/revision/operation/task/result/input引用、run/step/action/actionInputId、原输入/结果/hash、冻结媒体inputFingerprint、template binding、候选及原命令fingerprint、tenant/workspace/owner/audience。作为saveCandidates第二个仅服务器参数，经原scope/候选命令校验后，传入原PrismaInspectionDraftRepository.change事务；与草稿CAS及AiInspectionOperation创建一起保存到原result Json，不另补关系、不存候选正文或另建凭证表。关联hash用于完整性比对，不是签名、授权token或防数据库管理员篡改机制。
+
+仓储严格区分旧四字段result与带内部recognitionSave/recognitionSaveHash的新布局；未知字段、损坏、owner/scope/operation/revision/command不符拒绝。内部布局始终投影原draftId/revision/status/inspectionId，普通完整命令receipt兼容，不把内部关联返回shared/UI。原键不同task/result/input直接BINDING_CHANGED，不拿当前草稿猜旧命令；旧记录无关联保留原完整命令核对/待核对，不回填历史。
+
+reconcileSave优先走drafts.reconcileRecognitionSave：原订单read Guard、原owner/scope/target及收据双读，不构造Gateway或读取附件/模型正文。双image/audio组合也先原收据再选当前媒体。HTTP原result-save-receipt现在直接该纯收据方法，不为读历史保存事实调用candidate review。原readRecognitionSaveReview保留bind动作权限、当前review双读与变更标记，但不因template changed抹掉已保存事实。保存事实不等于采用、正式提交、当前附件可访问或重试许可，完整候选读取仍原collect拒绝失效来源。
+
+一次定向inline复用既有mediaFixture/draft和modelHostHarness（仅内存提取，不注册node:test、不写脚本）驱动真实collect→runner→saveCandidates→Prisma change/operation：合成模型返回完整候选，原保存COMMIT完成后替身抛丢失应答，仓储原键恢复revision3；更换模板v2及撤销附件后，重建无模型依赖的composeInspectionAssist仍返回原四字段保存receipt，原review明确changed/reviewRequired。换task/result/input拒绝，关联inputHash损坏拒绝，当前登出拒绝；原候选正文读取拒绝；无额外模型、bytes读取或operation写入。移除关联模拟旧result后，完整原候选命令reconcileOperation仍found，而仅result reference不能恢复失效正文关系。最终smoke标记passed/exit0；DB、对象流、route、财务准入/计量生命周期是明确替身，真实Auth/Guard、runner、持久结果/收据/识别消费与Prisma适配代码未替换。
+
+扩展inline首次把operator token用于staff HTTP，正确403/exit1；修正仅验证预期后同场景exit0，真实StaffInspectionRequestFactory/Controller验证跨audience拒绝。本片未取得staff HTTP正向完整识别链证据，不伪称通过；纯receipt服务正向已验证。原strict API Compiler API noEmit1125files/0diagnostics/exit0；最终bind权限保留是恢复既有更强检查，未扩大授权。diff --check exit0。Node预加载本树原offline/runtime，DATABASE_URL固定无效，write-root/TEMP/TMP/audit均本树（20261015-recognition-receipt.audit）；无真实HTTP/DB/文件存储/模型/支付、迁移、生产启用或共享生成。
+
+未来Agent Runtime/SDK替换必须保留原association生产点和同事务提交边界；checkpoint、SDK消息、当前草稿或新operation不能替代旧保存凭证。真MySQL锁/故障、真实模型与文件、客户/员工宿主和生产仍未验；不提升AIN验收率。
+
 ## 20261015 同步主线后的引用限额/撤回传播收口
 
 强制开工先核原HEAD0651b5e9、branch正确、tracked/index无WIP、无MERGE_HEAD/CHERRY_PICK_HEAD，再安全快进固定5faa55a5d5bda3f3ce9e17c74feae23bc0fcda4e，merge-base --is-ancestor exit0且HEAD为该固定提交；该历史包含原B成果。主线合入的UI/output/shared生成文件仅来自授权固定同步，本线不编辑或清理。读取正式需求AIN-R08、任务AIN10/19/20及本线/中央最新记录，不重做七项公共Gateway/runner/目录修复。
