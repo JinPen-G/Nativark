@@ -4,6 +4,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeAction, KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, MemoryAction, MemoryAuthorizationPort, KnowledgeUploadRevision } from './knowledge.ports';
 import { actor, fingerprint, sameScope } from './knowledge-validation';
+import { isAiStepExecutionContext } from '../task-contract-validation';
 
 export type FormalPolicyResource = {
   documentId?: string; documentVersion?: string; attachmentId?: string; aclRevision?: number;
@@ -33,6 +34,12 @@ export interface FormalMemoryPolicySource {
 
 const validPermission = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(value);
 const validKey = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[A-Za-z0-9._:-]+$/u.test(value);
+const sameCurrentIdentity = (a: AiExecutionContext, b: AiExecutionContext, now: Date) => {
+  if (!isAiStepExecutionContext(a) || !isAiStepExecutionContext(b) || !Number.isFinite(now.getTime())
+    || Date.parse(a.authorizedAt) > now.getTime() || Date.parse(b.authorizedAt) > now.getTime()) return false;
+  const stable = ({ authorizedAt: _at, requestId: _request, ...value }: AiExecutionContext) => fingerprint(value);
+  return stable(a) === stable(b);
+};
 
 /**
  * Auth-backed policy adapter. Auth resolves the current actor/scope; the
@@ -50,11 +57,13 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
     requestScope: AiExecutionContext['scope'], resource?: FormalPolicyResource,
     binding: Pick<KnowledgeAuthorizationRequest, 'creation' | 'lifecycle' | 'receiptOperationId'> = {}): Promise<KnowledgeGrant | null> {
     try {
+      context = structuredClone(context); requestScope = structuredClone(requestScope);
+      resource = structuredClone(resource); binding = structuredClone(binding);
       const current = await this.identities.resolve();
-      if (fingerprint(current) !== fingerprint(context) || !sameScope(current.scope, requestScope)
+      if (!sameCurrentIdentity(current, context, this.clock()) || !sameScope(current.scope, requestScope)
         || current.actor.kind === 'automation' || current.actor.kind === 'customer' && action !== 'read') return null;
       const policyRequest = { action, scope: structuredClone(requestScope), ...structuredClone(binding) } as KnowledgeAuthorizationRequest;
-      const policy = structuredClone(await this.policies.resolve(structuredClone(current), policyRequest, resource));
+      const policy = structuredClone(await this.policies.resolve(structuredClone(current), structuredClone(policyRequest), structuredClone(resource)));
       if (!policy || policy.action !== action || !sameScope(policy.scope, current.scope) || policy.audience !== current.audience
         || fingerprint(policy.actor) !== fingerprint(actor(current)) || !Number.isSafeInteger(policy.revision) || policy.revision < 1
         || !Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= this.clock().getTime()
@@ -63,10 +72,9 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
         || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length) return null;
       if (!('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
       if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
-      const before = fingerprint(current);
       const rechecked = structuredClone(await this.identities.resolve());
-      const latest = structuredClone(await this.policies.resolve(rechecked, policyRequest, resource));
-      if (before !== fingerprint(rechecked) || fingerprint(latest) !== fingerprint(policy) || Date.parse(policy.expiresAt) <= this.clock().getTime()) return null;
+      const latest = structuredClone(await this.policies.resolve(structuredClone(rechecked), structuredClone(policyRequest), structuredClone(resource)));
+      if (!sameCurrentIdentity(current, rechecked, this.clock()) || fingerprint(latest) !== fingerprint(policy) || Date.parse(policy.expiresAt) <= this.clock().getTime()) return null;
       return { scope: structuredClone(current.scope), actor: structuredClone(actor(current)) as never, audience: current.audience, accessKey: policy.grantKey };
     } catch { return null; }
   }
@@ -95,12 +103,13 @@ export class FormalMemoryAuthorizationAdapter implements MemoryAuthorizationPort
   }
   async authorize(context: AiExecutionContext, request: Parameters<MemoryAuthorizationPort['authorize']>[1]) {
     try {
+      context = structuredClone(context); request = structuredClone(request);
       const current = await this.identities.resolve();
-      if (fingerprint(current) !== fingerprint(context) || !sameScope(current.scope, request.scope)
+      if (!sameCurrentIdentity(current, context, this.clock()) || !sameScope(current.scope, request.scope)
         || fingerprint(actor(current)) !== fingerprint(request.owner) || current.actor.kind !== 'user') return null;
       const resource = request.memory ? { memoryId: request.memory.memoryId, revision: request.memory.revision,
         aclRevision: request.memory.aclRevision, owner: request.memory.owner } : undefined;
-      const policy = structuredClone(await this.policies.resolve(structuredClone(current), request));
+      const policy = structuredClone(await this.policies.resolve(structuredClone(current), structuredClone(request)));
       if (!policy || policy.action !== request.action || !sameScope(policy.scope, current.scope)
         || policy.audience !== current.audience || fingerprint(policy.actor) !== fingerprint(actor(current))
         || !Number.isSafeInteger(policy.revision) || policy.revision < 1 || !Number.isFinite(Date.parse(policy.expiresAt))
@@ -109,8 +118,8 @@ export class FormalMemoryAuthorizationAdapter implements MemoryAuthorizationPort
         || policy.requiredPermissions.some(permission => !validPermission(permission))
         || !('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
       if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
-      const latestContext = await this.identities.resolve(), latest = structuredClone(await this.policies.resolve(latestContext, request));
-      if (fingerprint(latestContext) !== fingerprint(current) || fingerprint(latest) !== fingerprint(policy)
+      const latestContext = await this.identities.resolve(), latest = structuredClone(await this.policies.resolve(structuredClone(latestContext), structuredClone(request)));
+      if (!sameCurrentIdentity(latestContext, current, this.clock()) || fingerprint(latest) !== fingerprint(policy)
         || Date.parse(policy.expiresAt) <= this.clock().getTime()) return null;
       return { scope: structuredClone(current.scope), actor: structuredClone(actor(current)) as never, audience: current.audience, accessKey: policy.grantKey };
     } catch { return null; }
