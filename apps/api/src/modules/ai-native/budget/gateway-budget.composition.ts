@@ -132,26 +132,47 @@ export function createPersistedGatewayBudget(input: {
   });
   const recoveryCommand = z.object({ reservationId: z.string().min(1).max(36)
     .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const originalReservation = async (value: unknown) => {
+    const parsed = recoveryCommand.safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const before = structuredClone(await input.scopes.resolveCurrent());
+    const { actorKind: _, ...context } = gatewayBudgetPrincipal(before.context);
+    const binding = structuredClone(await bindings.resolveForReservation(context, parsed.data.reservationId));
+    const record = await service.read(parsed.data.reservationId, binding.association);
+    return { before, binding, record, reservationId: parsed.data.reservationId };
+  };
   const recovery = Object.freeze({
+    /** Read the original balance/status after an uncertain response. This is
+     * not a proof of no consumption and never starts or settles a call. */
+    read: async (value: unknown) => {
+      const { before, record } = await originalReservation(value);
+      if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
+      return structuredClone(record);
+    },
     /** Server-only explicit recovery, not a background sweep or a new dispatch.
      * Auth, entitlement and original usage are rechecked by the existing service.
      * A lost mutation response stays unknown; never retry the write here. */
     reconcile: async (value: unknown) => {
-      const parsed = recoveryCommand.safeParse(structuredClone(value));
-      if (!parsed.success) throw new BudgetError('INVALID');
-      const { reservationId } = parsed.data;
-      const before = structuredClone(await input.scopes.resolveCurrent());
-      const principal = gatewayBudgetPrincipal(before.context);
-      const { actorKind: _, ...context } = principal;
-      const binding = structuredClone(await bindings.resolveForReservation(context, reservationId));
-      await service.read(reservationId, binding.association);
+      const { before, binding, record: original, reservationId } = await originalReservation(value);
       const evidenceRef = await facts.originalUsageReference(reservationId);
       // Stable original-operation event across process restarts. The repository
       // also compares the actual evidence payload on same-key replay.
       const eventKey = requestFingerprint({ method: 'persisted-original-usage-reconcile-1', reservationId,
         evidenceRef, association: binding.association });
       let record;
-      try { record = await service.reconcile(reservationId, binding.association, eventKey, evidenceRef); }
+      try {
+        if (original.status === 'settled') {
+          // A prior settle/reconcile COMMIT may have succeeded even if its
+          // acknowledgement was lost. Observe it, don't invent another event.
+          const evidence = await facts.readUsage(reservationId, evidenceRef, true);
+          record = await service.read(reservationId, binding.association);
+          if (record.status !== 'settled' || requestFingerprint(record.actual) !== requestFingerprint(evidence.quantity)) {
+            throw new BudgetError('PENDING_RECONCILIATION');
+          }
+        } else {
+          record = await service.reconcile(reservationId, binding.association, eventKey, evidenceRef);
+        }
+      }
       catch (error) {
         if (error instanceof BudgetError) throw error;
         throw new BudgetError('PENDING_RECONCILIATION');

@@ -40,6 +40,22 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   media?: GatewayMediaAttachmentResolver;
 };
 
+/** Original-task accounting recovery is deliberately independent of model
+ * configuration, adapters, credentials and the RUNNING-only execution gate.
+ * It still requires current task read/reconcile action authority, entitlement
+ * and persisted invocation/dispatch/usage evidence. No new model call exists
+ * on this surface, including after a worker restart or AI configuration stop. */
+export function composePersistedTaskCallAccountingRecovery(input: PersistedTaskAuthorizationDependencies &
+  Pick<PersistedTaskCallGatewayDependencies, 'guard' | 'taskId' | 'callPriceVersion'>) {
+  if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
+    || typeof input.guard?.canActivate !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  const clock = input.clock ?? (() => new Date());
+  const authorization = new PrismaTaskBudgetAuthorizationSource(input);
+  const pricing = new PrismaGatewayCallPricing(input.db, authorization.scopes, input.callPriceVersion, clock);
+  return createPersistedGatewayBudget({ db: input.db, scopes: authorization.scopes,
+    subscriptions: input.subscriptions, authorization, pricing, clock }).recovery;
+}
+
 /** Inert server composition for workspace operator/staff tasks. Real current
  * task policy, encrypted configuration, persisted capability proof, dispatch
  * ownership and one financial ledger are reused, not injectable success gates.
@@ -118,7 +134,7 @@ export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayD
   // still re-read by the services, not frozen into a permanent grant.
   Object.freeze(runtime.ports);
   Object.freeze(runtime);
-  return Object.freeze({ runtime, priceVersion: callPriceVersion,
+  return Object.freeze({ runtime, priceVersion: callPriceVersion, accountingRecovery: accounting.recovery,
     financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
 }
 
