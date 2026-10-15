@@ -78,6 +78,9 @@ export class OrderFactsHost {
   constructor(private readonly input: { orderId: string; tenantId: string; workspaceId: string;
     current(): boolean; post(path: string, value: unknown): Promise<unknown>; newKey(): string }) {}
   activate() { this.closed = false; this.busy = false; this.generation++; }
+  // Hide invalidates observations, not the original operation keys. Showing
+  // this page must never replace an uncertain request with a new create.
+  pause() { this.closed = true; this.busy = false; this.generation++; }
   close() { this.closed = true; this.generation++; this.originals.clear(); }
   private check(generation = this.generation) {
     if (this.closed || generation !== this.generation || !this.input.current()) throw Error('当前身份或订单已变化');
