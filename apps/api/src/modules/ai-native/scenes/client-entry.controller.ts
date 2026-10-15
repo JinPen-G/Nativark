@@ -11,7 +11,7 @@ import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskTransitionResultUnknownError } from '../ai-task-transition.repository';
 import { AiTaskInputResultUnknownError } from '../task-input/task-input.errors';
-import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
+import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from './request-abort';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
 
@@ -44,6 +44,7 @@ export class AiClientEntryController {
         AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
       let code = 'AI_RESOURCE_UNAVAILABLE';
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
+      else if (error instanceof AiRequestWaitError) code = error.code;
       else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError
         || error instanceof AiClientQuoteResultUnknownError) code = 'AI_RESULT_UNKNOWN';
       else if (error instanceof AiClientEntryError) code = error.code;
