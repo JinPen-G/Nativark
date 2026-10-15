@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口。只保留最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-16。代码核对点：`7477af7818ead66751bdc14acdc3122ad45f139c`；本次整理尚未提交。
-> **当前授权：暂停功能开发，仅整理文档。** 不启动辅助线、不恢复旧心跳，不把归档派工当当前授权。
+> 更新时间：2026-10-16。最新业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`；文档与六树同步基准为本文所在提交，开工以 Git 实际状态核对。
+> **功能开发仍暂停。** 本轮仅获准保全、整合和同步四条辅助树与本地 main，并推送 GitHub；不派新任务、不恢复心跳或服务，不把归档派工当当前授权。
 
 ## 阅读与维护
 
@@ -14,26 +14,28 @@
 
 ## 唯一主线与四条辅助线
 
-工作树均位于 `D:/工作文件/rental-OS/.claude/worktrees/`。目录不是写入授权；开工时重新核对实际状态。
+五条专项工作树均位于 `D:/工作文件/rental-OS/.claude/worktrees/`，本地 main 位于仓库根目录。目录不是写入授权；开工时重新核对实际状态。
 
-| 工作线 | 目录 | 分支 | 本次只读核对 HEAD |
+| 工作线 | 目录 | 分支 | 本轮统一同步基准 |
 | --- | --- | --- | --- |
-| 主线 | `claude-ai-native-foundation` | `ai/ai-native-contracts-s01-20261002` | `7477af78` |
-| Codex A | `codex-ai-native-lane-a` | `ai/codex-ai-native-lane-a-20261007` | `f968f6d0` |
-| Codex B | `codex-ai-native-lane-b` | `ai/codex-ai-native-lane-b-20261007` | `f968f6d0` |
-| Claude A | `claude-ai-native-lane-a` | `ai/claude-ai-native-lane-a-20261007` | `f968f6d0` |
-| Claude B | `claude-ai-native-lane-b` | `ai/claude-ai-native-lane-b-20261007` | `f968f6d0` |
+| 主线 | `claude-ai-native-foundation` | `ai/ai-native-contracts-s01-20261002` | 本文件所在提交 |
+| Codex A | `codex-ai-native-lane-a` | `ai/codex-ai-native-lane-a-20261007` | 本文件所在提交 |
+| Codex B | `codex-ai-native-lane-b` | `ai/codex-ai-native-lane-b-20261007` | 本文件所在提交 |
+| Claude A | `claude-ai-native-lane-a` | `ai/claude-ai-native-lane-a-20261007` | 本文件所在提交 |
+| Claude B | `claude-ai-native-lane-b` | `ai/claude-ai-native-lane-b-20261007` | 本文件所在提交 |
+| 本地 main | `D:/工作文件/rental-OS` | `main` | 本文件所在提交 |
 
-辅助 HEAD 来自 Git 工作树登记，本次未逐树核对 WIP、未合并或同步，不能据此认定它们干净或允许施工。负责人此前确认各线停写；恢复前须再次确认写入者和调度状态。
+本轮负责人已确认各线停写。辅助源代码 WIP 已比对并保全：有效客户/计价增量进入上述整合点，员工线已接收的等价修复不重复覆盖；旧修复不得回退主线后续安全校验。以后恢复前仍须重新核对写入者、调度、独有提交与 WIP，不能沿用本轮停写结论。
 
 ## 现场及开工边界
 
 - 主线整理前唯一 tracked WIP 是原总册中的四线授权/审核后续派内容；已原样保全到快照，不丢弃。
 - 本次在主线整理文档并补关键入口职责注释，未改业务逻辑。根目录 README 提供项目导航，AGENTS.md 维护共用规则，CLAUDE.md 仅引用共用规则。未跟踪 `output/`、历史 patch、隔离 client、锁与临时资源一律保留，不附带提交。
+- 文档整理已提交；Runtime 与 Provider SDK 未来方案已合并，当前不启动开源接入。同步前原稿位于各树 `output/worktree-sync-20261016-9d71725f/files/`；历史备注及等价旧 WIP 另保留 Git stash，不自动应用或删除。main 原有未跟踪 shared/src JS/映射文件保留，不上传。
 - 接手先核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、在途文件认领和并行写入者。代码基线是核对点，不是 reset 目标。
 - 获准恢复并行开发时，先保全各辅助成果，核验独有提交/等价成果，再按负责人授权同步固定主线。主线不直接修改辅助树，不追活动 HEAD；重叠文件须明确唯一作者。
 - 公共 schema/迁移、shared 总出口、OpenAPI、Auth/Guard、Gateway/预算、运行器及审批公共接点需单一认领。模块范围按实际任务确认，不机械沿用历史队列。
-- 当前不允许读 `.env`、安装依赖、启服务、访问真实 HTTP/DB/DNS/模型/支付/对象存储、执行迁移、改共享生成物、合 main、推送或生产启用。
+- 本轮 main 同步和 GitHub 推送获负责人明确授权；不延伸为读 `.env`、安装依赖、启服务、访问真实业务 HTTP/DB/DNS/模型/支付/对象存储、执行迁移、改共享生成物或生产启用的许可。
 - 获准验证代码时沿用本树离线 preload，`DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline`；审计、TEMP/TMP、缓存和写入根限制在本树，Prisma 仅走原隔离方案。
 - 功能优先，不新增成套测试脚本，不递归审查；每个完整功能片做一次针对性冒烟及必要类型检查。未验范围必须如实保留。
 
@@ -55,4 +57,4 @@
 
 下一位获准开发者应留下：实际 HEAD、未提交文件及归属、当前正在实现的完整功能、未完成依赖及具体入口、下一步、运行中进程/调度、验证边界。完成阶段的提交和失败证据移到实施记录，不在本文累积日志。
 
-当前无获准的下一段功能施工；等待负责人确认文档初版及恢复开发方向。
+当前无获准的下一段功能施工。同步不等于恢复目标或 A/B 派工；等待负责人明确恢复。API/客户小程序/租户官网类型检查、定向预算与收据冒烟已验；全局契约静态检查仍有常量/继承路由识别及声明问题，详见开发记录，不能宣称全部检查通过。
