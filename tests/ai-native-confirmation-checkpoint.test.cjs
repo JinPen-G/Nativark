@@ -106,7 +106,7 @@ test('confirmation checkpoint rejects boolean proofs and a missing source before
 
 test('confirmation checkpoint lost acknowledgement preserves the pause and cannot repeat the transaction', async () => {
   const h = harness(); h.storeControl.loseReply = true;
-  await assert.rejects(h.repository.pauseConfirmation(h.command), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  await assert.rejects(h.repository.pauseConfirmation(h.command), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(h.state.aiTask[0].status, 'WAITING_CONFIRMATION'); assert.equal(h.state.aiTaskEvent.length, 1);
   await assert.rejects(h.repository.pauseConfirmation(h.command), refused);
   assert.equal(h.state.aiTaskEvent.length, 1); assert.equal(h.state.aiRun[0].revision, 6); assert.equal(h.state.aiStep[0].revision, 2);
