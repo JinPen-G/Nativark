@@ -1,5 +1,29 @@
 # Rental OS AI Native 关键长任务总接续册
 
+## 2026-10-15 当前四线授权（覆盖下方旧派工/停止快照）
+
+用户要求：核对最新Codex进度后交由既有四个对话继续，四线各设一分钟空闲心跳、自行接续本域任务；主线派发确认后停止开发与自动收包，等用户新事项。开工固定基线为 `f968f6d0cf08477e79f6ef7c10522aa8fc1e8057`，不得追活动HEAD。Codex A/B开工核对已同点；Claude A/B各独有0、落后200，必须先核归属/WIP并安全ff-only到固定基线，读回成功后才能施工，不force/reset或跳hooks，保留全部output/锁。
+
+| 会话及唯一树 | 连续功能范围 | 禁止重叠 |
+| --- | --- | --- |
+| Codex A / codex-ai-native-lane-a | AIN09/15/21/22：延续CA15，原材料/受理历史观察与当前提交资格分离；修正收据授权指纹含动态时间的问题（已修则不重做），接原HTTP/transport及小程序checkout、租户网站Booking可信宿主和原结果恢复 | 独占客户scenes及上述客户两端必要接点；不改runner/task-input/budget/Core事务/knowledge/inspection/schema/公共聚合/Admin |
+| Codex B / codex-ai-native-lane-b | AIN10/19/20/24：保留CB16待验包，继续图片/音频原保存→人工更正→检查准备/原提交→独立历史收据；接员工transport/host及原pickup/return可信启动，当前候选失效不抹历史，旧收据不授新提交 | 独占knowledge/inspection-assist及员工AI必要接点；不改客户两端/客户scenes/runner/task-input/Gateway/budget/Core事务/schema/公共聚合 |
+| Claude A / claude-ai-native-lane-a | AIN06/07：承接abcc6922，原recover/continueConfirmation及必要宿主等待有界化、晚到提交与原收据恢复；保持原CAS/批准/累计资源 | 本批只认runner/task-input必要接线，不再写探针、业务scenes或budget |
+| Claude B / claude-ai-native-lane-b | AIN05/11/24：原BudgetQuotePort/会计接口的可信版本化价格与token上界生产/消费，保留calls链与原账本；缺正式数据拒绝，不编造费率/数量 | 本批认budget及如确需新增的本域定价模型/专用迁移；不执行迁移，不改runner/业务域/公共聚合 |
+
+### 2026-10-15 审核后 Codex A/B 续派
+
+负责人在只读审核结束后明确要求续派Codex A/B，授权范围以上表A/B两行更新为准；Claude A/B原运行器、预算任务不变。主线只派工并更新本册，不恢复自身开发、心跳或自动整合。下方多处“最新”及第0节旧基线均属历史，不覆盖本节固定f968f6d0与本次授权。
+
+- A已送达新队列，延续现有CA15三片而非重做；已知一分钟心跳为91926b10，本次复用/更新待A实际回执，不将消息送达当开工确认。
+- B已确认认领、原树/原分支/f968f6d0与空index，复用有效一分钟心跳8ff24d72，不叠加。CB16固定patch `5e58fcca7682b65b3d87bb6635d65e4ce3a97b79c3f0d6a9a206cbd0d8a36e58` 保留待验：单轮冒烟0pass/1fail为替身缺正式仓储端口，后续场景未运行；noEmit零诊断不替代行为通过，不为旧包循环补测。
+- 两线均以历史事实、当前可用性、明确人工决定和原提交结果的实际消费者为出口；不造新页面/假端点或把静态enabled当可信发布。公共合同不足先报精确leaf需求，缺依赖仍关闭；不改AppModule/部署、公共聚合或另一线文件，不新增迁移。客户账务授权耦合与Core审批重放缺陷没有在本次A/B包中转交。
+- 每包保留前像并冻结最小增量、SHA256、实际验证与未验项，更新各自原CA08/CB10接续记录；作者包不视为主线通过。当前仍执行下方离线/功能优先限制，真实浏览器/微信设备未验须明确，不以宿主静态接线宣称可上线。
+
+四线先回报实际基线/写入归属与各自心跳ID，再在本域队列内连续做完整功能包；无新任务价值或正式依赖阻塞须明确记录，不伪造完成。心跳仅空闲推进、不重入/轮询他线，暂停/交权取消，最长7天；本主线不设心跳。各自收口冻结固定SHA256/最小增量、更新本树既有接续记录，不要求用户逐批催促；本轮没有新commit/push/合main或自动整合授权。正式分数沿已核实49.1%/ENTRY48.6%/验收0/28，不凭WIP或小冒烟涨分。
+
+继续执行最新功能优先约束：不新增修改tests/fixtures/测试脚本，仅既有用例或一次直接内联冒烟及必要类型检查；禁止.env、安装、启服务、真实HTTP/DB/DNS/存储/模型/支付、共享生成物和生产启用。Node始终原两个preload、固定offline URL、本树绝对audit/writeRoot/TEMP/TMP/cache与禁compile cache；Prisma只原本树隔离流程，不动marker/preload/锁或跨树复制client。Runtime与ProviderSDK独立可替换但均不安装，未知操作不换ID/引擎重发。具体认领/同步/心跳以会话实际回执为准，消息送达不等于开工。
+
 > **最新底座功能（2026-10-13）：`05baeac1`。** 原C02订单解释工具候选接入server-only许可的C03/Unified/Public出口，原schema核验后保留，不再静默丢弃；最多8条有界且默认关闭，候选不是权限/批准/业务执行。实际协议/Gateway＋离线端口冒烟通过，627源码零诊断，无新增或修改测试脚本。保留text/stream/vision/strict JSON探针及用量/配置；tools持久挑战和实际业务消费仍待接，audio/可信计价/端侧及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
 
 > 最新源码（2026-10-13）`c4ae990970268ca1f736f909b3db579573a3ee21`：客户当前原模型结果HTTP消费已接，旧run不回填、撤权拒绝、unknown无正文，生成文本不是Core事实。未产出结果正常与权限变化离线通过，完整成功文本/客户财务正向仍未验；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不变，只主线施工。

@@ -1,3 +1,8 @@
+/**
+ * 职责：根据受权计划与持久租约推进任务步骤，协调暂停、恢复和确认继续等执行路径。
+ * 边界：权限、步骤副作用、存储与资源计量经注入 ports 完成，不直接派发供应商请求。
+ * 恢复必须保留 fencing 和原操作关联；租约过期或取消不证明外部副作用未发生。
+ */
 import {
   type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult,
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,

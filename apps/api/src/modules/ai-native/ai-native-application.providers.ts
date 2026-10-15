@@ -1,3 +1,8 @@
+/**
+ * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
+ * 边界：装配不等于执行开放；各请求仍核验当前政策、权限与实际可用的依赖。
+ * 接续时从这里追踪具体场景的消费者；不要在此补假授权、第二 Gateway 或预算账本。
+ */
 import type { FactoryProvider } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { AuthService } from '../auth/auth.service';

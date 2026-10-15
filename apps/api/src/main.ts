@@ -1,3 +1,8 @@
+/**
+ * 职责：启动 Nest HTTP 应用，统一请求身份、员工路由、校验、代理和 CORS 设置。
+ * 边界：业务装配见 AppModule；不能在此绕过 Guard 或直接增加业务执行路径。
+ * 注意：加载本文件会执行 bootstrap 并监听端口，不能把导入它当作离线检查。
+ */
 import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";

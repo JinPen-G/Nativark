@@ -1,11 +1,10 @@
 /**
- * 前后端共享契约的**唯一入口**。
+ * 职责：前后端共享契约的公共入口，只做正式再导出，保持消费者的导入路径稳定。
  *
- * 本文件刻意只做再导出：所有引用方写 `@rental-os/shared`，
- * 声明搬到哪个域文件都不影响它们，因此拆分可以继续做而不引发一次大改。
+ * 调用方使用 `@rental-os/shared`；模块内部按职责组织，不用深层源码路径绕过出口。
  *
- * 依赖方向全部是 `import type`，运行时零耦合：
- *   infrastructure → platform → core，core → platform 只取一个类型。
+ * 本包同时导出类型、schema、常量与运行时工具，并非纯类型包；只需类型时用 import type。
+ * 新增或调整导出须核对生产者、DTO/OpenAPI、各端消费者和构建边界，不把源码与 dist 一致视为当然。
  */
 export * from "./common";
 export * from "./core";
