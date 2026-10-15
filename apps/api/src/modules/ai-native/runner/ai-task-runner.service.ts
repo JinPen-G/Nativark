@@ -132,7 +132,7 @@ export class AiTaskRunner {
       throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     }
     lease = structuredClone(lease);
-    const initial = structuredClone(await this.deps.leases.readMetadata(lease.taskId));
+    const initial = structuredClone(await this.callReadBounded(() => this.deps.leases.readMetadata(lease.taskId), 5000, 'recovery_metadata', signal));
     if (initial.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     return this.runHeld({ taskId: lease.taskId, runId: lease.runId }, true, initial, lease, signal, true);
   }
@@ -140,7 +140,7 @@ export class AiTaskRunner {
   async continueConfirmation(value: AiTaskRunnerConfirmationRequest, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
     const input = structuredClone(value);
     if (!this.deps.confirmation || !this.deps.effects.continueConfirmation || signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
-    const initial = await this.deps.leases.readMetadata(input.taskId);
+    const initial = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal);
     if (initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
       || initial.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     let committed: Awaited<ReturnType<NonNullable<AiTaskRunnerDependencies['confirmation']>['resume']>>;
@@ -153,7 +153,7 @@ export class AiTaskRunner {
       || committed.lease.holderId !== input.lease.holderId || committed.lease.fencingToken !== input.lease.fencingToken
       || committed.lease.revision !== input.lease.revision + 1 || committed.continuation.stepId !== input.stepId
       || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
-    const current = await this.deps.leases.readMetadata(input.taskId);
+    const current = await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal);
     return this.runHeld({ taskId: input.taskId, runId: input.lease.runId }, false, current, committed.lease,
       signal, false, undefined, committed.continuation);
   }
@@ -165,6 +165,7 @@ export class AiTaskRunner {
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
     let outcomeAttempted = false;
+    let outcomeAcknowledged = false;
     let primaryUnknown: Error | undefined;
     const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
@@ -177,14 +178,14 @@ export class AiTaskRunner {
     const finish = async (outcome: AiTaskRunnerTaskOutcome): Promise<AiTaskRunnerOutcome> => {
       if (!this.deps.taskOutcome) return outcome;
       if (outcome.status === 'unknown') {
-        const current = await this.deps.leases.readMetadata(input.taskId);
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'outcome_metadata');
         if (current.status === 'waiting_external' || current.status === 'cancel_requested') {
           taskRevision = current.revision;
           return outcome;
         }
       }
       if (outcome.status !== "unknown" && outcome.status !== "paused") {
-        const current = await this.deps.leases.readMetadata(input.taskId);
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'outcome_metadata');
         if (current.cancelRequestedAt !== null || current.status === "cancel_requested") {
           taskRevision = current.revision;
           outcome = { status: "cancelled", completedSteps, cleanupFailed };
@@ -193,17 +194,18 @@ export class AiTaskRunner {
       outcomeAttempted = true;
       const committed = await this.commitTaskOutcome(outcome, lease, taskRevision);
       advance(committed);
+      outcomeAcknowledged = true;
       return committed.outcome;
     };
     try {
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-      if (adoptedRecovery) await this.deps.leases.assertRecoveryRun!({ ...structuredClone(lease), purpose: 'recovery_only' });
+      if (adoptedRecovery) await this.callReadBounded(() => this.deps.leases.assertRecoveryRun!({ ...structuredClone(lease), purpose: 'recovery_only' }), 5000, 'recovery_authority', signal);
       if (initial.status === 'waiting_input' || initial.status === 'waiting_confirmation') return { status: 'paused', completedSteps, cleanupFailed };
       if (!recovery && initial.status === 'queued') {
         if (!this.deps.taskOutcome?.start) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (!prepare) validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false)), input);
+        if (!prepare) validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false), 5000, 'initial_plan', signal)), input);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-        advance(await this.callBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
+        advance(await this.callWriteBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
         initial = { ...initial, status: 'running', revision: taskRevision };
       }
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
@@ -212,16 +214,16 @@ export class AiTaskRunner {
         signal?.addEventListener('abort', abort, { once: true });
         try {
           if (signal?.aborted) abort();
-          await this.callBounded(() => prepare({ lease: structuredClone(lease), taskRevision, signal: controller.signal }), 5000, 'held_prepare');
+          await this.callWriteBounded(() => prepare({ lease: structuredClone(lease), taskRevision, signal: controller.signal }), 5000, 'held_prepare');
         } finally { controller.abort(); signal?.removeEventListener('abort', abort); }
-        const current = await this.deps.leases.readMetadata(input.taskId);
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'prepared_metadata', signal);
         if (current.taskId !== input.taskId || current.revision !== taskRevision || current.status !== 'running'
           || current.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       }
-      if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
+      if (this.deps.resources) await this.callWriteBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-      const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
+      const plan = validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery), 5000, 'execution_plan', signal)), input);
       if (continuation) {
         if (recovery || !finiteInteger(continuation.remainingActiveMs, 1, plan.limits.maxStepMs)
           || !finiteInteger(continuation.remainingOutputBytes, 1, plan.limits.maxOutputBytes)) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
@@ -229,7 +231,9 @@ export class AiTaskRunner {
       }
       const startedAt = this.clock.now();
       const checkCancel = async () => {
-        const current = await this.deps.leases.readMetadata(input.taskId);
+        // A host abort must not skip reconciliation/checkpointing of a result
+        // already persisted. This read remains bounded independently.
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), plan.limits.maxStepMs, 'cancel_metadata');
         if (current.cancelRequestedAt === null && current.status !== "cancel_requested") return false;
         taskRevision = current.revision;
         return true;
@@ -237,7 +241,7 @@ export class AiTaskRunner {
       const pauseForInput = async (ref: AiTaskRunnerStepRef) => {
         if (!this.deps.inputs || await checkCancel()) return false;
         const current = { ...structuredClone(ref), registered: { ...ref.registered, taskRevision, runRevision: lease.revision } };
-        const committed = structuredClone(await this.callBounded(() => this.deps.inputs!.afterSucceeded(current, structuredClone(lease)), plan.limits.maxStepMs, 'input_wait'));
+        const committed = structuredClone(await this.callWriteBounded(() => this.deps.inputs!.afterSucceeded(current, structuredClone(lease)), plan.limits.maxStepMs, 'input_wait'));
         if (!committed) return false;
         if (committed.taskRevision !== taskRevision + 1 || committed.lease?.revision !== lease.revision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
         advance(committed);
@@ -252,7 +256,7 @@ export class AiTaskRunner {
         const cancelling = await checkCancel();
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
-        const registered = structuredClone(await this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined));
+        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), plan.limits.maxStepMs, 'step_register'));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
@@ -309,7 +313,7 @@ export class AiTaskRunner {
           // Recovery reads original charges and never reserves a fresh allowance.
           if ((reconcile || continuing) && !this.deps.resources.recover) return { status: 'unavailable', completedSteps, cleanupFailed };
           try {
-            resourceTicket = structuredClone(await this.callBounded(() => reconcile || continuing
+            resourceTicket = structuredClone(await this.callWriteBounded(() => reconcile || continuing
               ? this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease))
               : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
           } catch (error) {
@@ -318,9 +322,9 @@ export class AiTaskRunner {
           }
           activeResourceTicket = resourceTicket;
         }
-        if (!reconcile && !continuing) advance(await this.deps.steps.start(ref, structuredClone(lease)), ref);
+        if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), plan.limits.maxStepMs, 'step_start'), ref);
         if (!reconcile && !continuing && resourceTicket && this.deps.resources?.beforeExecute) {
-          resourceTicket = structuredClone(await this.callBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'model_resource_reserve'));
+          resourceTicket = structuredClone(await this.callWriteBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'model_resource_reserve'));
           activeResourceTicket = resourceTicket;
         }
         if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
@@ -424,19 +428,25 @@ export class AiTaskRunner {
       if (activeResourceTicket && this.deps.resources) {
         await this.callBounded(() => this.deps.resources!.markUnknown(activeResourceTicket!, structuredClone(lease)), 5000, 'resource_unknown').catch(() => {});
       }
-      if (error instanceof AiTaskRunnerError && !outcomeAttempted && (error.code === "AI_RESULT_UNKNOWN" || error.code === "AI_RUN_LIMIT")) {
+      // A timed-out persistent operation may already have committed. Never
+      // overwrite it with a guessed task failure; recover its original receipt.
+      if (primaryUnknown) throw primaryUnknown;
+      if (error instanceof AiTaskRunnerError && !outcomeAttempted && error.code === "AI_RUN_LIMIT") {
         if (!this.deps.taskOutcome) throw error;
         return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed };
       throw error;
     } finally {
-      try {
-        await this.callBounded(() => this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
-          expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken }), 5000, 'release_run');
-      } catch {
-        if (primaryUnknown) throw primaryUnknown;
-        throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "lease release acknowledgement is uncertain");
+      // A late persistent commit can still own the original CAS revision.
+      // Do not release/reclaim it from an uncertain acknowledgement.
+      if (!primaryUnknown && (!outcomeAttempted || outcomeAcknowledged)) {
+        try {
+          await this.callBounded(() => this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+            expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken }), 5000, 'release_run');
+        } catch {
+          throw new AiTaskRunnerError("AI_RESULT_UNKNOWN", "lease release acknowledgement is uncertain");
+        }
       }
     }
   }
@@ -445,9 +455,9 @@ export class AiTaskRunner {
     const port = this.deps.taskOutcome;
     if (!port) return { outcome, lease, taskRevision };
     let committed: Awaited<ReturnType<AiTaskRunnerOutcomePort["commit"]>>;
-    try { committed = structuredClone(await this.callBounded(() => port.commit({ taskId: lease.taskId,
+    try { committed = structuredClone(await this.callWriteBounded(() => port.commit({ taskId: lease.taskId,
       taskRevision, lease: { ...lease }, outcome: { ...outcome } }), 5000, 'task_outcome')); }
-    catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit is unavailable"); }
+    catch { throw new AiTaskRunnerError("AI_RESULT_UNKNOWN", "task outcome commit acknowledgement is uncertain"); }
     if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
       || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
       || committed.lease.holderId !== lease.holderId || !Number.isSafeInteger(committed.lease.revision)
@@ -459,10 +469,32 @@ export class AiTaskRunner {
   }
 
   private async persistResult(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, result: AiTaskRunnerEffectResult): Promise<AiTaskRunnerStepCommit> {
-    if (result.kind === "succeeded") return this.deps.steps.succeed(ref, lease, result.resultRef ?? null);
-    if (result.kind === "failed") return this.deps.steps.fail(ref, lease, result.errorCode, result.resultRef ?? null);
-    if (result.kind === "paused") return this.deps.steps.pause(ref, lease, result.pause, result.resultRef ?? null);
-    return this.deps.steps.unknown(ref, lease, result.resultRef ?? null);
+    return this.callWriteBounded(() => {
+      if (result.kind === "succeeded") return this.deps.steps.succeed(ref, lease, result.resultRef ?? null);
+      if (result.kind === "failed") return this.deps.steps.fail(ref, lease, result.errorCode, result.resultRef ?? null);
+      if (result.kind === "paused") return this.deps.steps.pause(ref, lease, result.pause, result.resultRef ?? null);
+      return this.deps.steps.unknown(ref, lease, result.resultRef ?? null);
+    }, 5000, 'step_result');
+  }
+
+  private async callReadBounded<T>(operation: () => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {
+    try { return await this.callBounded(operation, limitMs, phase, signal); }
+    catch (error) {
+      if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN')) {
+        throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE', `${phase} observation is unavailable`);
+      }
+      throw error;
+    }
+  }
+
+  private async callWriteBounded<T>(operation: () => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {
+    try { return await this.callBounded(operation, limitMs, phase, signal); }
+    catch (error) {
+      if (error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') {
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', `${phase} acknowledgement is uncertain`);
+      }
+      throw error;
+    }
   }
 
   private callBounded<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {

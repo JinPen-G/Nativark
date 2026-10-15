@@ -35,7 +35,8 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   const inputs = new PrismaClientTaskInputRepository(dependencies.db);
 
   const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
-    const grant = await authority.authorize(command.materialRef, operation === 'read' ? 'read'
+    // Original accounting uses current read authority; reserve/dispatch still require execute.
+    const grant = await authority.authorize(command.materialRef, operation === 'read' || operation === 'accounting' ? 'read'
       : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
     const receipt = await creation.readCreation(command);
     if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
@@ -43,7 +44,7 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     const input = await inputs.findCreation(grant.material, command.creationKey);
     if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
       || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
-      || input.policyId !== grant.policy.id || (!['read', 'cancel'].includes(operation) && input.policyRevision !== grant.policy.revision)) throw denied();
+      || input.policyId !== grant.policy.id || (!['read', 'accounting', 'cancel'].includes(operation) && input.policyRevision !== grant.policy.revision)) throw denied();
     const access = aiTaskAccessFromContext(grant.context, id, clock());
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
       id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,

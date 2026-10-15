@@ -11,7 +11,7 @@ import { KnowledgeSourceService } from './knowledge-source.service';
 import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { documentSourceSchema, draftInput, fingerprint, id, parse, visible } from './knowledge-validation';
+import { documentSourceSchema, draftInput, mutationInput, fingerprint, id, parse, visible } from './knowledge-validation';
 
 export type HumanKnowledgeDependencies = {
   db: ConstructorParameters<typeof PrismaKnowledgeRepository>[0];
@@ -59,7 +59,10 @@ export class HumanKnowledgeService {
   private invoke(callback: (context: AiExecutionContext) => Promise<KnowledgeRecord>) {
     return this.session.run(async context => knowledgeManagementView(await callback(context)));
   }
-  create(value: unknown) { return this.invoke(context => this.documents.create(context, value)); }
+  create(value: unknown) {
+    const input = parse(draftInput, value);
+    return this.invoke(context => this.documents.create(context, input));
+  }
   read(documentId: string) { return this.invoke(context => this.documents.read(context, parse(id, documentId))); }
   parserCapabilities() { return KnowledgeTextParser.capabilities(); }
   prepareCreate(value: unknown) {
@@ -259,13 +262,30 @@ export class HumanKnowledgeService {
   parse(value: unknown) {
     // Do not create a pending admission for a missing trusted byte source.
     if (!this.ports.files) throw new KnowledgeError('unavailable');
-    return this.invoke(context => this.documents.parseDocument(context, value));
+    const input = parse(mutationInput, value);
+    return this.invoke(context => this.documents.parseDocument(context, input));
   }
-  publish(value: unknown) { return this.invoke(context => this.publication.publish(context, value)); }
-  revise(expectedRevision: number, value: unknown) { return this.invoke(context => this.documents.newVersion(context, expectedRevision, value)); }
-  withdraw(value: unknown) { return this.invoke(context => this.publication.withdraw(context, value)); }
-  delete(value: unknown) { return this.invoke(context => this.publication.delete(context, value)); }
-  reconcileParse(value: unknown) { return this.invoke(context => this.documents.reconcileParse(context, value)); }
+  publish(value: unknown) {
+    const input = parse(mutationInput, value);
+    return this.invoke(context => this.publication.publish(context, input));
+  }
+  revise(expectedRevision: number, value: unknown) {
+    const input = parse(draftInput, value);
+    parse(mutationInput, { documentId: input.documentId, expectedRevision, operationId: input.operationId });
+    return this.invoke(context => this.documents.newVersion(context, expectedRevision, input));
+  }
+  withdraw(value: unknown) {
+    const input = parse(mutationInput, value);
+    return this.invoke(context => this.publication.withdraw(context, input));
+  }
+  delete(value: unknown) {
+    const input = parse(mutationInput, value);
+    return this.invoke(context => this.publication.delete(context, input));
+  }
+  reconcileParse(value: unknown) {
+    const input = parse(mutationInput, value);
+    return this.invoke(context => this.documents.reconcileParse(context, input));
+  }
 
   operation(documentId: string, operationId: string) {
     parse(id, documentId); parse(id, operationId);

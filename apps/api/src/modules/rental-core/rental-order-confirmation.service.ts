@@ -195,9 +195,10 @@ export class RentalOrderConfirmationService {
       tenantId, workspaceId: this.core.resolveWorkspaceId(tenantId), idempotencyKey: key,
       requestFingerprint: fingerprint, request: structuredClone(input)
     } : undefined;
-    const verifyReplay = async (order: { id: string; tenantId: string; workspaceId?: string }) => {
+    const verifyReplay = async (order: { id: string; tenantId: string }) => {
       if (!approval || !approvalBinding) return;
-      if (order.tenantId !== tenantId || order.workspaceId !== approvalBinding.workspaceId) throw new ConflictException("审批结果范围不匹配");
+      // findOrder scopes the row by workspace; its domain projection has no workspaceId.
+      if (order.tenantId !== tenantId || this.core.resolveWorkspaceId(tenantId) !== approvalBinding.workspaceId) throw new ConflictException("审批结果范围不匹配");
       await approval.replay(structuredClone(approvalBinding), order.id);
       await approval.authorize(structuredClone(approvalBinding));
     };
