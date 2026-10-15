@@ -132,6 +132,8 @@ export function createPersistedGatewayBudget(input: {
   });
   const recoveryCommand = z.object({ reservationId: z.string().min(1).max(36)
     .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const originalCallCommand = z.object({ callId: z.string().min(1).max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const originalReservation = async (value: unknown) => {
     const parsed = recoveryCommand.safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
@@ -142,6 +144,30 @@ export function createPersistedGatewayBudget(input: {
     return { before, binding, record, reservationId: parsed.data.reservationId };
   };
   const recovery = Object.freeze({
+    /** A reserve/link acknowledgement can be lost before its reservation ID
+     * reaches the host. Find only that original call's existing reservation;
+     * no result here attests dispatch, usage or permission to reserve again. */
+    readCall: async (value: unknown) => {
+      const parsed = originalCallCommand.safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const before = structuredClone(await input.scopes.resolveCurrent());
+      const principal = gatewayBudgetPrincipal(before.context);
+      if (before.scope.kind !== 'WORKSPACE' || before.scope.tenantId !== principal.tenantId
+        || before.scope.workspaceId !== principal.workspaceId) throw new BudgetError('FORBIDDEN');
+      const row = structuredClone(await input.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: before.scope.id, scopeKind: 'WORKSPACE', callId: parsed.data.callId }
+      }, select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true, callId: true } }));
+      // Absence is not proof of no consumption. In particular, do not perform
+      // a replacement reserve after a lost COMMIT response or a missing link.
+      if (!row) throw new BudgetError('PENDING_RECONCILIATION');
+      if (row.scopeId !== before.scope.id || row.scopeKind !== 'WORKSPACE'
+        || row.tenantId !== principal.tenantId || row.workspaceId !== principal.workspaceId
+        || row.actorId !== principal.actorId || row.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
+      const { record } = await originalReservation({ reservationId: row.id });
+      if (record.id !== row.id || record.callId !== parsed.data.callId
+        || identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
+      return structuredClone(record);
+    },
     /** Read the original balance/status after an uncertain response. This is
      * not a proof of no consumption and never starts or settles a call. */
     read: async (value: unknown) => {
