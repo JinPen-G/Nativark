@@ -35,6 +35,7 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   const inputs = new PrismaClientTaskInputRepository(dependencies.db);
 
   const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
+    const observingOriginal = ['read', 'accounting', 'cancel'].includes(operation);
     // Original accounting uses current read authority; reserve/dispatch still require execute.
     const grant = await authority.authorize(command.materialRef, operation === 'read' || operation === 'accounting' ? 'read'
       : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
@@ -44,7 +45,8 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     const input = await inputs.findCreation(grant.material, command.creationKey);
     if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
       || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
-      || input.policyId !== grant.policy.id || (!['read', 'accounting', 'cancel'].includes(operation) && input.policyRevision !== grant.policy.revision)) throw denied();
+      || input.policyId !== grant.policy.id || (!observingOriginal
+        && (input.policyRevision !== grant.policy.revision || input.expiresAt <= clock()))) throw denied();
     const access = aiTaskAccessFromContext(grant.context, id, clock());
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
       id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,
@@ -68,7 +70,8 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
       || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
-    return { context: grant.context, taskId: id, expiresAt: new Date(Math.min(grant.policy.expiresAt.getTime(), input.expiresAt.getTime())),
+    return { context: grant.context, taskId: id, expiresAt: new Date(observingOriginal ? grant.policy.expiresAt.getTime()
+      : Math.min(grant.policy.expiresAt.getTime(), input.expiresAt.getTime())),
       proof: requestFingerprint({ identity: identityHash(grant.context),
       task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash }) };
   };

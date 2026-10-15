@@ -23,7 +23,10 @@ export function composeClientMaterialTasks(dependencies: AiClientTaskDependencie
   const grant = async (row: AiClientTaskInput, operation: 'create' | 'read') => {
     const current = await authority.authorize(row.materialRef, operation), material = current.material;
     const stored = await inputs.findCreation(material, row.creationKey);
-    if (!stored || stored.inputHash !== row.inputHash || stored.id !== row.id || row.expiresAt <= clock()
+    // Expired execution material cannot create again. It must not make an
+    // owned ORIGINAL receipt disappear while current read policy still allows
+    // observation/accounting; no execution grant escapes this read instance.
+    if (!stored || stored.inputHash !== row.inputHash || stored.id !== row.id || operation === 'create' && row.expiresAt <= clock()
       || row.bindingHash !== material.bindingHash || row.principalHash !== material.principalHash || row.principalKind !== material.principalKind
       || row.materialInputHash !== material.inputHash || row.materialHash !== material.materialHash || row.materialRevision !== material.revision
       || row.tenantId !== material.tenantId || row.workspaceId !== material.workspaceId || row.channel !== material.channel
