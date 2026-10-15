@@ -1990,7 +1990,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Explicit bounded retention cleanup. Requires current full-workspace operator scope; unknown effects and original business receipts are held. No timer or automatic retry.',
     requestSchema: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
       kind: { type: 'string', enum: ['task', 'request', 'knowledge', 'memory', 'material', 'attachment'] },
-      limit: { type: 'integer', minimum: 1, maximum: 10 } } } },
+      limit: { type: 'integer', minimum: 1, maximum: 10 },
+      after: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } } } },
   { method: 'post', path: '/api/ai-native/privacy/receipt', tag: 'AI Native', operationId: 'readAiRetentionReceipt',
     permissions: ['system:params:manage'], authRequired: true, summary: 'Observe only an owned original cleanup receipt; does not resend an unknown object deletion.',
     requestSchema: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } },

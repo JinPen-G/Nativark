@@ -2,7 +2,7 @@
 
 这是原 AI Native 的清理适配，不是另一套业务账本或备份平台。
 
-- `POST /api/ai-native/privacy/cleanup`：`{kind, limit?}`，kind 为 task/request/knowledge/memory/material/attachment，每批最多10项。真实当前 Auth、operator、`system:params:manage`、完整 workspace/data/location 范围全部必需。没有默认后台定时器。
+- `POST /api/ai-native/privacy/cleanup`：`{kind, limit?, after?}`，kind 为 task/request/knowledge/memory/material/attachment，每批最多10项。按不可变ID排序，宿主用 `nextAfter` 继续有界候选页，避免受保留或已清理的首批对象阻塞后续；不是后台循环，也不表示全空间已完成清理。真实当前 Auth、operator、`system:params:manage`、完整 workspace/data/location 范围全部必需。没有默认后台定时器。
 - `receipt {id}` / `receipts {limit?, before?}`：只观察当前空间收据。批次应答不明先查收据，不能换ID重发业务动作。
 - `AiRetentionService` 的普通到期材料30天，未绑定知识临时附件7天。未知步骤、进行中任务、未结预算或派发待核对会保留；审批/业务执行材料和账务收据不随普通对话清理。清理不改变业务成功、失败或财务状态。
 - 知识删除/撤回和记忆删除在原 CAS 事务中写最少 tombstone。撤回立即停止当前读取；删除清理正文和重复确认正文，保留版本/hash/原操作收据。不得复活删除过的ID。

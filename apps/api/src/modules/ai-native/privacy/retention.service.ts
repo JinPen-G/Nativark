@@ -15,7 +15,8 @@ import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
-  limit: z.number().int().min(1).max(10).default(5) }).strict();
+  limit: z.number().int().min(1).max(10).default(5),
+  after: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict();
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const aiRetentionReceiptSchema = z.object({ id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 export const aiRetentionReceiptsSchema = z.object({ limit: z.number().int().min(1).max(50).default(20),
@@ -109,25 +110,26 @@ export class AiRetentionService {
     const command = aiRetentionCleanupSchema.parse(structuredClone(value)), current = await this.current();
     const scope = await this.db.aiScope.findFirst({ where: aiPersistenceScopeColumns(current.context.scope) });
     if (!scope) throw unavailable();
-    const where = { tenantId: current.tenantId, workspaceId: current.workspaceId };
+    const page = command.after ? { id: { gt: command.after } } : {};
+    const where = { tenantId: current.tenantId, workspaceId: current.workspaceId, ...page };
     let ids: string[];
-    if (command.kind === 'task') ids = (await this.db.aiTask.findMany({ where: { scopeId: scope.id,
-      status: { in: [...terminal] }, updatedAt: { lte: this.cutoff(30) }, archivedAt: null }, orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+    if (command.kind === 'task') ids = (await this.db.aiTask.findMany({ where: { scopeId: scope.id, ...page,
+      status: { in: [...terminal] }, updatedAt: { lte: this.cutoff(30) }, archivedAt: null }, orderBy: { id: 'asc' },
       take: command.limit, select: { id: true } })).map(row => row.id);
-    else if (command.kind === 'request') ids = (await this.db.aiTaskOriginalRequest.findMany({ where: { scopeId: scope.id,
-      erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    else if (command.kind === 'request') ids = (await this.db.aiTaskOriginalRequest.findMany({ where: { scopeId: scope.id, ...page,
+      erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' },
       take: command.limit, select: { id: true } })).map(row => row.id);
     else if (command.kind === 'memory') ids = (await this.db.aiStructuredMemory.findMany({ where: { ...where,
-      status: 'deleted' }, orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }], take: command.limit, select: { id: true } })).map(row => row.id);
+      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
     else if (command.kind === 'knowledge') ids = (await this.db.aiKnowledgeDocument.findMany({ where: { ...where,
-      status: 'deleted' }, orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }], take: command.limit, select: { id: true } })).map(row => row.id);
+      status: 'deleted' }, orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
     else if (command.kind === 'material') ids = (await this.db.aiClientSceneMaterial.findMany({ where: { ...where,
-      erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      erasedAt: null, createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' },
       take: command.limit, select: { id: true } })).map(row => row.id);
-    else ids = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, businessModule: 'ai-native',
+    else ids = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, ...page, businessModule: 'ai-native',
       businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: current.workspaceId },
       status: { in: ['active', 'failed', 'ai_erasure_pending'] }, createdAt: { lte: this.cutoff(7) } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: command.limit, select: { id: true } })).map(row => row.id);
+      orderBy: { id: 'asc' }, take: command.limit, select: { id: true } })).map(row => row.id);
     await this.check(current);
     const results = [];
     for (const resourceId of ids) {
@@ -140,6 +142,7 @@ export class AiRetentionService {
     }
     await this.check(current);
     return { policyVersion: AI_RETENTION_POLICY.version, scanned: ids.length, limit: command.limit, results,
+      nextAfter: ids.length === command.limit ? ids[ids.length - 1] : null, coverage: 'bounded_candidate_page',
       businessRecords: 'preserved', backupErasure: 'not_attested' };
   }
   /** Also used ONLY after a trusted restore manifest has been verified. */
