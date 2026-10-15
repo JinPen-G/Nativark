@@ -16,6 +16,7 @@ import { PrismaGatewayAccountingFacts, type GatewayActualUsagePricing } from './
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
+import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 
 export function createPersistedGatewayBudget(input: {
   db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0];
@@ -129,7 +130,41 @@ export function createPersistedGatewayBudget(input: {
       return saved;
     }
   });
-  return { bindings, facts, settings, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
+  const recoveryCommand = z.object({ reservationId: z.string().min(1).max(36)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const recovery = Object.freeze({
+    /** Server-only explicit recovery, not a background sweep or a new dispatch.
+     * Auth, entitlement and original usage are rechecked by the existing service.
+     * A lost mutation response stays unknown; never retry the write here. */
+    reconcile: async (value: unknown) => {
+      const parsed = recoveryCommand.safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const { reservationId } = parsed.data;
+      const before = structuredClone(await input.scopes.resolveCurrent());
+      const principal = gatewayBudgetPrincipal(before.context);
+      const { actorKind: _, ...context } = principal;
+      const binding = structuredClone(await bindings.resolveForReservation(context, reservationId));
+      await service.read(reservationId, binding.association);
+      const evidenceRef = await facts.originalUsageReference(reservationId);
+      // Stable original-operation event across process restarts. The repository
+      // also compares the actual evidence payload on same-key replay.
+      const eventKey = requestFingerprint({ method: 'persisted-original-usage-reconcile-1', reservationId,
+        evidenceRef, association: binding.association });
+      let record;
+      try { record = await service.reconcile(reservationId, binding.association, eventKey, evidenceRef); }
+      catch (error) {
+        if (error instanceof BudgetError) throw error;
+        throw new BudgetError('PENDING_RECONCILIATION');
+      }
+      try {
+        const after = await input.scopes.resolveCurrent();
+        if (identity(before) !== identity(after) || record.id !== reservationId || record.status !== 'settled'
+          || record.actual === null) throw new BudgetError('PENDING_RECONCILIATION');
+      } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
+      return structuredClone(record);
+    }
+  });
+  return { bindings, facts, settings, recovery, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
 }
 
 /** Workspace-user server assembly with real current task/configuration

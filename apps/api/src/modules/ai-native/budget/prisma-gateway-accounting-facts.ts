@@ -217,4 +217,19 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
     return { ...this.evidenceBinding(rows), ...usage, quantity, dispatchToken: receipt.dispatchToken,
       evidenceHash: requestFingerprint({ usageHash: receipt.usageHash, priceVersion: record.association.priceVersion, quantity }) };
   }
+
+  /** Recover only already persisted original usage. A reservation id is not
+   * proof of usage, a dispatch permit, or permission to fetch provider history.
+   * No caller-supplied evidence reference/counts and no new receipt write. */
+  async originalUsageReference(reservationId: string): Promise<string> {
+    if (!id.max(36).safeParse(reservationId).success) throw new BudgetError('INVALID');
+    const initial = await this.current(reservationId);
+    const rows = await this.rows(this.db, reservationId);
+    const fingerprint = this.evidenceFingerprint(rows);
+    await this.readUsage(reservationId, rows.receipt.id, true);
+    const current = await this.rows(this.db, reservationId);
+    if (fingerprint !== this.evidenceFingerprint(current)) throw new BudgetError('PENDING_RECONCILIATION');
+    await this.revalidateCurrent(reservationId, initial);
+    return rows.receipt.id;
+  }
 }
