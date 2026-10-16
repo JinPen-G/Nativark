@@ -159,7 +159,7 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (row.contentHash !== this.hash(binding)) throw unavailable();
     return { context: after.context, owner: after.owner, sceneVersion: row.sceneVersion,
       inputRef: row.id, inputRevision: row.revision, inputHash: row.contentHash, expiresAt: row.expiresAt.toISOString(),
-      command: structuredClone(value.command), preparationHash: value.preparationHash };
+      command: structuredClone(value.command), preparationHash: value.preparationHash, priceVersion: value.priceVersion };
   }
   async readOriginal(requestKey: string) {
     if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

@@ -145,6 +145,9 @@ export class TextCapabilityProbeRequestFactory {
       return { taskId: found.task.taskId, template };
     };
     return Object.freeze({
+      readAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.readOriginalAccounting(requestKey)),
+      releaseUnsent: value => run(requestSchema, value, ({ requestKey }) => root.workflow.releaseOriginalUnsent(requestKey), true),
+      reconcileAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.reconcileOriginalAccounting(requestKey), true),
       configureTaskAction: value => run(actionConfigureSchema, value, async ({ requestKey, operation, expectedRevision }) => {
         const target = await actionTask(requestKey, operation);
         const originalExpiry = Date.parse(await root.workflow.readOriginalPolicyExpiry(requestKey));

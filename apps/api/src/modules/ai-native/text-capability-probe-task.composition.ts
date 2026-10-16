@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, type AiTextCapabilityAccountingResponseDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
@@ -23,6 +23,10 @@ import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';
+import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';
+import { BudgetError } from './budget/budget.ports';
+import { AiTaskRunnerError } from './runner/ai-task-runner.service';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -199,13 +203,92 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     await root.authorization.tasks.readMetadata(task.taskId);
     return { task, root };
   };
-  return Object.freeze({
+  // Original financial recovery never resolves today's probe configuration or
+  // claims a runner lease. The immutable request determines the one call; the
+  // ordinary budget service still verifies current authority and usage facts.
+  const originalAccounting = async (requestKeyValue: string, operation: 'read' | 'releaseUnsent' | 'reconcile'):
+    Promise<AiTextCapabilityAccountingResponseDraft> => {
+    const parsed = id.max(128).safeParse(requestKeyValue);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const requestKey = parsed.data;
+    const original = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
+    const history = await workflow.readHistoricalOriginal(requestKey);
+    if (!original || history.state !== 'historical' || !history.task || !history.run) throw unavailable();
+    const context = original.context;
+    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
+    const taskId = history.task.taskId, runId = history.run.runId;
+    const callId = textProbeIntent(original.command.operationId, original.owner.scopeId, textProbeCapability(original.command)).intent.requestId;
+    const invocation = structuredClone(await observe(() => input.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: original.owner.scopeId, callId } }, select: { id: true, scopeId: true,
+        taskId: true, runId: true, stepId: true, actionId: true, actorId: true, sceneCode: true, callId: true,
+        priceVersion: true, intentHash: true, configurationHash: true, configuration: true, stepFingerprint: true } })));
+    const receipt = await observe(() => new PrismaTextCapabilityReceiptRepository(input.db, input.clock)
+      .find(original.owner.scopeId, original.command.operationId));
+    if (!invocation || !receipt) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    const d = receipt.descriptor;
+    if (invocation.scopeId !== original.owner.scopeId || invocation.taskId !== taskId || invocation.runId !== runId
+      || invocation.actorId !== context.actor.userId || invocation.sceneCode !== TEXT_PROBE_SCENE
+      || invocation.callId !== callId || invocation.priceVersion !== original.priceVersion
+      || invocation.stepId !== d.stepId || invocation.runId !== d.runId || d.callId !== callId || d.scopeId !== original.owner.scopeId
+      || requestFingerprint(d.command) !== requestFingerprint(original.command)
+      || requestFingerprint(d.context) !== requestFingerprint({ actorId: context.actor.userId,
+        tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId })
+      || requestFingerprint({ ...textProbeIntent(original.command.operationId, original.owner.scopeId, textProbeCapability(original.command)),
+        configuration: d.configuration }) !== original.preparationHash
+      || invocation.intentHash !== d.intentHash || invocation.configurationHash !== d.configurationHash
+      || requestFingerprint(invocation.configuration) !== d.configurationHash
+      || invocation.stepFingerprint !== requestFingerprint(original.command)) throw denied();
+    const reservation = structuredClone(await observe(() => input.db.aiBudgetReservation.findUnique({ where: {
+      scopeId_scopeKind_callId: { scopeId: original.owner.scopeId, scopeKind: 'WORKSPACE', callId } }, select: {
+        id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true,
+        callId: true, priceVersion: true, unitKind: true } })));
+    // Missing reserve/link acknowledgement is not proof of no consumption.
+    if (!reservation) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    if (reservation.scopeId !== original.owner.scopeId || reservation.scopeKind !== 'WORKSPACE'
+      || reservation.tenantId !== context.scope.tenantId || reservation.workspaceId !== context.scope.workspaceId
+      || reservation.actorId !== context.actor.userId || reservation.callId !== callId
+      || reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind)) throw denied();
+    const verify = async () => {
+      const again = await producer.originals.readHistoricalOriginal(requestKey);
+      const latest = await workflow.readHistoricalOriginal(requestKey);
+      if (!again || again.inputRef !== original.inputRef || again.inputHash !== original.inputHash
+        || latest.state !== 'historical' || latest.task?.taskId !== taskId || latest.run?.runId !== runId) throw denied();
+    };
+    let returnedMutation = false;
+    try {
+      await observe(verify);
+      const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
+        credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard, taskId, clock: input.clock,
+        pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+      const record = await observe(() => operation === 'read' ? recovery.readCall({ callId })
+        : recovery[operation]({ reservationId: reservation.id }), undefined, operation !== 'read');
+      returnedMutation = operation !== 'read';
+      await observe(verify, undefined, returnedMutation);
+      if (record.id !== reservation.id || record.callId !== callId || record.association.runId !== runId
+        || record.association.stepId !== invocation.stepId || record.association.actionId !== invocation.actionId)
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      return { requestKey, taskId, record: presentTaskBudgetUsageRecord(invocation, record),
+        accounting: operation === 'read' ? 'observed' : 'original_operation_only', execution: 'not_invoked',
+        automaticRetry: false, businessExecution: 'not_inferred_from_usage', admission: 'not_granted' };
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
+      if (error instanceof BudgetError && error.code === 'FORBIDDEN') throw denied();
+      if (returnedMutation || error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION')
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      if (error instanceof BudgetError) throw error.code === 'INVALID' ? new AiTaskRepositoryError('AI_INVALID_INPUT') : unavailable();
+      throw error;
+    }
+  };
+  const workflow = Object.freeze({
     // Server management capability, never a model tool or automatic seed.
     taskPolicies,
     publishOriginal: (value: unknown) => producer.originals.publish(value),
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
     readOriginalCapability: (requestKey: string) => producer.originals.readOriginalCapability(requestKey),
     readOriginalPolicyExpiry: (requestKey: string) => producer.originals.readPolicyExpiry(requestKey),
+    readOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'read'),
+    releaseOriginalUnsent: (requestKey: string) => originalAccounting(requestKey, 'releaseUnsent'),
+    reconcileOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'reconcile'),
     createTask: (value: unknown) => producer.create(value),
     readCreation: (value: unknown) => producer.readCreation(value),
     async readHistoricalOriginal(requestKey: string) {
@@ -334,4 +417,5 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       return result;
     },
   });
+  return workflow;
 }

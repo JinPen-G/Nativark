@@ -3,6 +3,7 @@ import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2033,6 +2034,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...(['readAccounting', 'releaseUnsent', 'reconcileAccounting'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TEXT_CAPABILITY_HTTP_DRAFT.basePath}/${AI_TEXT_CAPABILITY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalProbeAccounting_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], requestSchema: 'AiTextCapabilityRequestDraft',
+    responseSchema: 'AiTextCapabilityAccountingResponseDraft',
+    summary: 'Observe or reconcile only the original owned probe ledger under current task authority. No current model configuration, new probe, dispatch or caller usage. Missing usage stays unknown. Explicit module opt-in only.' })),
   ...(['read', 'releaseUnsent', 'reconcile'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
