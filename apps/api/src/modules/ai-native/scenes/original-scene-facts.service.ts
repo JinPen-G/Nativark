@@ -87,14 +87,14 @@ export class AiOriginalSceneFactsService {
     }).strict().safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
-    const original = await this.requests.read(ref);
+    // Reopen the original selected source under current read permissions;
+    // expiry stops new execution, not observation of its original evidence.
+    const original = await this.requests.readHistorical(ref);
     if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    if (!original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (original.receipt.state === 'revoked' || !original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const section = freezeOriginalInput(structuredClone(await this.tools.openingSection({ key: command.key })));
-    const after = await this.requests.read(ref);
-    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    if (originalIdentityHash(before.context) !== originalIdentityHash(grant.context)
+    const after = await this.requests.readHistorical(ref);
+    if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return freezeOriginalInput({ original: original.receipt, section, execution: 'not_attempted' as const,
       proposalPersistence: 'unavailable_no_formal_section_proposal_port' as const });

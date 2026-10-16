@@ -208,11 +208,18 @@ export class AiOriginalSceneResultService {
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
       // old diagnosis after configuration/coverage or current permissions change.
+      // Observation must not require an unexpired request or new execution
+      // grant. Historical ownership and current business read access are
+      // independently rechecked before and after this read.
       const isOrder = original.request.sceneCode === 'order_explanation';
       const current = original.request.sceneCode === 'order_explanation'
         ? await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
           .prepare({ question: original.request.input.question })
-        : (await this.scenes.prepareTaskMaterial(command.original)).material;
+        : original.request.sceneCode === 'opening_diagnosis'
+          ? (await this.scenes.tools.scenes.prepareOpeningDiagnosis({ requestKey: original.receipt.requestKey,
+            ...original.request.input })).payload.materials
+          : (await this.scenes.tools.scenes.prepareQuoteClarification({ requestKey: original.receipt.requestKey,
+            ...original.request.input })).payload.materials;
       const fingerprint = isOrder ? orderFactsFingerprint
         : original.request.sceneCode === 'opening_diagnosis' ? openingFactsFingerprint : quoteFactsFingerprint;
       if (frozen.knowledge) {
