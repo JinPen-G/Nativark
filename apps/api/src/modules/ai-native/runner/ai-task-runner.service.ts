@@ -26,6 +26,39 @@ const defaultClock: AiTaskRunnerClock = {
   clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>)
 };
 
+/** Shared wait boundary for the runner and its explicit recovery hosts.
+ * Interruption only stops local continuation; it never attests rollback. */
+export function callAiTaskRunnerDependency<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number,
+  phase: string, signal?: AbortSignal, clock: AiTaskRunnerClock = defaultClock): Promise<T> {
+  const controller = new AbortController();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false, timer: unknown, timerStarted = false;
+    const clear = () => {
+      try { if (timerStarted) clock.clearTimeout(timer); } catch { /* cleanup cannot revive a closed wait */ }
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const stop = (code: 'AI_RESULT_UNKNOWN' | 'AI_RUN_LIMIT', message: string) => {
+      if (settled) return;
+      settled = true; clear(); controller.abort();
+      reject(new AiTaskRunnerError(code, message));
+    };
+    const onAbort = () => stop('AI_RESULT_UNKNOWN', `${phase} interrupted`);
+    if (signal?.aborted) { onAbort(); return; }
+    try {
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timer = clock.setTimeout(() => stop(phase === 'reconcile' ? 'AI_RESULT_UNKNOWN' : 'AI_RUN_LIMIT', `${phase} deadline exceeded`), limitMs);
+      timerStarted = true;
+      if (settled) { clear(); return; }
+      if (signal?.aborted) { onAbort(); return; }
+      Promise.resolve(operation(controller.signal)).then(value => {
+        if (!settled) { settled = true; clear(); resolve(value); }
+      }, error => {
+        if (!settled) { settled = true; clear(); reject(error); }
+      });
+    } catch (error) { settled = true; clear(); reject(error); }
+  });
+}
+
 function finiteInteger(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 }
@@ -172,6 +205,7 @@ export class AiTaskRunner {
     let outcomeAttempted = false;
     let outcomeAcknowledged = false;
     let primaryUnknown: Error | undefined;
+    let propagatedError: unknown;
     const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
         || !commit.lease || commit.lease.taskId !== lease.taskId || commit.lease.runId !== lease.runId
@@ -441,6 +475,7 @@ export class AiTaskRunner {
         return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed };
+      propagatedError = error;
       throw error;
     } finally {
       // A late persistent commit can still own the original CAS revision.
@@ -449,7 +484,11 @@ export class AiTaskRunner {
         try {
           await this.callBounded(() => this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
             expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken }), 5000, 'release_run');
-        } catch {
+        } catch (error) {
+          // An acknowledged CAS/access refusal cannot release another holder.
+          // Preserve the original failure; lost/late release replies stay unknown.
+          if (propagatedError && error instanceof Error && 'code' in error
+            && (error.code === 'AI_REVISION_CONFLICT' || error.code === 'AI_ACCESS_DENIED')) throw propagatedError;
           throw new AiTaskRunnerError("AI_RESULT_UNKNOWN", "lease release acknowledgement is uncertain");
         }
       }
@@ -503,32 +542,7 @@ export class AiTaskRunner {
   }
 
   private callBounded<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {
-    const controller = new AbortController();
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const clear = () => {
-        this.clock.clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => {
-        if (settled) return;
-        settled = true; clear(); controller.abort();
-        reject(new AiTaskRunnerError('AI_RESULT_UNKNOWN', `${phase} interrupted`));
-      };
-      const timer = this.clock.setTimeout(() => {
-        if (settled) return;
-        settled = true; clear(); controller.abort();
-        reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
-      }, limitMs);
-      signal?.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) { onAbort(); return; }
-      let pending: Promise<T>;
-      try { pending = operation(controller.signal); }
-      catch (error) { settled = true; clear(); reject(error); return; }
-      pending.then(value => { if (!settled) { settled = true; clear(); resolve(value); } }, error => {
-        if (!settled) { settled = true; clear(); reject(error); }
-      });
-    });
+    return callAiTaskRunnerDependency(operation, limitMs, phase, signal, this.clock);
   }
 
   private async cleanupStep(step: AiTaskRunnerStepPlan, limitMs: number): Promise<boolean> {
