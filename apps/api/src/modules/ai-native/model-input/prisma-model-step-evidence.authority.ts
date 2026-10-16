@@ -7,9 +7,10 @@ import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evid
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelPolicy, type TaskModelPolicy } from './task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
+import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
-  | 'aiTaskExecutionCharge' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
+  | 'aiTaskExecutionCharge' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 
@@ -127,6 +128,12 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
       || requestFingerprint(result.actual) !== invocation.configurationHash
       || (artifact.outcome === 'SUCCEEDED' ? result.status !== 'completed' || result.usage.kind !== 'reported'
         : artifact.outcome !== 'FAILED' || result.status !== 'failed')) throw denied();
+    if (artifact.outcome === 'FAILED') {
+      const unsent = await readModelNonDispatchEvidence(this.modelDb, {
+        scopeId: key.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId }, invocation);
+      if (!unsent) throw unavailable();
+      return { inputRef: saved.id, inputHash, ...unsent };
+    }
     const receipt = await this.modelDb.aiGatewayAccountingReceipt.findFirst({ where: {
       scopeId: key.scopeId, taskId: key.taskId, invocationId: invocation.id } });
     if (!receipt || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId || receipt.invocationId !== invocation.id

@@ -10,6 +10,7 @@ import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-inv
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
   parseTaskModelInput, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
 
@@ -27,7 +28,8 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   private readonly scene: GatewayTextIntentBinding;
   private readonly runtime: PublicGatewayRuntime;
   private readonly priceVersion: string;
-  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'>,
+  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'
+    | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
   private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
@@ -210,7 +212,23 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     if (result.requestId !== input.intent.requestId || requestFingerprint(result.actual) !== requestFingerprint(input.configuration)) throw denied();
     const payload = JSON.parse(JSON.stringify(result));
     if (result.status === 'completed' && result.usage.kind === 'reported') return { kind: 'succeeded' as const, payload };
-    if (result.status === 'failed') return { kind: 'failed' as const, payload, errorCode: 'AI_RESOURCE_UNAVAILABLE' };
+    if (result.status === 'failed') {
+      if (context.scope.kind !== 'workspace') throw denied();
+      const unsent = await readModelNonDispatchEvidence(this.db, {
+        scopeId: task.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+        actorId: narrow.actorId }, invocation);
+      if (taskModelIdentity(await this.execution.authorize(binding.taskId)) !== input.identityHash) throw denied();
+      // Step outcomes use the shared tool-error contract, not an internal
+      // repository error code (which the transition authority must reject).
+      if (unsent) return { kind: 'failed' as const, payload, errorCode: 'AI_PROVIDER_UNAVAILABLE' };
+      // A process-local failed result is not durable proof of no dispatch or
+      // no debit. Preserve the original call for reconciliation, not retries.
+      return { kind: 'unknown' as const, payload: JSON.parse(JSON.stringify({ draftVersion: result.draftVersion,
+        requestId: result.requestId, actual: result.actual, evidence: result.evidence, status: 'unknown',
+        usage: { kind: 'unknown', reason: 'result_unknown', nextAction: 'reconcile' },
+        error: { code: 'AI_RESULT_UNKNOWN', message: 'Original dispatch or accounting outcome requires reconciliation.',
+          retryable: false, nextAction: 'reconcile' } })) };
+    }
     return { kind: 'unknown' as const, payload };
   }
 }

@@ -10,6 +10,7 @@ import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.
 import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult, AiTaskRunnerObservedResult, AiTaskRunnerConfirmationContinuation } from './ai-task-runner.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { isGatewayConfig } from '../gateway-contract-validation';
+import { readModelNonDispatchEvidence } from '../model-input/prisma-model-nondispatch.evidence';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
 type OrderBusiness = ReturnType<typeof composeControlledApprovedOrder>['waiting'];
 export type AiTaskOrderPhaseBusinessEvidence = {
@@ -48,7 +49,7 @@ export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
 }
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
 type Tx = Prisma.TransactionClient;
 const unavailable = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
@@ -533,42 +534,65 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       resultRef: artifact.id, actionId: artifact.actionId, requestFingerprint: artifact.stepFingerprint, status: artifact.outcome } });
     if (!step) throw unavailable();
     let dispatchToken: string | null = null;
+    let nonDispatchProof: string | null = null;
     if (charge.gatewayInvocationId) {
       if (typeof this.financialEvidence?.readDispatch !== 'function') throw unavailable();
       const invocation = await this.db.aiGatewayInvocation.findFirst({ where: { id: charge.gatewayInvocationId, scopeId: access.scopeId,
         taskId: input.taskId, runId: lease.runId, stepId: artifact.stepId, actionId: artifact.actionId, stepFingerprint: artifact.stepFingerprint } });
-      const receipt = await this.db.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: access.scopeId, taskId: input.taskId, invocationId: charge.gatewayInvocationId } });
-      if (!invocation || !receipt) throw unavailable();
-      const admission = await this.db.aiInvocationAdmission.findFirst({ where: { id: receipt.admissionId, tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
-        callId: invocation.callId, actorId: invocation.actorId, requestHash: receipt.requestHash, dispatchId: receipt.dispatchToken, revokedAt: null } });
-      if (!admission || !receipt.dispatchToken || !['dispatching', 'completed', 'unknown'].includes(admission.status)) throw denied();
-      // Consume the same authorized persistent accounting facts as the monetary
-      // budget. Do not create a second ledger or infer dispatch from a local flag.
-      const financial = structuredClone(await this.financialEvidence.readDispatch(receipt.reservationId));
-      if (!isGatewayConfig(invocation.configuration) || receipt.state !== 'dispatched'
-        || receipt.scopeId !== access.scopeId || receipt.taskId !== input.taskId || receipt.invocationId !== invocation.id
-        || invocation.id !== charge.gatewayInvocationId || invocation.scopeId !== access.scopeId
+      if (!invocation || invocation.id !== charge.gatewayInvocationId || invocation.scopeId !== access.scopeId
         || invocation.taskId !== input.taskId || invocation.runId !== lease.runId || invocation.stepId !== artifact.stepId
         || invocation.actionId !== artifact.actionId || invocation.stepFingerprint !== artifact.stepFingerprint
-        || admission.id !== receipt.admissionId || admission.actorId !== invocation.actorId || admission.callId !== invocation.callId
-        || admission.profileId !== invocation.configuration.configId || admission.dispatchId !== receipt.dispatchToken
-        || admission.requestHash !== receipt.requestHash || admission.tenantId !== receipt.tenantId || admission.workspaceId !== receipt.workspaceId
-        || financial.state !== 'dispatched' || financial.dispatchToken !== receipt.dispatchToken
-        || financial.reservationId !== receipt.reservationId || financial.requestId !== invocation.callId
-        || financial.callId !== invocation.callId || financial.actorId !== invocation.actorId
-        || financial.scopeKey !== `WORKSPACE:${access.scopeId}` || financial.runId !== lease.runId
-        || financial.stepId !== artifact.stepId || financial.actionId !== artifact.actionId
-        || financial.sceneCode !== invocation.sceneCode || financial.priceVersion !== invocation.priceVersion
-        || financial.configRevision !== invocation.configuration.configRevision
-        || financial.configurationHash !== invocation.configurationHash
-        || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw denied();
-      dispatchToken = receipt.dispatchToken;
+        || invocation.leaseOwnerId !== artifact.leaseOwnerId || invocation.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)) throw denied();
+      if (artifact.outcome === 'FAILED') {
+        const task = await this.db.aiTask.findFirst({ where: { AND: [access.taskWhere, { scopeId: access.scopeId }] },
+          select: { id: true, scopeId: true, scopeKind: true, ownerKind: true, ownerId: true, audience: true,
+            scope: { select: { kind: true, tenantId: true, workspaceId: true } } } });
+        if (!task || task.id !== input.taskId || task.scopeId !== access.scopeId || task.scopeKind !== 'WORKSPACE'
+          || task.scope.kind !== 'WORKSPACE' || !task.scope.tenantId || !task.scope.workspaceId
+          || task.ownerId !== invocation.actorId || !((task.ownerKind === 'USER' && ['OPERATOR', 'STAFF'].includes(task.audience))
+            || (task.ownerKind === 'CUSTOMER' && task.audience === 'CLIENT'))) throw denied();
+        const unsent = await readModelNonDispatchEvidence(this.db, { scopeId: task.scopeId,
+          tenantId: task.scope.tenantId, workspaceId: task.scope.workspaceId, actorId: task.ownerId }, invocation);
+        if (!unsent) throw unavailable();
+        dispatchToken = unsent.dispatchToken;
+        nonDispatchProof = unsent.proofHash;
+        // Task calls count the original bounded attempt (one), not provider
+        // usage or a monetary debit. Cancellation never grants a fresh call.
+      } else {
+        const receipt = await this.db.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: access.scopeId, taskId: input.taskId, invocationId: charge.gatewayInvocationId } });
+        if (!receipt) throw unavailable();
+        const admission = await this.db.aiInvocationAdmission.findFirst({ where: { id: receipt.admissionId, tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
+          callId: invocation.callId, actorId: invocation.actorId, requestHash: receipt.requestHash, dispatchId: receipt.dispatchToken, revokedAt: null } });
+        if (!admission || !receipt.dispatchToken || !['dispatching', 'completed', 'unknown'].includes(admission.status)) throw denied();
+        // Consume the same authorized persistent accounting facts as the monetary
+        // budget. Do not create a second ledger or infer dispatch from a local flag.
+        const financial = structuredClone(await this.financialEvidence.readDispatch(receipt.reservationId));
+        if (!isGatewayConfig(invocation.configuration) || receipt.state !== 'dispatched'
+          || receipt.scopeId !== access.scopeId || receipt.taskId !== input.taskId || receipt.invocationId !== invocation.id
+          || invocation.id !== charge.gatewayInvocationId || invocation.scopeId !== access.scopeId
+          || invocation.taskId !== input.taskId || invocation.runId !== lease.runId || invocation.stepId !== artifact.stepId
+          || invocation.actionId !== artifact.actionId || invocation.stepFingerprint !== artifact.stepFingerprint
+          || admission.id !== receipt.admissionId || admission.actorId !== invocation.actorId || admission.callId !== invocation.callId
+          || admission.profileId !== invocation.configuration.configId || admission.dispatchId !== receipt.dispatchToken
+          || admission.requestHash !== receipt.requestHash || admission.tenantId !== receipt.tenantId || admission.workspaceId !== receipt.workspaceId
+          || financial.state !== 'dispatched' || financial.dispatchToken !== receipt.dispatchToken
+          || financial.reservationId !== receipt.reservationId || financial.requestId !== invocation.callId
+          || financial.callId !== invocation.callId || financial.actorId !== invocation.actorId
+          || financial.scopeKey !== `WORKSPACE:${access.scopeId}` || financial.runId !== lease.runId
+          || financial.stepId !== artifact.stepId || financial.actionId !== artifact.actionId
+          || financial.sceneCode !== invocation.sceneCode || financial.priceVersion !== invocation.priceVersion
+          || financial.configRevision !== invocation.configuration.configRevision
+          || financial.configurationHash !== invocation.configurationHash
+          || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw denied();
+        dispatchToken = receipt.dispatchToken;
+      }
     } else if (charge.resource === 'CALLS') throw denied();
     const actualAmount = charge.resource === 'ACTIVE_MS' ? artifact.activeMs : charge.resource === 'OUTPUT_BYTES' ? artifact.outputBytes : 1n;
     await this.held(this.db, lease, access);
     return { scopeId: access.scopeId, taskId: input.taskId, runId: lease.runId, chargeId: input.chargeId, requestFingerprint: charge.requestFingerprint,
       resource: charge.resource.toLowerCase() as 'steps' | 'calls' | 'active_ms' | 'output_bytes', actualAmount,
-      evidenceHash: requestFingerprint({ ref: input.evidenceRef, charge: charge.requestFingerprint, contentHash: artifact.contentHash, amount: actualAmount.toString(), dispatchToken }),
+      evidenceHash: requestFingerprint({ ref: input.evidenceRef, charge: charge.requestFingerprint, contentHash: artifact.contentHash, amount: actualAmount.toString(), dispatchToken,
+        ...(nonDispatchProof ? { nonDispatchProof } : {}) }),
       evidenceRef: input.evidenceRef, dispatchToken, gatewayInvocationId: charge.gatewayInvocationId };
   }
 
