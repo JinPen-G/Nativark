@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近完整功能：`d3f6d022`（任务Gateway持久准入审计），此前`8f5e2b6e`、`a7d19811`为任务聚合/当前澄清。当前现场看协作接续，历史结果不相加称最新全量通过。
+> 归纳日期：2026-10-16；最近完整功能：`613fb18d`（订单模型链持久输入证据），此前`d3f6d022`为任务Gateway持久准入审计。当前现场看协作接续，历史结果不相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -159,6 +159,8 @@ HTTP快检沿用本树离线环境、source/private-client resolver与`output/co
 - **8f5e2b6e、a7d19811，AIN-04/06/12：** 标准任务场景聚合及当前澄清读取接回原Controller/Guard/OpenAPI，复用原计划、结果和候选复验；不构造执行宿主、不授新调用/回答提交权。只读仓储不发FOR UPDATE，写入锁不变；新增读取有界。标准订单聚合/撤权/无副作用/不合作身份依赖1/1、显式报价多轮澄清1/1、场景声明1/1，均0 fail/skip/todo、退出0；四次调用沿同一任务资源账，不等于报价或建单成功。API658 roots/0诊断、diff退出0。首轮缺方法TypeError；另有stdin语法、旧分页夹具及误读调用上限的冒烟失败，仅修验证初始化/预期，未改生产权限或额度。命令沿既有双preload、固定无效库和本树`output/core-original-recovery-20261016/`的`node ... -`，类型用`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`。无新增测试脚本、无百分比调整；数据库/Core存储、路由/准入/财务/传输为替身，真实MySQL、费率/计数来源、供应商及标准完整执行仍未验/未接通。
 
 - **d3f6d022，AIN-03/04/05/24：** 原任务Gateway缺省审计改为真实Prisma OperationLog生产者；核对当前主体和原调用/预留/派发关联、幂等写最少ID/hash，缺依赖拒绝，不存正文或令牌，不另建审计/账本。准入不是执行或收费成功；COMMIT应答丢失不重写。定向正常/重放/越权/脱敏1/1、提交应答丢失1/1（日志一次、零发送、原未派发取消），均0 fail/skip/todo、退出0；API659 roots/0诊断、diff退出0。首轮缺省工厂CONFIG_INVALID、1项TS枚举诊断及事务内授权嵌套等待已留证并修复。命令沿既有双preload和本树`output/core-original-recovery-20261016/`的`node ... -`及API源码检查，无新增测试脚本/迁移或百分比调整。DB与路由/准入/财务生命周期/传输为替身，真实MySQL、财务BudgetService整链及供应商未验；标准执行、真实费率/计数仍未接通。
+
+- **613fb18d，AIN-04/06/13：** 订单模型→受权订单读→回答的默认输入源接回原计划/步骤/模型及财务证据，宿主可省inputSource；串绑定、未完成/unknown及快照变化不推进，不创造澄清或批准。显式组合`orderReadChain:{enabled:true,answerRoundTrip:true}`沿原runner，未启生产。既有夹具+stdin冒烟2 pass/0 fail/skip/todo、退出0，含3步/2调用、同任务累计、串run/计划/结果、撤权及缺usage后恢复不重派；API659 roots/0诊断、diff退出0。首次非UUID引用及串行事务替身嵌套等待失败，仅修验证初始化/重入调度。命令为既有双preload的`node ... -`及`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`，沿固定无效库、本树`output/core-original-recovery-20261016/`。无新增脚本/百分比调整；Core返回、DB、路由/准入/财务生命周期/传输为替身，未证明真实BudgetService、MySQL或供应商。真实计价/能力及标准执行依赖仍缺。
 
 ## 更新与自动归档规则
 
