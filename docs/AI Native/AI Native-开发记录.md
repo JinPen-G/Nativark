@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`59407112`、`a975ca0c`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`4bafca5b`、`cf194228`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -26,7 +26,7 @@
 | AIN-08 业务事实 | business-tools 已接目录/可用性/客户/订单/历史/风险，会员与资金改用原有界查询 | 四品类/历史依据真实对照、其他 reader 的底层查询上限/执行计划核实 |
 | AIN-09 Core 报价 | Core 报价、显式选择、原请求 review/confirm/原键保存与核对已有入口 | 四品类/企业资格/时间地点/全部参数的完整正式消费；unknown 不重建报价 |
 | AIN-10 知识/记忆 | 持久仓储、版本/索引/来源 ACL、人类确认及场景输入；2e1be3be 稳定身份，312de861/023bfad3 删除与保留链 | 真实文件/索引/缓存/撤销删除传播、各格式/来源全链验收；当前词法检索不等于向量检索 |
-| AIN-11 设置/预算 | 平台/租户/场景交集、CAS/占用/结算/unknown、单账；699015d5/e7b90356 版本化定价证据；121c7521 接回任务Gateway/原场景和独立原账恢复，修复Decimal整行复制阻断 | 正式真实费率与可信上界/计数生产者、标准应用执行装配、全部场景设置消费者、真库并发/停用与真实成本 |
+| AIN-11 设置/预算 | 平台/租户/场景交集、CAS/占用/结算/unknown、单账及版本化定价证据；任务/原场景/能力验证的原账恢复；计价历史可独立于生产器读回并由显式只读HTTP消费 | 正式真实费率与可信上界/计数生产者、标准应用执行装配、全部场景设置消费者、真库并发/停用与真实成本 |
 | AIN-12 后台任务中心 | 列表/快照/事件水位、原场景聚合；4d326b46 标准应用只读观察，7477af78 当前只读政策入口 | 完整可信执行宿主与浏览器交互；只读装配不等于可执行助手 |
 | AIN-13 订单解释 | 受权订单/支付退款/历史来源与下一步、模型输入/结果/来源重开；c0def985 后台重新授权旧详情，保留 unknown | 真实各订单状态、金额一致性、模型结果/来源 ACL 和完整后台实流验收 |
 | AIN-14 开业诊断 | 分区检查/风险/差异/人工材料、原请求与部分配置消费者已有实现 | 各获准分区正式提案→保存/审核/发布/采用，版本变化与部分失败完整消费 |
@@ -108,7 +108,9 @@
 
 - **cf194228，AIN-05/11：** 能力验证增加原账读取、已证明未发送释放及原usage核对消费者，接回既有请求工厂/Controller/shared/OpenAPI，仍默认关闭。只收原requestKey，复核原材料→task/run/step/call/config/price和当前动作授权，不取当前模型配置、不领取或重发；复用原账本，无usage保持unknown。缺消费者红测退出1；首次实现冒烟暴露Prisma Decimal整行复制错误，已改最少字段查询并复验。一次性只读/缺usage、HTTP过期停用后持久usage恢复/重复不加账/撤权、schema零用量与Guard分别1/1；既有能力单账生命周期定向1/1，0 fail/skip/todo、退出0。API658 roots/0诊断、diff退出0。正常协议产生usage后仅注入旧settle故障，核对仍驱动实际预算服务和仓储；DB/传输为替身。未新增测试文件、未生成shared/Prisma、未变百分比；未验真库、供应商、未派发释放成功及新入口丢应答窗口。
 
-本片命令使用固定离线数据库及本树`output/core-original-recovery-20261016/`审计/TEMP/TMP，公共前缀`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；一次性stdin另加`-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`。能力原账本片既有入口为同两preload加`--test --test-name-pattern "authorized original probe request lifecycle" tests/ai-native-b03-capability-probe-regression.test.cjs`，1/1、退出0。此前模型入口`--test --test-name-pattern "model host recovery reads|model host keeps missing provider usage" tests/ai-native-model-task-host.test.cjs`、分别筛选`"model clarification lost answer acknowledgement"`及`"model host cancellation during dispatch"`，最终均退出0；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`、`git diff --check`退出0。无全仓、shared构建、真实环境或独立审查结论。
+- **4bafca5b，AIN-04/05/11：** 原价格/发布收据/输入上界读回不再要求新证据生产器；接入原预算模块的显式只读HTTP、shared/OpenAPI/Guard，默认关闭，缺生产器仍拒绝发布。原拒绝已复现；撤权误映射为不可用和1处泛型诊断已修复。一次性实际Auth/管理工厂/仓储/Controller组合1/1、0 fail/skip/todo，覆盖停用/过期、三项读取、越主体/撤权、来源缺失、正常发布兼容及原错误提示；API658 roots/0诊断、diff退出0。DB/价格/计数依据为合成替身，不是可信生产来源或真库；未新增测试文件、未改生成物/百分比、未注册AppModule。真实生产者、标准执行装配及完整故障窗仍缺。
+
+本片命令使用固定离线数据库及本树`output/core-original-recovery-20261016/`审计/TEMP/TMP，公共前缀`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；一次性stdin另加`-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`，计价历史本片同样沿用。能力原账此前既有入口为同两preload加`--test --test-name-pattern "authorized original probe request lifecycle" tests/ai-native-b03-capability-probe-regression.test.cjs`，1/1、退出0。此前模型入口`--test --test-name-pattern "model host recovery reads|model host keeps missing provider usage" tests/ai-native-model-task-host.test.cjs`、分别筛选`"model clarification lost answer acknowledgement"`及`"model host cancellation during dispatch"`，最终均退出0；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`、`git diff --check`退出0。无全仓、shared构建、真实环境或独立审查结论。
 
 - **b713f9ef，AIN-04/06：** 接管/原收据读取有界，超时不领取推定租约，迟到前置读取不再写入；已确认且未进入runner的中断按原fence清理。历史收据采用当前结果读权限，关闭新接管仍可核对本人原代次。既有接管恢复6/6、一次性实际Auth/仓储/受控时钟冒烟4/4，API658 roots/0诊断、diff退出0。首轮确认历史读取错误依赖新接管权限；中途显式RepeatableRead触发旧离线夹具只读分支，已保留原写事务隔离、仅增加maxWait/timeout后复验，未放宽鉴权或夹具。真实MySQL/多进程未验。
 
