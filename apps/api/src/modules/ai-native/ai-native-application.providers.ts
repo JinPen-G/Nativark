@@ -83,12 +83,17 @@ export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
     composeRequestBoundOriginalScenes(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
 };
 
-/** Existing current-task policies gate each read. No model route, new-call
- * entitlement, runner driver or pricing producer is constructed for history. */
+/** Existing current-task policies gate each read. Decode only the supported
+ * original order/text result (including its fixed read-tool candidates), never
+ * grant those candidates execution. This schema ceiling is not a model route,
+ * new-call entitlement, runner driver, capability claim or pricing producer.
+ * Results requiring knowledge still fail closed without a current ACL source. */
 export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: originalSceneInjection,
   useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
-    composeRequestBoundOriginalTaskRecoveryReaders(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
+    composeRequestBoundOriginalTaskRecoveryReaders(originalSceneDependencies(...args), { enabled: true, audience: 'operator' }, {
+      policy: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 32768, orderExplainTool: true }
+    })
 };
 
 /** Explicit owner/manager CAS, not a side effect of listing/creating a task.
