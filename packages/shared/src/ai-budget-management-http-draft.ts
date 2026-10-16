@@ -1,12 +1,29 @@
 import type { AiUsageSettingsDraft, AiBudgetLimitDraft } from './ai-usage-draft';
-import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, leafList as list, leafText as text,
+import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, leafList as list, leafText as text, leafTime as time,
   type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 /** Explicit server registration only. These paths are not production switches. */
 export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
-  read: 'read', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save'
+  read: 'read', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
+  priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound'
 });
+export type AiGatewayPriceReadDraft = { configurationHash: string; priceVersion: string };
+export type AiGatewayPricePublicationReadDraft = { reference: string };
+export type AiGatewayInputBoundReadDraft = { callId: string };
+/** Historical evidence only. No credential, current model selection, new
+ * token certification, price publication or execution permission is returned. */
+export type AiGatewayPriceSummaryDraft = {
+  id: string; evidenceHash: string; priceVersion: string; configurationHash: string;
+  validFrom: string; expiresAt: string; executionPermission: false;
+  configurationMeaning: 'historical_reference_not_current_selection';
+} & ({ unit: 'tokens'; scale: 0; currency: null; rounding: 'exact' }
+  | { unit: 'money'; scale: 6; currency: string; rounding: 'ceil_total_micro_units' });
+export type AiGatewayInputBoundSummaryDraft = {
+  id: string; evidenceHash: string; inputFingerprint: string; maxInputTokens: number; maxOutputTokens: number;
+  method: 'provider_count_tokens_receipt' | 'certified_tokenizer_bound'; validFrom: string; expiresAt: string;
+  price: AiGatewayPriceSummaryDraft; executionPermission: false;
+};
 export type AiBudgetSettingsReadDraft = { scope: 'tenant' | 'workspace'; sceneCode: string };
 export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: number;
@@ -40,7 +57,23 @@ const settings = { gates: obj({ platform: ref('AiSettingGateDraft'), tenant: ref
 const modelPolicy = { oneOf: [obj({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI'), selection: choice('managed_by_platform') }),
   obj({ mode: choice('tenant_managed'), allowedModels: list(text(256), 100) })] };
 const admission = choice('not_granted'), none = { type: 'null' };
+const pricingKey = { ...text(191), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
+const pricingHash = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
+const priceSummary = { id: pricingHash, evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 },
+  configurationHash: pricingHash, validFrom: time, expiresAt: time,
+  executionPermission: { type: 'boolean', const: false }, configurationMeaning: choice('historical_reference_not_current_selection') };
 export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiGatewayPriceReadDraft: obj({ configurationHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 } }),
+  AiGatewayPricePublicationReadDraft: obj({ reference: pricingKey }),
+  AiGatewayInputBoundReadDraft: obj({ callId: { ...pricingKey, maxLength: 128 } }),
+  AiGatewayPriceSummaryDraft: { oneOf: [
+    obj({ ...priceSummary, unit: choice('tokens'), scale: int(0, 0), currency: none, rounding: choice('exact') }),
+    obj({ ...priceSummary, unit: choice('money'), scale: int(6, 6), currency: { ...text(3, 3), pattern: '^[A-Z]{3}$' },
+      rounding: choice('ceil_total_micro_units') })] },
+  AiGatewayInputBoundSummaryDraft: obj({ id: pricingHash, evidenceHash: pricingHash, inputFingerprint: pricingHash,
+    maxInputTokens: int(0, Number.MAX_SAFE_INTEGER), maxOutputTokens: int(1, 32768),
+    method: choice('provider_count_tokens_receipt', 'certified_tokenizer_bound'), validFrom: time, expiresAt: time,
+    price: ref('AiGatewayPriceSummaryDraft'), executionPermission: { type: 'boolean', const: false } }),
   AiBudgetSettingsReadDraft: obj(selector),
   AiBudgetSettingsRefreshConfigurationDraft: obj({ ...selector, expectedRevision: int(1, 4294967294),
     confirmCurrentConfiguration: { type: 'boolean', const: true } }),

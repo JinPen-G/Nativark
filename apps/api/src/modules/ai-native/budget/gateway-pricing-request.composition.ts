@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiScopeResolutionError } from '../ai-scope.repository';
 import { BudgetError } from './budget.ports';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { createRecordedPricingGatewayBudget, createRecordedPricingGatewayAccountingRecovery } from './gateway-budget.composition';
-import type { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
+import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
 
 type ServerDependencies = Omit<ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0], 'credentials' | 'taskId'>
   & Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'db' | 'sceneCode'>
@@ -94,12 +96,15 @@ export class GatewayPricingRequestFactory {
           const recovery = createRecordedPricingGatewayAccountingRecovery(accounting);
           result = await recovery[action](command);
         } else {
-          // Missing publication evidence is not replaced by a fake source just
-          // to permit historical reads. All publication/management actions deny.
-          if (!server.pricingEvidence) throw new BudgetError('UNAVAILABLE');
-          const app = createRecordedPricingGatewayBudget({ ...accounting,
-            pricingEvidence: server.pricingEvidence, sceneCode: server.sceneCode });
-          const management = app.pricingRecords;
+          // Reopening immutable history needs current management authority,
+          // not a live producer, current profile or dispatch-capable adapter.
+          const publishing = action === 'publishPrice' || action === 'publishInputBound';
+          if (publishing && !server.pricingEvidence) throw new BudgetError('UNAVAILABLE');
+          const management = publishing && server.pricingEvidence
+            ? createRecordedPricingGatewayBudget({ ...accounting,
+              pricingEvidence: server.pricingEvidence, sceneCode: server.sceneCode }).pricingRecords
+            : new GatewayPricingRecordManagement(server.db, authorization.scopes, authorization,
+              undefined, undefined, server.sceneCode, clock);
           if (action === 'publishPrice') {
             const receipt = await management.publishPrice(command);
             mutationReturned = true;
@@ -129,6 +134,8 @@ export class GatewayPricingRequestFactory {
     } catch (error) {
       if (mutationReturned) throw new BudgetError('PENDING_RECONCILIATION');
       if (error instanceof BudgetError) throw error;
+      if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw denied();
+      if (error instanceof AiScopeResolutionError && ['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(error.code)) throw denied();
       throw new BudgetError('UNAVAILABLE');
     } finally { active = false; }
   }

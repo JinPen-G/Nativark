@@ -1,13 +1,18 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Post, Req, type DynamicModule } from '@nestjs/common';
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS, AI_USAGE_DRAFT_SCHEMAS,
-  type AiBudgetSettingsHttpFailureDraft } from '@rental-os/shared';
+  type AiBudgetSettingsHttpFailureDraft, type AiGatewayPriceSummaryDraft, type AiGatewayInputBoundSummaryDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { BudgetError } from './budget.ports';
 import { composeRequestBoundBudgetManagement, type BudgetManagementDependencies, type BudgetManagementRequest } from './budget-management.application';
+import { GatewayPricingRequestFactory, type GatewayPricingHttpRequest } from './gateway-pricing-request.composition';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 export const AI_BUDGET_MANAGEMENT = Symbol('AI_BUDGET_MANAGEMENT');
+export const AI_GATEWAY_PRICING_HISTORY = Symbol('AI_GATEWAY_PRICING_HISTORY');
 type Application = ReturnType<typeof composeRequestBoundBudgetManagement>;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(ajv);
 const refs = (value: unknown): unknown => Array.isArray(value) ? value.map(refs) : value && typeof value === 'object'
   ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, key === '$ref' && typeof child === 'string'
     ? child.replace(/^#\/components\/schemas\//u, 'urn:rental:budget-management:') : refs(child)])) : value;
@@ -17,6 +22,23 @@ for (const [name, schema] of Object.entries({ ...AI_USAGE_DRAFT_SCHEMAS, ...AI_B
 const tenantSummary = ajv.getSchema('urn:rental:budget-management:AiBudgetSettingsSummaryDraft')!;
 const platformSummary = ajv.getSchema('urn:rental:budget-management:AiPlatformBudgetSettingsSummaryDraft')!;
 const tenantChange = ajv.getSchema('urn:rental:budget-management:AiBudgetSettingsChangeResponseDraft')!;
+async function respondBudgetManagement<T>(work: () => Promise<T>, policyReadback = true) {
+  try { return await work(); }
+  catch (error) {
+    const codes: Record<string, [AiBudgetSettingsHttpFailureDraft['code'], number]> = {
+      INVALID: ['AI_INVALID_INPUT', 400], FORBIDDEN: ['AI_ACCESS_DENIED', 403],
+      REVISION_CONFLICT: ['AI_REVISION_CONFLICT', 409], IDEMPOTENCY_CONFLICT: ['AI_REVISION_CONFLICT', 409],
+      PENDING_RECONCILIATION: ['AI_RESULT_UNKNOWN', 409], AI_ACCESS_DENIED: ['AI_ACCESS_DENIED', 403],
+      AI_SCOPE_CHANGED: ['AI_ACCESS_DENIED', 403], AI_INVALID_INPUT: ['AI_INVALID_INPUT', 400]
+    };
+    const raw = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : '';
+    const [code, status] = Object.prototype.hasOwnProperty.call(codes, raw)
+      ? codes[raw] : ['AI_RESOURCE_UNAVAILABLE', 503] as const;
+    const body: AiBudgetSettingsHttpFailureDraft = { code, retryable: false,
+      ...(code === 'AI_RESULT_UNKNOWN' && policyReadback ? { nextAction: 'read_same_policy' as const } : {}) };
+    throw new HttpException(body, status);
+  }
+}
 @Controller(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath)
 export class AiBudgetManagementController {
   constructor(@Inject(AI_BUDGET_MANAGEMENT) private readonly application: Application) {}
@@ -28,21 +50,7 @@ export class AiBudgetManagementController {
     return structuredClone(value);
   }
   private async respond<T>(work: () => Promise<T>) {
-    try { return await work(); }
-    catch (error) {
-      const codes: Record<string, [AiBudgetSettingsHttpFailureDraft['code'], number]> = {
-        INVALID: ['AI_INVALID_INPUT', 400], FORBIDDEN: ['AI_ACCESS_DENIED', 403],
-        REVISION_CONFLICT: ['AI_REVISION_CONFLICT', 409], IDEMPOTENCY_CONFLICT: ['AI_REVISION_CONFLICT', 409],
-        PENDING_RECONCILIATION: ['AI_RESULT_UNKNOWN', 409], AI_ACCESS_DENIED: ['AI_ACCESS_DENIED', 403],
-        AI_SCOPE_CHANGED: ['AI_ACCESS_DENIED', 403], AI_INVALID_INPUT: ['AI_INVALID_INPUT', 400]
-      };
-      const raw = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : '';
-      const [code, status] = Object.prototype.hasOwnProperty.call(codes, raw)
-        ? codes[raw] : ['AI_RESOURCE_UNAVAILABLE', 503] as const;
-      const body: AiBudgetSettingsHttpFailureDraft = { code, retryable: false,
-        ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: 'read_same_policy' as const } : {}) };
-      throw new HttpException(body, status);
-    }
+    return respondBudgetManagement(work);
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
@@ -70,10 +78,52 @@ export class AiBudgetManagementController {
   }
 }
 
+/** Separate read-only host: no publishing methods, producer, budget admission
+ * or model driver. The global Guard and factory both enforce current authority. */
+@Controller(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath)
+export class AiGatewayPricingHistoryController {
+  constructor(@Inject(AI_GATEWAY_PRICING_HISTORY) private readonly application: GatewayPricingRequestFactory) {}
+  private read<T>(request: GatewayPricingHttpRequest, body: unknown, action: 'readPrice' | 'readPublication' | 'readInputBound',
+    inputSchema: string, outputSchema: string): Promise<T> {
+    return respondBudgetManagement<T>(async () => {
+      const validateInput = ajv.getSchema(`urn:rental:budget-management:${inputSchema}`);
+      const validateOutput = ajv.getSchema<T>(`urn:rental:budget-management:${outputSchema}`);
+      if (!validateInput || !validateInput(body)) throw new BudgetError('INVALID');
+      const command = structuredClone(body);
+      const result = await waitForTaskApplicationDependency(() => this.application.call(request, action, command), false);
+      if (!validateOutput || !validateOutput(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 65536)
+        throw new BudgetError('UNAVAILABLE');
+      return structuredClone(result as T); // Closed shared schema checked above.
+    }, false);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.priceRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPrice(@Req() request: GatewayPricingHttpRequest, @Body() body: unknown) {
+    return this.read<AiGatewayPriceSummaryDraft>(request, body, 'readPrice', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft');
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.pricePublicationRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPublication(@Req() request: GatewayPricingHttpRequest, @Body() body: unknown) {
+    return this.read<AiGatewayPriceSummaryDraft>(request, body, 'readPublication', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft');
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readInputBound(@Req() request: GatewayPricingHttpRequest, @Body() body: unknown) {
+    return this.read<AiGatewayInputBoundSummaryDraft>(request, body, 'readInputBound', 'AiGatewayInputBoundReadDraft', 'AiGatewayInputBoundSummaryDraft');
+  }
+}
+
 /** No AppModule registration. Disabled registration contributes no routes,
  * providers, identity reads, timers or financial calls. */
 @Module({})
 export class AiBudgetManagementModule {
+  /** Opt-in observations only; may be assembled without a publication source.
+   * Does not mount settings writes or enable anything in the production root. */
+  static registerHttpPricingHistory(dependencies?: Omit<ConstructorParameters<typeof GatewayPricingRequestFactory>[0], 'pricingEvidence'>,
+    options: { enabled: boolean } = { enabled: false }): DynamicModule {
+    if (options.enabled !== true) return { module: AiBudgetManagementModule, controllers: [], providers: [] };
+    if (!dependencies || 'pricingEvidence' in dependencies) throw new BudgetError('UNAVAILABLE');
+    return { module: AiBudgetManagementModule, controllers: [AiGatewayPricingHistoryController], providers: [{
+      provide: AI_GATEWAY_PRICING_HISTORY, useValue: new GatewayPricingRequestFactory(dependencies)
+    }], exports: [AI_GATEWAY_PRICING_HISTORY] };
+  }
   static registerHttp(dependencies: BudgetManagementDependencies, options: { enabled: boolean } = { enabled: false }): DynamicModule {
     if (options.enabled !== true) return { module: AiBudgetManagementModule };
     const application = composeRequestBoundBudgetManagement(dependencies, { enabled: true });

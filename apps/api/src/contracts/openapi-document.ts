@@ -4,6 +4,7 @@ import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2034,6 +2035,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...([
+    ['priceRead', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft'],
+    ['pricePublicationRead', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft'],
+    ['inputBoundRead', 'AiGatewayInputBoundReadDraft', 'AiGatewayInputBoundSummaryDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `readHistoricalGatewayPricing_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], requestSchema, responseSchema,
+    summary: 'Read owned persisted pricing evidence under current management authority. Producer/profile availability is not a history gate. No publication, certification, reserve or dispatch. Explicit read-only module opt-in only.' })),
   ...(['readAccounting', 'releaseUnsent', 'reconcileAccounting'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TEXT_CAPABILITY_HTTP_DRAFT.basePath}/${AI_TEXT_CAPABILITY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalProbeAccounting_${action}`, authRequired: true,
