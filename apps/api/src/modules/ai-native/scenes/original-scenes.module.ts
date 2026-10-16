@@ -95,7 +95,8 @@ export class AiOriginalScenesModule {
     const model = this.registerHttpPersistedModel(dependencies, options);
     const human = AiHumanQuoteSelectionModule.registerHttpTask(business.dependencies,
       { enabled: options.enabled, audience: options.audience }, business.task, business.reprepare);
-    const serverDependencies = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const serverDependencies = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const serverOptions = { ...options, host: structuredClone(options.host) }, serverBusiness = { ...business.dependencies };
     return { ...model, imports: [...(model.imports ?? []), human],
       providers: [...(model.providers ?? []), { provide: AI_CLARIFIED_QUOTE_SELECTION_REQUESTS,
@@ -115,7 +116,8 @@ export class AiOriginalScenesModule {
     }): DynamicModule {
     if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const registered = this.registerPersistedRequestModel(dependencies, options);
-    const server = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const server = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const selected = { ...options, host: structuredClone(options.host) };
     return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS, useFactory: () => {
       const app = composeRequestBoundPersistedOriginalSceneModel(server, selected);
@@ -179,7 +181,8 @@ export class AiOriginalScenesModule {
    * full task-center controller, which also requires business-only readers. */
   static registerPersistedRequestModel(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
     options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]): DynamicModule {
-    const server = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const server = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const selected = { ...options, host: structuredClone(options.host) };
     return { module: AiOriginalScenesModule,
       providers: [{ provide: AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,

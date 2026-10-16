@@ -94,10 +94,12 @@ export class InspectionRecognitionTaskApplication {
         policy: { kind: 'audio', sceneCode: dependencies.audioModel.gatewayScene.sceneCode,
           maxOutputTokens: dependencies.audioModel.gatewayScene.maxOutputTokens } } : undefined },
       model: { ...dependencies.model, host: structuredClone(dependencies.model.host),
-        ...('gateway' in dependencies.model ? { gateway: { ...dependencies.model.gateway, adapters: [...dependencies.model.gateway.adapters] } } : {}),
+        ...('gateway' in dependencies.model ? { gateway: { ...dependencies.model.gateway,
+          ...(dependencies.model.gateway.adapters === undefined ? {} : { adapters: [...dependencies.model.gateway.adapters] }) } } : {}),
         scene: structuredClone(dependencies.model.scene), gatewayScene: structuredClone(dependencies.model.gatewayScene) },
       ...(dependencies.audioModel ? { audioModel: { ...dependencies.audioModel,
-        ...('gateway' in dependencies.audioModel ? { gateway: { ...dependencies.audioModel.gateway, adapters: [...dependencies.audioModel.gateway.adapters] } } : {}),
+        ...('gateway' in dependencies.audioModel ? { gateway: { ...dependencies.audioModel.gateway,
+          ...(dependencies.audioModel.gateway.adapters === undefined ? {} : { adapters: [...dependencies.audioModel.gateway.adapters] }) } } : {}),
         host: structuredClone(dependencies.audioModel.host), scene: structuredClone(dependencies.audioModel.scene),
         gatewayScene: structuredClone(dependencies.audioModel.gatewayScene) } } : {}), limits };
   }

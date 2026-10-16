@@ -926,9 +926,9 @@ export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
     gateway: Pick<PersistedTaskCallGatewayDependencies,
-      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'audit'>
+      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit'>
       | Pick<PersistedTaskGatewayDependencies,
-        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'audit'>;
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit'>;
   };
 
 /** Formal original-reference model actions. Resolve the current original task
@@ -963,7 +963,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
   const accounting = composeRequestBoundOriginalTaskAccounting(sceneDependencies, requestOptions);
   if ('pricing' in gateway && 'callPriceVersion' in gateway) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]),
+  const serverGateway = Object.freeze({ ...gateway,
+    ...(gateway.adapters === undefined ? {} : { adapters: Object.freeze([...gateway.adapters]) }),
     ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)) } : {}) });
   const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;

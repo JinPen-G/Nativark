@@ -27,6 +27,9 @@ import { composeTaskModelHost, type TaskModelHostDependencies } from './runner/m
 import type { GatewayMediaAttachmentResolver } from './gateway-intent';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
+import { ChatCompletionsAdapter } from './chat-completions.adapter';
+import { createNativeModelEgressTransport } from './model-egress.transport';
+import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -36,7 +39,11 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   platformProfileId: string;
   routeScene: AiRouteScene;
   callPriceVersion: string;
-  adapters: readonly ModelAdapter[];
+  adapters?: readonly ModelAdapter[];
+  /** Explicit server selection of the existing bounded transport, instead of
+   * injected adapters. Neither omission nor an empty array enables transport.
+   * This is protocol support only, never a live provider/capability grant. */
+  nativeProtocol?: 'openai_chat_completions';
   /** Optional explicit audit sink. Otherwise use the existing durable OperationLog. */
   audit?: UnifiedGatewayAudit;
   /** Server-created original attachment ACL/ObjectReader adapter, not request
@@ -111,7 +118,9 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
     || !['chat', 'builder', 'vision', 'knowledge', 'reasoning'].includes(input.routeScene)
     || 'callPriceVersion' in input
-    || !Array.isArray(input.adapters) || !input.adapters.length
+    || input.nativeProtocol !== undefined && input.nativeProtocol !== 'openai_chat_completions'
+    || input.nativeProtocol !== undefined && input.adapters !== undefined
+    || input.nativeProtocol === undefined && (!Array.isArray(input.adapters) || !input.adapters.length)
     || input.audit !== undefined && typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const selection = checkedPricing(input.pricing);
   // Recorded evidence currently attests plain-text input/output tokens only.
@@ -119,7 +128,12 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   if (selection.kind === 'recorded' && (input.media || input.routeScene === 'vision')) throw new ModelGatewayError('CONFIG_INVALID');
   const { db, auth, credentials, subscriptions, guard, secrets, taskId, platformProfileId,
     routeScene, audit } = input;
-  const clock = input.clock ?? (() => new Date()), adapters = [...input.adapters];
+  const clock = input.clock ?? (() => new Date());
+  const adapters = input.nativeProtocol === 'openai_chat_completions'
+    ? [new ChatCompletionsAdapter(createNativeModelEgressTransport(), {
+      orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION },
+      ...(input.media ? { mediaInput: ['image', 'audio'] as const } : {})
+    })] : [...input.adapters!];
   const dependencies = { db, auth, credentials, subscriptions, clock };
   const authorization = composePersistedTaskAuthorization(dependencies);
   const invocation = { resolve: () => authorization.execution.authorize(taskId) };
@@ -175,6 +189,13 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
       transport: new RoutedModelTransport({ platform, tenant }, adapters), ...(media ? { media } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
+      // Remote evidence cannot make an absent local protocol feature work.
+      // Refuse before publication/claim/reservation, not after marking dispatch.
+      const adapter = adapters.find(value => value.provider === resolution.route.profile.protocol);
+      const features = { streaming: 'streaming', tools: 'tools', structured_output: 'structuredOutput',
+        vision: 'image', audio: 'audio' } as const;
+      if (!adapter || resolution.requiredCapabilities.some(capability => capability !== 'text'
+        && (!(capability in features) || !adapter.features.includes(features[capability as keyof typeof features])))) return false;
       const { actorKind: _, ...context } = gatewayBudgetPrincipal(resolution.context);
       await routing.assertCurrent(context, resolution);
       return (await capabilities.preflight(resolution.route.profile, resolution.requiredCapabilities)).allowed;

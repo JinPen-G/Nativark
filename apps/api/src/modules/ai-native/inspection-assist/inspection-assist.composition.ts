@@ -190,7 +190,8 @@ export class StaffInspectionRequestFactory {
       recognitionPersistedTaskHost: async (reference: unknown, dependencies: Omit<PersistedInspectionTaskHostDependencies, 'credentials'>) => {
         dependencies = { ...dependencies, task: structuredClone(dependencies.task), scene: structuredClone(dependencies.scene),
           gatewayScene: structuredClone(dependencies.gatewayScene), host: structuredClone(dependencies.host),
-          gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+          gateway: { ...dependencies.gateway,
+            ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
         if (!services.recognition || authorization === undefined || dependencies.db !== this.dependencies.db
           || dependencies.guard !== this.dependencies.guard || dependencies.gateway.routeScene !== 'vision'
           || dependencies.gatewayScene.routeScene !== 'vision' || 'runtime' in dependencies || 'credentials' in dependencies
