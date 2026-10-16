@@ -30,8 +30,10 @@ import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
-import { composePersistedTaskCallGateway, composePersistedTaskGateway,
+import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePersistedTaskAccountingRecovery,
   type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
+import { BudgetError } from '../budget/budget.ports';
+import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection } from '../task-request/quote-selection.validation';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
@@ -819,6 +821,84 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
   });
 }
 
+/** Server-only original-operation consumer, not a new HTTP/Agent tool. Resolve
+ * pricing from the owned persisted call, never the current model selection.
+ * Accounting may close an old balance but cannot start/resume a run or dispatch.
+ * Unknown dispatch/usage remains with the same ledger's evidence checks. */
+export function composeRequestBoundOriginalTaskAccounting(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  const schema = z.object({ original: originalRequestReferenceSchema,
+    callId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u) }).strict();
+  const call = bindRequests(dependencies, options, input => input);
+  const use = (request: AiSceneHttpRequest, value: unknown, operation: 'read' | 'releaseUnsent' | 'reconcile') => {
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, raw) => {
+      const command = schema.parse(raw), scenes = composeAiOriginalScenes(input);
+      const original = await scenes.requests.readHistorical(command.original);
+      const task = await scenes.readTaskReceipt(command.original.inputRef);
+      if (original.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const authorization = composePersistedTaskAuthorization(input);
+      const current = await authorization.authority.resolve(task.taskId, 'read_step_terminal');
+      const scope = await authorization.scopes.resolveCurrent();
+      if (scope.scope.kind !== 'WORKSPACE' || current.actor.kind !== 'user'
+        || originalIdentityHash(current) !== originalIdentityHash(original.context)
+        || originalIdentityHash(scope.context) !== originalIdentityHash(current)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const invocation = await input.db.aiGatewayInvocation.findUnique({ where: {
+        scopeId_callId: { scopeId: scope.scope.id, callId: command.callId } },
+        select: { id: true, scopeId: true, taskId: true, actorId: true, callId: true, priceVersion: true } });
+      if (!invocation || invocation.scopeId !== scope.scope.id || invocation.taskId !== task.taskId
+        || invocation.actorId !== current.actor.userId || invocation.callId !== command.callId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const reservation = await input.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: scope.scope.id, scopeKind: 'WORKSPACE', callId: command.callId } },
+        select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true,
+          callId: true, priceVersion: true, unitKind: true } });
+      // No replacement reserve when an acknowledgement or link is missing.
+      if (!reservation) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      if (reservation.scopeId !== scope.scope.id || reservation.scopeKind !== 'WORKSPACE'
+        || reservation.tenantId !== scope.scope.tenantId || reservation.workspaceId !== scope.scope.workspaceId
+        || reservation.actorId !== current.actor.userId || reservation.callId !== invocation.callId
+        || reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const verify = async () => {
+        const latest = await scenes.requests.readHistorical(command.original);
+        const latestTask = await scenes.readTaskReceipt(command.original.inputRef);
+        const authority = await authorization.authority.resolve(task.taskId, 'read_step_terminal');
+        if (latest.receipt.state === 'revoked' || latest.receipt.contentHash !== original.receipt.contentHash
+          || originalIdentityHash(latest.context) !== originalIdentityHash(original.context)
+          || originalIdentityHash(authority) !== originalIdentityHash(current)
+          || latestTask.state !== 'observed' || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      };
+      let returnedMutation = false;
+      try {
+        await verify();
+        const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
+          credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard,
+          taskId: task.taskId, clock: input.clock, pricing: {
+            kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+        const record = operation === 'read' ? await recovery.readCall({ callId: invocation.callId })
+          : await recovery[operation]({ reservationId: reservation.id });
+        returnedMutation = operation !== 'read';
+        await verify();
+        if (record.id !== reservation.id || record.callId !== invocation.callId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        return freezeOriginalInput({ original: command.original, record, execution: 'not_invoked' as const,
+          accounting: operation === 'read' ? 'observed' as const : 'original_operation_only' as const,
+          automaticRetry: false as const });
+      } catch (error) {
+        if (returnedMutation || error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION')
+          throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        if (error instanceof BudgetError) throw new AiTaskRepositoryError(error.code === 'FORBIDDEN'
+          ? 'AI_ACCESS_DENIED' : error.code === 'INVALID' ? 'AI_INVALID_INPUT' : 'AI_RESOURCE_UNAVAILABLE');
+        throw error;
+      }
+    });
+  };
+  return Object.freeze({ read: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'read'),
+    releaseUnsent: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'releaseUnsent'),
+    reconcile: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'reconcile') });
+}
+
 export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
@@ -858,6 +938,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   const { gateway, ...sceneDependencies } = dependencies;
   const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions,
     { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
+  const accounting = composeRequestBoundOriginalTaskAccounting(sceneDependencies, requestOptions);
   if ('pricing' in gateway && 'callPriceVersion' in gateway) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]),
     ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)) } : {}) });
@@ -917,6 +998,9 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
   });
   return Object.freeze({
+    readOriginalAccounting: accounting.read,
+    releaseOriginalUnsentAccounting: accounting.releaseUnsent,
+    reconcileOriginalAccounting: accounting.reconcile,
     readTaskPage: recoveryReaders.readTaskPage,
     readTaskEvents: recoveryReaders.readTaskEvents,
     readTaskReconnect: recoveryReaders.readTaskReconnect,
