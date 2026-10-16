@@ -4,8 +4,8 @@ import type { AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaBudgetRepository } from './prisma-budget.repository';
-import { BudgetError } from './budget.ports';
-import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft } from '@rental-os/shared';
+import { BudgetError, type BudgetRecord } from './budget.ports';
+import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
@@ -15,10 +15,12 @@ const refs = (value: unknown): unknown => Array.isArray(value) ? value.map(refs)
   ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, key === '$ref' && typeof child === 'string'
     ? child.replace(/^#\/components\/schemas\//u, 'urn:rental:task-usage:') : refs(child)])) : value;
 for (const [name, schema] of Object.entries({ ...AI_USAGE_DRAFT_SCHEMAS,
+  AiTaskBudgetUsageRecordDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsageRecordDraft,
   AiTaskBudgetUsagePageDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsagePageDraft })) {
   ajv.addSchema(refs(schema) as object, `urn:rental:task-usage:${name}`);
 }
 const checkedPage = ajv.getSchema<AiTaskBudgetUsagePageDraft>('urn:rental:task-usage:AiTaskBudgetUsagePageDraft')!;
+const checkedRecord = ajv.getSchema<AiTaskBudgetUsageRecordDraft>('urn:rental:task-usage:AiTaskBudgetUsageRecordDraft')!;
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const callId = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -29,6 +31,24 @@ const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
   return requestFingerprint(value);
 };
+
+/** Safe shared projection of an already-authorized original record. Never
+ * return the raw association, credential reference, hashes or dispatch token. */
+export function presentTaskBudgetUsageRecord(invocation: Readonly<{ id: string; callId: string }>,
+  record: Readonly<BudgetRecord>): AiTaskBudgetUsageRecordDraft {
+  if (record.callId !== invocation.callId || !(record.storageVersion instanceof Date)
+    || !Number.isFinite(record.storageVersion.getTime()) || record.status === 'settled' && record.actual === null)
+    throw new BudgetError('UNAVAILABLE');
+  const projected = { invocationId: invocation.id, callId: record.callId, reservationId: record.id, accounting: 'recorded' as const,
+    sceneCode: record.sceneCode, runId: record.association.runId, stepId: record.association.stepId,
+    revision: record.revision, observedVersionAt: record.storageVersion.toISOString(), status: record.status,
+    reserved: structuredClone(record.reserved), actual: structuredClone(record.actual), budgetDispatchMarked: record.dispatched,
+    modelPolicy: record.association.config.serviceMode === 'platform_managed'
+      ? { mode: 'platform_managed' as const, serviceName: 'Rental OS AI' as const }
+      : { mode: 'tenant_managed' as const, model: record.association.config.model } };
+  if (!checkedRecord(projected)) throw new BudgetError('UNAVAILABLE');
+  return projected;
+}
 
 /** Owner-scoped original financial observations, not admission, a provider
  * request or business outcome. Current read_step_terminal remains required;
@@ -90,13 +110,7 @@ export class TaskBudgetUsageReader {
       if (!record || record.actorId !== before.actorId || record.scopeId !== before.scopeId
         || record.callId !== row.callId || (record.status === 'settled' && record.actual === null)) throw new BudgetError('UNAVAILABLE');
       observations.push({ record, fingerprint: requestFingerprint(record) });
-      items.push({ invocationId: row.id, callId: row.callId, reservationId: record.id, accounting: 'recorded' as const,
-        sceneCode: record.sceneCode, runId: record.association.runId, stepId: record.association.stepId,
-        revision: record.revision, observedVersionAt: record.storageVersion.toISOString(), status: record.status,
-        reserved: structuredClone(record.reserved), actual: structuredClone(record.actual), budgetDispatchMarked: record.dispatched,
-        modelPolicy: record.association.config.serviceMode === 'platform_managed'
-          ? { mode: 'platform_managed' as const, serviceName: 'Rental OS AI' as const }
-          : { mode: 'tenant_managed' as const, model: record.association.config.model } });
+      items.push(presentTaskBudgetUsageRecord(row, record));
     }
     // Fresh original record observations; neither expiry nor a changed model
     // config authorizes release, settlement, retry or a replacement call.

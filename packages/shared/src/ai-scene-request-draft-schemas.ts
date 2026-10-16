@@ -25,6 +25,12 @@ const observedTask = object({ state: choice('observed'), taskId: uuid, runId: uu
   revision: integer(1, 4294967294), plan: choice('stored', 'not_observed'), resultAvailable: { type: 'boolean' }, execution: choice('not_inferred_from_metadata') });
 const recoveryStep = object({ stepId: id(), runId: id(), actionId: id(), revision: integer(1, 4294967294), status: choice(...AI_STEP_STATUSES_DRAFT),
   effect: choice('none', 'possible', 'committed'), resultAvailable: { type: 'boolean' }, nextAction: choice('reconcile_original_action', 'read_authorized_result', 'runner_owned') });
+const recordedUsage = object({ invocationId: text(36), callId: text(128), accounting: choice('recorded'), reservationId: text(36), sceneCode: text(128),
+  runId: text(36), stepId: text(36), revision: integer(1, 4294967295), observedVersionAt: leafTime,
+  status: choice('reserved', 'settled', 'released', 'pending_reconciliation'), reserved: { $ref: '#/components/schemas/AiUsageQuantityDraft' },
+  actual: { oneOf: [{ $ref: '#/components/schemas/AiUsageQuantityDraft' }, { type: 'null' }] }, budgetDispatchMarked: { type: 'boolean' },
+  modelPolicy: { oneOf: [object({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI') }),
+    object({ mode: choice('tenant_managed'), model: text(256) })] } });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiOpeningReadFactsDraft: object({ requestId: id(), scope: object({ kind: choice('workspace'), tenantId: id(), workspaceId: id() }),
     observedAt: leafTime, ready: { type: 'boolean' }, readinessBasis: choice('core_workspace_aggregate'),
@@ -63,14 +69,16 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
   AiSceneOrderReadTakeoverDraft: object({ original: originalReference, expectedTaskRevision: integer(1, 4294967294),
     expectedRunRevision: integer(1, 4294967294), expectedFencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }),
   AiSceneTaskUsageReadDraft: object({ original: originalReference, taskId: text(36), limit: integer(1, 20), after: text(36) }, ['original', 'limit']),
+  AiTaskBudgetUsageRecordDraft: recordedUsage,
+  AiOriginalTaskAccountingRequestDraft: object({ original: originalReference,
+    callId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' } }),
+  AiOriginalTaskAccountingResponseDraft: object({ draftVersion: base.draftVersion, original: originalReference,
+    taskId: text(36), record: recordedUsage, accounting: choice('observed', 'original_operation_only'),
+    execution: choice('not_invoked'), automaticRetry: { type: 'boolean', const: false },
+    businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') }),
   AiTaskBudgetUsagePageDraft: object({ taskId: text(36), items: list({ oneOf: [
     object({ invocationId: text(36), callId: text(128), accounting: choice('not_recorded') }),
-    object({ invocationId: text(36), callId: text(128), accounting: choice('recorded'), reservationId: text(36), sceneCode: text(128),
-      runId: text(36), stepId: text(36), revision: integer(1, 4294967295), observedVersionAt: leafTime,
-      status: choice('reserved', 'settled', 'released', 'pending_reconciliation'), reserved: { $ref: '#/components/schemas/AiUsageQuantityDraft' },
-      actual: { oneOf: [{ $ref: '#/components/schemas/AiUsageQuantityDraft' }, { type: 'null' }] }, budgetDispatchMarked: { type: 'boolean' },
-      modelPolicy: { oneOf: [object({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI') }),
-        object({ mode: choice('tenant_managed'), model: text(256) })] } })] }, 20), nextAfter: { oneOf: [text(36), { type: 'null' }] },
+    recordedUsage] }, 20), nextAfter: { oneOf: [text(36), { type: 'null' }] },
     observedAt: leafTime, coverage: choice('page_not_total'), totals: choice('not_computed'),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
     businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') }),

@@ -33,6 +33,7 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePersistedTaskAccountingRecovery,
   type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
 import { BudgetError } from '../budget/budget.ports';
+import { presentTaskBudgetUsageRecord } from '../budget/task-budget-usage.reader';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection } from '../task-request/quote-selection.validation';
@@ -43,7 +44,7 @@ import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { AI_TASK_RECOVERY_READ_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION,
-  isAiTaskInputSubmissionDraft, type AiSceneModelRecoverySnapshotReadResponse } from '@rental-os/shared';
+  isAiTaskInputSubmissionDraft, type AiSceneModelRecoverySnapshotReadResponse, type AiOriginalTaskAccountingResponseDraft } from '@rental-os/shared';
 import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
@@ -821,7 +822,8 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
   });
 }
 
-/** Server-only original-operation consumer, not a new HTTP/Agent tool. Resolve
+/** Original-operation consumer; transport accepts only original ref + callId,
+ * never a model-selected tool, actor, reservation or execution grant. Resolve
  * pricing from the owned persisted call, never the current model selection.
  * Accounting may close an old balance but cannot start/resume a run or dispatch.
  * Unknown dispatch/usage remains with the same ledger's evidence checks. */
@@ -830,7 +832,8 @@ export function composeRequestBoundOriginalTaskAccounting(
   const schema = z.object({ original: originalRequestReferenceSchema,
     callId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u) }).strict();
   const call = bindRequests(dependencies, options, input => input);
-  const use = (request: AiSceneHttpRequest, value: unknown, operation: 'read' | 'releaseUnsent' | 'reconcile') => {
+  const use = (request: AiSceneHttpRequest, value: unknown, operation: 'read' | 'releaseUnsent' | 'reconcile',
+    signal?: AbortSignal): Promise<AiOriginalTaskAccountingResponseDraft> => {
     const parsed = schema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return call(request, parsed.data, async (input, raw) => {
@@ -873,6 +876,7 @@ export function composeRequestBoundOriginalTaskAccounting(
       let returnedMutation = false;
       try {
         await verify();
+        if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
         const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
           credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard,
           taskId: task.taskId, clock: input.clock, pricing: {
@@ -882,9 +886,10 @@ export function composeRequestBoundOriginalTaskAccounting(
         returnedMutation = operation !== 'read';
         await verify();
         if (record.id !== reservation.id || record.callId !== invocation.callId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-        return freezeOriginalInput({ original: command.original, record, execution: 'not_invoked' as const,
+        return freezeOriginalInput({ draftVersion: command.original.draftVersion, original: command.original,
+          taskId: task.taskId, record: presentTaskBudgetUsageRecord(invocation, record), execution: 'not_invoked' as const,
           accounting: operation === 'read' ? 'observed' as const : 'original_operation_only' as const,
-          automaticRetry: false as const });
+          automaticRetry: false as const, businessExecution: 'not_inferred_from_usage' as const, admission: 'not_granted' as const });
       } catch (error) {
         if (returnedMutation || error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION')
           throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
@@ -894,9 +899,9 @@ export function composeRequestBoundOriginalTaskAccounting(
       }
     });
   };
-  return Object.freeze({ read: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'read'),
-    releaseUnsent: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'releaseUnsent'),
-    reconcile: (request: AiSceneHttpRequest, value: unknown) => use(request, value, 'reconcile') });
+  return Object.freeze({ read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'read', signal),
+    releaseUnsent: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'releaseUnsent', signal),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'reconcile', signal) });
 }
 
 export type RequestBoundPersistedOriginalSceneModelDependencies =

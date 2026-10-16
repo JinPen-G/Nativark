@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOriginalOrderReadHttpModule } from './original-order-read-http.module';
+import { AiOriginalTaskAccountingHttpModule } from './original-task-accounting-http.module';
 import { AiSettingsTaskHttpModule } from './settings-task-http.module';
 import { AiHumanQuoteSelectionModule } from '../task-request/human-quote-selection.module';
 import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
@@ -35,6 +36,10 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Mount separately from model execution. No production/root activation. */
+  static registerHttpAccounting(dependencies?: RequestBoundOriginalSceneDependencies, options?: AiSceneRequestOptions): DynamicModule {
+    return AiOriginalTaskAccountingHttpModule.register(dependencies, options);
+  }
   /** Explicit transport for the same original read host. The host must not
    * also register a model driver for these runs; no root activation here. */
   static registerHttpOpeningReadTask(

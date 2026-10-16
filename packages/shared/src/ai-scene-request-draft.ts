@@ -45,14 +45,30 @@ export interface AiSceneOpeningModelSourceReadDraft {
 export interface AiSceneTaskUsageReadDraft {
   original: AiSceneRequestReadDraft; taskId?: string; limit: number; after?: string;
 }
+/** Current authorized observation of one original invocation, not a new call,
+ * arbitrary reservation selector or an assertion of zero consumption. */
+export interface AiOriginalTaskAccountingRequestDraft {
+  original: AiSceneRequestReadDraft;
+  callId: string;
+}
+export interface AiTaskBudgetUsageRecordDraft {
+  invocationId: string; callId: string; accounting: 'recorded'; reservationId: string;
+  sceneCode: string; runId: string; stepId: string; revision: number; observedVersionAt: string;
+  status: Exclude<AiUsageRecordDraft['status'], 'estimated'>;
+  reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null; budgetDispatchMarked: boolean;
+  modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI' } | { mode: 'tenant_managed'; model: string };
+}
+export interface AiOriginalTaskAccountingResponseDraft {
+  draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
+  original: AiSceneRequestReadDraft; taskId: string; record: AiTaskBudgetUsageRecordDraft;
+  accounting: 'observed' | 'original_operation_only'; execution: 'not_invoked'; automaticRetry: false;
+  businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
+}
 export interface AiTaskBudgetUsagePageDraft {
   taskId: string;
   items: Array<{ invocationId: string; callId: string } & (
     | { accounting: 'not_recorded' }
-    | { accounting: 'recorded'; reservationId: string; sceneCode: string; runId: string; stepId: string;
-        revision: number; observedVersionAt: string; status: Exclude<AiUsageRecordDraft['status'], 'estimated'>;
-        reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null; budgetDispatchMarked: boolean;
-        modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI' } | { mode: 'tenant_managed'; model: string } }
+    | AiTaskBudgetUsageRecordDraft
   )>;
   nextAfter: string | null; observedAt: string; coverage: 'page_not_total'; totals: 'not_computed';
   consistency: 'revalidated_reads_not_atomic_snapshot'; absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
@@ -197,6 +213,13 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   readOriginalSettingsCancellationSettlement: 'settings/original/cancel/settlement-receipt',
   decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
+} as const);
+
+/** Separate opt-in accounting host. No model/runner routes are registered,
+ * and no transport action may select a tenant, actor or current model price. */
+export const AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/accounting`, method: 'POST',
+  read: 'read', releaseUnsent: 'release-unsent', reconcile: 'reconcile'
 } as const);
 
 /** Explicit original opening READ host, not model execution or production

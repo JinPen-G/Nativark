@@ -2,6 +2,7 @@ import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2032,6 +2033,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...(['read', 'releaseUnsent', 'reconcile'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
+    permissions: ['rental-os:order:view'], requestSchema: 'AiOriginalTaskAccountingRequestDraft',
+    responseSchema: 'AiOriginalTaskAccountingResponseDraft',
+    summary: 'Explicit opt-in host only. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the original read, never retry dispatch.' })),
   ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,

@@ -7,6 +7,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -188,7 +189,15 @@ const originalTaskObservationRoutes = new Set([
   AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource,
 ].map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
 
+// Original AI budget bookkeeping only. The application still verifies the
+// original resource, current task action and persisted dispatch/usage evidence.
+const originalTaskAccountingRoutes = new Set([
+  AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.read, AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.releaseUnsent,
+  AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.reconcile
+].map(action => `POST /${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${action}`));
+
 export function requiredPermissions(method: string, path: string) {
+  if (originalTaskAccountingRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (originalOrderReadRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (originalTaskObservationRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
