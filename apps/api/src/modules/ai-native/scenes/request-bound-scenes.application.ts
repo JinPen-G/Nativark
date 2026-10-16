@@ -942,7 +942,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   options: AiSceneRequestOptions & { host: AiTaskApplicationHost;
     clock?: AiOriginalSceneRunDependencies['clock']; monotonic?: AiOriginalSceneRunDependencies['monotonic'];
     /** Server configuration only. Absence preserves the original single model. */
-    orderReadChain?: { enabled: true; inputSource: AiTaskInputSource; answerRoundTrip?: true } }) {
+    orderReadChain?: { enabled: true; inputSource?: AiTaskInputSource; answerRoundTrip?: true } }) {
   if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
     || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies
     || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -950,9 +950,9 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
     || orderReadChain.answerRoundTrip !== undefined && orderReadChain.answerRoundTrip !== true
     || dependencies.gatewayScene.orderExplainTool !== true || dependencies.gatewayScene.structuredOutput
-    || typeof orderReadChain.inputSource?.resolve !== 'function'
-    || typeof orderReadChain.inputSource.validateAnswers !== 'function')) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const orderSource = orderReadChain ? Object.freeze({
+    || orderReadChain.inputSource !== undefined && (typeof orderReadChain.inputSource?.resolve !== 'function'
+      || typeof orderReadChain.inputSource?.validateAnswers !== 'function'))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const orderSource = orderReadChain?.inputSource ? Object.freeze({
     resolve: orderReadChain.inputSource.resolve.bind(orderReadChain.inputSource),
     validateAnswers: orderReadChain.inputSource.validateAnswers.bind(orderReadChain.inputSource)
   }) : undefined;
@@ -973,7 +973,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     const original = await scenes.requests.readHistorical(reference);
     // Historical chain reads retain current read authority, not a new-effect
     // grant. start() still resolves the live original policy during preparation.
-    if (!orderSource) await scenes.requests.resolve(original.receipt.sceneCode, reference.inputRef);
+    if (!orderReadChain) await scenes.requests.resolve(original.receipt.sceneCode, reference.inputRef);
     const task = await scenes.readTaskReceipt(reference.inputRef);
     if (task.state !== 'observed' || original.receipt.state === 'revoked'
       || original.request.sceneCode !== input.scene.code || original.receipt.sceneVersion !== input.scene.version) {
@@ -986,7 +986,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
       : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
     const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion });
-    const orderApplication = orderSource ? model.createModelOrderApplication(serverHost, {
+    const orderApplication = orderReadChain ? model.createModelOrderApplication(serverHost, {
       inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
       answerRoundTrip ? { answerRoundTrip: true } : undefined) : undefined;
     // Clarification and quote actions retain separate protocols. Control and

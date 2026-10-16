@@ -18,7 +18,7 @@ import { composeAiTaskCenterScene } from '../task-center-scene.composition';
 import type { AiOriginalSceneResultService } from './original-scene-result.service';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
-type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource };
+type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource?: AiTaskInputSource };
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
@@ -30,8 +30,9 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
   if (options && (options.answerRoundTrip !== true || Object.keys(options).some(key => key !== 'answerRoundTrip'))) throw unavailable();
   const answerRoundTrip = options?.answerRoundTrip === true;
   if (input.scene.code !== 'order_explanation' || input.gatewayScene.orderExplainTool !== true
-    || input.gatewayScene.structuredOutput || typeof run?.inputSource?.resolve !== 'function'
-    || typeof run.inputSource.validateAnswers !== 'function' || typeof run.financialEvidence?.readDispatch !== 'function') throw unavailable();
+    || input.gatewayScene.structuredOutput || typeof run?.financialEvidence?.readDispatch !== 'function'
+    || run.inputSource !== undefined && (typeof run.inputSource?.resolve !== 'function'
+      || typeof run.inputSource?.validateAnswers !== 'function')) throw unavailable();
   const serverHost = structuredClone(host);
   const authorization = composePersistedTaskAuthorization(input);
   const taskTransitions = new AiTaskTransitionRepository(input.db, authorization.authority, input.clock);

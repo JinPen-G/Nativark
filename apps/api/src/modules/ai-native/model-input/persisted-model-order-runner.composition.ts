@@ -21,6 +21,7 @@ import type { AiStepTransitionAuthority } from '../ai-step-transition.repository
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import type { AiTaskInputSource } from '../task-input/task-input.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegistrationRef: id,
@@ -35,7 +36,9 @@ const answerSnapshotSchema = z.object({ version: z.literal('model-order-answer-s
     historicalFeeEvidence: z.literal('not_loaded') }).strict() }).strict();
 const answerFacts = (facts: z.infer<typeof answerSnapshotSchema>['facts']) => ({ audience: facts.audience,
   scope: facts.scope, order: facts.order, paymentEvidence: facts.paymentEvidence, historicalFeeEvidence: facts.historicalFeeEvidence });
-type Dependencies = Omit<TaskModelHostDependencies, 'task' | 'kind' | 'planTools'> & {
+type Dependencies = Omit<TaskModelHostDependencies, 'task' | 'kind' | 'planTools' | 'inputSource'> & {
+  /** Optional explicit host policy; otherwise use this fixed chain's persisted evidence. */
+  inputSource?: AiTaskInputSource;
   core: Pick<RentalCoreService, 'getOrder'>;
   originalRequests: PrismaOriginalRequestRepository;
   /** Frozen server task input, never a public model prompt/permission switch. */
@@ -56,7 +59,9 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const task = taskSchema.parse(structuredClone(input.task));
   if (input.gatewayScene.orderExplainTool !== true || input.gatewayScene.structuredOutput
     || typeof input.financialEvidence?.readDispatch !== 'function'
-    || !(input.originalRequests instanceof PrismaOriginalRequestRepository)) throw unavailable();
+    || !(input.originalRequests instanceof PrismaOriginalRequestRepository)
+    || input.inputSource !== undefined && (typeof input.inputSource?.resolve !== 'function'
+      || typeof input.inputSource?.validateAnswers !== 'function')) throw unavailable();
   const { routeScene: _route, ...serverPolicy } = structuredClone(input.gatewayScene);
   const policy = taskModelPolicy(serverPolicy);
   const assertOriginal = async (forExecution = false) => {
@@ -181,6 +186,55 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       return executor.execute(binding, signal);
     } };
   } };
+  // This closed plan has no free-form clarification step. Absence of a host
+  // source is not a blanket "not required": prove the exact completed model,
+  // immutable plan/input, original tool candidate or revalidated answer facts.
+  // Unknown results, changed facts and unrelated steps cannot advance the plan.
+  const completedModelInput: AiTaskInputSource = {
+    async resolve(value) {
+      const binding = structuredClone(value);
+      if (binding.taskId !== task.taskId || binding.runId !== task.runId
+        || binding.toolCode !== TASK_TEXT_MODEL_TOOL || binding.toolVersion !== AI_TOOL_DRAFT_VERSION
+        || ![task.modelRegistrationRef, task.answerRegistrationRef].includes(binding.registrationRef)) throw denied();
+      await assertOriginal();
+      const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
+      const row = await input.db.aiTask.findFirst({ where: access.where });
+      if (!row || row.scopeId !== binding.scopeId) throw denied();
+      const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId) throw denied();
+      const plan = aiTaskRunPlanSchema.parse(structuredClone(saved.payload));
+      if (saved.planHash !== binding.planHash || requestFingerprint(plan) !== binding.planHash
+        || plan.taskId !== task.taskId || plan.runId !== task.runId || plan.taskRevision !== binding.planRevision
+        || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
+      const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, id: binding.inputRef,
+        registrationRef: binding.registrationRef } });
+      if (!frozen || frozen.scopeId !== key.scopeId || frozen.taskId !== key.taskId || frozen.runId !== key.runId
+        || frozen.id !== binding.inputRef || frozen.registrationRef !== binding.registrationRef
+        || frozen.fingerprint !== binding.inputHash || frozen.toolCode !== binding.toolCode
+        || frozen.toolVersion !== binding.toolVersion) throw denied();
+      const proof = await modelEvidence.readCompletedEvidence(task.taskId, binding.stepId, binding.basisResultRef);
+      if (proof.step.runId !== task.runId || proof.step.inputRef !== binding.inputRef
+        || proof.step.fingerprint !== binding.inputHash || proof.artifact.id !== binding.basisResultRef) throw denied();
+      if (binding.registrationRef === task.modelRegistrationRef) {
+        const target = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: task.orderRegistrationRef } });
+        if (!target) throw unavailable();
+        if ((await candidate({ ...key, inputRef: target.id, fingerprint: target.fingerprint })).resultId !== binding.basisResultRef) throw denied();
+      } else {
+        const result = proof.artifact.payload;
+        if (!isGatewayResult(result) || result.status !== 'completed' || result.toolRequests.length) throw denied();
+        await verifyAnswerSnapshot(binding.inputRef);
+      }
+      const latest = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (!latest || latest.planHash !== saved.planHash || requestFingerprint(latest.payload) !== binding.planHash
+        || (await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+      await assertOriginal();
+      return { kind: 'not_required' };
+    },
+    async validateAnswers() { throw unavailable(); }
+  };
+  const modelInputSource = input.inputSource ? Object.freeze({ resolve: input.inputSource.resolve.bind(input.inputSource),
+    validateAnswers: input.inputSource.validateAnswers.bind(input.inputSource) }) : completedModelInput;
   const root = composeCurrentAuthorizedPersistentTaskInputRunner({ db: input.db, wall: input.clock, monotonic: input.monotonic,
     planAuthority, transitionAuthority, registrationAuthority: { resolve: async command => {
       if (command.registrationRef === task.modelRegistrationRef) return model.planAuthority.resolve(command);
@@ -192,8 +246,8 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       transition: (kind, step, lease, resultRef) => step.plan.toolCode === TASK_TEXT_MODEL_TOOL
         ? model.commands.transition(kind, step, lease, resultRef) : order.commands.transition(kind, step, lease, resultRef)
     }, executors, invocations: model.invocations, financialEvidence: input.financialEvidence,
-    inputSource: { resolve: binding => binding.toolCode === 'rental.order.explain' ? order.inputSource.resolve(binding) : input.inputSource.resolve(binding),
-      validateAnswers: (binding, contract, answers) => input.inputSource.validateAnswers(binding, contract, answers) },
+    inputSource: { resolve: binding => binding.toolCode === 'rental.order.explain' ? order.inputSource.resolve(binding) : modelInputSource.resolve(binding),
+      validateAnswers: (binding, contract, answers) => modelInputSource.validateAnswers(binding, contract, answers) },
     toolCatalog: { resolve: (code, version) => code === TASK_TEXT_MODEL_TOOL ? model.toolCatalog.resolve(code, version) : order.toolCatalog.resolve(code, version) }
   }, model.authorization);
   const publishAnswer: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {

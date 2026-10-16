@@ -176,7 +176,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),
     prepareHeldRun,
     createModelOrderApplication(host: AiTaskApplicationHost,
-      run: Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource },
+      run: Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource?: AiTaskInputSource },
       options?: { answerRoundTrip: true }) {
       return composeOriginalModelOrderScene(dependencies, scenes, host, run, results, options);
     },
