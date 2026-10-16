@@ -12,6 +12,32 @@ const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const keyForTask = (inputRef: string) => `scene-request:${inputRef}`;
+
+/** Immutable original provenance for current-authorized historical model reads.
+ * Expiry is not a new-effect grant. Callers must independently authorize the
+ * task/resource now and recheck this binding after dependent reads. */
+export async function readOriginalTaskModelProvenance(db: Pick<PrismaClient, 'aiTaskOriginalRequest'>,
+  task: Prisma.AiTaskGetPayload<{}>) {
+  if (!task.inputRef || task.ownerKind !== 'USER' || task.scopeKind !== 'WORKSPACE') throw denied();
+  const where = { id: task.inputRef, scopeId: task.scopeId, audience: task.audience,
+    ownerKind: task.ownerKind, ownerId: task.ownerId };
+  const row = await db.aiTaskOriginalRequest.findFirst({ where });
+  if (!row || Object.entries(where).some(([key, value]) => row[key as keyof typeof row] !== value)
+    || row.status !== 'STORED' || row.erasedAt || row.sceneCode !== task.sceneCode || row.sceneVersion !== task.sceneVersion
+    || row.revision !== task.inputRevision || row.contentHash !== task.inputHash
+    || !/^[a-f0-9]{64}$/u.test(row.authorizationBindingHash)) throw denied();
+  const body = originalBody(parseOriginalRequest({ draftVersion: row.contractVersion, requestKey: row.requestKey,
+    sceneCode: row.sceneCode, input: structuredClone(row.payload) }));
+  const contentHash = requestFingerprint({ version: row.contractVersion, scopeId: row.scopeId, audience: row.audience,
+    ownerKind: row.ownerKind, ownerId: row.ownerId, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion,
+    revision: row.revision, previousInputRef: row.previousRequestId, input: body.input });
+  if (row.contentHash !== contentHash) throw denied();
+  return Object.freeze({ inputRef: row.id, contentHash, revision: row.revision,
+    authorizationHash: row.authorizationBindingHash,
+    bindingHash: requestFingerprint({ ...where, contentHash, revision: row.revision,
+      authorizationHash: row.authorizationBindingHash, expiresAt: row.expiresAt.toISOString() }) });
+}
+
 export class AiOriginalRequestResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
   readonly retryable = false;

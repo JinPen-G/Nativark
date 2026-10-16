@@ -8,9 +8,11 @@ import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evid
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelPolicy, type TaskModelPolicy } from './task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
+import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
-  | 'aiTaskExecutionCharge' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
+  | 'aiTaskExecutionCharge' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>
+  & Partial<Pick<PrismaClient, 'aiTaskOriginalRequest'>>;
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 
@@ -31,10 +33,22 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
   /** Reuse original model/financial evidence for a dependent read, without
    * turning terminal observation into dispatch or reconciliation permission. */
   async readCompletedEvidence(taskId: string, stepId: string, resultId: string) {
+    return this.readCompleted(taskId, stepId, resultId, false);
+  }
+  /** Original completed evidence only: current read permission plus immutable
+   * original identity, not the expired dispatch grant or today's permission set.
+   * This method cannot register, dispatch, settle, release or approve anything. */
+  async readOriginalCompletedEvidence(taskId: string, stepId: string, resultId: string) {
+    return this.readCompleted(taskId, stepId, resultId, true);
+  }
+  private async readCompleted(taskId: string, stepId: string, resultId: string, originalObservation: boolean) {
     const context = structuredClone(await this.modelAuthorization.resolve(taskId, 'read_step_terminal'));
     const access = aiTaskAccessFromContext(context, taskId, this.clock());
     const task = await this.modelDb.aiTask.findFirst({ where: access.where });
     if (!task) throw denied();
+    if (originalObservation && typeof this.modelDb.aiTaskOriginalRequest?.findFirst !== 'function') throw unavailable();
+    const original = originalObservation ? await readOriginalTaskModelProvenance({
+      aiTaskOriginalRequest: this.modelDb.aiTaskOriginalRequest! }, task) : undefined;
     const key = { scopeId: task.scopeId, taskId };
     const step = await this.modelDb.aiStep.findFirst({ where: { ...key, id: stepId, resultRef: resultId, status: 'SUCCEEDED' } });
     if (!step || step.id !== stepId || step.scopeId !== key.scopeId || step.taskId !== taskId
@@ -61,7 +75,7 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
       owner: charge.leaseOwnerId, fence: charge.fencingToken.toFixed(0), revision: charge.revision
     })).sort((left, right) => left.id.localeCompare(right.id)));
     const chargeHash = chargeBinding(charges);
-    const evidence = await this.additionalEvidence(step, artifact, charges, context);
+    const evidence = await this.modelEvidence(step, artifact, charges, context, original?.authorizationHash);
     const current = await this.modelAuthorization.resolve(taskId, 'read_step_terminal');
     const latest = await this.modelDb.aiTaskResultArtifact.findFirst({ where: { ...key, id: resultId } });
     const latestStep = await this.modelDb.aiStep.findFirst({ where: { ...key, id: stepId } });
@@ -78,6 +92,11 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
       || latest.leaseOwnerId !== artifact.leaseOwnerId || latest.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)
       || requestFingerprint(stepBinding(latestStep)) !== requestFingerprint(stepBinding(step))
       || chargeBinding(latestCharges) !== chargeHash) throw denied();
+    if (original) {
+      const currentTask = await this.modelDb.aiTask.findFirst({ where: aiTaskAccessFromContext(current, taskId, this.clock()).where });
+      if (!currentTask || (await readOriginalTaskModelProvenance({ aiTaskOriginalRequest: this.modelDb.aiTaskOriginalRequest! },
+        currentTask)).bindingHash !== original.bindingHash) throw denied();
+    }
     // Keep Prisma Decimal/BigInt implementation objects behind the repository
     // boundary. Consumers need the immutable result binding, not raw rows.
     return { context: structuredClone(current), step: stepBinding(step), artifact: {
@@ -90,6 +109,10 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
   }
   protected override async additionalEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext) {
+    return this.modelEvidence(step, artifact, charges, context);
+  }
+  private async modelEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
+    charges: AiTaskExecutionCharge[], context: AiExecutionContext, originalAuthorizationHash?: string) {
     const actorId = context.audience === 'client' && context.actor.kind === 'customer' ? context.actor.customerId
       : ['operator', 'staff'].includes(context.audience) && context.actor.kind === 'user' ? context.actor.userId : null;
     if (!actorId || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
@@ -97,9 +120,10 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
     const saved = await this.modelDb.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });
     if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
       || saved.id !== step.inputRef || saved.toolCode !== step.toolCode || saved.toolVersion !== step.toolVersion
-      || saved.fingerprint !== step.requestFingerprint || saved.expiresAt <= this.clock()) throw denied();
+      || saved.fingerprint !== step.requestFingerprint || !originalAuthorizationHash && saved.expiresAt <= this.clock()) throw denied();
     const input = parseTaskModelInput(saved.payload, this.policy);
-    if (taskModelFingerprint(input, this.policy) !== step.requestFingerprint || taskModelIdentity(context) !== input.identityHash) throw denied();
+    if (taskModelFingerprint(input, this.policy) !== step.requestFingerprint
+      || (originalAuthorizationHash ?? taskModelIdentity(context)) !== input.identityHash) throw denied();
     const inputHash = requestFingerprint(input);
     if (!artifact) return { inputRef: saved.id, inputHash };
     if (charges.length !== 4 || charges.filter(c => c.resource === 'CALLS').length !== 1) throw denied();

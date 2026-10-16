@@ -12,6 +12,7 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import type { composeAiOriginalScenes } from './original-scenes.composition';
 import { continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledge, type AiOriginalSceneKnowledgeSnapshot } from './original-scene-knowledge';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -145,15 +146,10 @@ export class AiOriginalSceneResultService {
     const access = structuredClone(await this.tasks.resolveAccess(task.taskId, 'read_step_terminal'));
     const result = await this.results.read({ taskId: task.taskId, resultId: command.resultId });
     const originalBinding = async (tx: Prisma.TransactionClient, row: Prisma.AiTaskGetPayload<{}>) => {
-      const where = { id: command.original.inputRef, scopeId: row.scopeId,
-        audience: row.audience, ownerKind: row.ownerKind, ownerId: row.ownerId };
-      const saved = await tx.aiTaskOriginalRequest.findFirst({ where, select: { id: true, scopeId: true, audience: true, ownerKind: true, ownerId: true,
-        authorizationBindingHash: true, contentHash: true, revision: true, status: true } });
-      if (!saved || Object.entries(where).some(([key, value]) => saved[key as keyof typeof saved] !== value)
-        || saved.status === 'REVOKED' || saved.contentHash !== original.receipt.contentHash || saved.contentHash !== row.inputHash
-        || saved.revision !== original.receipt.revision || saved.revision !== row.inputRevision
-        || !/^[a-f0-9]{64}$/u.test(saved.authorizationBindingHash)) throw denied();
-      return saved.authorizationBindingHash;
+      const saved = await readOriginalTaskModelProvenance(tx, row);
+      if (saved.inputRef !== command.original.inputRef || saved.contentHash !== original.receipt.contentHash
+        || saved.revision !== original.receipt.revision) throw denied();
+      return saved.authorizationHash;
     };
     const provenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: access.where });

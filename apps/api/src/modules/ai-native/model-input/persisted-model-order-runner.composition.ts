@@ -109,10 +109,10 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   } };
   const modelEvidence = model.createTransitionAuthority(input.financialEvidence);
   const readEvidence = new PrismaTaskStepEvidenceAuthority(input.db, model.authorization.authority, planAuthority, input.clock);
-  const candidate = async (binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) => {
+  const candidate = async (binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }, forExecution = true) => {
     binding = structuredClone(binding);
     if (binding.taskId !== task.taskId || binding.runId !== task.runId) throw denied();
-    await assertOriginal(true);
+    await assertOriginal(forExecution);
     const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
     const row = await input.db.aiTask.findFirst({ where: access.where });
     if (!row) throw denied();
@@ -128,7 +128,8 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const parent = await input.db.aiStep.findFirst({ where: { ...key, inputRef: frozen.id,
       toolCode: TASK_TEXT_MODEL_TOOL, requestFingerprint: frozen.fingerprint, status: 'SUCCEEDED' } });
     if (!parent?.resultRef) throw unavailable();
-    const proof = await modelEvidence.readCompletedEvidence(task.taskId, parent.id, parent.resultRef);
+    const proof = await (forExecution ? modelEvidence.readCompletedEvidence(task.taskId, parent.id, parent.resultRef)
+      : modelEvidence.readOriginalCompletedEvidence(task.taskId, parent.id, parent.resultRef));
     const result = proof.artifact.payload;
     if (!isGatewayResult(result) || result.status !== 'completed' || result.usage.kind !== 'reported'
       || result.requestId !== published.intent.requestId || requestFingerprint(result.actual) !== requestFingerprint(published.configuration)
@@ -353,7 +354,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       || snapshot.modelRegistrationRef !== task.modelRegistrationRef || snapshot.readRegistrationRef !== task.orderRegistrationRef) throw denied();
     const readInput = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: task.orderRegistrationRef } });
     if (!readInput) throw unavailable();
-    await candidate({ taskId: task.taskId, runId: task.runId, inputRef: readInput.id, fingerprint: readInput.fingerprint });
+    await candidate({ taskId: task.taskId, runId: task.runId, inputRef: readInput.id, fingerprint: readInput.fingerprint }, forExecution);
     const step = await input.db.aiStep.findFirst({ where: { ...key, inputRef: readInput.id,
       toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, status: 'SUCCEEDED' } });
     if (!step?.resultRef) throw unavailable();
@@ -423,7 +424,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       return { resultId: result.resultId, status: result.status,
         text: null, automaticRetry: false as const, businessExecution: 'readonly_not_business_commit' as const };
     }
-    const proof = await modelEvidence.readCompletedEvidence(task.taskId, step.id, result.resultId);
+    const proof = await modelEvidence.readOriginalCompletedEvidence(task.taskId, step.id, result.resultId);
     const payload = proof.artifact.payload;
     if (!isGatewayResult(payload) || payload.status !== 'completed' || payload.usage.kind !== 'reported'
       || payload.toolRequests.length || payload.requestId !== published.intent.requestId
