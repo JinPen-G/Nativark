@@ -87,13 +87,21 @@ export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
  * original order/text result (including its fixed read-tool candidates), never
  * grant those candidates execution. This schema ceiling is not a model route,
  * new-call entitlement, runner driver, capability claim or pricing producer.
- * Results requiring knowledge still fail closed without a current ACL source. */
+ * Knowledge snapshots reuse current persisted ACL and human-consent checks;
+ * this host neither collects new context nor parses/uploads or confirms data. */
 export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
-  provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: originalSceneInjection,
-  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
-    composeRequestBoundOriginalTaskRecoveryReaders(originalSceneDependencies(...args), { enabled: true, audience: 'operator' }, {
-      policy: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 32768, orderExplainTool: true }
-    })
+  provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: [...originalSceneInjection, FileStorageRuntimeService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, files?: FileStorageRuntimeService) =>
+    composeRequestBoundOriginalTaskRecoveryReaders(
+      originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      { enabled: true, audience: 'operator' }, {
+        policy: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 32768, orderExplainTool: true },
+        // Direct text-only compositions may omit files. A frozen snapshot with
+        // knowledge then remains unavailable, never stripped to expose its text.
+        ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
+      })
 };
 
 /** Explicit owner/manager CAS, not a side effect of listing/creating a task.
