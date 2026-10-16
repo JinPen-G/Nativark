@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-16。最近功能提交：`59407112`（原能力验证恢复）、`a975ca0c`（能力请求授权/观察等待）；此前审批收敛：`560e92d3`、`20cf5584`。开工以实际 Git 状态为准，不将提交号作为回退目标。
+> 更新时间：2026-10-16。最近功能提交：`cf194228`（能力验证原账务善后）；此前能力恢复：`59407112`、`a975ca0c`，审批收敛：`560e92d3`、`20cf5584`。开工以实际 Git 状态为准，不将提交号作为回退目标。
 > **负责人确认Claude未施工，已要求Codex直接接回主线。** 当前继续主线单线实现，不启动A/B或其他辅助线。此前Claude双线交接未执行，不作为活动派工。未来抽离、Runtime/SDK接入仍未启动。
 
 ## 权威依据
@@ -26,14 +26,14 @@
 
 1. **持久计价的真实生产者与标准应用装配。** `task-model-gateway.composition.ts` 的 `composePersistedTaskGateway`、`composePersistedTaskModelHost` 及原请求场景组合已可由服务端显式选择 `pricing: { kind: 'recorded', priceVersion }`；旧 calls 入口保留兼容，不混用、不回退。下一步仍需合法的真实费率/可信token上界生产者、已发布能力和标准应用执行依赖；本次未注册生产模型驱动，不把有记录/接口当成依赖验真。
 2. **中断与结果收敛。** 原请求/模型订单、选报价及人工审批/重新提案已接有限等待；原能力验证任务现也复用原runner的快照/CAS恢复领取，宿主不再重复领取或自行清理在途租约，HTTP授权和观察等待有界。领取丢应答不凭重读授执行权；能力收据核对可能持久化证据，超时仍unknown、不重新探测。下一步按原依赖核对当前标准执行装配及其真实计价/能力生产者，不能因这些宿主修复就宣称全部运行与供应商能力完成；任务累计资源已有resourceOrigin，承接多轮时不得按旧记录重复重建或重置额度。
-3. **原账恢复与宿主。** 原请求→原任务→原调用的善后已接到shared、OpenAPI和默认关闭的`AiOriginalScenesModule.registerHttpAccounting`；显式启用后提供`POST /api/ai-native/scene-requests/accounting/{read|release-unsent|reconcile}`，只收original/callId。响应复用已校验的公开用量投影，不含凭据引用、dispatch token或内部association；当前Guard/Auth/ALS和原账证据仍复验。未注册AppModule，不是生产开放；标准应用部署还须按授权构建同版shared并选择可信宿主。剩余是token/money、未派发释放、提交应答丢失等场景组合证据，以及员工/客户各自正式运输入口；不能凭善后授新执行权。
+3. **原账恢复与宿主。** 场景善后仍由默认关闭的`AiOriginalScenesModule.registerHttpAccounting`提供`POST /api/ai-native/scene-requests/accounting/{read|release-unsent|reconcile}`，只收original/callId。能力验证另在既有`TextCapabilityProbeModule.registerHttp`下接通`POST /api/ai-native/text-capability/accounting/{read|release-unsent|reconcile}`，只收requestKey，由原材料定位唯一task/run/call及价格版本；当前管理权限、任务读取政策和单账证据复验，不要求原探测配置/计划继续开放，不授新探测或派发权。响应复用公开用量投影，不含凭据、dispatch token或内部association。两入口均未注册AppModule、默认关闭；部署还需授权构建同版shared及可信宿主。剩余是token/money、未派发释放成功、提交应答丢失等场景组合证据，以及员工/客户正式运输入口；没有可靠usage仍unknown，不能自动重发/退额。
 4. **剩余原任务。** AIN-06/07各中断/确认/接管窗口，知识/媒体的真实ACL与保留删除传播，以及完整可信宿主仍按原任务承接。AIN-25～28的真实环境、供应商、宿主与独立验收尚未完成，不能混称为仅剩部署。
 
 当前主线功能片验证结束，无本轮启动的服务、Worker、Cron或真实模型调用。Codex已按最新授权恢复主线核心施工；未启动任何辅助对话或重复心跳。
 
 ## 验证与交接边界
 
-- 最近API源码类型检查：658 roots、0诊断，退出0。能力验证恢复/证据发布/身份挂起一次性冒烟分开见开发记录，既有定向3/3及HTTP改动后2/2均退出0，0 fail/skip/todo；无新增测试文件。此前选报价HTTP原样旧夹具仍失败；一次性补齐配置store及两处消费者共用的正式分页替身后同一原断言1/1，不能宣称无注入原样或真实HTTP通过。diff退出0；数据库/传输及部分业务服务为替身。原账HTTP仍默认关闭、未注册AppModule。
+- 最近API源码类型检查：658 roots、0诊断，退出0。能力原账务只读/缺usage保留、过期停用后HTTP原用量核对/幂等/撤权、schema与Guard三段一次性冒烟分别1/1；既有能力任务单账生命周期定向1/1，0 fail/skip/todo，退出0。无新增测试文件，具体首轮失败与命令见开发记录。此前选报价HTTP原样旧夹具仍失败；一次性补齐配置store及共用正式分页替身后原断言1/1，不宣称无注入原样或真实HTTP通过。diff退出0；DB/传输及部分业务服务为替身。原账HTTP默认关闭、未注册AppModule。
 - 数据库事务、路由及模型传输为离线替身；真实MySQL锁/并发、供应商、浏览器/微信、真实支付/存储均未验。全局契约静态门此前失败，本轮未重跑或修复，不写成通过。
 - 不新增测试脚本；复用已有入口、一次性命令及必要类型检查，不删断言或扩大审查。开发记录按完整功能收口简短更新，百分比未跨原门槛不调整。
 
