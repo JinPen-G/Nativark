@@ -12,6 +12,7 @@ import { PrismaApprovedOrderReprepareRepository, type ApprovedOrderReprepareRow 
 import { approvedOrderCommandSchema, deniedOrder, orderContextHash } from './prisma-approved-order.source';
 import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
 import type { ApprovedOrderReprepareApplication, ApprovedOrderReprepareServices } from './approved-order-reprepare.ports';
+import { callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -115,21 +116,27 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
   };
   const reprepare = async (value: unknown): Promise<AiApprovalReprepareReceiptDraft> => {
     const command = parse(value);
-    let submitted = false;
-    try {
+    let submitted = false, committed = false;
+    const attempt = async (signal: AbortSignal) => {
+      const assertActive = () => { if (signal.aborted) throw new AiApprovalReprepareResultUnknownError(); };
       const current = await readers(command);
+      assertActive();
       if (await ledger.find(current.scopeId, command.operationKey)) return readReceipt(command);
       if (!d.reprepareServices) throw unavailable();
       const grant = await human.resolve(command.originalTaskId, undefined, 'reprepare_approval');
       if (grant.principal.scopeId !== current.scopeId || orderContextHash(grant.context) !== orderContextHash(current.context)) throw deniedOrder();
+      assertActive();
       submitted = true;
       await d.db.$transaction(async tx => {
+        assertActive();
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${current.scopeId} AND id IN (${Prisma.join([command.originalTaskId, command.replacement.taskId].sort())}) ORDER BY id FOR UPDATE`);
+        assertActive();
         if (await ledger.find(current.scopeId, command.operationKey, tx)) return;
         const deps = transactionDependencies(d, tx), app = composeControlledApprovedOrder(deps), authority = new ApprovedOrderHumanAuthority(deps);
         const services = d.reprepareServices!(deps);
         if (typeof services?.selection?.readAuthorized !== 'function' || typeof services?.lease?.current !== 'function') throw unavailable();
         const recheck = async () => {
+          assertActive();
           const now = await authority.resolve(command.originalTaskId, tx, 'reprepare_approval');
           if (now.bindingHash !== grant.bindingHash) throw deniedOrder();
           const eligibility = await app.application.readReprepareEligibility(command.originalTaskId, {
@@ -137,6 +144,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
           });
           if (['unknown', 'committed', 'approved_uncommitted'].includes(eligibility.state)) throw new AiApprovedOrderResultUnknownError();
           if (!eligibility.canRequestReprepare || eligibility.state !== (command.reason === 'change_plan' ? 'change_requested' : command.reason)) throw conflict();
+          assertActive();
         };
         await recheck();
         const original = await app.approvals.readProposal(command.originalTaskId, command.original), action = original.proposal.payload.actions[0];
@@ -146,6 +154,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
         if (await tx.aiProposal.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId } })
           || await tx.aiApprovalConsumption.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId, actionId: r.actionId } })) throw conflict();
         if (original.facts.input.payload.quoteId === first.proof.quoteId || action.input.contentHash === r.fingerprint) throw conflict();
+        assertActive();
         const saved = await app.prepare({ taskId: r.taskId, proposalId: `rp-${requestFingerprint([current.scopeId, command.operationKey]).slice(0, 32)}`,
           proposalRevision: 1, actionId: r.actionId, expiresAt: first.expiresAt, lease: first.lease }).catch(error => {
           if (error instanceof AiApprovedOrderResultUnknownError || error instanceof AiTaskRepositoryError
@@ -160,6 +169,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
         const latest = await materials(command, services, deps, tx);
         if (latest.proofHash !== first.proofHash || latest.expiresAt !== first.expiresAt
           || requestFingerprint(latest.lease) !== requestFingerprint(first.lease)) throw conflict();
+        assertActive();
         const changed = await tx.aiProposal.updateMany({ where: { scopeId: current.scopeId, taskId: command.originalTaskId,
           id: command.original.proposalId, stateRevision: head.stateRevision, status: head.status, currentRevision: head.currentRevision },
         data: { status: 'SUPERSEDED', currentRevision: command.original.proposalRevision, stateRevision: { increment: 1 } } });
@@ -176,13 +186,31 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
         const final = await materials(command, services, deps, tx);
         if (final.proofHash !== first.proofHash || final.expiresAt !== first.expiresAt
           || requestFingerprint(final.lease) !== requestFingerprint(first.lease)) throw conflict();
+        // The new proposal, old-head supersession and operation receipt are
+        // one transaction. A stopped callback must not commit any subset;
+        // uncertainty after COMMIT is resolved only by the original receipt.
+        assertActive();
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 10000 });
+      committed = true;
       return await readReceipt(command);
+    };
+    try {
+      return await callAiTaskRunnerDependency(attempt, 10000, 'approval_reprepare', undefined, d.runnerClock);
     } catch (error) {
+      if (committed && !(error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED')) {
+        throw new AiApprovalReprepareResultUnknownError();
+      }
       if (error instanceof AiTaskRepositoryError || error instanceof AiApprovedOrderResultUnknownError || error instanceof AiApprovalReprepareResultUnknownError) throw error;
       if (submitted) throw new AiApprovalReprepareResultUnknownError();
       throw unavailable();
     }
   };
-  return Object.freeze({ reprepare, readReceipt });
+  return Object.freeze({ reprepare, readReceipt: async (value: unknown) => {
+    const command = parse(value);
+    try { return await callAiTaskRunnerDependency(() => readReceipt(command), 5000, 'approval_reprepare_receipt', undefined, d.runnerClock); }
+    catch (error) {
+      if (error instanceof AiTaskRepositoryError || error instanceof AiApprovalReprepareResultUnknownError) throw error;
+      throw new AiApprovalReprepareResultUnknownError();
+    }
+  } });
 }

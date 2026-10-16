@@ -124,7 +124,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
     });
   };
   const decide = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
-    let started = false;
+    let started = false, committed = false;
     const attempt = async (signal: AbortSignal) => {
       const assertActive = () => { if (signal.aborted) throw new AiApprovalDecisionResultUnknownError(); };
       taskId = parse(id, taskId);
@@ -146,7 +146,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
         // unknown and must be observed by the original decision reference.
         assertActive();
         started = true;
-        return d.db.$transaction(async tx => {
+        const record = await d.db.$transaction(async tx => {
           await recheck(tx);
           // Reuse the existing decision/CAS repository inside this authorization-checked transaction.
           const db = { aiProposal: tx.aiProposal, aiProposalVersion: tx.aiProposalVersion, aiApproval: tx.aiApproval,
@@ -156,6 +156,8 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
           await recheck(tx);
           return record;
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        committed = true;
+        return record;
       } }, { authorize: async (context, input) => {
         if (orderContextHash(context) !== orderContextHash(grant.context) || input.scopeId !== grant.principal.scopeId
           || input.taskId !== taskId || input.proposalId !== command.proposalId || input.proposalRevision !== command.proposalRevision
@@ -179,6 +181,9 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
     try {
       return await callAiTaskRunnerDependency(attempt, 5000, 'approval_decision', undefined, d.runnerClock);
     } catch (error) {
+      if (committed && !(error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED')) {
+        throw new AiApprovalDecisionResultUnknownError();
+      }
       if (error instanceof AiTaskRepositoryError) throw error;
       if (error instanceof AiApprovalRepositoryError && error.code !== 'UNAVAILABLE') {
         throw new AiTaskRepositoryError(error.code === 'INVALID' ? 'AI_INVALID_INPUT' : error.code === 'CONFLICT' ? 'AI_REVISION_CONFLICT' : 'AI_ACCESS_DENIED');
