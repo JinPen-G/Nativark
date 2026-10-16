@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`3793d8d8`、`b713f9ef`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`cd99b42f`、`3793d8d8`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -97,6 +97,8 @@
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
 
 - **3793d8d8，AIN-06：** 原场景/模型宿主/模型订单组合不再直接领取后再恢复，而走原runner的有界恢复领取；外层原材料、计划和授权读取可中断，领取应答不明不重派。原请求阻塞读取红测已复现并转绿；一次性实际Auth/原请求/runner/仓储冒烟6/6、模型订单原unknown核对1/1，既有模型定向3/3、澄清重放1/1、取消1/1。API658 roots/0诊断、diff退出0，无新增测试文件。数据库/模型传输/初始财务生命周期及补齐旧夹具的配置分页store均为替身，不证明MySQL或供应商验收；其他场景窗口待续。
+
+- **cd99b42f，AIN-06：** 通用原场景启动/澄清继续/取消/核对接回同一有限等待；取消已提交但应答超时保留unknown及原取消意图，不迟到自动推进。一次性加载既有`original model application retains unknown usage and cancellation without redispatch or invented zero usage`原断言，连同已中断启动共2/2；受控时钟的取消迟到应答1/1，API658 roots/0诊断及diff退出0。命令沿用下述双preload stdin与类型检查；没有新增测试文件、真库/外部访问或独立审查，不改变百分比。
 
 本片命令使用固定离线数据库及本树`output/core-original-recovery-20261016/`审计/TEMP/TMP，公共前缀`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；一次性stdin另加`-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`。同两preload既有入口`--test --test-name-pattern "model host recovery reads|model host keeps missing provider usage" tests/ai-native-model-task-host.test.cjs`、分别筛选`"model clarification lost answer acknowledgement"`及`"model host cancellation during dispatch"`，最终均退出0；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`、`git diff --check`退出0。无全仓、shared构建、真实环境或独立审查结论。
 
