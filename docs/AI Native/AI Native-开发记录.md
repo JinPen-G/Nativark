@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`4b3ee36f`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`fb4b032d`、`f8659157`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -21,7 +21,7 @@
 | AIN-03 持久化 | task/run/input/phase/proposal/approval、预算、知识/记忆与追加迁移已有代码；近期含内容保留/删除收据 | 全表升级/回读、真实迁移/索引/并发及部署恢复统一验收；本轮未执行迁移 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；7477af78 允许当前受权只读政策独立于旧执行输入过期更新 | 全身份/地点/撤权真实等价；执行动作仍须有效原输入，未知动作拒绝 |
 | AIN-05 Gateway | 平台/BYOK、唯一 invocation/dispatch、calls 单账及文本/流/媒体能力链已有实现 | 标准应用完整可信模型依赖、真实供应商/全部能力及可信计数/价格；不以内部组件等同公开可用 |
-| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；d7a12287、349eb2e8 补有限等待 | 所有中断窗、澄清/确认与业务场景组合；真实多进程/MySQL 竞争和宕机未验 |
+| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；fb4b032d/f8659157 补共用应用及设置宿主有限等待、迟到结果隔离和安全租约清理 | 接管宿主等剩余中断窗、澄清/确认完整组合；真实多进程/MySQL 竞争和宕机未验 |
 | AIN-07 审批 | 不可变提案、当前人类批准、CAS、Core 参与者和原审批/业务收据组合；重放校验修正已进入主线 | 全动作/失败窗与批准消费/Core 原子性真库复验；不自授批准 |
 | AIN-08 业务事实 | business-tools 已接目录/可用性/客户/订单/历史/风险，会员与资金改用原有界查询 | 四品类/历史依据真实对照、其他 reader 的底层查询上限/执行计划核实 |
 | AIN-09 Core 报价 | Core 报价、显式选择、原请求 review/confirm/原键保存与核对已有入口 | 四品类/企业资格/时间地点/全部参数的完整正式消费；unknown 不重建报价 |
@@ -95,6 +95,11 @@
 | 2026-10-16 | 原账HTTP与公开脱敏契约：4b3ee36f | shared/OpenAPI/精确Guard路由与默认关闭模块接通，响应复用用量投影并运行时校验，宿主等待有界；未注册AppModule。一次性实际Guard/Controller/账本适配验证读取、核对重放、越权与未知释放拒绝及脱敏，三条OpenAPI一致；既有用量契约4/4、API658 roots/0诊断、diff均退出0。首轮撤权由HTTP Guard返回401而非内部错误，已修正一次性检查的层级预期，未改生产鉴权。未构建shared dist、启服务或真库验收 |
 
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
+
+- **f8659157，AIN-06/07：** 设置恢复、确认与取消等待有界；修正释放字段，已委派/应答不明不由宿主释放，超期清理不发迟到写入。一次性实际宿主/仓储冒烟8/8，既有设置4/4；首轮复现清理覆盖原错误，临时7项类型错误已修，接管用例首轮失败后修复并单项通过。Core存储和数据库为替身，未验MySQL。
+- **fb4b032d，AIN-06：** 共用应用启动/澄清/恢复/确认及只读入口复用有限等待，显式传递受控时钟。阻塞读取红测已复现并转绿1/1，原收据/迟到提交冒烟3/3。既有应用定向首轮5 pass/2 fail，两处旧预期校正为unknown并加强原租约断言，失败项复验2/2；最终API658 roots/0诊断及diff退出0。一次性历史源码加载曾重复注册ts-node，已修验证装载方式，未放宽编译。
+
+本片命令沿用下述固定离线环境与两个preload，后缀为`-`（一次性stdin）；`--test --test-name-pattern "settings normal host cancellation|settings normal host recovers" tests/ai-native-plan-input-source.test.cjs`；`--test --test-name-pattern "pre-aborted host|abort during metadata|normal completion removes|host abort at claim|cancellation followed by takeover" tests/ai-native-runner-abort.test.cjs tests/ai-native-runner-cancel-commit.test.cjs`（首轮4/5，失败单项复验1/1）；`--test --test-name-pattern "application starts an existing QUEUED|host abort during_preflight|application resume consumes|application resume does not execute after an unknown|application resume host abort|application reconcile uses its held lease" tests/ai-native-task-application.test.cjs`（失败项仅以最后一段pattern复验）；`./output/typecheck-ai-native.cjs`及`git diff --check`。最终各复验退出0，未执行全仓/真库/生产验收。
 
 本轮快检命令在主线树运行：公共前缀为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；服务冒烟另加 `-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs`，环境使用AGENTS固定无效DATABASE_URL，审计及TEMP/TMP位于本树 `output/core-gateway-pricing-20261016/`。实际后缀为 `./output/typecheck-ai-native.cjs`（退出0）；`--test --test-name-pattern "formal call task host" tests/ai-native-model-task-host.test.cjs`（退出0）；`-` 一次性stdin组合（最终退出0，2条正向与1条预算层拒绝，首轮失败边界见上表）；`git diff --check`（退出0）。未生成或改动共享client/dist，未执行全局契约静态门、真实迁移或外部服务检查。
 
