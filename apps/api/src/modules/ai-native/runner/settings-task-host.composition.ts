@@ -87,7 +87,7 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.clock);
   const unavailable = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner, recovery, events,
-    host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
+    host, prepare, clock: input.runnerClock, inputs: { submit: unavailable, readPending: unavailable } });
   const bounded = async <T>(operation: (signal: AbortSignal) => Promise<T>, write: boolean, limitMs = 5000, parent?: AbortSignal) => {
     try { return await callAiTaskRunnerDependency(operation, limitMs, 'settings_recovery', parent, input.runnerClock); }
     catch (error) {

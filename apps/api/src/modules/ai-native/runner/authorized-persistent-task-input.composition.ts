@@ -66,7 +66,7 @@ export function composeCurrentAuthorizedPersistentTaskInputRunner(
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.wall);
   const results = new AiTaskResultRepository(input.db, authorization.tasks, input.wall);
   const createApplication = (host: AiTaskApplicationHost, prepare?: AiTaskHeldPreparation) => new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks,
-    runner: composed.runner, inputs: composed.inputs, recovery, events, host, prepare });
+    runner: composed.runner, inputs: composed.inputs, recovery, events, host, prepare, clock: input.clock });
   return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover,
     readTakeoverReceipt: takeovers.readReceipt.bind(takeovers), recovery, events, results, createApplication });
 }

@@ -256,7 +256,10 @@ for (const complete of [true, false]) test(`application reconcile uses its held 
   h.storeControl.beforeWrite = async (name, args) => {
     if (name === 'aiStep' && args.data?.status === 'SUCCEEDED' || name === 'aiRun' && args.data?.leaseOwnerId === null) throw Error('synthetic stopped worker');
   };
-  await assert.rejects(app.start(query), e => e.code === 'AI_STORAGE_UNAVAILABLE'); h.storeControl.beforeWrite = null;
+  // The host cannot prove whether the failed lease release committed. Preserve
+  // the held original operation and reconcile; never report a clean rollback.
+  await assert.rejects(app.start(query), e => e.code === 'AI_RESULT_UNKNOWN'); h.storeControl.beforeWrite = null;
+  assert.equal(h.state.aiRun[0].leaseOwnerId, host.holderId);
   const fence = h.state.aiRun[0].fencingToken.toFixed(0), artifacts = h.clone(h.state.aiTaskResultArtifact), charges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
   const result = await app.reconcile(query);
   assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, complete ? 'succeeded' : 'unknown');
