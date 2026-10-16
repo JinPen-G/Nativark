@@ -20,6 +20,7 @@ import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-ef
 import type { AiStepTransitionAuthority } from '../ai-step-transition.repository';
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegistrationRef: id,
@@ -393,7 +394,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const application = root.createApplication(input.host, prepare);
   const resumePreparedOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-    await assertOriginal(true);
+    await waitForTaskApplicationDependency(() => assertOriginal(true), false, signal);
     // The ordinary application obtains a fresh current-authority/CAS lease.
     // Its preparation hook preserves the original published prefix and only
     // completes never-published fixed inputs before the plan exists.
@@ -482,9 +483,9 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const readOriginalTakeoverReceipt = async (value: unknown) => {
     const parsed = takeoverRevisionSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const original = await assertOriginal();
+    const original = await waitForTaskApplicationDependency(() => assertOriginal(), false);
     const receipt = await root.readTakeoverReceipt({ ...parsed.data, taskId: task.taskId, runId: task.runId });
-    const current = await assertOriginal();
+    const current = await waitForTaskApplicationDependency(() => assertOriginal(), false);
     if (original.receipt.contentHash !== current.receipt.contentHash
       || taskModelIdentity(original.context) !== taskModelIdentity(current.context)) throw denied();
     return receipt;
@@ -493,56 +494,59 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const parsed = takeoverRevisionSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-    const original = await assertOriginal();
-    const snapshot = await application.inspect({ taskId: task.taskId, runId: task.runId });
+    const observe = <T>(operation: () => Promise<T>) => waitForTaskApplicationDependency(operation, false, signal);
+    const original = await observe(() => assertOriginal());
+    const snapshot = await observe(() => application.inspect({ taskId: task.taskId, runId: task.runId }));
     if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
       || snapshot.run.revision !== parsed.data.expectedRunRevision
       || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    const access = await model.tasks.resolveAccess(task.taskId, 'takeover_run');
-    const row = await input.db.aiTask.findFirst({ where: access.where });
+    const access = await observe(() => model.tasks.resolveAccess(task.taskId, 'takeover_run'));
+    const row = await observe(() => input.db.aiTask.findFirst({ where: access.where }));
     if (!row || row.inputRef !== original.receipt.inputRef) throw denied();
     const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
-    const storedPlan = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+    const storedPlan = await observe(() => input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } }));
     if (!storedPlan) throw unavailable();
     const plan = aiTaskRunPlanSchema.parse(structuredClone(storedPlan.payload));
     if (storedPlan.scopeId !== key.scopeId || storedPlan.taskId !== key.taskId || storedPlan.runId !== key.runId
       || plan.taskId !== task.taskId || plan.runId !== task.runId
       || requestFingerprint(plan) !== storedPlan.planHash || snapshot.plan.planHash !== storedPlan.planHash
       || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
-    const run = await input.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: task.runId,
-      actorKind: access.actorKind, actorId: access.actorId } });
+    const run = await observe(() => input.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: task.runId,
+      actorKind: access.actorKind, actorId: access.actorId } }));
     if (!run?.leaseOwnerId || run.leaseOwnerId === recoveryHost.holderId
       || run.revision !== parsed.data.expectedRunRevision || !run.fencingToken.equals(parsed.data.expectedFencingToken)) {
       throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
-    const current = await assertOriginal();
+    const current = await observe(() => assertOriginal());
     if (current.receipt.contentHash !== original.receipt.contentHash
       || taskModelIdentity(current.context) !== taskModelIdentity(original.context)
-      || (await model.tasks.resolveAccess(task.taskId, 'takeover_run')).bindingKey !== access.bindingKey) throw denied();
+      || (await observe(() => model.tasks.resolveAccess(task.taskId, 'takeover_run'))).bindingKey !== access.bindingKey) throw denied();
+    if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     // Previous/new holders are server-derived. The original transactional
     // takeover performs owner/action authorization, task/run CAS and fencing.
     // Recovery only observes original facts; it never publishes or dispatches.
     const outcome = await root.takeoverAndRecover({ ...parsed.data, taskId: task.taskId, runId: task.runId,
       previousHolderId: run.leaseOwnerId, holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs }, signal);
-    await assertOriginal();
+    await waitForTaskApplicationDependency(() => assertOriginal(), true, signal);
     return { kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
       automaticRetry: false as const, businessExecution: 'readonly_not_business_commit' as const };
   };
   const recoverOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-    await assertOriginal();
-    const snapshot = await application.inspect({ taskId: task.taskId, runId: task.runId });
+    await waitForTaskApplicationDependency(() => assertOriginal(), false, signal);
+    const snapshot = await waitForTaskApplicationDependency(() => application.inspect({ taskId: task.taskId, runId: task.runId }), false, signal);
     if (!snapshot.plan || !['running', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
       return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
     }
     // Recovery receives the repository's current-authority/CAS recovery lease.
     // The runner reloads and validates expectedSteps through planAuthority.
     // It never calls prepare(), publishes inputs or dispatches a model again.
-    const lease = await model.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
+    const outcome = await root.runner.run({ taskId: task.taskId, runId: task.runId,
       holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
       expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-      expectedFencingToken: snapshot.run.fencingToken });
-    return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
+      expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+    await waitForTaskApplicationDependency(() => assertOriginal(), true, signal);
+    return { kind: 'run_outcome' as const, outcome };
   };
   return Object.freeze({ ...root, model, readOrderResult, readAnswerResult, resumePreparedOriginal,
     recoverOriginal, takeoverOriginal, readOriginalTakeoverReceipt, application });

@@ -9,7 +9,7 @@ import { isGatewayResult } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { composeCurrentAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
-import type { AiTaskApplicationHost } from './prisma-task-application';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './prisma-task-application';
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 
@@ -107,9 +107,9 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     if (!value || Object.prototype.hasOwnProperty.call(value, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const submission = { ...structuredClone(value), taskId: task.taskId };
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const receipt = await root.inputs.readSubmission(submission);
+    const receipt = await waitForTaskApplicationDependency(() => root.inputs.readSubmission(submission), false);
     if (receipt.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const { request, snapshot } = await originalSnapshot();
+    const { request, snapshot } = await waitForTaskApplicationDependency(originalSnapshot, false);
     if (receipt.runId !== request.runId) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     if (signal?.aborted || snapshot.task.status !== 'running') return { receipt,
       execution: { kind: 'not_started' as const, reason: signal?.aborted ? 'host_aborted' as const : 'task_not_runnable' as const } };
@@ -121,32 +121,31 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
   };
   const recoverOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-    const { request, snapshot } = await originalSnapshot();
+    const { request, snapshot } = await waitForTaskApplicationDependency(originalSnapshot, false, signal);
     // A terminal or never-dispatched run remains observation. Recovery cannot
     // prepare/publish a new input or save another plan to make it runnable.
     if (!snapshot.plan || !['running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
       return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
     }
-    const lease = await root.authorization.tasks.claimRecoveryRun({ ...request,
-      holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
-      expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-      expectedFencingToken: snapshot.run.fencingToken });
     // Repository CAS fences the previous holder. The original runner rechecks
     // authority and persisted plan/evidence and owns bounded lease cleanup;
     // external_unknown is reconciliation only, never a provider retry.
-    return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
+    return { kind: 'run_outcome' as const, outcome: await root.runner.run({ ...request,
+      holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
+      expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+      expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal) };
   };
   const requestCancelOriginal = async (value: unknown) => {
     const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294) })
       .strict().safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = structuredClone(await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
+    const before = structuredClone(await waitForTaskApplicationDependency(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false));
     // The original transition repository supplies action authorization, scoped
     // revision CAS and durable cancellation/event ordering. No run is started,
     // accounting released or external effect claimed to have been rolled back.
-    const receipt = await root.taskTransitions.transition({ taskId: task.taskId,
-      expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
-    const after = await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+    const receipt = await waitForTaskApplicationDependency(() => root.taskTransitions.transition({ taskId: task.taskId,
+      expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' }), true);
+    const after = await waitForTaskApplicationDependency(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true);
     if (before.bindingKey !== after.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return { receipt, cancellation: 'requested_not_rollback' as const,
       retryable: false as const, nextAction: 'read_original_task' as const };
@@ -158,6 +157,6 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     // Inspection is observation only, including after a process rebuild.
     // Reconciliation uses the existing application's held-lease gate; a new
     // holder receives recovery_lease_unavailable, not new dispatch permission.
-    readOriginalRecovery: async () => (await originalSnapshot()).snapshot,
-    reconcileOriginal: async (signal?: AbortSignal) => application.reconcile((await originalSnapshot()).request, signal) });
+    readOriginalRecovery: async () => (await waitForTaskApplicationDependency(originalSnapshot, false)).snapshot,
+    reconcileOriginal: async (signal?: AbortSignal) => application.reconcile((await waitForTaskApplicationDependency(originalSnapshot, false, signal)).request, signal) });
 }

@@ -41,7 +41,7 @@ type Dependencies = {
 
 /** Bound application preflight too, not just the runner it eventually calls.
  * A write timeout is unknown; a late read cannot proceed into a new dispatch. */
-async function applicationWait<T>(operation: () => Promise<T>, write: boolean, signal?: AbortSignal, clock?: AiTaskRunnerClock): Promise<T> {
+export async function waitForTaskApplicationDependency<T>(operation: () => Promise<T>, write: boolean, signal?: AbortSignal, clock?: AiTaskRunnerClock): Promise<T> {
   try { return await callAiTaskRunnerDependency(operation, 5000, 'task_application', signal, clock); }
   catch (error) {
     if (error instanceof AiTaskRunnerError && (error.code === 'AI_RESULT_UNKNOWN' || error.code === 'AI_RUN_LIMIT')) {
@@ -68,7 +68,7 @@ export class PrismaTaskApplication {
   }
 
   private wait<T>(operation: () => Promise<T>, write = false, signal?: AbortSignal) {
-    return applicationWait(operation, write, signal, this.deps.clock);
+    return waitForTaskApplicationDependency(operation, write, signal, this.deps.clock);
   }
 
   inspect(value: unknown) { return this.wait(() => this.deps.recovery.read(value)); }
@@ -86,7 +86,7 @@ export class PrismaTaskApplication {
     const parsed = requestSchema.extend({ stepId: id.max(36) }).safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const input = parsed.data;
-    const read = <T>(operation: () => Promise<T>) => applicationWait(operation, false, undefined, dependencies.clock);
+    const read = <T>(operation: () => Promise<T>) => waitForTaskApplicationDependency(operation, false, undefined, dependencies.clock);
     const before = structuredClone(await read(() => dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal')));
     const result = await read(() => dependencies.db.$transaction(async tx => {
       const task = await tx.aiTask.findFirst({ where: before.where });

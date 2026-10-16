@@ -3,7 +3,7 @@ import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { composePersistedModelOrderTaskRunner } from '../model-input/persisted-model-order-runner.composition';
 import { parseTaskModelInput, taskModelFingerprint, taskModelMaterialSchema, TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -36,6 +36,8 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
   const authorization = composePersistedTaskAuthorization(input);
   const taskTransitions = new AiTaskTransitionRepository(input.db, authorization.authority, input.clock);
   const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens, orderExplainTool: true };
+  const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
+    waitForTaskApplicationDependency(operation, afterMutation, signal, run.clock);
   const bound = async (value: unknown) => {
     const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -199,20 +201,23 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     },
     async start(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { outcome: { kind: 'not_started' as const, reason: 'host_aborted' as const } };
-      const { before, runner } = await assemble(value, true);
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, true), signal);
       const outcome = await runner.application.start({ taskId: before.task.taskId, runId: before.task.runId }, signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, businessExecution: 'readonly_not_business_commit' as const });
     },
     async recover(value: unknown, signal?: AbortSignal) {
-      const { before, runner } = await assemble(value, false);
-      const outcome = await runner.recoverOriginal(signal); await verify(before);
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, false), signal);
+      const outcome = await runner.recoverOriginal(signal); await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, automaticRetry: false as const });
     },
     async resumePrepared(value: unknown, signal?: AbortSignal) {
-      const { before, runner } = await assemble(value, 'prepared');
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, 'prepared'), signal);
       const outcome = await runner.resumePreparedOriginal(signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome,
         automaticRetry: false as const, preparation: 'original_inputs_only' as const,
         businessExecution: 'readonly_not_business_commit' as const });
@@ -224,9 +229,9 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { original, ...command } = parsed.data;
-      const { before, runner } = await assemble(original, false);
+      const { before, runner } = await observe(() => assemble(original, false), signal);
       const outcome = await runner.takeoverOriginal(command, signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome,
         takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,
         businessExecution: 'readonly_not_business_commit' as const });
@@ -237,9 +242,9 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         expectedRunRevision: z.number().int().min(1).max(4294967294),
         expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { original, ...command } = parsed.data, { before, runner } = await assemble(original, false);
+      const { original, ...command } = parsed.data, { before, runner } = await observe(() => assemble(original, false));
       const receipt = await runner.readOriginalTakeoverReceipt(command);
-      await verify(before);
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
     },
     async readOrderResult(value: unknown) {
