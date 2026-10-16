@@ -26,6 +26,7 @@ import type { AiRouteScene } from './provider-router.ports';
 import { composeTaskModelHost, type TaskModelHostDependencies } from './runner/model-task-host.composition';
 import type { GatewayMediaAttachmentResolver } from './gateway-intent';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -36,7 +37,8 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   routeScene: AiRouteScene;
   callPriceVersion: string;
   adapters: readonly ModelAdapter[];
-  audit: UnifiedGatewayAudit;
+  /** Optional explicit audit sink. Otherwise use the existing durable OperationLog. */
+  audit?: UnifiedGatewayAudit;
   /** Server-created original attachment ACL/ObjectReader adapter, not request
    * bytes/URL or a capability grant. Absent means media remains unavailable. */
   media?: GatewayMediaAttachmentResolver;
@@ -110,7 +112,7 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     || !['chat', 'builder', 'vision', 'knowledge', 'reasoning'].includes(input.routeScene)
     || 'callPriceVersion' in input
     || !Array.isArray(input.adapters) || !input.adapters.length
-    || typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    || input.audit !== undefined && typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const selection = checkedPricing(input.pricing);
   // Recorded evidence currently attests plain-text input/output tokens only.
   // Never price image/audio traffic with an unrelated text/calls upper bound.
@@ -168,7 +170,8 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   const runtime: PublicGatewayRuntime = {
     evidence: 'live',
     ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
-      dispatch: new InvocationDispatchService(admissions), budget: accounting.budget, audit,
+      dispatch: new InvocationDispatchService(admissions), budget: accounting.budget,
+      audit: audit ?? new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock),
       transport: new RoutedModelTransport({ platform, tenant }, adapters), ...(media ? { media } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
