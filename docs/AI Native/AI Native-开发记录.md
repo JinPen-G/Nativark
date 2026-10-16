@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`bde2862f`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`4b3ee36f`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -92,11 +92,15 @@
 
 | 2026-10-16 | 原场景账务善后消费：bde2862f | 原请求/任务/调用与当前权限绑定，复用原账读取/未派发释放/核对；接回持久模型场景显式入口，原单位/版本不随当前配置变化。一次性真实Auth/Guard/ALS、原运行器和预算/Prisma适配冒烟验证calls原用量结算/重放、读后撤权及跨任务/已派发释放拒绝；API657 roots/0诊断、diff退出0。首轮旧夹具缺分页来源、误用模型app创建入口及另一任务缺读政策均已定位，只在一次性夹具补合法配置store/原请求创建/政策数据，未放宽生产检查。DB、初始财务生命周期/用量和传输仍为替身；未公开HTTP，token/money及其他恢复窗口仍未验 |
 
+| 2026-10-16 | 原账HTTP与公开脱敏契约：4b3ee36f | shared/OpenAPI/精确Guard路由与默认关闭模块接通，响应复用用量投影并运行时校验，宿主等待有界；未注册AppModule。一次性实际Guard/Controller/账本适配验证读取、核对重放、越权与未知释放拒绝及脱敏，三条OpenAPI一致；既有用量契约4/4、API658 roots/0诊断、diff均退出0。首轮撤权由HTTP Guard返回401而非内部错误，已修正一次性检查的层级预期，未改生产鉴权。未构建shared dist、启服务或真库验收 |
+
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
 
 本轮快检命令在主线树运行：公共前缀为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；服务冒烟另加 `-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs`，环境使用AGENTS固定无效DATABASE_URL，审计及TEMP/TMP位于本树 `output/core-gateway-pricing-20261016/`。实际后缀为 `./output/typecheck-ai-native.cjs`（退出0）；`--test --test-name-pattern "formal call task host" tests/ai-native-model-task-host.test.cjs`（退出0）；`-` 一次性stdin组合（最终退出0，2条正向与1条预算层拒绝，首轮失败边界见上表）；`git diff --check`（退出0）。未生成或改动共享client/dist，未执行全局契约静态门、真实迁移或外部服务检查。
 
 ## 待补的验收证据
+
+HTTP快检沿用本树离线环境、source/private-client resolver与`output/core-admission-outcome-20261016/`审计目录：`node ... -`分别驱动实际模块/Guard/Controller与三条OpenAPI声明（退出0）；`node ... --test --test-name-pattern "quantity cannot mix units|fixed precision money" tests/ai-native-usage-contracts.test.cjs`（4 pass，0 fail/skip/todo，退出0）；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`（退出0）及`git diff --check`退出0。未监听HTTP，数据库/初始财务生命周期/传输仍为替身；全局契约静态门此前失败，本片未全量复跑或宣称已修。
 
 原场景善后快检：同下述preload/固定无效数据库及本树`output/core-admission-outcome-20261016/`，`node ... -`一次性stdin运行原请求→运行器→持久用量→请求绑定核对（退出0），`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`（657 roots/0诊断，退出0）、`git diff --check`退出0；没有新增测试脚本或运行全量回归。
 
