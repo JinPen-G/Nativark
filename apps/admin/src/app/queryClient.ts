@@ -1,12 +1,31 @@
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { createMutationSoundCallbacks } from "../features/sound/mutationSound";
 
+/** Temporary read failures may keep cached data visible; denied/unknown errors
+ * must still hide protected content instead of presenting it as current. */
+export function isTransientRefreshError(error: unknown): boolean {
+  const failure = error as { response?: { status?: number }; code?: string } | null;
+  const status = failure?.response?.status;
+  return Boolean(status && (status >= 500 || status === 408 || status === 429)
+    || failure?.code && ["ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT"].includes(failure.code));
+}
+
 export const queryClient = new QueryClient({
   mutationCache: new MutationCache(createMutationSoundCallbacks(currentSessionEpoch)),
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
+      // Active views revalidate in place. Query observers stop timers on unmount,
+      // pause in hidden/offline tabs and deduplicate requests for the same key.
+      refetchOnWindowFocus: true,
+      refetchIntervalInBackground: false,
+      refetchInterval: (query) => {
+        if (typeof window === "undefined" || !window.localStorage.getItem("rental_access_token")
+          || query.meta?.liveRefresh === false) return false;
+        const status = (query.state.error as { response?: { status?: number } } | null)?.response?.status;
+        if (status && status >= 400 && status < 500 && status !== 408 && status !== 429) return false;
+        return Math.min(30_000, 3_000 * 2 ** Math.min(query.state.fetchFailureCount, 4));
+      },
       staleTime: 30_000
     },
     mutations: { retry: false }

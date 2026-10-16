@@ -92,7 +92,7 @@ export function RentalOrdersPage() {
         ]} /></Col>
         <Col xs={24} md={8}><Select allowClear placeholder={t("全部状态")} style={{ width: "100%" }} options={statusOptions} value={status} onChange={value => applyFilter(setStatus)(value as RentalCoreOrderStatus | undefined)} /></Col>
       </Row>
-      <QueryState loading={orders.isLoading} error={orders.error}><AnimatedTable<RentalOrder> sorting={false} sortValue={orderSortValue} rowKey="id" dataSource={rows} loading={orders.isFetching}
+      <QueryState loading={orders.isLoading} error={orders.error}><AnimatedTable<RentalOrder> sorting={false} sortValue={orderSortValue} rowKey="id" dataSource={rows} loading={orders.isLoading || orders.isPlaceholderData && orders.isFetching}
         pagination={{ current: page, pageSize, total, showSizeChanger: false, showTotal: (count) => `${t("共")} ${count} ${t("单")}`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
         columns={[
         { title: t("订单"), fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },

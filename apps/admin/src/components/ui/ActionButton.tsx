@@ -2,6 +2,7 @@ import { ConfigProvider, type FormInstance } from "antd";
 import { useRef } from "react";
 import { ActionButton as ArcActionButton, type ActionButtonProps as ArcProps } from "@/registry/components/action-button/action-button";
 import { useLocale } from "@/app/locale";
+import { formSnapshotFingerprint, notifyFormSaved } from "@/app/serverFormSnapshot";
 
 export interface ActionButtonProps extends Omit<ArcProps, "onAction"> {
   /** Resolve only after the real operation completes. Throw on failure. */
@@ -45,7 +46,11 @@ export function SaveButton<Values>({ form, onSave, ...props }: SaveButtonProps<V
     event.preventDefault();
   }} pendingLabel={props.pendingLabel ?? t("保存中")}
     successLabel={props.successLabel ?? t("已保存")} onAction={async () => {
+      const submitted = formSnapshotFingerprint(form.getFieldsValue(true));
       const values = await form.validateFields();
-      return onSave(values);
+      const result = await onSave(values);
+      // Failed saves reject above; do not mark a later, still-unsaved draft clean.
+      if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== false) notifyFormSaved(form, submitted);
+      return result;
     }} />;
 }

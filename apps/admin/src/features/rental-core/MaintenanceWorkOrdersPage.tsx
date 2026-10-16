@@ -17,6 +17,7 @@ import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, SearchField, Select } from "@/components/ui";
 import { useEffect, useState } from "react";
+import { useServerFormSync } from "@/app/useServerFormSync";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -144,11 +145,11 @@ export function MaintenanceWorkOrdersPage() {
       createForm.setFieldsValue({ type: "repair", dispositionId: workOrderDispositions[0]?.id });
     }
   }, [createForm, dialog, workOrderDispositions[0]?.id]);
-  useEffect(() => {
-    if (dialog === "assign") {
+  useServerFormSync(assignForm, dialog === "assign" ? activeWorkOrder : undefined, () => {
+    if (activeWorkOrder) {
       assignForm.setFieldsValue({ assigneeId: activeWorkOrder?.assigneeId });
     }
-  }, [activeWorkOrder?.assigneeId, assignForm, dialog]);
+  }, `${dialog}:${activeWorkOrder?.id}`);
   const filteredWorkOrders = (workOrders.data ?? []).filter((row) => {
     if (statusFilter && row.status !== statusFilter) return false;
     if (typeFilter && row.type !== typeFilter) return false;

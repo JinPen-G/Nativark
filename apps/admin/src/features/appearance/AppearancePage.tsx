@@ -4,7 +4,9 @@ import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button, ColorPicker, SaveButton } from "@/components/ui";
-import { useEffect, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
+import { useServerFormSync } from "@/app/useServerFormSync";
+import { isTransientRefreshError } from "@/app/queryClient";
 import { useMutation, useQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
 import type { SaveTenantAppearanceRequest } from "@rental-os/shared";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
@@ -45,7 +47,7 @@ function RadiusPreview({ kind, radius }: { kind: "container" | "button" | "input
   return <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}><span style={{ ...shape, display: "inline-flex", alignItems: "center", height: 44, padding: "0 18px", border: "1px solid var(--rental-color-border-secondary)", background: "var(--rental-color-bg-container)", color: "var(--rental-color-text)", fontSize: 13, boxShadow: "var(--rental-box-shadow-tertiary)" }}>{t("容器卡片")}</span>{meta}</div>;
 }
 
-type AppearanceForm = Pick<SaveTenantAppearanceRequest, "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius">;
+type AppearanceForm = Pick<SaveTenantAppearanceRequest, "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius" | "expectedRevision">;
 
 /** 账户级主题色：跟随登录账户、与租户品牌色相互独立。单字段独立表单、独立保存。 */
 function AccountThemeColorCard() {
@@ -55,16 +57,19 @@ function AccountThemeColorCard() {
   const queryClient = useQueryClient();
   const setAccountThemeColor = useAuthStore((state) => state.setAccountThemeColor);
   const profile = useQuery({ queryKey: ["account-appearance"], queryFn: accountAppearanceApi.getProfile });
-  useEffect(() => { if (profile.data) form.setFieldsValue({ themeColor: profile.data.themeColor }); }, [profile.data, form]);
+  const profileCurrent = useServerFormSync(form, profile.data, () => { if (profile.data) form.setFieldsValue({ themeColor: profile.data.themeColor }); });
   const save = useMutation({
     meta: { soundFeedback: true },
-    mutationFn: (values: { themeColor?: string }) => accountAppearanceApi.saveProfile({ themeColor: values.themeColor }),
+    mutationFn: async (values: { themeColor?: string }) => {
+      if (!profileCurrent()) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
+      return accountAppearanceApi.saveProfile({ themeColor: values.themeColor });
+    },
     onSuccess: (data) => {
       setAccountThemeColor(data.themeColor);
       void queryClient.invalidateQueries({ queryKey: ["account-appearance"] });
       message.success(t("主题色已保存"));
     },
-    onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
+    onError: (error: any) => message.error(error?.response?.data?.message ?? error?.message ?? t("保存失败"))
   });
   return (
     <Card size="small" title={t("管理后台主题色")}>
@@ -96,11 +101,12 @@ export function AppearancePage() {
   const watchInput = Form.useWatch("adminInputRadius", form);
   const previewRadii = resolveAdminRadii({ container: watchContainer, button: watchButton, input: watchInput, legacy: profile.data?.adminCornerRadius });
 
-  useEffect(() => {
+  useServerFormSync(form, profile.data, () => {
     if (!profile.data) return;
     const d = profile.data;
-    form.setFieldsValue({ adminContainerRadius: d.adminContainerRadius, adminButtonRadius: d.adminButtonRadius, adminInputRadius: d.adminInputRadius });
-  }, [profile.data, form]);
+    form.setFieldsValue({ adminContainerRadius: d.adminContainerRadius, adminButtonRadius: d.adminButtonRadius, adminInputRadius: d.adminInputRadius,
+      expectedRevision: d.revision });
+  });
 
   const save = useMutation({
     meta: { soundFeedback: true },
@@ -109,7 +115,7 @@ export function AppearancePage() {
       adminContainerRadius: values.adminContainerRadius,
       adminButtonRadius: values.adminButtonRadius,
       adminInputRadius: values.adminInputRadius,
-      expectedRevision: profile.data?.revision
+      expectedRevision: form.getFieldValue("expectedRevision")
     }),
     onSuccess: (data) => {
       setTenantBranding({ brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius });
@@ -125,7 +131,7 @@ export function AppearancePage() {
       <PageHeader title="外观与音效" description="设置管理后台圆角与界面音效。品牌标识及主题色请在客户端配置中维护。" />
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <AccountThemeColorCard />
-        {profile.isLoading ? <LoadingState /> : profile.error || !profile.data ? (
+        {profile.isLoading ? <LoadingState /> : !profile.data || profile.error && !isTransientRefreshError(profile.error) ? (
           <Alert showIcon type="error" title={t("无法读取圆角设置")} description={<Button onClick={() => profile.refetch()}>{t("重试")}</Button>} />
         ) : (
           <Form<AppearanceForm> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>

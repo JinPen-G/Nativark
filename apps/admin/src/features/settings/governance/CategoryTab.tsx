@@ -2,13 +2,13 @@ import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { Form } from "@/components/ui";
+import { App, Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, SaveButton } from "@/components/ui";
-import { useEffect } from "react";
+import { useServerFormSync } from "@/app/useServerFormSync";
 import { useLocale } from "@/app/locale";
 import type { GovernanceTabContext } from "./shared";
 import { CategoryPreparationEntry } from "./CategoryPreparationDialog";
@@ -51,8 +51,9 @@ export function CategoryTab({
   onSave: (values: CategorySettingsFormValues) => Promise<unknown>;
 }) {
   const { t } = useLocale();
+  const { message } = App.useApp();
   const [form] = Form.useForm<CategorySettingsFormValues>();
-  useEffect(() => {
+  const isCurrent = useServerFormSync(form, settings, () => {
     form.setFieldsValue({
       pricing: settings.pricing,
       payment: {
@@ -73,13 +74,20 @@ export function CategoryTab({
         protectManual: true,
       },
     });
-  }, [form, settings]);
+  });
+  const saveCurrent = async (values: CategorySettingsFormValues) => {
+    if (!isCurrent()) {
+      const reason = t("服务端配置已变更，未保存的内容已保留。请重新打开本页核对后再保存。");
+      message.warning(reason); throw new Error(reason);
+    }
+    return onSave(values);
+  };
 
   return (
-    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={values => { void onSave(values).catch(() => undefined); }}>
+    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
       <div className="table-toolbar">
         <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={onSave} />
+        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />
       </div>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <CategoryPreparationEntry />

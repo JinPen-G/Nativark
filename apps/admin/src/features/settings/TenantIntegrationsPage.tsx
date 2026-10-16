@@ -18,6 +18,8 @@ import { tenantIntegrationsApi } from "@/api/tenantIntegrations";
 import { useLocale } from "@/app/locale";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
+import { useServerFormSync } from "@/app/useServerFormSync";
+import { isTransientRefreshError } from "@/app/queryClient";
 
 const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", payment: "支付", file: "云存储" };
 const CAPABILITY_TAB_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信配置", payment: "支付配置", file: "云存储配置" };
@@ -43,12 +45,15 @@ function ProviderCard({
   const queryClient = useQueryClient();
   const [testFeedback, setTestFeedback] = useState<"failed" | "live" | "config" | null>(null);
   const save = useMutation({
-    mutationFn: (values: SaveTenantIntegrationRequest) => tenantIntegrationsApi.save(definition.capability, definition.provider, {
+    mutationFn: async (values: SaveTenantIntegrationRequest) => {
+      if (!configCurrent()) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
+      return tenantIntegrationsApi.save(definition.capability, definition.provider, {
       ...values,
       credentials: Object.fromEntries(Object.entries(values.credentials ?? {}).filter(([, value]) => String(value ?? "").trim()))
-    }),
+      });
+    },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["tenant-integrations"] }); message.success(`${t(definition.name)}${t("配置已保存")}`); },
-    onError: (error: any) => message.error(error?.response?.data?.message ?? `${t(definition.name)}${t("配置保存失败")}`)
+    onError: (error: any) => message.error(error?.response?.data?.message ?? error?.message ?? `${t(definition.name)}${t("配置保存失败")}`)
   });
   const test = useMutation({
     mutationFn: () => tenantIntegrationsApi.test(definition.capability, definition.provider),
@@ -59,9 +64,9 @@ function ProviderCard({
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("连接测试失败"))
   });
 
-  useEffect(() => {
+  const configCurrent = useServerFormSync(form, config ?? definition, () => {
     form.setFieldsValue({ enabled: config?.enabled ?? false, isDefault: config?.isDefault ?? false, settings: config?.settings ?? {}, credentials: {} });
-  }, [config, form]);
+  });
 
   useEffect(() => {
     registerForm(providerKey, form);
@@ -172,7 +177,7 @@ export function TenantIntegrationsPage() {
     }
   }, []);
   if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
-  if (catalog.error || !catalog.data) return <PageHeader title={t("第三方服务")} description={t("暂时无法读取租户第三方服务配置，请刷新重试。")} />;
+  if (!catalog.data || catalog.error && !isTransientRefreshError(catalog.error)) return <PageHeader title={t("第三方服务")} description={t("暂时无法读取租户第三方服务配置，请刷新重试。")} />;
   const configByProvider = new Map(catalog.data.configs.map((config) => [`${config.capability}:${config.provider}`, config]));
   return (
     <PageHeader

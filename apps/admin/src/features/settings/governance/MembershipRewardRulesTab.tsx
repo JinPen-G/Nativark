@@ -3,12 +3,12 @@ import { SaveOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
 import { Card, Col, InputNumber, Row, Space, Typography } from "antd";
-import { Form } from "@/components/ui";
+import { App, Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button } from "@/components/ui";
-import { useEffect } from "react";
+import { useServerFormSync } from "@/app/useServerFormSync";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { rewardTypeLabels } from "./ruleOptionLabels";
@@ -33,10 +33,18 @@ export function MembershipRewardRulesTab({
   onSave: (values: MembershipSettingsFormValues) => Promise<unknown>;
 }) {
   const { t } = useLocale();
+  const { message } = App.useApp();
   const [form] = Form.useForm<MembershipSettingsFormValues>();
-  useEffect(() => {
+  const isCurrent = useServerFormSync(form, settings, () => {
     form.setFieldsValue({ membership: settings.membership });
-  }, [form, settings]);
+  });
+  const saveCurrent = async (values: MembershipSettingsFormValues) => {
+    if (!isCurrent()) {
+      const reason = t("服务端配置已变更，未保存的内容已保留。请重新打开本页核对后再保存。");
+      message.warning(reason); throw new Error(reason);
+    }
+    return onSave(values);
+  };
 
   const couponTemplates = useQuery({
     queryKey: ["rental-core", "coupon-templates"],
@@ -47,10 +55,10 @@ export function MembershipRewardRulesTab({
     .filter((item) => item.status === "active")
     .map((item) => ({ value: item.id, label: item.name }));
   return (
-    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={values => { void onSave(values).catch(() => undefined); }}>
+    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
       <div className="table-toolbar">
         <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={onSave} />
+        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />
       </div>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
