@@ -5,11 +5,12 @@ import { requestFingerprint as hash } from '../../rental-core/rental-idempotency
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { BudgetError } from './budget.ports';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
-import { createRecordedPricingGatewayBudget } from './gateway-budget.composition';
+import { createRecordedPricingGatewayBudget, createRecordedPricingGatewayAccountingRecovery } from './gateway-budget.composition';
 import type { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
 
 type ServerDependencies = Omit<ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0], 'credentials' | 'taskId'>
-  & Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'db' | 'pricingEvidence' | 'sceneCode'>;
+  & Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'db' | 'sceneCode'>
+  & Partial<Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'pricingEvidence'>>;
 export type GatewayPricingRequestAction = 'publishPrice' | 'publishInputBound' | 'readPublication' | 'readPrice' | 'readInputBound' | 'readPricing' | 'readPricingCall';
 export type GatewayPricingHttpRequest = { headers: { authorization?: unknown } };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
@@ -30,17 +31,23 @@ const boundSummary = (record: Awaited<ReturnType<GatewayPricingRecordManagement[
   price: priceSummary(record.price), executionPermission: false as const
 });
 
+/** Current Auth/ALS request boundary. Historical reservation pricing reads
+ * need only stored evidence; publishing still requires the trusted producer.
+ * Neither path selects a model, grants dispatch or starts a background job. */
 export class GatewayPricingRequestFactory {
   private readonly server: ServerDependencies;
   constructor(input: ServerDependencies) {
     if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'subscriptions', 'clock', 'pricingEvidence', 'sceneCode'].includes(key))
       || typeof input.auth?.resolveAccessContext !== 'function' || typeof input.guard?.canActivate !== 'function'
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiScope?.findFirst !== 'function'
-      || typeof input.pricingEvidence?.readPrice !== 'function' || typeof input.pricingEvidence.readInputBound !== 'function'
+      || input.pricingEvidence !== undefined && (typeof input.pricingEvidence?.readPrice !== 'function'
+        || typeof input.pricingEvidence.readInputBound !== 'function')
       || typeof input.subscriptions?.readCategoryCommercialContext !== 'function'
       || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).safeParse(input.sceneCode).success
       || input.clock !== undefined && typeof input.clock !== 'function') throw new BudgetError('UNAVAILABLE');
-    this.server = { ...input };
+    this.server = { ...input, ...(input.pricingEvidence ? { pricingEvidence: Object.freeze({
+      readPrice: input.pricingEvidence.readPrice.bind(input.pricingEvidence),
+      readInputBound: input.pricingEvidence.readInputBound.bind(input.pricingEvidence) }) } : {}) };
   }
   async call(request: GatewayPricingHttpRequest, action: GatewayPricingRequestAction, value: unknown) {
     const header = bearer.safeParse(request?.headers?.authorization);
@@ -80,33 +87,41 @@ export class GatewayPricingRequestFactory {
         await identity.resolve();
         const authorization = new PrismaTaskBudgetAuthorizationSource({ db: server.db, auth, credentials,
           subscriptions: server.subscriptions, guard, clock });
-        const app = createRecordedPricingGatewayBudget({ db: server.db, scopes: authorization.scopes, authorization,
-          subscriptions: server.subscriptions, pricingEvidence: server.pricingEvidence, sceneCode: server.sceneCode, clock });
-        const management = app.pricingRecords;
         let result: unknown;
-        if (action === 'publishPrice') {
-          const receipt = await management.publishPrice(command);
-          mutationReturned = true;
-          const original = await management.readPublication(command);
-          if (original.id !== receipt.id || original.hash !== receipt.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
-          result = receipt;
-        } else if (action === 'publishInputBound') {
-          const receipt = await management.publishInputBound(command);
-          mutationReturned = true;
-          const original = await management.readInputBound({ callId: receipt.callId });
-          if (original.id !== receipt.id || original.hash !== receipt.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
-          result = receipt;
-        } else if (action === 'readPricing' || action === 'readPricingCall') {
-          result = await app.recovery[action](command);
-        } else if (action === 'readInputBound') {
-          const original = await management.readInputBound(command);
-          if (hash(original) !== hash(await management.readInputBound(command))) throw new BudgetError('PENDING_RECONCILIATION');
-          result = boundSummary(original);
+        const accounting = { db: server.db, scopes: authorization.scopes, authorization,
+          subscriptions: server.subscriptions, clock };
+        if (action === 'readPricing' || action === 'readPricingCall') {
+          const recovery = createRecordedPricingGatewayAccountingRecovery(accounting);
+          result = await recovery[action](command);
         } else {
-          const original = action === 'readPrice' ? await management.readPrice(command) : await management.readPublication(command);
-          const again = action === 'readPrice' ? await management.readPrice(command) : await management.readPublication(command);
-          if (hash(original) !== hash(again)) throw new BudgetError('PENDING_RECONCILIATION');
-          result = priceSummary(original);
+          // Missing publication evidence is not replaced by a fake source just
+          // to permit historical reads. All publication/management actions deny.
+          if (!server.pricingEvidence) throw new BudgetError('UNAVAILABLE');
+          const app = createRecordedPricingGatewayBudget({ ...accounting,
+            pricingEvidence: server.pricingEvidence, sceneCode: server.sceneCode });
+          const management = app.pricingRecords;
+          if (action === 'publishPrice') {
+            const receipt = await management.publishPrice(command);
+            mutationReturned = true;
+            const original = await management.readPublication(command);
+            if (original.id !== receipt.id || original.hash !== receipt.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
+            result = receipt;
+          } else if (action === 'publishInputBound') {
+            const receipt = await management.publishInputBound(command);
+            mutationReturned = true;
+            const original = await management.readInputBound({ callId: receipt.callId });
+            if (original.id !== receipt.id || original.hash !== receipt.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
+            result = receipt;
+          } else if (action === 'readInputBound') {
+            const original = await management.readInputBound(command);
+            if (hash(original) !== hash(await management.readInputBound(command))) throw new BudgetError('PENDING_RECONCILIATION');
+            result = boundSummary(original);
+          } else {
+            const original = action === 'readPrice' ? await management.readPrice(command) : await management.readPublication(command);
+            const again = action === 'readPrice' ? await management.readPrice(command) : await management.readPublication(command);
+            if (hash(original) !== hash(again)) throw new BudgetError('PENDING_RECONCILIATION');
+            result = priceSummary(original);
+          }
         }
         await identity.resolve();
         return result;

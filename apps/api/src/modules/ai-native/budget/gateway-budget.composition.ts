@@ -238,13 +238,11 @@ export function createPersistedGatewayBudget(input: {
   return { bindings, facts, settings, recovery, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
 }
 
-export function createRecordedPricingGatewayBudget(input:
+type RecordedPricingAccountingDependencies =
   Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'pricing'>
-  & { db: ConstructorParameters<typeof PrismaGatewayRecordedPricing>[0]; pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
-  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
-  const gateway = createPersistedGatewayBudget({ ...input, pricing });
-  const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
-    input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
+  & { db: ConstructorParameters<typeof PrismaGatewayRecordedPricing>[0] };
+
+function recordedPricingRecovery(gateway: ReturnType<typeof createPersistedGatewayBudget>, pricing: PrismaGatewayRecordedPricing) {
   const readPricing = async (value: unknown, readOriginal: typeof gateway.recovery.read) => {
     const command = structuredClone(value);
     const original = await readOriginal(command);
@@ -258,11 +256,28 @@ export function createRecordedPricingGatewayBudget(input:
     return { ...basis, reservationStatus: confirmed.status, configurationRevision: confirmed.association.config.configRevision,
       dispatched: confirmed.dispatched, recordedActualQuantity: confirmed.actual };
   };
-  const recovery = Object.freeze({ ...gateway.recovery,
+  return Object.freeze({ ...gateway.recovery,
     readPricing: (value: unknown) => readPricing(value, gateway.recovery.read),
     readPricingCall: (value: unknown) => readPricing(value, gateway.recovery.readCall)
   });
-  return { ...gateway, pricingRecords, recovery };
+}
+
+/** Original stored pricing only: no new-price/input-bound producer, model
+ * connection or execution gate is required. Current accounting authorization
+ * and same-ledger binding still apply; this never publishes new evidence. */
+export function createRecordedPricingGatewayAccountingRecovery(input: RecordedPricingAccountingDependencies) {
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const gateway = createPersistedGatewayBudget({ ...input, pricing });
+  return recordedPricingRecovery(gateway, pricing);
+}
+
+export function createRecordedPricingGatewayBudget(input: RecordedPricingAccountingDependencies
+  & { pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const gateway = createPersistedGatewayBudget({ ...input, pricing });
+  const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
+    input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
+  return { ...gateway, pricingRecords, recovery: recordedPricingRecovery(gateway, pricing) };
 }
 
 /** Workspace-user server assembly with real current task/configuration
