@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -13,12 +13,12 @@ import { PrismaTextCapabilityReceiptRepository } from './prisma-text-capability-
 import { PrismaTaskRecoverySnapshotRepository } from './runner/prisma-task-recovery-snapshot.repository';
 import type { TextCapabilityProbeApplication } from './text-capability-probe.application';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
-import type { AiTaskApplicationHost } from './runner/prisma-task-application';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './runner/prisma-task-application';
 import type { AiTaskRunnerRepositoryCommandFactory } from './runner/ai-task-runner.repository-adapter';
 import type { AiTaskInputSource } from './task-input/task-input.ports';
 import type { AiTaskRegisteredExecutor } from './runner/prisma-task-measured-effects';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
-import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
+import type { AiTaskRunnerClock, AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
@@ -46,6 +46,7 @@ export type TextCapabilityProbeTaskComposition = Omit<PersistedTaskAuthorization
   financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   clock?: () => Date;
   monotonic?: () => number;
+  runnerClock?: AiTaskRunnerClock;
 };
 
 /** Server-only composition for the capability challenge. The task/run/step is
@@ -74,8 +75,8 @@ export function composeTextCapabilityProbeTask(input: TextCapabilityProbeTaskCom
     requestCancellation(value: unknown) {
       const parsed = cancellationSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      return root.taskTransitions.transition({ taskId: task.taskId, expectedRevision: parsed.data.expectedRevision,
-        to: 'cancel_requested', reason: 'cancel_requested' });
+      return waitForTaskApplicationDependency(() => root.taskTransitions.transition({ taskId: task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' }), true, undefined, input.runnerClock);
     },
   });
 }
@@ -159,7 +160,7 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
     transitionAuthority: transition, planAuthority: source, inputSource, commands, executors,
     invocations, financialEvidence: input.financialEvidence, toolCatalog: { resolve: async (code, version) =>
       code === TEXT_CAPABILITY_PROBE_TOOL && version === AI_TOOL_DRAFT_VERSION ? { modelCall: true } : null },
-    wall: clock, monotonic: input.monotonic });
+    wall: clock, monotonic: input.monotonic, clock: input.runnerClock });
   return Object.freeze({ ...composed, authorization, source, plans, invocations, commands, transition, executors, inputSource });
 }
 
@@ -177,6 +178,9 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'prepareCurrent' | 'runHeldCurrent' | 'reconcileCurrent' | 'preflightCurrent' | 'prepareHeldInvocationCurrent'>;
   sceneVersion: string; priceVersion: string;
 }) {
+  const host = z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(input.host));
+  const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
+    waitForTaskApplicationDependency(operation, afterMutation, signal, input.runnerClock);
   const producer = composeAuthorizedTextProbeTaskProducer(input.db, {
     auth: input.auth, credentials: input.credentials, guard: input.guard, probe: input.probe,
     sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, clock: input.clock,
@@ -189,7 +193,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     const saved = found.task;
     const task = { taskId: saved.taskId, runId: saved.runId, registrationRef: saved.registrationRef,
       command: saved.command, priceVersion: saved.priceVersion, limits: saved.limits };
-    const root = composeTextCapabilityProbeTask({ ...input, task });
+    const root = composeTextCapabilityProbeTask({ ...input, host, task });
     // Reauthorize the exact persisted task before returning a runner/receipt
     // consumer. Merely finding the original creation key grants no run lease.
     await root.authorization.tasks.readMetadata(task.taskId);
@@ -205,7 +209,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     createTask: (value: unknown) => producer.create(value),
     readCreation: (value: unknown) => producer.readCreation(value),
     async readHistoricalOriginal(requestKey: string) {
-      const original = await producer.originals.readHistoricalOriginal(requestKey);
+      const original = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
       const now = (input.clock ?? (() => new Date()))();
       if (!Number.isFinite(now.getTime())) throw unavailable();
       const validity = (expiresAt: string) => Date.parse(expiresAt) <= now.getTime() ? 'expired' as const : 'historical_only' as const;
@@ -216,12 +220,12 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       const where = { ...original.owner, scopeKind: 'WORKSPACE' as const, sceneCode: TEXT_PROBE_SCENE,
         sceneVersion: original.sceneVersion, creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
         inputRevision: original.inputRevision, inputHash: original.inputHash };
-      const rows = await input.db.aiTask.findMany({ where, take: 2, select: { id: true, scopeId: true, scopeKind: true,
+      const rows = await observe(() => input.db.aiTask.findMany({ where, take: 2, select: { id: true, scopeId: true, scopeKind: true,
         audience: true, ownerKind: true, ownerId: true, sceneCode: true, sceneVersion: true, creationKey: true,
-        inputRef: true, inputRevision: true, inputHash: true } });
+        inputRef: true, inputRevision: true, inputHash: true } }));
       if (rows.length > 1) throw unavailable();
       if (!rows.length) {
-        const again = await producer.originals.readHistoricalOriginal(requestKey);
+        const again = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
         if (!again || again.inputRef !== original.inputRef || again.inputHash !== original.inputHash) throw unavailable();
         return absent;
       }
@@ -230,16 +234,16 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       // The original key locates, never authorizes. Use current task policies,
       // without resolving today's model, plan policy or an execution lease.
       const authorization = composePersistedTaskAuthorization(input);
-      const access = await authorization.tasks.resolveAccess(stored.id, 'read_metadata');
-      const metadata = await authorization.tasks.readMetadata(stored.id);
-      const runs = await input.db.aiRun.findMany({ where: { scopeId: stored.scopeId, taskId: stored.id, sequence: 1 }, take: 2,
-        select: { id: true, scopeId: true, taskId: true, sequence: true, actorKind: true, actorId: true } });
+      const access = await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_metadata'));
+      const metadata = await observe(() => authorization.tasks.readMetadata(stored.id));
+      const runs = await observe(() => input.db.aiRun.findMany({ where: { scopeId: stored.scopeId, taskId: stored.id, sequence: 1 }, take: 2,
+        select: { id: true, scopeId: true, taskId: true, sequence: true, actorKind: true, actorId: true } }));
       if (runs.length !== 1 || runs[0].scopeId !== stored.scopeId || runs[0].taskId !== stored.id || runs[0].sequence !== 1
         || runs[0].actorKind !== access.actorKind || runs[0].actorId !== access.actorId) throw unavailable();
-      const snapshot = await new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks).read({ taskId: stored.id, runId: runs[0].id });
+      const snapshot = await observe(() => new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks).read({ taskId: stored.id, runId: runs[0].id }));
       if (snapshot.task.revision !== metadata.revision || snapshot.task.status !== metadata.status
         || snapshot.steps.some(step => step.toolCode !== TEXT_CAPABILITY_PROBE_TOOL)) throw unavailable();
-      const receipt = await new PrismaTextCapabilityReceiptRepository(input.db, input.clock).find(stored.scopeId, original.command.operationId);
+      const receipt = await observe(() => new PrismaTextCapabilityReceiptRepository(input.db, input.clock).find(stored.scopeId, original.command.operationId));
       let configurationRevision: number | null = null;
       let observation: { receiptId: string; methodVersion: string; mode: 'mock' | 'live';
         checkedAt: string; expiresAt: string; validity: 'expired' | 'historical_only'; matched: boolean;
@@ -258,87 +262,73 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
           mode: o.transport === 'node_https' ? 'live' : 'mock', checkedAt: o.checkedAt, expiresAt: o.expiresAt,
           validity: validity(o.expiresAt), matched: o.matched, reportedUsage: o.usage ? { ...o.usage } : null };
       }
-      const again = await producer.originals.readHistoricalOriginal(requestKey);
+      const again = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
       if (!again || again.inputRef !== original.inputRef || again.inputHash !== original.inputHash
-        || (await authorization.tasks.resolveAccess(stored.id, 'read_metadata')).bindingKey !== access.bindingKey
-        || (await authorization.tasks.resolveAccess(stored.id, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+        || (await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_metadata'))).bindingKey !== access.bindingKey
+        || (await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_step_terminal'))).bindingKey !== access.bindingKey) throw denied();
       return { ...header, state: 'historical' as const,
         task: { taskId: snapshot.task.taskId, status: snapshot.task.status, revision: snapshot.task.revision,
           cancelRequestedAt: snapshot.task.cancelRequestedAt }, run: { runId: snapshot.run.runId, status: snapshot.run.status },
         resultObserved: snapshot.steps.some(step => step.artifacts.length > 0), configurationRevision, observation };
     },
     async readTaskMetadataOriginal(value: unknown) {
-      const { task, root } = await originalTask(value);
-      const before = await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
-      const metadata = await root.authorization.tasks.readMetadata(task.taskId);
-      if ((await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== before.bindingKey) throw denied();
+      const { task, root } = await observe(() => originalTask(structuredClone(value)));
+      const before = await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
+      const metadata = await observe(() => root.authorization.tasks.readMetadata(task.taskId));
+      if ((await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'))).bindingKey !== before.bindingKey) throw denied();
       return metadata;
     },
     async startOriginal(value: unknown, signal?: AbortSignal) {
-      const { task, root } = await originalTask(value);
+      if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+      const { task, root } = await observe(() => originalTask(structuredClone(value)), signal);
       return root.application.start({ taskId: task.taskId, runId: task.runId }, signal);
     },
     async inspectOriginal(value: unknown) {
-      const { task, root } = await originalTask(value);
+      const { task, root } = await observe(() => originalTask(structuredClone(value)));
       return root.application.inspect({ taskId: task.taskId, runId: task.runId });
     },
     async requestCancellationOriginal(value: unknown) {
       const parsed = originalCancellationSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { creationKey, inputRef, expectedRevision } = parsed.data;
-      const { root } = await originalTask({ creationKey, inputRef });
+      const { root } = await observe(() => originalTask({ creationKey, inputRef }));
       return root.requestCancellation({ expectedRevision });
     },
     async reconcileOriginal(value: unknown, signal?: AbortSignal) {
-      const { task, root } = await originalTask(value);
-      const before = await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
-      const stored = await input.db.aiTask.findFirst({ where: before.where });
-      const run = stored && await input.db.aiRun.findFirst({ where: { scopeId: stored.scopeId, taskId: task.taskId, id: task.runId } });
-      if (!stored || stored.id !== task.taskId || !run || run.id !== task.runId || run.scopeId !== stored.scopeId
-        || run.taskId !== task.taskId || run.actorKind !== before.actorKind || run.actorId !== before.actorId) throw denied();
+      if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+      const { task, root } = await observe(() => originalTask(structuredClone(value)), signal);
+      const before = await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), signal);
+      const snapshot = await observe(() => root.recovery.read({ taskId: task.taskId, runId: task.runId }), signal);
       const verifyReader = async () => {
         if ((await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== before.bindingKey) throw denied();
       };
-      await verifyReader();
+      await observe(verifyReader, signal);
       // Terminal tasks and never-started work are read-only. Recovery does not
       // turn QUEUED into a fresh start, nor claim a completed run's lease.
-      if (!['RUNNING', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(stored.status)
-        || !['QUEUED', 'RUNNING'].includes(run.status)) return { kind: 'not_started', reason: 'task_not_runnable' } as const;
-      if ((await root.authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run')).bindingKey !== before.bindingKey) throw denied();
+      if (!snapshot.plan || !['running', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)
+        || !['queued', 'running'].includes(snapshot.run.status)) return { kind: 'not_started', reason: 'task_not_runnable' } as const;
       if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
-      // Consume the acknowledged acquisition only. If claim's reply is lost,
-      // it throws here: never reread a lease to manufacture dispatch authority.
-      const lease = await root.authorization.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
-        holderId: input.host.holderId, leaseMs: input.host.leaseMs, expectedTaskRevision: stored.revision,
-        expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) });
-      try {
-        if ((await root.authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run')).bindingKey !== before.bindingKey) throw denied();
-        const result = await root.application.reconcile({ taskId: task.taskId, runId: task.runId }, signal);
-        await verifyReader();
-        return result;
-      } finally {
-        // The runner normally releases its latest lease. Clean up only this
-        // exact acknowledged acquisition if execution never advanced it.
-        const held = await input.db.aiRun.findFirst({ where: { scopeId: stored.scopeId, taskId: task.taskId, id: task.runId,
-          leaseOwnerId: input.host.holderId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken),
-          leaseExpiresAt: { gt: (input.clock ?? (() => new Date()))() } } });
-        if (held) {
-          const latest = await root.authorization.tasks.readMetadata(task.taskId);
-          await root.authorization.tasks.releaseRun({ taskId: task.taskId, runId: task.runId, holderId: input.host.holderId,
-            expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
-        }
-      }
+      // The original runner owns bounded acquisition, CAS and cleanup. A lost
+      // claim reply cannot be reconstructed from a lease read, and recovery
+      // never calls the preparation or provider execution path.
+      const outcome = await root.runner.run({ taskId: task.taskId, runId: task.runId, ...host,
+        expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+        expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+      await observe(verifyReader, undefined, true);
+      return { kind: 'run_outcome' as const, outcome };
     },
     async preflightOriginal(value: unknown) {
-      const { task, root } = await originalTask(value);
-      const result = await input.probe.preflightCurrent(structuredClone(task.command));
-      await root.authorization.tasks.readMetadata(task.taskId);
+      const { task, root } = await observe(() => originalTask(structuredClone(value)));
+      const result = await observe(() => input.probe.preflightCurrent(structuredClone(task.command)));
+      await observe(() => root.authorization.tasks.readMetadata(task.taskId));
       return result;
     },
     async readCapabilityReceipt(value: unknown) {
-      const { task, root } = await originalTask(value);
-      const result = await input.probe.reconcileCurrent(structuredClone(task.command));
-      await root.authorization.tasks.readMetadata(task.taskId);
+      const { task, root } = await observe(() => originalTask(structuredClone(value)));
+      // Receipt reconciliation may persist capability evidence. It is not a
+      // read-only observation or proof that a timed-out publication was absent.
+      const result = await observe(() => input.probe.reconcileCurrent(structuredClone(task.command)), undefined, true);
+      await observe(() => root.authorization.tasks.readMetadata(task.taskId), undefined, true);
       // The original capability receipt, not a runner success flag, determines
       // verified/unverified status. Re-reading it cannot dispatch a probe.
       return result;
