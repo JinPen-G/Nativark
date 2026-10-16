@@ -165,6 +165,14 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return Object.freeze({ readSubmission: repository.readSubmission.bind(repository) });
   }
 
+  /** Current questions still require their original source revalidation. This
+   * read-only surface has no plan authorizer or mutation/continuation methods. */
+  static pendingReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, source: AiTaskInputSource, clock?: () => Date) {
+    if (typeof source?.resolve !== 'function') throw unavailable();
+    const repository = new PrismaTaskInputRepository(db, tasks, undefined, source, clock, true);
+    return Object.freeze({ readPending: repository.readPending.bind(repository) });
+  }
+
   /** Only the enclosing task-transition transaction may invoke this witness.
    * It validates persisted released/measured input work, not a fresh model gate. */
   static releasedCancellationWitness(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
@@ -198,7 +206,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return this.transaction(work, true);
   }
   private async task(tx: Tx, taskId: string, access: Access) {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
+    if (!this.receiptOnly) await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
     const task = await tx.aiTask.findFirst({ where: access.where, include: { scope: true } });
     if (!task || task.id !== taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
       || task.audience !== access.audience || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
@@ -206,7 +214,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return task;
   }
   private async run(tx: Tx, taskId: string, scopeId: string, runId: string, access: Access, completed = false) {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
+    if (!this.receiptOnly) await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
     const run = await tx.aiRun.findFirst({ where: { id: runId, scopeId, taskId } });
     if (!run || run.id !== runId || run.scopeId !== scopeId || run.taskId !== taskId
       || run.actorId !== access.actorId || run.actorKind !== access.actorKind || !['QUEUED', 'RUNNING', ...(completed ? ['SUCCEEDED'] : [])].includes(run.status)
@@ -415,7 +423,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const before = await this.access(taskId, 'read_metadata');
     return this.transaction(async tx => {
       const task = await this.task(tx, taskId, before);
-      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null) return null;
+      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null) {
+        await this.access(taskId, 'read_metadata', before);
+        return null;
+      }
       const requests = await tx.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId, waitingTaskRevision: task.revision, status: 'PENDING' }, take: 2 });
       if (requests.length !== 1) throw unavailable();
       const request = requests[0], run = await this.run(tx, taskId, task.scopeId, request.runId, before);

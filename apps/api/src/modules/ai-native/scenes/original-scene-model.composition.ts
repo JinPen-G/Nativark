@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft } from '@rental-os/shared';
-import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
@@ -69,29 +69,9 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
   } });
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
-  const current = async (ref: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string) => {
-    const original = await scenes.requests.readHistorical(ref);
-    if (original.request.sceneCode !== scene.code || original.receipt.sceneVersion !== scene.version) throw denied();
-    await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
-    const task = await scenes.requests.readTaskReceipt(ref.inputRef);
-    if (task.state !== 'observed' || task.taskId !== taskId) throw denied();
-    const access = await model.tasks.resolveAccess(taskId, 'read_metadata');
-    const provenance = await dependencies.db.$transaction(async tx => {
-      const row = await tx.aiTask.findFirst({ where: access.where });
-      if (!row || row.inputRef !== ref.inputRef) throw denied();
-      return readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId, runId,
-        originRunId: task.runId, registrationRef: registration(ref.inputRef), includeHistory: true });
-    });
-    const after = await model.tasks.resolveAccess(taskId, 'read_metadata');
-    if (access.bindingKey !== after.bindingKey) throw denied();
-    return { original, task, provenance };
-  };
-  const same = (before: Awaited<ReturnType<typeof current>>, after: Awaited<ReturnType<typeof current>>) => {
-    if (originalIdentityHash(before.original.context) !== originalIdentityHash(after.original.context)
-      || before.original.receipt.contentHash !== after.original.receipt.contentHash
-      || before.task.revision !== after.task.revision
-      || requestFingerprint(before.provenance) !== requestFingerprint(after.provenance)) throw denied();
-  };
+  const { current, same, source: originalInputSource } = composeOriginalSceneClarificationSource({
+    db: dependencies.db, tasks: model.tasks, scenes, scene, gatewayScene, results
+  });
   const executors: AiTaskRegisteredExecutor = { resolve: async (code, version) => {
     const executor = await model.executors.resolve(code, version);
     if (!executor) return null;
@@ -190,89 +170,6 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         materialHash: packet.materialHash, messageHash: requestFingerprint(material),
         model: 'not_called' as const, businessExecution: 'not_attempted' as const });
     };
-  const readClarificationBasis = async (value: Readonly<AiTaskInputBinding>) => {
-    const binding = structuredClone(value), access = await model.tasks.resolveAccess(binding.taskId, 'read_step_terminal');
-    const task = await dependencies.db.aiTask.findFirst({ where: access.where });
-    if (!task?.inputRef || task.scopeId !== binding.scopeId || binding.toolCode !== TASK_TEXT_MODEL_TOOL
-      || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
-    const ref = originalRequestReferenceSchema.parse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: task.inputRef });
-    const before = await current(ref, binding.taskId, binding.runId);
-    const stored = await dependencies.db.$transaction(async tx => {
-      const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
-        scopeId: binding.scopeId, taskId: binding.taskId, runId: binding.runId } } });
-      const step = await tx.aiStep.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
-        runId: binding.runId, id: binding.stepId } });
-      const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
-        runId: binding.runId, id: binding.inputRef, registrationRef: before.provenance.registrationRef } });
-      const payload = z.object({ taskRevision: revision }).passthrough().safeParse(plan?.payload);
-      if (!plan || plan.planHash !== binding.planHash || requestFingerprint(plan.payload) !== binding.planHash
-        || !payload.success || payload.data.taskRevision !== binding.planRevision
-        || binding.registrationRef !== before.provenance.registrationRef || !step || !input
-        || step.status !== 'SUCCEEDED' || step.resultRef !== binding.basisResultRef || step.inputRef !== binding.inputRef
-        || step.requestFingerprint !== binding.inputHash || step.toolCode !== binding.toolCode
-        || step.toolVersion !== binding.toolVersion || input.fingerprint !== binding.inputHash) throw denied();
-      const parsed = parseTaskModelInput(input.payload, modelPolicy);
-      if (taskModelFingerprint(parsed, modelPolicy) !== binding.inputHash) throw denied();
-      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits) };
-    });
-    // The actual result reader proves invocation, dispatch/usage, original lineage,
-    // source freshness and current Guard/owner access. Unknown is never a question basis.
-    const result = await results.read({ original: ref, resultId: binding.basisResultRef });
-    // A stale quote result is only proof of the original completed invocation.
-    // No old text/facts are consumed: questions are rebuilt below using current
-    // authorized readers. Other scenes and unknown invocations remain closed.
-    if (!(result.status === 'available' || result.status === 'stale' && before.original.request.sceneCode === 'quote_clarification')
-      || result.taskId !== binding.taskId || result.runId !== binding.runId) throw unavailable();
-    same(before, await current(ref, binding.taskId, binding.runId));
-    if ((await model.tasks.resolveAccess(binding.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
-    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history, current: before };
-  };
-  const originalInputSource = Object.freeze<AiTaskInputSource>({
-    async resolve(binding: Readonly<AiTaskInputBinding>) {
-      const command = structuredClone(binding), basis = await readClarificationBasis(command);
-      if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
-      if (basis.history.length + 1 >= basis.limits.maxCalls) return { kind: 'not_required' as const };
-      const candidate = applyOriginalQuoteAnswers(basis.original.request.input.candidate, basis.history);
-      const prepared = await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
-      const parsed = z.object({ status: z.string(),
-        missingFields: z.array(z.string()).max(100).optional(), ambiguousFields: z.array(z.string()).max(100).optional()
-      }).passthrough().safeParse(prepared);
-      if (!parsed.success) throw unavailable();
-      const facts = parsed.data;
-      if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
-      if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
-      const fieldLabels: Record<string, string> = { items: '商品及数量', customerId: '客户明确选择', startsAt: '开始时间',
-        endsAt: '结束时间', locationId: '履约地点', returnLocationId: '归还地点', fulfillmentMode: '履约方式',
-        selectionRevision: '当前候选重新确认', request: '正式报价参数' };
-      const missing = [...new Set([...(facts.missingFields ?? []), ...(facts.ambiguousFields ?? [])]
-        .map(field => fieldLabels[field.startsWith('items.') ? 'items' : field] ?? '业务参数'))].join('、').slice(0, 70);
-      const contract = originalQuoteAnswerContract(candidate, prepared,
-        `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`);
-      if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) return { kind: 'not_required' as const };
-      same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
-      return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
-        expiresAt: basis.original.receipt.expiresAt, contract };
-    },
-    async validateAnswers(binding, contract, answers) {
-      const command = structuredClone(binding), submittedContract = structuredClone(contract), submittedAnswers = structuredClone(answers);
-      const expected = await originalInputSource.resolve(command);
-      if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
-        || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
-      if (submittedContract.code === 'original_quote_parameters') {
-        const basis = await readClarificationBasis(command);
-        if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
-        // The same deterministic consumer used by successor preparation validates
-        // human parameters. It does not quote, approve or create an order here.
-        applyOriginalQuoteAnswers(basis.original.request.input.candidate,
-          [...basis.history, { contract: submittedContract, answers: submittedAnswers }]);
-        return { disposition: 'business_parameters' as const, planHash: command.planHash,
-          inputRef: command.inputRef, inputHash: command.inputHash,
-          contractHash: requestFingerprint(submittedContract), answersHash: requestFingerprint(submittedAnswers),
-          bindingHash: requestFingerprint(command) };
-      }
-      return { disposition: 'context_only' as const, planHash: command.planHash, inputRef: command.inputRef, inputHash: command.inputHash };
-    }
-  });
   return Object.freeze({ scenes, readModelResult: results.read.bind(results), reopenModelSource: results.reopenSource.bind(results),
     runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
       planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
@@ -555,4 +452,130 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       } });
     }
   });
+}
+
+
+/** Source-only assembly shared by the execution host and current pending-input
+ * observation. It reads the original plan/result and current business candidates;
+ * it cannot construct a Gateway, publish input, claim a lease or resume a run. */
+export function composeOriginalSceneClarificationSource(input: {
+  db: AiOriginalSceneModelDependencies['db'];
+  tasks: Pick<AiTaskRepository, 'resolveAccess'>;
+  scenes: ReturnType<typeof composeAiOriginalScenes>;
+  scene: { code: string; version: string };
+  gatewayScene: AiOriginalSceneModelDependencies['gatewayScene'];
+  results: Pick<AiOriginalSceneResultService, 'read'>;
+}) {
+  const { db, tasks, scenes, results } = input;
+  const scene = Object.freeze(structuredClone(input.scene));
+  const { routeScene: _routeScene, ...serverPolicy } = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
+  const modelPolicy = taskModelPolicy(serverPolicy);
+  const registration = (inputRef: string) => `scene-model:${inputRef}`;
+  const current = async (ref: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string) => {
+    const original = await scenes.requests.readHistorical(ref);
+    if (original.request.sceneCode !== scene.code || original.receipt.sceneVersion !== scene.version) throw denied();
+    await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const task = await scenes.requests.readTaskReceipt(ref.inputRef);
+    if (task.state !== 'observed' || task.taskId !== taskId) throw denied();
+    const access = await tasks.resolveAccess(taskId, 'read_metadata');
+    const provenance = await db.$transaction(async tx => {
+      const row = await tx.aiTask.findFirst({ where: access.where });
+      if (!row || row.inputRef !== ref.inputRef) throw denied();
+      return readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId, runId,
+        originRunId: task.runId, registrationRef: registration(ref.inputRef), includeHistory: true });
+    });
+    const after = await tasks.resolveAccess(taskId, 'read_metadata');
+    if (access.bindingKey !== after.bindingKey) throw denied();
+    return { original, task, provenance };
+  };
+  const same = (before: Awaited<ReturnType<typeof current>>, after: Awaited<ReturnType<typeof current>>) => {
+    if (originalIdentityHash(before.original.context) !== originalIdentityHash(after.original.context)
+      || before.original.receipt.contentHash !== after.original.receipt.contentHash
+      || before.task.revision !== after.task.revision
+      || requestFingerprint(before.provenance) !== requestFingerprint(after.provenance)) throw denied();
+  };
+  const readClarificationBasis = async (value: Readonly<AiTaskInputBinding>) => {
+    const binding = structuredClone(value), access = await tasks.resolveAccess(binding.taskId, 'read_step_terminal');
+    const task = await db.aiTask.findFirst({ where: access.where });
+    if (!task?.inputRef || task.scopeId !== binding.scopeId || binding.toolCode !== TASK_TEXT_MODEL_TOOL
+      || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+    const ref = originalRequestReferenceSchema.parse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: task.inputRef });
+    const before = await current(ref, binding.taskId, binding.runId);
+    const stored = await db.$transaction(async tx => {
+      const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+        scopeId: binding.scopeId, taskId: binding.taskId, runId: binding.runId } } });
+      const step = await tx.aiStep.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
+        runId: binding.runId, id: binding.stepId } });
+      const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
+        runId: binding.runId, id: binding.inputRef, registrationRef: before.provenance.registrationRef } });
+      const payload = z.object({ taskRevision: revision }).passthrough().safeParse(plan?.payload);
+      if (!plan || plan.planHash !== binding.planHash || requestFingerprint(plan.payload) !== binding.planHash
+        || !payload.success || payload.data.taskRevision !== binding.planRevision
+        || binding.registrationRef !== before.provenance.registrationRef || !step || !input
+        || step.status !== 'SUCCEEDED' || step.resultRef !== binding.basisResultRef || step.inputRef !== binding.inputRef
+        || step.requestFingerprint !== binding.inputHash || step.toolCode !== binding.toolCode
+        || step.toolVersion !== binding.toolVersion || input.fingerprint !== binding.inputHash) throw denied();
+      const parsed = parseTaskModelInput(input.payload, modelPolicy);
+      if (taskModelFingerprint(parsed, modelPolicy) !== binding.inputHash) throw denied();
+      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits) };
+    });
+    // The actual result reader proves invocation, dispatch/usage, original lineage,
+    // source freshness and current Guard/owner access. Unknown is never a question basis.
+    const result = await results.read({ original: ref, resultId: binding.basisResultRef });
+    // A stale quote result is only proof of the original completed invocation.
+    // No old text/facts are consumed: questions are rebuilt below using current
+    // authorized readers. Other scenes and unknown invocations remain closed.
+    if (!(result.status === 'available' || result.status === 'stale' && before.original.request.sceneCode === 'quote_clarification')
+      || result.taskId !== binding.taskId || result.runId !== binding.runId) throw unavailable();
+    same(before, await current(ref, binding.taskId, binding.runId));
+    if ((await tasks.resolveAccess(binding.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history, current: before };
+  };
+  const originalInputSource = Object.freeze<AiTaskInputSource>({
+    async resolve(binding: Readonly<AiTaskInputBinding>) {
+      const command = structuredClone(binding), basis = await readClarificationBasis(command);
+      if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
+      if (basis.history.length + 1 >= basis.limits.maxCalls) return { kind: 'not_required' as const };
+      const candidate = applyOriginalQuoteAnswers(basis.original.request.input.candidate, basis.history);
+      const prepared = await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
+      const parsed = z.object({ status: z.string(),
+        missingFields: z.array(z.string()).max(100).optional(), ambiguousFields: z.array(z.string()).max(100).optional()
+      }).passthrough().safeParse(prepared);
+      if (!parsed.success) throw unavailable();
+      const facts = parsed.data;
+      if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
+      if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
+      const fieldLabels: Record<string, string> = { items: '商品及数量', customerId: '客户明确选择', startsAt: '开始时间',
+        endsAt: '结束时间', locationId: '履约地点', returnLocationId: '归还地点', fulfillmentMode: '履约方式',
+        selectionRevision: '当前候选重新确认', request: '正式报价参数' };
+      const missing = [...new Set([...(facts.missingFields ?? []), ...(facts.ambiguousFields ?? [])]
+        .map(field => fieldLabels[field.startsWith('items.') ? 'items' : field] ?? '业务参数'))].join('、').slice(0, 70);
+      const contract = originalQuoteAnswerContract(candidate, prepared,
+        `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`);
+      if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) return { kind: 'not_required' as const };
+      same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
+      return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
+        expiresAt: basis.original.receipt.expiresAt, contract };
+    },
+    async validateAnswers(binding, contract, answers) {
+      const command = structuredClone(binding), submittedContract = structuredClone(contract), submittedAnswers = structuredClone(answers);
+      const expected = await originalInputSource.resolve(command);
+      if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
+        || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
+      if (submittedContract.code === 'original_quote_parameters') {
+        const basis = await readClarificationBasis(command);
+        if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
+        // The same deterministic consumer used by successor preparation validates
+        // human parameters. It does not quote, approve or create an order here.
+        applyOriginalQuoteAnswers(basis.original.request.input.candidate,
+          [...basis.history, { contract: submittedContract, answers: submittedAnswers }]);
+        return { disposition: 'business_parameters' as const, planHash: command.planHash,
+          inputRef: command.inputRef, inputHash: command.inputHash,
+          contractHash: requestFingerprint(submittedContract), answersHash: requestFingerprint(submittedAnswers),
+          bindingHash: requestFingerprint(command) };
+      }
+      return { disposition: 'context_only' as const, planHash: command.planHash, inputRef: command.inputRef, inputHash: command.inputHash };
+    }
+  });
+  return Object.freeze({ current, same, source: originalInputSource });
 }

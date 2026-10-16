@@ -6,8 +6,8 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication, type SelectedQuoteTaskConfiguration, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
-import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
-import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene } from '../task-center-scene.composition';
@@ -635,8 +635,20 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
       return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
     };
+    const pending = async (value: unknown) => {
+      const reference = originalRequestReferenceSchema.parse(structuredClone(value));
+      if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const scene = input.creationRules.find(rule => rule.sceneCode === resultPolicy.sceneCode);
+      if (!scene) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await scenes.readTaskReceipt(reference.inputRef);
+      if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
+        scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: resultPolicy,
+        results: { read: command => resultReader().read(command) } });
+      return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
+    };
     const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
-      usage: persistedCenter.usage, scenes, modelResults: {
+      usage: persistedCenter.usage, scenes, ...(resultPolicy ? { input: { read: pending } } : {}), modelResults: {
         read: value => resultReader().read(value), reopenSource: value => resultReader().reopenSource(value)
       } });
     return { scenes, center, resultReader, tasks: authorization.tasks, db: input.db,
@@ -671,7 +683,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
     readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
-    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readScene(command)),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
+      () => call(request, value, (root, command) => root.center.readScene(command)), false),
+    readInput: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
+      () => call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input), false),
     readAnswer(request: AiSceneHttpRequest, value: unknown) {
       const parsed = answerSchema.safeParse(structuredClone(value));
       if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
