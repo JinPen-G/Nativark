@@ -1,6 +1,11 @@
 import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageQuantityDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 
 export type BudgetAction = 'settings_read' | 'settings_write' | 'reserve' | 'dispatch' | 'read' | 'settle' | 'release' | 'unknown' | 'reconcile';
+/** Original reservation lifecycle only. These actions cannot admit a new call;
+ * current action authority and persisted association/evidence remain mandatory. */
+export function isOriginalBudgetLifecycleAction(action: BudgetAction): boolean {
+  return action === 'read' || action === 'settle' || action === 'release' || action === 'unknown' || action === 'reconcile';
+}
 export type BudgetStatus = 'reserved' | 'settled' | 'released' | 'pending_reconciliation';
 export interface BudgetPolicyKey { scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; sceneCode: string; }
 export interface BudgetPolicy extends BudgetPolicyKey { id: string; revision: number; settings: AiUsageSettingsDraft; }
@@ -9,6 +14,8 @@ export interface BudgetGrant {
   /** Fresh, action-specific result from the server authorization adapter. */
   authorizationKey: string;
   expiresAt: Date;
+  /** Current commercial permission for NEW usage, not authority over old money.
+   * False blocks settings/new admission; original accounting needs its own grant. */
   entitled: boolean;
 }
 export interface BudgetAuthority {

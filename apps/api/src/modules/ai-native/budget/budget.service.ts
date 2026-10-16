@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { isAiStepExecutionContext } from '../task-contract-validation';
-import { BudgetError, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
+import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
 
@@ -38,7 +38,8 @@ export class BudgetService {
     try { grant = structuredClone(await this.authority.resolve(action, structuredClone(resource))); }
     catch { throw new BudgetError('FORBIDDEN'); }
     const now = this.now(), context = grant?.context;
-    if (!grant || !isAiStepExecutionContext(context) || !grant.entitled || !identifier(grant.authorizationKey)
+    if (!grant || !isAiStepExecutionContext(context) || typeof grant.entitled !== 'boolean'
+      || !isOriginalBudgetLifecycleAction(action) && !grant.entitled || !identifier(grant.authorizationKey)
       || !(grant.expiresAt instanceof Date) || grant.expiresAt <= now || Date.parse(context.authorizedAt) > now.getTime()
       || (context.actor.kind === 'automation' && Date.parse(context.actor.expiresAt) <= now.getTime())
       || (resource.association && !same(context.scope, resource.association.scope))) throw new BudgetError('FORBIDDEN');
