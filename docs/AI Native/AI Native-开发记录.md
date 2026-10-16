@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`5a8f458d`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`5c4ca431`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -88,11 +88,15 @@
 
 | 2026-10-16 | 派发前失败与任务计量收敛：5a8f458d | 原取消事实、invocation及财务关联共同证明未派发，失败使用既有公共错误码；四类定向情形、真实预算拒绝、计量中断后重建通过，既有相关用例4 pass/0 fail/skip/todo，API657 roots/0诊断、diff退出0。保留首轮AI_ACCESS_DENIED及随后资源待核对红测，已修错误码与计量接线；一次性夹具的提前执行授权、方法绑定及恢复入口错误也已纠正。未知取消/部分占用仍unknown，不退款或重派；任务调用次数保守记录一次尝试，不代表供应商收费。真实DB/供应商未验 |
 
+| 2026-10-16 | 历史计价读取与新发布来源解耦：5c4ca431 | 复用原账恢复和当前Auth/ALS，无发布来源也可按原预留/调用读取历史计价；过期原价、停新执行及无settings权限可读，撤权/发布新证据拒绝，无写入或新调用。一次性实际factory/仓储冒烟、既有账务组合4/4、API657 roots/0诊断及diff均退出0。首轮缺来源构造失败已修；夹具BigInt快照和不合法预留期限已纠正。未接新HTTP/生产驱动，真实DB/计价来源未验 |
+
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
 
 本轮快检命令在主线树运行：公共前缀为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；服务冒烟另加 `-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs`，环境使用AGENTS固定无效DATABASE_URL，审计及TEMP/TMP位于本树 `output/core-gateway-pricing-20261016/`。实际后缀为 `./output/typecheck-ai-native.cjs`（退出0）；`--test --test-name-pattern "formal call task host" tests/ai-native-model-task-host.test.cjs`（退出0）；`-` 一次性stdin组合（最终退出0，2条正向与1条预算层拒绝，首轮失败边界见上表）；`git diff --check`（退出0）。未生成或改动共享client/dist，未执行全局契约静态门、真实迁移或外部服务检查。
 
 ## 待补的验收证据
+
+历史读取快检沿用同一离线环境及审计目录：`node ... -`一次性stdin实际factory/授权/Prisma适配组合、`node ... --test tests/ai-native-gateway-budget-composition.test.cjs`（4 pass、0 fail/skip/todo）、`node ... ./output/typecheck-ai-native.cjs`和`git diff --check`均退出0；其中数据库、原价格/上界和传输为合成替身，不代表真实供应商计价或MySQL验证。
 
 本次失败收口命令复用上述Node/preload与固定无效数据库，审计/TEMP/TMP在本树`output/core-admission-outcome-20261016/`：`./output/typecheck-ai-native.cjs`（最终退出0）；已有`tests/ai-native-model-task-host.test.cjs`分别以`--test-name-pattern "model host starts queued task|host restart reconciles|missing usage"`及`"keeps missing provider usage|recovery reads"`筛选（分别1/1、3/3，退出0）；`node ... -`一次性stdin驱动实际运行器/Prisma适配（四种未派发情形、实际预算拒绝、重建恢复，最终退出0）；`git diff --check`退出0。数据库、路由/传输及部分财务生命周期为替身；只有“实际预算拒绝”那条额外组合真实BudgetService，不把其他情形冒充真实财务事务或MySQL验收。
 
