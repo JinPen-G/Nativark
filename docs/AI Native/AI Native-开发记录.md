@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`b713f9ef`、`fb4b032d`、`f8659157`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`3793d8d8`、`b713f9ef`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -21,7 +21,7 @@
 | AIN-03 持久化 | task/run/input/phase/proposal/approval、预算、知识/记忆与追加迁移已有代码；近期含内容保留/删除收据 | 全表升级/回读、真实迁移/索引/并发及部署恢复统一验收；本轮未执行迁移 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；7477af78 允许当前受权只读政策独立于旧执行输入过期更新 | 全身份/地点/撤权真实等价；执行动作仍须有效原输入，未知动作拒绝 |
 | AIN-05 Gateway | 平台/BYOK、唯一 invocation/dispatch、calls 单账及文本/流/媒体能力链已有实现 | 标准应用完整可信模型依赖、真实供应商/全部能力及可信计数/价格；不以内部组件等同公开可用 |
-| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；b713f9ef/fb4b032d/f8659157 补接管、共用应用及设置宿主有限等待、历史收据独立读权限和安全清理 | 原请求场景外层等剩余中断窗、澄清/确认完整组合；真实多进程/MySQL 竞争和宕机未验 |
+| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；3793d8d8复用原runner有界领取，接通原场景/模型订单组合恢复外层；此前接管、应用与设置等待/清理已有证据 | 其他场景取消/澄清外层、确认完整窗口；真实多进程/MySQL 竞争和宕机未验 |
 | AIN-07 审批 | 不可变提案、当前人类批准、CAS、Core 参与者和原审批/业务收据组合；重放校验修正已进入主线 | 全动作/失败窗与批准消费/Core 原子性真库复验；不自授批准 |
 | AIN-08 业务事实 | business-tools 已接目录/可用性/客户/订单/历史/风险，会员与资金改用原有界查询 | 四品类/历史依据真实对照、其他 reader 的底层查询上限/执行计划核实 |
 | AIN-09 Core 报价 | Core 报价、显式选择、原请求 review/confirm/原键保存与核对已有入口 | 四品类/企业资格/时间地点/全部参数的完整正式消费；unknown 不重建报价 |
@@ -95,6 +95,10 @@
 | 2026-10-16 | 原账HTTP与公开脱敏契约：4b3ee36f | shared/OpenAPI/精确Guard路由与默认关闭模块接通，响应复用用量投影并运行时校验，宿主等待有界；未注册AppModule。一次性实际Guard/Controller/账本适配验证读取、核对重放、越权与未知释放拒绝及脱敏，三条OpenAPI一致；既有用量契约4/4、API658 roots/0诊断、diff均退出0。首轮撤权由HTTP Guard返回401而非内部错误，已修正一次性检查的层级预期，未改生产鉴权。未构建shared dist、启服务或真库验收 |
 
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
+
+- **3793d8d8，AIN-06：** 原场景/模型宿主/模型订单组合不再直接领取后再恢复，而走原runner的有界恢复领取；外层原材料、计划和授权读取可中断，领取应答不明不重派。原请求阻塞读取红测已复现并转绿；一次性实际Auth/原请求/runner/仓储冒烟6/6、模型订单原unknown核对1/1，既有模型定向3/3、澄清重放1/1、取消1/1。API658 roots/0诊断、diff退出0，无新增测试文件。数据库/模型传输/初始财务生命周期及补齐旧夹具的配置分页store均为替身，不证明MySQL或供应商验收；其他场景窗口待续。
+
+本片命令使用固定离线数据库及本树`output/core-original-recovery-20261016/`审计/TEMP/TMP，公共前缀`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；一次性stdin另加`-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`。同两preload既有入口`--test --test-name-pattern "model host recovery reads|model host keeps missing provider usage" tests/ai-native-model-task-host.test.cjs`、分别筛选`"model clarification lost answer acknowledgement"`及`"model host cancellation during dispatch"`，最终均退出0；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`、`git diff --check`退出0。无全仓、shared构建、真实环境或独立审查结论。
 
 - **b713f9ef，AIN-04/06：** 接管/原收据读取有界，超时不领取推定租约，迟到前置读取不再写入；已确认且未进入runner的中断按原fence清理。历史收据采用当前结果读权限，关闭新接管仍可核对本人原代次。既有接管恢复6/6、一次性实际Auth/仓储/受控时钟冒烟4/4，API658 roots/0诊断、diff退出0。首轮确认历史读取错误依赖新接管权限；中途显式RepeatableRead触发旧离线夹具只读分支，已保留原写事务隔离、仅增加maxWait/timeout后复验，未放宽鉴权或夹具。真实MySQL/多进程未验。
 
