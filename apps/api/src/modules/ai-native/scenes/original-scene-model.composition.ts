@@ -317,16 +317,16 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         return after;
       };
       const settleInputCancellation = async (before: Awaited<ReturnType<typeof bound>>) => {
-        const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
-        const task = await dependencies.db.aiTask.findFirst({ where: access.where });
+        const access = await observe(() => model.tasks.resolveAccess(before.task.taskId, 'read_metadata'));
+        const task = await observe(() => dependencies.db.aiTask.findFirst({ where: access.where }));
         if (!task || task.inputRef !== before.reference.inputRef) throw denied();
         if (task.status !== 'CANCEL_REQUESTED') return null;
-        await verify(before);
+        await observe(() => verify(before));
         try {
-          const settled = await root.taskTransitions.settleInputCancellation({ taskId: task.id,
+          const settled = await waitForTaskApplicationDependency(() => root.taskTransitions.settleInputCancellation({ taskId: task.id,
             expectedRevision: task.revision, to: 'cancelled', reason: 'cancel_settled' },
-          (tx, key) => root.inputs.closeCancelledInputWait(tx, key));
-          await verify(before);
+          (tx, key) => root.inputs.closeCancelledInputWait(tx, key)), true, undefined, run.clock);
+          await observe(() => verify(before), undefined, true);
           return settled;
         } catch (error) {
           // Unknown/active work lacks the released-input witness. Leave the
@@ -370,10 +370,18 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         return { before, receipt };
       };
       return Object.freeze({ async start(value: unknown, signal?: AbortSignal) {
-        const before = await bound(value), { reference, task } = before;
-        await current(reference, task.taskId, task.runId);
+        const original = structuredClone(value);
+        const alreadyAborted = signal?.aborted;
+        const before = await observe(() => bound(original), alreadyAborted ? undefined : signal), { reference, task } = before;
+        if (alreadyAborted) {
+          await observe(() => verify(before));
+          return freezeOriginalInput({ original: before.original.receipt, taskId: task.taskId, runId: task.runId,
+            execution: { kind: 'not_started' as const, reason: 'host_aborted' as const },
+            businessExecution: 'not_inferred_from_model_result' as const });
+        }
+        await observe(() => current(reference, task.taskId, task.runId), signal);
         const execution = await application(reference).start({ taskId: task.taskId, runId: task.runId }, signal);
-        const after = await verify(before);
+        const after = await observe(() => verify(before), undefined, true);
         return freezeOriginalInput({ original: after.original.receipt, taskId: task.taskId, runId: task.runId,
           execution, businessExecution: 'not_inferred_from_model_result' as const });
       }, async readInput(value: unknown) {
@@ -395,10 +403,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict()
           .safeParse(structuredClone(value));
         if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        const before = await bound(parsed.data.original), submission = parsed.data.submission;
+        const before = await observe(() => bound(parsed.data.original)), submission = parsed.data.submission;
         if (submission.taskId !== before.task.taskId) throw denied();
         const receipt = await application(before.reference).resume(submission, signal);
-        await verify(before);
+        await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
       }, async readAnswer(value: unknown) {
         const { receipt } = await answer(value);
@@ -470,12 +478,13 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         await verify(before);
         return freezeOriginalInput({ receipt, execution, businessExecution: 'not_inferred_from_model_result' as const });
       }, async reconcile(value: unknown, signal?: AbortSignal) {
-        const before = await bound(value);
+        const original = structuredClone(value);
+        const before = await observe(() => bound(original), signal);
         const cancellation = await settleInputCancellation(before);
         if (cancellation) return freezeOriginalInput({ kind: 'cancellation_settled' as const, receipt: cancellation });
-        const runId = await originalRun(before);
+        const runId = await observe(() => originalRun(before), signal);
         const result = await application(before.reference).reconcile({ taskId: before.task.taskId, runId }, signal);
-        await verify(before);
+        await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(result); // Original held lease only, never a new claim/re-dispatch.
       }, async recover(value: unknown, signal?: AbortSignal) {
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
@@ -537,10 +546,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const parsed = z.object({ original: originalRequestReferenceSchema, expectedRevision: revision }).strict()
           .safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        const before = await bound(parsed.data.original);
-        const receipt = await root.taskTransitions.transition({ taskId: before.task.taskId,
-          expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
-        await verify(before);
+        const before = await observe(() => bound(parsed.data.original));
+        const receipt = await waitForTaskApplicationDependency(() => root.taskTransitions.transition({ taskId: before.task.taskId,
+          expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' }), true, undefined, run.clock);
+        await observe(() => verify(before), undefined, true);
         const settlement = await settleInputCancellation(before);
         return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const, settlement });
       } });
