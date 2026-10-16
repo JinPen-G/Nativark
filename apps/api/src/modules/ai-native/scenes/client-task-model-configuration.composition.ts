@@ -24,6 +24,7 @@ import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { UnifiedGatewayAudit } from '../unified-ai-gateway.ports';
 import type { AiRouteScene } from '../provider-router.ports';
 import { PrismaPlatformModelConnection } from '../platform-model-connection';
+import { PrismaTaskGatewayAudit } from '../prisma-task-gateway-audit';
 
 export type ClientCallGatewayDependencies = {
   db: PrismaClient;
@@ -32,7 +33,7 @@ export type ClientCallGatewayDependencies = {
   callPriceVersion: string;
   adapters: readonly ModelAdapter[];
   platformConnection: GatewayConnectionResolver;
-  audit: UnifiedGatewayAudit;
+  audit?: UnifiedGatewayAudit;
 };
 /** Formal platform Vault producer; no caller-provided connection or grant. */
 export type ClientPersistedCallGatewayDependencies = Omit<ClientCallGatewayDependencies, 'platformConnection'>;
@@ -100,11 +101,11 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
      * ledger. Only explicit server adapters; no default provider or HTTP client.
      * Live capabilities must already have the original verified probe receipt.
      * Building this object does not read a model, reserve, claim or invoke. */
-      if (!server || server.db !== dependencies.db || typeof server.audit?.append !== 'function'
+      if (!server || server.db !== dependencies.db || server.audit !== undefined && typeof server.audit?.append !== 'function'
         || typeof server.platformConnection?.resolve !== 'function' || !Array.isArray(server.adapters)
         || !server.adapters.length) throw new ModelGatewayError('CONFIG_INVALID');
       const db = server.db, routeScene = server.routeScene, callPriceVersion = server.callPriceVersion;
-      const adapters = [...server.adapters], audit = server.audit, platformConnection = server.platformConnection;
+      const adapters = [...server.adapters], platformConnection = server.platformConnection;
       const budgetAuthority = new PrismaClientTaskBudgetAuthorizationSource({ ...dependencies, db,
         command, loadMaterial: loader, clock });
       // Financial reads/reconcile use the original accounting authority, not a
@@ -112,6 +113,9 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
       const pricing = new PrismaGatewayCallPricing(db, budgetAuthority.scopes, callPriceVersion, clock);
       const accounting = createPersistedGatewayBudget({ db, scopes: budgetAuthority.scopes,
         subscriptions: dependencies.subscriptions, authorization: budgetAuthority, pricing, clock });
+      // The same durable admission audit as operator tasks, bound to this
+      // original customer task and ledger; no operator identity or second log.
+      const audit = server.audit ?? new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock);
       const capabilities = createPersistedTextCapabilityEvidence(db, clock);
       const profiles = new PrismaProviderProfileRepository(db);
       const routing = new AiGatewayRoutingService(scopes, configuration,

@@ -20,7 +20,7 @@ export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthoriz
   /** Server-selected platform profile, not a request/model-supplied ID. */
   platformProfileId: string;
   pricing: TextCapabilityProbeDependencies['pricing'] | { mode: 'persisted_calls'; priceVersion: string };
-  audit: TextCapabilityProbeDependencies['audit'];
+  audit?: TextCapabilityProbeDependencies['audit'];
   protocol?: TextCapabilityProbeDependencies['protocol'];
   host: Parameters<typeof composePersistedTextProbeWorkflow>[0]['host'];
   sceneVersion: string;

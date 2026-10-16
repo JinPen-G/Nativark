@@ -25,15 +25,16 @@ import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textPr
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
+import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
   db: Parameters<typeof createPersistedGatewayBudget>[0]['db'] & TextProbeReceiptDb
     & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0]
-    & Pick<import('@prisma/client').PrismaClient, 'aiTaskExecutionCharge'>;
+    & Pick<import('@prisma/client').PrismaClient, 'aiTaskExecutionCharge' | 'operationLog'>;
   scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>;
   management: Pick<TenantModelConfigurationAuthority, 'authorize'>;
   configuration: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>;
-  audit: UnifiedGatewayAudit;
+  audit?: UnifiedGatewayAudit;
   protocol?: ModelJsonTransport;
   /** Existing authorized platform Vault connection, never a tenant fallback.
    * E.g. createAuthorizedPlatformModelConfiguration(...).invocation. */
@@ -55,7 +56,10 @@ export class TextCapabilityProbeApplication {
     if (!input || [input.management?.authorize, input.scopes?.resolveCurrent, input.scopes?.resolveRoutingScopes,
       input.configuration?.selectionForInvocation, input.configuration?.profile, input.configuration?.credential,
       input.authorization?.resolveContext, input.authorization?.authorize, input.subscriptions?.readCategoryCommercialContext,
-      input.pricing?.quote, input.pricing?.quantity, input.audit?.append].some(method => typeof method !== 'function')) {
+      input.pricing?.quote, input.pricing?.quantity].some(method => typeof method !== 'function')
+      || input.audit !== undefined && typeof input.audit?.append !== 'function'
+      || input.audit === undefined && (typeof input.db.operationLog?.create !== 'function'
+        || typeof input.db.operationLog.findUnique !== 'function')) {
       throw new ModelGatewayError('CONFIG_INVALID');
     }
     this.profiles = new PrismaProviderProfileRepository(input.db);
@@ -264,7 +268,10 @@ export class TextCapabilityProbeApplication {
           orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } }) : this.adapter;
     const transport = new RoutedModelTransport({ tenant, platform }, [adapter], authority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
-      budget: this.accounting.budget, transport, audit: this.input.audit,
+      budget: this.accounting.budget, transport, audit: this.input.audit
+        // Task ownership comes from the persisted charge, not a caller's lease.
+        // The audit independently checks its invocation/task/ledger association.
+        ?? new PrismaTaskGatewayAudit(this.input.db, this.input.scopes, this.accounting.facts, charges[0].taskId, this.input.clock),
       ...(authority.media ? { media: authority.media } : {}),
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,
         this.adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
