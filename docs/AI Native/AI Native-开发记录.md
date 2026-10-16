@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`1a9bef1a`、`e06327d2`、`02183b7f`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`64df1cbd`、`1a9bef1a`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -149,6 +149,8 @@ HTTP快检沿用本树离线环境、source/private-client resolver与`output/co
 命令沿用本片本树`output/core-original-recovery-20261016/`、固定无效库及双preload的`node ... -`（最终2/2、退出0），API源码`./output/typecheck-ai-native.cjs`和`git diff --check`退出0。DB/Core存储、路由、准入、财务生命周期及传输为替身；不证明真实定价、财务事务、MySQL或外部供应商。未调正式百分比，完整可信执行宿主与其他恢复窗口仍待补。
 
 - **1a9bef1a，AIN-04/06：** 原模型结果不再把执行时完整权限指纹等同于当前读权限；在只读事务内核验原请求scope/owner/版本/hash，与冻结输入绑定，读后再验原绑定及当前权限/事实/知识ACL。不改执行、审批或财务权限。一次性真实Auth/Guard/原请求/runner/结果适配冒烟1/1（撤执行保读取、篡改原绑定及撤读拒绝、调用数不增），首轮旧实现`AI_ACCESS_DENIED`已复现。沿本树`output/core-original-recovery-20261016/`及双preload的stdin，最终1 pass、0 fail/skip/todo、退出0；API源码658 roots/0诊断和diff退出0。未新增测试文件；DB/Core存储、路由、准入、财务生命周期和传输为替身，真库及标准可信宿主仍未验，百分比不变。
+
+- **64df1cbd，AIN-06：** 取消执行前强制补1毫秒的逻辑；步骤登记/资源操作耗尽总时限后不启动工具、确认继续或新核对调用，沿原中断收据机制保留未知占用。受控时钟+实际Auth/runner/Prisma资源冒烟1/1，零执行、reservedSteps=1/consumedSteps=0、charges=UNKNOWN；既有QUEUED正常启动1/1，均0 fail/skip/todo、退出0。首轮有一次超期工具执行，并在后续任务终态提交返回`AI_RESULT_UNKNOWN`；修复后正常返回unknown，不伪造未消费或退额。命令沿本树`output/core-original-recovery-20261016/`、固定无效库及双preload的stdin，另以`--test --test-name-pattern "application starts an existing QUEUED" tests/ai-native-task-application.test.cjs`快检；API源码658 roots/0诊断、diff退出0。无新增测试文件；数据库、初始计划/工具输出为替身，未验真实MySQL、供应商或所有期限窗口，百分比不变。
 
 ## 更新与自动归档规则
 
