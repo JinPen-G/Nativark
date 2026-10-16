@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`121c7521`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`5a8f458d`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -86,11 +86,15 @@
 | 2026-10-16 | 辅助增量整合：930a5351、32910c6e | 计价请求 consumer/原调用读取、客户独立 acceptance 收据及只读宿主进入主线，保留后续授权/过期/实耗修复并补微信路由和公开声明。API 656 roots/0诊断，客户小程序与租户官网类型检查退出0；预算4/4及一次性收据关键路径冒烟通过，未新增测试脚本。契约检查退出1：常量/继承路由识别、员工上传声明仍有问题；首轮预算冒烟因缺 shared dist 失败，使用已有本树源码夹具复验通过。真实DB、浏览器/微信和供应商未验 |
 | 2026-10-16 | 持久计价接回任务执行与原账恢复：121c7521 | 服务端显式选择recorded或calls，复用原账本；定向calls用例1/1、token/money各一条真实服务/仓储正向及预算层缺证据拒绝通过；API 656 roots/0诊断、diff检查退出0。首轮组合暴露Prisma Decimal整行structuredClone失败，已改受限字段投影，原上界发布/读回也已验；首次夹具在调用登记前读取记录失败已修正。缺证据的模拟取消/步骤终态链曾报AI_ACCESS_DENIED，本轮只确认预算拒绝、零发送/零预留，不声称正常失败终态完整通过。DB/路由/传输为替身，无新测试文件，真实费率/计数及部署未接通 |
 
+| 2026-10-16 | 派发前失败与任务计量收敛：5a8f458d | 原取消事实、invocation及财务关联共同证明未派发，失败使用既有公共错误码；四类定向情形、真实预算拒绝、计量中断后重建通过，既有相关用例4 pass/0 fail/skip/todo，API657 roots/0诊断、diff退出0。保留首轮AI_ACCESS_DENIED及随后资源待核对红测，已修错误码与计量接线；一次性夹具的提前执行授权、方法绑定及恢复入口错误也已纠正。未知取消/部分占用仍unknown，不退款或重派；任务调用次数保守记录一次尝试，不代表供应商收费。真实DB/供应商未验 |
+
 最近节点没有新增测试脚本。上述各次定向结果不能相加当作“当前全量通过”；本轮仅执行受影响核心链路的类型/冒烟与diff检查，未重跑全部业务验收。
 
 本轮快检命令在主线树运行：公共前缀为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；服务冒烟另加 `-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs`，环境使用AGENTS固定无效DATABASE_URL，审计及TEMP/TMP位于本树 `output/core-gateway-pricing-20261016/`。实际后缀为 `./output/typecheck-ai-native.cjs`（退出0）；`--test --test-name-pattern "formal call task host" tests/ai-native-model-task-host.test.cjs`（退出0）；`-` 一次性stdin组合（最终退出0，2条正向与1条预算层拒绝，首轮失败边界见上表）；`git diff --check`（退出0）。未生成或改动共享client/dist，未执行全局契约静态门、真实迁移或外部服务检查。
 
 ## 待补的验收证据
+
+本次失败收口命令复用上述Node/preload与固定无效数据库，审计/TEMP/TMP在本树`output/core-admission-outcome-20261016/`：`./output/typecheck-ai-native.cjs`（最终退出0）；已有`tests/ai-native-model-task-host.test.cjs`分别以`--test-name-pattern "model host starts queued task|host restart reconciles|missing usage"`及`"keeps missing provider usage|recovery reads"`筛选（分别1/1、3/3，退出0）；`node ... -`一次性stdin驱动实际运行器/Prisma适配（四种未派发情形、实际预算拒绝、重建恢复，最终退出0）；`git diff --check`退出0。数据库、路由/传输及部分财务生命周期为替身；只有“实际预算拒绝”那条额外组合真实BudgetService，不把其他情形冒充真实财务事务或MySQL验收。
 
 - 真实 MySQL 行锁、跨进程并发/故障恢复、完整迁移和真实部署没有由上述离线检查证明。
 - 真实定价/计数来源、供应商和数据处理放行、支付渠道、对象存储及外部删除须分别验证。
