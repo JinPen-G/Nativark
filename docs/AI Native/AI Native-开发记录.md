@@ -74,6 +74,8 @@
 
 只保留最近一个月的阶段记录，日期以实际 Git 提交为准。方法级变更合并进完整功能节点，不为每次冒烟追加一篇日志。
 
+- **0614cc2b，AIN-05/06/11：** 任务/原场景/员工持久模型宿主可显式选择原有受控原生协议，缺项不默认启用、与外供Adapter互斥；本地功能不支持先拒绝，仍核验真实配置/能力/单账。一次性订单3步2调用组合1/1，驱动实际Auth/Guard/runner/预算仓储/准入/派发/审计，2份预留各结算一次、6层级allocation、1份任务累计预算；DB/Core返回/路由/传输为替身。显式协议装配/实际任务宿主缺配置/关键拒绝冒烟1/1，0 fail/skip/todo、退出0；两处类型诊断修复后API659 roots/0诊断、diff退出0。沿原离线前缀/stdin与本树output，复用`task-model-host.cjs`和原正式宿主用例，无新测试脚本。未验证原生DNS/HTTP或供应商，不等于标准应用已启用；真实费率/计数、已发布能力及完整可信执行放行仍缺。
+
 - **6de34723，AIN-04/11：** 商业新用量权益撤回不再阻断受权原账生命周期，grant保留真实false；新预留/派发仍拒绝，原关联/当前权限/目录版本/usage证据不省略。原账403红测1 fail后，一次性真实Auth/订阅/runner/预算仓储组合1/1，覆盖旧settle故障后核对、重复不加账、新任务拒绝、已派发禁释放及撤权；既有权益边界4/4，API659 roots/0诊断、diff，最终退出0。中间冒烟误将prepare当新执行，已改检查领取/启动，未放宽代码。命令沿固定离线前缀/stdin及本树`output/core-original-recovery-20261016/`；既有入口筛选`entitlement truthiness|entitlement revision forms|context revocation during entitlement|conflicting duplicate entitlement`，文件`tests/ai-native-budget-evidence-binding.test.cjs`。DB/协议为替身，真库及token/money组合未验；无新测试脚本、未改百分比。
 
 - **49063417、b3f89175，AIN-04/05/06/11：** 原回答观察按不可变原请求授权绑定核对，另复验当前读权/订单事实；客户任务及能力验证默认复用原OperationLog准入审计，缺日志拒绝，不授新派发。历史回答红测1 fail后复验1/1；默认审计复用原用例的一次性stdin：实际预算/仓储/runner能力生命周期1/1、客户装配/关键拒绝1/1，最终均0 fail/skip/todo、退出0。首轮租约taskId接线类型错误已修；客户完整旧夹具另有Booking预算关闭断言失败，未改断言或宣称全套通过。API659 roots/0诊断、diff退出0。沿原离线前缀与`output/core-original-recovery-20261016/`；DB/传输为替身，客户本片未验证实际派发，真库/供应商/浏览器未验。无新增测试脚本、未改百分比；真实计价/计数及完整可信执行装配仍缺。
