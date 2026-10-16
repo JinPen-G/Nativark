@@ -333,9 +333,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         }
         // Once a plan exists its input set is closed. No late action injection.
         if (await tx.aiTaskRunPlan.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } })) throw conflict();
+        // Inputs bind business steps as well as model steps. Model calls are
+        // reserved by the durable resource gate, not by counting input rows.
         const published = await tx.aiTaskActionInput.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId },
-          take: Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls) + 1 });
-        if (published.length >= Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls)) throw unavailable();
+          take: current.policy.limits.maxSteps + 1 });
+        if (published.length >= current.policy.limits.maxSteps) throw unavailable();
         const changed = await tx.aiTask.updateMany({ where: { ...current.access.where, revision: command.expectedTaskRevision,
           status: 'RUNNING', cancelRequestedAt: null }, data: { revision: command.expectedTaskRevision } });
         if (changed.count !== 1) throw conflict();
