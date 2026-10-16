@@ -84,7 +84,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         sceneCode: original.request.sceneCode, sceneVersion: original.receipt.sceneVersion } });
       if (!current?.enabled || current.expiresAt && current.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime()) throw unavailable();
       limits = aiTaskRunnerLimitsSchema.parse(structuredClone(current.limits));
-      if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 3 : 2)) throw unavailable();
+      if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 2 : 1)) throw unavailable();
     } else {
       if (!stored && fresh !== 'prepared') throw unavailable();
       if (stored && (stored.scopeId !== scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId)) throw denied();

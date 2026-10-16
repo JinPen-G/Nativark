@@ -87,7 +87,7 @@ const readonlyHostTaskSchema = z.object({ taskId: hostResourceId.max(36), runId:
   steps: z.array(z.object({ registrationRef: hostResourceId, toolCode: z.enum(PERSISTED_READONLY_TOOLS),
     input: z.unknown() }).strict()).min(1).max(6), limits: aiTaskRunnerLimitsSchema
 }).strict().refine(task => new Set(task.steps.map(step => step.registrationRef)).size === task.steps.length
-  && task.steps.length <= task.limits.maxSteps && task.steps.length <= task.limits.maxCalls);
+  && task.steps.length <= task.limits.maxSteps);
 
 /** Normal host for existing server-created tasks. The host selects the closed
  * tool/input set from its authorized original request, never from model tool

@@ -72,12 +72,15 @@ function validateLimits(value: AiTaskRunnerLimits): AiTaskRunnerLimits {
   return value;
 }
 
-function validatePlan(plan: AiTaskRunnerPlan, input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>): AiTaskRunnerPlan {
+function validatePlan(plan: AiTaskRunnerPlan, input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, modelCallsMetered = false): AiTaskRunnerPlan {
   if (!plan || plan.taskId !== input.taskId || plan.runId !== input.runId || !Array.isArray(plan.steps)) {
     throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "authorized task plan is unavailable");
   }
   const limits = validateLimits(plan.limits);
-  if (plan.steps.length > limits.maxSteps || plan.steps.length > limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+  // Persistent calls are Gateway invocations, not business reads or original
+  // receipt reconciliation. The resource gate owns their durable admission.
+  // Legacy isolated consumers have no classifier and retain the stricter cap.
+  if (plan.steps.length > limits.maxSteps || (!modelCallsMetered && plan.steps.length > limits.maxCalls)) throw new AiTaskRunnerError("AI_RUN_LIMIT");
   for (const step of plan.steps) {
     if (!step || typeof step.registrationRef !== "string" || step.registrationRef.length < 1 || step.registrationRef.length > 191
       || typeof step.toolCode !== "string" || step.toolCode.length < 1 || step.toolCode.length > 191
@@ -200,7 +203,7 @@ export class AiTaskRunner {
     initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false, prepare?: AiTaskHeldPreparation,
     continuation?: AiTaskRunnerConfirmationContinuation): Promise<AiTaskRunnerOutcome> {
     let taskRevision = initial.revision;
-    let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
+    let completedSteps = 0, cleanupFailed = 0, legacyCalls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
     let outcomeAttempted = false;
     let outcomeAcknowledged = false;
@@ -242,7 +245,7 @@ export class AiTaskRunner {
       if (initial.status === 'waiting_input' || initial.status === 'waiting_confirmation') return { status: 'paused', completedSteps, cleanupFailed };
       if (!recovery && initial.status === 'queued') {
         if (!this.deps.taskOutcome?.start) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (!prepare) validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false), 5000, 'initial_plan', signal)), input);
+        if (!prepare) validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false), 5000, 'initial_plan', signal)), input, this.deps.resources !== undefined);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         advance(await this.callWriteBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
         initial = { ...initial, status: 'running', revision: taskRevision };
@@ -262,7 +265,7 @@ export class AiTaskRunner {
       }
       if (this.deps.resources) await this.callWriteBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-      const plan = validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery), 5000, 'execution_plan', signal)), input);
+      const plan = validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery), 5000, 'execution_plan', signal)), input, this.deps.resources !== undefined);
       if (continuation) {
         if (recovery || !finiteInteger(continuation.remainingActiveMs, 1, plan.limits.maxStepMs)
           || !finiteInteger(continuation.remainingOutputBytes, 1, plan.limits.maxOutputBytes)) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
@@ -291,7 +294,8 @@ export class AiTaskRunner {
       }
       for (const stepPlan of plan.steps) {
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs || calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs
+          || (!this.deps.resources && legacyCalls >= plan.limits.maxCalls)) throw new AiTaskRunnerError("AI_RUN_LIMIT");
         const cancelling = await checkCancel();
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
@@ -367,7 +371,7 @@ export class AiTaskRunner {
           activeResourceTicket = resourceTicket;
         }
         if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
-        calls++;
+        if (!this.deps.resources) legacyCalls++;
         let result: AiTaskRunnerEffectResult;
         try {
           const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));

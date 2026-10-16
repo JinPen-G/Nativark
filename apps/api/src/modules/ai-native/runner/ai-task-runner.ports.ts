@@ -45,6 +45,8 @@ export interface AiTaskRunnerLimits {
   maxStepMs: number;
   maxOutputBytes: number;
   maxConcurrent: number;
+  /** Persistent model invocation ceiling; business steps use maxSteps. The
+   * durable resource gate must reserve each call before Gateway dispatch. */
   maxCalls: number;
 }
 

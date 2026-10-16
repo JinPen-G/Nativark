@@ -41,7 +41,7 @@ export const aiTaskRunnerLimitsSchema = z.object({ maxSteps: z.number().int().mi
 const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevision: z.number().int().min(1).max(4294967294),
   steps: z.array(z.object({ registrationRef: id, operation: z.enum(['readonly', 'idempotent', 'external_unknown']), toolCode: id, toolVersion: id }).strict()).max(1000),
   limits: aiTaskRunnerLimitsSchema
-}).strict().refine(p => p.steps.length <= p.limits.maxSteps && p.steps.length <= p.limits.maxCalls && p.limits.maxStepMs <= p.limits.maxTotalMs
+}).strict().refine(p => p.steps.length <= p.limits.maxSteps && p.limits.maxStepMs <= p.limits.maxTotalMs
   && new Set(p.steps.map(s => s.registrationRef)).size === p.steps.length);
 export { planSchema as aiTaskRunPlanSchema };
 const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u), policyVersion: id.max(64), expiresAt: z.string().datetime({ offset: true }) }).strict();
