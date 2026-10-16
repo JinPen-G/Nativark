@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`24d76cd9`、`4bafca5b`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`e06327d2`、`02183b7f`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -143,6 +143,10 @@ HTTP快检沿用本树离线环境、source/private-client resolver与`output/co
 - **02183b7f，AIN-06/11：** 输入登记残留的`min(maxSteps,maxCalls)`阻断三步两模型调用，已改为步骤上限，调用仍走原持久资源门，不改旧计划/额度。一次性实际原请求→模型→受权订单事实→回答1/1，steps=3/calls=2；回答当前可读、事实变化后stale且不重派。既有步骤上限/计划封闭用例1/1，API658 roots/0诊断、diff退出0。首轮保留`AI_RESOURCE_UNAVAILABLE`失败；另有旧夹具缺分页、发布后改政策和大写非法状态引起的验证失败，仅修stdin初始化/数据，不放宽生产检查。未新增测试文件、未改百分比。
 
 本片命令沿用上述离线双preload、固定无效库及本树`output/core-original-recovery-20261016/`审计/TEMP：`node ... -`一次性stdin（最终1 pass、0 fail/skip/todo、退出0）；`node ... --test --test-name-pattern "scene step ceiling prevents extra inputs" tests/ai-native-plan-input-source.test.cjs`（1/1、退出0）；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`及`git diff --check`退出0。混合链的数据库/Core存储、路由、准入、财务生命周期和传输为离线替身，不是实际财务BudgetService、MySQL锁或供应商证明；真实计价生产者与标准执行装配仍缺。
+
+- **e06327d2，AIN-04/06/14：** 开业/报价原结果按当前受权reader复查，不再要求新任务材料生产；开业分区来源重开复用原选定范围和当前权限，过期不授新执行、撤销仍拒绝。一次性真实原请求/runner/结果与来源组合2/2，0 fail/skip/todo；API658 roots/0诊断、diff退出0。首轮复现过期读回被`prepareTaskMaterial`阻断；另一次初始冒烟误改持久expiry导致原内容校验拒绝，随后改为推进受控时钟。没有改旧收据/模型结果、增加调用或新增测试文件。
+
+命令沿用本片本树`output/core-original-recovery-20261016/`、固定无效库及双preload的`node ... -`（最终2/2、退出0），API源码`./output/typecheck-ai-native.cjs`和`git diff --check`退出0。DB/Core存储、路由、准入、财务生命周期及传输为替身；不证明真实定价、财务事务、MySQL或外部供应商。未调正式百分比，完整可信执行宿主与其他恢复窗口仍待补。
 
 ## 更新与自动归档规则
 
