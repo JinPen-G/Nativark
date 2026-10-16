@@ -11,6 +11,7 @@ import { ApprovedOrderHumanAuthority } from './approved-order-human.authority';
 import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
 import { PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const referenceSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: id,
@@ -124,18 +125,26 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
   };
   const decide = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
     let started = false;
-    try {
+    const attempt = async (signal: AbortSignal) => {
+      const assertActive = () => { if (signal.aborted) throw new AiApprovalDecisionResultUnknownError(); };
       taskId = parse(id, taskId);
       const command = parse(decisionSchema, value), { decision, ...reference } = command;
       const first = await load(taskId, reference), grant = await human.resolve(taskId);
+      assertActive();
       if (orderContextHash(first.context) !== orderContextHash(grant.context)) throw deniedOrder();
       const recheck = async (tx?: Prisma.TransactionClient) => {
+        assertActive();
         same(first, await load(taskId, reference, tx), false);
         const current = await human.resolve(taskId, tx);
+        assertActive();
         if (current.bindingHash !== grant.bindingHash || Date.parse(first.payload.expiresAt) <= clock().getTime()) throw deniedOrder();
       };
       await recheck();
       const service = new AiApprovalService({ decide: async (input, principal) => {
+        // A late preflight cannot begin a decision. During the transaction the
+        // final recheck rolls back stopped work; a lost COMMIT reply is still
+        // unknown and must be observed by the original decision reference.
+        assertActive();
         started = true;
         return d.db.$transaction(async tx => {
           await recheck(tx);
@@ -166,6 +175,9 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       });
       if (!outcome.ok) throw outcome.error;
       return outcome.record;
+    };
+    try {
+      return await callAiTaskRunnerDependency(attempt, 5000, 'approval_decision', undefined, d.runnerClock);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       if (error instanceof AiApprovalRepositoryError && error.code !== 'UNAVAILABLE') {
@@ -175,5 +187,18 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       throw unavailable();
     }
   };
-  return Object.freeze({ readProposal, decide, readReceipt });
+  // Observing a historical decision never creates one. Bound the complete
+  // observation, including current ACL and route revalidation, independently.
+  const observe = async <T>(operation: () => Promise<T>) => {
+    try { return await callAiTaskRunnerDependency(operation, 5000, 'approval_observation', undefined, d.runnerClock); }
+    catch (error) {
+      if (error instanceof AiTaskRunnerError && ['AI_RUN_LIMIT', 'AI_RESULT_UNKNOWN'].includes(error.code)) throw unavailable();
+      throw error;
+    }
+  };
+  return Object.freeze({
+    readProposal: (taskId: string, value: Reference) => observe(() => readProposal(taskId, structuredClone(value))),
+    decide,
+    readReceipt: (taskId: string, value: AiProposalDecisionRequestDraft) => observe(() => readReceipt(taskId, structuredClone(value)))
+  });
 }

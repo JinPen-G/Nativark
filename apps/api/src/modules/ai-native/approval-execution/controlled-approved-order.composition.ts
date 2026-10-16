@@ -13,12 +13,15 @@ import { composeApprovedOrderApplication } from './approved-order-application.co
 import { composeApprovedOrderReprepare } from './approved-order-reprepare.composition';
 import type { ApprovedOrderReprepareServicesFactory } from './approved-order-reprepare.ports';
 import type { PersistedTaskInputTool } from '../runner/prisma-task-plan-input.source';
+import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {
   confirmation: PersistedApprovedOrderDependencies['confirmation'] & Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
   scene: { code: string; version: string };
   planTools?: readonly PersistedTaskInputTool[];
   reprepareServices?: ApprovedOrderReprepareServicesFactory;
+  /** Server-owned deadline clock, never an approval/request field. */
+  runnerClock?: AiTaskRunnerClock;
 };
 
 /** Explicit assembly only: no policy seeds, automatic approval, runner hosting
