@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-16；最近功能点：`cd99b42f`、`3793d8d8`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
+> 归纳日期：2026-10-16；最近功能点：`1ce90141`、`bca387fc`，此前业务源码整合点：`32910c6e1a5952b3c47ac1201375b28c9f73a694`。当前树状态见协作接续，以下历史证据不等于本次全量复验。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -21,7 +21,7 @@
 | AIN-03 持久化 | task/run/input/phase/proposal/approval、预算、知识/记忆与追加迁移已有代码；近期含内容保留/删除收据 | 全表升级/回读、真实迁移/索引/并发及部署恢复统一验收；本轮未执行迁移 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；7477af78 允许当前受权只读政策独立于旧执行输入过期更新 | 全身份/地点/撤权真实等价；执行动作仍须有效原输入，未知动作拒绝 |
 | AIN-05 Gateway | 平台/BYOK、唯一 invocation/dispatch、calls 单账及文本/流/媒体能力链已有实现 | 标准应用完整可信模型依赖、真实供应商/全部能力及可信计数/价格；不以内部组件等同公开可用 |
-| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；3793d8d8复用原runner有界领取，接通原场景/模型订单组合恢复外层；此前接管、应用与设置等待/清理已有证据 | 其他场景取消/澄清外层、确认完整窗口；真实多进程/MySQL 竞争和宕机未验 |
+| AIN-06 运行器 | 持久 lease/fence、原收据恢复/暂停/接管/取消及累计资源；原场景、模型订单取消/读取及选报价审批恢复已有有界接线，丢应答不重读授执行权 | 其他宿主/动作的完整恢复窗口、标准可信装配；真实多进程/MySQL 竞争和宕机未验 |
 | AIN-07 审批 | 不可变提案、当前人类批准、CAS、Core 参与者和原审批/业务收据组合；重放校验修正已进入主线 | 全动作/失败窗与批准消费/Core 原子性真库复验；不自授批准 |
 | AIN-08 业务事实 | business-tools 已接目录/可用性/客户/订单/历史/风险，会员与资金改用原有界查询 | 四品类/历史依据真实对照、其他 reader 的底层查询上限/执行计划核实 |
 | AIN-09 Core 报价 | Core 报价、显式选择、原请求 review/confirm/原键保存与核对已有入口 | 四品类/企业资格/时间地点/全部参数的完整正式消费；unknown 不重建报价 |
@@ -99,6 +99,8 @@
 - **3793d8d8，AIN-06：** 原场景/模型宿主/模型订单组合不再直接领取后再恢复，而走原runner的有界恢复领取；外层原材料、计划和授权读取可中断，领取应答不明不重派。原请求阻塞读取红测已复现并转绿；一次性实际Auth/原请求/runner/仓储冒烟6/6、模型订单原unknown核对1/1，既有模型定向3/3、澄清重放1/1、取消1/1。API658 roots/0诊断、diff退出0，无新增测试文件。数据库/模型传输/初始财务生命周期及补齐旧夹具的配置分页store均为替身，不证明MySQL或供应商验收；其他场景窗口待续。
 
 - **cd99b42f，AIN-06：** 通用原场景启动/澄清继续/取消/核对接回同一有限等待；取消已提交但应答超时保留unknown及原取消意图，不迟到自动推进。一次性加载既有`original model application retains unknown usage and cancellation without redispatch or invented zero usage`原断言，连同已中断启动共2/2；受控时钟的取消迟到应答1/1，API658 roots/0诊断及diff退出0。命令沿用下述双preload stdin与类型检查；没有新增测试文件、真库/外部访问或独立审查，不改变百分比。
+
+- **1ce90141、bca387fc，AIN-06/07：** 模型订单取消/未启动收敛/原结果与来源读取接回有限等待；选报价审批恢复的领取丢应答保留unknown，不委托Core、不凭重读授执行权，已委托runner的在途确认不由外层释放。两处无期限领取/取消红测均已复现；一次性实际组合的模型订单取消/收据2条、选报价领取丢应答1条、确认迟到1条、批准/拒绝/取消/业务丢应答4条通过，分别退出0。API658 roots/0诊断、diff退出0；中途2处闭包类型收窄已修复。既有HTTP用例`selected quote task HTTP uses normal runner and current human decision without caller execution authority`原样0 pass/1 fail/0 skip/todo，停在原请求资源授权依赖不可用；仅补旧夹具目录/会员分页替身后仍在后续场景读取失败，未放宽断言或生产校验，不称HTTP通过。数据库/Core部分服务为替身，无新增测试文件、真库/外部服务或独立审查，百分比不变。
 
 本片命令使用固定离线数据库及本树`output/core-original-recovery-20261016/`审计/TEMP/TMP，公共前缀`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs`；一次性stdin另加`-r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`。同两preload既有入口`--test --test-name-pattern "model host recovery reads|model host keeps missing provider usage" tests/ai-native-model-task-host.test.cjs`、分别筛选`"model clarification lost answer acknowledgement"`及`"model host cancellation during dispatch"`，最终均退出0；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`、`git diff --check`退出0。无全仓、shared构建、真实环境或独立审查结论。
 
