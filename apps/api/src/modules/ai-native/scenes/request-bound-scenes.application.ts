@@ -628,8 +628,6 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     // The current formal root must not construct a model/Gateway merely to
     // reconnect. Keep the existing repositories and source-bound consumer.
     const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db });
-    const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
-      usage: persistedCenter.usage, scenes });
     // Construct knowledge services only for actual result/source reads. These
     // still revalidate current ACL/consent; absence never means trusted content.
     const resultReader = () => {
@@ -637,6 +635,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
       return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
     };
+    const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
+      usage: persistedCenter.usage, scenes, modelResults: {
+        read: value => resultReader().read(value), reopenSource: value => resultReader().reopenSource(value)
+      } });
     return { scenes, center, resultReader, tasks: authorization.tasks, db: input.db,
       answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
       inputCancellation: () => PrismaTaskInputRepository.releasedCancellationWitness(input.db, authorization.tasks, input.clock),
@@ -669,6 +671,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
     readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readScene(command)),
     readAnswer(request: AiSceneHttpRequest, value: unknown) {
       const parsed = answerSchema.safeParse(structuredClone(value));
       if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

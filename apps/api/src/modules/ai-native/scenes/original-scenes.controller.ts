@@ -199,6 +199,10 @@ export class AiOriginalSceneObservationController {
   readTaskUsage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readTaskUsage(request, body));
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.readTaskScene(request, body));
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readRecoverySnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readRecoverySnapshot(request, body));
