@@ -374,7 +374,11 @@ export class AiTaskRunner {
         if (!this.deps.resources) legacyCalls++;
         let result: AiTaskRunnerEffectResult;
         try {
-          const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));
+          // Registration/start and resource accounting can consume the remaining
+          // host budget. Do not mint a fresh millisecond to start a late effect.
+          // Existing interrupted-receipt handling below preserves uncertainty.
+          const remaining = plan.limits.maxTotalMs - (this.clock.now() - startedAt);
+          if (remaining <= 0) throw new AiTaskRunnerError('AI_RUN_LIMIT');
           const raw = await this.callBounded(signal => continuing
             ? this.deps.effects.continueConfirmation!(structuredClone(stepPlan), signal, structuredClone(lease), structuredClone(continuation!))
             : reconcile ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
