@@ -140,6 +140,10 @@ HTTP快检沿用本树离线环境、source/private-client resolver与`output/co
 
 - **24d76cd9，AIN-06/11：** 修正计划/循环把全部步骤误作模型调用的限制；持久流程由原calls资源门约束Gateway，maxSteps仍限制业务步骤，无资源门旧宿主保持保守上限，不改已存计划或额度。一次性既有Auth/runner/Prisma资源组合1/1，steps=2/calls=0且重建不重执行；首轮低限额初始化失败，错误格式化也失败，终态重进后按既有`AI_ACCESS_DENIED`断言复验。既有`ai-native-model-task-host.test.cjs`筛选`model host starts queued task|model clarification cannot obtain new quota`，2/2、0 fail/skip/todo、退出0。沿上述双preload/stdin、固定无效库及本树TEMP；API源码658 roots/0诊断、diff退出0。未新增测试文件、未调百分比；DB/业务执行及模型传输为替身，混合三步低calls、真库/供应商仍未验。
 
+- **02183b7f，AIN-06/11：** 输入登记残留的`min(maxSteps,maxCalls)`阻断三步两模型调用，已改为步骤上限，调用仍走原持久资源门，不改旧计划/额度。一次性实际原请求→模型→受权订单事实→回答1/1，steps=3/calls=2；回答当前可读、事实变化后stale且不重派。既有步骤上限/计划封闭用例1/1，API658 roots/0诊断、diff退出0。首轮保留`AI_RESOURCE_UNAVAILABLE`失败；另有旧夹具缺分页、发布后改政策和大写非法状态引起的验证失败，仅修stdin初始化/数据，不放宽生产检查。未新增测试文件、未改百分比。
+
+本片命令沿用上述离线双preload、固定无效库及本树`output/core-original-recovery-20261016/`审计/TEMP：`node ... -`一次性stdin（最终1 pass、0 fail/skip/todo、退出0）；`node ... --test --test-name-pattern "scene step ceiling prevents extra inputs" tests/ai-native-plan-input-source.test.cjs`（1/1、退出0）；`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs ./output/typecheck-ai-native.cjs`及`git diff --check`退出0。混合链的数据库/Core存储、路由、准入、财务生命周期和传输为离线替身，不是实际财务BudgetService、MySQL锁或供应商证明；真实计价生产者与标准执行装配仍缺。
+
 ## 更新与自动归档规则
 
 此处的“自动归档”是每位 AI/开发者维护文档时必须执行的规则，不是新建定时任务或后台服务：
