@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-17。最近功能提交：`ab3cca31`（价格版本轮换后的原调用计数账务恢复）。固定证据见开发记录，开工以实际Git现场为准，不将SHA作为回退目标。
+> 更新时间：2026-10-17。最近功能提交：`9270976d`（客户显式计价与原账恢复）。固定证据见开发记录，开工以实际Git现场为准，不将SHA作为回退目标。
 > **负责人于2026-10-17授权Claude接续AI Native主线核心开发。** 从Codex已交付的`93305f03`继续单线实现，不启动A/B或其他辅助开发线。旧双线交接不作为活动派工；未来抽离、Runtime/SDK接入仍未启动。
 
 ## 权威依据
@@ -24,16 +24,16 @@
 
 主线继续原 AIN-03/04/05/06/07/11 依赖，不以界面或空包装代替核心：
 
-1. **持久计价与标准执行装配。** 原任务Gateway支持服务端选择recorded或calls，未配置不回退。`composePersistedTaskGateway`及原场景/员工持久模型宿主现可由服务器显式指定`gateway.nativeProtocol:'openai_chat_completions'`，复用原有界/出网校验传输和受控订单工具协议；与adapters互斥，二者皆缺仍拒绝，不因省字段启用。配置、Vault、当前身份、能力收据和单账门仍逐调用复核；本地协议缺功能时先拒绝，不能以远端能力证据顶替。本原生选项不附带任意structured output schema，须另供正式适配器。默认审计接原OperationLog，绑定当前主体/原task/run/step/call、预留和dispatch关联，只留必要ID/hash，不存正文、密钥或原dispatch token。客户`createCallGateway/createPersistedCallGateway`及`composeAuthorizedPersistedTextProbeWorkflow`也复用该审计生产者，缺日志仓储仍拒绝。审计COMMIT应答不明不重写、不据此派发，不代表标准应用执行放行。计价历史及发布收据仍可独立于生产器读取；显式`registerHttpPricingHistory`默认关闭。下一步仍需真实费率/可信token上界生产者、已发布能力及标准完整执行依赖；原生协议支持或calls调用计数不等于真实供应商/成本已验真。
+1. **持久计价与标准执行装配。** 原任务Gateway支持服务端选择recorded或calls，未配置不回退。`composePersistedTaskGateway`及原场景/员工持久模型宿主现可由服务器显式指定`gateway.nativeProtocol:'openai_chat_completions'`，复用原有界/出网校验传输和受控订单工具协议；与adapters互斥，二者皆缺仍拒绝，不因省字段启用。配置、Vault、当前身份、能力收据和单账门仍逐调用复核；本地协议缺功能时先拒绝，不能以远端能力证据顶替。本原生选项不附带任意structured output schema，须另供正式适配器。默认审计接原OperationLog，绑定当前主体/原task/run/step/call、预留和dispatch关联，只留必要ID/hash，不存正文、密钥或原dispatch token。客户`createGateway/createPersistedGateway`现显式选择calls或recorded（tokens/money），已接回`client-request.application`原消费者；旧`createCallGateway/createPersistedCallGateway`保持兼容，混用参数、缺计价和recorded搭配vision均拒绝。这些客户入口及`composeAuthorizedPersistedTextProbeWorkflow`复用该审计生产者，缺日志仓储仍拒绝。审计COMMIT应答不明不重写、不据此派发，不代表标准应用执行放行。计价历史及发布收据仍可独立于生产器读取；显式`registerHttpPricingHistory`默认关闭。下一步仍需真实费率/可信token上界生产者、已发布能力及标准完整执行依赖；原生协议支持或calls调用计数不等于真实供应商/成本已验真。
 2. **中断与结果收敛。** 原请求/模型订单、选报价、审批及能力验证已接有界等待和原runner恢复，领取丢应答不凭重读授执行权，证据发布超时仍unknown。原请求→模型→受权订单事实→回答现有正式输入证据来源，不再强制宿主补一个not_required替身：复核原计划、输入、完成步骤、用量/财务关联和固定工具候选，回答还复核订单快照。历史回答现按不可变原请求的执行时授权指纹核对证据，并复验当前结果读权限与事实；原输入过期/停新执行不单独阻断已完成回答观察，原记录撤销、串绑定或当前撤权仍拒绝，不授继续派发权。入口沿`composeRequestBoundPersistedOriginalSceneModel`的服务端`orderReadChain:{enabled:true,answerRoundTrip:true}`，可省inputSource，仍未注册生产执行。未知/串绑定/事实变化拒绝推进；该封闭链不承担自由澄清，报价多轮仍走原澄清源。已存计划/指纹/累计额度不改，maxSteps与原calls门分别限制，超时不补1毫秒强行启动。下一步仍核对完整可信执行装配及各中断窗口，不把定向组合当运行器、真实财务预算或供应商整项验收。
-3. **原账恢复与宿主。** 场景善后仍由默认关闭的`AiOriginalScenesModule.registerHttpAccounting`提供`POST /api/ai-native/scene-requests/accounting/{read|release-unsent|reconcile}`，只收original/callId。能力验证另在既有`TextCapabilityProbeModule.registerHttp`下接通`POST /api/ai-native/text-capability/accounting/{read|release-unsent|reconcile}`，只收requestKey，由原材料定位唯一task/run/call及价格版本；当前管理权限、任务读取政策和单账证据复验，不要求原探测配置/计划继续开放，不授新探测或派发权。预算层现保留真实商业权益布尔值：明确撤回新用量权益后，仍可凭当前独立动作授权处理绑定原预留的read/settle/release/unknown/reconcile；reserve/dispatch和设置不放行。权益目录/版本缺失、主体撤权及证据不明仍拒绝，不能据此释放已派发调用。calls历史结算现按原invocation/预留版本核验，不再要求与重启宿主的新价格版本一致；原配置/预算政策停用及租约过期不替代当前善后授权，新报价仍受当前版本准入。响应复用公开用量投影，不含凭据、dispatch token或内部association。两入口均未注册AppModule、默认关闭；部署还需授权构建同版shared及可信宿主。剩余是token/money、未派发释放成功、提交应答丢失等场景组合证据，以及员工/客户正式运输入口；没有可靠usage仍unknown，不能自动重发/退额。
+3. **原账恢复与宿主。** 场景善后仍由默认关闭的`AiOriginalScenesModule.registerHttpAccounting`提供`POST /api/ai-native/scene-requests/accounting/{read|release-unsent|reconcile}`，只收original/callId。能力验证另在既有`TextCapabilityProbeModule.registerHttp`下接通`POST /api/ai-native/text-capability/accounting/{read|release-unsent|reconcile}`，只收requestKey，由原材料定位唯一task/run/call及价格版本；当前管理权限、任务读取政策和单账证据复验，不要求原探测配置/计划继续开放，不授新探测或派发权。预算层现保留真实商业权益布尔值：明确撤回新用量权益后，仍可凭当前独立动作授权处理绑定原预留的read/settle/release/unknown/reconcile；reserve/dispatch和设置不放行。权益目录/版本缺失、主体撤权及证据不明仍拒绝，不能据此释放已派发调用。calls历史结算现按原invocation/预留版本核验，不再要求与重启宿主的新价格版本一致；原配置/预算政策停用及租约过期不替代当前善后授权，新报价仍受当前版本准入。响应复用公开用量投影，不含凭据、dispatch token或内部association。两入口均未注册AppModule、默认关闭；部署还需授权构建同版shared及可信宿主。客户另有`composeClientTaskAccountingRecovery`，沿当前客户政策/原任务和同一账本恢复calls、tokens、money，停新执行不抹掉原用量；跨客户/空间及撤回当前读取仍拒绝。剩余是原场景/能力验证的token/money、未派发释放成功、提交应答丢失等完整场景组合，以及员工/客户正式运输入口；没有可靠usage仍unknown，不能自动重发/退额。
 4. **标准观察与剩余原任务。** 标准`AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER`已接`POST /api/ai-native/scene-requests/model/{scene|input|result|source}`：聚合原任务/快照与指定模型结果，读取当前澄清或明确null；源自原计划/步骤/结果、当前业务候选与权限，变化后拒绝旧问题。问题来源复用原执行宿主逻辑，但观察不构造Gateway、不授lease/提交/继续执行权，也不把旧问题标签直接当当前可用。原知识政策/版本与人类确认仍复验，缺依赖不丢来源露文本。新增scene/input读取使用原有限等待；只读仓储不发FOR UPDATE语句，执行及取消事务锁保持原样。标准政策仍仅原订单解释；报价正向澄清由显式服务端组合消费，不默认开放报价模型执行。下一步仍是完整可信执行宿主、AIN-06/07其余中断窗口、真实文件ACL/保留删除传播；真实费率/计数生产者未交付，不将这些代码缺口混称为仅剩部署。
 
 当前主线功能片已收口，无本轮启动的服务、Worker、Cron或真实模型调用。Claude按负责人最新授权接续主线；未启动辅助开发线或重复心跳。
 
 ## 验证与交接边界
 
-- 最近原账恢复定向复验10/10、0 fail/skip/todo，API源码类型检查659 roots/0诊断、diff均退出0。覆盖实际Auth/订阅/预算与仓储服务上的settle回滚、价格/配置轮换停用、原租约过期后的原账核对及重复不加账；原绑定篡改、缺usage、旧版新报价和已派发释放仍拒绝。数据库为既有事务替身，无模型派发；本片只证明calls路径，不替代token/money、真库或供应商证据。前片订单3步2调用及权益撤回证据见开发记录；客户完整旧夹具Booking预算断言、旧选报价HTTP夹具和全局静态门失败未重跑或掩盖。
+- 最近既有账务测试13/13、0 fail/skip/todo，API源码类型检查659 roots/0诊断、diff均退出0；一次独立只读复核未发现本片可证实问题，未独立复跑。新增客户calls/tokens/money组合驱动实际客户政策、原任务创建/领取/启动及同一预算仓储，覆盖缺价格证据拒绝、unknown、当前配置/政策停用和原材料/lease/价格过期后的迟到用量结算、重复不加账、跨客户/空间与撤权拒绝。数据库为事务替身，身份/material loader、invocation/admission和价格/上界为合成种子；直接调用组装后预算端口，不证明完整请求→模型→证据生产→派发闭环。真实费率/可信上界生产器仍是代码与可信依赖缺口，不是仅剩部署。前片证据见开发记录；客户完整旧夹具Booking预算断言、旧选报价HTTP夹具和全局静态门失败未重跑或掩盖。
 - 数据库事务、路由及模型传输为离线替身；真实MySQL锁/并发、供应商、浏览器/微信、真实支付/存储均未验。全局契约静态门此前失败，本轮未重跑或修复，不写成通过。
 - 不新增测试脚本；复用已有入口、一次性命令及必要类型检查，不删断言或扩大审查。开发记录按完整功能收口简短更新，百分比未跨原门槛不调整。
 
