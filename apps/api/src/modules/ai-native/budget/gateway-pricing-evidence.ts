@@ -10,6 +10,9 @@ const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const timestamp = z.string().datetime({ offset: true });
 const provenance = z.object({ reference: key, revision: key, documentHash: hash }).strict();
 const money = z.string().regex(/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u);
+export const gatewayPricingSelectionSchema = z.object({ kind: z.enum(['calls', 'recorded']),
+  priceVersion: key.max(64) }).strict();
+export type GatewayPricingSelection = z.infer<typeof gatewayPricingSelectionSchema>;
 const billing = z.discriminatedUnion('unit', [
   z.object({ unit: z.literal('tokens'), metric: z.literal('input_plus_output'), scale: z.literal(0), rounding: z.literal('exact') }).strict(),
   z.object({ unit: z.literal('money'), currency: z.string().regex(/^[A-Z]{3}$/u), scale: z.literal(6),

@@ -40,6 +40,10 @@ const unique = {
 function createTaskInputStore(initial, constraints = {}) {
   const state = clone({ aiTaskQuoteSelection: [], ...initial }), trace = [];
   const control = { beforeRead: null, beforeWrite: null, beforeCommit: null, loseReply: false };
+  const moneyColumns = { aiBudgetReservation: ['reservedMoney', 'actualMoney'], aiBudgetLedgerEntry: ['moneyAmount'] };
+  const hydrateMoney = (name, row) => {
+    for (const key of moneyColumns[name] ?? []) if (row[key] !== null && row[key] !== undefined) row[key] = new Prisma.Decimal(row[key]);
+  };
   function related(row, name, data) {
     if (!row) return row;
     const out = clone(row);
@@ -102,6 +106,7 @@ function createTaskInputStore(initial, constraints = {}) {
           for (const field of ['inputTokens', 'outputTokens', 'usageHash']) row[field] ??= null;
         }
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
+        hydrateMoney(name, row);
         rows().push(row); return hydrate(row);
       };
       all[name] = {
@@ -127,6 +132,7 @@ function createTaskInputStore(initial, constraints = {}) {
             else if (v && typeof v === 'object' && 'decrement' in v) row[k] -= v.decrement;
             else row[k] = clone(v);
           }
+          for (const row of found) hydrateMoney(name, row);
           if (['aiBudgetReservation', 'aiGatewayAccountingReceipt'].includes(name)) for (const row of found) {
             row.updatedAt = new Date(row.updatedAt.getTime() + 1);
           }
@@ -140,12 +146,22 @@ function createTaskInputStore(initial, constraints = {}) {
   }
   let tail = Promise.resolve();
   const db = delegates(state);
-  // Only the existing receipt repository's parameterized SQL is simulated.
-  // No challenge, ownership, financial or capability decisions live here.
+  // Only the existing repositories' parameterized receipt/client-input SQL is
+  // simulated. No authorization, financial or capability decisions live here.
   function raw(data, readOnly = false) {
     return {
       $queryRaw: async sql => {
         const text = sql.sql ?? '', values = sql.values ?? [];
+        if (text.includes('FROM ai_client_task_policies')) {
+          if (!Array.isArray(data.aiClientTaskPolicy)) throw Error('client policy table not configured');
+          const keys = ['tenantId', 'workspaceId', 'channel', 'customerType', 'sceneCode', 'sceneVersion'];
+          return clone(data.aiClientTaskPolicy.filter(row => keys.every((key, i) => row[key] === values[i])).slice(0, 1));
+        }
+        if (text.includes('FROM ai_client_task_inputs')) {
+          if (!Array.isArray(data.aiClientTaskInput)) throw Error('client input table not configured');
+          const keys = ['tenantId', 'workspaceId', 'channel', 'principalHash', 'creationKey'];
+          return clone(data.aiClientTaskInput.filter(row => keys.every((key, i) => row[key] === values[i])).slice(0, 1));
+        }
         if (!text.includes('ai_text_capability_receipts')) { trace.push('row.lock'); return []; }
         if (!Array.isArray(data.aiTextCapabilityReceipt)) throw Error('receipt table not configured');
         const rows = data.aiTextCapabilityReceipt.filter(row => text.includes('WHERE scopeId')
@@ -155,6 +171,18 @@ function createTaskInputStore(initial, constraints = {}) {
       $executeRaw: async sql => {
         if (readOnly) throw Error('read-only snapshot cannot write receipts');
         const text = sql.sql ?? '', values = sql.values ?? [], rows = data.aiTextCapabilityReceipt;
+        if (text.startsWith('INSERT INTO ai_client_task_inputs')) {
+          if (!Array.isArray(data.aiClientTaskInput)) throw Error('client input table not configured');
+          const columns = ['id', 'tenantId', 'workspaceId', 'channel', 'principalKind', 'principalHash', 'creationKey',
+            'materialRef', 'materialInputHash', 'materialHash', 'materialRevision', 'bindingHash', 'policyId', 'policyRevision',
+            'policyHash', 'sceneCode', 'sceneVersion', 'inputHash', 'revision', 'dispatchState', 'createdAt', 'expiresAt'];
+          if (values.length !== columns.length) throw Error('unsupported client input insert');
+          const row = Object.fromEntries(columns.map((key, i) => [key, clone(values[i])]));
+          const key = ['tenantId', 'workspaceId', 'channel', 'principalHash', 'creationKey'];
+          if (data.aiClientTaskInput.some(prior => prior.id === row.id || key.every(field => prior[field] === row[field])))
+            throw Error('client input unique');
+          trace.push('aiClientTaskInput.create'); data.aiClientTaskInput.push(row); return 1;
+        }
         if (!text.includes('ai_text_capability_receipts') || !Array.isArray(rows)) throw Error('unsupported offline SQL');
         if (text.startsWith('INSERT')) {
           const [id, scopeId, profileId, operationId, descriptor, descriptorHash] = values;

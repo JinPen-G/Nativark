@@ -8,7 +8,7 @@ import { createAuthorizedPlatformModelConfiguration } from './platform-model-con
 import { PrismaTaskBudgetAuthorizationSource } from './budget/prisma-task-budget-authorization.source';
 import { PrismaGatewayCallPricing } from './budget/prisma-gateway-call-pricing';
 import { PrismaGatewayRecordedPricing } from './budget/prisma-gateway-recorded-pricing';
-import { z } from 'zod';
+import { gatewayPricingSelectionSchema, type GatewayPricingSelection } from './budget/gateway-pricing-evidence';
 import { createPersistedGatewayBudget } from './budget/gateway-budget.composition';
 import { createPersistedTextCapabilityEvidence } from './prisma-text-capability-receipt.repository';
 import { PrismaProviderProfileRepository } from './provider-profile.repository';
@@ -51,9 +51,7 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   media?: GatewayMediaAttachmentResolver;
 };
 
-const taskPricingSchema = z.object({ kind: z.enum(['calls', 'recorded']),
-  priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u) }).strict();
-export type PersistedTaskGatewayPricing = z.infer<typeof taskPricingSchema>;
+export type PersistedTaskGatewayPricing = GatewayPricingSelection;
 export type PersistedTaskGatewayDependencies = Omit<PersistedTaskCallGatewayDependencies, 'callPriceVersion'> & {
   /** Server policy only. Recorded mode reads the invocation's persisted price
    * and certified input bound; it never falls back to calls or guesses a rate. */
@@ -61,7 +59,7 @@ export type PersistedTaskGatewayDependencies = Omit<PersistedTaskCallGatewayDepe
 };
 
 function checkedPricing(value: unknown) {
-  const parsed = taskPricingSchema.safeParse(structuredClone(value));
+  const parsed = gatewayPricingSelectionSchema.safeParse(structuredClone(value));
   if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
   return Object.freeze(parsed.data);
 }

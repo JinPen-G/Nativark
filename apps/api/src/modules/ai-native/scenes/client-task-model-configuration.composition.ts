@@ -17,6 +17,8 @@ import { InvocationAdmissionService } from '../invocation-admission.service';
 import { InvocationDispatchService } from '../invocation-dispatch.service';
 import { PrismaClientTaskBudgetAuthorizationSource } from '../budget/prisma-client-task-budget-authorization.source';
 import { PrismaGatewayCallPricing } from '../budget/prisma-gateway-call-pricing';
+import { PrismaGatewayRecordedPricing } from '../budget/prisma-gateway-recorded-pricing';
+import { gatewayPricingSelectionSchema, type GatewayPricingSelection } from '../budget/gateway-pricing-evidence';
 import { createPersistedGatewayBudget } from '../budget/gateway-budget.composition';
 import { RoutedModelTransport, type GatewayConnectionResolver } from '../routed-model-transport';
 import type { ModelAdapter } from '../model-gateway.ports';
@@ -37,6 +39,20 @@ export type ClientCallGatewayDependencies = {
 };
 /** Formal platform Vault producer; no caller-provided connection or grant. */
 export type ClientPersistedCallGatewayDependencies = Omit<ClientCallGatewayDependencies, 'platformConnection'>;
+export type ClientGatewayDependencies = Omit<ClientCallGatewayDependencies, 'callPriceVersion'> & {
+  pricing: GatewayPricingSelection;
+};
+export type ClientPersistedGatewayDependencies = Omit<ClientGatewayDependencies, 'platformConnection'>;
+
+function clientPricing(db: PrismaClient, scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
+  value: unknown, clock: () => Date) {
+  const parsed = gatewayPricingSelectionSchema.safeParse(structuredClone(value));
+  if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+  const selection = Object.freeze(parsed.data);
+  return { selection, pricing: selection.kind === 'recorded'
+    ? new PrismaGatewayRecordedPricing(db, scopes, clock)
+    : new PrismaGatewayCallPricing(db, scopes, selection.priceVersion, clock) };
+}
 
 /** Original customer request accounting only. No operator credentials, model
  * configuration or new dispatch dependency is required to observe old usage.
@@ -47,13 +63,24 @@ export function composeClientTaskCallAccountingRecovery(input: AiClientTaskDepen
   callPriceVersion: string;
   clock?: () => Date;
 }, value: unknown) {
+  if (!input || 'pricing' in input) throw new ModelGatewayError('CONFIG_INVALID');
+  const { callPriceVersion, ...dependencies } = input;
+  return composeClientTaskAccountingRecovery({ ...dependencies, pricing: { kind: 'calls', priceVersion: callPriceVersion } }, value);
+}
+
+export function composeClientTaskAccountingRecovery(input: AiClientTaskDependencies & {
+  db: PrismaClient;
+  loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>;
+  pricing: GatewayPricingSelection;
+  clock?: () => Date;
+}, value: unknown) {
   const command = structuredClone(clientTaskCommandSchema.parse(structuredClone(value)));
-  if (typeof input?.loadMaterial !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  if (!input || 'callPriceVersion' in input || typeof input.loadMaterial !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const clock = input.clock ?? (() => new Date());
   const authorization = new PrismaClientTaskBudgetAuthorizationSource({ db: input.db,
     subscriptions: input.subscriptions, sceneCode: input.sceneCode, sceneVersion: input.sceneVersion,
     loadMaterial: input.loadMaterial, command, clock });
-  const pricing = new PrismaGatewayCallPricing(input.db, authorization.scopes, input.callPriceVersion, clock);
+  const { pricing } = clientPricing(input.db, authorization.scopes, input.pricing, clock);
   return createPersistedGatewayBudget({ db: input.db, scopes: authorization.scopes,
     subscriptions: input.subscriptions, authorization, pricing, clock }).recovery;
 }
@@ -96,21 +123,23 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
     }
   });
   const connection = createScopeBoundTenantModelConnection(configuration, scopes);
-  const createCallGateway = (server: ClientCallGatewayDependencies) => {
-    /** Same original task, original encrypted configuration and one persistent
-     * ledger. Only explicit server adapters; no default provider or HTTP client.
-     * Live capabilities must already have the original verified probe receipt.
-     * Building this object does not read a model, reserve, claim or invoke. */
-      if (!server || server.db !== dependencies.db || server.audit !== undefined && typeof server.audit?.append !== 'function'
+  const createGateway = (server: ClientGatewayDependencies) => {
+    /** Same original task, encrypted configuration and persistent ledger. Recorded
+     * pricing consumes published text evidence, never a customer-provided rate
+     * or token estimate. Assembly neither publishes evidence nor grants dispatch. */
+      if (!server || server.db !== dependencies.db || 'callPriceVersion' in server
+        || server.audit !== undefined && typeof server.audit?.append !== 'function'
         || typeof server.platformConnection?.resolve !== 'function' || !Array.isArray(server.adapters)
-        || !server.adapters.length) throw new ModelGatewayError('CONFIG_INVALID');
-      const db = server.db, routeScene = server.routeScene, callPriceVersion = server.callPriceVersion;
+        || !server.adapters.length || !['chat', 'builder', 'vision', 'knowledge', 'reasoning'].includes(server.routeScene))
+        throw new ModelGatewayError('CONFIG_INVALID');
+      const db = server.db, routeScene = server.routeScene;
       const adapters = [...server.adapters], platformConnection = server.platformConnection;
       const budgetAuthority = new PrismaClientTaskBudgetAuthorizationSource({ ...dependencies, db,
         command, loadMaterial: loader, clock });
       // Financial reads/reconcile use the original accounting authority, not a
       // RUNNING-only gate that would prohibit accounting after a terminal result.
-      const pricing = new PrismaGatewayCallPricing(db, budgetAuthority.scopes, callPriceVersion, clock);
+      const { pricing, selection } = clientPricing(db, budgetAuthority.scopes, server.pricing, clock);
+      if (selection.kind === 'recorded' && routeScene === 'vision') throw new ModelGatewayError('CONFIG_INVALID');
       const accounting = createPersistedGatewayBudget({ db, scopes: budgetAuthority.scopes,
         subscriptions: dependencies.subscriptions, authorization: budgetAuthority, pricing, clock });
       // The same durable admission audit as operator tasks, bound to this
@@ -136,24 +165,36 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
           return (await capabilities.preflight(resolution.route.profile, resolution.requiredCapabilities)).allowed;
         }
       };
-      return Object.freeze({ runtime, callPriceVersion, accountingRecovery: accounting.recovery,
+      return Object.freeze({ runtime, priceVersion: selection.priceVersion, accountingRecovery: accounting.recovery,
         financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
   };
-  return Object.freeze({ configuration, scopes, connection, createCallGateway,
+  const createPersistedGateway = (server: ClientPersistedGatewayDependencies) => {
+    if (!server || server.db !== dependencies.db || 'platformConnection' in server) throw new ModelGatewayError('CONFIG_INVALID');
+    const platformConnection = new PrismaPlatformModelConnection(server.db, scopes, {
+      // Customer tasks never manage or save platform configuration.
+      manage: async () => { throw new ModelGatewayError('FORBIDDEN'); },
+      invoke: async value => {
+        const expected = structuredClone(value);
+        const principal = gatewayBudgetPrincipal(await authorization.execution.authorize(taskId));
+        if (principal.actorKind !== 'CUSTOMER' || principal.actorId !== expected.actorId
+          || principal.tenantId !== expected.tenantId || principal.workspaceId !== expected.workspaceId)
+          throw new ModelGatewayError('FORBIDDEN');
+      }
+    }, secrets);
+    return createGateway({ ...server, platformConnection });
+  };
+  const createCallGateway = (server: ClientCallGatewayDependencies) => {
+    if (!server || 'pricing' in server) throw new ModelGatewayError('CONFIG_INVALID');
+    const { callPriceVersion, ...gateway } = server;
+    const configured = createGateway({ ...gateway, pricing: { kind: 'calls', priceVersion: callPriceVersion } });
+    return Object.freeze({ ...configured, callPriceVersion: configured.priceVersion });
+  };
+  return Object.freeze({ configuration, scopes, connection, createGateway, createPersistedGateway, createCallGateway,
     createPersistedCallGateway(server: ClientPersistedCallGatewayDependencies) {
-      if (!server || server.db !== dependencies.db) throw new ModelGatewayError('CONFIG_INVALID');
-      const platformConnection = new PrismaPlatformModelConnection(server.db, scopes, {
-        // Customer tasks never manage or save platform configuration.
-        manage: async () => { throw new ModelGatewayError('FORBIDDEN'); },
-        invoke: async value => {
-          const expected = structuredClone(value);
-          const principal = gatewayBudgetPrincipal(await authorization.execution.authorize(taskId));
-          if (principal.actorKind !== 'CUSTOMER' || principal.actorId !== expected.actorId
-            || principal.tenantId !== expected.tenantId || principal.workspaceId !== expected.workspaceId)
-            throw new ModelGatewayError('FORBIDDEN');
-        }
-      }, secrets);
-      return createCallGateway({ ...server, platformConnection });
+      if (!server || 'pricing' in server) throw new ModelGatewayError('CONFIG_INVALID');
+      const { callPriceVersion, ...gateway } = server;
+      const configured = createPersistedGateway({ ...gateway, pricing: { kind: 'calls', priceVersion: callPriceVersion } });
+      return Object.freeze({ ...configured, callPriceVersion: configured.priceVersion });
     }
   });
 }
