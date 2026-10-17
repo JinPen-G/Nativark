@@ -73,18 +73,20 @@ export class PrismaGatewayCallPricing implements BudgetQuotePort, GatewayActualU
         invocationId: row.id, registrationHash: row.registrationHash, association: binding.association, policies }) };
   }
   /** Called by accounting facts only after its original dispatch/usage evidence
-   * checks. Missing usage still stays unknown; this never synthesizes usage. */
+   * checks. Missing usage still stays unknown; this never synthesizes usage.
+   * The selected price version gates new quotes, not an original reservation's
+   * accounting after configuration rotation or execution shutdown. */
   async quantity(value: Readonly<BudgetRecord>, usageValue: Readonly<ModelUsage>) {
     const record = structuredClone(value), usage = structuredClone(usageValue), before = await this.current();
     if (!record.dispatched || record.reserved.unit !== 'calls' || record.reserved.value !== 1
-      || record.association.priceVersion !== this.priceVersion || record.actorId !== before.gateway.actorId
+      || record.actorId !== before.gateway.actorId
       || ![usage.inputTokens, usage.outputTokens].every(count => Number.isSafeInteger(count) && count >= 0)) throw new BudgetError('UNAVAILABLE');
     const binding = await this.bindings.resolveForReservation(before.gateway, record.id);
     if (requestFingerprint(binding.association) !== requestFingerprint(record.association)) throw new BudgetError('FORBIDDEN');
     const stored = await this.db.aiBudgetReservation.findFirst({ where: { id: record.id, scopeId: before.scope.id,
       scopeKind: 'WORKSPACE', actorId: before.gateway.actorId, callId: record.callId } });
     if (!stored || stored.unitKind !== 'calls' || stored.reservedCalls !== 1
-      || stored.priceVersion !== this.priceVersion || stored.dispatchState === 'not_dispatched') throw new BudgetError('FORBIDDEN');
+      || stored.priceVersion !== record.association.priceVersion || stored.dispatchState === 'not_dispatched') throw new BudgetError('FORBIDDEN');
     const after = await this.current();
     if (before.scope.id !== after.scope.id || identity(before.context) !== identity(after.context)) throw new BudgetError('FORBIDDEN');
     return { unit: 'calls' as const, value: 1 };

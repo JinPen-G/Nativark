@@ -11,7 +11,7 @@ const config = { configId: 'profile', configRevision: 1, credentialRef: 'vault',
 const association = { requestId: 'call', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', priceVersion: 'price', scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, config };
 const call = { context: { actorId: 'actor', tenantId: 'tenant', workspaceId: 'workspace' }, binding: { id: 'admission', actorId: 'actor', callId: 'call', requestHash: 'a'.repeat(64), profileId: 'profile', dispatchId: 'dispatch', scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' } }, request: { callId: 'call', model: 'model', maxOutputTokens: 32, intentHash: 'b'.repeat(64) }, expiresAt: new Date(time.getTime() + 60000) };
 
-test('real task budget authority binds the persisted invocation and rejects forged scope or revoked actor', { timeout: 15000 }, async () => {
+for (const recoverAfterRotation of [false, true]) test(`real task budget authority binds the persisted invocation and rejects forged scope or revoked actor${recoverAfterRotation ? ' after price rotation' : ''}`, { timeout: 15000 }, async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
   const { PrismaTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-task-budget-authorization.source');
   const { Prisma } = require('../apps/api/node_modules/@prisma/client');
@@ -63,11 +63,62 @@ test('real task budget authority binds the persisted invocation and rejects forg
   assert.equal(h.state.aiBudgetReservation.length, 1);
   assert.equal(h.state.aiBudgetAllocation.length, 3);
   await root.budget.dispatch(accountingCall, reserved.id);
-  await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
-  await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
+  if (recoverAfterRotation) {
+    h.storeControl.beforeWrite = (table, args) => {
+      if (table === 'aiBudgetLedgerEntry' && args.data.kind === 'settle') throw Error('synthetic settlement rollback');
+    };
+    try {
+      await assert.rejects(root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 }), { code: 'ACCOUNTING_PENDING' });
+    } finally { h.storeControl.beforeWrite = null; }
+    assert.equal(h.state.aiGatewayAccountingReceipt[0].inputTokens, 2n);
+    assert.equal(h.state.aiGatewayAccountingReceipt[0].outputTokens, 3n);
+    assert.equal(h.state.aiBudgetReservation[0].actualCalls, null);
+    await root.budget.abandon(accountingCall, reserved.id, 'settlement_pending');
+    assert.equal(h.state.aiBudgetReservation[0].status, 'pending_reconciliation');
+    const originalInvocation = h.clone(h.state.aiGatewayInvocation[0]);
+    const originalReceipt = h.clone(h.state.aiGatewayAccountingReceipt[0]);
+    h.state.aiProviderProfile[0].configRevision = 2;
+    h.state.aiProviderProfile[0].enabled = false;
+    h.state.aiProviderProfile[0].disabledAt = new Date(h.control.now);
+    for (const policy of h.state.aiBudgetPolicy) {
+      policy.configRevision++;
+      policy.priceVersion = 'price-next';
+      policy.enabled = false;
+      policy.settingsJson.gates.scene.enabled = false;
+    }
+    h.control.now = new Date('2026-10-06T12:02:00Z');
+    const nextPricing = new PrismaGatewayCallPricing(h.db, source.scopes, 'price-next', () => h.control.now);
+    await assert.rejects(nextPricing.quote(command, authorized), { code: 'FORBIDDEN' });
+    const { composePersistedTaskCallAccountingRecovery } = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
+    const recovery = composePersistedTaskCallAccountingRecovery({ ...h.authorization, db: h.db,
+      guard: { canActivate: async () => false }, taskId: 'task-a', callPriceVersion: 'price-next', clock: () => h.control.now });
+    const before = await recovery.readCall({ callId: 'call' });
+    assert.equal(before.association.priceVersion, 'price');
+    assert.equal(before.association.config.configRevision, 1);
+    await assert.rejects(nextPricing.quantity({ ...before, association: { ...before.association, priceVersion: 'price-next' } },
+      { inputTokens: 2, outputTokens: 3 }), { code: 'FORBIDDEN' });
+    const beforeRecoveryLedgerCount = h.state.aiBudgetLedgerEntry.length;
+    h.state.aiGatewayAccountingReceipt[0].inputTokens = null;
+    await assert.rejects(recovery.reconcile({ reservationId: reserved.id }), { code: 'PENDING_RECONCILIATION' });
+    assert.equal(h.state.aiBudgetLedgerEntry.length, beforeRecoveryLedgerCount);
+    h.state.aiGatewayAccountingReceipt[0].inputTokens = originalReceipt.inputTokens;
+    const reconciled = await recovery.reconcile({ reservationId: reserved.id });
+    assert.deepEqual(reconciled.actual, { unit: 'calls', value: 1 });
+    assert.equal(reconciled.association.priceVersion, 'price');
+    assert.equal(reconciled.association.config.configRevision, 1);
+    const ledgerCount = h.state.aiBudgetLedgerEntry.length;
+    await recovery.reconcile({ reservationId: reserved.id });
+    assert.equal(h.state.aiBudgetLedgerEntry.length, ledgerCount);
+    await assert.rejects(recovery.releaseUnsent({ reservationId: reserved.id }), { code: 'PENDING_RECONCILIATION' });
+    assert.deepEqual(h.state.aiGatewayInvocation[0], originalInvocation);
+    assert.deepEqual(h.state.aiGatewayAccountingReceipt[0], originalReceipt);
+  } else {
+    await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
+    await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
+  }
   assert.equal(h.state.aiBudgetReservation[0].status, 'settled');
   assert.equal(h.state.aiBudgetReservation[0].actualCalls, 1);
-  assert.equal(h.state.aiBudgetLedgerEntry.filter(entry => entry.kind === 'settle').length, 1);
+  assert.equal(h.state.aiBudgetLedgerEntry.filter(entry => entry.kind === (recoverAfterRotation ? 'reconcile' : 'settle')).length, 1);
   const allocations = await h.db.aiBudgetAllocation.findMany({ where: { reservationId: reserved.id },
     select: { reservation: { select: { status: true, actualCalls: true } } } });
   assert.equal(allocations.length, 3);
