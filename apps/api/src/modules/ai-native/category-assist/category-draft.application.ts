@@ -1,4 +1,5 @@
-import { Module, type DynamicModule } from '@nestjs/common';
+import { Module, Body, Controller, Header, HttpCode, HttpException, Inject, Param, Post, Req, type DynamicModule } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -10,6 +11,8 @@ import type { AiOrderRouteCredentialSource } from '../order-route-context.author
 import type { CategoryGovernanceController } from '../../rental-core/category-governance.controller';
 import { CategoryGovernancePreviewGuard } from '../../rental-core/category-governance-preview.guard';
 import { CreateCategoryDraftDto, PatchCategoryDraftDto } from '../../rental-core/category-governance-request.dto';
+import { withRequestAbort } from '../scenes/request-abort';
+import type { IncomingMessage } from 'node:http';
 
 export class CategoryAssistError extends Error {
   constructor(readonly code: 'INVALID_INPUT' | 'ACCESS_DENIED' | 'UNAVAILABLE', readonly writeMayHaveCommitted = false) { super(code); }
@@ -124,5 +127,78 @@ export class CategoryDraftApplication {
 export class CategoryAssistModule {
   static register(dependencies: Dependencies): DynamicModule {
     return { module: CategoryAssistModule, providers: [{ provide: CategoryDraftApplication, useValue: new CategoryDraftApplication(dependencies) }], exports: [CategoryDraftApplication] };
+  }
+}
+
+export const AI_CATEGORY_DRAFT_REQUESTS = Symbol('AI_CATEGORY_DRAFT_REQUESTS');
+const categoryOperations = ['detail', 'create', 'patch', 'validate', 'review'] as const;
+type CategoryOperation = typeof categoryOperations[number];
+type CategoryRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+
+/** Human transport over the original CAT-GOV services; not an agent tool,
+ * proposal store or a second governance state machine. No publish/adopt API.
+ * The original preview gate and platform permissions are never bypassed. */
+export function composeCategoryDraftRequests(dependencies: Omit<Dependencies, 'credentials'>, options: { enabled: boolean }) {
+  const enabled = z.object({ enabled: z.boolean() }).strict().parse(structuredClone(options)).enabled;
+  return Object.freeze({
+    async consume(request: CategoryRequest, operation: string, value: unknown, signal?: AbortSignal) {
+      if (!(categoryOperations as readonly string[]).includes(operation)) throw new HttpException({ code: 'AI_INVALID_INPUT', retryable: false }, 400);
+      const action = operation as CategoryOperation;
+      const write = action === 'create' || action === 'patch';
+      if (!enabled && (write || action === 'validate')) throw new HttpException({ code: 'AI_RESOURCE_UNAVAILABLE', retryable: false }, 503);
+      let command: unknown;
+      try {
+        if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 256 * 1024) throw Error();
+        command = structuredClone(value);
+      } catch { throw new HttpException({ code: 'AI_INVALID_INPUT', retryable: false }, 400); }
+      let authorization = request?.headers?.authorization;
+      if (typeof authorization !== 'string' || !authorization || authorization.length > 8192) {
+        throw new HttpException({ code: 'AI_ACCESS_DENIED', retryable: false }, 403);
+      }
+      const requestId = randomUUID();
+      const credentials = { current: async () => {
+        if (typeof authorization !== 'string') throw new CategoryAssistError('ACCESS_DENIED');
+        return { authorization, audience: 'operator' as const, requestId };
+      } };
+      const close = () => { authorization = undefined; };
+      const interrupted = () => new HttpException({ code: write ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE', retryable: false,
+        ...(write ? { nextAction: 'manual_review_original_draft_no_automatic_retry' } : {}) }, write ? 409 : 503);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let abort: (() => void) | undefined;
+      try {
+        if (signal?.aborted) throw interrupted();
+        const stopped = new Promise<never>((_, reject) => {
+          abort = () => { close(); reject(interrupted()); };
+          signal?.addEventListener('abort', abort, { once: true });
+          timer = setTimeout(abort, 5000);
+        });
+        const app = new CategoryDraftApplication({ ...dependencies, credentials });
+        return await Promise.race([Promise.resolve().then<unknown>(() => app[action](command)), stopped]);
+      } catch (error) {
+        const response = error instanceof HttpException ? error.getResponse() : undefined;
+        if (response && typeof response === 'object' && 'code' in response) throw error;
+        if (error instanceof CategoryAssistError && !error.writeMayHaveCommitted) {
+          const status = error.code === 'INVALID_INPUT' ? 400 : error.code === 'ACCESS_DENIED' ? 403 : 503;
+          throw new HttpException({ code: status === 400 ? 'AI_INVALID_INPUT' : status === 403 ? 'AI_ACCESS_DENIED' : 'AI_RESOURCE_UNAVAILABLE', retryable: false }, status);
+        }
+        // No operation receipt exists for legacy draft writes. Transport loss
+        // cannot safely become a retry, or a fabricated successful creation.
+        if (write) throw interrupted();
+        throw new HttpException({ code: 'AI_RESOURCE_UNAVAILABLE', retryable: false }, 503);
+      } finally {
+        close();
+        if (timer) clearTimeout(timer);
+        if (abort) signal?.removeEventListener('abort', abort);
+      }
+    }
+  });
+}
+
+@Controller('ai-native/category-drafts')
+export class AiCategoryDraftController {
+  constructor(@Inject(AI_CATEGORY_DRAFT_REQUESTS) private readonly requests: ReturnType<typeof composeCategoryDraftRequests>) {}
+  @Post(':operation') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  consume(@Req() request: CategoryRequest, @Param('operation') operation: string, @Body() value: unknown) {
+    return withRequestAbort(request, signal => this.requests.consume(request, operation, value, signal));
   }
 }

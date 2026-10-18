@@ -16,6 +16,8 @@ import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
 import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
 import { RentalIdempotencyRepository } from '../rental-core/rental-idempotency.repository';
+import { CategoryGovernanceController } from '../rental-core/category-governance.controller';
+import { AI_CATEGORY_DRAFT_REQUESTS, composeCategoryDraftRequests } from './category-assist/category-draft.application';
 import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
@@ -153,6 +155,16 @@ export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox) =>
     composeRequestBoundPlatformModelSettings({ db, guard, secrets })
+};
+export const AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION');
+export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
+  provide: AI_CATEGORY_DRAFT_REQUESTS,
+  inject: [ApiAuthGuard, CategoryGovernanceController, { token: AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, optional: true }],
+  useFactory: (guard: ApiAuthGuard, controller: CategoryGovernanceController, value?: unknown) => {
+    const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return composeCategoryDraftRequests({ guard, controller }, parsed.data);
+  }
 };
 /** Human management only. No action policy/authority is seeded by assembly;
  * absent persisted grants still refuse every memory/governance operation. */

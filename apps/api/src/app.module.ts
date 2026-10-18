@@ -121,6 +121,8 @@ import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSetting
 import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
 import { HumanAutomationPolicyRequestController } from './modules/ai-native/automation/human-automation-policy-request.controller';
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
+import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
 
@@ -133,6 +135,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     DatabaseModule
   ],
   controllers: [
+    AiCategoryDraftController,
     TextCapabilityProbeController,
     AiOriginalScenesController,
     AiOriginalOrderReadController,
@@ -196,6 +199,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     PlatformDemoRequestController
   ],
   providers: [
+    AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,

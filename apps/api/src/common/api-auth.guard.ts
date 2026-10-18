@@ -222,6 +222,9 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && /^\/ai-native\/category-drafts\/(?:detail|create|patch|validate|review)$/u.test(path)) {
+    return [path.endsWith('/create') || path.endsWith('/patch') ? 'system:rental-category:edit' : 'system:rental-category:view'];
+  }
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension}`)
     return ['rental-os:order:extend', 'rental-os:order:operate'];
   if (originalOrderExecutionRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];

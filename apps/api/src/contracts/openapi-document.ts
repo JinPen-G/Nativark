@@ -2016,6 +2016,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       `clientAi_${surface}_${route.replace(/\//gu, '_')}`,
       'Current independent customer identity and persisted surface/scene policy required. Observation does not grant execution; only an explicit original-page decision submits through Core. Unknown uses the same original receipt, never automatic resubmission.',
       { requestSchema, responseSchema })))),
+  ...(['detail', 'create', 'patch', 'validate', 'review'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/ai-native/category-drafts/${operation}`, tag: 'AI Native',
+    operationId: `aiCategoryDraft_${operation}`, permissions: [operation === 'create' || operation === 'patch'
+      ? 'system:rental-category:edit' : 'system:rental-category:view'],
+    summary: 'Human draft preparation through original platform CAT-GOV permissions, preview gate and DTO/CAS. New work is server-disabled by default; publication and adoption are unavailable. Unknown draft writes require manual original-state review, not automatic retry. Payload remains the existing internal draft adapter, not a new public governance contract.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/history-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionHistory', permissions: ['rental-os:order:view'],
     summary: 'Read bounded owned historical inspection draft references under current staff/order/location authorization; no media access or execution.',
