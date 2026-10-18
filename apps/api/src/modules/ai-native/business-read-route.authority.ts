@@ -1,4 +1,5 @@
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { HttpException } from '@nestjs/common';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../common/request-identity';
@@ -113,8 +114,28 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     try {
       return await authorize(async context => {
         const before = binding(context);
-        const result = await read(context);
+        // withQuote is R1 work, not an optional read. Keep its existing
+        // outcome/unknown handling separate from read-source degradation.
+        if (kind === 'quote') {
+          const result = await read(context);
+          await authorize(async current => { if (binding(current) !== before) throw new ModelGatewayError('FORBIDDEN'); });
+          return result;
+        }
+        let result!: T, failure: unknown, failed = false;
+        try { result = await read(context); }
+        catch (error) { failure = error; failed = true; }
+        // Recheck even failed reads: an optional-source downgrade must never
+        // swallow a concurrent revocation. Only the business fault, not a
+        // Guard/session failure, may become a safe unavailable response.
         await authorize(async current => { if (binding(current) !== before) throw new ModelGatewayError('FORBIDDEN'); });
+        if (failed) {
+          const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
+          if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
+            throw new ModelGatewayError('FORBIDDEN');
+          if (failure instanceof ModelGatewayError) throw failure;
+          if (failure instanceof HttpException && [401, 403].includes(failure.getStatus())) throw new ModelGatewayError('FORBIDDEN');
+          throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+        }
         return result;
       });
     } catch (error) {

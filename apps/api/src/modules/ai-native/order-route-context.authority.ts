@@ -1,5 +1,6 @@
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { HttpException } from '@nestjs/common';
 import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
@@ -69,14 +70,31 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
         const context = structuredClone(candidate);
         const { requestId: _, authorizedAt: __, ...binding } = context;
         const fingerprint = requestFingerprint(binding);
-        const value = await read(structuredClone(context), this.orderId);
+        let value!: T, failure: unknown, failed = false;
+        try { value = await read(structuredClone(context), this.orderId); }
+        catch (error) { failure = error; failed = true; }
         if (recheck) {
           const current = await this.resolve();
           const { requestId: ___, authorizedAt: ____, ...currentBinding } = current;
           if (requestFingerprint(currentBinding) !== fingerprint) throw Error();
         }
+        // A Core read failure is not evidence of revoked access. Still check
+        // current access first so fallback cannot hide a concurrent revocation.
+        // Never expose the original database/provider error or its payload.
+        if (failed) {
+          if (failure instanceof AiScopeResolutionError) throw failure;
+          const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
+          if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
+            throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+          if (failure instanceof HttpException && [401, 403].includes(failure.getStatus()))
+            throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+          throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
+        }
         return value;
       });
-    } catch { throw new AiScopeResolutionError('AI_ACCESS_DENIED'); }
+    } catch (error) {
+      if (error instanceof AiScopeResolutionError) throw error;
+      throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+    }
   }
 }
