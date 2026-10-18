@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HumanKnowledgeContextService, knowledgeContextInputSchema } from './human-knowledge-context.service';
+import { HumanKnowledgeContextService, knowledgeContextInputSchema, knowledgePreparedContextSchema } from './human-knowledge-context.service';
 import type { HumanKnowledgeDependencies } from './human-knowledge.service';
 import { KnowledgeCurrentSession } from './knowledge-current-session';
 import { PersistentMemoryConsentService } from './persistent-memory-consent.service';
@@ -20,6 +20,8 @@ const preferenceSection = z.discriminatedUnion('status', [
   truncated: z.boolean(), coverage: z.literal('bounded_window'), pagination: z.literal('unavailable'),
   semantics: z.literal('preference_not_authority') }).strict(),
 ]);
+/** Format of the actual prepared package, not proof of current read authority. */
+export const humanKnowledgePreparedInputSchema = knowledgePreparedContextSchema.extend({ preferences: preferenceSection });
 
 export type HumanKnowledgeInputDependencies = HumanKnowledgeDependencies & {
   /** Explicit formal policy and memory repository. Omission never grants access. */
