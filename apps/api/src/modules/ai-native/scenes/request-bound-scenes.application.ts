@@ -56,7 +56,7 @@ export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | '
 export type AiOriginalTaskActionPolicyOptions = AiSceneRequestOptions & {
   /** Explicit server configuration. No client permission lists or automatic
    * action-policy creation. The current owner must also pass config Guard. */
-  templates: readonly Pick<AiTaskActionPolicyMutation, 'operation' | 'requiredPermissions'>[];
+  templates: readonly (Pick<AiTaskActionPolicyMutation, 'operation' | 'requiredPermissions'> & { sceneCode?: string })[];
   ttlMs: number;
 };
 export type AiScenePlanPolicyConfiguration = AiSceneRequestOptions & {
@@ -573,9 +573,11 @@ export function composeRequestBoundOriginalTaskActionPolicies(
   const operation = z.string().refine(value => taskActionPolicyOperations.includes(value));
   const permission = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
   const templates = freezeOriginalInput(z.array(z.object({ operation,
+    sceneCode: z.enum(['order_explanation', 'quote_clarification', 'opening_diagnosis']).optional(),
     requiredPermissions: z.array(permission).min(1).max(64).refine(value => new Set(value).size === value.length)
-  }).strict()).min(1).max(taskActionPolicyOperations.length).parse(structuredClone(options.templates)));
-  if (new Set(templates.map(template => template.operation)).size !== templates.length) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  }).strict()).min(1).max(taskActionPolicyOperations.length * 4).parse(structuredClone(options.templates)));
+  if (new Set(templates.map(template => `${template.sceneCode ?? '*'}:${template.operation}`)).size !== templates.length)
+    throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   const ttlMs = z.number().int().min(1).max(120000).parse(options.ttlMs);
   const readSchema = z.object({ original: originalRequestReferenceSchema, operation }).strict();
   const configureSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
@@ -586,9 +588,10 @@ export function composeRequestBoundOriginalTaskActionPolicies(
   type Root = { scenes: ReturnType<typeof composeAiOriginalScenes>;
     policies: ReturnType<typeof composeTaskActionPolicyManagement>; clock: () => Date };
   const target = async (root: Root, original: z.infer<typeof originalRequestReferenceSchema>, selected: string) => {
-    const template = templates.find(value => value.operation === selected);
-    if (!template) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const before = await root.scenes.requests.readHistorical(original);
+    const template = templates.find(value => value.operation === selected && value.sceneCode === before.receipt.sceneCode)
+      ?? templates.find(value => value.operation === selected && value.sceneCode === undefined);
+    if (!template) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const task = await root.scenes.readTaskReceipt(original.inputRef);
     if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const verify = async () => {
@@ -1453,9 +1456,9 @@ export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuo
   const call = bindRequests(dependencies, options, input => new PrismaQuoteSelectionRepository({ ...input,
     originals: composeAiOriginalScenes(input).requests }));
   return Object.freeze({
-    select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command)),
-    read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command)),
-    reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command))
+    select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command), { write: true }),
+    read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command), { write: false })
   });
 }
 
@@ -1530,18 +1533,18 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
       readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskReconnect: center.readReconnect, readTaskUsage: center.readUsage });
   });
   return Object.freeze({
-    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command)),
-    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command)),
-    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
-    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command)),
-    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command)),
-    readScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readScene(command)),
-    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.start(command, signal)),
-    readConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readConfirmation(command)),
-    continueConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.continueConfirmation(command, signal)),
-    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, signal)),
-    readResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readResult(command)),
-    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requestCancel(command))
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command), { write: false }),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command), { write: false }),
+    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command), { write: false }),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command), { write: false }),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command), { write: false }),
+    readScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readScene(command), { write: false }),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.start(command, signal), { write: true, signal, preflightOnly: true }),
+    readConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readConfirmation(command), { write: false }),
+    continueConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.continueConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
+    readResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readResult(command), { write: false }),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requestCancel(command), { write: true })
   });
 }
 
@@ -1559,13 +1562,13 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
     return composeHumanQuoteOrder({ ...input, originals: composeAiOriginalScenes(input).requests });
   });
   return Object.freeze({
-    readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command)),
-    decideSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.decideSelectedProposal(command)),
-    readSelectedDecisionReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedDecisionReceipt(command)),
-    readSelectedOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedOrderResult(command)),
-    readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command)),
-    reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command)),
-    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command))
+    readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command), { write: false }),
+    decideSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.decideSelectedProposal(command), { write: true }),
+    readSelectedDecisionReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedDecisionReceipt(command), { write: false }),
+    readSelectedOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedOrderResult(command), { write: false }),
+    readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command), { write: false }),
+    reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command), { write: true }),
+    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false })
   });
 }
 

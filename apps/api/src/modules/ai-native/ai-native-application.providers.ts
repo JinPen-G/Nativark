@@ -13,6 +13,8 @@ import { ApiAuthGuard } from '../../common/api-auth.guard';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { RentalCoreService } from '../rental-core/rental-core.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
+import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
+import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
 import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
@@ -55,6 +57,9 @@ import { AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
 import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
 import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
   AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS } from './scenes/settings-task.controller';
+import { AiHumanQuoteSelectionModule } from './task-request/human-quote-selection.module';
+import { AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS, AI_SELECTED_QUOTE_TASK_REQUESTS } from './task-request/human-quote-selection.controller';
+import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
 
@@ -352,21 +357,68 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
 const originalReadOperations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
 const originalOrderExecutionOperations = ['claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] as const;
 
+/** One existing quote-selection/approval/Core runner, never a second order
+ * execution path. No configuration grants a task policy or business approval. */
+export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
+const quoteOrderConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    leaseMs: z.number().int().min(1).max(120000) }).strict(), limits: aiTaskRunnerLimitsSchema }).strict()]);
+function readQuoteOrderConfiguration(value: unknown) {
+  const parsed = quoteOrderConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return parsed.data;
+}
+export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS,
+  AI_SELECTED_QUOTE_TASK_REQUESTS].map(provide => ({ provide,
+  inject: [...originalSceneInjection, RentalOrderConfirmationService, RentalBusinessFactRepository,
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, confirmation: RentalOrderConfirmationService,
+    quoteFacts: RentalBusinessFactRepository, value?: unknown) => {
+    const configuration = readQuoteOrderConfiguration(value);
+    const dependencies = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      core, confirmation, quoteFacts, holderId: configuration.enabled ? configuration.host.holderId : 'ai-native-quote-observer',
+      scene: { code: 'quote_clarification', version: '1' } };
+    dependencies.creationRules = dependencies.creationRules.filter(rule => rule.sceneCode === 'quote_clarification');
+    const options = { enabled: true, audience: 'operator' } as const;
+    const reprepare = { holderId: dependencies.holderId, creationRules: dependencies.creationRules, memberships };
+    // Deny-only observer ceilings are NOT the stored plan/budget and never
+    // authorize execution. Historical readers resolve the exact persisted
+    // selection/plan/approval themselves; all methods that can run are closed.
+    const task = configuration.enabled ? configuration : { host: { holderId: dependencies.holderId, leaseMs: 1 },
+      limits: { maxSteps: 1, maxCalls: 1, maxTotalMs: 1, maxStepMs: 1, maxOutputBytes: 1, maxConcurrent: 1 as const } };
+    const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare);
+    const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
+    if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const requests = entry.useFactory() as Record<string, unknown>;
+    const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile']
+      : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal'];
+    return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) => [method,
+      !configuration.enabled && closedMethods.includes(method)
+        ? async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } : call])));
+  }
+}));
+
 /** Explicit same-owner manager CAS, never policy seeding during task creation.
  * Without server execution configuration, only the original read policies are
  * exposed. The closed order chain adds no approval or free-input permission. */
 export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_TASK_ACTION_POLICIES,
-  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown) => {
-    const configuration = readOrderExecutionConfiguration(serverValue);
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, quoteValue?: unknown) => {
+    const configuration = readOrderExecutionConfiguration(serverValue), quote = readQuoteOrderConfiguration(quoteValue);
     const operations = [...originalReadOperations, ...(configuration.enabled ? originalOrderExecutionOperations : [])];
     return composeRequestBoundOriginalTaskActionPolicies(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
         enabled: true, audience: 'operator', ttlMs: 120000,
-        templates: operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'] }))
+        templates: [...operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'],
+          ...((originalReadOperations as readonly string[]).includes(operation) ? {} : { sceneCode: 'order_explanation' }) })),
+          ...(quote.enabled ? [...originalOrderExecutionOperations, 'decide_approval' as const].map(operation => ({
+            operation, sceneCode: 'quote_clarification', requiredPermissions: ['rental-os:order:create'] })) : [])]
       });
   }
 };
@@ -377,15 +429,19 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundScenePlanPolicies>> = {
   provide: AI_SCENE_PLAN_POLICIES,
   inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown) => {
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown, quoteValue?: unknown) => {
     const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue), settings = readSettingsExecutionConfiguration(settingsValue);
+    const quote = readQuoteOrderConfiguration(quoteValue);
     const scenes = [
-      // Preparation policies have only their original read tools. No quote
-      // commit, model, approval or settings-write tool is granted here.
-      { scene: { code: 'quote_clarification', version: '1' }, tools: ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve'] as const },
+      // A server option only makes its original tool eligible for a human
+      // CAS policy. It grants no task action, approval, lease or dispatch.
+      { scene: { code: 'quote_clarification', version: '1' }, tools: quote.enabled
+        ? ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve', 'rental.order.commit'] as const
+        : ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve'] as const },
       { scene: { code: 'opening_diagnosis', version: '1' }, tools: settings.enabled
         ? ['tenant.opening.diagnose', AI_APPROVED_SETTINGS_TOOL_CODE] as const : ['tenant.opening.diagnose'] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
