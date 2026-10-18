@@ -6,7 +6,7 @@ import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authori
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { PrismaTaskApplication } from '../runner/prisma-task-application';
+import { PrismaTaskApplication, waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
@@ -48,7 +48,7 @@ export function composeRequestBoundSettingsTaskReads(
       return { ...credential };
     } };
     try {
-      return await runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         const identity = new AiTaskCurrentIdentityAuthority(server.auth, credentials, clock);
         const before = await identity.resolve();
         const initial = structuredClone(await creation.read(boundRequest, original));
@@ -69,7 +69,7 @@ export function composeRequestBoundSettingsTaskReads(
         // Legitimate concurrent task transitions do not invalidate an already
         // consistent repository snapshot. Its exact watermark remains intact.
         return freezeOriginalInput(result);
-      });
+      }), false);
     } finally { active = false; }
   };
   return Object.freeze({

@@ -51,6 +51,10 @@ import { StaffInspectionRequestFactory } from './inspection-assist/inspection-as
 import { HumanAutomationRequestFactory } from './automation/human-automation-request.composition';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './business-events/prisma-business-failure-outbox';
+import { AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
+import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
+import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
+  AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS } from './scenes/settings-task.controller';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
 
@@ -81,6 +85,48 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
   provide: HumanAutomationPolicyRequestFactory, inject: [PrismaService, AuthService, ApiAuthGuard],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) => new HumanAutomationPolicyRequestFactory({ db, auth, guard })
 }];
+
+/** Original notification changes only, not a generic settings executor. The
+ * server selects this host; persisted plan/action grants and human approval
+ * are still independently required. Reads remain available after disabling
+ * new preparation/execution, and never acquire a lease or invoke a model. */
+export const AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION');
+const settingsExecutionConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), host: z.object({ holderId: z.string().min(1).max(191)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), leaseMs: z.number().int().min(1).max(120000) }).strict() }).strict()]);
+function readSettingsExecutionConfiguration(value: unknown) {
+  const parsed = settingsExecutionConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return parsed.data;
+}
+const settingsEntries = [
+  [AI_SETTINGS_CHANGE_REQUESTS, ['prepare']],
+  [AI_SETTINGS_TASK_CREATION_REQUESTS, ['create']],
+  [AI_SETTINGS_TASK_CONTROL_REQUESTS, ['configurePolicy', 'start']],
+  [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask']],
+  [AI_SETTINGS_TASK_READ_REQUESTS, []]
+] as const;
+export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = settingsEntries.map(([provide, executionMethods]) => ({
+  provide, inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService,
+    { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService, value?: unknown) => {
+    const configuration = readSettingsExecutionConfiguration(value);
+    const host = configuration.enabled ? configuration.host : { holderId: 'ai-native-settings-observer', leaseMs: 30000 };
+    const module = AiSettingsTaskHttpModule.registerOriginalLifecycle({ db, auth, guard, core, subscriptions,
+      scene: { code: 'opening_diagnosis', version: '1' }, holderId: host.holderId }, {
+      enabled: true, audience: 'operator', host, ttlMs: 120000,
+      templates: (['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'decide_approval'] as const)
+        .map(operation => ({ operation,
+          requiredPermissions: ['rental-os:price:manage'] }))
+    });
+    const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
+    if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const requests = entry.useFactory() as Record<string, unknown>;
+    return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) =>
+      [method, !configuration.enabled && (executionMethods as readonly string[]).includes(method)
+        ? async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } : call])));
+  }
+}));
 
 export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
@@ -331,16 +377,17 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundScenePlanPolicies>> = {
   provide: AI_SCENE_PLAN_POLICIES,
   inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown) => {
-    const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue);
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown) => {
+    const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue), settings = readSettingsExecutionConfiguration(settingsValue);
     const scenes = [
       // Preparation policies have only their original read tools. No quote
       // commit, model, approval or settings-write tool is granted here.
       { scene: { code: 'quote_clarification', version: '1' }, tools: ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve'] as const },
-      { scene: { code: 'opening_diagnosis', version: '1' }, tools: ['tenant.opening.diagnose'] as const },
+      { scene: { code: 'opening_diagnosis', version: '1' }, tools: settings.enabled
+        ? ['tenant.opening.diagnose', AI_APPROVED_SETTINGS_TOOL_CODE] as const : ['tenant.opening.diagnose'] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
       ...(probe.enabled ? [{ scene: { code: TEXT_PROBE_SCENE, version: probe.sceneVersion },

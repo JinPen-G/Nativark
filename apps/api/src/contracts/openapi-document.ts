@@ -2119,6 +2119,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Draft-polymorphic response, not a frozen full protocol.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject' })),
+  ...Object.entries(AI_SCENE_MODEL_HTTP_DRAFT).filter(([name]) => /Settings/u.test(name)).map(([name, action]) => ({
+    method: 'post' as const, path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `originalNotificationSettings_${name}`, permissions: ['rental-os:price:manage'],
+    summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Unknown requires original change/task/decision/operation observation; draft-polymorphic response.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject' })),
   { method: 'post', path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension}`,
     tag: 'AI Native', operationId: 'previewOriginalOrderExtension',
     summary: 'Current owner-bound original next-steps request and exact order version. Reuses human Core extension permission and pricing; no persistence, inventory reservation, approval, extension or payment. Response remains a draft projection, not an execution receipt.',

@@ -185,6 +185,10 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
 const originalQuoteReadRoutes = new Set([AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview, AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt,
   AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes].map(action => `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${action}`));
+// Fixed original notification lifecycle only; every consumer still verifies
+// current scope/owner, task policy and (for writes) real human approval/Core.
+const originalSettingsRoutes = new Set(Object.entries(AI_SCENE_MODEL_HTTP_DRAFT)
+  .filter(([name]) => /Settings/u.test(name)).map(([, action]) => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
 const originalTaskObservationRoutes = new Set([
   AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage,
   AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene,
@@ -218,6 +222,7 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-os:order:extend', 'rental-os:order:operate'];
   if (originalOrderExecutionRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (originalTaskAccountingRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
+  if (originalSettingsRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm}`)
     return ['rental-os:order:create'];

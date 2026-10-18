@@ -73,7 +73,7 @@ export function composeRequestBoundSettingsChanges(
   const call = bindRequests(dependencies, options, composeApprovedSettingsApplication);
   const read = prepareSettingsChangeSchema.pick({ changeKey: true });
   return Object.freeze({
-    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.readCurrent()),
+    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.readCurrent(), { write: false }),
     prepare: (request: AiSceneHttpRequest, value: unknown) => {
       const parsed = prepareSettingsChangeSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -81,12 +81,12 @@ export function composeRequestBoundSettingsChanges(
         const change = await app.prepareChange(command);
         return freezeOriginalInput({ change, task: 'not_created' as const, approval: 'not_granted' as const,
           activeSettings: 'not_modified' as const });
-      });
+      }, { write: true });
     },
     readReceipt: (request: AiSceneHttpRequest, value: unknown) => {
       const parsed = read.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      return call(request, freezeOriginalInput(parsed.data), (app, command) => app.readChangeReceipt(command));
+      return call(request, freezeOriginalInput(parsed.data), (app, command) => app.readChangeReceipt(command), { write: false });
     }
   });
 }
@@ -254,7 +254,7 @@ export function composeRequestBoundSettingsTaskCreation(
       }
       return freezeOriginalInput({ original: { changeId: original.change.changeId, changeHash: original.change.changeHash },
         receipt, execution: 'not_attested' as const, approval: 'not_granted' as const });
-    });
+    }, { write: creating });
   };
   return Object.freeze({
     create: (request: AiSceneHttpRequest, value: unknown) => use(request, value, true),
@@ -324,9 +324,13 @@ export function composeRequestBoundSettingsTaskControls(
         receipt = await root.policies.put({ taskId: found.task.taskId, operation, requiredPermissions: template.requiredPermissions,
           expiresAt: new Date(expiresAt) }, writeSchema.parse(value).expectedRevision);
       }
-      await found.verify();
+      try { await found.verify(); }
+      catch (error) {
+        if (mode !== 'read') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
       return freezeOriginalInput({ receipt, semantics: 'policy_not_approval_or_dispatch' as const });
-    });
+    }, { write: mode !== 'read' });
   };
   const cancellation = (request: AiSceneHttpRequest, value: unknown,
     mode: 'request' | 'settle_unstarted' | 'read_request' | 'read_settlement') => {
@@ -342,10 +346,15 @@ export function composeRequestBoundSettingsTaskControls(
         : mode === 'read_settlement' ? await transitions.readCancellationSettlementReceipt(input)
           : mode === 'request' ? await transitions.transition({ ...input, to: 'cancel_requested', reason: 'cancel_requested' })
             : await transitions.settleUnstartedCancellation({ ...input, to: 'cancelled', reason: 'cancel_settled' }, found.task.runId);
-      await found.verify();
+      try { await found.verify(); }
+      catch (error) {
+        if (mode === 'request' || mode === 'settle_unstarted')
+          throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
       return freezeOriginalInput({ receipt, cancellation: 'not_business_rollback' as const,
         automaticRetry: false as const, financialRelease: 'not_performed' as const });
-    });
+    }, { write: mode === 'request' || mode === 'settle_unstarted' });
   };
   return Object.freeze({
     requestCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'request'),
@@ -359,29 +368,33 @@ export function composeRequestBoundSettingsTaskControls(
       const parsed = reference.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, parsed.data, async (root, value) => {
-        const input = reference.parse(value), found = await target(root, request, input);
-        const authorization = composePersistedTaskAuthorization(root.input);
-        const access = await authorization.tasks.resolveAccess(found.task.taskId, 'read_metadata');
-        const metadata = await root.input.db.aiTask.findFirst({ where: access.where });
-        if (!metadata || metadata.sceneCode !== scene.code || metadata.sceneVersion !== scene.version
-          || metadata.inputRef !== found.change.changeId || metadata.inputHash !== found.change.changeHash)
-          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const policy = structuredClone(await root.input.db.aiTaskPlanPolicy.findFirst({ where: {
-          scopeId: metadata.scopeId, sceneCode: scene.code, sceneVersion: scene.version } }));
-        const tools = aiPersistedPlanToolsSchema.safeParse(policy?.allowedTools);
-        const limits = aiTaskRunnerLimitsSchema.safeParse(policy?.limits);
-        if (!policy?.enabled || policy.scopeId !== metadata.scopeId || policy.sceneCode !== scene.code
-          || policy.sceneVersion !== scene.version || !policy.expiresAt
-          || !Number.isFinite(new Date(policy.expiresAt).getTime()) || new Date(policy.expiresAt).getTime() <= root.clock().getTime()
-          || !tools.success || !limits.success
-          || !tools.data.some(tool => tool.code === AI_APPROVED_SETTINGS_TOOL_CODE)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const hostRoot = composeTaskSettingsHost({ ...root.input, host, task: { taskId: found.task.taskId, runId: found.task.runId,
-          registrationRef: `settings-change:${found.change.changeHash}`, change: { changeId: found.change.changeId, changeHash: found.change.changeHash },
-          limits: limits.data } });
+        const { found, hostRoot } = await waitForTaskApplicationDependency(async () => {
+          const input = reference.parse(value), found = await target(root, request, input);
+          const authorization = composePersistedTaskAuthorization(root.input);
+          const access = await authorization.tasks.resolveAccess(found.task.taskId, 'read_metadata');
+          const metadata = await root.input.db.aiTask.findFirst({ where: access.where });
+          if (!metadata || metadata.sceneCode !== scene.code || metadata.sceneVersion !== scene.version
+            || metadata.inputRef !== found.change.changeId || metadata.inputHash !== found.change.changeHash)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const policy = structuredClone(await root.input.db.aiTaskPlanPolicy.findFirst({ where: {
+            scopeId: metadata.scopeId, sceneCode: scene.code, sceneVersion: scene.version } }));
+          const tools = aiPersistedPlanToolsSchema.safeParse(policy?.allowedTools);
+          const limits = aiTaskRunnerLimitsSchema.safeParse(policy?.limits);
+          if (!policy?.enabled || policy.scopeId !== metadata.scopeId || policy.sceneCode !== scene.code
+            || policy.sceneVersion !== scene.version || !policy.expiresAt
+            || !Number.isFinite(new Date(policy.expiresAt).getTime()) || new Date(policy.expiresAt).getTime() <= root.clock().getTime()
+            || !tools.success || !limits.success
+            || !tools.data.some(tool => tool.code === AI_APPROVED_SETTINGS_TOOL_CODE)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const hostRoot = composeTaskSettingsHost({ ...root.input, host, task: { taskId: found.task.taskId, runId: found.task.runId,
+            registrationRef: `settings-change:${found.change.changeHash}`, change: { changeId: found.change.changeId, changeHash: found.change.changeHash },
+            limits: limits.data } });
+          return { found, hostRoot };
+        }, false, signal);
         const result = await hostRoot.application.start({ taskId: found.task.taskId, runId: found.task.runId }, signal);
-        await found.verify();
+        try { await waitForTaskApplicationDependency(found.verify, false, signal); }
+        catch { throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false }); }
         return freezeOriginalInput(result);
-      });
+      }, { write: true, signal, preflightOnly: true });
     }
   });
 }
@@ -481,23 +494,32 @@ export function composeRequestBoundPersistedSettingsTask(
     } };
   });
   const use = <R>(request: AiSceneHttpRequest, value: unknown,
-    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>) =>
-    call(request, value, async (root, command) => { const result = await consume(root.settingsHost, command); await root.verify(); return result; });
+    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>,
+    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true }) =>
+    call(request, value, async (root, command) => {
+      const result = await consume(root.settingsHost, command);
+      try { await waitForTaskApplicationDependency(root.verify, false, lifetime.signal); }
+      catch (error) {
+        if (lifetime.write) throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
+      return result;
+    }, lifetime);
   return Object.freeze({
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.application.start(command, signal)),
+      use(request, value, (root, command) => root.application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.application.readConfirmation(command)),
+      use(request, value, (root, command) => root.application.readConfirmation(command), { write: false }),
     decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.settings.application.decide(command)),
+      use(request, value, (root, command) => root.settings.application.decide(command), { write: true }),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command)),
+      use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command), { write: false }),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.application.continueOriginalConfirmation(command, signal)),
+      use(request, value, (root, command) => root.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.application.reconcileOriginal(command, signal)),
+      use(request, value, (root, command) => root.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
     cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.application.requestCancelOriginal(command))
+      use(request, value, (root, command) => root.application.requestCancelOriginal(command), { write: true })
   });
 }
 

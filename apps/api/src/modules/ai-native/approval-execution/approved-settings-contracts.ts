@@ -40,7 +40,9 @@ const validators = Object.fromEntries(Object.keys(AI_APPROVED_SETTINGS_DRAFT_SCH
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: definitions })])) as Record<keyof Contracts, ValidateFunction>;
 export function settingsContract<K extends keyof Contracts>(name: K, value: unknown, output = false): Contracts[K] {
   const copy = structuredClone(value);
-  if (!validators[name](copy)) throw new AiTaskRepositoryError(output ? 'AI_RESOURCE_UNAVAILABLE' : 'AI_INVALID_INPUT');
+  const validate = validators[name];
+  if (typeof validate !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  if (!validate(copy)) throw new AiTaskRepositoryError(output ? 'AI_RESOURCE_UNAVAILABLE' : 'AI_INVALID_INPUT');
   return copy as Contracts[K];
 }
 export function registeredSettingsTool() {
