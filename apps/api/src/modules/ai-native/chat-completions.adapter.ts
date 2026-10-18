@@ -179,7 +179,12 @@ export class ChatCompletionsAdapter implements ModelAdapter {
         const deltas = decoder.push(event.bytes), usage = decoder.accountingUsage();
         if (usage) await input.recordUsage?.(usage);
         if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
-        for (const delta of deltas) {
+        // The decoder validates the whole bounded network block before any
+        // text escapes. Deliver it as one unit so coalesced SSE frames do not
+        // each trigger the same downstream vault/routing/ACL reads. Each next
+        // delivered block still rechecks current authority; no timed cache.
+        const delta = deltas.join('');
+        if (delta) {
           if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
           yield { kind: "text_delta", delta };
         }
