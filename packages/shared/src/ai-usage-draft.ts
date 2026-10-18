@@ -22,6 +22,9 @@ interface AiTenantModelSettingsInputBaseDraft {
 export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraft & (
   | { mode: "platform_managed" }
   | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string;
+  /** Explicit reviewed replacement: revision zero, a fresh key, disabled
+   * service and an original operationKey. Never import a masked credential. */
+  legacySource?: AiLegacyModelConfigurationReferenceDraft;
   /** Management-only write secret. Never reuse as model input/output/log schema. */
   secretChange: { operation: "retain" } | { operation: "replace"; apiKey: string } | { operation: "clear" } }
 );
@@ -38,7 +41,7 @@ export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBase
 );
 /** Management only. No model request, secret readback, tenant or actor override. */
 export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
-  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation'
+  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation', legacy: 'legacy'
 } as const);
 /** Platform manager resource, never tenant-side configuration or dispatch.
  * URL profile identity is validated separately; a body cannot override it. */
@@ -63,6 +66,12 @@ export type AiModelConfigurationOperationDraft = {
   operationKey: string; automaticRetry: false; execution: 'not_granted'; observation: 'original_configuration_save';
 } & ({ state: 'unknown'; result: null } | { state: 'recorded'; expectedRevision: number; resultRevision: number;
   recordedAt: string; result: AiTenantModelSettingsSummaryDraft | AiPlatformModelSettingsSaveDraft });
+export type AiLegacyModelConfigurationReferenceDraft = { parameterSetId: string; versionNo: number; fingerprint: string };
+export type AiLegacyModelConfigurationDraft = { currentConfiguration: 'present' | 'absent'; automaticImport: false;
+  sourcePreserved: true; execution: 'not_granted' } & ({ state: 'not_recorded'; source: null }
+    | { state: 'review_required'; source: AiLegacyModelConfigurationReferenceDraft;
+      supportedProtocol: 'openai_chat_completions' | null; credential: 'replacement_required';
+      conversion: 'explicit_disabled_replacement_only' });
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;

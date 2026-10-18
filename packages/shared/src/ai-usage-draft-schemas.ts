@@ -13,6 +13,7 @@ const usageReported = obj({ kind: choice("reported"), inputTokens: int(), output
 const usageEstimated = obj({ kind: choice("estimated"), inputTokens: int(), outputTokens: int(), methodVersion: id() });
 const usageUnknown = obj({ kind: choice("unknown"), reason: choice("not_returned", "result_unknown"), nextAction: choice("reconcile") });
 const operationKey = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
+const legacySource = obj({ parameterSetId: id(), versionNo: int(1), fingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$' } });
 const settingsInput = { draftVersion: v, configId: id(), expectedRevision: int(0, 4294967294), enabled: bool };
 const settingsSummary = { draftVersion: v, tenantId: id(), configId: id(), configRevision: int(0, 4294967295), enabled: bool, connectionState: choice("not_tested", "mock_only", "verified_live", "failed", "not_verified") };
 const platformCapabilities = { type: 'array', maxItems: 8, uniqueItems: true,
@@ -33,7 +34,15 @@ export const AI_USAGE_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiUsageQuantityDraft: quantity("any"),
   AiBudgetLimitDraft: { oneOf: [obj({ state: choice("not_configured") }), obj({ state: choice("zero"), quantity: quantity("zero") }), obj({ state: choice("limited"), quantity: quantity("positive") })] },
   AiSettingGateDraft: gate,
-  AiTenantModelSettingsInputDraft: { oneOf: [obj({ ...settingsInput, operationKey, mode: choice("platform_managed") }, [...Object.keys(settingsInput), 'mode']), obj({ ...settingsInput, operationKey, mode: choice("tenant_managed"), protocol: id(), baseUrl, model, secretChange: { oneOf: [obj({ operation: choice("retain") }), obj({ operation: choice("replace"), apiKey: { type: "string", minLength: 1, maxLength: 8192, pattern: "\\S", not: { pattern: "[\\r\\n]" }, writeOnly: true } }), obj({ operation: choice("clear") })] } }, [...Object.keys(settingsInput), 'mode', 'protocol', 'baseUrl', 'model', 'secretChange'])] },
+  AiTenantModelSettingsInputDraft: { oneOf: [obj({ ...settingsInput, operationKey, mode: choice("platform_managed") }, [...Object.keys(settingsInput), 'mode']), obj({ ...settingsInput, operationKey, legacySource, mode: choice("tenant_managed"), protocol: id(), baseUrl, model, secretChange: { oneOf: [obj({ operation: choice("retain") }), obj({ operation: choice("replace"), apiKey: { type: "string", minLength: 1, maxLength: 8192, pattern: "\\S", not: { pattern: "[\\r\\n]" }, writeOnly: true } }), obj({ operation: choice("clear") })] } }, [...Object.keys(settingsInput), 'mode', 'protocol', 'baseUrl', 'model', 'secretChange'])] },
+  AiLegacyModelConfigurationDraft: { oneOf: [
+    obj({ currentConfiguration: choice('present', 'absent'), automaticImport: { type: 'boolean', const: false },
+      sourcePreserved: { type: 'boolean', const: true }, execution: choice('not_granted'), state: choice('not_recorded'), source: { type: 'null' } }),
+    obj({ currentConfiguration: choice('present', 'absent'), automaticImport: { type: 'boolean', const: false },
+      sourcePreserved: { type: 'boolean', const: true }, execution: choice('not_granted'), state: choice('review_required'), source: legacySource,
+      supportedProtocol: { oneOf: [choice('openai_chat_completions'), { type: 'null' }] }, credential: choice('replacement_required'),
+      conversion: choice('explicit_disabled_replacement_only') })
+  ] },
   AiModelConfigurationOperationReadDraft: obj({ operationKey }),
   AiModelConfigurationOperationDraft: { oneOf: [
     obj({ operationKey, automaticRetry: { type: 'boolean', const: false }, execution: choice('not_granted'),

@@ -14,6 +14,8 @@ import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
 import { modelConfigurationOperationKey, type ModelConfigurationOperationWrite } from './model-configuration-operation';
 import type { AiModelConfigurationOperationDraft } from '@rental-os/shared';
+import type { AiLegacyModelConfigurationDraft } from '@rental-os/shared';
+import type { LegacyModelConfigurationBasis, LegacyModelConfigurationSource } from './tenant-model-config.repository';
 
 /** Protocol support, never a supplier/model catalogue. Extend through tested adapters. */
 export const tenantModelProtocols = ["openai_chat_completions"] as const;
@@ -38,9 +40,11 @@ export interface TenantModelConfigPorts {
   /** Must validate fresh server identity, tenant membership, space access and action permission. */
   authorize(context: GatewayContext, action: "read" | "manage" | "invoke"): Promise<void>;
   repository: {
-    read(tenantId: string): Promise<TenantModelRecord | null>;
+    read(tenantId: string, legacy?: LegacyModelConfigurationBasis): Promise<TenantModelRecord | null>;
+    readLegacyState?(tenantId: string): Promise<{ configured: boolean; source: LegacyModelConfigurationSource | null }>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
-    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext, operation?: ModelConfigurationOperationWrite): Promise<boolean>;
+    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext,
+      operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis): Promise<boolean>;
     readOperation?(context: GatewayContext, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
     setAllowedCapabilities?(context: GatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
   };
@@ -83,8 +87,8 @@ export class TenantModelConfigService {
     return scope;
   }
 
-  private async readRecord(tenantId: string) {
-    const record = this.snapshot(await this.ports.repository.read(tenantId)) as TenantModelRecord | null;
+  private async readRecord(tenantId: string, legacy?: LegacyModelConfigurationBasis) {
+    const record = this.snapshot(await this.ports.repository.read(tenantId, legacy)) as TenantModelRecord | null;
     if (record && record.tenantId !== tenantId) throw new ModelGatewayError("FORBIDDEN");
     if (!record) return null;
     tenantModelMode(record);
@@ -204,7 +208,21 @@ export class TenantModelConfigService {
         return original.result;
       }
     }
-    const previous = await this.readRecord(context.tenantId);
+    let legacy: LegacyModelConfigurationBasis | undefined;
+    const legacySource = input.mode === 'tenant_managed' ? input.legacySource : undefined;
+    if (legacySource !== undefined) {
+      if (input.mode !== 'tenant_managed' || input.expectedRevision !== 0 || input.enabled || !input.operationKey
+        || input.secretChange.operation !== 'replace' || /\*|•|…/u.test(input.secretChange.apiKey)) throw new ModelGatewayError('INVALID_REQUEST');
+      if (!this.ports.repository.readLegacyState) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      const state = structuredClone(await this.ports.repository.readLegacyState(context.tenantId));
+      await this.authorize(context, 'manage');
+      if (state.configured || !state.source || legacySource.fingerprint !== this.secrets.fingerprint(requestFingerprint(state.source))
+        || legacySource.parameterSetId !== state.source.id || legacySource.versionNo !== state.source.versionNo) throw new AiModelConfigurationRevisionConflictError();
+      const old = state.source.content as { aiModel?: { provider?: unknown } };
+      if (!['OPENAI', 'OPENAI_COMPATIBLE'].includes(old.aiModel?.provider as string)) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      legacy = { parameterSetId: state.source.id, versionNo: state.source.versionNo, hash: requestFingerprint(state.source) };
+    }
+    const previous = await this.readRecord(context.tenantId, legacy);
     if ((previous?.revision ?? 0) !== input.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
     let next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.mode,
       serviceEnabled: input.enabled, revision: input.expectedRevision + 1 };
@@ -220,7 +238,7 @@ export class TenantModelConfigService {
     const result = this.publicSummary(context.tenantId, next);
     const operation = input.operationKey === undefined ? undefined : { operationKey: input.operationKey,
       expectedRevision: input.expectedRevision, commandHash: commandHash!, result };
-    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.expectedRevision, next, context, operation)) throw new AiModelConfigurationRevisionConflictError();
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.expectedRevision, next, context, operation, legacy)) throw new AiModelConfigurationRevisionConflictError();
     try {
       await this.authorize(context, 'manage');
       return result;
@@ -234,6 +252,26 @@ export class TenantModelConfigService {
     const result = await this.ports.repository.readOperation(context, key as string);
     await this.authorize(context, 'read');
     return structuredClone(result);
+  }
+
+  /** Review only: preserve the old object, expose no key/mask/log/prompt, and
+   * never turn a historical connection success into current capability proof. */
+  async readLegacySettings(context: GatewayContext): Promise<AiLegacyModelConfigurationDraft> {
+    context = await this.authorize(context, 'read');
+    if (!this.ports.repository.readLegacyState) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    const before = structuredClone(await this.ports.repository.readLegacyState(context.tenantId));
+    await this.authorize(context, 'read');
+    const latest = structuredClone(await this.ports.repository.readLegacyState(context.tenantId));
+    await this.authorize(context, 'read');
+    if (requestFingerprint(before) !== requestFingerprint(latest)) throw new AiModelConfigurationRevisionConflictError();
+    const base = { currentConfiguration: latest.configured ? 'present' as const : 'absent' as const,
+      automaticImport: false as const, sourcePreserved: true as const, execution: 'not_granted' as const };
+    if (!latest.source) return { ...base, state: 'not_recorded', source: null };
+    const old = latest.source.content as { aiModel?: { provider?: unknown } };
+    return { ...base, state: 'review_required', source: { parameterSetId: latest.source.id, versionNo: latest.source.versionNo,
+      fingerprint: this.secrets.fingerprint(requestFingerprint(latest.source)) },
+      supportedProtocol: ['OPENAI', 'OPENAI_COMPATIBLE'].includes(old.aiModel?.provider as string) ? 'openai_chat_completions' : null,
+      credential: 'replacement_required', conversion: 'explicit_disabled_replacement_only' };
   }
 
   async profile(context: GatewayContext): Promise<GatewayProfile> {

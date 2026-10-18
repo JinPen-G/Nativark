@@ -33,10 +33,12 @@ const validSave = ajv.compile(AI_USAGE_DRAFT_SCHEMAS.AiTenantModelSettingsInputD
 const validRead = ajv.compile({ type: 'object', properties: {}, additionalProperties: false });
 const validOperation = ajv.compile<{ operationKey: string }>(AI_USAGE_DRAFT_SCHEMAS.AiModelConfigurationOperationReadDraft);
 const validSummary = ajv.compile<AiTenantModelSettingsSummaryDraft>(AI_USAGE_DRAFT_SCHEMAS.AiTenantModelSettingsSummaryDraft);
+const validLegacy = ajv.compile(AI_USAGE_DRAFT_SCHEMAS.AiLegacyModelConfigurationDraft);
 export const AI_NATIVE_MODEL_SETTINGS_REQUESTS = Symbol('AI_NATIVE_MODEL_SETTINGS_REQUESTS');
 
 export function composeRequestBoundModelSettings(dependencies: Dependencies) {
-  const call = async (request: Request, value: unknown, write: boolean, signal?: AbortSignal, operation = false) => {
+  const call = async (request: Request, value: unknown, action: 'read' | 'save' | 'operation' | 'legacy', signal?: AbortSignal) => {
+    const write = action === 'save', operation = action === 'operation', legacy = action === 'legacy';
     const header = bearer.safeParse(request?.headers?.authorization);
     if (!header.success) throw new ModelGatewayError('FORBIDDEN');
     let command: unknown;
@@ -70,10 +72,11 @@ export function composeRequestBoundModelSettings(dependencies: Dependencies) {
         const configuration = createPersistedTenantModelConfiguration({ ...dependencies, authorize: authority.authorize.bind(authority) });
         const result = write ? await configuration.saveSettings(context, command) : operation
           ? await configuration.readSettingsOperation(context, (command as { operationKey: string }).operationKey)
-          : await configuration.readSettings(context);
+          : legacy ? await configuration.readLegacySettings(context) : await configuration.readSettings(context);
         try {
           if (!active || originalIdentityHash(await identity.resolve()) !== originalIdentityHash(initial)) throw new ModelGatewayError('FORBIDDEN');
           if (operation ? !validModelConfigurationOperation(result) || result.operationKey !== (command as { operationKey: string }).operationKey
+            : legacy ? !validLegacy(result)
             : !validSummary(result) || result.tenantId !== context.tenantId || result.configId !== context.tenantId) throw new ModelGatewayError('INVALID_RESPONSE');
           return structuredClone(result);
         } catch (error) {
@@ -86,16 +89,18 @@ export function composeRequestBoundModelSettings(dependencies: Dependencies) {
       signal?.removeEventListener('abort', close);
     }
   };
-  return Object.freeze({ read: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, false, signal),
-    operation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, false, signal, true),
-    save: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, true, signal) });
+  return Object.freeze({ read: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'read', signal),
+    operation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'operation', signal),
+    legacy: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'legacy', signal),
+    save: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'save', signal) });
 }
 
 @Controller(AI_MODEL_SETTINGS_HTTP_DRAFT.basePath)
 export class AiModelSettingsController {
   constructor(@Inject(AI_NATIVE_MODEL_SETTINGS_REQUESTS) private readonly settings: ReturnType<typeof composeRequestBoundModelSettings>) {}
-  private async respond(request: Request, write: boolean, body: unknown, operation = false) {
-    try { return await withRequestAbort(request, signal => this.settings[write ? 'save' : operation ? 'operation' : 'read'](request, body, signal)); }
+  private async respond(request: Request, action: 'read' | 'save' | 'operation' | 'legacy', body: unknown) {
+    const write = action === 'save';
+    try { return await withRequestAbort(request, signal => this.settings[action](request, body, signal)); }
     catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : undefined;
       const mapped: Record<string, [string, number]> = {
@@ -112,9 +117,11 @@ export class AiModelSettingsController {
     }
   }
   @Post(AI_MODEL_SETTINGS_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  read(@Req() request: Request, @Body() body: unknown) { return this.respond(request, false, body); }
+  read(@Req() request: Request, @Body() body: unknown) { return this.respond(request, 'read', body); }
   @Post(AI_MODEL_SETTINGS_HTTP_DRAFT.save) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  save(@Req() request: Request, @Body() body: unknown) { return this.respond(request, true, body); }
+  save(@Req() request: Request, @Body() body: unknown) { return this.respond(request, 'save', body); }
   @Post(AI_MODEL_SETTINGS_HTTP_DRAFT.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  operation(@Req() request: Request, @Body() body: unknown) { return this.respond(request, false, body, true); }
+  operation(@Req() request: Request, @Body() body: unknown) { return this.respond(request, 'operation', body); }
+  @Post(AI_MODEL_SETTINGS_HTTP_DRAFT.legacy) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  legacy(@Req() request: Request, @Body() body: unknown) { return this.respond(request, 'legacy', body); }
 }

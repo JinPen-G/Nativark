@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
-import { checkedTenantModelRecord, PrismaTenantModelConfigRepository } from './tenant-model-config.repository';
+import { checkedTenantModelRecord, PrismaTenantModelConfigRepository, readLegacyModelConfiguration, type LegacyModelConfigurationBasis } from './tenant-model-config.repository';
 import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
 import { capabilityNameSchema } from './capability-verification';
@@ -27,10 +27,16 @@ export class PrismaTenantModelProfileRepository implements Repository {
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
     this.records = new PrismaTenantModelConfigRepository(db);
   }
-  read(tenantId: string) { return this.records.read(tenantId); }
+  read(tenantId: string, legacy?: LegacyModelConfigurationBasis) { return this.records.read(tenantId, legacy); }
+  async readLegacyState(tenantId: string) {
+    const configured = await this.db.aiTenantModelConfiguration.findUnique({ where: { tenantId }, select: { tenantId: true } });
+    if (configured && configured.tenantId !== tenantId) throw new ModelGatewayError('FORBIDDEN');
+    return { configured: Boolean(configured), source: await readLegacyModelConfiguration(this.db, tenantId) };
+  }
 
-  async compareAndSwap(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext, operation?: ModelConfigurationOperationWrite) {
-    return this.commit(tenantId, expectedRevision, value, caller, undefined, operation);
+  async compareAndSwap(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext,
+    operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis) {
+    return this.commit(tenantId, expectedRevision, value, caller, undefined, operation, legacy);
   }
 
   async readOperation(caller: GatewayContext, operationKey: string, commandHash?: string) {
@@ -62,14 +68,16 @@ export class PrismaTenantModelProfileRepository implements Repository {
   }
 
   private async commit(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext,
-    capabilities?: readonly AiProfileCapability[], operationValue?: ModelConfigurationOperationWrite) {
+    capabilities?: readonly AiProfileCapability[], operationValue?: ModelConfigurationOperationWrite, legacyValue?: LegacyModelConfigurationBasis) {
     const operation = structuredClone(operationValue);
+    const legacy = structuredClone(legacyValue);
     if (operation && !this.db.aiModelConfigurationOperation?.create) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     const parsed = contextSchema.safeParse(caller), next = checkedTenantModelRecord(value);
     if (!parsed.success || parsed.data.tenantId !== tenantId || next.tenantId !== tenantId
       || !Number.isInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= 4294967295
       || next.revision !== expectedRevision + 1) throw new ModelGatewayError('CONFIG_INVALID');
     const context = parsed.data, mode = tenantModelMode(next);
+    if (legacy && (expectedRevision !== 0 || !operation || mode !== 'tenant_managed' || tenantModelServiceEnabled(next))) throw new ModelGatewayError('CONFIG_INVALID');
     if (operation && (operation.expectedRevision !== expectedRevision || !('tenantId' in operation.result)
       || operation.result.tenantId !== tenantId || operation.result.configRevision !== next.revision
       || operation.result.mode !== mode || operation.result.enabled !== (tenantModelServiceEnabled(next)
@@ -85,7 +93,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
         // Config CAS is the common write lock for all saves/mode changes. The
         // existing config-only adapter is reused ONLY inside this transaction.
         const records = new PrismaTenantModelConfigRepository(tx);
-        if (!await records.compareAndSwap(tenantId, expectedRevision, next)) return false;
+        if (!await records.compareAndSwap(tenantId, expectedRevision, next, undefined, undefined, legacy)) return false;
         await current();
         const columns = aiPersistenceScopeColumns({ kind: 'tenant', tenantId });
         const scope = await tx.aiScope.findFirst({ where: columns });
@@ -112,6 +120,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
         // are sequential fresh authority checks, NOT atomic business admission.
         if (operation) await appendModelConfigurationOperation(tx, { scopeId: scope.id, scopeKind: 'TENANT',
           targetId: tenantId, actorId: context.actorId, workspaceId: context.workspaceId }, operation);
+        if (legacy) await records.assertLegacySource(tenantId, legacy);
         await current();
         callbackCompleted = true;
         return true;
