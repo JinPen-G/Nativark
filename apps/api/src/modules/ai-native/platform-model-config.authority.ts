@@ -31,13 +31,19 @@ export class PlatformModelConfigurationAuthority implements PlatformConnectionAu
     if (profileId !== this.profileId) throw new ModelGatewayError('FORBIDDEN');
     await this.resolve();
   }
+  async read(profileId: string): Promise<void> {
+    if (profileId !== this.profileId) throw new ModelGatewayError('FORBIDDEN');
+    await this.resolveRead();
+  }
   invoke(context: GatewayContext) { return this.invocation.authorize(context, 'invoke'); }
-  async resolve(): Promise<AiExecutionContext> {
+  resolve(): Promise<AiExecutionContext> { return this.current('PUT'); }
+  resolveRead(): Promise<AiExecutionContext> { return this.current('GET'); }
+  private async current(method: 'GET' | 'PUT'): Promise<AiExecutionContext> {
     try {
       const credential = credentialsSchema.parse(structuredClone(await this.credentials.current()));
       return await runWithRequestIdentity({}, async () => {
         const path = `/api/platform/ai/providers/${this.profileId}`;
-        const request = { url: path, originalUrl: path, method: 'PUT', headers: { authorization: credential.authorization }, query: {}, user: undefined as unknown };
+        const request = { url: path, originalUrl: path, method, headers: { authorization: credential.authorization }, query: {}, user: undefined as unknown };
         if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw Error();
         const user = userSchema.parse(request.user), identity = getRequestIdentity(), now = this.clock();
         if (!identity?.isSaasAdmin || identity.staffApi || identity.userId !== user.id || !(now instanceof Date) || !Number.isFinite(now.getTime())) throw Error();

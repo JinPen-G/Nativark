@@ -23,8 +23,9 @@ export function createAuthorizedPlatformModelConfiguration(ports: {
     ports?.db?.aiPlatformModelConnection?.create, ports?.db?.aiPlatformModelConnection?.update]
     .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   const authority = new PlatformModelConfigurationAuthority(ports.guard, ports.credentials, ports.profileId, ports.invocation);
+  const observations = new AiScopeRepository(ports.db, { resolve: () => authority.resolveRead() });
   return {
-    management: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, authority), authority, ports.secrets),
+    management: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, authority), authority, ports.secrets, observations),
     invocation: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, ports.invocation), authority, ports.secrets)
   };
 }

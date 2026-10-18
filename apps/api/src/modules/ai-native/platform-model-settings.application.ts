@@ -56,13 +56,14 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
     try {
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         const authority = new PlatformModelConfigurationAuthority(dependencies.guard, credentials, target.data, invocation);
-        const before = await authority.resolve();
+        const current = () => write ? authority.resolve() : authority.resolveRead();
+        const before = await current();
         if (write) await registerCurrentPlatformAiConfigurationScope({ db: dependencies.db, authority });
         const root = createAuthorizedPlatformModelConfiguration({ ...dependencies, credentials, invocation, profileId: target.data });
         const result = write ? await root.management.save({ ...(command as AiPlatformModelSettingsInputDraft), profileId: target.data })
           : await root.management.read(target.data);
         try {
-          if (!active || originalIdentityHash(await authority.resolve()) !== originalIdentityHash(before)) throw new ModelGatewayError('FORBIDDEN');
+          if (!active || originalIdentityHash(await current()) !== originalIdentityHash(before)) throw new ModelGatewayError('FORBIDDEN');
           if (!(write ? validSaved : validRead)(result) || result.profileId !== target.data) throw new ModelGatewayError('INVALID_RESPONSE');
           return structuredClone(result);
         } catch (error) {

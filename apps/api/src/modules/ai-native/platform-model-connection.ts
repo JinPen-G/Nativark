@@ -42,6 +42,8 @@ type Scopes = Pick<AiScopeRepository, 'resolveRoutingScopes'>;
  */
 export interface PlatformConnectionAuthority {
   manage(profileId: string): Promise<void>;
+  /** Optional for older management-only hosts. Never reused for save. */
+  read?(profileId: string): Promise<void>;
   invoke(context: GatewayContext): Promise<void>;
 }
 
@@ -50,7 +52,8 @@ export interface PlatformConnectionAuthority {
  */
 export class PrismaPlatformModelConnection implements GatewayConnectionResolver {
   constructor(private readonly db: Db, private readonly scopes: Scopes,
-    private readonly authority: PlatformConnectionAuthority, private readonly secrets: SecretBox) {
+    private readonly authority: PlatformConnectionAuthority, private readonly secrets: SecretBox,
+    private readonly readScopes?: Scopes) {
     if ([db?.$transaction, db?.aiProviderProfile?.findFirst, db?.aiPlatformModelConnection?.findUnique,
       scopes?.resolveRoutingScopes, authority?.manage, authority?.invoke, secrets?.encrypt, secrets?.decrypt]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -70,13 +73,16 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       return value.apiKey;
     } catch { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); }
   }
-  private async currentOwner() {
-    try { return structuredClone(await this.scopes.resolveRoutingScopes('platform_managed')); }
+  private async currentOwner(read = false) {
+    try { return structuredClone(await (read && this.readScopes ? this.readScopes : this.scopes).resolveRoutingScopes('platform_managed')); }
     catch { throw new ModelGatewayError('FORBIDDEN'); }
   }
-  private async management(profileId: string) {
-    try { await this.authority.manage(profileId); } catch { throw new ModelGatewayError('FORBIDDEN'); }
-    const resolved = await this.currentOwner();
+  private async management(profileId: string, read = false) {
+    try {
+      if (read && this.authority.read) await this.authority.read(profileId);
+      else await this.authority.manage(profileId);
+    } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    const resolved = await this.currentOwner(read);
     if (resolved.context.actor.kind !== 'saas_admin' || resolved.context.scope.kind !== 'platform'
       || resolved.configurationScope.kind !== 'PLATFORM') throw new ModelGatewayError('FORBIDDEN');
     const { authorizedAt: _, requestId: __, ...identity } = resolved.context;
@@ -88,7 +94,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
    * its key, creating a new profile, probing a provider or proving who saved it. */
   async read(profileId: string) {
     if (!id.safeParse(profileId).success) throw new ModelGatewayError('CONFIG_INVALID');
-    const before = await this.management(profileId);
+    const before = await this.management(profileId, true);
     const read = async () => {
       const row = await this.db.aiProviderProfile.findFirst({ where: { id: profileId, scopeId: before.scopeId,
         scopeKind: 'PLATFORM', serviceMode: 'platform_managed' }, include: { platformConnection: { select } } });
@@ -106,7 +112,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       return { profile, connection: value };
     };
     const first = await read(), latest = await read();
-    const current = await this.management(profileId);
+    const current = await this.management(profileId, true);
     if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
     if (requestFingerprint(first) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
     return { profileId, revision: latest.profile.configRevision, enabled: latest.profile.enabled && latest.profile.disabledAt === null,

@@ -12,7 +12,8 @@ type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingM
 export class HumanMemoryManagementController {
   constructor(@Inject(HumanMemoryManagementRequestFactory) private readonly requests: HumanMemoryManagementRequestFactory) {}
   private async call<T>(request: Request, value: unknown, write: boolean,
-    action: (scoped: HumanMemoryManagementRequest, command: unknown) => Promise<T>): Promise<T> {
+    action: (scoped: HumanMemoryManagementRequest, command: unknown) => Promise<T>,
+    nextAction: AiMemoryManagementErrorDraft['nextAction'] = 'read_original_memory_operation'): Promise<T> {
     try {
       let command: unknown;
       try {
@@ -34,7 +35,7 @@ export class HumanMemoryManagementController {
         code: code === 'invalid_input' || code === 'limit_exceeded' ? 'AI_INVALID_INPUT'
           : code === 'conflict' ? 'AI_REVISION_CONFLICT' : code === 'not_ready' ? 'AI_NOT_READY'
             : code === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE',
-        retryable: false, nextAction: 'read_original_memory_operation' };
+        retryable: false, nextAction };
       throw new HttpException(response, response.code === 'AI_INVALID_INPUT' ? 400
         : response.code === 'AI_REVISION_CONFLICT' || response.code === 'AI_NOT_READY' || response.code === 'AI_RESULT_UNKNOWN' ? 409 : 503);
     }
@@ -58,7 +59,7 @@ export class HumanMemoryManagementController {
   @Post(paths.changeStatus) @HttpCode(200) @Header('Cache-Control', 'no-store')
   changeStatus(@Req() request: Request, @Body() value: unknown) { return this.call(request, value, false, (scoped, command) => scoped.changeStatus(command)); }
   @Post(paths.revoke) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  revoke(@Req() request: Request, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.revoke(command)); }
+  revoke(@Req() request: Request, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.revoke(command), 'read_current_memory_state'); }
   @Post(paths.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   operation(@Req() request: Request, @Body() value: unknown) { return this.call(request, value, false, (scoped, command) => scoped.operation(command)); }
 }

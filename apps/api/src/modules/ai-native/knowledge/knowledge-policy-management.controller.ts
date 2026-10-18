@@ -28,8 +28,10 @@ export class KnowledgePolicyManagementController {
         : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN'
           && ['prepareTarget', 'bindTarget', 'prepare', 'commit'].includes(method) ? 'result_unknown' : 'unavailable';
       const translated = errors[key];
+      const nextAction = method === 'prepareTarget' || method === 'bindTarget' ? 'read_original_policy_target'
+        : method === 'prepare' ? 'read_original_policy_preparation' : 'read_original_policy_operation';
       throw new HttpException({ code: translated.code, retryable: false,
-        ...(key === 'result_unknown' ? { nextAction: 'read_original_policy_operation' } : {}) }, translated.status);
+        ...(key === 'result_unknown' ? { nextAction } : {}) }, translated.status);
     }
   }
 
