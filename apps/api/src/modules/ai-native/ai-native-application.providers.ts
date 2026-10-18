@@ -24,11 +24,13 @@ import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies,
+  composeRequestBoundOriginalTaskAccounting,
   composeRequestBoundPersistedOriginalOrderRead, type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
+import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-accounting-http.module';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
@@ -89,6 +91,16 @@ export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_SCENE_REQUESTS, inject: originalSceneInjection,
   useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
     composeRequestBoundOriginalScenes(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
+};
+
+/** Original AI ledger recovery only. Keep this independent of the server's
+ * new-execution configuration: current owner/resource/action authorization and
+ * persisted same-call evidence, not an active model or old input TTL, decide
+ * access. This cannot reserve, dispatch, infer non-consumption or move funds. */
+export const AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER: FactoryProvider = {
+  provide: AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS, inject: originalSceneInjection,
+  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
+    composeRequestBoundOriginalTaskAccounting(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
 };
 
 /** Existing current-task policies gate each read. Decode only the supported

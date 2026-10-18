@@ -1,5 +1,6 @@
-/** Explicit original-accounting transport. No model/worker/root registration,
- * new reservation or business-funds operation; disabled unless server-composed. */
+/** Original-accounting transport, also used by the standard recovery provider.
+ * The standalone module is opt-in; neither host grants model/worker execution,
+ * new reservations or business-funds operations. Current authority is required. */
 import { Body, Controller, Header, HttpCode, Inject, Module, Post, Req, type DynamicModule } from '@nestjs/common';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT as routes } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';

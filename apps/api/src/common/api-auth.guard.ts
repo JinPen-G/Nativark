@@ -7,7 +7,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -200,7 +200,19 @@ const originalTaskAccountingRoutes = new Set([
   AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.reconcile
 ].map(action => `POST /${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${action}`));
 
+// Only the registered closed order-chain entrypoints. This route permission
+// is not a task policy, lease, approval or dispatch grant; the original host
+// still checks current owner, original material, plan, capabilities and budget.
+const originalOrderExecutionRoutes = new Set(([
+  'start', 'recover', 'readPreparation', 'resumePrepared', 'readAnswer',
+  'readOrderResult', 'readModelResult', 'readTaskScene', 'readNextSteps',
+  'readTaskSnapshot', 'reopenModelSource', 'takeover', 'readTakeoverReceipt',
+  'requestCancel', 'readCancellationReceipt', 'settleUnstartedCancellation',
+  'readCancellationSettlementReceipt'
+] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
+
 export function requiredPermissions(method: string, path: string) {
+  if (originalOrderExecutionRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (originalTaskAccountingRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (originalOrderReadRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];

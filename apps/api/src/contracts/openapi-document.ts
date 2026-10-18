@@ -2071,7 +2071,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
     permissions: ['rental-os:order:view'], requestSchema: 'AiOriginalTaskAccountingRequestDraft',
     responseSchema: 'AiOriginalTaskAccountingResponseDraft',
-    summary: 'Explicit opt-in host only. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the original read, never retry dispatch.' })),
+    summary: 'Standard original order recovery host, independent of new-execution configuration. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the original read, never retry dispatch. Other scenes still require their own explicit trusted composition.' })),
   ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,
