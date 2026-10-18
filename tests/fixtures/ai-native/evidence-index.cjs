@@ -1,6 +1,6 @@
 "use strict";
 // Evidence metadata only. Loading this fixture does not import or execute business tests.
-const base = "docs/开发任务/附件/AI原生系统协作切片/";
+const base = "docs/历史归档/整理前快照-20261016/docs/开发任务/附件/AI原生系统协作切片/";
 const levels = ["static", "type_check", "unit", "contract", "real_database", "browser", "wechat_host", "real_device", "real_model", "external_payment", "production_canary"];
 const commits = {
   S01: "a8cdd30742d0d17a5f36050e2726f984fa88a336",
@@ -61,7 +61,7 @@ rows.push(
   row("fact-refund", "payment.refund", "PaymentRuntimeService.applyProviderRefundOutcome", ["synthetic-tenant"], ["tenant", "workspace"], ["funding-source", "outcome"],
     [ref("S02-tests", "provider success with internal funding failure")], "Controlled funding dependency; no actual provider or ledger acceptance"),
   row("fact-ai-mock", "legacy.ai.connection", "PlatformService.testAiConnection", ["synthetic-tenant"], ["tenant"], ["model-source"],
-    [ref("S02-tests", "legacy AI connection success is explicitly mock")], "mock_success is NOT real_model evidence"),
+    [ref("S02-tests", "legacy AI connection entry is fail-closed until the real Gateway probe is assembled")], "Historical mock success was not real_model evidence; the current source rejects the uncomposed legacy probe. This index reruns neither behavior."),
   row("fact-history", "historical.basis", "RentalBusinessService.quoteOrderExtension; RentalCoreService.listInspectionTemplates", ["synthetic-tenant"], ["workspace", "order-history"], ["historical-source"],
     [ref("S02-tests", "KNOWN GAP: legacy order without inspection snapshots"), ref("S04-tests", "KNOWN GAP: invalid historical timezone")], "Current inspection fallback and non-structured history errors; not repaired", true)
 );

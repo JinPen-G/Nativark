@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-18；最近完整功能：标准受控预算设置与原占用计量保护。当前现场看协作接续，固定提交及验证边界见近期节点，历史结果不相加称最新全量通过。
+> 归纳日期：2026-10-18；最近完整功能：标准持久能力验证链与AIN-01现状基线收口。当前现场看协作接续，固定提交及验证边界见近期节点，历史结果不相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -16,17 +16,17 @@
 
 | 任务 | 已有实现/消费依据 | 仍需完成或验证 |
 | --- | --- | --- |
-| AIN-01 基线盘点 | 已有原业务、成熟度、人工流程与依赖盘点；原切片 AIN-01-20261002 | 目标环境/四品类人工基线逐项闭合；旧静态观察不能当现状 |
+| AIN-01 基线盘点 | 原15项工具目录、实际消费者和当前实现已重新对齐，历史证据断链修复；四品类报价/确认关闭AI对照已复验，见下节 | 目标运行环境/部署版本未验；完整选品至结算/变更人工案例、人工耗时/成功率/修正率及A27/A28全范围仍待验证 |
 | AIN-02 公共契约 | shared 版本化叶子、错误/Action/事件及 OpenAPI 发布；近期只读任务与政策接口已公布 | 全端契约等价、缺字段及运行路径随实际功能核实；未验全范围 |
 | AIN-03 持久化 | task/run/input/phase/proposal/approval、预算、知识/记忆与追加迁移已有代码；近期含内容保留/删除收据 | 全表升级/回读、真实迁移/索引/并发及部署恢复统一验收；本轮未执行迁移 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；当前受权只读政策独立于旧输入过期；原模型结果核对执行时持久授权绑定，另复验当前读权限与事实 | 全身份/地点/撤权真实等价；执行动作仍须有效原输入，未知动作拒绝 |
-| AIN-05 Gateway | 平台/BYOK、唯一invocation/dispatch、原账及文本/流/媒体链；任务Gateway现默认用原OperationLog记录最少准入关联，缺日志依赖拒绝，审计不授派发权 | 标准完整可信执行依赖、真实供应商/全部能力、真实计数/价格；审计真库并发及全生命周期验收仍缺 |
+| AIN-05 Gateway | 平台/BYOK、唯一invocation/dispatch、原账及文本/流/媒体链；ebd5d479将原持久能力验证及人类政策接入标准应用，默认关闭，复用原审计与单账 | 模型配置管理的完整标准消费者、可信执行依赖、真实供应商/全部能力、真实计数/价格；审计真库并发及全生命周期验收仍缺 |
 | AIN-06 运行器 | 持久lease/fence、原收据恢复/暂停/接管/取消和有界等待；步骤上限与持久模型调用上限分离，原资源门与resourceOrigin承接累计额度，丢应答不重读授执行权 | 混合模型/业务完整消费与各宿主/动作恢复窗口、标准可信装配；真实多进程/MySQL竞争和宕机未验 |
 | AIN-07 审批 | 不可变提案、当前人类批准、CAS、Core 参与者和原审批/业务收据组合；人工决策与重新提案等待有界，迟到事务中止、已提交后观察失败保持原收据核对 | 全动作/失败窗与批准消费/Core 原子性真库复验；不自授批准 |
 | AIN-08 业务事实 | business-tools 已接目录/可用性/客户/订单/历史/风险，会员与资金改用原有界查询 | 四品类/历史依据真实对照、其他 reader 的底层查询上限/执行计划核实 |
 | AIN-09 Core 报价 | Core 报价、显式选择、原请求 review/confirm/原键保存与核对已有入口 | 四品类/企业资格/时间地点/全部参数的完整正式消费；unknown 不重建报价 |
 | AIN-10 知识/记忆 | 持久仓储、版本/索引/来源 ACL、人类确认及场景输入；2e1be3be 稳定身份，312de861/023bfad3 删除与保留链 | 真实文件/索引/缓存/撤销删除传播、各格式/来源全链验收；当前词法检索不等于向量检索 |
-| AIN-11 设置/预算 | 平台/租户/场景交集、CAS/占用/结算/unknown、单账及版本化定价证据；任务/原场景/能力验证及客户的原账恢复，客户请求宿主可显式选择calls或recorded（tokens/money），历史结算保留原调用版本；计价历史可独立于生产器读回并由显式只读HTTP消费 | 正式真实费率与可信上界/计数生产者、标准应用执行装配、全部场景设置消费者、真库并发/停用与真实成本 |
+| AIN-11 设置/预算 | 平台/租户/场景交集、CAS/占用/结算/unknown、单账及版本化定价证据；bd052264将六个设置入口接入标准应用，ebd5d479复用能力验证的持久预留/结算链；历史结算保留原调用版本 | 正式真实费率与可信上界/计数生产者、完整标准执行的正向组合、全部场景设置消费者、真库并发/停用与真实成本；租户首次初始化/重绑定完整正向仍待验 |
 | AIN-12 后台任务中心 | 列表/快照/事件水位、原场景聚合；标准scene/input/result/source只读入口，原知识政策/确认复验及当前澄清来源接线 | 完整可信执行宿主、正式知识/文件环境与撤回传播、浏览器；报价澄清需显式服务端组合，只读不等于可执行助手 |
 | AIN-13 订单解释 | 受权订单/支付退款/历史来源与下一步、模型输入/结果/来源重开；c0def985 后台重新授权旧详情，保留 unknown | 真实各订单状态、金额一致性、模型结果/来源 ACL 和完整后台实流验收 |
 | AIN-14 开业诊断 | 分区检查/风险/差异/人工材料、原请求与部分配置消费者已有实现 | 各获准分区正式提案→保存/审核/发布/采用，版本变化与部分失败完整消费 |
@@ -44,6 +44,34 @@
 | AIN-26 组合验收 | 各片离线证据保留，未当作本项整体通过 | 冻结构建/迁移/政策/素材，另授权真库、四品类及多端实际组合验收 |
 | AIN-27 真实供应商/试点 | 当前不宣称真实供应商或生产试点验收 | 供应商/地区/凭据/额度及试点授权、两轨真实能力/用量、部署和回退 |
 | AIN-28 最终交付 | 本文只是当前实施索引，不是最终验收报告 | 全范围缺陷收口、独立复核、可操作运行/停用/接管交付与负责人验收 |
+
+## AIN-01当前基线与门槛依据
+
+本节是现状盘点，不是新增注册表或执行授权。原`tool-baseline.ts`的`baseline-1/unavailable`保留历史初始目录；实际实现和消费者以下表为准，能调用仍须当前政策/权限/依赖。历史证据索引修正为归档路径，旧作者结果不冒充本轮实测。
+
+核对现场：专项分支`ai/ai-native-contracts-s01-20261002`，本地主分支`46cbaf0f`；Core最近相关修复`d7a12287`、治理服务`4c5d7529`。未启动或连接运行环境，部署构建SHA、数据库迁移和生产开放状态均未核实。以下源码位置相对`apps/api/src/modules/ai-native/`，原权限候选/风险/副作用沿`tool-baseline.ts`，实际Auth/Guard、dataScope/locationScope及字段权限不能省略。
+
+| 原工具 | 当前实现/消费者 | 输入输出与边界、仍缺部分 |
+| --- | --- | --- |
+| rental.order.explain | `tools/business-tools.composition.ts`的order/orderExplanation；原订单请求及模型订单链 | 服务端绑定订单→状态/历史/来源；资金另验finance，缺历史不换当前依据；标准执行默认关闭 |
+| rental.catalog.search | 同一组合的catalog、`catalog-read-facts.service.ts` | schema限定ID/名称/游标/最多100条→当前持久配置及版本；必须原有界分页，不退回全表 |
+| rental.availability.check | 同一组合的availability、`availability-read-facts.service.ts` | 正式DTO/当前空间地点→观察时点可用性，不预占 |
+| membership.customer.resolve | 同一组合的membershipCandidates | 原有界个人/企业候选→脱敏ID/名称/来源，个人候选最多50；同名不自动选，tenant会员不授跨空间订单资格 |
+| rental.quote.preview | `tools/quote-route.composition.ts`、`quote-preview.service.ts` | 显式人类选择/当前正式参数→Core金额/版本/有效期；R1会保存报价，unknown只核对原操作，不锁库存 |
+| rental.order.propose | 原selected-quote/订单任务与`approval-execution/`准备链 | 固定原输入及报价→不可变提案/原收据；不是无条件通用提案工具，未批准不建单 |
+| rental.order.commit | `scenes/business-order-application.ts`→原持久审批/Core组合 | 原task/action/input/proposal/真人批准→原订单结果；R2事务/幂等，缺依赖unavailable，资金/交付不推断 |
+| rental.change.preview | `tools/order-next-steps.service.ts`只作人工候选；原Core的previewExtension业务入口 | 正式AI变更预览工具尚未装配，不把有Core服务算AI已接通；人工原预览不执行延期/退款，AI层不补造价格或历史依据 |
+| tenant.opening.diagnose | 同一业务组合的opening/openingActions | 白名单分区/最多50问题→配置事实、来源/缺项/人工出口；未验证外部连接不画成功 |
+| tenant.config.propose | `tools/opening-action-list.service.ts`；通知设置另有正式准备/审批链 | 已支持普通字段→版本化差异候选，候选不等于发布；其他配置分区的正式持久提案/写入未齐 |
+| tenant.notifications.commit | `scenes/settings-business-consumer.composition.ts`及原settings任务宿主 | 仅原获准通知数组/字段与真人批准→Core原操作收据；R2，非所有settings通用写入，缺正式宿主依赖拒绝 |
+| membership.profile.propose | 同一业务组合的memberProfileDifference/submissionMaterial | 当前候选普通姓名差异→prepared_not_submitted；无正式资料提案端口，敏感验证仍走原流程 |
+| inspection.draft.extract | `inspection-assist/inspection-assist.composition.ts`及员工任务/历史收据宿主 | 原附件/对象/阶段/模板→候选、更正与原收据；缺正式媒体/存储依赖不可识别，不自动判责收费 |
+| operations.risks.list | 同一业务组合的risks/riskRecheck | 原有界报表查询→风险对象/时点/来源；无成本不报利润，当前库存不报历史利用率 |
+| platform.category.propose | `category-assist/category-draft.application.ts` | 正式治理DTO/版本→受权草稿/校验/review；原preview门不绕过，发布/采用仍未开放 |
+
+四品类人工对照复用`RENTAL_CATEGORY_DEFINITIONS`及原Core，不另造价格算法：摄影、露营、车辆、工程的现有报价保存和订单确认各1例已在本轮验证，计价/履约枚举仍取正式定义。9项现有用例通过：只产生原报价，不创建订单/预占；确认只到reserved，不推断已付款/已交付；旧AI连接入口拒绝。完整资格、取还检查、结算、变更、历史不足口径与人工指标并未由这9项覆盖。
+
+门槛核对：AIN-01的G1/G2沿原目录与人工参考案例，G3由`AiOrderNextStepsService`实际消费目录、当前权限过滤和人工资源交接证明，本轮5项目录/消费者冒烟通过；证据路径检查先2 pass/1 fail，修复后3/3。因此登记75%，G4仍缺上述完整人工/目标环境及独立验收。AIN-05的G3由`500c839d`/`ebd5d479`标准执行/能力验证消费者及定向组合证明；AIN-11的G3由`bd052264`标准设置消费者及实际BudgetService/Prisma组合证明，均可登记75%，不要求等所有G4条件齐备才更新G3，也不把默认关闭当整项可用。
 
 ## ENTRY 增量实施摘要
 
@@ -92,9 +120,11 @@
 - **待验证：** 原调用证据留存/恢复、真实MySQL并发与宕机、全端当前权限、供应商/文件副本与备份删除、实际性能。离线服务/仓储替身与真实环境分别记录，历史绿测不能整体外推。
 - **待决定/放行：** 供应商及地区、数据用途/外部处理责任、商业额度、自动化白名单、SLO与试点。已定本地保留期限不重新待决，文档补齐不授权生产采集或调用。
 
-以上是接手前文档快照，对应需求v1.8、任务v1.14，不计功能验收；负责人后续确认全部停写并恢复主线源码开发，最新修复及剩余边界见下方近期功能节点。原任务百分比未调整。
+以上场景表包含接手前快照，对应需求v1.8、任务v1.14，不计功能验收；后续已收口功能以近期节点及本页门槛依据为准。百分比只在正式任务表维护，不将作者局部通过视为整项验收。
 
 ## 近期完整功能节点
+
+- **2026-10-18，AIN-01/05/11：** `ebd5d479`将原能力验证的17条shared路径及人类计划/动作政策接回标准AppModule，独立服务器DI配置默认关闭，无启动读写或政策种子，复用持久任务/运行器/唯一Gateway与原预算账本。标准provider真实Auth/Guard/仓储的准备→发布→建任务→显式政策→受权读取及拒绝stdin1/1；既有B03仅选完整生命周期1/1，原17路径/请求响应schema解析0退出；API660 roots/0诊断。AIN-01复用原用例：四品类报价/确认及旧连接9/9、目录/实际消费者5/5、证据断链先2/3后3/3，无新增测试文件。命令使用双preload/固定offline库：`node --test --test-name-pattern='quote persistence invocation writes only quote|confirmation only creates confirmed reservation|legacy AI connection entry is fail-closed' tests/ai-native-fact-baseline.test.cjs`；`node --test tests/ai-native-tool-baseline.test.cjs tests/ai-native-lane-a-next-steps-smoke.test.cjs`；`node --test tests/ai-native-evidence-index.test.cjs`；B03仅选`authorized original probe request lifecycle executes through persisted runner and one financial ledger`；类型沿`node output/typecheck-ai-native.cjs`。最终均0 fail/skip/todo、退出0；首轮类型1诊断修复，原红测及日志保留`output/core-capability-host-20261018/`和`output/core-baseline-close-20261018/`。DB/身份配置数据/权益/外部协议为离线替身，标准provider冒烟未派发，B03为mock能力证据，不是live供应商认证。AIN-01/05/11按G3更新75%；其余任务未重估，未改验收门槛、未连接真实环境。
 
 只保留最近一个月的阶段记录，日期以实际 Git 提交为准。方法级变更合并进完整功能节点，不为每次冒烟追加一篇日志。
 
