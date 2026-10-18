@@ -30,6 +30,41 @@ const aggregateRead = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('settings'), taskId: sceneId, runId: sceneId, reference: z.unknown() }).strict()
 ]);
 
+/** Shared read-only settings aggregation for the standalone settings host and
+ * the task center. The same original preparation/receipt and watermark reader
+ * are consumed; no lease, runner or approval continuation is invoked here. */
+export async function readSettingsTaskCenterScene(
+  settings: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>,
+  events: Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>, value: unknown) {
+  const parsed = aggregateRead.safeParse(structuredClone(value));
+  if (!parsed.success || parsed.data.kind !== 'settings') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const command = freezeOriginalInput(parsed.data);
+  const preparation = z.object({ preparation: z.object({ taskId: sceneId, runId: sceneId }).passthrough() }).passthrough().safeParse(command.reference);
+  if (!preparation.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  if (preparation.data.preparation.taskId !== command.taskId || preparation.data.preparation.runId !== command.runId)
+    throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const first = await settings.read(command.reference);
+  if (!('task' in first)) return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId,
+    business: first, snapshot: { availability: 'unavailable' as const },
+    consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+  let snapshot: { availability: 'unavailable' } | { availability: 'available'; value: Awaited<ReturnType<AiTaskEventRepository['readSnapshot']>> };
+  if (!events.readSnapshot) snapshot = { availability: 'unavailable' };
+  else {
+    const current = await events.readSnapshot({ taskId: command.taskId });
+    if (current.taskId !== command.taskId || current.revision !== first.task.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    snapshot = { availability: 'available', value: current };
+  }
+  const latest = await settings.read(command.reference);
+  if (!('task' in latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+  const { observedAt: _firstObservation, ...firstEvidence } = first;
+  const { observedAt: _latestObservation, ...latestEvidence } = latest;
+  if (requestFingerprint(latestEvidence) !== requestFingerprint(firstEvidence)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+  return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId, snapshot,
+    originalInput: { inputRef: first.step.inputRef, fingerprint: first.step.fingerprint, change: first.change },
+    business: first, submission: 'not_attested_by_approval' as const,
+    consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+}
+
 /**
  * Read-only task-center consumer. It deliberately does not become a second
  * task facade: listing, original request authorization and recovery remain in
@@ -242,24 +277,7 @@ export function composeAiTaskCenterScene(input: {
       const command = freezeOriginalInput(parsed.data);
       if (command.kind === 'settings') {
         if (typeof input.settings?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const preparation = z.object({ preparation: z.object({ taskId: sceneId, runId: sceneId }).passthrough() }).passthrough().safeParse(command.reference);
-        if (!preparation.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        if (preparation.data.preparation.taskId !== command.taskId || preparation.data.preparation.runId !== command.runId)
-          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const first = await input.settings.read(command.reference);
-        if (!('task' in first)) return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId,
-          business: first, snapshot: { availability: 'unavailable' as const },
-          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
-        const snapshot = await readSnapshot(command.taskId, first.task.revision);
-        const latest = await input.settings.read(command.reference);
-        if (!('task' in latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        const { observedAt: _firstObservation, ...firstEvidence } = first;
-        const { observedAt: _latestObservation, ...latestEvidence } = latest;
-        if (requestFingerprint(latestEvidence) !== requestFingerprint(firstEvidence)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId, snapshot,
-          originalInput: { inputRef: first.step.inputRef, fingerprint: first.step.fingerprint, change: first.change },
-          business: first, submission: 'not_attested_by_approval' as const,
-          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+        return readSettingsTaskCenterScene(input.settings, input.events ?? {}, command);
       }
       const current = await readObservedTask(command.original, command.taskId);
       // Successors require consumed-input provenance from the formal model-result

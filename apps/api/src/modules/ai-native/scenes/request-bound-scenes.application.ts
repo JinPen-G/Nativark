@@ -10,7 +10,7 @@ import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, t
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { composePersistedTaskCenter } from '../task-center.composition';
-import { composeAiTaskCenterScene } from '../task-center-scene.composition';
+import { composeAiTaskCenterScene, readSettingsTaskCenterScene } from '../task-center-scene.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
 import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings-task-host.composition';
@@ -489,7 +489,7 @@ export function composeRequestBoundPersistedSettingsTask(
         task: { taskId: task.id, runId: run.id, registrationRef: registered, change: change.data, limits: plan.data.limits } };
     };
     const before = await read(), settingsHost = composeTaskSettingsHost({ ...input, host, task: before.task });
-    return { settingsHost, verify: async () => {
+    return { settingsHost, input, verify: async () => {
       if ((await read()).binding !== before.binding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     } };
   });
@@ -506,6 +506,13 @@ export function composeRequestBoundPersistedSettingsTask(
       return result;
     }, lifetime);
   return Object.freeze({
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (root, command) => {
+      const settings = composeAiSettingsBusinessConsumer({ ...root.input, settingsHost: root.settingsHost });
+      const persisted = composePersistedTaskCenter(root.input);
+      const result = await readSettingsTaskCenterScene(settings, persisted.events, command);
+      await root.verify();
+      return result;
+    }),
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       use(request, value, (root, command) => root.application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>

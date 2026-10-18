@@ -277,18 +277,42 @@ export const AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER: FactoryProvider = {
  * Knowledge snapshots reuse current persisted ACL and human-consent checks;
  * this host neither collects new context nor parses/uploads or confirms data. */
 export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
-  provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: [...originalSceneInjection, FileStorageRuntimeService],
+  provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: [...originalSceneInjection, FileStorageRuntimeService,
+    { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true }, { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, files?: FileStorageRuntimeService) =>
-    composeRequestBoundOriginalTaskRecoveryReaders(
+    memberships: MembershipService, payments: PaymentRuntimeService, files?: FileStorageRuntimeService,
+    quotes?: { readScene(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown> },
+    settings?: { readTaskScene(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown> }) => {
+    const original = composeRequestBoundOriginalTaskRecoveryReaders(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
       { enabled: true, audience: 'operator' }, {
         policy: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 32768, orderExplainTool: true },
         // Direct text-only compositions may omit files. A frozen snapshot with
         // knowledge then remains unavailable, never stripped to expose its text.
         ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
-      })
+      });
+    return Object.freeze({ ...original,
+      readTaskScene(request: { headers: { authorization?: unknown } }, value: unknown) {
+        // Dispatch ONLY a fixed read operation, never a caller component/tool
+        // name, URL or runner action. Target readers rebind owner/scope and the
+        // original selection, preparation, approval and business receipt.
+        const command = structuredClone(value), currentRequest = { headers: { authorization: request?.headers?.authorization } };
+        if (command && typeof command === 'object' && 'kind' in command) {
+          if (command.kind === 'settings') {
+            if (!settings) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+            return settings.readTaskScene(currentRequest, command);
+          }
+          if (command.kind === 'original' && !('resultId' in command)
+            && ['review', 'decision', 'order'].some(field => Object.prototype.hasOwnProperty.call(command, field))) {
+            if (!quotes) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+            return quotes.readScene(currentRequest, command);
+          }
+        }
+        return original.readTaskScene(currentRequest, command);
+      }
+    });
+  }
 };
 
 /** Server DI only. No environment/model/request setting can publish this token.
