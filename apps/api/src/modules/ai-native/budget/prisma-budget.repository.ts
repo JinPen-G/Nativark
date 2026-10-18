@@ -90,6 +90,21 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         await revalidate();
         const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
         if (!next) throw new BudgetError('UNAVAILABLE');
+        if (settings.budget.state === 'limited') {
+          const meter = settings.budget.quantity;
+          // The successful CAS holds this policy's write lock until COMMIT;
+          // admission takes that same lock before inserting allocations.
+          // Meter bindings are immutable and released reservations cannot be
+          // reopened. Do not reinterpret an old unresolved/charged meter as
+          // zero, even after a disabled/not-configured intermediate policy.
+          const incompatible = await tx.aiBudgetAllocation.findFirst({ where: { policyId: next.id,
+            reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] }, OR: [
+              { unitKind: { not: meter.unit } },
+              ...(meter.unit === 'money' ? [{ moneyCurrency: { not: meter.currency } }, { moneyCurrency: null }] : [])
+            ] } }, select: { reservationId: true } });
+          if (incompatible) throw new BudgetError('REVISION_CONFLICT');
+        }
+        await revalidate();
         const saved = policy(next);
         callbackCompleted = true;
         return saved;
@@ -148,7 +163,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         const requested = quantityAtoms(quote.quantity);
         for (const row of rows) {
           const settings = policy(row).settings;
-          const allocations = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] } } }, select: { reservation: { select: { status: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, actualTokens: true, actualCalls: true, actualMoney: true, moneyCurrency: true, runId: true } } } });
+          const allocations = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] } } }, select: { reservation: { select: { status: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, actualTokens: true, actualCalls: true, actualMoney: true, moneyCurrency: true, runId: true } } } });
+          if (allocations.some(item => item.reservation.unitKind !== quote.quantity.unit
+            || quote.quantity.unit === 'money' && item.reservation.moneyCurrency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
           const active = allocations.filter(item => item.reservation.status === 'reserved' || item.reservation.status === 'pending_reconciliation');
           const concurrent = active.length;

@@ -2052,6 +2052,19 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ['rental-os:order:view'], requestSchema, responseSchema: 'GenericObject',
     summary: 'Default closed without explicit trusted server execution configuration. Uses only the original owner-bound model/order/answer chain; current action/plan permissions, verified route and single financial ledger still apply. Recovery observes original effects, never redispatches unknown work. Historical read-only observation remains independently available.' })),
   ...([
+    ['read', 'AiBudgetSettingsReadDraft', 'AiBudgetSettingsSummaryDraft'],
+    ['change', 'AiBudgetSettingsChangeDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['initialize', 'AiBudgetSettingsInitializeDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['refreshConfiguration', 'AiBudgetSettingsRefreshConfigurationDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `manageAiBudgetSettings_${action}`, authRequired: true,
+    permissions: [action === 'platformRead' || action === 'platformSave' ? 'system:ai-provider:manage' : 'system:params:manage'],
+    requestSchema, responseSchema,
+    summary: 'Standard server-composed settings host, default unavailable without trusted execution configuration. Current tenant/workspace or distinct platform management Guard, version CAS and original single-ledger policies remain mandatory. No policy seed, unlimited default, model call, reservation or dispatch. Rebinding uses the current server-selected profile and disables its policy gate; unknown writes require same-policy read, never blind retry.' })),
+  ...([
     ['priceRead', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft'],
     ['pricePublicationRead', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft'],
     ['inputBoundRead', 'AiGatewayInputBoundReadDraft', 'AiGatewayInputBoundSummaryDraft']

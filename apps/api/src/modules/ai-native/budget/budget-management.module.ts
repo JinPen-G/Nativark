@@ -7,10 +7,12 @@ import { BudgetError } from './budget.ports';
 import { composeRequestBoundBudgetManagement, type BudgetManagementDependencies, type BudgetManagementRequest } from './budget-management.application';
 import { GatewayPricingRequestFactory, type GatewayPricingHttpRequest } from './gateway-pricing-request.composition';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from '../scenes/request-abort';
 
 export const AI_BUDGET_MANAGEMENT = Symbol('AI_BUDGET_MANAGEMENT');
 export const AI_GATEWAY_PRICING_HISTORY = Symbol('AI_GATEWAY_PRICING_HISTORY');
 type Application = ReturnType<typeof composeRequestBoundBudgetManagement>;
+type SettingsRequest = BudgetManagementRequest & AiRequestAbortSource;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
 const refs = (value: unknown): unknown => Array.isArray(value) ? value.map(refs) : value && typeof value === 'object'
@@ -49,32 +51,38 @@ export class AiBudgetManagementController {
     }
     return structuredClone(value);
   }
-  private async respond<T>(work: () => Promise<T>) {
-    return respondBudgetManagement(work);
+  private async respond<T>(request: SettingsRequest, write: boolean, work: (signal: AbortSignal) => Promise<T>) {
+    return respondBudgetManagement(async () => {
+      try { return await withRequestAbort(request, work); }
+      catch (error) {
+        if (error instanceof AiRequestWaitError) throw new BudgetError(write ? 'PENDING_RECONCILIATION' : 'UNAVAILABLE');
+        throw error;
+      }
+    });
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  read(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.read(request, body), false));
+  read(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => this.checked(await this.application.read(request, body, signal), false));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.change) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  change(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.change(request, body), false, true));
+  change(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.checked(await this.application.change(request, body, signal), false, true));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.initialize) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  initialize(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.initialize(request, body), false, true));
+  initialize(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.checked(await this.application.initialize(request, body, signal), false, true));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  refreshConfiguration(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.refreshConfiguration(request, body), false, true));
+  refreshConfiguration(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.checked(await this.application.refreshConfiguration(request, body, signal), false, true));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  platformRead(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.platformRead(request, body), true));
+  platformRead(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => this.checked(await this.application.platformRead(request, body, signal), true));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  platformSave(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
-    return this.respond(async () => this.checked(await this.application.platformSave(request, body), true, true));
+  platformSave(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.checked(await this.application.platformSave(request, body, signal), true, true));
   }
 }
 
@@ -110,8 +118,9 @@ export class AiGatewayPricingHistoryController {
   }
 }
 
-/** No AppModule registration. Disabled registration contributes no routes,
- * providers, identity reads, timers or financial calls. */
+/** Standalone registration remains opt-in; the standard root supplies its own
+ * default-closed settings provider. Disabled module registration contributes
+ * no routes, identity reads, timers or financial calls. */
 @Module({})
 export class AiBudgetManagementModule {
   /** Opt-in observations only; may be assembled without a publication source.

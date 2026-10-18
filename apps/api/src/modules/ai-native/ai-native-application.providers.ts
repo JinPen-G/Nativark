@@ -31,6 +31,9 @@ import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
 import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-accounting-http.module';
+import { AI_BUDGET_MANAGEMENT } from './budget/budget-management.module';
+import { composeRequestBoundBudgetManagement } from './budget/budget-management.application';
+import { BudgetError } from './budget/budget.ports';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
@@ -131,7 +134,7 @@ export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION');
 const orderExecutionConfiguration = z.discriminatedUnion('enabled', [
   z.object({ enabled: z.literal(false) }).strict(),
-  z.object({ enabled: z.literal(true), platformProfileId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+  z.object({ enabled: z.literal(true), platformProfileId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     maxOutputTokens: z.number().int().min(1).max(32768), pricing: gatewayPricingSelectionSchema,
     host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
       leaseMs: z.number().int().min(1).max(120000) }).strict(), includeKnowledge: z.boolean() }).strict()
@@ -143,6 +146,32 @@ function readOrderExecutionConfiguration(value: unknown) {
   } catch { /* Non-data DI values cannot become configuration. */ }
   throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 }
+/** Explicit current-manager budget configuration, never budget initialization
+ * at application startup. Missing trusted profile/configuration stays closed;
+ * models, credentials and whitelist changes are not accepted from tenant bodies.
+ * Platform writes retain their distinct platform Guard and authority. */
+export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundBudgetManagement>> = {
+  provide: AI_BUDGET_MANAGEMENT,
+  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    secrets: SecretBox, serverValue?: unknown) => {
+    const configuration = readOrderExecutionConfiguration(serverValue);
+    if (!configuration.enabled) {
+      const unavailable = async (): Promise<never> => { throw new BudgetError('UNAVAILABLE'); };
+      return Object.freeze({ read: unavailable, change: unavailable, initialize: unavailable,
+        refreshConfiguration: unavailable, platformRead: unavailable, platformSave: unavailable });
+    }
+    if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') throw new BudgetError('UNAVAILABLE');
+    return composeRequestBoundBudgetManagement({
+      // The existing settings-only root exposes no pricing/reserve method;
+      // this version never substitutes a calls price for token/money usage.
+      tenant: { db, auth, guard, subscriptions, callPriceVersion: configuration.pricing.priceVersion,
+        initialConfiguration: { db, secrets, platformProfileId: configuration.platformProfileId } },
+      platform: { db, guard, profileId: configuration.platformProfileId }
+    }, { enabled: true });
+  }
+};
 const originalReadOperations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
 const originalOrderExecutionOperations = ['claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] as const;
 

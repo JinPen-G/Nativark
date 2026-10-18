@@ -16,6 +16,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
 import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
@@ -80,7 +81,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     initialConfiguration: dependencies.tenant.initialConfiguration && { ...dependencies.tenant.initialConfiguration } },
     platform = dependencies.platform && { ...dependencies.platform };
   const call = async <T>(request: BudgetManagementRequest, value: unknown,
-    consume: (credentials: AiTaskCredentialSource, command: unknown) => Promise<T>) => {
+    consume: (credentials: AiTaskCredentialSource, command: unknown) => Promise<T>, write = false, signal?: AbortSignal) => {
     const header = bearer.safeParse(request?.headers?.authorization);
     if (!header.success) throw new BudgetError('FORBIDDEN');
     let command: unknown;
@@ -89,9 +90,24 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       command = structuredClone(value);
     } catch { throw new BudgetError('INVALID'); }
     const requestId = randomUUID();
-    const credentials: AiTaskCredentialSource = { current: async () => ({ authorization: header.data,
-      audience: 'operator', requestId: requestId }) };
-    return runWithRequestIdentity({}, () => consume(credentials, command));
+    let active = true;
+    const close = () => { active = false; };
+    const credentials: AiTaskCredentialSource = { current: async () => {
+      if (!active) throw new BudgetError('FORBIDDEN');
+      return { authorization: header.data, audience: 'operator', requestId };
+    } };
+    signal?.addEventListener('abort', close, { once: true });
+    if (signal?.aborted) close();
+    try {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, () => consume(credentials, command)), write, signal);
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN')
+        throw new BudgetError('PENDING_RECONCILIATION');
+      throw error;
+    } finally {
+      active = false;
+      signal?.removeEventListener('abort', close);
+    }
   };
   const tenantRoot = async (credentials: AiTaskCredentialSource, expectedContext?: AiExecutionContext) => {
     if (!tenant) throw new BudgetError('UNAVAILABLE');
@@ -117,7 +133,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
   };
   // First provisioning and explicit re-binding use the same actual config
   // producer. Re-binding never resets allocations or opens a gate by itself.
-  const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean) => call(request, value, async (credentials, value) => {
+  const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = refresh ? refreshConfiguration.safeParse(value) : initialize.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, producer = tenant?.initialConfiguration;
@@ -185,13 +201,13 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
           observation: policy.revision === saved.revision ? 'same_revision' as const : 'changed_after_save' as const };
       }
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
-    });
+    }, true, signal);
   return Object.freeze({
-    read: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, command) =>
-      (await tenantRoot(credentials)).settings.summary(command)),
-    initialize: (request: BudgetManagementRequest, value: unknown) => configure(request, value, false),
-    refreshConfiguration: (request: BudgetManagementRequest, value: unknown) => configure(request, value, true),
-    change: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
+    read: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, command) =>
+      (await tenantRoot(credentials)).settings.summary(command), false, signal),
+    initialize: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => configure(request, value, false, signal),
+    refreshConfiguration: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => configure(request, value, true, signal),
+    change: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = change.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, root = await tenantRoot(credentials), selector = { scope: command.scope, sceneCode: command.sceneCode };
@@ -216,16 +232,16 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
           observation: policy.revision === saved.revision ? 'same_revision' as const : 'changed_after_save' as const };
       }
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
-    }),
-    platformRead: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
+    }, true, signal),
+    platformRead: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformRead.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       return platformView(parsed.data.sceneCode, await platformRoot(credentials).read(parsed.data));
-    }),
-    platformSave: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
+    }, false, signal),
+    platformSave: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformSave.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       return platformView(parsed.data.sceneCode, await platformRoot(credentials).save(parsed.data));
-    })
+    }, true, signal)
   });
 }
