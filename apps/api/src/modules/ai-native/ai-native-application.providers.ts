@@ -34,6 +34,9 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-acc
 import { AI_BUDGET_MANAGEMENT } from './budget/budget-management.module';
 import { composeRequestBoundBudgetManagement } from './budget/budget-management.application';
 import { BudgetError } from './budget/budget.ports';
+import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
+import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
+import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
@@ -146,6 +149,55 @@ function readOrderExecutionConfiguration(value: unknown) {
   } catch { /* Non-data DI values cannot become configuration. */ }
   throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 }
+/** Separate server-owned probe configuration: enabling an order workflow must
+ * not implicitly permit billable capability challenges (or vice versa). The
+ * root installs neither token and never seeds policies or runs a probe. */
+export const AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION = Symbol('AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION');
+const probeConfiguration = z.discriminatedUnion('enabled', [
+  z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
+    priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
+    sceneVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
+    host: orderExecutionConfiguration.options[1].shape.host,
+    capabilities: z.array(textProbeCommandSchema.shape.capability.unwrap()).min(1).max(6)
+      .refine(values => values.includes('text') && new Set(values).size === values.length),
+    taskActionPolicyTtlMs: z.number().int().min(1).max(120000) }).strict()
+]);
+function readProbeConfiguration(value: unknown) {
+  try {
+    const parsed = probeConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
+    if (parsed.success) return parsed.data;
+  } catch { /* Do not accept live adapters/functions as server data. */ }
+  throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+}
+const probeOperations = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
+  'claim_recovery_run', 'release_run', 'transition_task', 'request_input'] as const;
+/** The existing immutable request -> persistent task -> measured runner ->
+ * unique Gateway/dispatch/ledger -> evidence workflow. This factory performs
+ * no reads on assembly. Calls quotas are not supplier money/token pricing;
+ * current Guard, scene/action policy, entitlement and budget gates still apply.
+ * No transport or authority can be provided in a request/configuration body. */
+export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapabilityProbeRequestFactory, 'open'>> = {
+  provide: TEXT_CAPABILITY_PROBE_REQUESTS,
+  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    secrets: SecretBox, serverValue?: unknown) => {
+    const configuration = readProbeConfiguration(serverValue);
+    if (!configuration.enabled) return Object.freeze({ open(): never {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    } });
+    if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    return new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets,
+      platformProfileId: configuration.platformProfileId, sceneVersion: configuration.sceneVersion,
+      priceVersion: configuration.priceVersion, pricing: { mode: 'persisted_calls', priceVersion: configuration.priceVersion },
+      host: configuration.host, probeCapabilities: configuration.capabilities,
+      taskActionPolicyTtlMs: configuration.taskActionPolicyTtlMs,
+      taskActionPolicies: probeOperations.map(operation => ({ operation, requiredPermissions: ['system:params:manage'] })) });
+  }
+};
 /** Explicit current-manager budget configuration, never budget initialization
  * at application startup. Missing trusted profile/configuration stays closed;
  * models, credentials and whitelist changes are not accepted from tenant bodies.
@@ -194,23 +246,30 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
   }
 };
 
-/** Human-managed limits/tool ceiling for the same fixed order chain. These
+/** Human-managed limits/tool ceiling for explicitly selected order/probe scenes. These
  * writes use the existing Guard, scoped CAS and same-transaction audit; they
  * neither create per-task policies nor grant a lease, budget or dispatch. */
 export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundScenePlanPolicies>> = {
   provide: AI_SCENE_PLAN_POLICIES,
-  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown) => {
-    if (!readOrderExecutionConfiguration(serverValue).enabled) {
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown) => {
+    const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue);
+    const scenes = [
+      ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
+        tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
+      ...(probe.enabled ? [{ scene: { code: TEXT_PROBE_SCENE, version: probe.sceneVersion },
+        tools: [TEXT_CAPABILITY_PROBE_TOOL] as const }] : [])
+    ];
+    if (!scenes.length) {
       const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
       return Object.freeze({ read: unavailable, change: unavailable });
     }
     return composeRequestBoundScenePlanPolicies(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
-        enabled: true, audience: 'operator', scenes: [{ scene: { code: 'order_explanation', version: '1' },
-          tools: ['ai.model.text', 'rental.order.explain'] }]
+        enabled: true, audience: 'operator', scenes
       });
   }
 };

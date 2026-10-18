@@ -23,8 +23,9 @@ const gatewayCodes: Record<string, keyof typeof statuses> = { FORBIDDEN: 'AI_ACC
   CAPABILITY_UNSUPPORTED: 'AI_RESOURCE_UNAVAILABLE', BUDGET_UNAVAILABLE: 'AI_RESOURCE_UNAVAILABLE',
   ACCOUNTING_PENDING: 'AI_RESULT_UNKNOWN', CANCELLED: 'AI_RESULT_UNKNOWN' };
 
-/** Only register through the disabled-by-default HTTP module option. POST reads
- * carry keys in the body and never start tasks; no model tools are exposed. */
+/** Standard registration and standalone module both require explicit trusted
+ * probe configuration. POST reads carry original keys, never start tasks;
+ * management, original task policy and budget gates are not an enable flag. */
 @Controller(routes.basePath)
 export class TextCapabilityProbeController {
   constructor(@Inject(TEXT_CAPABILITY_PROBE_REQUESTS) private readonly requests: TextCapabilityProbeRequestFactory) {}
