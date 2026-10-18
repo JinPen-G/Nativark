@@ -19,7 +19,7 @@ import { InvocationAdmissionService } from './invocation-admission.service';
 import { InvocationDispatchService } from './invocation-dispatch.service';
 import { RoutedModelTransport } from './routed-model-transport';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
-import { ModelGatewayError, type ModelAdapter } from './model-gateway.ports';
+import { ModelGatewayError, modelAdapterSupportsCapabilities, type ModelAdapter } from './model-gateway.ports';
 import type { PublicGatewayRuntime } from './public-ai-gateway.service';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import type { AiRouteScene } from './provider-router.ports';
@@ -190,10 +190,7 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
       // Remote evidence cannot make an absent local protocol feature work.
       // Refuse before publication/claim/reservation, not after marking dispatch.
       const adapter = adapters.find(value => value.provider === resolution.route.profile.protocol);
-      const features = { streaming: 'streaming', tools: 'tools', structured_output: 'structuredOutput',
-        vision: 'image', audio: 'audio' } as const;
-      if (!adapter || resolution.requiredCapabilities.some(capability => capability !== 'text'
-        && (!(capability in features) || !adapter.features.includes(features[capability as keyof typeof features])))) return false;
+      if (!modelAdapterSupportsCapabilities(adapter, resolution.requiredCapabilities)) return false;
       const { actorKind: _, ...context } = gatewayBudgetPrincipal(resolution.context);
       await routing.assertCurrent(context, resolution);
       return (await capabilities.preflight(resolution.route.profile, resolution.requiredCapabilities)).allowed;

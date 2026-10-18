@@ -2,7 +2,7 @@ import type { SecretBox } from '../../../common/secret-box';
 import type { PrismaClient } from '@prisma/client';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
-import { ModelGatewayError } from '../model-gateway.ports';
+import { ModelGatewayError, modelAdapterSupportsCapabilities } from '../model-gateway.ports';
 import { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } from '../tenant-model-config.composition';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
@@ -157,6 +157,8 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
           transport: new RoutedModelTransport({ platform: platformConnection, tenant: connection }, adapters) },
         verifyEvidence: async (resolution, mode) => {
           if (mode !== 'live' || resolution.scene !== routeScene) return false;
+          const adapter = adapters.find(value => value.provider === resolution.route.profile.protocol);
+          if (!modelAdapterSupportsCapabilities(adapter, resolution.requiredCapabilities)) return false;
           // The existing router and preflight resolve the exact current profile
           // and verified persisted evidence; a declared/mock fingerprint alone
           // never becomes a live transport capability here.

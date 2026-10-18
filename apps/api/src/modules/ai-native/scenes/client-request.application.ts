@@ -483,7 +483,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             const recovery = composeClientTaskAccountingRecovery({ ...taskDependencies, db, loadMaterial, clock,
               pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: reservation.priceVersion } }, command);
             const record = reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId });
-            account = { status: record.status, reserved: record.reserved, actual: record.actual, dispatched: record.dispatched };
+            // Customer status observation must not disclose internal provider
+            // rates/quantities or masquerade as an order payment/refund receipt.
+            account = { status: record.status, usageRecorded: record.actual !== null, dispatched: record.dispatched };
           }
         }
       } catch (error) {
@@ -497,7 +499,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (before.proof !== after.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       await bound.assertCurrent();
       return freezeOriginalInput(aiClientTaskAccountingResponseSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION, callId,
-        state: account ? 'observed' : 'unknown', account, observedAt: clock().toISOString(),
+        state: account ? 'observed' : 'unknown', account, meaning: 'ai_invocation_not_business_payment', observedAt: clock().toISOString(),
         execution: 'not_authorized_by_accounting', retryable: false, nextAction: 'read_original_accounting' }));
     }, signal);
   };

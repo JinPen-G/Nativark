@@ -31,20 +31,15 @@ export const aiClientTaskCancelRequestSchema = aiClientTaskReadRequestSchema.ext
 }).strict();
 /** Original call selector, not customer-supplied usage, price or authority. */
 export const aiClientTaskAccountingRequestSchema = aiClientTaskReadRequestSchema.extend({ callId: id.max(128) }).strict();
-const accountingQuantity = z.discriminatedUnion('unit', [
-  z.object({ unit: z.literal('calls'), value: z.number().int().min(0).max(2147483647) }).strict(),
-  z.object({ unit: z.literal('tokens'), value: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict(),
-  z.object({ unit: z.literal('money'), amount: z.string().regex(/^(0|[1-9][0-9]*)\.[0-9]{6}$/u),
-    currency: z.string().regex(/^[A-Z]{3}$/u), scale: z.literal(6) }).strict()
-]);
 export const aiClientTaskAccountingResponseSchema = z.object({ contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
   callId: id.max(128), state: z.enum(['observed', 'unknown']),
   account: z.object({ status: z.enum(['reserved', 'settled', 'released', 'pending_reconciliation']),
-    reserved: accountingQuantity, actual: accountingQuantity.nullable(), dispatched: z.boolean() }).strict().nullable(),
+    usageRecorded: z.boolean(), dispatched: z.boolean() }).strict().nullable(),
+  meaning: z.literal('ai_invocation_not_business_payment'),
   observedAt: z.string().datetime({ offset: true }), execution: z.literal('not_authorized_by_accounting'),
   retryable: z.literal(false), nextAction: z.literal('read_original_accounting') }).strict()
   .refine(value => (value.state === 'observed') === (value.account !== null))
-  .refine(value => !value.account || (value.account.status === 'settled') === (value.account.actual !== null));
+  .refine(value => !value.account || (value.account.status === 'settled') === value.account.usageRecorded);
 export const aiClientTaskCancelReceiptSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),

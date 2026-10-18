@@ -119,6 +119,17 @@ export interface ModelAdapter {
   stream?(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
 }
+/** Local protocol support is separate from a remotely verified profile.
+ * Reject an absent implementation before admission/reservation, not after the
+ * invocation has already acquired a dispatch token and become uncertain. */
+export function modelAdapterSupportsCapabilities(adapter: ModelAdapter | undefined, capabilities: readonly string[]): boolean {
+  if (!adapter || typeof adapter.generate !== 'function' || !Array.isArray(adapter.features)) return false;
+  const features: Readonly<Record<string, ModelFeature>> = { streaming: 'streaming', tools: 'tools',
+    structured_output: 'structuredOutput', vision: 'image', audio: 'audio' };
+  return capabilities.every(capability => capability === 'text' || Object.hasOwn(features, capability)
+    && adapter.features.includes(features[capability])
+    && (capability !== 'streaming' || typeof adapter.stream === 'function'));
+}
 export interface GatewayProfile {
   enabled: boolean;
   provider: string;
