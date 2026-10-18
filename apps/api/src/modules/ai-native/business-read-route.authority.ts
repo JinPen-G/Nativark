@@ -8,7 +8,8 @@ import type { AiOrderRouteCredentialSource } from './order-route-context.authori
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
 import { aiQuotePreviewInputSchema } from './quote-preview.service';
-import type { RentalQuoteRequest } from '@rental-os/shared';
+import { AiTaskRepositoryError } from './ai-task.repository';
+import type { RentalQuoteRequest, RentalOrderExtensionRequest, SystemUserRow } from '@rental-os/shared';
 import { z } from 'zod';
 
 export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
@@ -26,7 +27,8 @@ const routes = {
   quote_context: { method: 'GET', path: '/rental/v1/business-settings' },
   payment_intents: { method: 'GET', path: '/rental/v1/orders/:orderId/payment-intents' },
   payment_refunds: { method: 'GET', path: '/rental/v1/orders/:orderId/payment-intents/:intentId/refunds' },
-  quote: { method: 'POST', path: '/rental/v1/quotes' }
+  quote: { method: 'POST', path: '/rental/v1/quotes' },
+  extension_preview: { method: 'POST', path: '/rental/v1/orders/:orderId/extensions/preview' }
 } as const;
 
 /** Closed route bridge. The actual business read runs inside the Guard's ALS
@@ -41,7 +43,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
   }
 
   async withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
-    if ((kind as string) === 'quote') throw new ModelGatewayError('INVALID_REQUEST');
+    if (['quote', 'extension_preview'].includes(kind as string)) throw new ModelGatewayError('INVALID_REQUEST');
     return this.withRoute(kind, input, read);
   }
 
@@ -62,7 +64,22 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     });
   }
 
-  private async withRoute<T>(kind: keyof typeof routes, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
+  /** Existing Core preview only, with the SAME permission as its human route.
+   * No apply/pay callback, arbitrary route, header or caller identity is exposed. */
+  async withExtensionPreview<T>(orderId: string, input: RentalOrderExtensionRequest,
+    consume: (context: AiExecutionContext, request: { user: SystemUserRow }) => Promise<T>): Promise<T> {
+    const command = structuredClone(input);
+    return this.withRoute('extension_preview', { ...command, orderId }, async (context, request) => {
+      if (!request || !('access' in context)) throw new ModelGatewayError('FORBIDDEN');
+      const locations = command.services?.map(row => row.serviceLocationId).filter((id): id is string => Boolean(id)) ?? [];
+      if (context.access.locationScope?.mode === 'selected'
+        && locations.some(id => !context.access.locationScope!.locationIds.includes(id))) throw new ModelGatewayError('FORBIDDEN');
+      return consume(context, request);
+    });
+  }
+
+  private async withRoute<T>(kind: keyof typeof routes, input: unknown,
+    read: (context: AiExecutionContext, request?: { user: SystemUserRow }) => Promise<T>): Promise<T> {
     if (!Object.prototype.hasOwnProperty.call(routes, kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
     const body = structuredClone(input);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');
@@ -80,14 +97,19 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
       route = { method: 'GET', path: route.path.replace(':orderId', parsed.data.orderId)
         .replace(':intentId', 'intentId' in parsed.data ? String(parsed.data.intentId) : '') };
     }
-    const authorize = async <R>(consume: (context: AiExecutionContext) => Promise<R>): Promise<R> => {
+    if (kind === 'extension_preview') {
+      const parsed = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u).safeParse((body as Record<string, unknown>).orderId);
+      if (!parsed.success || ['expire-pending', 'reconcile-pickup-overdue'].includes(parsed.data.toLowerCase())) throw new ModelGatewayError('INVALID_REQUEST');
+      route = { ...route, path: route.path.replace(':orderId', parsed.data) };
+    }
+    const authorize = async <R>(consume: (context: AiExecutionContext, request: { user: SystemUserRow }) => Promise<R>): Promise<R> => {
       const credential = structuredClone(await this.credentials.current());
       if (!credential || !['operator', 'staff'].includes(credential.audience)
         || typeof credential.authorization !== 'string' || credential.authorization.length > 8192
         || typeof credential.requestId !== 'string') throw new ModelGatewayError('FORBIDDEN');
       return runWithRequestIdentity({}, async () => {
         const staff = credential.audience === 'staff';
-        const request: { url: string; originalUrl: string; method: string; headers: object; query: object; body: unknown; staffApiRequest: boolean; user?: { id: string; tenantId: string; isActive: boolean; isSaasAdmin?: boolean; permissions?: string[] } } = {
+        const request: { url: string; originalUrl: string; method: string; headers: object; query: object; body: unknown; staffApiRequest: boolean; user?: SystemUserRow } = {
           url: `/api${route.path}`, originalUrl: `/api${staff ? route.path.replace('/rental/v1/', '/staff/v1/') : route.path}`,
           method: route.method, headers: { authorization: credential.authorization }, query: route.method === 'GET' ? structuredClone(body) : {}, body: structuredClone(body), staffApiRequest: staff
         };
@@ -104,7 +126,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
             ...(identity.organizationId ? { organizationId: identity.organizationId } : {}) }
         };
         if (!isAiStepExecutionContext(context)) throw new ModelGatewayError('FORBIDDEN');
-        return consume(structuredClone(context));
+        return consume(structuredClone(context), { user: structuredClone(user) });
       });
     };
     const binding = (context: AiExecutionContext) => {
@@ -112,7 +134,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
       return requestFingerprint(identity);
     };
     try {
-      return await authorize(async context => {
+      return await authorize(async (context, request) => {
         const before = binding(context);
         // withQuote is R1 work, not an optional read. Keep its existing
         // outcome/unknown handling separate from read-source degradation.
@@ -122,13 +144,14 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
           return result;
         }
         let result!: T, failure: unknown, failed = false;
-        try { result = await read(context); }
+        try { result = await read(context, request); }
         catch (error) { failure = error; failed = true; }
         // Recheck even failed reads: an optional-source downgrade must never
         // swallow a concurrent revocation. Only the business fault, not a
         // Guard/session failure, may become a safe unavailable response.
         await authorize(async current => { if (binding(current) !== before) throw new ModelGatewayError('FORBIDDEN'); });
         if (failed) {
+          if (kind === 'extension_preview' && failure instanceof AiTaskRepositoryError && failure.code === 'AI_REVISION_CONFLICT') throw failure;
           const code = failure && typeof failure === 'object' && 'code' in failure ? failure.code : undefined;
           if (typeof code === 'string' && ['FORBIDDEN', 'AUTHENTICATION_FAILED', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(code))
             throw new ModelGatewayError('FORBIDDEN');
@@ -139,6 +162,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
         return result;
       });
     } catch (error) {
+      if (kind === 'extension_preview' && error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT') throw error;
       if (error instanceof ModelGatewayError) throw error;
       throw new ModelGatewayError('FORBIDDEN');
     }

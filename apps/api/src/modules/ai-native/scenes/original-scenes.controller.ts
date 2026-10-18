@@ -51,6 +51,7 @@ const openingSourceDefinitions = JSON.parse(JSON.stringify(Object.fromEntries(
 const validOpeningSource = openingSourceAjv.compile<AiOriginalOpeningReadSourceDraft>({
   $ref: '#/$defs/AiOriginalOpeningReadSourceDraft', $defs: openingSourceDefinitions
 });
+const validOrderExtensionPreview = openingSourceAjv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneOrderExtensionPreviewDraft);
 
 /** Separate, opt-in read-task transport. It offers no model, approval, input
  * submission or configuration-write route, and never selects an arbitrary tool. */
@@ -152,6 +153,14 @@ export class AiOriginalTaskActionPolicyController {
 export class AiOriginalScenesController {
   constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}
   private readonly respond = respondAiScene;
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  previewOrderExtension(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.respond(() => {
+      const command = structuredClone(body);
+      if (!validOrderExtensionPreview(command)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return withRequestAbort(request, signal => this.scenes.previewOrderExtension(request, command, signal));
+    });
+  }
   @Post()
   create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.create(request, body)); }
   @Post('read')

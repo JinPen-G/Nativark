@@ -4,6 +4,7 @@
  * 接续时从这里追踪具体场景的消费者；不要在此补假授权、第二 Gateway 或预算账本。
  */
 import type { FactoryProvider } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { z } from 'zod';
 import { SecretBox } from '../../common/secret-box';
 import { PrismaService } from '../database/prisma.service';
@@ -11,6 +12,7 @@ import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { RentalCoreService } from '../rental-core/rental-core.service';
+import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
@@ -94,9 +96,16 @@ function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: 
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
 }
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
-  provide: AI_ORIGINAL_SCENE_REQUESTS, inject: originalSceneInjection,
-  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
-    composeRequestBoundOriginalScenes(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
+  provide: AI_ORIGINAL_SCENE_REQUESTS, inject: [...originalSceneInjection, ModuleRef],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, moduleRef?: Pick<ModuleRef, 'get'>) =>
+    composeRequestBoundOriginalScenes({ ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      // Resolve the EXISTING controller lazily after startup, not a duplicate
+      // Core instance. Only its non-persistent preview is exposed to this host.
+      ...(moduleRef ? { extensionPreview: { previewExtension: (...args: Parameters<RentalCoreController['previewExtension']>) =>
+        moduleRef.get(RentalCoreController, { strict: false }).previewExtension(...args) } } : {})
+    }, { enabled: true, audience: 'operator' })
 };
 
 /** Original AI ledger recovery only. Keep this independent of the server's

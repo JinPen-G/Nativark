@@ -32,6 +32,11 @@ const recordedUsage = object({ invocationId: text(36), callId: text(128), accoun
   modelPolicy: { oneOf: [object({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI') }),
     object({ mode: choice('tenant_managed'), model: text(256) })] } });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneOrderExtensionPreviewDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
+    expectedOrderVersion: leafTime,
+    extension: object({ newEndAt: leafTime, services: list(object({ serviceId: id(), quantity: { type: 'number', minimum: 1 },
+      scheduledStartAt: leafTime, scheduledEndAt: leafTime, serviceLocationId: id() }, ['serviceId', 'quantity']), 50),
+      memo: text(2000, 0) }, ['newEndAt']) }),
   AiOpeningReadFactsDraft: object({ requestId: id(), scope: object({ kind: choice('workspace'), tenantId: id(), workspaceId: id() }),
     observedAt: leafTime, ready: { type: 'boolean' }, readinessBasis: choice('core_workspace_aggregate'),
     coverage: choice('requested_sections', 'all_readiness_sections'),

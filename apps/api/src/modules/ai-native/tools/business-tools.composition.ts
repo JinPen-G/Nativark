@@ -27,6 +27,8 @@ import { composeAiBusinessOrderApplication } from '../scenes/business-order-appl
 import type { PersistedApprovedOrderDependencies } from '../approval-execution/approved-order-composition.ports';
 import { AiOrderInspectionFactsService } from './order-inspection-facts.service';
 import { composeAiSettingsBusinessConsumer, type AiSettingsBusinessDependencies } from '../scenes/settings-business-consumer.composition';
+import type { RentalCoreController } from '../../rental-core/rental-core.controller';
+import { AiOrderExtensionPreviewService } from './order-extension-preview.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -41,6 +43,8 @@ export function composeAiAuthorizedBusinessTools(input: {
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   payments?: AiOrderPaymentReadPort;
+  /** Human Core preview only; absence never falls back to AI pricing. */
+  extensionPreview?: Pick<RentalCoreController, 'previewExtension'>;
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
    * default original input, policy or approval is supplied by this lane. */
   approvedOrder?: Omit<PersistedApprovedOrderDependencies, 'guard' | 'credentials'>;
@@ -104,6 +108,9 @@ export function composeAiAuthorizedBusinessTools(input: {
     order,
     orderExplanation: explanation,
     orderNextSteps: nextSteps,
+    orderExtensionPreview: (serverOrderId: string) => new AiOrderExtensionPreviewService(serverOrderId, input.core,
+      new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), routes,
+      input.extensionPreview, input.clock),
     orderExplanationPreparation: orderPreparation,
     orderManualHandoff: (serverOrderId: string, value: unknown) => nextSteps(serverOrderId).manualHandoff(value),
     orderPayments: (serverOrderId: string) => {

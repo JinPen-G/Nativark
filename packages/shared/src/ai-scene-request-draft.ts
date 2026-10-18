@@ -1,4 +1,4 @@
-import type { RentalFulfillmentMode, RENTAL_PRICING_UNIT_CODES } from './core';
+import type { RentalFulfillmentMode, RentalOrderExtensionRequest, RENTAL_PRICING_UNIT_CODES } from './core';
 import type { AiTaskStatusDraft, AiStepStateDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
 import type { AiWorkspaceScope } from './ai-native';
@@ -34,6 +34,12 @@ export type AiSceneRequestReissueDraft = AiSceneRequestCreateDraft & { previousI
 export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
+}
+/** Explicit current preview for the order selected by the stored original
+ * next-steps request. No caller order/actor/scope, amount or execution grant. */
+export interface AiSceneOrderExtensionPreviewDraft extends AiSceneRequestReadDraft {
+  expectedOrderVersion: string;
+  extension: RentalOrderExtensionRequest;
 }
 /** Reopen only a readiness section selected by the original request. This is
  * a current authorized observation, not a URL or historical configuration. */
@@ -173,7 +179,8 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
-  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare'
+  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare',
+  previewOrderExtension: 'order-extension-preview'
 } as const);
 /** Owner-only operator policy management; never execution or business approval. */
 export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({
