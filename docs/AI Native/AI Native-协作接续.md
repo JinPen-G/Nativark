@@ -24,7 +24,7 @@
 
 继续原 AIN-03/04/05/06/07/11 依赖，不以界面或空包装代替核心。当前场景交付矩阵与剩余实施缺口见[开发记录](<AI Native-开发记录.md>)；优先补可信价格/计数生产与完整标准执行依赖、其他输入格式/规模下的来源关系及真实删除传播，不以正确拒绝算正向交付。
 
-`500c839d`已把同一持久订单链接入AppModule的原控制器及17个既有契约路径，复用`composeRequestBoundPersistedOriginalOrderRead`，没有第二运行器或账本。可信服务器DI token `AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION`需明确提供enabled、platformProfileId、maxOutputTokens、pricing、host及includeKnowledge；标准根未提供它，全部执行方法默认不可用，不创建政策或发模型请求。原独立观察provider不随新执行开关关闭。启用配置不是授权，原当前身份/动作及计划政策、能力/连接/Vault、权益与预算仍逐调用校验。OpenAPI暂用GenericObject表达多态结果，不能称完整响应协议已冻结。下一步复核中止期间的原请求预检生命周期，及实际可信政策/计价生产依赖；未启动服务或开放调用。
+`500c839d`已把同一持久订单链接入AppModule的原控制器及17个既有契约路径，复用`composeRequestBoundPersistedOriginalOrderRead`，没有第二运行器或账本。可信服务器DI token `AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION`需明确提供enabled、platformProfileId、maxOutputTokens、pricing、host及includeKnowledge；标准根未提供它，全部执行方法默认不可用，不创建政策或发模型请求。原独立观察provider不随新执行开关关闭。启用配置不是授权，原当前身份/动作及计划政策、能力/连接/Vault、权益与预算仍逐调用校验。OpenAPI暂用GenericObject表达多态结果，不能称完整响应协议已冻结。`91631362`进一步将启动/恢复/准备恢复/接管的只读预检设为5秒有界等待，取消立即关闭本次凭据，迟到compose不进入consume；不把此5秒限额施加于后续正常运行，不推断回滚/退额。下一步仍是可信政策/计价生产依赖及完整正向标准消费者；未启动服务或开放调用。
 
 `b09b0215`已让清理消费原冻结输入的知识/偏好/媒体引用，核查原输入指纹、原请求和空间；仅实际引用的未决任务保留对应来源，不重新打开已撤回正文。每类最多核查50条、50个任务及每任务50份模型输入，超限/旧格式/孤立账务关联仍unavailable，不把页内未出现当无引用；当前不代表全格式或生产规模删除完成。`2aaaa910`将原账务read/releaseUnsent/reconcile整个请求含前置Auth/DB等待设为有界，取消/期限后关闭本次凭据，迟到compose不继续消费；可能写入不明仍unknown、不重试。
 
@@ -40,6 +40,8 @@
 上文历史接点中的“未注册生产执行”指未提供启用配置、未开放真实运行；标准默认关闭的执行注册现已补齐，不应再重复造宿主。原审查不能据此整体结项。继续核对未接可信生产依赖和标准消费者；未知结果、缺正式来源和未验环境分别保留。不启动服务、Worker、Cron、真实模型调用或辅助开发线。
 
 ## 验证与交接边界
+
+- 原订单预检中止冒烟首轮1 fail，修复后1/1；受控时钟期限1/1、装配/撤权复验1/1，API660 roots/0诊断、diff退出0。均stdin，无新测试文件；日志`standard-order-abort-{red|green}`、`standard-order-preflight-deadline`、`standard-order-provider-after-preflight`和`standard-order-preflight-typecheck`沿既有output目录保留。Auth/DB及外部依赖为哨兵/受控Promise，不代替真实取消、真库或供应商验收。
 
 - 标准provider/控制器/契约定向stdin冒烟1/1；既有`ai-native-model-task-host.test.cjs`仅选原任务、原财务收据及四类资源正常链1/1，未运行其余用例；API660 roots/0诊断、diff退出0。无新测试文件。首次冒烟使用错误draftVersion及不完整哨兵端口失败，修正夹具后通过，未放宽产品校验；日志保留`output/core-usage-receipt-20261018/standard-order-*`。provider冒烟证明默认关闭及当前撤权拒绝，既有宿主冒烟的DB/传输/部分账务生命周期为替身，不证明标准根真实模型正向运行或部署验收。既有知识断言失败继续保留。
 

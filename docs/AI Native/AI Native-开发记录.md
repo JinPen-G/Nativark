@@ -98,6 +98,8 @@
 
 只保留最近一个月的阶段记录，日期以实际 Git 提交为准。方法级变更合并进完整功能节点，不为每次冒烟追加一篇日志。
 
+- **2026-10-18，AIN-04/06/13：** `91631362`修复原订单执行在当前身份预检中止后仍挂起的问题：启动/恢复/准备恢复/接管只读预检限5秒，关闭本次凭据并阻止迟到consume；正常执行仍用原runner期限，取消不证明副作用回滚。实际provider受控Promise冒烟先1 fail、后1/1；受控时钟期限1/1、装配/撤权复验1/1，API660 roots/0诊断、diff退出0。沿同一双preload/stdin及隔离类型命令，无新测试文件；红绿与期限日志保留`output/core-usage-receipt-20261018/standard-order-*`。真库/供应商、完整运行取消窗口未验，原遗留失败未隐藏，百分比不变。
+
 - **2026-10-18，AIN-04/05/06/11/13：** `500c839d`将既有持久模型→受权订单事实→回答链接入标准AppModule/provider及17个原契约路径，复用显式模块的同一组合；新增服务器DI配置默认缺省关闭，不提供权限/政策种子、不构造第二账本，原历史观察保持独立。控制器统一200/no-store，OpenAPI沿已有shared请求schema，响应暂为GenericObject。定向stdin装配/拒绝冒烟1/1，既有`node --test --test-name-pattern='^model host starts queued task and run, publishes under one lease, then settles the original invocation and four resources$' tests/ai-native-model-task-host.test.cjs`1/1，均0 fail/skip/todo；API660 roots/0诊断、diff退出0。沿本树双preload、固定offline库和`output/typecheck-ai-native.cjs`，首轮无效夹具与最终日志保留`output/core-usage-receipt-20261018/standard-order-*`。无新测试文件、服务启动或真实调用；真实政策/费率/认证计数生产、完整标准正向及真库/供应商仍未验，原知识断言失败未消除，百分比不变。
 
 - **2026-10-18，AIN-04/06/10/11/24：** `b09b0215`接入冻结模型输入的原知识/偏好/附件引用，复用既有格式校验，不新建知识库或删除账本；已核验窗口内区分无关来源与原未决引用，超限、篡改、跨空间及不支持格式拒绝清理，不因TTL释放未知占用。`2aaaa910`为原账read/releaseUnsent/reconcile补整个请求的有界等待和请求凭据关闭，读取消不可用、可能写取消unknown；原操作不自动重试。一次性冒烟来源2/2、生命周期1/1、实际账务入口1/1，API660 roots/0诊断、diff退出0；既有知识输入组合3/4（缺assertBound创建拒绝断言与58b2b5a9元数据实现语义不一致，原create代码未改，未删断言）。命令沿原双preload/stdin及`node output/typecheck-ai-native.cjs`，既有文件为`tests/ai-native-knowledge-lane-b-input-composition.test.cjs`；首轮红测、一次夹具缺表修正及最终日志保留本树`output/core-usage-receipt-20261018/`。DB/Auth/传输为替身，无新测试文件、真库/存储/模型或生产开放；真实费率/认证计数源、全格式/大规模引用索引及标准执行全链仍缺，百分比不变。
