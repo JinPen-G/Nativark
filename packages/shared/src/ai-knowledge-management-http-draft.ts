@@ -10,7 +10,10 @@ export const AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   beginUpload: 'uploads/begin', completeUpload: 'uploads/complete',
   beginRevisionUpload: 'uploads/revision/begin', completeRevisionUpload: 'uploads/revision/complete',
   observeUpload: 'uploads/read', observeRevisionUpload: 'uploads/revision/read',
+  indexRead: 'index/read', indexRequest: 'index/request', indexResume: 'index/resume', indexOperationRead: 'index/operation-read',
 });
+export type AiKnowledgeManagementIndexReferenceDraft = { documentId: string; operationId: string; generation: number };
+type IndexNextStep = 'manual' | 'none' | 'complete_same_job' | 'resume_same_relational_job';
 
 export type AiKnowledgeManagementDraftInput = {
   documentId: string; documentVersion: string; attachmentId: string; title: string;
@@ -20,6 +23,10 @@ export type AiKnowledgeManagementMutationInput = { documentId: string; expectedR
 export type AiKnowledgeManagementUploadInput = { documentId: string; fileName: string;
   mimeType: 'text/plain' | 'text/markdown'; sizeBytes: number };
 export type AiKnowledgeManagementHttpRequestsDraft = {
+  indexRead: { documentId: string };
+  indexRequest: { confirmation: 'request_relational_index'; command: AiKnowledgeManagementMutationInput & { kind: 'upsert' | 'remove' } };
+  indexResume: { confirmation: 'resume_original_relational_index'; command: AiKnowledgeManagementIndexReferenceDraft };
+  indexOperationRead: AiKnowledgeManagementIndexReferenceDraft;
   beginUpload: AiKnowledgeManagementUploadInput;
   completeUpload: { documentId: string; sessionId: string };
   beginRevisionUpload: AiKnowledgeManagementUploadInput & { expectedRevision: number; targetVersion: string };
@@ -58,6 +65,12 @@ export type AiKnowledgeManagementOperationResponseDraft = {
   completionSemantics: 'receipt_and_head_are_separate_facts'; recovery: 'read_original_operation_only';
 };
 export type AiKnowledgeManagementHttpResponsesDraft = {
+  indexRead: { document: AiKnowledgeManagementStateDraft; receipt: 'not_queued' | 'not_recorded' | 'recorded'; nextStep: IndexNextStep };
+  indexRequest: { document: AiKnowledgeManagementStateDraft; semantics: 'relational_index_not_external_index' };
+  indexResume: AiKnowledgeManagementHttpResponsesDraft['indexRequest'];
+  indexOperationRead: { document: AiKnowledgeManagementStateDraft; reference: AiKnowledgeManagementIndexReferenceDraft;
+    status: 'not_observed' | 'superseded' | 'pending' | 'completed' | 'failed'; receipt: 'unavailable' | 'not_recorded' | 'recorded';
+    nextStep: IndexNextStep | 'read_original_operation'; historicalCompletion: 'not_attested'; physicalIndexDeletion: 'not_verified' };
   observeUpload: Omit<FileUploadSessionSummary, 'uploadUrl' | 'uploadHeaders'> & { documentId: string;
     targetVersion?: string; expectedRevision?: number; semantics: 'observed_upload_not_document_commit' };
   observeRevisionUpload: AiKnowledgeManagementHttpResponsesDraft['observeUpload'];
@@ -104,7 +117,21 @@ const state = obj({ documentId: id, title: text(256), documentVersion: id, revis
 }, ['documentId', 'title', 'documentVersion', 'revision', 'aclRevision', 'publication', 'parsing', 'indexing',
   'parseOperation', 'indexJob', 'body', 'physicalIndexDeletion', 'actionAuthorization']);
 const commandResponse = obj({ operationId: id, document: state, semantics: choice('current_document_state_not_original_operation_result') });
+const indexReference = obj({ documentId: id, operationId: text(191), generation: revision });
+const indexNextStep = choice('manual', 'none', 'complete_same_job', 'resume_same_relational_job');
+const indexMutation = obj({ document: state, semantics: choice('relational_index_not_external_index') });
 export const AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiKnowledgeManagementIndexReadRequestDraft: obj({ documentId: id }),
+  AiKnowledgeManagementIndexRequestDraft: obj({ confirmation: choice('request_relational_index'), command: obj({ documentId: id, expectedRevision,
+    operationId: id, kind: choice('upsert', 'remove') }) }),
+  AiKnowledgeManagementIndexResumeRequestDraft: obj({ confirmation: choice('resume_original_relational_index'), command: indexReference }),
+  AiKnowledgeManagementIndexOperationRequestDraft: indexReference,
+  AiKnowledgeManagementIndexReadResponseDraft: obj({ document: state, receipt: choice('not_queued', 'not_recorded', 'recorded'), nextStep: indexNextStep }),
+  AiKnowledgeManagementIndexMutationResponseDraft: indexMutation,
+  AiKnowledgeManagementIndexOperationResponseDraft: obj({ document: state, reference: indexReference,
+    status: choice('not_observed', 'superseded', 'pending', 'completed', 'failed'), receipt: choice('unavailable', 'not_recorded', 'recorded'),
+    nextStep: choice('manual', 'none', 'complete_same_job', 'resume_same_relational_job', 'read_original_operation'),
+    historicalCompletion: choice('not_attested'), physicalIndexDeletion: choice('not_verified') }),
   AiKnowledgeManagementBeginUploadRequestDraft: obj(upload),
   AiKnowledgeManagementCompleteUploadRequestDraft: obj({ documentId: id, sessionId: id }),
   AiKnowledgeManagementBeginRevisionUploadRequestDraft: obj({ ...upload, expectedRevision, targetVersion: id }),

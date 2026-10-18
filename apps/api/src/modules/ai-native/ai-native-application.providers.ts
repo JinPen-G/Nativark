@@ -21,6 +21,7 @@ import { ClientApiService } from '../client/client-api.service';
 import { composeStandardClientBookingEntry, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY } from './scenes/standard-client-entry.application';
 import { randomUUID } from 'node:crypto';
 import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.service';
+import { TenantIntegrationService } from '../integrations/tenant-integration.service';
 import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -41,6 +42,7 @@ import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controll
 import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } from './model-settings.application';
 import { AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, composeRequestBoundPlatformModelSettings } from './platform-model-settings.application';
 import { HumanMemoryManagementRequestFactory } from './knowledge/human-memory-management.composition';
+import { HumanKnowledgeManagementRequestFactory } from './knowledge/human-knowledge-management.composition';
 import { KNOWLEDGE_POLICY_MANAGEMENT, createKnowledgePolicyManagementFactory } from './knowledge/knowledge-policy-management.composition';
 import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
@@ -74,6 +76,11 @@ export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER: FactoryProvider = {
   provide: HumanMemoryManagementRequestFactory, inject: [PrismaService, AuthService],
   useFactory: (db: PrismaService, auth: AuthService) => new HumanMemoryManagementRequestFactory({ db, auth, clock: { now: () => Date.now() } })
+};
+export const AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER: FactoryProvider = {
+  provide: HumanKnowledgeManagementRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService],
+  useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService) =>
+    new HumanKnowledgeManagementRequestFactory({ db, auth, integrations, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
   provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [PrismaService, AuthService, ApiAuthGuard],

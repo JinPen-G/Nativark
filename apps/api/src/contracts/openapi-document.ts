@@ -6,7 +6,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
-import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
@@ -2031,6 +2031,24 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
     summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...([
+    ['observeUpload', 'ObserveUploadRequestDraft', 'ObserveUploadResponseDraft'],
+    ['observeRevisionUpload', 'ObserveRevisionUploadRequestDraft', 'ObserveUploadResponseDraft'],
+    ['beginUpload', 'BeginUploadRequestDraft', 'BeginUploadResponseDraft'], ['completeUpload', 'CompleteUploadRequestDraft', 'CompleteUploadResponseDraft'],
+    ['beginRevisionUpload', 'BeginRevisionUploadRequestDraft', 'BeginRevisionUploadResponseDraft'],
+    ['completeRevisionUpload', 'CompleteRevisionUploadRequestDraft', 'CompleteRevisionUploadResponseDraft'],
+    ['prepareCreate', 'PrepareRequestDraft', 'PrepareResponseDraft'], ['create', 'CreateRequestDraft', 'CommandResponseDraft'],
+    ['parse', 'ParseRequestDraft', 'CommandResponseDraft'], ['reconcileParse', 'ReconcileParseRequestDraft', 'CommandResponseDraft'],
+    ['revise', 'ReviseRequestDraft', 'CommandResponseDraft'], ['publish', 'PublishRequestDraft', 'CommandResponseDraft'],
+    ['withdraw', 'WithdrawRequestDraft', 'CommandResponseDraft'], ['delete', 'DeleteRequestDraft', 'CommandResponseDraft'],
+    ['operationStatus', 'OperationRequestDraft', 'OperationResponseDraft'],
+    ['indexRead', 'IndexReadRequestDraft', 'IndexReadResponseDraft'], ['indexRequest', 'IndexRequestDraft', 'IndexMutationResponseDraft'],
+    ['indexResume', 'IndexResumeRequestDraft', 'IndexMutationResponseDraft'], ['indexOperationRead', 'IndexOperationRequestDraft', 'IndexOperationResponseDraft']
+  ] as const).map(([action, request, response]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageCurrentAiKnowledge_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current operator and exact persisted document/upload action policy, ACL, version and original file integration required. No ambient file grants or model call. Human confirmation is action-specific; upload, document commit and publication are separate facts. Unknown writes require original operation observation.',
+    requestSchema: `AiKnowledgeManagement${request}`, responseSchema: `AiKnowledgeManagement${response}` })),
   ...([
     ['list', 'ListRequestDraft', 'ListResponseDraft'], ['state', 'StateRequestDraft', 'StateDraft'],
     ['read', 'ReadRequestDraft', 'MutationDraft'], ['propose', 'ProposeRequestDraft', 'MutationDraft'],
