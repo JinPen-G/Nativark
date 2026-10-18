@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-18。最近核心功能：原订单受权续租预览及配置提交不明收敛；模型执行仍默认关闭。固定提交与证据见开发记录，开工以实际Git现场为准，不将SHA作为回退目标。
+> 更新时间：2026-10-18。最近核心功能：租户双轨/平台模型配置与知识、记忆、原索引操作的标准管理入口；模型执行仍默认关闭。固定提交与证据见开发记录，开工以实际Git现场为准，不将SHA作为回退目标。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -18,7 +18,7 @@
 
 四条辅助树仍保留在同级目录：`codex-ai-native-lane-a`、`codex-ai-native-lane-b`、`claude-ai-native-lane-a`、`claude-ai-native-lane-b`。上次交接已实际同步四树到`71dbdd65`，当时均干净且与主线差异0/0；本轮主线已有新提交，辅助树未再同步，不宣称它们仍与最新主线一致。不复制私有生成物。本地main仍为`46cbaf0f`，本次没有合main或推送授权。
 
-开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮从干净主线接续，既有需求、任务、未来方案及文档整理成果不重做。未跟踪 output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
+开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录），全部保留、不夹带；正式任务仅选择性暂存本轮百分比变化。源码已按完整功能提交，接手以实际status为准。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
 
@@ -26,9 +26,11 @@
 
 AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务入口/仅候选/缺依赖的区分；四品类原报价与确认、实际目录消费者及归档证据链接已用现有入口快检。当前按原G3将AIN-01/05/11更新为75%，整项验收仍0/28，不改分母或门槛。AIN-01尚缺完整人工流程/指标及目标环境版本；本轮补上`rental.change.preview`中的续租预览：`business-tools.orderExtensionPreview(orderId).read`及原`next_steps`请求的`previewOrderExtension`→标准同名POST入口。订单由原请求绑定，原view及extend/operate权限、订单版本、服务地点和读后身份均复验；只复用原Core试算，不保存/批准/执行，也未登记自动模型工具。其他变更类型、完整响应协议及真实HTTP/四品类全范围仍未验。其他任务具备门槛证据再更新，不批量估分。
 
-配置管理的具体未接点：C07平台模式输入的enabled无独立持久字段，configId的管理对象绑定及未配置revision=0的公开摘要也需统一；不能用两次非原子保存或虚构revision把现有服务包装成双轨完整保存。`fa349049`已在原平台/租户事务补提交不明与提交后撤权，原平台组合的`management.read(profileId)`可当前授权下观察修订，无密钥且不认证连接；当前状态不是原保存收据，不能因此换修订自动重写。下一步仍需完整合法存储、配置操作收据与公开消费者，不自动导入旧明文设置或开放执行；这些是代码待补，不笼统归为环境未验。原续租预览`32c5812e`仅试算，不将模型建议升级为执行许可。
+配置标准入口已补：`97610dcc`提供`POST /api/ai-native/model-settings/{read|save}`，复用C07；configId绑定当前tenant而非Profile，未配置读revision=0/disabled，模式、独立serviceEnabled和密钥/Profile同一CAS，平台模式保留BYOK且不要求供应商字段。`f7f3ec29`提供`GET/PUT /api/platform/ai/providers/{profileId}`，沿原SaaS平台Guard和canonical PLATFORM范围；expectedRevision=0首次创建DEFAULT Profile与加密Vault，旧修订/并发冲突拒绝。两入口保存都不验证连接/能力、不授额度/执行，清密钥强制关闭；提交应答不明只当前授权下观察、不自动重写。追加迁移`20261018090000_ai_tenant_service_gate`只完成离线校验，未执行。仍缺旧明文设置的合法转换、配置原操作收据及后台表单正式消费；不要把当前修订当原保存收据或自动导入旧密钥。
 
-`ebd5d479`将原能力验证的17个shared路径与`AI_NATIVE_CAPABILITY_PROBE_PROVIDER`接回标准AppModule；另需服务器`AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION`显式提供profile、scene/price版本、host、能力白名单及政策TTL。标准根没有该值，默认关闭且组装零读写；订单执行配置不会顺带开放付费probe。原计划管理provider按独立配置只开放对应固定scene/tool，人类按CAS配置政策，无自动种子。请求沿原Auth/Guard/ALS、原输入→task→runner→唯一Gateway/预算→能力收据，mock结果不变成live认证。当前已验标准准备/政策/读取和既有mock完整生命周期，真实模型/全部能力及标准传输完整链未验；配置管理的完整标准消费者仍需接，不重复造能力工作流。未来首选Harness的调整仅属未来方案，不启动接入。
+知识/记忆标准管理已接回原实现：`e46b4c76`注册`HumanMemoryManagementController`和`KnowledgePolicyManagementController`，`2784aedd`注册`HumanKnowledgeManagementController`，均为当前人类操作。记忆提议/确认/撤回、政策prepare/commit/原operation及文件上传/创建/解析/发布/撤回沿原仓储、正式政策和原文件集成；新增`index/{read|request|resume|operation-read}`复用原词法索引协调器/收据，不启动worker。取消及5秒等待关闭本次凭据，未知写入只核对原操作。缺正式管理authority或动作政策仍不可用，不播种授权。AIN-03已按标准持久消费者与实际仓储冒烟跨G3为75%，真实迁移/并发及完整升级回退仍未验；其余百分比不因入口数量变化。下一步继续补完整标准预算首次初始化/重绑定与执行正向、知识可信authority生产/配置、正式内容消费和真实删除传播；不要重复造已注册的管理服务或索引器。
+
+`ebd5d479`将原能力验证的17个shared路径与`AI_NATIVE_CAPABILITY_PROBE_PROVIDER`接回标准AppModule；另需服务器`AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION`显式提供profile、scene/price版本、host、能力白名单及政策TTL。标准根没有该值，默认关闭且组装零读写；订单执行配置不会顺带开放付费probe。原计划管理provider按独立配置只开放对应固定scene/tool，人类按CAS配置政策，无自动种子。请求沿原Auth/Guard/ALS、原输入→task→runner→唯一Gateway/预算→能力收据，mock结果不变成live认证。当前已验标准准备/政策/读取和既有mock完整生命周期，真实模型/全部能力及标准传输完整链未验；配置保存现有正式入口但不替代这些依赖。未来首选Harness的调整仅属未来方案，不启动接入。
 
 `500c839d`已把同一持久订单链接入AppModule的原控制器及17个既有契约路径，复用`composeRequestBoundPersistedOriginalOrderRead`，没有第二运行器或账本。可信服务器DI token `AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION`需明确提供enabled、platformProfileId、maxOutputTokens、pricing、host及includeKnowledge；标准根未提供它，全部执行方法默认不可用，不创建政策或发模型请求。原独立观察provider不随新执行开关关闭。启用配置不是授权，原当前身份/动作及计划政策、能力/连接/Vault、权益与预算仍逐调用校验。OpenAPI暂用GenericObject表达多态结果，不能称完整响应协议已冻结。`91631362`进一步将启动/恢复/准备恢复/接管的只读预检设为5秒有界等待，取消立即关闭本次凭据，迟到compose不进入consume；不把此5秒限额施加于后续正常运行，不推断回滚/退额。下一步仍是可信政策/计价生产依赖及完整正向标准消费者；未启动服务或开放调用。
 
@@ -50,6 +52,8 @@ AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务�
 上文历史接点中的“未注册生产执行”指未提供启用配置、未开放真实运行；标准默认关闭的执行注册现已补齐，不应再重复造宿主。原审查不能据此整体结项。继续核对未接可信生产依赖和标准消费者；未知结果、缺正式来源和未验环境分别保留。不启动服务、Worker、Cron、真实模型调用或辅助开发线。
 
 ## 验证与交接边界
+
+- 本轮配置、平台管理、记忆/政策和知识文件/索引消费者的最终定向冒烟均退出0，API663 roots/0诊断，diff退出0，无新增测试脚本。首轮夹具/类型/无效验证命令及修复证据均保留，具体分阶段数量/命令见开发记录；标准知识索引冒烟使用合成已解析版本，未访问对象存储。Prisma隔离生成/validate/diff退出0且共享产物未变，未执行迁移。不得称全量或真实环境通过；既有失败仍保留。继续功能，不为报告新增全矩阵或测试文件。
 
 - 最新预算设置stdin组合2/2（实际Auth/Guard、BudgetService/Prisma仓储，含平台首次保存、租户变更、zero/not_configured、CAS、旧COMMIT读回、跨单位/币种拒绝及断线），同单位正常预留/历史混合拒绝仓储冒烟1/1；既有C03仅选微金额写回1/1。API660 roots/0诊断、diff退出0。混合计量红测、首轮缺profile/表夹具及Prisma allocation无id字段的类型失败均保留并修正；未放宽校验。日志`output/core-budget-settings-20261018/`，无新增测试文件/迁移/生成。DB为串行事务替身、Profile和权益为合成种子，预留仓储冒烟的报价/复验端口为替身，不代表真实供应商价格、真库锁或完整标准派发验收。
 
