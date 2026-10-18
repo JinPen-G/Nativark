@@ -26,6 +26,8 @@ import { ClientApiService } from '../client/client-api.service';
 import { composeStandardClientBookingEntry, standardClientModelDependencies, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY,
   AI_NATIVE_CLIENT_MODEL_CONFIGURATION, AI_NATIVE_CLIENT_MODEL_ADAPTERS } from './scenes/standard-client-entry.application';
 import { randomUUID } from 'node:crypto';
+import { createClientTaskPolicyManagementApplication } from './scenes/client-task-policy-management.service';
+import { AI_NATIVE_CLIENT_TASK_POLICIES, AI_NATIVE_CLIENT_POLICY_CONFIGURATION } from './scenes/client-task-policy.controller';
 import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.service';
 import { TenantIntegrationService } from '../integrations/tenant-integration.service';
 import { AiRetentionService } from './privacy/retention.service';
@@ -156,6 +158,17 @@ export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),
 }));
+
+export const AI_NATIVE_CLIENT_POLICY_PROVIDER: FactoryProvider = {
+  provide: AI_NATIVE_CLIENT_TASK_POLICIES,
+  inject: [PrismaService, ApiAuthGuard, AuthService, { token: AI_NATIVE_CLIENT_POLICY_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, auth: AuthService, value?: unknown) => {
+    const selected = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
+    if (!selected.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return createClientTaskPolicyManagementApplication({ db, guard, modelPlan: { db, auth },
+      scene: { sceneCode: 'quote_clarification', sceneVersion: '1' }, enabled: selected.data.enabled });
+  }
+};
 
 export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox],

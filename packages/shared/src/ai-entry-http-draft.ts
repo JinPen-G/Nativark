@@ -57,6 +57,12 @@ export const AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT = Object.freeze({
   basePath: 'staff/v1/ai-native/inspection-task-policies', method: 'POST',
   read: 'read', configure: 'configure', clear: 'clear'
 });
+/** Operator-managed customer scene gates and text plan, not customer grants. */
+export const AI_CLIENT_TASK_POLICY_HTTP_DRAFT = Object.freeze({
+  basePath: 'ai-native/client-task-policies', method: 'POST',
+  read: 'read', change: 'change', operation: 'operation',
+  readModelPlan: 'model-plan/read', changeModelPlan: 'model-plan/change'
+});
 
 /** Original staff inspection services, never an arbitrary tool dispatcher. */
 export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({

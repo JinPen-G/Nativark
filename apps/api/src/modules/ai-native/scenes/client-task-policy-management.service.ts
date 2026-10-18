@@ -138,6 +138,7 @@ export class HumanClientTaskPolicyManagementService {
     const expiresAt = new Date(input.expiresAt), now = this.clock();
     if (!Number.isFinite(now.getTime()) || expiresAt <= now || expiresAt.getTime() - now.getTime() > 90 * 86400000)
       throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    let committed = false;
     try {
       const receipt = await this.db.$transaction(async tx => {
         const policyKey = this.key(manager, key);
@@ -172,11 +173,12 @@ export class HumanClientTaskPolicyManagementService {
         await this.recheck(manager);
         return detail;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      committed = true;
       await this.recheck(manager);
       return { state: 'observed' as const, operationKey: input.operationKey, result: receipt.result,
         recordedAt: receipt.recordedAt, execution: 'not_attested' as const, retryable: false as const };
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw error;
+      if (!committed && error instanceof AiTaskRepositoryError) throw error;
       // A failed COMMIT response is not proof of rollback. Only operation() may
       // observe the original audit; this service never automatically resends.
       return { state: 'unknown' as const, operationKey: input.operationKey, retryable: false as const,
@@ -201,16 +203,20 @@ export function createClientTaskPolicyManagementApplication(input: {
   const credentialSchema = z.object({ authorization: z.string().min(1).max(8192),
     requestId: z.string().min(1).max(191), audience: z.literal('operator') }).strict();
   const call = async <T>(request: unknown, consume: (service: HumanClientTaskPolicyManagementService,
-    credentials: AiOrderRouteCredentialSource) => Promise<T>) => {
+    credentials: AiOrderRouteCredentialSource) => Promise<T>, signal?: AbortSignal) => {
     if (!enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     let credential: z.infer<typeof credentialSchema> | undefined = parse(credentialSchema, request);
+    const close = () => { credential = undefined; };
+    signal?.addEventListener('abort', close, { once: true });
     const credentials: AiOrderRouteCredentialSource = { current: async () => {
-      if (!credential) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (!credential || signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return structuredClone(credential);
     } };
     const service = new HumanClientTaskPolicyManagementService(input.db, input.guard, credentials, scene, input.clock);
-    try { return await consume(service, credentials); }
-    finally { credential = undefined; }
+    try {
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return await consume(service, credentials);
+    } finally { signal?.removeEventListener('abort', close); close(); }
   };
   const plan = (credentials: AiOrderRouteCredentialSource) => {
     if (!modelPlan || !Object.is(modelPlan.db, input.db) || typeof modelPlan.auth?.resolveAccessContext !== 'function')
@@ -221,15 +227,21 @@ export function createClientTaskPolicyManagementApplication(input: {
   return Object.freeze({
     // No caller-controlled scope/scene/tool or automatic plan enablement. A plan
     // update neither grants customer execution nor validates a provider/budget.
-    readModelPlan: (request: unknown) => call(request, async (_service, credentials) => ({
-      ...await plan(credentials).read(), execution: 'not_attested' as const })),
-    changeModelPlan: (request: unknown, value: unknown) => {
+    readModelPlan: (request: unknown, signal?: AbortSignal) => call(request, async (_service, credentials) => ({
+      ...await plan(credentials).read(), execution: 'not_attested' as const }), signal),
+    changeModelPlan: (request: unknown, value: unknown, signal?: AbortSignal) => {
       const command = structuredClone(value);
       return call(request, async (_service, credentials) => ({ ...await plan(credentials).put(command),
-        execution: 'not_attested' as const }));
+        execution: 'not_attested' as const }), signal);
     },
-    read: (request: unknown, value: unknown) => call(request, service => service.read(structuredClone(value))),
-    change: (request: unknown, value: unknown) => call(request, service => service.change(structuredClone(value))),
-    operation: (request: unknown, value: unknown) => call(request, service => service.operation(structuredClone(value)))
+    read: (request: unknown, value: unknown, signal?: AbortSignal) => {
+      const command = structuredClone(value); return call(request, service => service.read(command), signal);
+    },
+    change: (request: unknown, value: unknown, signal?: AbortSignal) => {
+      const command = structuredClone(value); return call(request, service => service.change(command), signal);
+    },
+    operation: (request: unknown, value: unknown, signal?: AbortSignal) => {
+      const command = structuredClone(value); return call(request, service => service.operation(command), signal);
+    }
   });
 }
