@@ -74,7 +74,7 @@ export class StaffInspectionAssistController {
           }
           default: throw new InspectionAssistError('INVALID_INPUT');
         }
-      }));
+      }, signal), 15000);
     }, operation.startsWith('submission-') ? operation === 'submission-submit' || operation === 'submission-read' ? 'submission-read' : 'submission-preparation'
       : operation.startsWith('input-') ? 'input-receipt' : operation.startsWith('result-') ? 'result-save-receipt' : 'draft-operation');
   }

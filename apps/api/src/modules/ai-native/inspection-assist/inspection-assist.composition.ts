@@ -82,10 +82,14 @@ export class StaffInspectionRequestFactory {
 
   /** One request, one private credential lifetime and one original service graph.
    * Closing a request is not a claim that any remote operation was cancelled. */
-  async withRequest<T>(request: { headers: { authorization?: unknown } }, consume: (services: ReturnType<StaffInspectionRequestFactory['open']>) => Promise<T>) {
+  async withRequest<T>(request: { headers: { authorization?: unknown } }, consume: (services: ReturnType<StaffInspectionRequestFactory['open']>) => Promise<T>, signal?: AbortSignal) {
     const services = this.open({ headers: { authorization: request?.headers?.authorization }, requestId: randomUUID() });
-    try { return await runWithRequestIdentity({}, () => consume(services)); }
-    finally { services.close(); }
+    const close = () => services.close();
+    signal?.addEventListener('abort', close, { once: true });
+    try {
+      if (signal?.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+      return await runWithRequestIdentity({}, () => consume(services));
+    } finally { signal?.removeEventListener('abort', close); close(); }
   }
 
   open(request: { headers: { authorization?: unknown }; requestId: unknown }) {

@@ -2029,6 +2029,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Observe only the exact saved recognition association under current owner/order/location authority. Missing evidence is not permission to retry a write.',
     requestSchema: AI_LEAF_COMPONENT_SCHEMAS.AiStaffInspectionReceiptHostRequest.properties!.recognitionSave,
     responseSchema: 'GenericObject' },
+  ...(['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit', 'evidence-bind',
+    'evidence-fingerprint', 'evidence-replace', 'draft-operation', 'submission-review',
+    'submission-prepare', 'submission-preparation', 'submission-submit', 'submission-read'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/staff/v1/ai-native/inspection-assist/${operation}`, tag: 'AI Native',
+    operationId: `staffInspection_${operation.replace(/-/gu, '_')}`, permissions: ['rental-os:order:view'],
+    summary: 'Original staff/order/location and stage action authorization is rechecked. Server manual-flow opt-in is required for new work; exact original receipts remain readable. Preparing is not submitting; an unknown write is observed by its original key, never automatically resent. Recognition is not enabled. Wire payload remains the existing draft; GenericObject does not certify full schema coverage.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
     summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },

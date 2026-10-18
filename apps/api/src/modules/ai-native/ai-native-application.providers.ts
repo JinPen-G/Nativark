@@ -15,6 +15,7 @@ import { RentalCoreService } from '../rental-core/rental-core.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
 import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
+import { RentalIdempotencyRepository } from '../rental-core/rental-idempotency.repository';
 import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
@@ -179,19 +180,37 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
   },
 };
 
-/** Historical observations only. No storage reader, recognition driver or Core
- * submission port is supplied; normal staff pages can reopen owned history,
- * but cannot use this registration to create drafts or execute inspections. */
+/** Server opt-in to the original HUMAN inspection flow. No recognition/task
+ * host is supplied here. Closing new work keeps original submission/draft
+ * receipts readable under their existing current action authorization. */
+export const AI_NATIVE_STAFF_MANUAL_CONFIGURATION = Symbol('AI_NATIVE_STAFF_MANUAL_CONFIGURATION');
+const staffManualConfiguration = z.object({ enabled: z.boolean() }).strict();
+function readStaffManualConfiguration(value: unknown) {
+  const parsed = staffManualConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return parsed.data;
+}
+const staffReceiptOperations = ['history-read', 'receipt-host-read', 'result-save-receipt',
+  'draft-operation', 'submission-preparation', 'submission-read'] as const;
+const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit',
+  'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
+  'submission-review', 'submission-prepare', 'submission-submit'] as const;
 export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_REQUESTS,
-  inject: [PrismaService, ApiAuthGuard, RentalCoreService],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService) =>
-    new StaffInspectionRequestFactory({ db, guard, core })
+  inject: [PrismaService, ApiAuthGuard, RentalCoreService, RentalCoreController,
+    { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, controller: RentalCoreController, value?: unknown) => {
+    readStaffManualConfiguration(value);
+    return new StaffInspectionRequestFactory({ db, guard, core,
+      originalInspection: { controller, receipts: new RentalIdempotencyRepository(db) } });
+  }
 }, {
   provide: AI_STAFF_INSPECTION_ENABLED, useFactory: () => true
 }, {
   provide: AI_STAFF_INSPECTION_OPERATIONS,
-  useFactory: () => Object.freeze(['history-read', 'receipt-host-read', 'result-save-receipt'])
+  inject: [{ token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }],
+  useFactory: (value?: unknown) => Object.freeze([...staffReceiptOperations,
+    ...(readStaffManualConfiguration(value).enabled ? staffManualOperations : [])])
 }];
 
 /** Standard application wiring, not an execution enable switch. No startup
