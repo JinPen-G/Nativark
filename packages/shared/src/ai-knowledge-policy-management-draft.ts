@@ -83,7 +83,8 @@ export type AiKnowledgePolicyHttpReceiptDraft = AiKnowledgePolicyManagementRecei
 };
 export type AiKnowledgePolicyHttpResultDraft = AiKnowledgePolicyHttpPreparationDraft | AiKnowledgePolicyHttpReceiptDraft | AiKnowledgePolicyManagementUnknownDraft;
 export type AiKnowledgePolicyHttpErrorDraft = {
-  code: 'AI_INVALID_INPUT' | 'AI_REVISION_CONFLICT' | 'AI_RESOURCE_UNAVAILABLE'; retryable: false;
+  code: 'AI_INVALID_INPUT' | 'AI_REVISION_CONFLICT' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_RESULT_UNKNOWN'; retryable: false;
+  nextAction?: 'read_original_policy_operation';
 };
 
 const id: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9_-]+$' };
@@ -127,5 +128,6 @@ export const AI_KNOWLEDGE_POLICY_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafS
   AiKnowledgePolicyReviewHttpResponseDraft: { oneOf: [preparation, receipt, unknown] },
   AiKnowledgePolicyCommitHttpResponseDraft: { oneOf: [receipt, unknown] },
   AiKnowledgePolicyOperationHttpResponseDraft: { oneOf: [receipt, unknown] },
-  AiKnowledgePolicyHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_REVISION_CONFLICT', 'AI_RESOURCE_UNAVAILABLE'), retryable: no }),
+  AiKnowledgePolicyHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_REVISION_CONFLICT', 'AI_RESOURCE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'),
+    retryable: no, nextAction: choice('read_original_policy_operation') }, ['code', 'retryable']),
 };

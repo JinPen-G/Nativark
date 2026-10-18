@@ -65,6 +65,7 @@ export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({
 });
 
 export const AI_KNOWLEDGE_POLICY_HTTP_ERRORS = Object.freeze({
+  result_unknown: { status: 409, code: 'AI_RESULT_UNKNOWN' },
   invalid_input: { status: 400, code: 'AI_INVALID_INPUT' },
   conflict: { status: 409, code: 'AI_REVISION_CONFLICT' },
   unavailable: { status: 503, code: 'AI_RESOURCE_UNAVAILABLE' },

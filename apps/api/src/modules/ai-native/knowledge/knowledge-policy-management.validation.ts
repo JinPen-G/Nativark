@@ -5,7 +5,7 @@ import { knowledgeUploadInput, knowledgeUploadRevisionSchema, knowledgeUploadKey
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, type AiKnowledgePolicyChangeDraft } from '@rental-os/shared';
 
 export class KnowledgePolicyManagementError extends Error {
-  constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict' | 'trusted_authority_missing') { super(code); }
+  constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict' | 'trusted_authority_missing' | 'result_unknown') { super(code); }
 }
 export function managementParse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);

@@ -108,8 +108,11 @@ import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/o
 import { AiBudgetManagementController } from "./modules/ai-native/budget/budget-management.module";
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
-import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
+  AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
+import { HumanMemoryManagementController } from './modules/ai-native/knowledge/human-memory-management.controller';
+import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
@@ -130,6 +133,8 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AiBudgetManagementController,
     AiModelSettingsController,
     AiPlatformModelSettingsController,
+    HumanMemoryManagementController,
+    KnowledgePolicyManagementController,
     AiScenePlanPolicyController,
     StaffInspectionAssistController,
     WebsiteClientEntryController,
@@ -178,6 +183,8 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
+    AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
+    AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
     AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,

@@ -3,6 +3,7 @@ import type { AiKnowledgePolicyChangeDraft, AiKnowledgePolicyHttpLifecycleDraft,
   AiKnowledgePolicySnapshotDraft } from '@rental-os/shared';
 import { HumanKnowledgePolicyManagementService, type KnowledgePolicyManagementDb, type KnowledgePolicyManagementDependencies } from './human-knowledge-policy-management.service';
 import { KnowledgePolicyManagementError, managementParse, policySnapshot } from './knowledge-policy-management.validation';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 export const KNOWLEDGE_POLICY_MANAGEMENT = Symbol('KNOWLEDGE_POLICY_MANAGEMENT');
 export type KnowledgePolicyManagementFactoryOptions = { enabled: boolean; guard: KnowledgePolicyManagementDependencies['guard'] };
@@ -66,22 +67,34 @@ export function createKnowledgePolicyManagementFactory(input: KnowledgePolicyMan
       } } }, input.clock);
     return { service, close() { credential = undefined; } };
   };
-  const invoke = <T>(request: unknown, action: (service: HumanKnowledgePolicyManagementService) => Promise<T>) => {
+  const invoke = <T>(request: unknown, value: unknown,
+    action: (service: HumanKnowledgePolicyManagementService, command: unknown) => Promise<T>, write: boolean, signal?: AbortSignal) => {
+    let command: unknown;
+    try {
+      command = structuredClone(value);
+      if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error();
+    } catch { throw new KnowledgePolicyManagementError('invalid_input'); }
     const scoped = open(request);
+    const close = () => scoped.close();
+    signal?.addEventListener('abort', close, { once: true });
+    if (signal?.aborted) close();
     return (async () => {
-      try { return await action(scoped.service); }
-      finally { scoped.close(); }
+      try { return await waitForTaskApplicationDependency(() => action(scoped.service, command), write, signal); }
+      catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new KnowledgePolicyManagementError('result_unknown');
+        throw error;
+      } finally { close(); signal?.removeEventListener('abort', close); }
     })();
   };
   return {
-    prepareTarget: (request: unknown, value: unknown) => invoke(request, service => service.prepareTarget(structuredClone(value))),
-    target: (request: unknown, value: unknown) => invoke(request, service => service.target(structuredClone(value))),
-    bindTarget: (request: unknown, value: unknown) => invoke(request, service => service.bindTarget(structuredClone(value))),
-    read: (request: unknown, value: unknown) => invoke(request, service => service.read(structuredClone(value))),
-    prepare: (request: unknown, value: unknown) => invoke(request, async service => publicResult(await service.prepare(structuredClone(value)), service)),
-    preparation: (request: unknown, value: unknown) => invoke(request, async service => publicResult(await service.preparation(structuredClone(value)), service)),
-    commit: (request: unknown, value: unknown) => invoke(request, async service => publicResult(await service.commit(structuredClone(value)), service)),
-    operation: (request: unknown, value: unknown) => invoke(request, async service => publicResult(await service.operation(structuredClone(value)), service)),
+    prepareTarget: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, (service, command) => service.prepareTarget(command), true, signal),
+    target: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, (service, command) => service.target(command), false, signal),
+    bindTarget: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, (service, command) => service.bindTarget(command), true, signal),
+    read: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, (service, command) => service.read(command), false, signal),
+    prepare: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, async (service, command) => publicResult(await service.prepare(command), service), true, signal),
+    preparation: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, async (service, command) => publicResult(await service.preparation(command), service), false, signal),
+    commit: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, async (service, command) => publicResult(await service.commit(command), service), true, signal),
+    operation: (request: unknown, value: unknown, signal?: AbortSignal) => invoke(request, value, async (service, command) => publicResult(await service.operation(command), service), false, signal),
   };
 }
 export type KnowledgePolicyManagementApplication = ReturnType<typeof createKnowledgePolicyManagementFactory>;

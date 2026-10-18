@@ -40,6 +40,8 @@ import { TextCapabilityProbeRequestFactory } from './text-capability-probe-reque
 import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
 import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } from './model-settings.application';
 import { AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, composeRequestBoundPlatformModelSettings } from './platform-model-settings.application';
+import { HumanMemoryManagementRequestFactory } from './knowledge/human-memory-management.composition';
+import { KNOWLEDGE_POLICY_MANAGEMENT, createKnowledgePolicyManagementFactory } from './knowledge/knowledge-policy-management.composition';
 import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
@@ -66,6 +68,17 @@ export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox) =>
     composeRequestBoundPlatformModelSettings({ db, guard, secrets })
+};
+/** Human management only. No action policy/authority is seeded by assembly;
+ * absent persisted grants still refuse every memory/governance operation. */
+export const AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER: FactoryProvider = {
+  provide: HumanMemoryManagementRequestFactory, inject: [PrismaService, AuthService],
+  useFactory: (db: PrismaService, auth: AuthService) => new HumanMemoryManagementRequestFactory({ db, auth, clock: { now: () => Date.now() } })
+};
+export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
+  provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [PrismaService, AuthService, ApiAuthGuard],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) =>
+    createKnowledgePolicyManagementFactory({ db, auth, guard, enabled: true, clock: () => new Date() })
 };
 
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {

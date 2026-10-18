@@ -6,6 +6,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
@@ -2030,6 +2031,31 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
     summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...([
+    ['list', 'ListRequestDraft', 'ListResponseDraft'], ['state', 'StateRequestDraft', 'StateDraft'],
+    ['read', 'ReadRequestDraft', 'MutationDraft'], ['propose', 'ProposeRequestDraft', 'MutationDraft'],
+    ['confirm', 'ConfirmRequestDraft', 'MutationDraft'], ['resumeConfirmation', 'ConfirmRequestDraft', 'MutationDraft'],
+    ['confirmation', 'ConfirmationRequestDraft', 'ConfirmationResponseDraft'], ['change', 'ChangeRequestDraft', 'MutationDraft'],
+    ['changeStatus', 'ChangeStatusRequestDraft', 'ChangeStatusResponseDraft'], ['revoke', 'RevokeRequestDraft', 'RevokeResponseDraft'],
+    ['operation', 'OperationRequestDraft', 'OperationResponseDraft']
+  ] as const).map(([action, request, response]) => ({ method: 'post' as const,
+    path: `/api/${AI_MEMORY_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_MEMORY_MANAGEMENT_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageOwnedAiMemory_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current human owner and persisted action policy required. Explicit consent is not business approval. Bounded request; uncertain writes must use the original memory operation, never automatic retry.',
+    requestSchema: `AiMemoryManagement${request}`, responseSchema: `AiMemoryManagement${response}` })),
+  ...([
+    ['prepareTarget', 'AiKnowledgeTargetSelectionDraft', 'GenericObject'],
+    ['target', 'AiKnowledgeTargetReadDraft', 'GenericObject'], ['bindTarget', 'AiKnowledgeTargetBindDraft', 'GenericObject'],
+    ['read', 'AiKnowledgeTargetSelectionDraft', 'GenericObject'],
+    ['prepare', 'AiKnowledgePolicyChangeDraft', 'AiKnowledgePolicyPrepareHttpResponseDraft'],
+    ['preparation', 'AiKnowledgePolicyPreparationSelectionDraft', 'AiKnowledgePolicyReviewHttpResponseDraft'],
+    ['commit', 'AiKnowledgePolicyCommitDraft', 'AiKnowledgePolicyCommitHttpResponseDraft'],
+    ['operation', 'AiKnowledgePolicyReceiptSelectionDraft', 'AiKnowledgePolicyOperationHttpResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageCurrentAiKnowledgePolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current tenant manager plus persisted exact management authority, participants and resource basis required. No default root/policy, file access, model execution or business approval is created. Unknown writes require original operation observation.',
+    requestSchema, responseSchema })),
   { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
     operationId: 'readPlatformAiModelConfiguration', permissions: ['system:ai-provider:view', 'system:ai-provider:manage'],
     summary: 'Current SaaS platform manager only. Masked current configuration, not an original save receipt or connection/capability proof.',
