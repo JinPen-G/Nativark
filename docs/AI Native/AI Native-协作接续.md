@@ -24,9 +24,9 @@
 
 继续原 AIN-03/04/05/06/07/11 依赖，不以界面或空包装代替核心。当前场景交付矩阵与剩余实施缺口见[开发记录](<AI Native-开发记录.md>)；优先补可信价格/计数生产与完整标准执行依赖、其他输入格式/规模下的来源关系及真实删除传播，不以正确拒绝算正向交付。
 
-**当前收口结果与下一缺口：** 本轮五个完整功能提交已接回标准代码，AIN-09/14/16/17/18按原G3登记75%，原28项等权57.1%、正式验收0/28。报价是R1持久保存，不是建单批准；开业/资料仍缺其他分区/普通字段正式写入消费者。通知设置只处理原获准通知数组，`AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION`需服务器显式提供host；新执行关闭后仍有原change/creation/result/snapshot/event/decision观察，不以当前配置替代原收据。`AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION`默认不记录事件、不生产影子任务；显式开启仍需正式automation主体、政策、预算和人类grant，不启动worker或无人业务执行。不要重复造已注册消费者；下一轮优先核对标准通知原变更→创建→政策→start-original全链、报价→批准建单的标准装配及其余实际分区，缺正式依赖的分别列明。
+**当前收口结果与下一缺口：** 本轮六个完整功能提交已接回标准代码，AIN-09/14/15/16/17/18按原G3登记75%，原28项等权58.0%、正式验收0/28。R1报价保存和R2真人批准建单分离；`AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION`显式提供host/limits后，原selected quote runner才可启动，关闭后原选择/批准/订单结果仍可读，observer限额不代表历史预算或新执行许可。开业/资料仍缺其他分区/普通字段正式写入消费者。通知设置只处理原获准通知数组，`AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION`需服务器显式提供host；新执行关闭后仍有原change/creation/result/snapshot/event/decision观察，不以当前配置替代原收据。`AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION`默认不记录事件、不生产影子任务；显式开启仍需正式automation主体、政策、预算和人类grant，不启动worker或无人业务执行。下一轮优先核对标准通知原变更→创建→政策→start-original全链、报价原请求→显式选择生产链和其他实际分区；不要重复造已验证的selected quote审批执行消费者，缺正式依赖的分别列明。
 
-**本轮验证边界：** 配置原收据2/2、旧配置显式替换1/1、标准报价/开业1/1、标准事件/影子/人类原键1/1、标准通知设置执行/批准/原结果1/1，均为分阶段stdin功能冒烟、退出0，不相加称全量通过；API664 roots/0诊断、diff退出0。旧事件组合仍0/1（未ready便准备）；旧设置宿主组合1 pass/1 fail（无关旧报价夹具无持久分页），以及shared旧JS缺新schema均保留，源码优先冒烟不证明旧生成产物通过。未新增测试文件，未覆盖共享产物。新配置收据迁移只完成隔离生成/validate/diff，未执行；真实MySQL、服务/供应商/存储及浏览器/设备未验。各首轮/最终日志在`output/core-configuration-receipts-20261018/`。
+**本轮验证边界：** 配置原收据2/2、旧配置显式替换1/1、标准报价/开业1/1、标准事件/影子/人类原键1/1、标准通知设置执行/批准/原结果1/1、标准已选报价→批准→Core提交一次→停用后原结果零写入/撤权拒绝1/1，均为分阶段stdin冒烟、退出0，不相加称全量通过；API664 roots/0诊断、diff退出0。旧事件组合仍0/1（未ready便准备）；旧设置宿主组合1 pass/1 fail（无关旧报价夹具无持久分页），以及shared旧JS缺新schema均保留，源码优先冒烟不证明旧生成产物通过。未新增测试文件，未覆盖共享产物。新配置收据迁移只完成隔离生成/validate/diff，未执行；真实MySQL、服务/供应商/存储及浏览器/设备未验。各首轮/最终日志在`output/core-configuration-receipts-20261018/`。
 
 AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务入口/仅候选/缺依赖的区分；四品类原报价与确认、实际目录消费者及归档证据链接已用现有入口快检。当前按原G3将AIN-01/05/11更新为75%，整项验收仍0/28，不改分母或门槛。AIN-01尚缺完整人工流程/指标及目标环境版本；本轮补上`rental.change.preview`中的续租预览：`business-tools.orderExtensionPreview(orderId).read`及原`next_steps`请求的`previewOrderExtension`→标准同名POST入口。订单由原请求绑定，原view及extend/operate权限、订单版本、服务地点和读后身份均复验；只复用原Core试算，不保存/批准/执行，也未登记自动模型工具。其他变更类型、完整响应协议及真实HTTP/四品类全范围仍未验。其他任务具备门槛证据再更新，不批量估分。
 
@@ -46,7 +46,7 @@ AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务�
 
 原预算标准设置、首次配置与显式重绑定已复验离线正向，沿同一可信服务器DI配置默认关闭；初始化/重绑定只消费正式当前配置、保留旧债务并关闭本层政策门，不自动开额度、派发或建立第二账本。当前平台/租户Guard和CAS不省略，写应答不明只读原政策；未释放/已计量占用不能换成不同单位或币种，不经停用/未配置清零，不自动换汇。平台模式、tokens/money首次配置的完整组合、真实费率/计数与模型执行仍待核实，不再重复列租户BYOK首次配置为完全未验。
 
-`0b74345e`补齐同一服务器配置下的人类政策入口：标准`AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER`接原`AiScenePlanPolicyController`，仅管理order_explanation v1及ai.model.text/rental.order.explain；无执行配置仍不可用。原只读动作provider默认仍限三项读政策；明确服务器配置后可由当前同主体管理员逐项配置claim_run/claim_recovery_run/release_run/transition_task/takeover_run，不开放输入、建单或批准。沿原Auth/Guard、CAS、原政策审计事务及有限请求等待，不在创建任务时播种政策，也不创建财务占用。OpenAPI补原两条plan-policies路径；响应仍GenericObject，未宣布完整协议冻结。下一步需完整原请求→政策→执行的标准正向组合、可信费率/计数源及其余场景消费者，不把管理入口就绪等同运行放行。
+标准计划政策入口现在同时承接固定报价/开业准备工具；订单模型、能力probe、通知设置写工具与报价建单工具各需独立服务器配置才成为可选政策项。任务动作政策默认仍限三项读操作；订单只读执行与quote_clarification建单/批准操作的模板按原持久场景分开，不能以order:view模板取得建单许可。人类还须同主体当前管理权及业务权限、真实CAS和审计，任务创建不播种政策，政策配置不是真人批准或财务准入。现有OpenAPI部分响应仍GenericObject草案，不称全部协议冻结；真实费率/计数与完整标准模型链仍缺可信生产依赖。
 
 原生协议→Routed→Unified→原财务收据现先保留已核验usage，再进行文本交付复验、观察和当前授权下的结算；中断/写应答不明不自动重写或重发。旧预算组合若缺`recordUsage`现先拒绝，宿主须使用同一`PersistentGatewayBudget`，不能再建账本。任务/原请求/客户材料按真实关联核查清理；无法核验的来源仍明确`source_task_binding_unavailable`。原生流只合并同一有界网络块已验证片段，每个实际交付块仍复核，不用定时权限缓存。以下既有接点继续复用：
 
