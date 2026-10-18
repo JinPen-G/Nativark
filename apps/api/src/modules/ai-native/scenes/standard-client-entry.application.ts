@@ -60,11 +60,14 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
       // Snapshot JSON commands before current-identity/storage awaits. A signal
       // is deliberately the original cancellation channel, not serialized data.
       args = args.map(value => value instanceof AbortSignal ? value : structuredClone(value));
+      const signal = args.find((value): value is AbortSignal => value instanceof AbortSignal);
+      const check = () => { if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_request_interrupted'); };
+      check();
       const authorization = request?.headers?.authorization;
       if (typeof authorization !== 'string') return unavailable();
       const ip = request.ip;
       const boundRequest = { headers: { authorization }, ip };
-      const session = createAiGuardedClientSession(input.guard, { current: async () => ({ authorization, ip }) });
+      const session = createAiGuardedClientSession(input.guard, { current: async () => { check(); return { authorization, ip }; } });
       // An order explanation must not borrow a quote-scene publication. Task
       // controls remain bound to the explicitly assembled original scene.
       const sceneCode = name === 'readOrderExplanation' ? 'order_explanation' : input.tasks!.sceneCode;
@@ -85,7 +88,8 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         const website = channel === 'web' ? structuredClone(await input.db.websiteChannelProfile.findUnique({
           where: { tenantId: identity.tenantId }, select: { tenantId: true, revision: true, enabled: true } })) : null;
         if (!policy || Object.entries(key).some(([k, v]) => policy[k as keyof typeof policy] !== v)
-          || !policy.enabled || !policy.allowRead || !(policy.expiresAt instanceof Date) || !Number.isFinite(policy.expiresAt.getTime())
+          || !policy.enabled || !policy.allowRead || (name === 'prepare' || name === 'createTask') && !policy.allowCreate
+          || !(policy.expiresAt instanceof Date) || !Number.isFinite(policy.expiresAt.getTime())
           || policy.expiresAt <= now || !Number.isSafeInteger(policy.revision) || policy.revision < 1
           || !profile || profile.tenantId !== identity.tenantId || !Number.isSafeInteger(profile.revision) || profile.revision < 1
           || !published || published.tenantId !== identity.tenantId || published.workspaceId !== identity.workspaceId
@@ -97,6 +101,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         return { identity, policy, releaseRevision };
       };
       const before = await select();
+      check();
       const application = composeRequestBoundClientApplication({ ...input,
         tasks: { db: input.db, subscriptions: input.tasks!.subscriptions, sceneCode, sceneVersion },
         // Explicit server dependencies, when installed, remain subject to the
@@ -109,7 +114,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
       if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity)) {
         throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_publication_changed');
       }
-      return result;
+      check(); return result;
     };
     return method as AiClientEntryApplication[K];
   };
@@ -117,6 +122,8 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
     || !['web', 'wechat_miniprogram'].includes(channel)) return unavailable();
   return {
     readHostCapabilities: bind('readHostCapabilities'), issueAction: bind('issueAction'),
+    prepare: bind('prepare'), readOrderMaterialReceipt: bind('readOrderMaterialReceipt'),
+    createTask: bind('createTask'), readTaskCreation: bind('readTaskCreation'),
     createBookingDraft: bind('createBookingDraft'), chooseBookingDraft: bind('chooseBookingDraft'), readBookingDraft: bind('readBookingDraft'),
     handoffBookingDraft: bind('handoffBookingDraft'), readBookingHandoff: bind('readBookingHandoff'), readBookingOperation: bind('readBookingOperation'),
     acceptBookingSubmission: bind('acceptBookingSubmission'), readBookingAcceptance: bind('readBookingAcceptance'),

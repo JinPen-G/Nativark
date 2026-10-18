@@ -4,6 +4,8 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
   AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
+  aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+  aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
   aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
@@ -14,6 +16,7 @@ import { AiTaskInputResultUnknownError } from '../task-input/task-input.errors';
 import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from './request-abort';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
+import { AiClientTaskUnknownError } from './prisma-client-task-input.repository';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
@@ -24,7 +27,7 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
-  'readQuotePreparationOperation' | 'readPreparedQuoteOriginal'>;
+  'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation'>;
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
@@ -46,7 +49,7 @@ export class AiClientEntryController {
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
       else if (error instanceof AiRequestWaitError) code = error.code;
       else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError
-        || error instanceof AiClientQuoteResultUnknownError) code = 'AI_RESULT_UNKNOWN';
+        || error instanceof AiClientQuoteResultUnknownError || error instanceof AiClientTaskUnknownError) code = 'AI_RESULT_UNKNOWN';
       else if (error instanceof AiClientEntryError) code = error.code;
       else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
       else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
@@ -60,6 +63,45 @@ export class AiClientEntryController {
         ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
     }
   }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareOrderMaterial(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = aiClientOrderMaterialRequestSchema.parse(input);
+      const prepared = await this.application.prepare(current, { operationKey: command.operationKey,
+        command: { kind: 'order', orderId: command.orderId } }, signal);
+      const receipt = aiClientOrderMaterialReceiptSchema.safeParse({ contractVersion: AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+        operationKey: command.operationKey, state: 'observed', materialRef: prepared.materialRef,
+        materialHash: prepared.materialHash, expiresAt: prepared.expiresAt, execution: 'not_attested',
+        freshness: 'revalidate_before_execution', retryable: false, nextAction: 'read_original_material_receipt' });
+      if (!receipt.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_material_observation_unknown');
+      return receipt.data;
+    }, { maxWaitMs: 15000 }), 'read_original_material_receipt');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOrderMaterialReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, signal => this.application.readOrderMaterialReceipt(current, input, signal),
+      { maxWaitMs: 15000 }), 'read_original_material_receipt');
+  }
+  private taskCreation(request: ClientModelHttpRequest, body: unknown, create: boolean) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = aiClientTaskReadRequestSchema.parse(input);
+      const result = await this.application[create ? 'createTask' : 'readTaskCreation'](current, command, signal);
+      if (!('state' in result) || !('task' in result)) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_creation_observation_unknown');
+      const response = aiClientTaskCreationReceiptSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
+        ...command, state: result.state, task: result.task, inputRef: 'inputRef' in result ? result.inputRef : null,
+        inputHash: 'inputHash' in result ? result.inputHash : null, execution: 'not_attested', retryable: false,
+        nextAction: 'read_original_task_creation' });
+      if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_creation_observation_unknown');
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_original_task_creation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.createTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  createTask(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.taskCreation(request, value, true); }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskCreation(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.taskCreation(request, value, false); }
   private preparedQuoteObservation(value: unknown) {
     const result = value as { state?: unknown; quote?: unknown; source?: unknown };
     const raw = result?.quote;

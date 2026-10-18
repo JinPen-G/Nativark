@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
+  aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
   AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema, AI_BOOKING_ACCEPTANCE_READ_VERSION,
   aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
@@ -138,12 +139,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   type Published = Awaited<ReturnType<typeof publication>>;
   type Bound = { published: Published; identity: ClientRequestContext | null; bindingHash: string;
     scenes: ReturnType<typeof composeAiClientScenes>; assertCurrent(): Promise<void> };
-  const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>): Promise<T> => {
+  const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>, signal?: AbortSignal): Promise<T> => {
     const header = member ? bearerSchema.safeParse(request?.headers?.authorization) : undefined;
     if (member && !header?.success) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
     const credential = Object.freeze({ authorization: header?.success ? header.data : '', ip: request?.ip });
     let active = true;
+    const close = () => { active = false; };
+    signal?.addEventListener('abort', close, { once: true });
     try {
+      if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'request_interrupted');
       return await runWithRequestIdentity({}, async () => {
         if (!member) {
           const path = `/api/client/v1/${kind === 'catalog' ? 'public/catalog' : 'public/documents/help'}`;
@@ -170,7 +174,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         await assertCurrent();
         return result;
       });
-    } finally { active = false; }
+    } finally { signal?.removeEventListener('abort', close); close(); }
   };
   const scopeOf = (bound: Bound): AiClientMaterialScope => {
     const identity = bound.identity;
@@ -237,7 +241,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!input.success) return fail('AI_CLIENT_INVALID_INPUT');
     return freezeOriginalInput(input.data);
   };
-  const taskOperation = async (request: AiClientApplicationRequest, value: unknown, operation: 'create' | 'readCreation' | 'readSnapshot' | 'readEvents') => {
+  const taskOperation = async (request: AiClientApplicationRequest, value: unknown, operation: 'create' | 'readCreation' | 'readSnapshot' | 'readEvents', signal?: AbortSignal) => {
     const parsed = (operation === 'readEvents' ? clientTaskEventsCommandSchema : clientTaskCommandSchema).safeParse(structuredClone(value));
     if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
     if (!taskDependencies) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
@@ -262,7 +266,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (operation === 'readSnapshot' || operation === 'readEvents') return freezeOriginalInput(result);
         return freezeOriginalInput({ ...result, source: { materialRef: material.row.id, materialHash: material.row.materialHash,
           tenantCode: server.tenantCode, serviceCode: server.serviceCode, channel: server.channel } });
-      });
+      }, signal);
     } catch (error) {
       if (returned && operation === 'create') throw new AiClientTaskUnknownError();
       throw error;
@@ -542,6 +546,33 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     });
   };
   return Object.freeze({
+    /** Original material INSERT receipt, not refreshed order facts or execution
+     * permission. A changed order/expired material must not erase its receipt. */
+    async readOrderMaterialReceipt(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      requireEntry();
+      if (!taskDependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = parseEntry(aiClientOrderMaterialRequestSchema, structuredClone(value));
+      return withBinding(structuredClone(request), true, 'order', async bound => {
+        if (!bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const authority = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+        const subject = { ...scopeOf(bound), identity: structuredClone(bound.identity) };
+        const before = await authority.authorize(subject, 'read');
+        // Current ownership/visibility is necessary, but today's content/hash is
+        // never substituted for the immutable original INSERT.
+        await bound.scenes.member.order(command.orderId);
+        const row = await repository.findOperation(scopeOf(bound), command.operationKey);
+        const original = { kind: 'order' as const, orderId: command.orderId };
+        if (row && (row.inputHash !== requestFingerprint(original) || jsonHash(row.command) !== jsonHash(original)
+          || row.materialHash !== materialHash(original, row.material))) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+        await bound.assertCurrent();
+        assertReadPolicyUnchanged(before, await authority.authorize(subject, 'read'));
+        return freezeOriginalInput(aiClientOrderMaterialReceiptSchema.parse({ contractVersion: AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+          operationKey: command.operationKey, state: row ? 'observed' : 'unknown', materialRef: row?.id ?? null,
+          materialHash: row?.materialHash ?? null, expiresAt: row?.expiresAt.toISOString() ?? null,
+          execution: 'not_attested', freshness: 'revalidate_before_execution', retryable: false,
+          nextAction: 'read_original_material_receipt' }));
+      }, signal);
+    },
     /** Server-only request consumers. Public transport must use its formal
      * whitelist contract; these methods are not registered by this composition. */
     async prepareQuoteParameters(request: AiClientApplicationRequest, value: unknown) {
@@ -1022,8 +1053,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           scope: expected.scope, execution: 'navigation_not_business_submission' as const };
       });
     },
-    createTask: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'create'),
-    readTaskCreation: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readCreation'),
+    createTask: (request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) => taskOperation(request, value, 'create', signal),
+    readTaskCreation: (request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) => taskOperation(request, value, 'readCreation', signal),
     /** Server-only composition callback, deliberately absent from HTTP controller.
      * Reuses the original request's Guard/ALS/publication-aware material loader.
      * Providing authority does not publish a plan, reserve budget or start a run. */
@@ -1147,7 +1178,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         material: await readMaterial(bound, command), publication: bound.published.value, materialRef: null,
         durability: 'current_public_read_only' as const, persistentOperations: 'unavailable_anonymous_session_missing' as const }));
     },
-    async prepare(request: AiClientApplicationRequest, value: unknown) {
+    async prepare(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
       const input = parseOperation(value), inputHash = requestFingerprint(input.command);
       if (input.command.kind === 'booking_quote') requireBooking();
       let submitted = false;
@@ -1174,7 +1205,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           const saved = await repository.save(draftRow);
           if (input.command.kind === 'booking_quote') await entryGrant(bound, saved.row);
           return { ...packet(saved.row, await verify(bound, saved.row)), replayed: saved.replayed };
-        });
+        }, signal);
       } catch (error) {
         if (error instanceof AiClientMaterialError || !submitted) throw error;
         throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN');

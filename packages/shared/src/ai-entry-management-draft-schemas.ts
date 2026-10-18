@@ -2,7 +2,8 @@ import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES, AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
-import { AI_CLIENT_HOST_CAPABILITIES_VERSION } from './ai-client-entry-draft-schemas';
+import { AI_CLIENT_HOST_CAPABILITIES_VERSION, AI_CLIENT_MATERIAL_RECEIPT_VERSION } from './ai-client-entry-draft-schemas';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
 
 const id = { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const uuid = { type: 'string', format: 'uuid' };
@@ -44,6 +45,18 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiClientOrderMaterialRequest: object({ operationKey: { ...id, maxLength: 128 }, orderId: id }),
+  AiClientOrderMaterialReceipt: object({ contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
+    operationKey: { ...id, maxLength: 128 }, state: { enum: ['observed', 'unknown'] },
+    materialRef: { anyOf: [uuid, { type: 'null' }] }, materialHash: { anyOf: [hash, { type: 'null' }] },
+    expiresAt: { anyOf: [date, { type: 'null' }] }, execution: literal('not_attested'),
+    freshness: literal('revalidate_before_execution'), retryable: literal(false), nextAction: literal('read_original_material_receipt') }),
+  AiClientTaskCreationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    creationKey: { ...id, maxLength: 128 }, materialRef: uuid, state: { enum: ['observed', 'unknown'] },
+    inputRef: { anyOf: [uuid, { type: 'null' }] }, inputHash: { anyOf: [hash, { type: 'null' }] },
+    task: { anyOf: [object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
+      status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
+    execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
   AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
