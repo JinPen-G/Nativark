@@ -9,6 +9,7 @@ import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } f
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2027,6 +2028,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: 'readOwnedStaffInspectionHistory', permissions: ['rental-os:order:view'],
     summary: 'Read bounded owned historical inspection draft references under current staff/order/location authorization; no media access or execution.',
     requestSchema: 'AiStaffInspectionHistoryRequest', responseSchema: 'AiStaffInspectionHistoryResponse' },
+  ...(['create', 'readCreation', 'start', 'reconcile', 'requestCancel', 'readInput', 'resume', 'readAnswer', 'continueAnswer'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; cancellation is not rollback; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
+  ...(['read', 'configure', 'clear'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognitionPolicy_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Human CAS policy management for the original owned inspection candidate task only. Stage authority and current server plan bound every operation. Not approval, Core submission or platform policy management.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/receipt-host-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionReceiptHost', permissions: ['rental-os:order:view'],
     summary: 'Open an explicitly selected original historical receipt host. Does not authorize recognition or original inspection submission.',
@@ -2037,11 +2050,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: AI_LEAF_COMPONENT_SCHEMAS.AiStaffInspectionReceiptHostRequest.properties!.recognitionSave,
     responseSchema: 'GenericObject' },
   ...(['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit', 'evidence-bind',
-    'evidence-fingerprint', 'evidence-replace', 'draft-operation', 'submission-review',
+    'evidence-fingerprint', 'evidence-replace', 'draft-operation', 'input-prepare', 'input-receipt', 'result-read', 'result-save', 'submission-review',
     'submission-prepare', 'submission-preparation', 'submission-submit', 'submission-read'] as const).map(operation => ({
     method: 'post' as const, path: `/api/staff/v1/ai-native/inspection-assist/${operation}`, tag: 'AI Native',
     operationId: `staffInspection_${operation.replace(/-/gu, '_')}`, permissions: ['rental-os:order:view'],
-    summary: 'Original staff/order/location and stage action authorization is rechecked. Server manual-flow opt-in is required for new work; exact original receipts remain readable. Preparing is not submitting; an unknown write is observed by its original key, never automatically resent. Recognition is not enabled. Wire payload remains the existing draft; GenericObject does not certify full schema coverage.',
+    summary: 'Original staff/order/location and stage action authorization is rechecked. Manual work and recognition require separate server opt-ins; exact original receipts remain readable. Recognition results are candidate evidence only, not field adoption or Core submission. An unknown write is observed by its original key, never automatically resent. Wire payload remains the existing draft; GenericObject does not certify full schema coverage.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',

@@ -53,6 +53,13 @@ import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } 
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
+import { composeStandardStaffRecognition, readStaffRecognitionConfiguration, STAFF_RECOGNITION_SCENES,
+  AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, AI_NATIVE_STAFF_RECOGNITION_RUNTIME, AI_NATIVE_STAFF_RECOGNITION_ADAPTERS } from './inspection-assist/inspection-standard.application';
+import { INSPECTION_RECOGNITION_TASKS } from './inspection-assist/inspection-recognition-task.controller';
+import { AI_STAFF_INSPECTION_TASK_POLICIES } from './staff-inspection-task-policy.composition';
+import { INSPECTION_OBJECT_READER } from './inspection-assist/inspection-media.reader';
+import { TenantInspectionObjectReader } from '../integrations/inspection-object-reader';
+import type { ModelAdapter } from './model-gateway.ports';
 import { HumanAutomationRequestFactory } from './automation/human-automation-request.composition';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './business-events/prisma-business-failure-outbox';
@@ -216,12 +223,30 @@ const staffReceiptOperations = ['history-read', 'receipt-host-read', 'result-sav
 const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit',
   'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
   'submission-review', 'submission-prepare', 'submission-submit'] as const;
+export const AI_NATIVE_STAFF_RECOGNITION_PROVIDERS: FactoryProvider[] = [{
+  provide: INSPECTION_OBJECT_READER,
+  inject: [PrismaService, TenantIntegrationService, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, integrations: TenantIntegrationService, value?: unknown) =>
+    readStaffRecognitionConfiguration(value).enabled ? new TenantInspectionObjectReader(db, integrations) : undefined
+}, {
+  provide: AI_NATIVE_STAFF_RECOGNITION_RUNTIME,
+  inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox, FileStorageRuntimeService, ModuleRef,
+    { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_ADAPTERS, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
+    secrets: SecretBox, files: FileStorageRuntimeService, moduleRef: ModuleRef, value?: unknown, adapters?: readonly ModelAdapter[]) =>
+    composeStandardStaffRecognition({ db, auth, guard, core, subscriptions, secrets, files, moduleRef, adapters }, value)
+}, ...([['application', INSPECTION_RECOGNITION_TASKS], ['policies', AI_STAFF_INSPECTION_TASK_POLICIES]] as const).map(([key, provide]) => ({
+  provide, inject: [AI_NATIVE_STAFF_RECOGNITION_RUNTIME],
+  useFactory: (runtime: ReturnType<typeof composeStandardStaffRecognition>) => runtime[key]
+}))];
 export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_REQUESTS,
   inject: [PrismaService, ApiAuthGuard, RentalCoreService, ModuleRef,
-    { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, moduleRef: ModuleRef, value?: unknown) => {
+    { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_RUNTIME, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, moduleRef: ModuleRef, value?: unknown,
+    runtime?: ReturnType<typeof composeStandardStaffRecognition>) => {
     readStaffManualConfiguration(value);
+    if (runtime?.enabled) return runtime.staffRequests;
     return new StaffInspectionRequestFactory({ db, guard, core,
       originalInspection: { controller: { createInspection: (...args: Parameters<RentalCoreController['createInspection']>) =>
         moduleRef.get(RentalCoreController, { strict: false }).createInspection(...args) }, receipts: new RentalIdempotencyRepository(db) } });
@@ -230,9 +255,10 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_ENABLED, useFactory: () => true
 }, {
   provide: AI_STAFF_INSPECTION_OPERATIONS,
-  inject: [{ token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }],
-  useFactory: (value?: unknown) => Object.freeze([...staffReceiptOperations,
-    ...(readStaffManualConfiguration(value).enabled ? staffManualOperations : [])])
+  inject: [{ token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
+  useFactory: (value?: unknown, recognition?: unknown) => Object.freeze([...staffReceiptOperations,
+    ...(readStaffManualConfiguration(value).enabled ? staffManualOperations : []),
+    ...(readStaffRecognitionConfiguration(recognition).enabled ? ['input-prepare', 'input-receipt', 'result-read', 'result-save'] : [])])
 }];
 
 /** Standard application wiring, not an execution enable switch. No startup
@@ -495,12 +521,13 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
   provide: AI_SCENE_PLAN_POLICIES,
   inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown, quoteValue?: unknown) => {
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown, quoteValue?: unknown, recognitionValue?: unknown) => {
     const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue), settings = readSettingsExecutionConfiguration(settingsValue);
     const quote = readQuoteOrderConfiguration(quoteValue);
+    const recognition = readStaffRecognitionConfiguration(recognitionValue);
     const scenes = [
       // A server option only makes its original tool eligible for a human
       // CAS policy. It grants no task action, approval, lease or dispatch.
@@ -512,7 +539,9 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
       ...(probe.enabled ? [{ scene: { code: TEXT_PROBE_SCENE, version: probe.sceneVersion },
-        tools: [TEXT_CAPABILITY_PROBE_TOOL] as const }] : [])
+        tools: [TEXT_CAPABILITY_PROBE_TOOL] as const }] : []),
+      ...(recognition.enabled ? [{ scene: { code: STAFF_RECOGNITION_SCENES.image, version: '1' }, tools: ['ai.model.image'] as const },
+        ...(recognition.audio ? [{ scene: { code: STAFF_RECOGNITION_SCENES.audio, version: '1' }, tools: ['ai.model.audio'] as const }] : [])] : [])
     ];
     return composeRequestBoundScenePlanPolicies(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {

@@ -1,4 +1,7 @@
-import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+const inspectionPolicyPaths = new Set([AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.read,
+  AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.configure, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.clear]
+  .map(operation => `/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${operation}`));
 const { basePath: inspectionTaskBase, method: inspectionTaskMethod, ...inspectionTaskOperations } = AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT;
 const inspectionTaskPaths = new Set(Object.values(inspectionTaskOperations).map(operation => `/${inspectionTaskBase}/${operation}`));
 const inspectionAssistPaths = new Set(Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations)
@@ -32,6 +35,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
   if (path.startsWith("/staff/v1/auth/")) return isStaffAuthPath(path);
   if (isHumanAutomationRoute(verb, path, 'staff')) return true;
   if (inspectionAssistPaths.has(path)) return verb === "POST";
+  if (inspectionPolicyPaths.has(path)) return verb === 'POST';
   // Exact opt-in AI recognition task routes. Original order/attachment/action
   // authorities still recheck ownership, location and the current stage.
   if (inspectionTaskPaths.has(path)) return verb === inspectionTaskMethod;
@@ -88,6 +92,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
 }
 
 export function staffRoutePermissions(method: string, path: string, body?: unknown) {
+  if (method.toUpperCase() === 'POST' && inspectionPolicyPaths.has(path)) return ['rental-os:order:view'];
   if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && inspectionAssistPaths.has(path)) return ['rental-os:order:view'];
   if (method.toUpperCase() === inspectionTaskMethod && inspectionTaskPaths.has(path)) {

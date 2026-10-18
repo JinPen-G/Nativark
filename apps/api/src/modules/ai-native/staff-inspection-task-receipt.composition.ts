@@ -41,18 +41,24 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
   if (dependencies.db !== dependencies.inspection.db || typeof dependencies.auth?.resolveAccessContext !== 'function') throw unavailable();
   const server = { ...dependencies, inspection: { ...dependencies.inspection } }, clock = server.clock ?? (() => new Date());
   return Object.freeze({
-    async readCreation(request: { headers: { authorization?: unknown } }, value: unknown) {
+    async readCreation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) {
       const parsed = referenceSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const reference = freezeOriginalInput(parsed.data);
       const token = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u).safeParse(request?.headers?.authorization);
       if (!token.success) throw denied();
-      const requestId = randomUUID(), credentials = { current: async () => ({ authorization: token.data,
-        requestId, audience: 'staff' as const }) };
+      let active = true;
+      const requestId = randomUUID(), credentials = { current: async () => {
+        if (!active || signal?.aborted) throw denied();
+        return { authorization: token.data, requestId, audience: 'staff' as const };
+      } };
       return runWithRequestIdentity({}, async () => {
         const scopes = new AiScopeRepository(server.db, new AiTaskCurrentIdentityAuthority(server.auth, credentials, clock), clock);
         const inspection = new StaffInspectionRequestFactory(server.inspection).open({ headers: { authorization: token.data }, requestId });
+        const close = () => { active = false; inspection.close(); };
+        signal?.addEventListener('abort', close, { once: true });
         try {
+          if (signal?.aborted) throw denied();
           let originalBinding: string | undefined;
           const resolve = async () => {
             const before = await scopes.resolveCurrent(), context = before.context;
@@ -107,7 +113,7 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
             sceneCode: original.configured.code, inputRef: reference.inputId });
           return freezeOriginalInput({ ...receipt, execution: 'not_attested' as const,
             semantics: 'original_metadata_not_dispatch_or_candidate_evidence' as const });
-        } finally { inspection.close(); }
+        } finally { signal?.removeEventListener('abort', close); close(); }
       });
     }
   });

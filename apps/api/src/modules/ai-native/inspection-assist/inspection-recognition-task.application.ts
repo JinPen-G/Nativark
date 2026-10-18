@@ -105,7 +105,7 @@ export class InspectionRecognitionTaskApplication {
   }
 
   private async request<T>(request: Request, value: unknown,
-    consume: (bound: ReturnType<InspectionRecognitionTaskApplication['bind']>, reference: Reference) => Promise<T>) {
+    consume: (bound: ReturnType<InspectionRecognitionTaskApplication['bind']>, reference: Reference) => Promise<T>, signal?: AbortSignal) {
     if (!this.server.enabled) throw unavailable();
     const header = z.string().min(1).max(8192).safeParse(request?.headers?.authorization);
     const parsed = referenceSchema.safeParse(structuredClone(value));
@@ -114,13 +114,16 @@ export class InspectionRecognitionTaskApplication {
     const requestId = randomUUID();
     let active = true;
     const credentials: AiTaskCredentialSource = { current: async () => {
-      if (!active) throw denied();
+      if (!active || signal?.aborted) throw denied();
       return { authorization: header.data, requestId, audience: 'staff' };
     } };
     const inspection = new StaffInspectionRequestFactory(this.server.inspection).open({
       headers: { authorization: header.data }, requestId });
     let audioInspection: typeof inspection | undefined;
+    const close = () => { active = false; audioInspection?.close(); inspection.close(); };
+    signal?.addEventListener('abort', close, { once: true });
     try {
+      if (signal?.aborted) throw denied();
       return await runWithRequestIdentity({}, async () => {
         if (this.server.audioModel) {
           if (!inspection.recognition) throw unavailable();
@@ -139,7 +142,7 @@ export class InspectionRecognitionTaskApplication {
         }
         return consume(this.bind(credentials, inspection, parsed.data), parsed.data);
       });
-    } finally { active = false; audioInspection?.close(); inspection.close(); }
+    } finally { signal?.removeEventListener('abort', close); close(); }
   }
 
   private bind(credentials: AiTaskCredentialSource,
@@ -207,14 +210,14 @@ export class InspectionRecognitionTaskApplication {
     return { creation, command, existing };
   }
 
-  create(request: Request, reference: unknown) {
+  create(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {
       const command = await bound.command();
       return { task: await bound.creation.create(command), execution: 'not_attested' as const,
         purpose: 'inspection_candidates_only' as const };
-    });
+    }, signal);
   }
-  readCreation(request: Request, reference: unknown) {
+  readCreation(request: Request, reference: unknown, signal?: AbortSignal) {
     if (!this.server.enabled) throw unavailable();
     const model = this.server.model, audio = this.server.audioModel;
     // Observation uses the original durable task, not today's creation plan,
@@ -223,46 +226,48 @@ export class InspectionRecognitionTaskApplication {
       inspection: this.server.inspection, clock: model.clock }, { enabled: true,
       scenes: [{ kind: this.server.mediaKind ?? 'image', code: model.scene.code, version: model.scene.version },
         ...(audio ? [{ kind: 'audio' as const, code: audio.scene.code, version: audio.scene.version }] : [])] })
-      .readCreation(request, reference);
+      .readCreation(request, reference, signal);
   }
   start(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
       return root.application.start(query, signal);
-    });
+    }, signal);
   }
   reconcile(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
       return root.application.reconcile(query, signal);
-    });
+    }, signal);
   }
   /** Server consumer only. The task identity is taken from the ORIGINAL
    * creation receipt, not a client-selected task or a second financial source. */
-  readResultReview(request: Request, reference: unknown, resultId: unknown) {
+  readResultReview(request: Request, reference: unknown, resultId: unknown, expectedTaskId?: string, signal?: AbortSignal) {
     const result = inspectionId.safeParse(resultId);
     if (!result.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return this.request(request, reference, async (bound, original) => {
       const { inspection, query } = await bound.existing();
+      if (expectedTaskId !== undefined && expectedTaskId !== query.taskId) throw denied();
       return inspection.readRecognitionReview({ ...original, taskId: query.taskId, resultId: result.data });
-    });
+    }, signal);
   }
   /** Explicit evidence save, never field adoption or Core submission. Lost
    * replies are recovered by the original result-save receipt in staff service. */
-  saveResultReview(request: Request, reference: unknown, value: unknown) {
+  saveResultReview(request: Request, reference: unknown, value: unknown, expectedTaskId?: string, signal?: AbortSignal) {
     const command = z.object({ resultId: inspectionId, operationId: inspectionId }).strict().safeParse(structuredClone(value));
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return this.request(request, reference, async (bound, original) => {
       const { inspection, query } = await bound.existing();
+      if (expectedTaskId !== undefined && expectedTaskId !== query.taskId) throw denied();
       return inspection.saveRecognitionReview({ ...original, taskId: query.taskId,
         resultId: command.data.resultId, operationId: command.data.operationId });
-    });
+    }, signal);
   }
-  readInput(request: Request, reference: unknown) {
+  readInput(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
       return root.application.readInput({ taskId: query.taskId });
-    });
+    }, signal);
   }
   resume(request: Request, reference: unknown, value: unknown, signal?: AbortSignal) {
     const submission = structuredClone(value);
@@ -273,16 +278,16 @@ export class InspectionRecognitionTaskApplication {
       const result = await root.application.resume(submission, signal);
       await bound.creation.readCreation(await bound.command());
       return result;
-    });
+    }, signal);
   }
-  readAnswer(request: Request, reference: unknown, value: unknown) {
+  readAnswer(request: Request, reference: unknown, value: unknown, signal?: AbortSignal) {
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
       if (submission.taskId !== query.taskId) throw denied();
       return root.inputs.readSubmission(submission);
-    });
+    }, signal);
   }
   continueAnswer(request: Request, reference: unknown, value: unknown, signal?: AbortSignal) {
     const submission = structuredClone(value);
@@ -295,9 +300,9 @@ export class InspectionRecognitionTaskApplication {
       const result = await root.application.start({ taskId: query.taskId, runId: receipt.runId }, signal);
       await bound.creation.readCreation(await bound.command());
       return { receipt, result };
-    });
+    }, signal);
   }
-  requestCancel(request: Request, reference: unknown, expectedRevision: number) {
+  requestCancel(request: Request, reference: unknown, expectedRevision: number, signal?: AbortSignal) {
     if (!z.number().int().min(1).max(4294967294).safeParse(expectedRevision).success) {
       throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     }
@@ -308,7 +313,7 @@ export class InspectionRecognitionTaskApplication {
       // A reply does not attest provider cancellation, inspection submission or rollback.
       await bound.creation.readCreation(await bound.command());
       return { receipt, cancellation: 'requested_not_rollback' as const };
-    });
+    }, signal);
   }
 }
 

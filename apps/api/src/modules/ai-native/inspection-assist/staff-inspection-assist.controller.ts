@@ -4,6 +4,8 @@ import { z } from 'zod';
 import type { StaffInspectionRequestFactory } from './inspection-assist.composition';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
 import { withInspectionRequestSignal, respondInspectionHttp, type InspectionHttpRequest } from './inspection-http';
+import { INSPECTION_RECOGNITION_TASKS } from './inspection-recognition-task.controller';
+import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
 
 export const AI_STAFF_INSPECTION_REQUESTS = Symbol('AI_STAFF_INSPECTION_REQUESTS');
 export const AI_STAFF_INSPECTION_ENABLED = Symbol('AI_STAFF_INSPECTION_ENABLED');
@@ -11,6 +13,8 @@ export const AI_STAFF_INSPECTION_OPERATIONS = Symbol('AI_STAFF_INSPECTION_OPERAT
 const operations = new Set<string>(Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations));
 const evidenceFingerprint = z.object({ target: inspectionTargetSchema.extend({ templateId: inspectionId }).strict(),
   refs: z.array(z.object({ attachmentId: inspectionId, attachmentRevision: z.number().int().min(1).max(999) }).strict()).max(100) }).strict();
+const recognitionReview = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, inputId: inspectionId,
+  expectedRevision: z.number().int().min(1).max(999), taskId: inspectionId, resultId: inspectionId }).strict();
 
 /** Fixed original-service operations only. Neither this transport nor preparing
  * a draft grants model dispatch, adoption, approval or inspection submission. */
@@ -18,7 +22,8 @@ const evidenceFingerprint = z.object({ target: inspectionTargetSchema.extend({ t
 export class StaffInspectionAssistController {
   constructor(@Inject(AI_STAFF_INSPECTION_REQUESTS) private readonly requests: StaffInspectionRequestFactory,
     @Inject(AI_STAFF_INSPECTION_ENABLED) private readonly enabled: boolean,
-    @Optional() @Inject(AI_STAFF_INSPECTION_OPERATIONS) private readonly permittedOperations?: readonly string[]) {}
+    @Optional() @Inject(AI_STAFF_INSPECTION_OPERATIONS) private readonly permittedOperations?: readonly string[],
+    @Optional() @Inject(INSPECTION_RECOGNITION_TASKS) private readonly recognitionTasks?: Pick<InspectionRecognitionTaskApplication, 'readResultReview' | 'saveResultReview'>) {}
 
   @Post(':operation')
   @HttpCode(200)
@@ -33,7 +38,8 @@ export class StaffInspectionAssistController {
       // Snapshot before the first await; original service schemas reject caller
       // identity, raw model output and arbitrary configuration/URL properties.
       const input = structuredClone(body);
-      return withInspectionRequestSignal(request, signal => this.requests.withRequest(request, async services => {
+      const current = { headers: { authorization: request?.headers?.authorization } };
+      return withInspectionRequestSignal(request, signal => this.requests.withRequest(current, async services => {
         const absent = () => { throw new InspectionAssistError('STORAGE_UNAVAILABLE'); };
         switch (operation) {
           case 'history-read': return services.readHistory(input);
@@ -54,8 +60,16 @@ export class StaffInspectionAssistController {
           case 'input-receipt': return services.recognition ? services.recognition.readPreparation(input) : absent();
           // Preserve the existing wire projection while checking that the
           // original result still belongs to the current human-review draft.
-          case 'result-read': return (await services.readRecognitionReview(input)).recognition;
-          case 'result-save': return (await services.saveRecognitionReview(input)).receipt;
+          case 'result-read': {
+            if (!this.recognitionTasks) return (await services.readRecognitionReview(input)).recognition;
+            const { taskId, resultId, ...reference } = recognitionReview.parse(input);
+            return (await this.recognitionTasks.readResultReview(current, reference, resultId, taskId, signal)).recognition;
+          }
+          case 'result-save': {
+            if (!this.recognitionTasks) return (await services.saveRecognitionReview(input)).receipt;
+            const { taskId, resultId, operationId, ...reference } = recognitionReview.extend({ operationId: inspectionId }).strict().parse(input);
+            return (await this.recognitionTasks.saveResultReview(current, reference, { resultId, operationId }, taskId, signal)).receipt;
+          }
           // Receipt recovery observes only the saved association. It must not
           // reopen current/withdrawn media or load a candidate review body.
           case 'result-save-receipt': return services.recognitionResults.readSavedReceipt(input);

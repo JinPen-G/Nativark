@@ -51,6 +51,12 @@ export const AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT = Object.freeze({
     reconcile: 'reconcile', requestCancel: 'cancel', readInput: 'input/read', resume: 'input/resume',
     readAnswer: 'input/receipt', continueAnswer: 'input/continue',
 });
+/** Current same-staff-owner candidate-runtime policies only, never Core
+ * inspection submission, model credentials or a general permissions editor. */
+export const AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT = Object.freeze({
+  basePath: 'staff/v1/ai-native/inspection-task-policies', method: 'POST',
+  read: 'read', configure: 'configure', clear: 'clear'
+});
 
 /** Original staff inspection services, never an arbitrary tool dispatcher. */
 export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({
