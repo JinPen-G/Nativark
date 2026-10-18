@@ -1261,12 +1261,12 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     previewOrderExtension: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.previewOrderExtension(command), { write: false, signal }),
     readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteCatalog(command)),
-    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.compareOriginalQuotes(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.compareOriginalQuotes(command), { write: false, signal }),
     prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOpeningSections(command)),
     readOpeningSection: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOpeningSection(command)),
-    reviewQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reviewQuote(command)),
-    confirmQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmQuote(command)),
-    readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteReceipt(command)),
+    reviewQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reviewQuote(command), { write: false, signal }),
+    confirmQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.confirmQuote(command), { write: true, signal }),
+    readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readQuoteReceipt(command), { write: false, signal }),
     readRecovery: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readRecovery(command))
   });
 }

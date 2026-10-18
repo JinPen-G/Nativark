@@ -178,15 +178,21 @@ export class AiOriginalScenesController {
   @Post('recovery')
   recovery(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readRecovery(request, body)); }
   /** Read current preparation for the stored original request, never quote creation. */
-  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview)
-  quoteReview(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reviewQuote(request, body)); }
-  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm)
-  quoteConfirm(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.confirmQuote(request, body)); }
-  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt)
-  quoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readQuoteReceipt(request, body)); }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  quoteReview(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, signal => this.scenes.reviewQuote(request, body, signal)));
+  }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  quoteConfirm(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, signal => this.scenes.confirmQuote(request, body, signal)), 'read_original_quote_receipt');
+  }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  quoteReceipt(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, signal => this.scenes.readQuoteReceipt(request, body, signal)));
+  }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  compareOriginalQuotes(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return this.respond(() => this.scenes.compareOriginalQuotes(request, body));
+  compareOriginalQuotes(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, signal => this.scenes.compareOriginalQuotes(request, body, signal)));
   }
 }
 

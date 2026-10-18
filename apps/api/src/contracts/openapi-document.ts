@@ -2109,6 +2109,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current owner-bound original next-steps request and exact order version. Reuses human Core extension permission and pricing; no persistence, inventory reservation, approval, extension or payment. Response remains a draft projection, not an execution receipt.',
     permissions: ['rental-os:order:extend', 'rental-os:order:operate'],
     requestSchema: 'AiSceneOrderExtensionPreviewDraft', responseSchema: 'GenericObject' },
+  ...([
+    ['quoteReview', 'AiSceneRequestReadDraft', false], ['quoteConfirm', 'AiSceneQuoteConfirmDraft', true],
+    ['quoteReceipt', 'AiSceneQuoteReceiptReadDraft', false], ['compareOriginalQuotes', 'AiSceneOriginalQuotesCompareDraft', false]
+  ] as const).map(([action, requestSchema, write]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `consumeOriginalQuote_${action}`,
+    permissions: write ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: write ? 'Explicit human confirmation of the immutable original quote inputs. Original Core pricing/persistence only; no stock reservation, order approval, order creation or model call. Unknown is observed by its original quote receipt, never recreated.'
+      : 'Current original-owner quote preparation or exact Core receipt. Historical receipt and current admissibility are separate; no quotation, inventory reservation, approval or new execution.',
+    requestSchema, responseSchema: 'GenericObject' })),
   ...(['read', 'material', 'recovery'] as const).map(action => ({ method: 'post' as const,
     path: `/api/ai-native/scene-requests/${action}`, tag: 'AI Native', operationId: `readOriginalOrderFacts_${action}`,
     summary: 'Read the exact original owner-bound request/current authorized facts; no worker, new run, approval or model invocation.',

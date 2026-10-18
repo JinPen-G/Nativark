@@ -116,8 +116,10 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
  * reads, policies, credentials, worker, model adapter or financial ledger are
  * created here. Every request uses its own current Guard/Auth/ALS context.
  * Missing/disabled persisted scene policy or AI entitlement refuses creation.
- * Only the existing order-fact preparation is selected for this first host;
- * this preparation provider never constructs model execution or business writes.
+ * Registers the existing order/opening/quote preparation consumers. Persisted
+ * scene policies remain absent/disabled until a current manager changes them.
+ * It never constructs a model host; quote persistence requires its separate
+ * explicit human-confirm endpoint and original Core permission.
  */
 const originalSceneInjection = [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
   RentalBusinessService, RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService];
@@ -126,6 +128,10 @@ function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: 
     memberships: MembershipService, payments: PaymentRuntimeService): RequestBoundOriginalSceneDependencies {
   return { db, auth, guard, subscriptions, core, business, reports, memberships, payments,
       creationRules: [{ sceneCode: 'order_explanation', sceneVersion: '1', revision: 1,
+        audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 },
+      { sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
+        audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 300000 },
+      { sceneCode: 'opening_diagnosis', sceneVersion: '1', revision: 1,
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
 }
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
@@ -288,7 +294,7 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
   }
 };
 
-/** Human-managed limits/tool ceiling for explicitly selected order/probe scenes. These
+/** Human-managed limits/tool ceilings for preparation and opted-in execution. These
  * writes use the existing Guard, scoped CAS and same-transaction audit; they
  * neither create per-task policies nor grant a lease, budget or dispatch. */
 export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundScenePlanPolicies>> = {
@@ -300,15 +306,15 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
     memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown) => {
     const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue);
     const scenes = [
+      // Preparation policies have only their original read tools. No quote
+      // commit, model, approval or settings-write tool is granted here.
+      { scene: { code: 'quote_clarification', version: '1' }, tools: ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve'] as const },
+      { scene: { code: 'opening_diagnosis', version: '1' }, tools: ['tenant.opening.diagnose'] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
       ...(probe.enabled ? [{ scene: { code: TEXT_PROBE_SCENE, version: probe.sceneVersion },
         tools: [TEXT_CAPABILITY_PROBE_TOOL] as const }] : [])
     ];
-    if (!scenes.length) {
-      const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
-      return Object.freeze({ read: unavailable, change: unavailable });
-    }
     return composeRequestBoundScenePlanPolicies(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
         enabled: true, audience: 'operator', scenes
