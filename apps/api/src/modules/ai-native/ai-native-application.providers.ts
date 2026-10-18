@@ -23,7 +23,8 @@ import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace
 import { MembershipService } from '../platform/membership.service';
 import { PaymentRuntimeService } from '../integrations/payment.runtime.service';
 import { ClientApiService } from '../client/client-api.service';
-import { composeStandardClientBookingEntry, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY } from './scenes/standard-client-entry.application';
+import { composeStandardClientBookingEntry, standardClientModelDependencies, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY,
+  AI_NATIVE_CLIENT_MODEL_CONFIGURATION, AI_NATIVE_CLIENT_MODEL_ADAPTERS } from './scenes/standard-client-entry.application';
 import { randomUUID } from 'node:crypto';
 import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.service';
 import { TenantIntegrationService } from '../integrations/tenant-integration.service';
@@ -146,9 +147,12 @@ export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = setting
 export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
 ] as const).map(([provide, channel]) => ({
-  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService) =>
+  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox,
+    { token: AI_NATIVE_CLIENT_MODEL_CONFIGURATION, optional: true }, { token: AI_NATIVE_CLIENT_MODEL_ADAPTERS, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService,
+    secrets: SecretBox, value?: unknown, adapters?: readonly ModelAdapter[]) =>
     composeStandardClientBookingEntry({ db, guard, client,
+      ...standardClientModelDependencies(db, secrets, value, adapters),
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),
 }));

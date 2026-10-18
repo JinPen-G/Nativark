@@ -1,19 +1,54 @@
 import { Controller, Inject } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
 import { AiClientEntryController, type AiClientEntryApplication } from './client-entry.controller';
 import { composeRequestBoundClientApplication, type AiClientApplicationRequest, type AiClientRequestDependencies } from './client-request.application';
+import type { SecretBox } from '../../../common/secret-box';
+import type { ModelAdapter } from '../model-gateway.ports';
+import { ChatCompletionsAdapter } from '../chat-completions.adapter';
+import { createNativeModelEgressTransport } from '../model-egress.transport';
+import { gatewayPricingSelectionSchema } from '../budget/gateway-pricing-evidence';
+import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
+export const AI_NATIVE_CLIENT_MODEL_CONFIGURATION = Symbol('AI_NATIVE_CLIENT_MODEL_CONFIGURATION');
+export const AI_NATIVE_CLIENT_MODEL_ADAPTERS = Symbol('AI_NATIVE_CLIENT_MODEL_ADAPTERS');
+const modelConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), pricing: gatewayPricingSelectionSchema, systemPrompt: z.string().min(1).max(8000),
+    maxOutputTokens: z.number().int().min(1).max(32768), limits: aiTaskRunnerLimitsSchema,
+    host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+      leaseMs: z.number().int().min(1).max(120000) }).strict() }).strict()]);
+
+/** Inert standard dependency producer. Model/configuration/entitlement/price
+ * records are not seeded here. Only original authorized text summaries can
+ * finish this closed plan; explicit booking parameter selection stays manual. */
+export function standardClientModelDependencies(db: PrismaClient, secrets: SecretBox, value?: unknown,
+  suppliedAdapters?: readonly ModelAdapter[]): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults'> {
+  let config: z.infer<typeof modelConfiguration>;
+  try { config = modelConfiguration.parse(structuredClone(value ?? { enabled: false })); }
+  catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
+  // Original result observation needs neither an enabled model nor a Provider.
+  if (!config.enabled) return { taskResults: { db } };
+  if (config.limits.maxStepMs > config.limits.maxTotalMs || !secrets
+    || suppliedAdapters !== undefined && (!Array.isArray(suppliedAdapters) || !suppliedAdapters.length))
+    throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_dependencies');
+  const gatewayScene = { sceneCode: 'quote_clarification', routeScene: 'chat' as const, maxOutputTokens: config.maxOutputTokens };
+  const adapters = suppliedAdapters ? [...suppliedAdapters] : [new ChatCompletionsAdapter(createNativeModelEgressTransport())];
+  return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
+    inputSource: 'original_client', gatewayScene,
+    gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },
+    taskInputs: { db, inputSource: 'original_client', gatewayScene }, taskResults: { db } };
+}
 type Dependencies = AiClientRequestDependencies & {
   db: PrismaClient;
 };
 
-/** Fixed server-selected surface; the standard provider installs no model runtime.
+/** Fixed server-selected surface; model execution requires separate server opt-in.
  * The authenticated surface, published workspace and managed customer policy
  * are read from real services/storage, never from URL/body scope or a local flag.
  */
