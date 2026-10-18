@@ -53,6 +53,26 @@ export class AiRetentionService {
   async check(before: Session) { if ((await this.current()).hash !== before.hash) throw refused(); }
   private now() { const value = this.clock(); if (!Number.isFinite(value.getTime())) throw unavailable(); return value; }
   private cutoff(days: number) { return new Date(this.now().getTime() - days * 86400000); }
+  private async unresolvedTask(tx: Prisma.TransactionClient, scopeId: string, taskId: string,
+    owner: { tenantId: string; workspaceId: string }): Promise<boolean> {
+    if (await tx.aiTask.findFirst({ where: { id: taskId, scopeId, status: { notIn: [...terminal] } }, select: { id: true } })
+      || await tx.aiStep.findFirst({ where: { taskId, scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
+      || await tx.aiTaskExecutionCharge.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { chargeId: true } })) return true;
+    // Resolve persisted associations, not guessed call prefixes. Include
+    // reservations created before their accounting link was acknowledged.
+    const runs = await tx.aiRun.findMany({ where: { taskId, scopeId }, select: { id: true }, orderBy: { id: 'asc' }, take: 101 });
+    const invocations = await tx.aiGatewayInvocation.findMany({ where: { taskId, scopeId }, select: { callId: true }, orderBy: { id: 'asc' }, take: 201 });
+    if (runs.length > 100 || invocations.length > 200) return true;
+    const calls = invocations.map(row => row.callId);
+    return Boolean(await tx.aiBudgetReservation.findFirst({ where: { scopeId, scopeKind: 'WORKSPACE',
+      status: { in: ['reserved', 'pending_reconciliation'] }, OR: [
+        { runId: { in: runs.map(row => row.id) } }, { accountingReceipts: { some: { taskId, scopeId } } }
+      ] }, select: { id: true } })
+      || calls.length && (await tx.aiInvocationAdmission.findFirst({ where: { ...owner, callId: { in: calls },
+        status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
+      || await tx.aiUsageReservation.findFirst({ where: { ...owner, callId: { in: calls },
+        status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })));
+  }
   async receipt(value: unknown) {
     const command = aiRetentionReceiptSchema.parse(value), current = await this.current();
     const row = await this.db.aiDataErasure.findFirst({ where: { id: command.id,
@@ -171,16 +191,19 @@ export class AiRetentionService {
           || receipt.kind !== kind || receipt.resourceId !== resourceId || receipt.policyVersion !== AI_RETENTION_POLICY.version
           || expectedHash && receipt.targetHash !== expectedHash)) throw refused();
         if (receipt?.state === 'erased' && !expectedHash) return { id: key, state: 'erased', replayed: true };
-        // Conservative scope hold for sources without a sufficiently precise
-        // task reference. TTL is never evidence of no side effects/consumption.
-        if (await tx.aiTask.findFirst({ where: { scopeId: scope.id, status: { notIn: [...terminal] } }, select: { id: true } })
+        // Task/request/client material have persisted exact associations below.
+        // Knowledge/memory/file source provenance is not yet normalized to a
+        // task relation: do not pretend a scope-wide hold proves that relation.
+        const sourceWithoutTaskBinding = ['knowledge', 'memory', 'attachment'].includes(kind);
+        if (sourceWithoutTaskBinding && (await tx.aiTask.findFirst({ where: { scopeId: scope.id, status: { notIn: [...terminal] } }, select: { id: true } })
           || await tx.aiStep.findFirst({ where: { scopeId: scope.id, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
           || await tx.aiBudgetReservation.findFirst({ where: { scopeId: scope.id,
             status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })
           || await tx.aiInvocationAdmission.findFirst({ where: { ...owner,
             status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
           || await tx.aiUsageReservation.findFirst({ where: { ...owner,
-            status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })) return { id: key, state: 'held', reason: 'unresolved_effects' };
+            status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } }))) return { id: key, state: 'unavailable', reason: 'source_task_binding_unavailable' };
+        if (kind === 'task' && await this.unresolvedTask(tx, scope.id, resourceId, owner)) return { id: key, state: 'held', reason: 'unresolved_effects' };
         const mark = { retention: 'erased', receiptId: key, policyVersion: AI_RETENTION_POLICY.version };
         if (expectedHash) {
           const exists = kind === 'task' ? await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: scope.id }, select: { id: true } })
@@ -230,6 +253,10 @@ export class AiRetentionService {
         } else if (kind === 'request') {
           const row = await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: scope.id } });
           if (!row || row.createdAt > this.cutoff(30) && !expectedHash) throw unavailable();
+          const related = await tx.aiTask.findMany({ where: { scopeId: scope.id, inputRef: row.id },
+            select: { id: true }, orderBy: { id: 'asc' }, take: 101 });
+          if (related.length > 100) return { id: key, state: 'held', reason: 'association_limit' };
+          for (const task of related) if (await this.unresolvedTask(tx, scope.id, task.id, owner)) return { id: key, state: 'held', reason: 'unresolved_effects' };
           if (await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: row.id, archivedAt: null }, select: { id: true } })
             || await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: scope.id, originalRequestId: row.id }, select: { id: true } })) return { id: key, state: 'held', reason: 'original_operation_retention' };
           targetHash = fingerprint([kind, row.id, row.contentHash, row.createdAt.toISOString()]);
