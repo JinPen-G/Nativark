@@ -14,7 +14,21 @@ const usageEstimated = obj({ kind: choice("estimated"), inputTokens: int(), outp
 const usageUnknown = obj({ kind: choice("unknown"), reason: choice("not_returned", "result_unknown"), nextAction: choice("reconcile") });
 const settingsInput = { draftVersion: v, configId: id(), expectedRevision: int(0, 4294967294), enabled: bool };
 const settingsSummary = { draftVersion: v, tenantId: id(), configId: id(), configRevision: int(0, 4294967295), enabled: bool, connectionState: choice("not_tested", "mock_only", "verified_live", "failed", "not_verified") };
+const platformCapabilities = { type: 'array', maxItems: 8, uniqueItems: true,
+  items: choice('text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning') };
+const platformSaved = { profileId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][\\w.:-]{0,35}$' },
+  revision: int(1, 4294967295), enabled: bool, credentialConfigured: bool };
 export const AI_USAGE_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiPlatformModelSettingsInputDraft: obj({ expectedRevision: int(0, 4294967294), protocol: choice('openai_chat_completions'),
+    model, baseUrl, enabled: bool, maxOutputTokens: int(1, 32768), allowedCapabilities: platformCapabilities,
+    secretChange: { oneOf: [obj({ operation: choice('retain') }), obj({ operation: choice('replace'),
+      apiKey: { type: 'string', minLength: 1, maxLength: 8192, pattern: '^[\\x21-\\x7e]+$', writeOnly: true } }), obj({ operation: choice('clear') })] }
+  }, ['expectedRevision', 'protocol', 'model', 'baseUrl', 'enabled', 'maxOutputTokens', 'secretChange']),
+  AiPlatformModelSettingsSaveDraft: obj(platformSaved),
+  AiPlatformModelSettingsSummaryDraft: obj({ ...platformSaved, mode: choice('platform_managed'), protocol: id(), model,
+    allowedCapabilities: platformCapabilities, baseUrl, maxOutputTokens: int(1, 32768),
+    verification: choice('not_assessed_by_configuration_read'), observation: choice('current_configuration_not_write_receipt')
+  }, [...Object.keys(platformSaved), 'mode', 'protocol', 'model', 'allowedCapabilities', 'verification', 'observation']),
   AiUsageQuantityDraft: quantity("any"),
   AiBudgetLimitDraft: { oneOf: [obj({ state: choice("not_configured") }), obj({ state: choice("zero"), quantity: quantity("zero") }), obj({ state: choice("limited"), quantity: quantity("positive") })] },
   AiSettingGateDraft: gate,

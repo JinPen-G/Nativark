@@ -37,6 +37,24 @@ export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBase
 export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save'
 } as const);
+/** Platform manager resource, never tenant-side configuration or dispatch.
+ * URL profile identity is validated separately; a body cannot override it. */
+export const AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({ basePath: 'platform/ai/providers' } as const);
+export type AiPlatformModelSettingsInputDraft = {
+  expectedRevision: number; protocol: 'openai_chat_completions'; model: string; baseUrl: string;
+  enabled: boolean; maxOutputTokens: number;
+  allowedCapabilities?: ('text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning')[];
+  secretChange: { operation: 'retain' } | { operation: 'replace'; apiKey: string } | { operation: 'clear' };
+};
+export type AiPlatformModelSettingsSaveDraft = {
+  profileId: string; revision: number; enabled: boolean; credentialConfigured: boolean;
+};
+export type AiPlatformModelSettingsSummaryDraft = AiPlatformModelSettingsSaveDraft & {
+  mode: 'platform_managed'; protocol: string; model: string;
+  allowedCapabilities: NonNullable<AiPlatformModelSettingsInputDraft['allowedCapabilities']>;
+  baseUrl?: string; maxOutputTokens?: number;
+  verification: 'not_assessed_by_configuration_read'; observation: 'current_configuration_not_write_receipt';
+};
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;

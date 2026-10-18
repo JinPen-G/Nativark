@@ -14,7 +14,9 @@ const profileIdSchema = z.string().regex(/^[A-Za-z0-9][\w.:-]{0,35}$/u);
 const credentialsSchema = z.object({ authorization: z.string().min(1).max(8192), requestId: z.string().min(1).max(191), audience: z.literal('operator') }).strict();
 const userSchema = z.object({ id: z.string().min(1), isActive: z.literal(true), isSaasAdmin: z.literal(true), permissions: z.array(z.string()) });
 
-/** Bound to one server application-selected Profile and credential source.
+/** Bound to one validated Profile resource and current credential source.
+ * The resource id is not authority; the real platform Guard and persisted
+ * platform ownership must both pass before any configuration is delivered.
  * Platform management has its own actual Guard permission. It never borrows
  * tenant-management permission or grants cross-tenant content access. */
 export class PlatformModelConfigurationAuthority implements PlatformConnectionAuthority, AiCurrentScopeAuthority {

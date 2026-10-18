@@ -10,13 +10,13 @@ import { capabilityNameSchema, capabilityProfileFingerprint } from './capability
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { isAiStepExecutionContext } from './task-contract-validation';
-import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
+import { AiModelConfigurationResultUnknownError, AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import { parseAiProviderProfileRecord } from './provider-profile.repository';
 
 const id = z.string().min(1).max(36).regex(/^[\w.:-]+$/u);
 const revision = z.number().int().min(1).max(4294967295);
 const saveSchema = z.object({
-  profileId: id, expectedRevision: revision.max(4294967294),
+  profileId: id, expectedRevision: z.number().int().min(0).max(4294967294),
   protocol: z.literal('openai_chat_completions'), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   baseUrl: z.string().min(1).max(2048), enabled: z.boolean(),
   maxOutputTokens: z.number().int().min(1).max(32768),
@@ -118,7 +118,9 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       observation: 'current_configuration_not_write_receipt' as const };
   }
 
-  /** Updates an existing PLATFORM Profile, never creates canonical scope IDs.
+  /** Creates the first DEFAULT Profile at revision zero, or updates an existing
+   * PLATFORM Profile. Canonical scope registration belongs to the current
+   * platform management application, never this credential resolver.
    * The Profile CAS is the transaction's write lock; losing writers cannot
    * replace its vault row. A failed/uncertain commit is never retried here.
    */
@@ -130,9 +132,18 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     let callbackCompleted = false;
     try {
       const saved = await this.db.$transaction(async tx => {
-        const profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
-          scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision } });
-        if (!profile) throw new ModelGatewayError('CONFIG_INVALID');
+        let profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
+          scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed' } });
+        if (input.expectedRevision === 0) {
+          // Unique id/scope-key/scope-role constraints select exactly one first
+          // writer across processes. No enabled placeholder escapes this txn.
+          if (profile) throw new AiModelConfigurationRevisionConflictError();
+          if (input.secretChange.operation === 'retain') throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
+          profile = await tx.aiProviderProfile.create({ data: { id: input.profileId, scopeId: before.scopeId,
+            scopeKind: 'PLATFORM', profileKey: 'default', role: 'DEFAULT', serviceMode: 'platform_managed',
+            protocol: input.protocol, provider: input.protocol, model: input.model,
+            credentialRef: 'unconfigured', configRevision: 1, enabled: false, disabledAt: new Date(), allowedCapabilities: [] } });
+        } else if (!profile || profile.configRevision !== input.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
         const old = await tx.aiPlatformModelConnection.findUnique({ where: { profileId: profile.id }, select });
         let key: string | undefined;
         if (input.secretChange.operation === 'replace') key = input.secretChange.apiKey;
@@ -152,11 +163,11 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
         if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
         const enabled = Boolean(key) && input.enabled;
         const updated = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, scopeId: before.scopeId,
-          scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision },
+          scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: profile.configRevision },
           data: { configRevision: nextRevision, protocol: input.protocol, model: input.model,
             ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: input.allowedCapabilities }),
             credentialRef: this.reference(profile.id, nextRevision), enabled, disabledAt: enabled ? null : new Date() } });
-        if (updated.count !== 1) throw new ModelGatewayError('CONFIG_INVALID');
+        if (updated.count !== 1) throw new AiModelConfigurationRevisionConflictError();
         const data = { configRevision: nextRevision, baseUrl, maxOutputTokens: input.maxOutputTokens, credentialsEncrypted: encrypted };
         if (old) await tx.aiPlatformModelConnection.update({ where: { profileId: profile.id }, data });
         else await tx.aiPlatformModelConnection.create({ data: { profileId: profile.id, ...data } });
@@ -172,6 +183,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       return saved;
     } catch (error) {
       if (callbackCompleted) throw new AiModelConfigurationResultUnknownError();
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AiModelConfigurationRevisionConflictError();
       throw error;
     }
   }

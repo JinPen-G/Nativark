@@ -1,5 +1,5 @@
-/** Internal action boundary for platform-owned provider configuration only.
- * No Controller, public DTO or automatic role grant is introduced here. */
+/** Exact permission boundary shared by platform configuration HTTP and its
+ * internal current-identity checks. Never grants tenant or invocation access. */
 export const PLATFORM_AI_PROVIDER_PERMISSIONS = {
   view: 'system:ai-provider:view', manage: 'system:ai-provider:manage'
 } as const;

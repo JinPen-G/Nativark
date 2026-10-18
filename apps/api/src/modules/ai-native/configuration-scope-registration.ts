@@ -8,6 +8,9 @@ import { TenantModelConfigurationAuthority } from './tenant-model-config.authori
 import { aiPersistenceScopeColumns } from './persistence-scope';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget/budget.ports';
+import type { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
+import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
+import { ModelGatewayError } from './model-gateway.ports';
 
 /** Current tenant configuration metadata only. Same canonical keys/unique index
  * as task creation; never creates a task, policy, lease, entitlement or grant.
@@ -57,4 +60,35 @@ export async function registerCurrentAiConfigurationScopes(input: {
   }
   try { await recheck(); } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
   return initial.context;
+}
+
+/** First platform setup creates canonical metadata, not permissions or a
+ * usable model. The current real platform Guard must authorize every check. */
+export async function registerCurrentPlatformAiConfigurationScope(input: {
+  db: Pick<PrismaClient, '$transaction' | 'aiScope'>;
+  authority: Pick<PlatformModelConfigurationAuthority, 'resolve'>;
+}) {
+  const resolve = async () => {
+    const context = structuredClone(await input.authority.resolve());
+    if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform' || context.audience !== 'operator') throw new ModelGatewayError('FORBIDDEN');
+    const { requestId: _, authorizedAt: __, ...stable } = context;
+    return requestFingerprint(stable);
+  };
+  const before = await resolve(), key = aiPersistenceScopeColumns({ kind: 'platform' });
+  const current = async () => { if (await resolve() !== before) throw new ModelGatewayError('FORBIDDEN'); };
+  let callbackCompleted = false;
+  try {
+    await input.db.$transaction(async tx => {
+      const row = await tx.aiScope.upsert({ where: { scopeKey: key.scopeKey }, create: { id: randomUUID(), ...key }, update: {},
+        select: { id: true, kind: true, scopeKey: true, tenantId: true, workspaceId: true } });
+      if (!row || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(row.id)
+        || Object.entries(key).some(([name, value]) => row[name as keyof typeof row] !== value)) throw new ModelGatewayError('FORBIDDEN');
+      await current();
+      callbackCompleted = true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    await current();
+  } catch (error) {
+    if (callbackCompleted) throw new AiModelConfigurationResultUnknownError();
+    throw error;
+  }
 }

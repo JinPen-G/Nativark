@@ -5,7 +5,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
@@ -2030,6 +2030,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
     summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
+    operationId: 'readPlatformAiModelConfiguration', permissions: ['system:ai-provider:view', 'system:ai-provider:manage'],
+    summary: 'Current SaaS platform manager only. Masked current configuration, not an original save receipt or connection/capability proof.',
+    responseSchema: 'AiPlatformModelSettingsSummaryDraft' },
+  { method: 'put', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
+    operationId: 'savePlatformAiModelConfiguration', permissions: ['system:ai-provider:manage'],
+    summary: 'SaaS platform manager CAS + encrypted Vault/Profile transaction. Revision zero provisions only the first DEFAULT profile; no policy, capability evidence or budget is granted. Lost acknowledgement requires observing current configuration, never automatic retry.',
+    requestSchema: 'AiPlatformModelSettingsInputDraft', responseSchema: 'AiPlatformModelSettingsSaveDraft' },
   { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.read}`,
     tag: 'AI Native', operationId: 'readCurrentTenantModelSettings', permissions: ['system:params:manage'],
     summary: 'Current tenant only. New tenant returns platform product default at revision zero with execution disabled. Masked configuration is not capability, budget or connection verification.',
