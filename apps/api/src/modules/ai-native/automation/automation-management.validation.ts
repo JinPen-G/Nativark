@@ -25,7 +25,7 @@ export const policyChange = z.object({ operationKey: managementId.max(128), subj
 export type PolicyChange = z.infer<typeof policyChange>;
 export class AutomationManagementError extends Error {
   readonly retryable = false;
-  constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict') { super(code); }
+  constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict' | 'result_unknown') { super(code); }
 }
 export function managementParse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);

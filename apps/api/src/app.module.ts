@@ -114,6 +114,9 @@ import { AiPlatformModelSettingsController } from './modules/ai-native/platform-
 import { HumanMemoryManagementController } from './modules/ai-native/knowledge/human-memory-management.controller';
 import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
 import { HumanKnowledgeManagementController } from './modules/ai-native/knowledge/human-knowledge-management.controller';
+import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
+import { HumanAutomationPolicyRequestController } from './modules/ai-native/automation/human-automation-policy-request.controller';
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
@@ -137,6 +140,9 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     HumanMemoryManagementController,
     KnowledgePolicyManagementController,
     HumanKnowledgeManagementController,
+    OperatorAutomationController,
+    StaffAutomationController,
+    HumanAutomationPolicyRequestController,
     AiScenePlanPolicyController,
     StaffInspectionAssistController,
     WebsiteClientEntryController,
@@ -188,6 +194,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
     AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
     AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER,
+    ...AI_NATIVE_BUSINESS_FAILURE_PROVIDERS,
     AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,

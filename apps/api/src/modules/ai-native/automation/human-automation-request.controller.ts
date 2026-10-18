@@ -5,16 +5,18 @@ import { BusinessFailureError } from '../business-events/prisma-business-failure
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewError } from './human-automation-review.service';
 import { HumanAutomationRequestFactory, type HumanAutomationHttpRequest, type HumanAutomationRequestAction } from './human-automation-request.composition';
+import { withRequestAbort } from '../scenes/request-abort';
 
 abstract class HumanAutomationController {
   protected abstract readonly audience: 'operator' | 'staff';
   constructor(protected readonly requests: HumanAutomationRequestFactory) {}
 
   private async call(request: HumanAutomationHttpRequest, action: HumanAutomationRequestAction, value: unknown) {
-    try { return await this.requests.call(request, this.audience, action, value); }
+    try { return await withRequestAbort(request, signal => this.requests.call(request, this.audience, action, value, signal)); }
     catch (error) {
       const reason = error instanceof AutomationError || error instanceof HumanAutomationReviewError || error instanceof BusinessFailureError
-        ? error.code : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input' : 'unavailable';
+        ? error.code : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input'
+          : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN' ? 'result_unknown' : 'unavailable';
       const code = reason === 'invalid_input' ? 'AI_INVALID_INPUT' : reason === 'conflict' ? 'AI_REVISION_CONFLICT'
         : reason === 'limit_reached' ? 'AI_LIMIT_REACHED' : reason === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
       // Even a failed batch may already have prepared some original candidates.
@@ -23,7 +25,7 @@ abstract class HumanAutomationController {
         nextAction: action === 'readQueue' ? 'read_review_queue'
           : action === 'close' || action === 'feedback' || action === 'operation' ? 'read_original_operation'
           : action === 'createTask' || action === 'readCreation' ? 'read_original_creation' : 'read_original_event' },
-      reason === 'invalid_input' ? 400 : reason === 'conflict' ? 409 : reason === 'limit_reached' ? 429 : 503);
+      reason === 'invalid_input' ? 400 : reason === 'conflict' || reason === 'result_unknown' ? 409 : reason === 'limit_reached' ? 429 : 503);
     }
   }
 

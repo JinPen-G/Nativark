@@ -2104,6 +2104,21 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     tag: 'AI Native', operationId: 'reviewPreservedLegacyTenantModelSettings', permissions: ['system:params:manage'],
     summary: 'Current authorized tenant review only. Returns a keyed original source/version reference, never old keys, masks, prompts or logs. Explicit save with legacySource requires revision zero, a replacement credential, operationKey and disabled BYOK; original settings remain unchanged and current capability/budget is not granted.',
     requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
+  ...(['operator', 'staff'] as const).flatMap(audience => [
+    ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
+    ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
+    ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation']
+  ].map(([suffix, action]) => ({ method: 'post' as const, path: `/api/ai-native/automation/${audience}/${suffix}`, tag: 'AI Native',
+    operationId: `humanAutomation_${audience}_${action}`,
+    permissions: audience === 'staff' ? ['rental-os:order:view']
+      : ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view', 'rental-os:finance:reconcile'],
+    summary: 'Original human audience/tenant/workspace/location and event source are revalidated. Metadata preparation/close is not business resolution or execution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action. Response remains draft-polymorphic.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject' }))),
+  ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
+    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
+    operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Draft-polymorphic response, not a frozen full protocol.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject' })),
   { method: 'post', path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension}`,
     tag: 'AI Native', operationId: 'previewOriginalOrderExtension',
     summary: 'Current owner-bound original next-steps request and exact order version. Reuses human Core extension permission and pricing; no persistence, inventory reservation, approval, extension or payment. Response remains a draft projection, not an execution receipt.',

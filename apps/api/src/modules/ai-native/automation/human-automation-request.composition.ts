@@ -12,8 +12,10 @@ import { composeAutomationFailureTasks, type AutomationDependencies } from './au
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';
 import { HumanAutomationReviewQueueService } from './human-automation-review-queue.service';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import type { IncomingMessage } from 'node:http';
 
-export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } };
+export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock'> & {
   /** Server configuration, never selected by the HTTP body. History reads need no active policy. */
   automation?: Pick<AutomationDependencies, 'policyId' | 'subscriptions'>;
@@ -45,14 +47,22 @@ export class HumanAutomationRequestFactory {
 
   /** The controller supplies the audience as a literal. No credentials or service
    * graph survive the request; an ambient ALS identity is never an authority. */
-  async call(request: HumanAutomationHttpRequest, audience: 'operator' | 'staff', action: HumanAutomationRequestAction, value: unknown) {
+  async call(request: HumanAutomationHttpRequest, audience: 'operator' | 'staff', action: HumanAutomationRequestAction, value: unknown, signal?: AbortSignal) {
     const header = bearer.safeParse(request?.headers?.authorization);
     if (!header.success || !['operator', 'staff'].includes(audience)) throw unavailable();
     let command: unknown;
-    try { command = structuredClone(value); } catch { throw new AutomationError('invalid_input'); }
+    try { command = structuredClone(value); if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error(); }
+    catch { throw new AutomationError('invalid_input'); }
     const credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
     const server = this.dependencies, clock = server.clock ?? (() => new Date());
     let active = true, initialIdentity: string | undefined;
+    const close = () => { active = false; };
+    signal?.addEventListener('abort', close, { once: true });
+    if (signal?.aborted) close();
+    // A stale candidate read can expire its original outbox marker. Treat
+    // interruption conservatively even though it never changes the business.
+    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'close', 'feedback'].includes(action);
+    let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
       return { ...credential };
@@ -80,7 +90,7 @@ export class HumanAutomationRequestFactory {
       return true;
     } };
     try {
-      return await runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
         const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock);
         const candidates = new BusinessFailureCandidateService(server.db, reads, clock);
@@ -102,6 +112,7 @@ export class HumanAutomationRequestFactory {
               const candidate = await candidates.read(selected.data);
               if (candidate.status !== 'ready' || !candidate.material) throw unavailable();
               const result = await automation().prepare(command);
+              writeReturned = true;
               if (result.state === 'prepared') {
                 const view = await reviews.read({ inputRef: result.inputRef });
                 if (view.event.eventId !== selected.data.eventId || view.actionResource.creationKey !== result.creationKey
@@ -119,6 +130,7 @@ export class HumanAutomationRequestFactory {
             case 'readCreation': {
               const service = automation();
               const result = await (action === 'createTask' ? service.create(command) : service.reconcile(command));
+              if (action === 'createTask') writeReturned = true;
               const view = await reviews.read({ inputRef: result.inputRef });
               if (view.actionResource.creationKey !== result.creationKey || view.review.status !== 'open'
                 || !view.currentSource.failed || view.currentSource.revision !== view.event.resourceRevision
@@ -138,6 +150,7 @@ export class HumanAutomationRequestFactory {
             case 'close':
             case 'feedback': {
               const result = await (action === 'close' ? reviews.close(command) : reviews.feedback(command));
+              writeReturned = true;
               if (result.state === 'observed' && hash(result) !== hash(await reviews.operation({ inputRef: result.inputRef, operationKey: result.operationKey }))) {
                 throw new AutomationError('result_unknown');
               }
@@ -147,9 +160,13 @@ export class HumanAutomationRequestFactory {
           }
         };
         const result = await execute();
+        writeReturned = write;
         await identity.resolve();
         return result;
-      });
-    } finally { active = false; }
+      }), write, signal);
+    } catch (error) {
+      if (writeReturned || error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new AutomationError('result_unknown');
+      throw error;
+    } finally { close(); signal?.removeEventListener('abort', close); }
   }
 }
