@@ -528,7 +528,7 @@ export function composeRequestBoundScenePlanPolicies(dependencies: RequestBoundO
         const input = readSchema.parse(command);
         return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).read(),
           execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
-      });
+      }, { write: false });
     },
     change(request: AiSceneHttpRequest, value: unknown) {
       const parsed = changeSchema.safeParse(structuredClone(value));
@@ -537,7 +537,7 @@ export function composeRequestBoundScenePlanPolicies(dependencies: RequestBoundO
         const input = changeSchema.parse(command);
         return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).put(input.change),
           execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
-      });
+      }, { write: true });
     },
   });
 }

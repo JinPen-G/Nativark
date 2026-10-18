@@ -23,12 +23,14 @@ import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
+  composeRequestBoundScenePlanPolicies,
   composeRequestBoundPersistedOriginalOrderRead, type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
-import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES } from './scenes/original-scenes.controller';
+import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
+  AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
@@ -110,19 +112,6 @@ export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
       })
 };
 
-/** Explicit owner/manager CAS, not a side effect of listing/creating a task.
- * This standard host can manage read policies only; execution/approval and
- * unknown reconciliation remain with their separate trusted assemblies. */
-export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
-  provide: AI_ORIGINAL_TASK_ACTION_POLICIES, inject: originalSceneInjection,
-  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
-    composeRequestBoundOriginalTaskActionPolicies(originalSceneDependencies(...args), {
-      enabled: true, audience: 'operator', ttlMs: 120000,
-      templates: (['read_metadata', 'read_events', 'read_step_terminal'] as const)
-        .map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'] }))
-    })
-};
-
 /** Server DI only. No environment/model/request setting can publish this token.
  * Omitted by the standard root, so registration alone grants no execution.
  * Operators still need real current task/action/plan policies and all Gateway
@@ -135,6 +124,55 @@ const orderExecutionConfiguration = z.discriminatedUnion('enabled', [
     host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
       leaseMs: z.number().int().min(1).max(120000) }).strict(), includeKnowledge: z.boolean() }).strict()
 ]);
+function readOrderExecutionConfiguration(value: unknown) {
+  try {
+    const parsed = orderExecutionConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
+    if (parsed.success) return parsed.data;
+  } catch { /* Non-data DI values cannot become configuration. */ }
+  throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+}
+const originalReadOperations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
+const originalOrderExecutionOperations = ['claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] as const;
+
+/** Explicit same-owner manager CAS, never policy seeding during task creation.
+ * Without server execution configuration, only the original read policies are
+ * exposed. The closed order chain adds no approval or free-input permission. */
+export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
+  provide: AI_ORIGINAL_TASK_ACTION_POLICIES,
+  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown) => {
+    const configuration = readOrderExecutionConfiguration(serverValue);
+    const operations = [...originalReadOperations, ...(configuration.enabled ? originalOrderExecutionOperations : [])];
+    return composeRequestBoundOriginalTaskActionPolicies(
+      originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
+        enabled: true, audience: 'operator', ttlMs: 120000,
+        templates: operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'] }))
+      });
+  }
+};
+
+/** Human-managed limits/tool ceiling for the same fixed order chain. These
+ * writes use the existing Guard, scoped CAS and same-transaction audit; they
+ * neither create per-task policies nor grant a lease, budget or dispatch. */
+export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundScenePlanPolicies>> = {
+  provide: AI_SCENE_PLAN_POLICIES,
+  inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown) => {
+    if (!readOrderExecutionConfiguration(serverValue).enabled) {
+      const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+      return Object.freeze({ read: unavailable, change: unavailable });
+    }
+    return composeRequestBoundScenePlanPolicies(
+      originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
+        enabled: true, audience: 'operator', scenes: [{ scene: { code: 'order_explanation', version: '1' },
+          tools: ['ai.model.text', 'rental.order.explain'] }]
+      });
+  }
+};
 export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<OriginalOrderReadHttpRequests> = {
   provide: AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
   inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
@@ -143,11 +181,9 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, secrets: SecretBox,
     files: FileStorageRuntimeService, serverValue?: unknown): OriginalOrderReadHttpRequests => {
-    const parsed = orderExecutionConfiguration.safeParse(structuredClone(serverValue ?? { enabled: false }));
-    if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    if (!parsed.data.enabled) return Object.freeze(Object.fromEntries(originalOrderReadRequestMethods.map(method =>
+    const configuration = readOrderExecutionConfiguration(serverValue);
+    if (!configuration.enabled) return Object.freeze(Object.fromEntries(originalOrderReadRequestMethods.map(method =>
       [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
-    const configuration = parsed.data;
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     return selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({

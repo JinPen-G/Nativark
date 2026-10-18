@@ -101,8 +101,8 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
-import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalTaskActionPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
-import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
+import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/original-order-read.controller";
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
@@ -119,6 +119,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
   controllers: [
     AiOriginalScenesController,
     AiOriginalOrderReadController,
+    AiScenePlanPolicyController,
     StaffInspectionAssistController,
     WebsiteClientEntryController,
     WechatClientEntryController,
@@ -163,6 +164,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
+    AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
     AI_NATIVE_RETENTION_PROVIDER,

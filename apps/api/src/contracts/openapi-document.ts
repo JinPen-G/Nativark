@@ -5,7 +5,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_SCENE_ORDER_READ_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2075,13 +2075,30 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,
-    summary: 'Current manager and same-owner original-resource access required. Standard host only manages read_metadata/read_events/read_step_terminal, with bounded expiry and revision CAS. No execution, approval, new input or financial permission.',
+    summary: 'Current manager and same-owner original-resource access required, with bounded expiry and revision CAS. Defaults to read policies only. Explicit trusted order execution configuration additionally exposes claim/recovery/release/transition/takeover policy management for the original closed order chain. No automatic policy seed, approval, arbitrary input, lease, financial grant or dispatch.',
     requestSchema: objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
-      operation: { type: 'string', enum: ['read_metadata', 'read_events', 'read_step_terminal'] },
+      operation: { type: 'string', enum: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
+        'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] },
       ...(action === 'read' ? {} : { expectedRevision: action === 'configure'
         ? { oneOf: [{ type: 'null' }, { type: 'integer', minimum: 1, maximum: 4294967294 }] }
         : { type: 'integer', minimum: 1, maximum: 4294967293 } }) },
       action === 'read' ? ['original', 'operation'] : ['original', 'operation', 'expectedRevision'], false) })),
+  ...(['read', 'change'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `manageOriginalOrderPlanPolicy_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], responseSchema: 'GenericObject',
+    summary: 'Default unavailable without trusted server order execution configuration. Current configuration Guard selects the workspace; the server fixes order_explanation v1 and only ai.model.text/rental.order.explain. Change uses revision CAS and same-transaction audit. No automatic task permission, approval, lease, invocation or financial occupancy. Lost write acknowledgements require original policy read.',
+    requestSchema: objectOf({ sceneCode: { type: 'string', enum: ['order_explanation'] },
+      ...(action === 'read' ? {} : { change: objectOf({ expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293, nullable: true },
+        enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' },
+        limits: objectOf({ maxSteps: { type: 'integer', minimum: 1, maximum: 1000 },
+          maxCalls: { type: 'integer', minimum: 1, maximum: 1000 }, maxConcurrent: { type: 'integer', enum: [1] },
+          maxTotalMs: { type: 'integer', minimum: 1, maximum: 86400000 },
+          maxStepMs: { type: 'integer', minimum: 1, maximum: 86400000, description: 'Must not exceed maxTotalMs.' },
+          maxOutputBytes: { type: 'integer', minimum: 1, maximum: 16777216 } },
+          ['maxSteps', 'maxCalls', 'maxConcurrent', 'maxTotalMs', 'maxStepMs', 'maxOutputBytes'], false) },
+        ['expectedRevision', 'enabled', 'limits', 'expiresAt'], false) }) },
+      action === 'read' ? ['sceneCode'] : ['sceneCode', 'change'], false) })),
   ...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
       cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
