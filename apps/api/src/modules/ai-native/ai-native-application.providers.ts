@@ -4,6 +4,8 @@
  * 接续时从这里追踪具体场景的消费者；不要在此补假授权、第二 Gateway 或预算账本。
  */
 import type { FactoryProvider } from '@nestjs/common';
+import { z } from 'zod';
+import { SecretBox } from '../../common/secret-box';
 import { PrismaService } from '../database/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
@@ -21,7 +23,11 @@ import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
-  type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
+  composeRequestBoundPersistedOriginalOrderRead, type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
+import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
+  type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
+import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
+import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
@@ -66,7 +72,7 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
  * created here. Every request uses its own current Guard/Auth/ALS context.
  * Missing/disabled persisted scene policy or AI entitlement refuses creation.
  * Only the existing order-fact preparation is selected for this first host;
- * model execution and business writes have no registered driver in this graph.
+ * this preparation provider never constructs model execution or business writes.
  */
 const originalSceneInjection = [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
   RentalBusinessService, RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService];
@@ -115,4 +121,43 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
       templates: (['read_metadata', 'read_events', 'read_step_terminal'] as const)
         .map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'] }))
     })
+};
+
+/** Server DI only. No environment/model/request setting can publish this token.
+ * Omitted by the standard root, so registration alone grants no execution.
+ * Operators still need real current task/action/plan policies and all Gateway
+ * capability, connection, entitlement and financial evidence dependencies. */
+export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION');
+const orderExecutionConfiguration = z.discriminatedUnion('enabled', [
+  z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), platformProfileId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    maxOutputTokens: z.number().int().min(1).max(32768), pricing: gatewayPricingSelectionSchema,
+    host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+      leaseMs: z.number().int().min(1).max(120000) }).strict(), includeKnowledge: z.boolean() }).strict()
+]);
+export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<OriginalOrderReadHttpRequests> = {
+  provide: AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
+  inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, secrets: SecretBox,
+    files: FileStorageRuntimeService, serverValue?: unknown): OriginalOrderReadHttpRequests => {
+    const parsed = orderExecutionConfiguration.safeParse(structuredClone(serverValue ?? { enabled: false }));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (!parsed.data.enabled) return Object.freeze(Object.fromEntries(originalOrderReadRequestMethods.map(method =>
+      [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
+    const configuration = parsed.data;
+    if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
+      || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
+      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      scene: { code: 'order_explanation', version: '1' },
+      gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
+      gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
+        pricing: configuration.pricing, nativeProtocol: 'openai_chat_completions' },
+      ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
+    }, { enabled: true, audience: 'operator', host: configuration.host,
+      orderReadChain: { enabled: true, answerRoundTrip: true } }));
+  }
 };

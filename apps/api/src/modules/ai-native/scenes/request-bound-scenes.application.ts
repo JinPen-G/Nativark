@@ -1086,6 +1086,22 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   });
 }
 
+/** One dedicated original order chain for both explicit modules and Nest's
+ * standard application provider. Never bind the legacy single-model driver. */
+export function composeRequestBoundPersistedOriginalOrderRead(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+  options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1] & {
+    orderReadChain: NonNullable<Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]['orderReadChain']>
+  }) {
+  if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const app = composeRequestBoundPersistedOriginalSceneModel(dependencies, options);
+  return Object.freeze({ ...app, readAnswer: app.readOrderReadChainAnswer,
+    readModelResult: app.readOrderReadChainModelResult, reopenModelSource: app.reopenOrderReadChainSource,
+    readTakeoverReceipt: app.readOrderReadChainTakeoverReceipt,
+    readCancellationReceipt: app.readOrderReadChainCancellationReceipt,
+    settleUnstartedCancellation: app.settleOrderReadChainUnstartedCancellation,
+    readCancellationSettlementReceipt: app.readOrderReadChainCancellationSettlementReceipt });
+}
+
 export function composeRequestBoundOriginalSceneModel(dependencies: RequestBoundOriginalSceneModelDependencies,
   options: AiSceneModelRequestOptions) {
   const { host, runServices, quoteTask, settingsTask, ...requestOptions } = options;

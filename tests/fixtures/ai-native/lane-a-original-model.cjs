@@ -88,7 +88,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     }, dispatch: async (call, id) => {
       await h.db.aiBudgetReservation.updateMany({ where: { id }, data: { dispatchState: 'dispatched' } });
       await financial.dispatch(call, id); execution.events.push('dispatch');
-    }, settle: async (call, id, _key, usage) => {
+    }, recordUsage: async (call, id, usage) => { await financial.recordUsage(call, id, usage); }, settle: async (call, id, _key, usage) => {
       await financial.recordUsage(call, id, usage);
       await h.db.aiBudgetReservation.updateMany({ where: { id }, data: { status: 'settled' } }); execution.events.push('settle');
     }, abandon: async (_call, id, reason) => {

@@ -5,6 +5,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_SCENE_ORDER_READ_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2035,6 +2036,21 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...([
+    ['start', 'AiSceneOrderReadReferenceDraft'], ['recover', 'AiSceneOrderReadReferenceDraft'],
+    ['readPreparation', 'AiSceneOrderReadReferenceDraft'], ['resumePrepared', 'AiSceneOrderReadReferenceDraft'],
+    ['readAnswer', 'AiSceneOrderReadReferenceDraft'], ['readOrderResult', 'AiSceneOrderReadReferenceDraft'],
+    ['readModelResult', 'AiSceneOrderReadReferenceDraft'], ['readTaskScene', 'AiSceneOrderReadReferenceDraft'],
+    ['readNextSteps', 'AiSceneOrderReadReferenceDraft'], ['readTaskSnapshot', 'AiSceneOrderReadReferenceDraft'],
+    ['reopenModelSource', 'AiSceneOrderReadReferenceDraft'], ['takeover', 'AiSceneOrderReadTakeoverDraft'],
+    ['readTakeoverReceipt', 'AiSceneOrderReadTakeoverDraft'], ['requestCancel', 'AiSceneOrderReadCancelDraft'],
+    ['readCancellationReceipt', 'AiSceneOrderReadCancelDraft'], ['settleUnstartedCancellation', 'AiSceneOrderReadCancelDraft'],
+    ['readCancellationSettlementReceipt', 'AiSceneOrderReadCancelDraft']
+  ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalOrderReadChain_${action}`, authRequired: true,
+    permissions: ['rental-os:order:view'], requestSchema, responseSchema: 'GenericObject',
+    summary: 'Default closed without explicit trusted server execution configuration. Uses only the original owner-bound model/order/answer chain; current action/plan permissions, verified route and single financial ledger still apply. Recovery observes original effects, never redispatches unknown work. Historical read-only observation remains independently available.' })),
   ...([
     ['priceRead', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft'],
     ['pricePublicationRead', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft'],

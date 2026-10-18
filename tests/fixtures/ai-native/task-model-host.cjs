@@ -69,7 +69,7 @@ async function modelHostHarness(kind) {
       await financial.dispatch(call, id);
       await h.db.aiInvocationAdmission.updateMany({ where: { id: call.binding.id }, data: { status: 'dispatching' } });
       control.events.push('dispatch');
-    }, settle: async (call, id, _event, usage) => {
+    }, recordUsage: async (call, id, usage) => { await financial.recordUsage(call, id, usage); }, settle: async (call, id, _event, usage) => {
       await financial.recordUsage(call, id, usage);
       await h.db.aiBudgetReservation.updateMany({ where: { id }, data: { status: 'settled' } }); control.events.push('settle');
     }, abandon: async (call, id) => {

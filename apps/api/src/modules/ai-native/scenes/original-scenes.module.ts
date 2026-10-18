@@ -16,7 +16,7 @@ import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesControl
   AI_ORIGINAL_OPENING_READ_TASK_REQUESTS, AiOriginalOpeningReadTaskController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
-  composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
+  composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundPersistedOriginalOrderRead, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
   type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection,
   composeRequestBoundSettingsBusinessTask } from './request-bound-scenes.application';
@@ -119,15 +119,8 @@ export class AiOriginalScenesModule {
     const server = { ...dependencies, gateway: { ...dependencies.gateway,
       ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const selected = { ...options, host: structuredClone(options.host) };
-    return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS, useFactory: () => {
-      const app = composeRequestBoundPersistedOriginalSceneModel(server, selected);
-      return Object.freeze({ ...app, readAnswer: app.readOrderReadChainAnswer,
-        readModelResult: app.readOrderReadChainModelResult, reopenModelSource: app.reopenOrderReadChainSource,
-        readTakeoverReceipt: app.readOrderReadChainTakeoverReceipt,
-        readCancellationReceipt: app.readOrderReadChainCancellationReceipt,
-        settleUnstartedCancellation: app.settleOrderReadChainUnstartedCancellation,
-        readCancellationSettlementReceipt: app.readOrderReadChainCancellationSettlementReceipt });
-    } }],
+    return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS,
+      useFactory: () => composeRequestBoundPersistedOriginalOrderRead(server, selected) }],
       exports: [AI_ORIGINAL_ORDER_READ_REQUESTS] };
   }
   /** Gateway-free recovery host. Use instead of, not alongside, HTTP model
