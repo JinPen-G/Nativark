@@ -131,18 +131,27 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
   const parsed = optionsSchema.safeParse(options);
   if (!parsed.success || 'credentials' in dependencies || 'originals' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const server = { ...dependencies }, { audience } = parsed.data;
-  return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>): Promise<R> => {
+  return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>,
+    lifetime?: { write: boolean; signal?: AbortSignal }): Promise<R> => {
     const header = bearerSchema.safeParse(request?.headers?.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
     let active = true;
     try {
-      return await runWithRequestIdentity({}, async () => consume(await compose({ ...server, credentials: {
-        current: async () => {
-          if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          return { ...credential };
-        }
-      } }, command), command));
+      const operation = () => runWithRequestIdentity({}, async () => {
+        const app = await compose({ ...server, credentials: {
+          current: async () => {
+            if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            return { ...credential };
+          }
+        } }, command);
+        if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return consume(app, command);
+      });
+      // Bound the entire request, including preflight identity/storage waits.
+      // Finally revokes these request-local credentials even if an abandoned
+      // dependency later resolves. A possible write remains original/unknown.
+      return lifetime ? await waitForTaskApplicationDependency(operation, lifetime.write, lifetime.signal) : await operation();
     } finally { active = false; }
   };
 }
@@ -915,7 +924,7 @@ export function composeRequestBoundOriginalTaskAccounting(
           ? 'AI_ACCESS_DENIED' : error.code === 'INVALID' ? 'AI_INVALID_INPUT' : 'AI_RESOURCE_UNAVAILABLE');
         throw error;
       }
-    });
+    }, { write: operation !== 'read', signal });
   };
   return Object.freeze({ read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'read', signal),
     releaseUnsent: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => use(request, value, 'releaseUnsent', signal),
