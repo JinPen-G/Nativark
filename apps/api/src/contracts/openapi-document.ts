@@ -2034,6 +2034,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...([
     ['observeUpload', 'ObserveUploadRequestDraft', 'ObserveUploadResponseDraft'],
     ['observeRevisionUpload', 'ObserveRevisionUploadRequestDraft', 'ObserveUploadResponseDraft'],
+    ['findOriginalUpload', 'FindOriginalUploadRequestDraft', 'FindOriginalUploadResponseDraft'],
+    ['findOriginalRevisionUpload', 'FindOriginalRevisionUploadRequestDraft', 'FindOriginalUploadResponseDraft'],
     ['beginUpload', 'BeginUploadRequestDraft', 'BeginUploadResponseDraft'], ['completeUpload', 'CompleteUploadRequestDraft', 'CompleteUploadResponseDraft'],
     ['beginRevisionUpload', 'BeginRevisionUploadRequestDraft', 'BeginRevisionUploadResponseDraft'],
     ['completeRevisionUpload', 'CompleteRevisionUploadRequestDraft', 'CompleteRevisionUploadResponseDraft'],

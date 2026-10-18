@@ -54,6 +54,22 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
     });
   }
 
+  async authorizeUploadObservation(tenantId: string, value: FileBusinessOwner) {
+    const boundOwner = structuredClone(value);
+    return this.session.run(async context => {
+      const target = this.owner(context, tenantId, boundOwner);
+      const before = await this.repository.read(context.scope, target.documentId);
+      // Before first creation there is no document/ACL to invent. The persisted
+      // actor-bound metadata policy is still mandatory; the runtime additionally
+      // verifies the exact upload's stored actor and workspace before returning.
+      const request = { action: 'read_metadata' as const, scope: context.scope,
+        ...(before ? { document: before.document } : {}) };
+      const grant = await authorize(this.authorization, context, request);
+      if (fingerprint(before) !== fingerprint(await this.repository.read(context.scope, target.documentId))
+        || fingerprint(grant) !== fingerprint(await authorize(this.authorization, context, request))) return unavailable();
+    });
+  }
+
   async assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, selection?: { documentVersion: string; expectedRevision: number }) {
     const boundOwner = structuredClone(owner), selected = structuredClone(selection);
     return this.session.run(async context => {

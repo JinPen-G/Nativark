@@ -10,6 +10,7 @@ export const AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   beginUpload: 'uploads/begin', completeUpload: 'uploads/complete',
   beginRevisionUpload: 'uploads/revision/begin', completeRevisionUpload: 'uploads/revision/complete',
   observeUpload: 'uploads/read', observeRevisionUpload: 'uploads/revision/read',
+  findOriginalUpload: 'uploads/original', findOriginalRevisionUpload: 'uploads/revision/original',
   indexRead: 'index/read', indexRequest: 'index/request', indexResume: 'index/resume', indexOperationRead: 'index/operation-read',
 });
 export type AiKnowledgeManagementIndexReferenceDraft = { documentId: string; operationId: string; generation: number };
@@ -23,6 +24,8 @@ export type AiKnowledgeManagementMutationInput = { documentId: string; expectedR
 export type AiKnowledgeManagementUploadInput = { documentId: string; fileName: string;
   mimeType: 'text/plain' | 'text/markdown'; sizeBytes: number };
 export type AiKnowledgeManagementHttpRequestsDraft = {
+  findOriginalUpload: AiKnowledgeManagementUploadInput;
+  findOriginalRevisionUpload: AiKnowledgeManagementUploadInput & { expectedRevision: number; targetVersion: string };
   indexRead: { documentId: string };
   indexRequest: { confirmation: 'request_relational_index'; command: AiKnowledgeManagementMutationInput & { kind: 'upsert' | 'remove' } };
   indexResume: { confirmation: 'resume_original_relational_index'; command: AiKnowledgeManagementIndexReferenceDraft };
@@ -65,6 +68,9 @@ export type AiKnowledgeManagementOperationResponseDraft = {
   completionSemantics: 'receipt_and_head_are_separate_facts'; recovery: 'read_original_operation_only';
 };
 export type AiKnowledgeManagementHttpResponsesDraft = {
+  findOriginalUpload: { documentId: string; automaticRetry: false; execution: 'not_attested'; semantics: 'original_upload_intent_not_document_commit' }
+    & ({ state: 'observed'; upload: Omit<FileUploadSessionSummary, 'uploadUrl' | 'uploadHeaders'> } | { state: 'unknown'; upload: null });
+  findOriginalRevisionUpload: AiKnowledgeManagementHttpResponsesDraft['findOriginalUpload'];
   indexRead: { document: AiKnowledgeManagementStateDraft; receipt: 'not_queued' | 'not_recorded' | 'recorded'; nextStep: IndexNextStep };
   indexRequest: { document: AiKnowledgeManagementStateDraft; semantics: 'relational_index_not_external_index' };
   indexResume: AiKnowledgeManagementHttpResponsesDraft['indexRequest'];
@@ -92,7 +98,7 @@ export type AiKnowledgeManagementHttpResponsesDraft = {
 };
 export type AiKnowledgeManagementHttpErrorDraft = {
   code: 'AI_INVALID_INPUT' | 'AI_REVISION_CONFLICT' | 'AI_NOT_READY' | 'AI_RESULT_UNKNOWN' | 'AI_RESOURCE_UNAVAILABLE';
-  retryable: false; nextAction: 'read_original_operation';
+  retryable: false; nextAction: 'read_original_operation' | 'read_original_upload_intent' | 'read_original_revision_upload_intent';
 };
 
 const id: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9_-]+$' };
@@ -120,7 +126,16 @@ const commandResponse = obj({ operationId: id, document: state, semantics: choic
 const indexReference = obj({ documentId: id, operationId: text(191), generation: revision });
 const indexNextStep = choice('manual', 'none', 'complete_same_job', 'resume_same_relational_job');
 const indexMutation = obj({ document: state, semantics: choice('relational_index_not_external_index') });
+const originalUploadObservation = { documentId: id, automaticRetry: { type: 'boolean', const: false },
+  execution: choice('not_attested'), semantics: choice('original_upload_intent_not_document_commit') };
 export const AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiKnowledgeManagementFindOriginalUploadRequestDraft: obj(upload),
+  AiKnowledgeManagementFindOriginalRevisionUploadRequestDraft: obj({ ...upload, expectedRevision, targetVersion: id }),
+  AiKnowledgeManagementFindOriginalUploadResponseDraft: { oneOf: [
+    obj({ ...originalUploadObservation, state: choice('observed'), upload: obj({ sessionId: text(191), fileAssetId: text(191), provider: text(128),
+      mode: choice('provider', 'simulation'), status: text(128), expiresAt: time }) }),
+    obj({ ...originalUploadObservation, state: choice('unknown'), upload: { type: 'null' } })
+  ] },
   AiKnowledgeManagementIndexReadRequestDraft: obj({ documentId: id }),
   AiKnowledgeManagementIndexRequestDraft: obj({ confirmation: choice('request_relational_index'), command: obj({ documentId: id, expectedRevision,
     operationId: id, kind: choice('upsert', 'remove') }) }),
@@ -166,5 +181,5 @@ export const AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDr
   AiKnowledgeManagementOperationResponseDraft: obj({ operationId: id, receipt: choice('recorded', 'not_recorded'), document: state,
     completionSemantics: choice('receipt_and_head_are_separate_facts'), recovery: choice('read_original_operation_only') }),
   AiKnowledgeManagementHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_REVISION_CONFLICT', 'AI_NOT_READY', 'AI_RESULT_UNKNOWN', 'AI_RESOURCE_UNAVAILABLE'),
-    retryable: { type: 'boolean', const: false }, nextAction: choice('read_original_operation') }),
+    retryable: { type: 'boolean', const: false }, nextAction: choice('read_original_operation', 'read_original_upload_intent', 'read_original_revision_upload_intent') }),
 };

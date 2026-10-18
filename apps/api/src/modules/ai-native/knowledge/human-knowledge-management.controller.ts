@@ -12,7 +12,8 @@ export class HumanKnowledgeManagementController {
   constructor(@Inject(HumanKnowledgeManagementRequestFactory) private readonly requests: HumanKnowledgeManagementRequestFactory) {}
 
   private async call<T>(request: HumanKnowledgeManagementHttpRequest, value: unknown, write: boolean,
-    action: (scoped: HumanKnowledgeManagementRequest, command: unknown) => Promise<T>): Promise<T> {
+    action: (scoped: HumanKnowledgeManagementRequest, command: unknown) => Promise<T>,
+    nextAction: AiKnowledgeManagementHttpErrorDraft['nextAction'] = 'read_original_operation'): Promise<T> {
     try {
       let command: unknown;
       try {
@@ -34,7 +35,7 @@ export class HumanKnowledgeManagementController {
         code: code === 'invalid_input' || code === 'limit_exceeded' ? 'AI_INVALID_INPUT'
           : code === 'conflict' ? 'AI_REVISION_CONFLICT' : code === 'not_ready' ? 'AI_NOT_READY'
             : code === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE',
-        retryable: false, nextAction: 'read_original_operation',
+        retryable: false, nextAction,
       };
       throw new HttpException(response, response.code === 'AI_INVALID_INPUT' ? 400
         : response.code === 'AI_REVISION_CONFLICT' || response.code === 'AI_NOT_READY' || response.code === 'AI_RESULT_UNKNOWN' ? 409 : 503);
@@ -54,22 +55,22 @@ export class HumanKnowledgeManagementController {
   @Post(paths.beginUpload)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  beginUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.beginUpload(command)); }
+  beginUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.beginUpload(command), 'read_original_upload_intent'); }
 
   @Post(paths.completeUpload)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  completeUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.completeUpload(command)); }
+  completeUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.completeUpload(command), 'read_original_upload_intent'); }
 
   @Post(paths.beginRevisionUpload)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  beginRevisionUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.beginRevisionUpload(command)); }
+  beginRevisionUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.beginRevisionUpload(command), 'read_original_revision_upload_intent'); }
 
   @Post(paths.completeRevisionUpload)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  completeRevisionUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.completeRevisionUpload(command)); }
+  completeRevisionUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.completeRevisionUpload(command), 'read_original_revision_upload_intent'); }
 
   @Post(paths.prepareCreate)
   @HttpCode(200)
@@ -124,4 +125,8 @@ export class HumanKnowledgeManagementController {
   indexResume(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, true, (scoped, command) => scoped.indexResume(command)); }
   @Post(paths.indexOperationRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
   indexOperationRead(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, false, (scoped, command) => scoped.indexOperationRead(command)); }
+  @Post(paths.findOriginalUpload) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  findOriginalUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, false, (scoped, command) => scoped.findOriginalUpload(command)); }
+  @Post(paths.findOriginalRevisionUpload) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  findOriginalRevisionUpload(@Req() request: HumanKnowledgeManagementHttpRequest, @Body() value: unknown) { return this.call(request, value, false, (scoped, command) => scoped.findOriginalRevisionUpload(command)); }
 }

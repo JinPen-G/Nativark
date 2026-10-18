@@ -99,6 +99,8 @@ export class HumanKnowledgeManagementRequestFactory {
       return response(command.operationId, await management[action](command));
     };
     return {
+      findOriginalUpload: value => uploads.findOriginal(value),
+      findOriginalRevisionUpload: value => uploads.findOriginal(value, true),
       indexRead: async value => {
         const result = await index.status(parse(z.object({ documentId: id }).strict(), value).documentId);
         return { ...result, document: publicState(result.document) };
