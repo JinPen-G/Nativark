@@ -6,12 +6,13 @@ import type { AiOrderRouteCredentialSource } from './order-route-context.authori
 import { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { PrismaPlatformModelConnection } from './platform-model-connection';
 import { ModelGatewayError } from './model-gateway.ports';
+import type { ModelConfigurationOperationDb } from './model-configuration-operation';
 
 /** Request-scoped explicit composition, not a root module or background loop.
  * Management and invocation resolve different authenticated consumer contexts;
  * neither factory switches role from a caller-provided flag. */
 export function createAuthorizedPlatformModelConfiguration(ports: {
-  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiProviderProfile' | 'aiPlatformModelConnection'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiProviderProfile' | 'aiPlatformModelConnection'> & ModelConfigurationOperationDb;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiOrderRouteCredentialSource;
   invocation: AiCurrentScopeAuthority;

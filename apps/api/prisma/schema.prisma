@@ -391,6 +391,29 @@ model AiTenantModelConfiguration {
   @@map("ai_tenant_model_configurations")
 }
 
+/// Immutable original configuration-save observation, committed with the config
+/// and Profile/Vault CAS. Contains safe results and keyed input hashes, no keys.
+model AiModelConfigurationOperation {
+  id               String      @id @default(uuid()) @db.VarChar(36)
+  scopeId          String      @db.VarChar(36)
+  scopeKind        AiScopeKind
+  targetId         String      @db.VarChar(191)
+  operationKey     String      @db.VarChar(128)
+  actorId          String      @db.VarChar(191)
+  workspaceId      String?     @db.VarChar(191)
+  expectedRevision Int         @db.UnsignedInt
+  resultRevision   Int         @db.UnsignedInt
+  commandHash      String      @db.Char(64)
+  result           Json
+  resultHash       String      @db.Char(64)
+  recordedAt       DateTime    @default(now()) @db.DateTime(3)
+  scope            AiScope     @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scopeId, scopeKind, targetId, operationKey], map: "ai_model_config_operation_original_key")
+  @@unique([scopeId, scopeKind, targetId, resultRevision], map: "ai_model_config_operation_revision_key")
+  @@map("ai_model_configuration_operations")
+}
+
 /// Server-resolved profile. credentialRef is a vault reference, never a key.
 /// CAS is enforced by the revision predicate in the repository and migration
 /// uniqueness prevents two profiles with the same role in one owner scope.
@@ -6150,6 +6173,7 @@ model AiScope {
   workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   tasks       AiTask[]
   profiles    AiProviderProfile[]
+  modelConfigurationOperations AiModelConfigurationOperation[]
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
   originalRequests AiTaskOriginalRequest[]

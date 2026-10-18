@@ -7,8 +7,10 @@ import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultU
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
+import { readModelConfigurationOperation, appendModelConfigurationOperation, type ModelConfigurationOperationWrite,
+  type ModelConfigurationOperationDb } from './model-configuration-operation';
 
-type Db = Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'> & ModelConfigurationOperationDb;
 type Repository = TenantModelConfigPorts['repository'];
 const identifier = z.string().min(1).max(128).regex(/^[A-Za-z0-9][\w.:-]*$/u);
 const contextSchema = z.object({ tenantId: identifier, workspaceId: identifier, actorId: identifier }).strict();
@@ -27,8 +29,22 @@ export class PrismaTenantModelProfileRepository implements Repository {
   }
   read(tenantId: string) { return this.records.read(tenantId); }
 
-  async compareAndSwap(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext) {
-    return this.commit(tenantId, expectedRevision, value, caller);
+  async compareAndSwap(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext, operation?: ModelConfigurationOperationWrite) {
+    return this.commit(tenantId, expectedRevision, value, caller, undefined, operation);
+  }
+
+  async readOperation(caller: GatewayContext, operationKey: string, commandHash?: string) {
+    const parsed = contextSchema.safeParse(structuredClone(caller));
+    if (!parsed.success) throw new ModelGatewayError('FORBIDDEN');
+    const context = parsed.data, action = commandHash === undefined ? 'read' as const : 'manage' as const;
+    await this.authorize(structuredClone(context), action);
+    const columns = aiPersistenceScopeColumns({ kind: 'tenant', tenantId: context.tenantId });
+    const scope = await this.db.aiScope.findFirst({ where: columns });
+    if (!scope || Object.entries(columns).some(([key, expected]) => scope[key as keyof typeof columns] !== expected)) throw new ModelGatewayError('FORBIDDEN');
+    const result = await readModelConfigurationOperation(this.db, { scopeId: scope.id, scopeKind: 'TENANT',
+      targetId: context.tenantId, actorId: context.actorId, workspaceId: context.workspaceId }, operationKey, commandHash);
+    await this.authorize(structuredClone(context), action);
+    return result;
   }
 
   async setAllowedCapabilities(caller: GatewayContext, expectedRevision: number, value: readonly AiProfileCapability[]) {
@@ -45,12 +61,19 @@ export class PrismaTenantModelProfileRepository implements Repository {
     return { revision: next.revision, allowedCapabilities: [...capabilities.data] };
   }
 
-  private async commit(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext, capabilities?: readonly AiProfileCapability[]) {
+  private async commit(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext,
+    capabilities?: readonly AiProfileCapability[], operationValue?: ModelConfigurationOperationWrite) {
+    const operation = structuredClone(operationValue);
+    if (operation && !this.db.aiModelConfigurationOperation?.create) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     const parsed = contextSchema.safeParse(caller), next = checkedTenantModelRecord(value);
     if (!parsed.success || parsed.data.tenantId !== tenantId || next.tenantId !== tenantId
       || !Number.isInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= 4294967295
       || next.revision !== expectedRevision + 1) throw new ModelGatewayError('CONFIG_INVALID');
     const context = parsed.data, mode = tenantModelMode(next);
+    if (operation && (operation.expectedRevision !== expectedRevision || !('tenantId' in operation.result)
+      || operation.result.tenantId !== tenantId || operation.result.configRevision !== next.revision
+      || operation.result.mode !== mode || operation.result.enabled !== (tenantModelServiceEnabled(next)
+        && (mode === 'platform_managed' || next.settings?.enabled === true)))) throw new ModelGatewayError('CONFIG_INVALID');
     const current = async () => {
       try { await this.authorize(structuredClone(context), 'manage'); }
       catch { throw new ModelGatewayError('FORBIDDEN'); }
@@ -87,6 +110,8 @@ export class PrismaTenantModelProfileRepository implements Repository {
         }
         // Revocation during any preceding await aborts this transaction. These
         // are sequential fresh authority checks, NOT atomic business admission.
+        if (operation) await appendModelConfigurationOperation(tx, { scopeId: scope.id, scopeKind: 'TENANT',
+          targetId: tenantId, actorId: context.actorId, workspaceId: context.workspaceId }, operation);
         await current();
         callbackCompleted = true;
         return true;

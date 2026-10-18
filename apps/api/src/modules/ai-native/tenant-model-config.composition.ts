@@ -7,13 +7,14 @@ import type { AiScopeRepository } from './ai-scope.repository';
 import { TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
+import type { ModelConfigurationOperationDb } from './model-configuration-operation';
 
 /** Explicit server composition only. No AppModule registration, credential default
  * or actor inferred from caller-supplied tenant/workspace IDs. The authority must
  * be bound to current server authentication and action permission checks.
  */
 export function createPersistedTenantModelConfiguration(input: {
-  db: Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'> & ModelConfigurationOperationDb;
   authorize: TenantModelConfigPorts['authorize'];
   secrets: SecretBox;
 }): TenantModelConfigService {

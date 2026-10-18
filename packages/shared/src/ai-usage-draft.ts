@@ -15,6 +15,9 @@ interface AiTenantModelSettingsInputBaseDraft {
    * current server tenant must match; clients cannot select another tenant. */
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; configId: string; expectedRevision: number;
   enabled: boolean;
+  /** Original save reference; supplying it records a receipt in the same CAS.
+   * Observation is not permission to retry an uncertain write. */
+  operationKey?: string;
 }
 export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraft & (
   | { mode: "platform_managed" }
@@ -35,13 +38,14 @@ export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBase
 );
 /** Management only. No model request, secret readback, tenant or actor override. */
 export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
-  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save'
+  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation'
 } as const);
 /** Platform manager resource, never tenant-side configuration or dispatch.
  * URL profile identity is validated separately; a body cannot override it. */
 export const AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({ basePath: 'platform/ai/providers' } as const);
 export type AiPlatformModelSettingsInputDraft = {
   expectedRevision: number; protocol: 'openai_chat_completions'; model: string; baseUrl: string;
+  operationKey?: string;
   enabled: boolean; maxOutputTokens: number;
   allowedCapabilities?: ('text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning')[];
   secretChange: { operation: 'retain' } | { operation: 'replace'; apiKey: string } | { operation: 'clear' };
@@ -55,6 +59,10 @@ export type AiPlatformModelSettingsSummaryDraft = AiPlatformModelSettingsSaveDra
   baseUrl?: string; maxOutputTokens?: number;
   verification: 'not_assessed_by_configuration_read'; observation: 'current_configuration_not_write_receipt';
 };
+export type AiModelConfigurationOperationDraft = {
+  operationKey: string; automaticRetry: false; execution: 'not_granted'; observation: 'original_configuration_save';
+} & ({ state: 'unknown'; result: null } | { state: 'recorded'; expectedRevision: number; resultRevision: number;
+  recordedAt: string; result: AiTenantModelSettingsSummaryDraft | AiPlatformModelSettingsSaveDraft });
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;

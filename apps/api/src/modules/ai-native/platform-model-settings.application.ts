@@ -18,6 +18,7 @@ import { withRequestAbort } from './scenes/request-abort';
 import { ModelGatewayError } from './model-gateway.ports';
 import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { originalIdentityHash } from './task-request/original-request.authority';
+import { modelConfigurationOperationKey, validModelConfigurationOperation } from './model-configuration-operation';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Dependencies = Omit<Parameters<typeof createAuthorizedPlatformModelConfiguration>[0], 'credentials' | 'invocation' | 'profileId'>;
@@ -31,7 +32,7 @@ const validSaved = ajv.compile(AI_USAGE_DRAFT_SCHEMAS.AiPlatformModelSettingsSav
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS = Symbol('AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS');
 
 export function composeRequestBoundPlatformModelSettings(dependencies: Dependencies) {
-  const call = async (request: Request, profileId: unknown, value: unknown, write: boolean, signal?: AbortSignal) => {
+  const call = async (request: Request, profileId: unknown, value: unknown, write: boolean, signal?: AbortSignal, operation = false) => {
     const header = bearer.safeParse(request?.headers?.authorization), target = identifier.safeParse(profileId);
     if (!header.success) throw new ModelGatewayError('FORBIDDEN');
     if (!target.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -41,6 +42,7 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
       if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 32768) throw Error();
     } catch { throw new ModelGatewayError('INVALID_REQUEST'); }
     if (write && !validInput(command)) throw new ModelGatewayError('INVALID_REQUEST');
+    if (operation && !modelConfigurationOperationKey.safeParse(command).success) throw new ModelGatewayError('INVALID_REQUEST');
     const requestId = randomUUID();
     let active = true;
     const close = () => { active = false; };
@@ -61,10 +63,11 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
         if (write) await registerCurrentPlatformAiConfigurationScope({ db: dependencies.db, authority });
         const root = createAuthorizedPlatformModelConfiguration({ ...dependencies, credentials, invocation, profileId: target.data });
         const result = write ? await root.management.save({ ...(command as AiPlatformModelSettingsInputDraft), profileId: target.data })
-          : await root.management.read(target.data);
+          : operation ? await root.management.readOperation(target.data, command as string) : await root.management.read(target.data);
         try {
           if (!active || originalIdentityHash(await current()) !== originalIdentityHash(before)) throw new ModelGatewayError('FORBIDDEN');
-          if (!(write ? validSaved : validRead)(result) || result.profileId !== target.data) throw new ModelGatewayError('INVALID_RESPONSE');
+          if (operation ? !validModelConfigurationOperation(result) || result.operationKey !== command
+            : !(write ? validSaved : validRead)(result) || !('profileId' in result) || result.profileId !== target.data) throw new ModelGatewayError('INVALID_RESPONSE');
           return structuredClone(result);
         } catch (error) {
           if (write) throw new AiModelConfigurationResultUnknownError();
@@ -77,14 +80,16 @@ export function composeRequestBoundPlatformModelSettings(dependencies: Dependenc
     }
   };
   return Object.freeze({ read: (request: Request, profileId: unknown, signal?: AbortSignal) => call(request, profileId, undefined, false, signal),
+    operation: (request: Request, profileId: unknown, operationKey: unknown, signal?: AbortSignal) => call(request, profileId, operationKey, false, signal, true),
     save: (request: Request, profileId: unknown, body: unknown, signal?: AbortSignal) => call(request, profileId, body, true, signal) });
 }
 
 @Controller(AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath)
 export class AiPlatformModelSettingsController {
   constructor(@Inject(AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS) private readonly settings: ReturnType<typeof composeRequestBoundPlatformModelSettings>) {}
-  private async respond(request: Request, profileId: string, write: boolean, body?: unknown) {
-    try { return await withRequestAbort(request, signal => write ? this.settings.save(request, profileId, body, signal) : this.settings.read(request, profileId, signal)); }
+  private async respond(request: Request, profileId: string, write: boolean, body?: unknown, operation = false) {
+    try { return await withRequestAbort(request, signal => write ? this.settings.save(request, profileId, body, signal)
+      : operation ? this.settings.operation(request, profileId, body, signal) : this.settings.read(request, profileId, signal)); }
     catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : undefined;
       const mapping: Record<string, [string, number]> = {
@@ -94,12 +99,18 @@ export class AiPlatformModelSettingsController {
         AI_RESULT_UNKNOWN: [write ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE', write ? 409 : 503]
       };
       const [safe, status] = typeof code === 'string' && Object.hasOwn(mapping, code) ? mapping[code] : ['AI_RESOURCE_UNAVAILABLE', 503];
+      const original = write && validInput(body) && body.operationKey !== undefined;
       throw new HttpException({ code: safe, retryable: false,
-        ...(safe === 'AI_RESULT_UNKNOWN' ? { nextAction: 'read_current_configuration', observation: 'not_original_write_receipt' } : {}) }, status);
+        ...(safe === 'AI_RESULT_UNKNOWN' ? original ? { nextAction: 'read_original_configuration_operation' }
+          : { nextAction: 'read_current_configuration', observation: 'not_original_write_receipt' } : {}) }, status);
     }
   }
   @Get(':profileId') @Header('Cache-Control', 'no-store')
   read(@Req() request: Request, @Param('profileId') profileId: string) { return this.respond(request, profileId, false); }
   @Put(':profileId') @HttpCode(200) @Header('Cache-Control', 'no-store')
   save(@Req() request: Request, @Param('profileId') profileId: string, @Body() body: unknown) { return this.respond(request, profileId, true, body); }
+  @Get(':profileId/operations/:operationKey') @Header('Cache-Control', 'no-store')
+  operation(@Req() request: Request, @Param('profileId') profileId: string, @Param('operationKey') operationKey: string) {
+    return this.respond(request, profileId, false, operationKey, true);
+  }
 }

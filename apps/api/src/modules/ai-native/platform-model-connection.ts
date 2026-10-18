@@ -12,11 +12,14 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { AiModelConfigurationResultUnknownError, AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import { parseAiProviderProfileRecord } from './provider-profile.repository';
+import { modelConfigurationOperationKey, readModelConfigurationOperation, appendModelConfigurationOperation,
+  type ModelConfigurationOperationDb } from './model-configuration-operation';
 
 const id = z.string().min(1).max(36).regex(/^[\w.:-]+$/u);
 const revision = z.number().int().min(1).max(4294967295);
 const saveSchema = z.object({
   profileId: id, expectedRevision: z.number().int().min(0).max(4294967294),
+  operationKey: modelConfigurationOperationKey.optional(),
   protocol: z.literal('openai_chat_completions'), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   baseUrl: z.string().min(1).max(2048), enabled: z.boolean(),
   maxOutputTokens: z.number().int().min(1).max(32768),
@@ -34,7 +37,7 @@ const connectionSchema = z.object({ profileId: id, configRevision: revision,
 const select = { profileId: true, configRevision: true, baseUrl: true, maxOutputTokens: true,
   credentialsEncrypted: true } satisfies Prisma.AiPlatformModelConnectionSelect;
 type Connection = z.infer<typeof connectionSchema>;
-type Db = Pick<PrismaClient, '$transaction' | 'aiProviderProfile' | 'aiPlatformModelConnection'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiProviderProfile' | 'aiPlatformModelConnection'> & ModelConfigurationOperationDb;
 type Scopes = Pick<AiScopeRepository, 'resolveRoutingScopes'>;
 
 /** Fresh action-specific server authorization is mandatory. Scope lookup is NOT
@@ -86,7 +89,17 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     if (resolved.context.actor.kind !== 'saas_admin' || resolved.context.scope.kind !== 'platform'
       || resolved.configurationScope.kind !== 'PLATFORM') throw new ModelGatewayError('FORBIDDEN');
     const { authorizedAt: _, requestId: __, ...identity } = resolved.context;
-    return { scopeId: resolved.configurationScope.id, binding: requestFingerprint(identity) };
+    return { scopeId: resolved.configurationScope.id, actorId: resolved.context.actor.userId, binding: requestFingerprint(identity) };
+  }
+
+  async readOperation(profileId: string, operationKey: string) {
+    if (!id.safeParse(profileId).success || !modelConfigurationOperationKey.safeParse(operationKey).success) throw new ModelGatewayError('INVALID_REQUEST');
+    const before = await this.management(profileId, true);
+    const result = await readModelConfigurationOperation(this.db, { scopeId: before.scopeId, scopeKind: 'PLATFORM',
+      targetId: profileId, actorId: before.actorId, workspaceId: null }, operationKey);
+    const current = await this.management(profileId, true);
+    if (current.binding !== before.binding || current.scopeId !== before.scopeId) throw new ModelGatewayError('FORBIDDEN');
+    return result;
   }
 
   /** Current manager-only observation, including a disabled profile. This
@@ -134,6 +147,19 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     const parsed = saveSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     const input = parsed.data, before = await this.management(input.profileId);
+    const owner = { scopeId: before.scopeId, scopeKind: 'PLATFORM' as const,
+      targetId: input.profileId, actorId: before.actorId, workspaceId: null };
+    const commandHash = input.operationKey === undefined ? undefined : this.secrets.fingerprint(requestFingerprint({ owner, input }));
+    if (input.operationKey !== undefined) {
+      if (!this.db.aiModelConfigurationOperation?.create) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      const original = await readModelConfigurationOperation(this.db, owner, input.operationKey, commandHash);
+      const current = await this.management(input.profileId);
+      if (current.binding !== before.binding || current.scopeId !== before.scopeId) throw new ModelGatewayError('FORBIDDEN');
+      if (original.state === 'recorded') {
+        if (!('profileId' in original.result) || original.result.profileId !== input.profileId) throw new ModelGatewayError('CONFIG_INVALID');
+        return original.result;
+      }
+    }
     const baseUrl = normalizeTenantModelBaseUrl(input.baseUrl);
     let callbackCompleted = false;
     try {
@@ -179,10 +205,13 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
         else await tx.aiPlatformModelConnection.create({ data: { profileId: profile.id, ...data } });
         // A revocation observed while either write awaited must abort both writes.
         // Sequential current checks do not constitute atomic dispatch authority.
+        const result = { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
+        if (input.operationKey !== undefined) await appendModelConfigurationOperation(tx, owner, {
+          operationKey: input.operationKey, expectedRevision: input.expectedRevision, commandHash: commandHash!, result });
         const final = await this.management(profile.id);
         if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
         callbackCompleted = true;
-        return { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
+        return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       const current = await this.management(input.profileId);
       if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');

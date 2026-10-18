@@ -12,6 +12,8 @@ import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultU
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
+import { modelConfigurationOperationKey, type ModelConfigurationOperationWrite } from './model-configuration-operation';
+import type { AiModelConfigurationOperationDraft } from '@rental-os/shared';
 
 /** Protocol support, never a supplier/model catalogue. Extend through tested adapters. */
 export const tenantModelProtocols = ["openai_chat_completions"] as const;
@@ -38,7 +40,8 @@ export interface TenantModelConfigPorts {
   repository: {
     read(tenantId: string): Promise<TenantModelRecord | null>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
-    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext): Promise<boolean>;
+    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext, operation?: ModelConfigurationOperationWrite): Promise<boolean>;
+    readOperation?(context: GatewayContext, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
     setAllowedCapabilities?(context: GatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
   };
 }
@@ -191,6 +194,16 @@ export class TenantModelConfigService {
     const input = request;
     context = await this.authorize(context, 'manage');
     if (input.configId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
+    const commandHash = input.operationKey === undefined ? undefined : this.secrets.fingerprint(requestFingerprint({ context, input }));
+    if (input.operationKey !== undefined) {
+      if (!this.ports.repository.readOperation) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      const original = await this.ports.repository.readOperation(context, input.operationKey, commandHash);
+      await this.authorize(context, 'manage');
+      if (original.state === 'recorded') {
+        if (!('tenantId' in original.result) || original.result.tenantId !== context.tenantId) throw new ModelGatewayError('CONFIG_INVALID');
+        return original.result;
+      }
+    }
     const previous = await this.readRecord(context.tenantId);
     if ((previous?.revision ?? 0) !== input.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
     let next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.mode,
@@ -204,11 +217,23 @@ export class TenantModelConfigService {
       next = { ...next, ...prepared, serviceEnabled: prepared.settings.enabled };
     }
     await this.authorize(context, 'manage');
-    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.expectedRevision, next, context)) throw new AiModelConfigurationRevisionConflictError();
+    const result = this.publicSummary(context.tenantId, next);
+    const operation = input.operationKey === undefined ? undefined : { operationKey: input.operationKey,
+      expectedRevision: input.expectedRevision, commandHash: commandHash!, result };
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.expectedRevision, next, context, operation)) throw new AiModelConfigurationRevisionConflictError();
     try {
       await this.authorize(context, 'manage');
-      return this.publicSummary(context.tenantId, next);
+      return result;
     } catch { throw new AiModelConfigurationResultUnknownError(); }
+  }
+
+  async readSettingsOperation(context: GatewayContext, key: unknown): Promise<AiModelConfigurationOperationDraft> {
+    if (!modelConfigurationOperationKey.safeParse(key).success) throw new ModelGatewayError('INVALID_REQUEST');
+    context = await this.authorize(context, 'read');
+    if (!this.ports.repository.readOperation) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    const result = await this.ports.repository.readOperation(context, key as string);
+    await this.authorize(context, 'read');
+    return structuredClone(result);
   }
 
   async profile(context: GatewayContext): Promise<GatewayProfile> {
