@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-18。最近核心功能：租户双轨/平台模型配置与知识、记忆、原索引操作的标准管理入口；模型执行仍默认关闭。固定提交与证据见开发记录，开工以实际Git现场为准，不将SHA作为回退目标。
+> 更新时间：2026-10-18。最近核心功能：配置原键收据及旧配置审阅替换、标准报价/开业准备、受权事件/人工办理及原通知设置审批执行。模型与主动执行仍须独立可信配置，默认不开放。固定提交及证据见开发记录，开工以实际Git现场为准，不回退旧SHA。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -24,9 +24,13 @@
 
 继续原 AIN-03/04/05/06/07/11 依赖，不以界面或空包装代替核心。当前场景交付矩阵与剩余实施缺口见[开发记录](<AI Native-开发记录.md>)；优先补可信价格/计数生产与完整标准执行依赖、其他输入格式/规模下的来源关系及真实删除传播，不以正确拒绝算正向交付。
 
+**当前收口结果与下一缺口：** 本轮五个完整功能提交已接回标准代码，AIN-09/14/16/17/18按原G3登记75%，原28项等权57.1%、正式验收0/28。报价是R1持久保存，不是建单批准；开业/资料仍缺其他分区/普通字段正式写入消费者。通知设置只处理原获准通知数组，`AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION`需服务器显式提供host；新执行关闭后仍有原change/creation/result/snapshot/event/decision观察，不以当前配置替代原收据。`AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION`默认不记录事件、不生产影子任务；显式开启仍需正式automation主体、政策、预算和人类grant，不启动worker或无人业务执行。不要重复造已注册消费者；下一轮优先核对标准通知原变更→创建→政策→start-original全链、报价→批准建单的标准装配及其余实际分区，缺正式依赖的分别列明。
+
+**本轮验证边界：** 配置原收据2/2、旧配置显式替换1/1、标准报价/开业1/1、标准事件/影子/人类原键1/1、标准通知设置执行/批准/原结果1/1，均为分阶段stdin功能冒烟、退出0，不相加称全量通过；API664 roots/0诊断、diff退出0。旧事件组合仍0/1（未ready便准备）；旧设置宿主组合1 pass/1 fail（无关旧报价夹具无持久分页），以及shared旧JS缺新schema均保留，源码优先冒烟不证明旧生成产物通过。未新增测试文件，未覆盖共享产物。新配置收据迁移只完成隔离生成/validate/diff，未执行；真实MySQL、服务/供应商/存储及浏览器/设备未验。各首轮/最终日志在`output/core-configuration-receipts-20261018/`。
+
 AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务入口/仅候选/缺依赖的区分；四品类原报价与确认、实际目录消费者及归档证据链接已用现有入口快检。当前按原G3将AIN-01/05/11更新为75%，整项验收仍0/28，不改分母或门槛。AIN-01尚缺完整人工流程/指标及目标环境版本；本轮补上`rental.change.preview`中的续租预览：`business-tools.orderExtensionPreview(orderId).read`及原`next_steps`请求的`previewOrderExtension`→标准同名POST入口。订单由原请求绑定，原view及extend/operate权限、订单版本、服务地点和读后身份均复验；只复用原Core试算，不保存/批准/执行，也未登记自动模型工具。其他变更类型、完整响应协议及真实HTTP/四品类全范围仍未验。其他任务具备门槛证据再更新，不批量估分。
 
-配置标准入口已补：`97610dcc`提供`POST /api/ai-native/model-settings/{read|save}`，复用C07；configId绑定当前tenant而非Profile，未配置读revision=0/disabled，模式、独立serviceEnabled和密钥/Profile同一CAS，平台模式保留BYOK且不要求供应商字段。`f7f3ec29`提供`GET/PUT /api/platform/ai/providers/{profileId}`，沿原SaaS平台Guard和canonical PLATFORM范围；expectedRevision=0首次创建DEFAULT Profile与加密Vault，旧修订/并发冲突拒绝。两入口保存都不验证连接/能力、不授额度/执行，清密钥强制关闭；提交应答不明只当前授权下观察、不自动重写。追加迁移`20261018090000_ai_tenant_service_gate`只完成离线校验，未执行。仍缺旧明文设置的合法转换、配置原操作收据及后台表单正式消费；不要把当前修订当原保存收据或自动导入旧密钥。
+配置标准入口支持租户双轨read/save与平台Profile读写，仍复用原C07/CAS/Profile/Vault。原键收据已同事务接入，`POST /api/ai-native/model-settings/operation`及平台`GET /api/platform/ai/providers/{profileId}/operations/{operationKey}`只返回当前原主体的安全保存结果，异载荷/跨主体拒绝。`POST /api/ai-native/model-settings/legacy`仅审阅原来源/版本，不回显旧密钥；显式替换需原版本、operationKey、全新替换密钥和disabled，原记录保留，不自动导入、复用掩码或认证能力。不支持的旧协议继续拒绝。`20261018090000_ai_tenant_service_gate`及新增`20261018100000_ai_model_configuration_operations`均未执行；后台表单正式消费、真实升级/并发及旧客户端无原键的保存恢复仍未齐，不把当前修订补造成原收据。
 
 知识/记忆标准管理已接回原实现：`e46b4c76`注册`HumanMemoryManagementController`和`KnowledgePolicyManagementController`，`2784aedd`注册`HumanKnowledgeManagementController`，均为当前人类操作。记忆提议/确认/撤回、政策prepare/commit/原operation及文件上传/创建/解析/发布/撤回沿原仓储、正式政策和原文件集成；新增`index/{read|request|resume|operation-read}`复用原词法索引协调器/收据，不启动worker。取消及5秒等待关闭本次凭据，未知写入只核对原操作。缺正式管理authority或动作政策仍不可用，不播种授权。AIN-03已按标准持久消费者与实际仓储冒烟跨G3为75%，真实迁移/并发及完整升级回退仍未验；其余百分比不因入口数量变化。BYOK配置→租户/场景预算首次初始化→配置变更后显式重绑定，已用标准预算provider/controller及真实Auth/Guard/订阅/仓储实现跑通离线正向；旧unknown债务/占用不归零，重绑定关闭本层执行门，未提供服务器配置仍拒绝。该结果不证明平台模式、tokens/money或模型派发全链。下一步继续可信价格/计数生产、完整标准执行、知识authority配置/正式内容消费及真实删除传播，不重复造已接回的管理服务或索引器。
 
@@ -40,7 +44,7 @@ AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务�
 
 **可信计价的精确剩余：** `budget/prisma-gateway-pricing-records.ts`的`GatewayPricingEvidenceSource.readPrice`仍需正式费率/币种/有效期及来源修订，`readInputBound`需认证tokenizer或供应商计数收据，绑定原invocation/registrationHash/intentHash/configurationHash/priceHash。当前未找到其正式数据生产者，不以字符估算、当前价或合成种子替代，也不因此开放真实调用。
 
-`bd052264`将原预算设置控制器与`AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER`装入标准应用，沿同一可信服务器DI配置默认关闭；当前有权管理员仍须通过原平台/租户Guard及政策CAS。六个既有设置路径已补OpenAPI，初始化/重绑定只消费正式当前配置，重绑定继续关闭政策门，不自动开额度、发模型或建立第二账本。设置请求有界/传递取消并关闭本次凭据，写应答不明只读原政策核对。政策CAS锁持有期间拒绝将未释放/已计量占用换成不同单位或币种，准入也拒绝历史混合计量，不能经中间停用/未配置状态清零旧用量；没有自动换汇或账期重置。本片已验现有政策读写与平台首次保存，租户首次配置/重绑定的全部正向组合及真实模型执行仍待核实。
+原预算标准设置、首次配置与显式重绑定已复验离线正向，沿同一可信服务器DI配置默认关闭；初始化/重绑定只消费正式当前配置、保留旧债务并关闭本层政策门，不自动开额度、派发或建立第二账本。当前平台/租户Guard和CAS不省略，写应答不明只读原政策；未释放/已计量占用不能换成不同单位或币种，不经停用/未配置清零，不自动换汇。平台模式、tokens/money首次配置的完整组合、真实费率/计数与模型执行仍待核实，不再重复列租户BYOK首次配置为完全未验。
 
 `0b74345e`补齐同一服务器配置下的人类政策入口：标准`AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER`接原`AiScenePlanPolicyController`，仅管理order_explanation v1及ai.model.text/rental.order.explain；无执行配置仍不可用。原只读动作provider默认仍限三项读政策；明确服务器配置后可由当前同主体管理员逐项配置claim_run/claim_recovery_run/release_run/transition_task/takeover_run，不开放输入、建单或批准。沿原Auth/Guard、CAS、原政策审计事务及有限请求等待，不在创建任务时播种政策，也不创建财务占用。OpenAPI补原两条plan-policies路径；响应仍GenericObject，未宣布完整协议冻结。下一步需完整原请求→政策→执行的标准正向组合、可信费率/计数源及其余场景消费者，不把管理入口就绪等同运行放行。
 
