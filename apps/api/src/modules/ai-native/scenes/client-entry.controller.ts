@@ -6,6 +6,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
+  aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
   aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
@@ -27,7 +28,8 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
-  'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation'>;
+  'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation' |
+  'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting'>;
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
@@ -102,6 +104,20 @@ export class AiClientEntryController {
   createTask(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.taskCreation(request, value, true); }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskCreation(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.taskCreation(request, value, false); }
+  private accounting(request: ClientModelHttpRequest, body: unknown, reconcile: boolean) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = aiClientTaskAccountingRequestSchema.parse(input);
+      const result = await this.application[reconcile ? 'reconcileOriginalTaskAccounting' : 'readOriginalTaskAccounting'](current, command, signal);
+      const response = aiClientTaskAccountingResponseSchema.safeParse(result);
+      if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_accounting_observation_unknown');
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_original_accounting');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskAccounting(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.accounting(request, value, false); }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcileTaskAccounting(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.accounting(request, value, true); }
   private preparedQuoteObservation(value: unknown) {
     const result = value as { state?: unknown; quote?: unknown; source?: unknown };
     const raw = result?.quote;

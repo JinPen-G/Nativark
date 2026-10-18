@@ -58,6 +58,17 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
       status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
     execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
+  AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
+  AiClientTaskAccountingResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
+    state: { enum: ['observed', 'unknown'] }, account: { anyOf: [object({ status: { enum: ['reserved', 'settled', 'released', 'pending_reconciliation'] },
+      reserved: { $ref: '#/components/schemas/AiClientAccountingQuantity' }, actual: { anyOf: [{ $ref: '#/components/schemas/AiClientAccountingQuantity' }, { type: 'null' }] },
+      dispatched: { type: 'boolean' } }), { type: 'null' }] }, observedAt: date, execution: literal('not_authorized_by_accounting'),
+    retryable: literal(false), nextAction: literal('read_original_accounting') }),
+  AiClientAccountingQuantity: { oneOf: [
+    object({ unit: literal('calls'), value: { type: 'integer', minimum: 0, maximum: 2147483647 } }),
+    object({ unit: literal('tokens'), value: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } }),
+    object({ unit: literal('money'), amount: { type: 'string', pattern: '^(0|[1-9][0-9]*)\\.[0-9]{6}$' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, scale: literal(6) })
+  ] },
   AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
   AiClientOrderExplanationReadRequest: object({ orderId: id, question: { enum: ['status', 'fees'], description: 'Omitted question uses status.' } }, ['orderId']),

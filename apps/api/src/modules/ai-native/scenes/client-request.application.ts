@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+  aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema, AI_BOOKING_ACCEPTANCE_READ_VERSION,
   aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
@@ -27,7 +28,7 @@ import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionS
 import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
 import { composeClientOriginalTaskModelHost, composeClientOriginalTaskInputReader } from './client-task-model-host.composition';
-import { composeClientTaskModelConfiguration, type ClientCallGatewayDependencies, type ClientPersistedCallGatewayDependencies,
+import { composeClientTaskAccountingRecovery, composeClientTaskModelConfiguration, type ClientCallGatewayDependencies, type ClientPersistedCallGatewayDependencies,
   type ClientGatewayDependencies, type ClientPersistedGatewayDependencies } from './client-task-model-configuration.composition';
 import type { SecretBox } from '../../../common/secret-box';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
@@ -51,6 +52,8 @@ import { composeClientBooking } from './client-booking.composition';
 import type { AiBookingMaterial } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
 import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
+import { BudgetError } from '../budget/budget.ports';
+import type { PrismaClient } from '@prisma/client';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -86,6 +89,8 @@ export type AiClientRequestDependencies = {
   /** Result reads require the same repository, not a provider or budget root. */
   taskResults?: { db: ConstructorParameters<typeof PrismaTaskRecoverySnapshotRepository>[0]
     & ConstructorParameters<typeof AiTaskResultRepository>[0] };
+  /** Original accounting is available independently of a currently enabled model. */
+  taskAccounting?: { db: PrismaClient };
   /** Original booking page only, explicit server assembly. Same ClientApiService
    * singleton as the read projection; never an Agent-selected executor. */
   bookingSubmission?: Pick<ClientApiService, 'prepareOrderSubmission' | 'readOrderSubmission' | 'createOrder'>;
@@ -442,6 +447,59 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     await bound.assertCurrent();
     return freezeOriginalInput({ ...receipt, operationKey: material.operationKey, retryable: false as const,
       payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const });
+  };
+  const originalAccounting = async (request: AiClientApplicationRequest, value: unknown, reconcile: boolean, signal?: AbortSignal) => {
+    requireEntry();
+    const db = dependencies.taskAccounting?.db;
+    if (!taskDependencies || !db || db !== dependencies.db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_accounting_dependencies_missing');
+    const { callId, ...command } = parseEntry(aiClientTaskAccountingRequestSchema, structuredClone(value));
+    return withBinding(structuredClone(request), true, 'order', async bound => {
+      const loadMaterial = async (materialRef: string) => {
+        await bound.assertCurrent();
+        const row = await repository.findSource(scopeOf(bound), materialRef);
+        if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await verify(bound, row, true); await bound.assertCurrent();
+        return { row, identity: structuredClone(bound.identity) };
+      };
+      const authorization = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
+      const original = await composeClientMaterialTasks(taskDependencies, loadMaterial, clock).readCreation(command);
+      if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const taskId = original.task.taskId, before = await authorization.execution.readGrant(taskId, 'read');
+      const current = await authorization.scopes.resolveCurrent();
+      const invocation = await db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } },
+        select: { id: true, taskId: true, scopeId: true, actorId: true, sceneCode: true, priceVersion: true } });
+      if (invocation && (invocation.taskId !== taskId || invocation.scopeId !== current.scope.id
+        || invocation.actorId !== bound.identity?.customerId || invocation.sceneCode !== taskDependencies.sceneCode)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      let account = null;
+      try {
+        if (invocation) {
+          const reservation = await db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
+            scopeId: current.scope.id, scopeKind: 'WORKSPACE', callId } }, select: { id: true, unitKind: true, priceVersion: true } });
+          if (reservation) {
+            if (reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind)) throw new BudgetError('FORBIDDEN');
+            // Select ONLY the original persisted counting basis. The existing
+            // recovery verifies every invocation/reservation/usage association;
+            // no current rate, provider, execute gate or replacement ID is used.
+            const recovery = composeClientTaskAccountingRecovery({ ...taskDependencies, db, loadMaterial, clock,
+              pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: reservation.priceVersion } }, command);
+            const record = reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId });
+            account = { status: record.status, reserved: record.reserved, actual: record.actual, dispatched: record.dispatched };
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof BudgetError)) throw error;
+        if (error.code === 'FORBIDDEN') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (error.code !== 'PENDING_RECONCILIATION') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        // Missing original usage / a lost COMMIT reply stays unknown. Never
+        // release, reserve again or call the provider from this observation.
+      }
+      const after = await authorization.execution.readGrant(taskId, 'read');
+      if (before.proof !== after.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await bound.assertCurrent();
+      return freezeOriginalInput(aiClientTaskAccountingResponseSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION, callId,
+        state: account ? 'observed' : 'unknown', account, observedAt: clock().toISOString(),
+        execution: 'not_authorized_by_accounting', retryable: false, nextAction: 'read_original_accounting' }));
+    }, signal);
   };
   const runOriginalTaskModel = async (request: AiClientApplicationRequest, value: unknown,
     model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>,
@@ -905,6 +963,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         }
         return readSubmission(request, bound, acceptance);
       });
+    },
+    readOriginalTaskAccounting(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      return originalAccounting(request, value, false, signal);
+    },
+    reconcileOriginalTaskAccounting(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      return originalAccounting(request, value, true, signal);
     },
     /** Internal server consumer only. Runtime/pricing/plan/host configuration is
      * injected by the application, never accepted in a customer HTTP body. */

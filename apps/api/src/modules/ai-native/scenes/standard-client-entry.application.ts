@@ -28,12 +28,12 @@ const modelConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: 
  * records are not seeded here. Only original authorized text summaries can
  * finish this closed plan; explicit booking parameter selection stays manual. */
 export function standardClientModelDependencies(db: PrismaClient, secrets: SecretBox, value?: unknown,
-  suppliedAdapters?: readonly ModelAdapter[]): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults'> {
+  suppliedAdapters?: readonly ModelAdapter[]): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults' | 'taskAccounting'> {
   let config: z.infer<typeof modelConfiguration>;
   try { config = modelConfiguration.parse(structuredClone(value ?? { enabled: false })); }
   catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
   // Original result observation needs neither an enabled model nor a Provider.
-  if (!config.enabled) return { taskResults: { db } };
+  if (!config.enabled) return { taskResults: { db }, taskAccounting: { db } };
   if (config.limits.maxStepMs > config.limits.maxTotalMs || !secrets
     || suppliedAdapters !== undefined && (!Array.isArray(suppliedAdapters) || !suppliedAdapters.length))
     throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_dependencies');
@@ -42,7 +42,7 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
   return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
     inputSource: 'original_client', gatewayScene,
     gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },
-    taskInputs: { db, inputSource: 'original_client', gatewayScene }, taskResults: { db } };
+    taskInputs: { db, inputSource: 'original_client', gatewayScene }, taskResults: { db }, taskAccounting: { db } };
 }
 type Dependencies = AiClientRequestDependencies & {
   db: PrismaClient;
@@ -124,6 +124,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
     readHostCapabilities: bind('readHostCapabilities'), issueAction: bind('issueAction'),
     prepare: bind('prepare'), readOrderMaterialReceipt: bind('readOrderMaterialReceipt'),
     createTask: bind('createTask'), readTaskCreation: bind('readTaskCreation'),
+    readOriginalTaskAccounting: bind('readOriginalTaskAccounting'), reconcileOriginalTaskAccounting: bind('reconcileOriginalTaskAccounting'),
     createBookingDraft: bind('createBookingDraft'), chooseBookingDraft: bind('chooseBookingDraft'), readBookingDraft: bind('readBookingDraft'),
     handoffBookingDraft: bind('handoffBookingDraft'), readBookingHandoff: bind('readBookingHandoff'), readBookingOperation: bind('readBookingOperation'),
     acceptBookingSubmission: bind('acceptBookingSubmission'), readBookingAcceptance: bind('readBookingAcceptance'),

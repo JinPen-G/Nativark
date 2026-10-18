@@ -10,6 +10,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   /** Owned order facts -> immutable material -> metadata task only. */
   prepareOrderMaterial: 'orders/material/prepare', readOrderMaterialReceipt: 'orders/material/receipt',
   createTask: 'tasks/create', readTaskCreation: 'tasks/creation/read',
+  /** Original financial lifecycle only; never creates a reservation/dispatch. */
+  readTaskAccounting: 'tasks/accounting/read', reconcileTaskAccounting: 'tasks/accounting/reconcile',
   /** Original task command only; neither endpoint starts or resumes execution. */
   readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
   /** Request only; observe the original snapshot after success or unknown. */
