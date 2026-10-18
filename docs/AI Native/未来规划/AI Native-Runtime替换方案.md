@@ -1,22 +1,24 @@
 # AI Native：Runtime 与 Provider SDK 开源接入方案
 
-文档版本：整理合并版；整理日期：2026-10-16。文件名保持稳定，内容覆盖 Runtime 双向转换与 Provider SDK 独立替换。具体依赖版本须在未来获准实施时另行核验。
+文档版本：未来候选调整版；更新日期：2026-10-18。文件名保持稳定，内容覆盖 Runtime 双向转换、可选聊天界面复用与 Provider SDK 独立替换。具体依赖版本须在未来获准实施时另行核验。
 
-> 文档分类：未来规划／设计方案。当前继续自研，不安装或迁移 LangGraph、Provider SDK；任何实际切换需负责人单独授权。
+> 文档分类：未来规划／设计方案。**未来优先评估 DeepSeek Harness，LangGraph 保留为备选及既有设计参考。当前继续自研，不安装、接入或迁移 Harness、LangGraph、Provider SDK；任何实际切换需负责人单独授权。**
 > 本文只维护替换边界、状态/存储映射、实施前置和回退方案，不记录项目百分比、当前 HEAD、派工或历史开发流水。
 > 原技术设计保留，整理前原文见[历史快照](../../历史归档/整理前快照-20261016/docs/开发任务/附件/AI原生系统协作切片/20261008-Runtime双向转接与自研保留手册.md)；项目当前状态见[协作接续](<../AI Native-协作接续.md>)。
 > 本文是未来需求与技术方案，不替代当前正式需求或开发任务，也不新增本期框架接入任务。这里的目标能力、候选和验收条件不表示代码已实现、依赖已选定或真实环境已验证。
 
-通用 SaaS 底座与 Rental Core 等行业模块的分离、外部团队接入及未来开源，单独见[通用 SaaS 底座方案](<AI Native-通用SaaS底座方案.md>)。它与本方案的 Runtime、Provider SDK 两条替换路线独立，不因更换引擎就自动完成行业解耦，也不要求同时实施。
+通用 SaaS 底座与 Rental Core 等行业模块的分离、外部团队接入及未来开源，单独见[通用 SaaS 底座方案](<AI Native-通用SaaS底座方案.md>)。它与本方案的 Runtime、Provider SDK 两条替换路线独立，不因更换引擎就自动完成行业解耦，也不要求同时实施。聊天界面复用可单独评估，不因界面复用就切换 Runtime。
 
 ## 1. 用途与授权边界
 
 未来的两条替换路线相互独立：
 
-- **Agent Runtime：** 自研运行层 → LangGraph 等运行层，以及将来退回自研或其他 Runtime。目标是替换编排驱动及必要适配，而不是业务系统。
+- **Agent Runtime：** 自研运行层 → 优先评估 DeepSeek Harness；LangGraph 为备选，以及将来退回自研或其他 Runtime。目标是替换适用的编排驱动及必要适配，而不是业务系统。Harness 的聊天界面、工具展示和插件可纳入复用评估，不等于默认开放其全部功能。
 - **Provider SDK：** 原请求编码/解析 → 经验证的成熟 SDK 适配。仅涉及模型协议边界，不要求同时替换 Runtime、Gateway、出网或预算。
 
 这不是必须接入某一框架的决定，也不承诺在途任务可无损热切换。真实包版本、许可证、Node/模块制式、TypeScript、schema 库和 saver 兼容性在实施前核验，不用历史调研版本充当已锁定版本。
+
+**阅读优先级：第2A节是 DeepSeek Harness 的优先评估方案；第3～12节保留原 LangGraph 备选设计，不是 Harness 的实现说明或当前必做队列；第13节是独立的 Provider SDK 方案；第14节是共同采用门槛。** 备选中的单一执行权、当前授权、原收据、累计资源及源码保留要求对所有候选同样适用，但图、channel、pending writes、saver、interrupt 等专有机制不能直接套用为 Harness 已有能力。
 
 本文件是现行未来接入方案的唯一维护入口；原开源研究归档保留，作为设计参考而非当前施工指令：[Claude 与 Codex 统一方案原文](../../历史归档/整理前快照-20261016/docs/开发任务/附件/AI原生系统文档备份/20261007-开源接入暂缓-943c15ea/开源接入统一方案-20261007-Claude与Codex整合.md)。原文引用的双方研究、历史评分和候选版本只对当时调研有效，不作为现在的完成率、节省比例或依赖锁定结论。
 
@@ -24,8 +26,9 @@
 
 | 内容 | 在本方案中的位置 |
 | --- | --- |
-| 自研成果保留、唯一执行权及业务权威 | 第2～5节 |
-| Runtime 状态、checkpoint、重入及双向迁移 | 第4～10节 |
+| DeepSeek Harness 优先候选、聊天/工具复用及正反向采用 | 第2A节 |
+| 自研成果保留、唯一执行权及业务权威 | 第2、2A节；第3～5节保留备选细则 |
+| LangGraph 备选状态、checkpoint、重入及双向迁移 | 第3～12节 |
 | Provider SDK 独立接法、出网与 usage 边界 | 第2节及第13节 |
 | 候选选型、许可、兼容与未来收益判断 | 第11节及第14节 |
 
@@ -35,6 +38,8 @@
 
 Runtime 或 SDK 都不能替代当前身份/Scope/Guard/ALS、人工批准、Core 事务/幂等、文件/知识 ACL、唯一 Gateway 与预算单账。框架/SDK 专有类型留在适配层，不进入业务工具或公共 DTO。
 
+职责仍须分清：Rental Core及原业务域负责租赁规则、报价、库存、订单和资金事实；身份授权、AI Gateway、AI预算、任务与审批分别复用 Rental OS 已有服务，不把这些全部归为 Rental Core，也不因采用 Harness 另建一套。
+
 Provider SDK 路线尤其保持：
 
 - 唯一 invocation/dispatch 与原 request/run/step、配置/价格/用量证据关联，禁止与旧协议双发或双记账。
@@ -42,11 +47,67 @@ Provider SDK 路线尤其保持：
 - 明确请求/错误/流终态/实际 usage 映射；缺 usage 不补零，丢应答/unknown 不换 ID、Provider 或适配器重发。
 - 实施时固定依赖/协议版本，先做不产生真实双副作用的差分；保留原适配器源码与回退路径。
 
-## 3. 源码保留规则
+## 2A. 优先候选：DeepSeek Harness
+
+### 定位与已知边界
+
+DeepSeek Harness 与 LangGraph 有重叠，但不是同一种产品。Harness 提供插件化 Agent 循环、会话历史、模型适配、工具执行和 Web 聊天应用；LangGraph 备选方案主要按图编排与 checkpoint 设计。采用 Harness 不自动获得第3～12节设想的全部图分支、子图、时间旅行或 Store 语义，需按真实需求另行核验。
+
+候选资料以官方[仓库说明](https://github.com/deepseek-ai/deepseek-harness)、[架构](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)、[运行器](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/README.md)、[模型适配](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-an-llm-adapter.md)、[工具管线](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/tool-execution-pipeline.md)和[聊天模块](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/ui-chat/README.md)为准。这些是可变化的上游资料，不是本项目已锁定依赖或接入证明。
+
+上游声明为开发者预览、存在兼容性破坏风险；[安全说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md)明确未经安全审计、不能视为生产就绪。运行器资料还列出整轮预算及根关闭时终态持久化的限制。正式采用前须重新核验，不能因有会话恢复就推定满足业务多进程恢复。仓库采用[MIT许可](https://github.com/deepseek-ai/deepseek-harness/blob/master/LICENSE)，修改/分发须保留相关声明，另核查第三方许可、品牌/图标及素材使用边界。
+
+### 目标分工与真实接点
+
+| 层次 | 拟复用内容 | 必须保留的 Rental OS 边界 |
+| --- | --- | --- |
+| 聊天和过程展示 | Harness 的消息流、输入区、工具过程、会话历史及适用附件视图 | 后台 UIArc/品牌、原登录态、公开任务与 Action 合同、当前来源授权；不开放开发者终端或插件市场 |
+| 编排驱动 | Agent 循环和适用的多轮/取消/会话机制 | 原 Task/Run/Step、不可变输入、步骤登记、lease/fencing/CAS及累计资源；一个任务只由一个驱动推进 |
+| 模型适配 | 注册调用 Rental OS 的 Harness LLM adapter | 所有请求经唯一 Gateway；原凭据、配置/能力、invocation/dispatch、预算和usage收据继续有效，不使用其直连供应商默认路径 |
+| 工具管线 | 工具schema、受控注册、执行前检查和结果展示 | 调用原业务工具应用入口，逐次复验身份/scope/地点/对象和风险；Harness 的一次允许提示不等于正式人类批准 |
+| 会话持久化 | 适用的 SessionPersistence 和会话事件机制 | 原任务/输入/批准/业务/费用记录仍是各自权威；明确映射和留存，不能把本地会话日志当业务账本 |
+| 业务与知识 | 只接已有受权工具、检索及原结果引用 | Core/正式业务服务、知识/文件ACL和人类记忆确认不迁入插件的私有权威；缺依赖仍拒绝 |
+
+目标关系为：Rental OS 入口 → 原当前身份与任务应用合同 → 服务器绑定的单一驱动 → Harness 循环 → 原受控模型/工具执行边界 → 原结果收据及公开事件。不得在 Harness 中再调用完整旧 runner 循环，也不得在旧 runner 内嵌第二循环；按需要提取原单步边界，两个驱动分开消费，旧实现和测试实际保留。未来适配目录可独立认领为 `ai-native/runtime-adapters/deepseek-harness/`，此处只是目标位置，不要求现在创建空目录或接口。
+
+现有 `runner/prisma-task-application.ts` 的 start/resume/continueConfirmation/reconcile/inspect、原输入和审批接口继续作为对外语义边界；Harness 的 create/resume/cancel 只在适配层转换。原 `model-gateway.ports.ts`、Gateway组合及业务工具服务继续消费本系统合同，Harness专有类型不进入shared或业务DTO。**这些是待验证的接入设计，不是已实现Host或可直接调用的适配API。** 若当前Gateway不支持所需的工具轮次、流或输入形状，先形成最小正式契约变更并核验生产者/消费者，不能绕过它直连供应商。
+
+### 会话、任务和提交事实的映射
+
+| 场景 | 必须落实的映射与行为 |
+| --- | --- |
+| 新建或恢复会话 | 服务器绑定 tenant/workspace/audience/owner、task/run 与 Harness session、引擎/插件/格式版本；列表、读取、订阅和删除均检查当前归属，sessionId不是授权或业务幂等键 |
+| 每轮模型调用 | 将实际发送内容、工具schema、输入/配置版本固定到原登记与指纹；多轮、压缩、标题、子Agent等附加请求全部经Gateway与资源/财务门，不能只登记和计量首轮 |
+| 每次工具动作 | 先原授权、合法lease/fence、步骤/动作登记和资源占用，再执行；模型tool-call ID不能代替原action/operation或可信dispatch token |
+| 等待输入/人类审批 | 先持久化原等待及输入/批准收据，明确解除等待与继续的唯一条件；聊天回复、插件确认或会话resume均不授予业务批准 |
+| 已执行但会话落库不明 | 按原action/invocation/业务及费用收据核对；缺usage或结果不明保持unknown，禁止换会话、引擎、Provider或ID重发 |
+| 取消、接管、撤权及重启 | 阻止新副作用，传递取消并有界清理；旧会话写入者不得覆盖新持有者。会话结束或崩溃修补不能直接投影为业务成功、回滚或退额 |
+
+优先复用现有MySQL/Prisma及上游正式持久化扩展，是否需要薄适配须在获准实施时核准。事先明确会话事件序号/唯一键、原任务关联、格式版本、写入所有权、CAS/事务顺序、大小/分页上限及保留删除传播；不能把本地JSONL或单进程锁当作多租户多进程正确性证据。原事实与会话不能原子提交时明确每个中断点的只读恢复规则，不承诺框架自动提供跨系统exactly-once。
+
+### 聊天界面和默认工具的复用限制
+
+- 可复用聊天实现或独立界面模块，先核验其插件依赖、React/构建/模块制式、消息格式、主题、无障碍及许可证；不是将单个组件复制后就算完成接入。保留原列表、表单、人工办理和UIArc，不以采用聊天界面授权后台视觉重做。
+- 上游Web的启动token/cookie及本地workspace不等于Rental OS用户/租户/经营空间；必须用原服务端身份绑定会话及订阅。iframe或反向代理只解决展示/转发，不能代替授权隔离。
+- 使用显式服务器白名单组成业务Agent，**不直接采用默认开发助手工具集**：Shell、任意文件读写、代码执行、终端、任意网络、插件安装/热加载等不向业务用户开放。工具不装载/不具备后端能力，比仅在界面隐藏更重要；最小profile也不自动等于最小权限。
+- 按operations/staff/customer/platform映射本系统既有audience及权限，禁止模型自选主体或扩大工具。来源、链接、附件访问和安全页面导航仍由原受权服务及固定Action映射决定。
+- 业务卡片和确认入口消费本系统确定性金额/状态/版本/来源，不把工具返回文字、生成答案或聊天绿色完成态当Core结果。微信小程序/网站另按原宿主合同适配，不推定Web聊天组件可直接用于所有端。
+
+### 获准后的采用、验收和退出
+
+1. 锁定上游提交/依赖/插件清单与许可、安全及部署隔离门槛，明确需要复用的循环和UI，不默认引入全部应用、遥测或云服务。Runtime和UI可分开选择，Provider SDK仍独立；不因研究此方案暂停当前自研开发。
+2. 先验证一条完整只读订单链：原登录/权限 → 原不可变输入与Task → Harness → 原Gateway/单账 → 原受权订单工具 → 原结果/来源展示。少量有界冒烟及必要类型检查，随后另授权验证真实环境；缺正式依赖不以替身补生产。
+3. 集中核验多进程竞争、重启恢复、撤权/换空间、附加模型请求计量、已提交但会话ACK丢失、取消/接管与迟到结果；不得仅验证会话恢复就跳过原lease、unknown和原账语义。
+4. 再接正式澄清/审批/受控写入和逐端宿主。只有所需能力与首发验收齐备，才让限定新任务采用新驱动；旧任务原则上由原版本完成或人工核对，禁止新旧驱动双执行作比较。
+5. 回退先停止新任务选择Harness，按持久映射处理其在途任务，确认旧驱动支持同场景后再用于新任务。已有unknown不得由旧驱动重发；不得先卸载插件/存储，再推断在途动作未发生。会话与checkpoint不作未经验证的跨引擎强转，清理和迁移另行授权。
+
+采用前仍须补齐实际版本的方法签名、业务驱动解耦范围、存储模型/索引/CAS、公开事件映射、逐场景能力差异和操作回退入口；本文不伪造已实现切换命令、不估算节省百分比、不提升原任务完成率。若安全、稳定性或适配代价不满足要求，保持自研，或重新评估下述LangGraph备选，不因“首选评估”强制采用。
+
+## 3. LangGraph备选：源码保留规则
 
 ### 3.1 将来获准采用时的分工：通用机制与业务控制分离
 
-以下是未来接入的设计原则，不是当前采用决定：获准接入后优先复用框架适用的通用能力，业务控制复用 Rental OS 正式服务。既有自研成果实际保留，不让两个驱动同时推进同一任务。
+以下第3～12节保留LangGraph路线的既有设计，作为备选和历史技术参考，不是Harness接入指南或当前采用决定。获准采用该备选后才按其专有机制实施；业务控制复用 Rental OS 正式服务。既有自研成果实际保留，不让两个驱动同时推进同一任务。
 
 | 能力 | 目标主要承担方 | 现有实现保留/复用方式 |
 | --- | --- | --- |
@@ -300,13 +361,13 @@ ModelEgressTransport 不是 fetch 签名，不能用类型强转假装兼容。�
 
 ## 14. 候选复核与未来实施范围
 
-LangGraph.js 是 Runtime 的优先研究候选，不是已批准依赖。Provider SDK 的候选与 Runtime 分开选择；历史研究出现过的包名和版本仅作为查证线索，本次文档整理未安装、联网核验发布包或验证许可证及加载行为。
+DeepSeek Harness 是 Runtime 的优先评估候选，LangGraph.js 为备选；两者均不是已批准依赖或已接入能力。Harness的聊天界面/插件可纳入复用，但与LangGraph图机制不做同名替换或一一等价承诺。Provider SDK候选仍单独选择。官方资料只能支持初步判断，实际发布包、传递依赖、许可证及加载/出网行为须在获准实施时重新核验；不以本文调整表示已验证运行或生产可用。
 
 正式采用前逐项确认：
 
 - 实际发布包、公开导出、维护状态、安全风险、许可证/NOTICE 与使用或局部复用时的保留义务。
 - 生产 Node、CommonJS/ESM、TypeScript、schema 库及传递依赖的实际兼容。优先局部适配或适当版本，不整仓转 ESM 或升级基础设施迁就示例。
-- JS checkpoint saver 与锁定 Runtime 的序列化、pending writes、分页、并发、删除和恢复合同。优先现有 MySQL/Prisma；仅在无合适维护实现且确有需求时补薄适配，不因研究有限就宣称没有开源实现。
+- Harness须核验会话持久化、事件/模型/工具协议、写入所有权与任务映射；如采用LangGraph备选，再核验JS checkpoint saver的序列化、pending writes、分页、并发、删除和恢复合同。优先现有MySQL/Prisma；仅在确有需要时补薄适配，不把两种存储协议混为一谈，不因研究有限就宣称没有开源实现。
 - 框架/SDK 默认重试、缓存、追踪、云代理、自动工具/媒体处理与出网行为。以实际版本验证，不能依赖未经核实的默认值。
 - 首个迁移切片的完整输入、真实消费者、当前权限、提交点、原收据、计量和回退出口。建议仍从当前合法 operator/workspace 的只读订单解释开始，不报价、建单或处分资金，不默认开放其他 audience。
 
