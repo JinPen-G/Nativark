@@ -209,20 +209,23 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!text || Buffer.byteLength(text, 'utf8') > maxBytes) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
     return freezeOriginalInput(JSON.parse(text) as unknown);
   };
-  const verify = async (bound: Bound, row: AiClientSceneMaterial) => {
+  const verify = async (bound: Bound, row: AiClientSceneMaterial, originalTaskObservation = false) => {
     const parsedCommand = commandSchema.safeParse(row.command);
+    // Historical order observation still reloads current owner/visibility;
+    // old content and expiry cannot supply permission for a new effect.
+    const historicalOrder = originalTaskObservation && parsedCommand.success && parsedCommand.data.kind === 'order';
     if (!parsedCommand.success || row.inputHash !== requestFingerprint(parsedCommand.data)
       || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
-      || row.publicationHash !== requestFingerprint(row.publication) || row.expiresAt <= clock()
+      || row.publicationHash !== requestFingerprint(row.publication) || !historicalOrder && row.expiresAt <= clock()
       || row.materialHash !== materialHash(parsedCommand.data, row.material)) return fail('AI_CLIENT_MATERIAL_STALE');
     const entryBefore = parsedCommand.data.kind === 'booking_quote' ? await entryGrant(bound, row) : null;
     const current = await readMaterial(bound, parsedCommand.data);
-    if (materialHash(parsedCommand.data, current) !== row.materialHash) return fail('AI_CLIENT_MATERIAL_STALE');
+    if (!historicalOrder && materialHash(parsedCommand.data, current) !== row.materialHash) return fail('AI_CLIENT_MATERIAL_STALE');
     if (entryBefore && (await entryGrant(bound, row)).policyFingerprint !== entryBefore.policyFingerprint) {
       throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
     }
     const latest = await repository.findSource(scopeOf(bound), row.id);
-    if (!latest || jsonHash(row) !== jsonHash(latest) || row.expiresAt <= clock()) return fail('AI_CLIENT_MATERIAL_STALE');
+    if (!latest || jsonHash(row) !== jsonHash(latest) || !historicalOrder && row.expiresAt <= clock()) return fail('AI_CLIENT_MATERIAL_STALE');
     return parsedCommand.data;
   };
   const packet = (row: AiClientSceneMaterial, command: Command) => freezeOriginalInput({
@@ -255,7 +258,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           const row = await repository.findSource(scopeOf(bound), materialRef);
           if (!row) return fail('AI_CLIENT_MATERIAL_STALE');
-          await verify(bound, row);
+          await verify(bound, row, operation !== 'create');
           await bound.assertCurrent();
           return { row, identity };
         };
@@ -637,7 +640,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           const row = await repository.findSource(scopeOf(bound), materialRef);
           if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row); await bound.assertCurrent();
+          await verify(bound, row, true); await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
         const authorized = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
@@ -712,7 +715,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           const row = await repository.findSource(scopeOf(bound), materialRef);
           if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row);
+          await verify(bound, row, true);
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
@@ -736,7 +739,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           const row = await repository.findSource(scopeOf(bound), materialRef);
           if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row);
+          await verify(bound, row, true);
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
