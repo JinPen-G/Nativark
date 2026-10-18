@@ -11,6 +11,8 @@ export type AiBudgetLimitDraft =
   | { state: "limited"; quantity: AiUsageQuantityDraft };
 export interface AiSettingGateDraft { enabled: boolean; revision: number }
 interface AiTenantModelSettingsInputBaseDraft {
+  /** Tenant configuration identity, NOT a Gateway provider Profile ID. The
+   * current server tenant must match; clients cannot select another tenant. */
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; configId: string; expectedRevision: number;
   enabled: boolean;
 }
@@ -21,14 +23,20 @@ export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraf
   secretChange: { operation: "retain" } | { operation: "replace"; apiKey: string } | { operation: "clear" } }
 );
 interface AiTenantModelSettingsSummaryBaseDraft {
+  /** Revision zero means no persisted configuration; the platform product
+   * default remains disabled and does not grant budget or execution. */
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; tenantId: string; configId: string; configRevision: number;
   enabled: boolean;
-  connectionState: "not_tested" | "mock_only" | "verified_live" | "failed";
+  connectionState: "not_tested" | "mock_only" | "verified_live" | "failed" | "not_verified";
 }
 export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBaseDraft & (
   | { mode: "platform_managed"; serviceName: "Rental OS AI"; routing: "automatic"; availability: "ready" | "unavailable" | "not_verified" }
   | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; credentialState: "configured" | "missing" | "rotation_required" }
 );
+/** Management only. No model request, secret readback, tenant or actor override. */
+export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
+  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save'
+} as const);
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;

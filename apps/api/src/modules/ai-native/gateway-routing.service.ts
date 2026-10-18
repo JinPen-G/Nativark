@@ -57,7 +57,7 @@ export class AiGatewayRoutingService {
 
   private async selection(context: GatewayContext) {
     try { return selectionSchema.parse(await this.configuration.selectionForInvocation(structuredClone(context))); }
-    catch { throw new ModelGatewayError('CONFIG_INVALID'); }
+    catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
   async resolve(value: GatewayContext, requested: readonly AiProfileCapability[]): Promise<GatewayRoutingResolution> {

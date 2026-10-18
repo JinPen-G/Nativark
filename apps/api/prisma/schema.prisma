@@ -380,6 +380,9 @@ model AiTenantModelConfiguration {
   tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   mode                 String   @default("platform_managed") @db.VarChar(32)
   revision             Int      @default(1) @db.UnsignedInt
+  /// Null preserves legacy BYOK enabled semantics; explicit saves bind the
+  /// service gate independently of retained BYOK fields and selected mode.
+  serviceEnabled       Boolean?
   settings             Json?
   credentialsEncrypted String?  @db.Text
   createdAt            DateTime @default(now()) @db.DateTime(3)

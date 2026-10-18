@@ -38,6 +38,7 @@ import { composeRequestBoundBudgetManagement } from './budget/budget-management.
 import { BudgetError } from './budget/budget.ports';
 import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
 import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
+import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } from './model-settings.application';
 import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
   AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
@@ -54,6 +55,12 @@ export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),
 }));
+
+export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
+  provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox) =>
+    composeRequestBoundModelSettings({ db, auth, guard, secrets })
+};
 
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
   provide: AI_RETENTION_REQUESTS, inject: [PrismaService, AuthService, FileStorageRuntimeService],

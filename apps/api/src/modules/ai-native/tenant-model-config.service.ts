@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+import { AI_USAGE_DRAFT_SCHEMAS, AI_USAGE_DRAFT_VERSION,
+  type AiTenantModelSettingsInputDraft, type AiTenantModelSettingsSummaryDraft } from '@rental-os/shared';
 import { SecretBox } from "../../common/secret-box";
 import { isPrivateOrLocalHost, parseOutboundUrl } from "../../common/outbound-url";
 import { ModelGatewayError, type GatewayContext, type GatewayProfile } from "./model-gateway.ports";
-import { tenantModelMode } from "./model-config-compatibility";
+import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError,
+  AiModelConfigurationRevisionConflictError } from "./model-config-compatibility";
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
 
@@ -21,7 +27,11 @@ export const tenantModelSettingsSchema = z.object({
 }).strict();
 const settingsSchema = tenantModelSettingsSchema;
 type Settings = Omit<z.infer<typeof settingsSchema>, "apiKey" | "expectedRevision" | "secretChange">;
-export interface TenantModelRecord { tenantId: string; revision: number; mode?: "platform_managed" | "tenant_managed"; settings?: Settings; credentialsEncrypted?: string; }
+export interface TenantModelRecord { tenantId: string; revision: number; mode?: "platform_managed" | "tenant_managed";
+  serviceEnabled?: boolean; settings?: Settings; credentialsEncrypted?: string; }
+const settingsAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(settingsAjv);
+const validPublicSettings = settingsAjv.compile<AiTenantModelSettingsInputDraft>(AI_USAGE_DRAFT_SCHEMAS.AiTenantModelSettingsInputDraft);
 export interface TenantModelConfigPorts {
   /** Must validate fresh server identity, tenant membership, space access and action permission. */
   authorize(context: GatewayContext, action: "read" | "manage" | "invoke"): Promise<void>;
@@ -71,10 +81,11 @@ export class TenantModelConfigService {
   }
 
   private async readRecord(tenantId: string) {
-    const record = await this.ports.repository.read(tenantId);
+    const record = this.snapshot(await this.ports.repository.read(tenantId)) as TenantModelRecord | null;
     if (record && record.tenantId !== tenantId) throw new ModelGatewayError("FORBIDDEN");
     if (!record) return null;
     tenantModelMode(record);
+    tenantModelServiceEnabled(record);
     if (!record.settings) return record;
     const parsed = settingsSchema.omit({ apiKey: true, expectedRevision: true, secretChange: true }).safeParse(record.settings);
     if (!parsed.success || !Number.isSafeInteger(record.revision) || record.revision < 1 || record.revision >= Number.MAX_SAFE_INTEGER || typeof record.credentialsEncrypted !== "string") throw new ModelGatewayError("CONFIG_INVALID");
@@ -96,15 +107,17 @@ export class TenantModelConfigService {
   }
 
   private summary(record: TenantModelRecord) {
-    if (tenantModelMode(record) === "platform_managed") return { mode: "platform_managed" as const, serviceName: "Rental OS AI", revision: record.revision, availability: "not_verified" as const };
-    return { ...record.settings, mode: "tenant_managed" as const, revision: record.revision, keyConfigured: Boolean(record.credentialsEncrypted) };
+    if (tenantModelMode(record) === "platform_managed") return { mode: "platform_managed" as const, serviceName: "Rental OS AI", revision: record.revision,
+      enabled: tenantModelServiceEnabled(record), availability: "not_verified" as const };
+    return { ...record.settings, enabled: tenantModelServiceEnabled(record) && record.settings?.enabled === true,
+      mode: "tenant_managed" as const, revision: record.revision, keyConfigured: Boolean(record.credentialsEncrypted) };
   }
 
   async get(context: GatewayContext) {
     context = await this.authorize(context, "read");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'read');
-    if (!record) return { mode: "platform_managed" as const, serviceName: "Rental OS AI", revision: 0, availability: "not_verified" as const };
+    if (!record) return { mode: "platform_managed" as const, serviceName: "Rental OS AI", revision: 0, enabled: false, availability: "not_verified" as const };
     if (record.credentialsEncrypted) this.decrypt(record);
     return this.summary(record);
   }
@@ -114,25 +127,88 @@ export class TenantModelConfigService {
     context = await this.authorize(context, "manage");
     const parsed = settingsSchema.safeParse(request);
     if (!parsed.success) throw new ModelGatewayError("CONFIG_INVALID");
-    const { apiKey, secretChange, expectedRevision, ...settings } = parsed.data;
+    const { expectedRevision } = parsed.data;
+    const previous = await this.readRecord(context.tenantId);
+    if ((previous?.revision ?? 0) !== expectedRevision) throw new ModelGatewayError("CONFIG_INVALID");
+    const prepared = this.prepareTenantSettings(context.tenantId, previous, parsed.data);
+    const mode = previous?.mode ?? 'tenant_managed';
+    const next: TenantModelRecord = { tenantId: context.tenantId, mode, revision: expectedRevision + 1, ...prepared,
+      serviceEnabled: mode === 'tenant_managed' ? prepared.settings.enabled : tenantModelServiceEnabled(previous) };
+    await this.authorize(context, 'manage');
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, expectedRevision, next, context)) throw new ModelGatewayError('CONFIG_INVALID');
+    return this.summary(next);
+  }
+
+  private prepareTenantSettings(tenantId: string, previous: TenantModelRecord | null, input: z.infer<typeof settingsSchema>) {
+    const { apiKey, secretChange, expectedRevision: _, ...settings } = input;
     if (apiKey !== undefined && secretChange !== undefined) throw new ModelGatewayError("CONFIG_INVALID");
     const suppliedKey = secretChange?.operation === "replace" ? secretChange.apiKey : apiKey;
     if (suppliedKey !== undefined && !/^[\x21-\x7e]{1,8192}$/.test(suppliedKey.trim())) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
     settings.baseUrl = normalizeTenantModelBaseUrl(settings.baseUrl);
-    const previous = await this.readRecord(context.tenantId);
-    if ((previous?.revision ?? 0) !== expectedRevision) throw new ModelGatewayError("CONFIG_INVALID");
     // Never silently forward a stored key to a changed endpoint/protocol.
     if (secretChange?.operation !== "clear" && !suppliedKey?.trim() && (!previous?.settings || previous.settings.baseUrl !== settings.baseUrl || previous.settings.protocol !== settings.protocol)) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
     const clear = secretChange?.operation === "clear";
     const key = clear ? undefined : suppliedKey?.trim() || this.decrypt(previous!);
     if (clear) settings.enabled = false;
     let encrypted: string;
-    try { encrypted = clear ? "" : this.secrets.encrypt({ apiKey: key!, tenantId: context.tenantId, protocol: settings.protocol, baseUrl: settings.baseUrl, model: settings.model }); }
+    try { encrypted = clear ? "" : this.secrets.encrypt({ apiKey: key!, tenantId, protocol: settings.protocol, baseUrl: settings.baseUrl, model: settings.model }); }
     catch { throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE"); }
-    const next = { tenantId: context.tenantId, mode: previous?.mode ?? "tenant_managed" as const, revision: expectedRevision + 1, settings, credentialsEncrypted: encrypted };
+    return { settings, credentialsEncrypted: encrypted };
+  }
+
+  private publicSummary(tenantId: string, record: TenantModelRecord | null): AiTenantModelSettingsSummaryDraft {
+    const base = { draftVersion: AI_USAGE_DRAFT_VERSION, tenantId, configId: tenantId,
+      configRevision: record?.revision ?? 0, enabled: tenantModelServiceEnabled(record), connectionState: 'not_verified' as const };
+    if (tenantModelMode(record) === 'platform_managed') return { ...base, mode: 'platform_managed',
+      serviceName: 'Rental OS AI', routing: 'automatic', availability: 'not_verified' };
+    if (!record?.settings) throw new ModelGatewayError('CONFIG_INVALID');
+    let credentialState: 'configured' | 'missing' | 'rotation_required' = 'missing';
+    if (record.credentialsEncrypted) {
+      try { this.decrypt(record); credentialState = 'configured'; }
+      catch { credentialState = 'rotation_required'; }
+    }
+    return { ...base, enabled: base.enabled && record.settings.enabled, mode: 'tenant_managed',
+      protocol: record.settings.protocol, baseUrl: record.settings.baseUrl, model: record.settings.model, credentialState };
+  }
+
+  /** Existing C07 management projection; identity comes from the actual request
+   * authority. A configuration read does not attest capability or connection. */
+  async readSettings(context: GatewayContext): Promise<AiTenantModelSettingsSummaryDraft> {
+    context = await this.authorize(context, 'read');
+    const before = await this.readRecord(context.tenantId);
+    await this.authorize(context, 'read');
+    const latest = await this.readRecord(context.tenantId);
+    await this.authorize(context, 'read');
+    if (requestFingerprint(before) !== requestFingerprint(latest)) throw new AiModelConfigurationRevisionConflictError();
+    return this.publicSummary(context.tenantId, latest);
+  }
+
+  /** Mode + independent service gate + retained/replaced/cleared credential
+   * commit once with the existing Profile CAS. Never two sequential saves. */
+  async saveSettings(context: GatewayContext, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
+    const request = this.snapshot(value);
+    if (!validPublicSettings(request)) throw new ModelGatewayError('INVALID_REQUEST');
+    const input = request;
+    context = await this.authorize(context, 'manage');
+    if (input.configId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
+    const previous = await this.readRecord(context.tenantId);
+    if ((previous?.revision ?? 0) !== input.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
+    let next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.mode,
+      serviceEnabled: input.enabled, revision: input.expectedRevision + 1 };
+    if (input.mode === 'tenant_managed') {
+      const parsed = settingsSchema.safeParse({ ...(previous?.settings ?? {}), enabled: input.enabled,
+        protocol: input.protocol, baseUrl: input.baseUrl, model: input.model,
+        secretChange: input.secretChange, expectedRevision: input.expectedRevision });
+      if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+      const prepared = this.prepareTenantSettings(context.tenantId, previous, parsed.data);
+      next = { ...next, ...prepared, serviceEnabled: prepared.settings.enabled };
+    }
     await this.authorize(context, 'manage');
-    if (!await this.ports.repository.compareAndSwap(context.tenantId, expectedRevision, next, context)) throw new ModelGatewayError("CONFIG_INVALID");
-    return this.summary(next);
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.expectedRevision, next, context)) throw new AiModelConfigurationRevisionConflictError();
+    try {
+      await this.authorize(context, 'manage');
+      return this.publicSummary(context.tenantId, next);
+    } catch { throw new AiModelConfigurationResultUnknownError(); }
   }
 
   async profile(context: GatewayContext): Promise<GatewayProfile> {
@@ -141,7 +217,7 @@ export class TenantModelConfigService {
     await this.authorize(context, 'invoke');
     if (!record || tenantModelMode(record) !== "tenant_managed") throw new ModelGatewayError("PROVIDER_UNAVAILABLE");
     if (!record.settings) throw new ModelGatewayError("CONFIG_INVALID");
-    return { enabled: record.settings.enabled, provider: record.settings.protocol,
+    return { enabled: tenantModelServiceEnabled(record) && record.settings.enabled, provider: record.settings.protocol,
       baseUrl: normalizeTenantModelBaseUrl(record.settings.baseUrl), allowedModels: [record.settings.model],
       credentialRef: this.reference(record), timeoutMs: record.settings.timeoutMs,
       maxConcurrent: record.settings.maxConcurrent, maxOutputTokens: record.settings.maxOutputTokens };
@@ -151,7 +227,7 @@ export class TenantModelConfigService {
     context = await this.authorize(context, "invoke");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'invoke');
-    if (!record || tenantModelMode(record) !== "tenant_managed" || !record.settings?.enabled || this.reference(record) !== reference) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
+    if (!record || !tenantModelServiceEnabled(record) || tenantModelMode(record) !== "tenant_managed" || !record.settings?.enabled || this.reference(record) !== reference) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
     return this.decrypt(record);
   }
 
@@ -159,6 +235,7 @@ export class TenantModelConfigService {
     context = await this.authorize(context, action);
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, action);
+    if (action === 'invoke' && !tenantModelServiceEnabled(record)) throw new ModelGatewayError('DISABLED');
     return { mode: tenantModelMode(record), revision: record?.revision ?? 0 };
   }
 
@@ -187,7 +264,8 @@ export class TenantModelConfigService {
     if ((previous?.revision ?? 0) !== input.data.expectedRevision) throw new ModelGatewayError("CONFIG_INVALID");
     if (input.data.mode === "tenant_managed" && (!previous?.settings || !previous.credentialsEncrypted)) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
     if (input.data.mode === 'tenant_managed') this.decrypt(previous!);
-    const next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.data.mode, revision: input.data.expectedRevision + 1 };
+    const next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.data.mode,
+      serviceEnabled: tenantModelServiceEnabled(previous), revision: input.data.expectedRevision + 1 };
     await this.authorize(context, 'manage');
     if (!await this.ports.repository.compareAndSwap(context.tenantId, input.data.expectedRevision, next, context)) throw new ModelGatewayError("CONFIG_INVALID");
     return this.summary(next);

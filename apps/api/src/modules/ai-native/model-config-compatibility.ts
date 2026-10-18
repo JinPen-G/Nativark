@@ -9,6 +9,19 @@ export class AiModelConfigurationResultUnknownError extends Error {
   readonly nextAction = 'reconcile';
   constructor() { super('AI_RESULT_UNKNOWN: model configuration acknowledgement unknown'); this.name = 'AiModelConfigurationResultUnknownError'; }
 }
+export class AiModelConfigurationRevisionConflictError extends Error {
+  readonly code = 'AI_REVISION_CONFLICT';
+  readonly retryable = false;
+  constructor() { super('AI_REVISION_CONFLICT'); }
+}
+/** New tenants stay closed. Legacy BYOK retains its stored switch; an explicit
+ * service switch never borrows the inactive track's enabled field. */
+export function tenantModelServiceEnabled(record: TenantModelRecord | null): boolean {
+  if (record === null) return false;
+  tenantModelMode(record);
+  if (record.serviceEnabled !== undefined && typeof record.serviceEnabled !== 'boolean') throw new ModelGatewayError('CONFIG_INVALID');
+  return record.serviceEnabled ?? record.settings?.enabled === true;
+}
 /** Null means a new tenant; a malformed existing row NEVER means platform fallback. */
 export function tenantModelMode(record: TenantModelRecord | null): "platform_managed" | "tenant_managed" {
   if (record === null) return "platform_managed";

@@ -8,6 +8,7 @@ const tenantIdSchema = z.string().min(1).max(191).regex(/^[\w.:-]+$/u);
 const recordSchema = z.object({
   tenantId: tenantIdSchema, revision: z.number().int().min(1).max(4294967295),
   mode: z.enum(['platform_managed', 'tenant_managed']).optional(),
+  serviceEnabled: z.boolean().optional(),
   settings: tenantModelSettingsSchema.omit({ apiKey: true, expectedRevision: true, secretChange: true }).optional(),
   credentialsEncrypted: z.string().max(65535).regex(/^(?:|v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/u).optional()
 }).strict();
@@ -17,7 +18,7 @@ export function checkedTenantModelRecord(value: unknown): TenantModelRecord {
   tenantModelMode(parsed.data);
   return parsed.data;
 }
-const select = { tenantId: true, mode: true, revision: true, settings: true, credentialsEncrypted: true } satisfies Prisma.AiTenantModelConfigurationSelect;
+const select = { tenantId: true, mode: true, revision: true, serviceEnabled: true, settings: true, credentialsEncrypted: true } satisfies Prisma.AiTenantModelConfigurationSelect;
 type TenantModelRepository = TenantModelConfigPorts['repository'];
 
 /** Server-only storage port, not an authorization boundary. Its caller must use
@@ -53,6 +54,7 @@ export class PrismaTenantModelConfigRepository implements TenantModelRepository 
     if (!row) { await this.assertNoUnconvertedLegacy(tenantId); return null; }
     if (row.tenantId !== tenantId) throw new ModelGatewayError('FORBIDDEN');
     return checkedTenantModelRecord({ tenantId: row.tenantId, revision: row.revision, mode: row.mode,
+      ...(row.serviceEnabled != null ? { serviceEnabled: row.serviceEnabled } : {}),
       ...(row.settings !== null ? { settings: row.settings } : {}),
       ...(row.credentialsEncrypted !== null ? { credentialsEncrypted: row.credentialsEncrypted } : {}) });
   }
@@ -62,6 +64,7 @@ export class PrismaTenantModelConfigRepository implements TenantModelRepository 
       || next.revision !== expectedRevision + 1 || next.tenantId !== tenantId) throw new ModelGatewayError('CONFIG_INVALID');
     // Validation projects a detached snapshot before any asynchronous operation.
     const data = { mode: tenantModelMode(next), revision: next.revision,
+      serviceEnabled: next.serviceEnabled ?? null,
       settings: next.settings ? { ...next.settings } : Prisma.DbNull,
       credentialsEncrypted: next.credentialsEncrypted ?? null };
     if (expectedRevision === 0) {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
 import { checkedTenantModelRecord, PrismaTenantModelConfigRepository } from './tenant-model-config.repository';
-import { tenantModelMode, AiModelConfigurationResultUnknownError } from './model-config-compatibility';
+import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
@@ -71,7 +71,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
         const where = { scopeId: scope.id, scopeKind: 'TENANT' as const, role: 'DEFAULT' as const };
         const profile = await tx.aiProviderProfile.findFirst({ where });
         if (profile && (profile.serviceMode !== 'tenant_managed' || profile.configRevision !== expectedRevision)) throw new ModelGatewayError('CONFIG_INVALID');
-        const enabled = mode === 'tenant_managed' && next.settings?.enabled === true && Boolean(next.credentialsEncrypted);
+        const enabled = mode === 'tenant_managed' && tenantModelServiceEnabled(next) && next.settings?.enabled === true && Boolean(next.credentialsEncrypted);
         const data = { configRevision: next.revision, credentialRef: tenantModelCredentialReference(tenantId, next.revision),
           enabled, disabledAt: enabled ? null : new Date(),
           ...(capabilities === undefined ? {} : { allowedCapabilities: [...capabilities] }),

@@ -107,6 +107,8 @@ import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/origin
 import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/original-task-accounting-http.module";
 import { AiBudgetManagementController } from "./modules/ai-native/budget/budget-management.module";
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
+import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
+import { AI_NATIVE_MODEL_SETTINGS_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
@@ -125,6 +127,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AiOriginalOrderReadController,
     AiOriginalTaskAccountingController,
     AiBudgetManagementController,
+    AiModelSettingsController,
     AiScenePlanPolicyController,
     StaffInspectionAssistController,
     WebsiteClientEntryController,
@@ -171,6 +174,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
     AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
+    AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
