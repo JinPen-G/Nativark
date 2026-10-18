@@ -145,7 +145,11 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   }
   async recordUsage(value: GatewayAccountingCall, reservationId: string, input: ModelUsage) {
     const call = checkedAccountingCall(value), usage = usageSchema.parse(structuredClone(input));
-    await this.bindings.resolveForReservation(call.context, reservationId);
+    // This server-only receipt write records an already dispatched effect,
+    // even if its caller/configuration was revoked while awaiting the provider.
+    // The original secret dispatch token and every persisted association below
+    // must match. Reading/settling/reconciling still require CURRENT authority;
+    // no transport text or credentials are retained by this write.
     return this.db.$transaction(async tx => {
       const rows = await this.rows(tx, reservationId); this.matchCall(rows, call);
       if (rows.receipt.state !== 'dispatched') throw new BudgetError('PENDING_RECONCILIATION');

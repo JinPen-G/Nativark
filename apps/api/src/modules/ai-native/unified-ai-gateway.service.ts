@@ -6,7 +6,7 @@ import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
-import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -103,8 +103,27 @@ export class UnifiedAiGatewayService {
 
   private assertBudget() {
     const budget = this.ports.budget;
-    if ([budget?.reserve, budget?.dispatch, budget?.settle, budget?.abandon]
+    if ([budget?.reserve, budget?.dispatch, budget?.recordUsage, budget?.settle, budget?.abandon]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
+  private usageRecorder(value: GatewayAccountingCall, reservationId: string) {
+    const call = structuredClone(value);
+    let fingerprint: string | undefined, pending: Promise<void> | undefined;
+    return (valueUsage: ModelUsage): Promise<void> => {
+      const parsed = textResultSchema.shape.usage.unwrap().safeParse(valueUsage);
+      if (!parsed.success) return Promise.reject(new ModelGatewayError('INVALID_RESPONSE'));
+      const usage = parsed.data, hash = requestFingerprint(usage);
+      if (pending) return hash === fingerprint ? pending : Promise.reject(new ModelGatewayError('INVALID_RESPONSE'));
+      fingerprint = hash;
+      // Receipt persistence has its own bounded accounting wait, independent
+      // of caller cancellation or revoked text delivery. A lost write response
+      // stays unknown: reuse this promise, never automatically write it again.
+      const receiptDeadline = new GatewayDeadline(5000);
+      pending = receiptDeadline.wait(() => this.ports.budget.recordUsage(structuredClone(call), reservationId, usage))
+        .finally(() => receiptDeadline.close());
+      return pending;
+    };
   }
 
   private input(request: ModelRequest): ModelRequest {
@@ -193,7 +212,10 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       dispatched = true;
-      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
+      const recordUsage = this.usageRecorder(call, usage.id);
+      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)
+        .then(async result => { if (result.usage) await recordUsage(result.usage); return result; })));
+      await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       const result = intentBinding ? this.textResult(rawResult,
         intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true,
         intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true) : rawResult;
@@ -283,10 +305,14 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
+      const recordUsage = this.usageRecorder(call, usage.id);
       let result: GatewayInvocationResult | undefined;
-      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)[Symbol.asyncIterator]();
+      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)[Symbol.asyncIterator]();
       while (true) {
-        const item = await life.wait(() => iterator!.next());
+        const item = await life.wait(() => iterator!.next().then(async item => {
+          if (!item.done && !result && item.value?.kind === 'result' && item.value.result?.usage) await recordUsage(item.value.result.usage);
+          return item;
+        }));
         if (item.done) { sourceDone = true; break; }
         if (++eventCount > 4094) throw new ModelGatewayError('INVALID_RESPONSE');
         const event = item.value;

@@ -95,6 +95,11 @@ export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRe
 });
 export type ModelProtocolRequest = z.infer<typeof modelProtocolRequestSchema>;
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
+/** Trusted in-process protocol callback, excluded from serialized requests.
+ * Counters survive rejected text; this does not authorize text or settlement. */
+export type ModelProtocolInvocation = Readonly<ModelProtocolRequest> & {
+  signal: AbortSignal; recordUsage?: (usage: ModelUsage) => Promise<void>;
+};
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
 export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
 export interface ProtocolToolCall { id: string; type: 'function'; function: { name: string; arguments: string }; }
@@ -109,9 +114,9 @@ export interface ModelAdapter {
   readonly provider: string;
   readonly structuredSchemaHash?: string;
   readonly features: readonly ModelFeature[];
-  generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  generate(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
-  stream?(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  stream?(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
 }
 export interface GatewayProfile {

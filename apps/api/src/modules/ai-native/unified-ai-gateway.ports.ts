@@ -9,9 +9,12 @@ import type { GatewayMediaAttachmentResolver } from './gateway-intent';
 
 export interface GatewayInvocationResult { text: string; usage?: ModelUsage; usageState?: 'reported' | 'reconciliation_required'; [key: string]: unknown; }
 export type GatewayStreamEvent = { kind: 'text_delta'; delta: string } | { kind: 'result'; result: GatewayInvocationResult };
+/** Bound by the Gateway to one admitted call. Never supplied by an HTTP caller
+ * or carried in provider messages; only validated terminal counters enter it. */
+export type GatewayUsageRecorder = (usage: ModelUsage) => Promise<void>;
 export interface UnifiedGatewayTransport {
-  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal): Promise<GatewayInvocationResult>;
-  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal): AsyncIterable<GatewayStreamEvent>;
+  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder): Promise<GatewayInvocationResult>;
+  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder): AsyncIterable<GatewayStreamEvent>;
 }
 export interface GatewayInvocationObservation {
   call: import('./gateway-accounting.ports').GatewayAccountingCall;

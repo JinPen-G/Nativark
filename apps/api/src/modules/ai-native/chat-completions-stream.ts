@@ -22,6 +22,8 @@ export class ChatCompletionsStream {
   private usage: AdapterResult["usage"];
   private readonly calls = new Map<number, { id?: string; type?: 'function'; name: string; arguments: string }>();
   private readonly callIds = new Set<string>();
+  /** Only validated terminal protocol counters, never interim estimates or text. */
+  accountingUsage(): AdapterResult['usage'] { return this.failed || !this.usage ? undefined : { ...this.usage }; }
   constructor(private readonly credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy) {
     if (!credential || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1_048_576) throw new ModelGatewayError("CONFIG_INVALID");
   }

@@ -48,6 +48,10 @@ export class PersistentGatewayBudget implements UnifiedGatewayBudget {
       if (record.id !== reservationId || record.status !== 'settled') throw new BudgetError('PENDING_RECONCILIATION');
     });
   }
+  async recordUsage(value: GatewayAccountingCall, reservationId: string, valueUsage: ModelUsage) {
+    const call = checkedAccountingCall(value), usage = structuredClone(valueUsage);
+    await this.run(async () => { await this.facts.recordUsage(call, reservationId, usage); });
+  }
   async abandon(value: GatewayAccountingCall, reservationId: string, reason: string) {
     const call = checkedAccountingCall(value);
     await this.run(async () => {

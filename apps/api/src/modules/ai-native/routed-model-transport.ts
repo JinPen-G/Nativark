@@ -3,7 +3,7 @@ import { capabilityProfileFingerprint } from './capability-verification';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
-import type { UnifiedGatewayTransport } from './unified-ai-gateway.ports';
+import type { GatewayUsageRecorder, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import type { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
@@ -103,20 +103,22 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   private rejectSecret(value: unknown, credential: string) {
     if (JSON.stringify(value)?.includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
-  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal) {
+  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder) {
     try {
       const prepared = await this.prepare(context, request, route, signal, false);
-      const result = await prepared.adapter.generate({ ...structuredClone(prepared.request), signal }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl });
+      const result = await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl });
+      if (result.usage) await recordUsage?.(structuredClone(result.usage));
       this.cancelled(signal); this.rejectSecret(result, prepared.connection.credential);
       await prepared.recheck();
       return { ...structuredClone(result) };
     } catch (error) { throw this.safeError(error); }
   }
-  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal) {
+  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder) {
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;
-      for await (const event of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
+      for await (const event of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
+        if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
         this.cancelled(signal);
         if (terminal) throw new ModelGatewayError('INVALID_RESPONSE');
         this.rejectSecret(event, prepared.connection.credential);

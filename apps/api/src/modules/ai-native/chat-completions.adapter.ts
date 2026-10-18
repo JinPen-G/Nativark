@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
-import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest } from "./model-gateway.ports";
+import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest, type ModelProtocolInvocation } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
 import { ChatCompletionsStream, chatCompletionsUsageSchema } from "./chat-completions-stream";
 import Ajv, { type ValidateFunction } from 'ajv';
@@ -125,7 +125,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     this.policy = new ChatProtocolPolicy(policy);
   }
 
-  private request(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }) {
+  private request(input: ModelProtocolInvocation) {
     if (!input || !input.signal || typeof input.signal.aborted !== 'boolean' || typeof input.signal.addEventListener !== 'function' || typeof input.signal.removeEventListener !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     // Project only server protocol fields. Later caller mutations cannot replace
     // messages or the cancellation signal; forged top-level tool definitions are ignored.
@@ -137,7 +137,8 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (parsed.data.features?.some(feature => (feature === 'image' || feature === 'audio') && !this.mediaInput.includes(feature))) {
       throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     }
-    return { ...parsed.data, signal: input.signal };
+    if (input.recordUsage !== undefined && typeof input.recordUsage !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    return { ...parsed.data, signal: input.signal, recordUsage: input.recordUsage };
   }
   private messages(input: ModelProtocolRequest) {
     return input.messages.map(message => ({ role: message.role, content: typeof message.content === 'string' ? message.content
@@ -153,7 +154,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     return encoded;
   }
 
-  async *stream(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  async *stream(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent> {
     if (!this.transport.postStream) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
     input = this.request(input);
@@ -167,15 +168,18 @@ export class ChatCompletionsAdapter implements ModelAdapter {
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
       body: this.body({ model: input.model, messages: this.messages(input), stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" })) {
-      if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
       if (event.kind === "headers") {
         if (headers) throw new ModelGatewayError("INVALID_RESPONSE"); headers = true;
         if (event.status === 401 || event.status === 403) throw new ModelAdapterError("AUTHENTICATION_FAILED");
         if (event.status === 429) throw new ModelAdapterError("RATE_LIMITED");
         if (event.status !== 200) throw new ModelAdapterError("PROVIDER_FAILED");
+        if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
       } else {
         if (!headers) throw new ModelGatewayError("INVALID_RESPONSE");
-        for (const delta of decoder.push(event.bytes)) {
+        const deltas = decoder.push(event.bytes), usage = decoder.accountingUsage();
+        if (usage) await input.recordUsage?.(usage);
+        if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
+        for (const delta of deltas) {
           if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
           yield { kind: "text_delta", delta };
         }
@@ -186,7 +190,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     yield { kind: "result", result: decoder.finish() };
   }
 
-  async generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  async generate(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
     input = this.request(input);
     if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
@@ -199,9 +203,6 @@ export class ChatCompletionsAdapter implements ModelAdapter {
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
       body: this.body({ model: input.model, messages: this.messages(input), stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" });
-    // An injected transport may complete after cancellation. Never convert that late
-    // response into a protocol success; outer Gateway accounting remains responsible.
-    if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     if (result.status === 401 || result.status === 403) throw new ModelAdapterError("AUTHENTICATION_FAILED");
     if (result.status === 429) throw new ModelAdapterError("RATE_LIMITED");
     if (result.status !== 200) throw new ModelAdapterError("PROVIDER_FAILED");
@@ -209,6 +210,11 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     let parsed;
     try { parsed = responseSchema.safeParse(JSON.parse(result.body)); } catch { throw new ModelGatewayError("INVALID_RESPONSE"); }
     if (!parsed.success) throw new ModelGatewayError("INVALID_RESPONSE");
+    // Persist only protocol-validated original counts before cancellation or
+    // rejected text/tool/structured output. Never serialize this callback to HTTP.
+    if (parsed.data.usage) await input.recordUsage?.({ inputTokens: parsed.data.usage.prompt_tokens,
+      outputTokens: parsed.data.usage.completion_tokens });
+    if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     const choice = parsed.data.choices[0];
     // Partial/truncated, refused or tool responses must not be presented as a complete text answer.
     const text = choice.message.content ?? '', calls = choice.message.tool_calls ?? [];
