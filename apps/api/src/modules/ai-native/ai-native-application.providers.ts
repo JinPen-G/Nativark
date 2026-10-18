@@ -159,10 +159,19 @@ export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION');
 export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
   provide: AI_CATEGORY_DRAFT_REQUESTS,
-  inject: [ApiAuthGuard, CategoryGovernanceController, { token: AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, optional: true }],
-  useFactory: (guard: ApiAuthGuard, controller: CategoryGovernanceController, value?: unknown) => {
+  inject: [ApiAuthGuard, ModuleRef, { token: AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, optional: true }],
+  useFactory: (guard: ApiAuthGuard, moduleRef: ModuleRef, value?: unknown) => {
     const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    // Controllers are not injectable providers. Resolve the already registered
+    // original instance lazily, after Nest has constructed its controller map.
+    const controller = {
+      detail: (...args: Parameters<CategoryGovernanceController['detail']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).detail(...args),
+      create: (...args: Parameters<CategoryGovernanceController['create']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).create(...args),
+      patch: (...args: Parameters<CategoryGovernanceController['patch']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).patch(...args),
+      validate: (...args: Parameters<CategoryGovernanceController['validate']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).validate(...args),
+      preview: (...args: Parameters<CategoryGovernanceController['preview']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).preview(...args)
+    };
     return composeCategoryDraftRequests({ guard, controller }, parsed.data);
   }
 };
@@ -209,12 +218,13 @@ const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'dr
   'submission-review', 'submission-prepare', 'submission-submit'] as const;
 export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_REQUESTS,
-  inject: [PrismaService, ApiAuthGuard, RentalCoreService, RentalCoreController,
+  inject: [PrismaService, ApiAuthGuard, RentalCoreService, ModuleRef,
     { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, controller: RentalCoreController, value?: unknown) => {
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, moduleRef: ModuleRef, value?: unknown) => {
     readStaffManualConfiguration(value);
     return new StaffInspectionRequestFactory({ db, guard, core,
-      originalInspection: { controller, receipts: new RentalIdempotencyRepository(db) } });
+      originalInspection: { controller: { createInspection: (...args: Parameters<RentalCoreController['createInspection']>) =>
+        moduleRef.get(RentalCoreController, { strict: false }).createInspection(...args) }, receipts: new RentalIdempotencyRepository(db) } });
   }
 }, {
   provide: AI_STAFF_INSPECTION_ENABLED, useFactory: () => true
