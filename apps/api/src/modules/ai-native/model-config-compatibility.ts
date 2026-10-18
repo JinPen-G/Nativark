@@ -1,5 +1,14 @@
 import { ModelGatewayError } from "./model-gateway.ports";
 import type { TenantModelRecord } from "./tenant-model-config.service";
+/** A transaction reached its commit boundary but its acknowledgement/current
+ * delivery authority is unknown. Never retry with another revision or assume
+ * rollback. Reading current configuration is observation, not a write receipt. */
+export class AiModelConfigurationResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN';
+  readonly retryable = false;
+  readonly nextAction = 'reconcile';
+  constructor() { super('AI_RESULT_UNKNOWN: model configuration acknowledgement unknown'); this.name = 'AiModelConfigurationResultUnknownError'; }
+}
 /** Null means a new tenant; a malformed existing row NEVER means platform fallback. */
 export function tenantModelMode(record: TenantModelRecord | null): "platform_managed" | "tenant_managed" {
   if (record === null) return "platform_managed";

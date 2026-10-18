@@ -10,6 +10,8 @@ import { capabilityNameSchema, capabilityProfileFingerprint } from './capability
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { isAiStepExecutionContext } from './task-contract-validation';
+import { AiModelConfigurationResultUnknownError } from './model-config-compatibility';
+import { parseAiProviderProfileRecord } from './provider-profile.repository';
 
 const id = z.string().min(1).max(36).regex(/^[\w.:-]+$/u);
 const revision = z.number().int().min(1).max(4294967295);
@@ -81,6 +83,41 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     return { scopeId: resolved.configurationScope.id, binding: requestFingerprint(identity) };
   }
 
+  /** Current manager-only observation, including a disabled profile. This
+   * resolves an ambiguous save's current revision without decrypting/exporting
+   * its key, creating a new profile, probing a provider or proving who saved it. */
+  async read(profileId: string) {
+    if (!id.safeParse(profileId).success) throw new ModelGatewayError('CONFIG_INVALID');
+    const before = await this.management(profileId);
+    const read = async () => {
+      const row = await this.db.aiProviderProfile.findFirst({ where: { id: profileId, scopeId: before.scopeId,
+        scopeKind: 'PLATFORM', serviceMode: 'platform_managed' }, include: { platformConnection: { select } } });
+      if (!row) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      let profile: AiProviderProfileRecord;
+      try { profile = parseAiProviderProfileRecord(row); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
+      if (profile.id !== profileId || profile.scopeId !== before.scopeId || profile.scopeKind !== 'PLATFORM'
+        || profile.serviceMode !== 'platform_managed') throw new ModelGatewayError('FORBIDDEN');
+      const connection = row.platformConnection === null ? null : connectionSchema.safeParse(row.platformConnection);
+      if (connection !== null && (!connection.success || connection.data.profileId !== profile.id
+        || connection.data.configRevision !== profile.configRevision
+        || profile.credentialRef !== this.reference(profile.id, profile.configRevision))) throw new ModelGatewayError('CONFIG_INVALID');
+      const value = connection?.success ? connection.data : null;
+      if (value) normalizeTenantModelBaseUrl(value.baseUrl);
+      return { profile, connection: value };
+    };
+    const first = await read(), latest = await read();
+    const current = await this.management(profileId);
+    if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+    if (requestFingerprint(first) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
+    return { profileId, revision: latest.profile.configRevision, enabled: latest.profile.enabled && latest.profile.disabledAt === null,
+      mode: 'platform_managed' as const, protocol: latest.profile.protocol, model: latest.profile.model,
+      allowedCapabilities: [...latest.profile.allowedCapabilities],
+      ...(latest.connection ? { baseUrl: latest.connection.baseUrl, maxOutputTokens: latest.connection.maxOutputTokens } : {}),
+      credentialConfigured: Boolean(latest.connection?.credentialsEncrypted),
+      verification: 'not_assessed_by_configuration_read' as const,
+      observation: 'current_configuration_not_write_receipt' as const };
+  }
+
   /** Updates an existing PLATFORM Profile, never creates canonical scope IDs.
    * The Profile CAS is the transaction's write lock; losing writers cannot
    * replace its vault row. A failed/uncertain commit is never retried here.
@@ -90,43 +127,53 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     const input = parsed.data, before = await this.management(input.profileId);
     const baseUrl = normalizeTenantModelBaseUrl(input.baseUrl);
-    return this.db.$transaction(async tx => {
-      const profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
-        scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision } });
-      if (!profile) throw new ModelGatewayError('CONFIG_INVALID');
-      const old = await tx.aiPlatformModelConnection.findUnique({ where: { profileId: profile.id }, select });
-      let key: string | undefined;
-      if (input.secretChange.operation === 'replace') key = input.secretChange.apiKey;
-      if (input.secretChange.operation === 'retain') {
-        const row = connectionSchema.safeParse(old);
-        if (!row.success || row.data.baseUrl !== baseUrl || profile.protocol !== input.protocol) throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
-        key = this.decrypt(row.data, profile);
-      }
-      const nextRevision = input.expectedRevision + 1;
-      let encrypted = '';
-      if (key) {
-        try { encrypted = this.secrets.encrypt({ apiKey: key, profileId: profile.id, scopeId: before.scopeId,
-          revision: String(nextRevision), protocol: input.protocol, model: input.model, baseUrl }); }
-        catch { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); }
-      }
-      const current = await this.management(profile.id);
+    let callbackCompleted = false;
+    try {
+      const saved = await this.db.$transaction(async tx => {
+        const profile = await tx.aiProviderProfile.findFirst({ where: { id: input.profileId,
+          scopeId: before.scopeId, scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision } });
+        if (!profile) throw new ModelGatewayError('CONFIG_INVALID');
+        const old = await tx.aiPlatformModelConnection.findUnique({ where: { profileId: profile.id }, select });
+        let key: string | undefined;
+        if (input.secretChange.operation === 'replace') key = input.secretChange.apiKey;
+        if (input.secretChange.operation === 'retain') {
+          const row = connectionSchema.safeParse(old);
+          if (!row.success || row.data.baseUrl !== baseUrl || profile.protocol !== input.protocol) throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
+          key = this.decrypt(row.data, profile);
+        }
+        const nextRevision = input.expectedRevision + 1;
+        let encrypted = '';
+        if (key) {
+          try { encrypted = this.secrets.encrypt({ apiKey: key, profileId: profile.id, scopeId: before.scopeId,
+            revision: String(nextRevision), protocol: input.protocol, model: input.model, baseUrl }); }
+          catch { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); }
+        }
+        const current = await this.management(profile.id);
+        if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+        const enabled = Boolean(key) && input.enabled;
+        const updated = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, scopeId: before.scopeId,
+          scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision },
+          data: { configRevision: nextRevision, protocol: input.protocol, model: input.model,
+            ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: input.allowedCapabilities }),
+            credentialRef: this.reference(profile.id, nextRevision), enabled, disabledAt: enabled ? null : new Date() } });
+        if (updated.count !== 1) throw new ModelGatewayError('CONFIG_INVALID');
+        const data = { configRevision: nextRevision, baseUrl, maxOutputTokens: input.maxOutputTokens, credentialsEncrypted: encrypted };
+        if (old) await tx.aiPlatformModelConnection.update({ where: { profileId: profile.id }, data });
+        else await tx.aiPlatformModelConnection.create({ data: { profileId: profile.id, ...data } });
+        // A revocation observed while either write awaited must abort both writes.
+        // Sequential current checks do not constitute atomic dispatch authority.
+        const final = await this.management(profile.id);
+        if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+        callbackCompleted = true;
+        return { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      const current = await this.management(input.profileId);
       if (current.scopeId !== before.scopeId || current.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
-      const enabled = Boolean(key) && input.enabled;
-      const updated = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, scopeId: before.scopeId,
-        scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision },
-        data: { configRevision: nextRevision, protocol: input.protocol, model: input.model,
-          ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: input.allowedCapabilities }),
-          credentialRef: this.reference(profile.id, nextRevision), enabled, disabledAt: enabled ? null : new Date() } });
-      if (updated.count !== 1) throw new ModelGatewayError('CONFIG_INVALID');
-      const data = { configRevision: nextRevision, baseUrl, maxOutputTokens: input.maxOutputTokens, credentialsEncrypted: encrypted };
-      if (old) await tx.aiPlatformModelConnection.update({ where: { profileId: profile.id }, data });
-      else await tx.aiPlatformModelConnection.create({ data: { profileId: profile.id, ...data } });
-      // A revocation observed while either write awaited must abort both writes.
-      // Sequential current checks do not constitute atomic dispatch authority.
-      const final = await this.management(profile.id);
-      if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
-      return { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
-    });
+      return saved;
+    } catch (error) {
+      if (callbackCompleted) throw new AiModelConfigurationResultUnknownError();
+      throw error;
+    }
   }
 
   async resolve(value: GatewayContext, selected: AiProviderProfileRecord) {

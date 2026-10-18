@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
 import { checkedTenantModelRecord, PrismaTenantModelConfigRepository } from './tenant-model-config.repository';
-import { tenantModelMode } from './model-config-compatibility';
+import { tenantModelMode, AiModelConfigurationResultUnknownError } from './model-config-compatibility';
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
 import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileCapability } from './provider-profile.ports';
@@ -56,8 +56,9 @@ export class PrismaTenantModelProfileRepository implements Repository {
       catch { throw new ModelGatewayError('FORBIDDEN'); }
     };
     await current();
+    let callbackCompleted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      const committed = await this.db.$transaction(async tx => {
         // Config CAS is the common write lock for all saves/mode changes. The
         // existing config-only adapter is reused ONLY inside this transaction.
         const records = new PrismaTenantModelConfigRepository(tx);
@@ -87,9 +88,13 @@ export class PrismaTenantModelProfileRepository implements Repository {
         // Revocation during any preceding await aborts this transaction. These
         // are sequential fresh authority checks, NOT atomic business admission.
         await current();
+        callbackCompleted = true;
         return true;
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      if (committed) await current();
+      return committed;
     } catch (error) {
+      if (callbackCompleted) throw new AiModelConfigurationResultUnknownError();
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ModelGatewayError('CONFIG_INVALID');
       throw error; // no automatic retry on commit uncertainty or deadlock
     }

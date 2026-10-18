@@ -144,7 +144,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
           return result;
         }
         let result!: T, failure: unknown, failed = false;
-        try { result = await read(context, request); }
+        try { result = kind === 'extension_preview' ? await read(context, request) : await read(context); }
         catch (error) { failure = error; failed = true; }
         // Recheck even failed reads: an optional-source downgrade must never
         // swallow a concurrent revocation. Only the business fault, not a

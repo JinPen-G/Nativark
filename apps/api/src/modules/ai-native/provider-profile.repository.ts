@@ -16,7 +16,7 @@ const profileRowSchema = z.object({
 const keyWhere = (scope: AiProfileScope, profileKey?: string) => ({
   scopeId: scope.id, scopeKind: scope.kind, ...(profileKey === undefined ? {} : { profileKey })
 });
-function record(value: AiProviderProfile): AiProviderProfileRecord {
+export function parseAiProviderProfileRecord(value: AiProviderProfile): AiProviderProfileRecord {
   const parsed = profileRowSchema.safeParse(value);
   if (!parsed.success) throw new Error('AI_PROFILE_INVALID_ROW');
   return parsed.data;
@@ -30,15 +30,15 @@ export class PrismaProviderProfileRepository implements ProviderProfileRepositor
   }
   async list(scope: AiProfileScope) {
     const rows = await this.delegate.findMany({ where: keyWhere(scope), orderBy: [{ role: 'asc' }, { profileKey: 'asc' }] });
-    return rows.map(record);
+    return rows.map(parseAiProviderProfileRecord);
   }
   async get(scope: AiProfileScope, profileKey: string) {
     const row = await this.delegate.findFirst({ where: keyWhere(scope, profileKey) });
-    return row === null ? null : record(row);
+    return row === null ? null : parseAiProviderProfileRecord(row);
   }
   async create(input: CreateAiProviderProfile) {
     const row = await this.delegate.create({ data: { scopeId: input.scope.id, scopeKind: input.scope.kind, profileKey: input.profileKey, role: input.role, serviceMode: input.serviceMode, protocol: input.protocol, provider: input.provider, model: input.model, credentialRef: input.credentialRef, allowedCapabilities: [...input.allowedCapabilities] }, });
-    return record(row);
+    return parseAiProviderProfileRecord(row);
   }
   async update(scope: AiProfileScope, profileKey: string, input: UpdateAiProviderProfile) {
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 || input.expectedRevision >= 4294967295) throw new Error('AI_PROFILE_INVALID_REVISION');
@@ -47,7 +47,7 @@ export class PrismaProviderProfileRepository implements ProviderProfileRepositor
     try {
       // Extended unique predicate performs CAS and returns this exact write in one
       // statement. A separate get could return a later writer's revision/config.
-      return record(await this.delegate.update({ where: {
+      return parseAiProviderProfileRecord(await this.delegate.update({ where: {
         scopeId_scopeKind_profileKey: { scopeId: scope.id, scopeKind: scope.kind, profileKey },
         configRevision: input.expectedRevision,
         // Config-owned profiles must use their encrypted config transaction,
