@@ -132,27 +132,39 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
   if (!parsed.success || 'credentials' in dependencies || 'originals' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const server = { ...dependencies }, { audience } = parsed.data;
   return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>,
-    lifetime?: { write: boolean; signal?: AbortSignal }): Promise<R> => {
+    lifetime?: { write: boolean; signal?: AbortSignal; preflightOnly?: true }): Promise<R> => {
     const header = bearerSchema.safeParse(request?.headers?.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
     let active = true;
+    const close = () => { active = false; };
+    lifetime?.signal?.addEventListener('abort', close, { once: true });
+    if (lifetime?.signal?.aborted) close();
     try {
       const operation = () => runWithRequestIdentity({}, async () => {
-        const app = await compose({ ...server, credentials: {
+        const assemble = () => Promise.resolve(compose({ ...server, credentials: {
           current: async () => {
             if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return { ...credential };
           }
-        } }, command);
+        } }, command));
+        // Original execution preflight is read-only. Bound identity/material
+        // resolution without imposing this five-second limit on a valid run.
+        // Abort revokes request-local credentials before any late consume.
+        const app = lifetime?.preflightOnly
+          ? await waitForTaskApplicationDependency(assemble, false, lifetime.signal) : await assemble();
         if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return consume(app, command);
       });
-      // Bound the entire request, including preflight identity/storage waits.
-      // Finally revokes these request-local credentials even if an abandoned
-      // dependency later resolves. A possible write remains original/unknown.
-      return lifetime ? await waitForTaskApplicationDependency(operation, lifetime.write, lifetime.signal) : await operation();
-    } finally { active = false; }
+      // Accounting bounds the entire request; execution bounds its preflight
+      // here and keeps the runner's own limits after that. An abandoned wait
+      // revokes these credentials, never proves an original write rolled back.
+      return lifetime && !lifetime.preflightOnly
+        ? await waitForTaskApplicationDependency(operation, lifetime.write, lifetime.signal) : await operation();
+    } finally {
+      active = false;
+      lifetime?.signal?.removeEventListener('abort', close);
+    }
   };
 }
 
@@ -1054,11 +1066,13 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskScene(command)),
       readNextSteps: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readNextSteps(command)),
       readPreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readPreparation(command)),
-      resumePrepared: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.resumePrepared(command, signal)),
+      resumePrepared: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+        (app, command) => app.resumePrepared(command, signal), { write: true, signal, preflightOnly: true }),
       readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command))
     } : {}),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.start(command, signal)),
+      call(request, value, async (app, command) => await app.start(command, signal),
+        { write: true, signal, preflightOnly: true }),
     readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readInput(command)),
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command)),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -1078,10 +1092,12 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.reconcile(command, signal)),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.recover(command, signal)),
+      call(request, value, async (app, command) => await app.recover(command, signal),
+        { write: true, signal, preflightOnly: true }),
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readExecution(command)),
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.takeover(command, signal)),
+      call(request, value, async (app, command) => await app.takeover(command, signal),
+        { write: true, signal, preflightOnly: true }),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.requestCancel(command))
   });
 }
