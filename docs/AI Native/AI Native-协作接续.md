@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-18。最近核心功能：标准应用注册原模型→订单事实→回答宿主，默认关闭；固定提交与证据见开发记录。开工以实际Git现场为准，不将SHA作为回退目标。
+> 更新时间：2026-10-18。最近核心功能：标准原订单执行宿主及人类计划/动作政策管理装配，执行默认关闭；固定提交与证据见开发记录。开工以实际Git现场为准，不将SHA作为回退目标。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时12份未提交文档成果；只更新本接续和开发记录，其余正式文档不夹带提交，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -30,6 +30,8 @@
 
 **可信计价的精确剩余：** `budget/prisma-gateway-pricing-records.ts`的`GatewayPricingEvidenceSource.readPrice`仍需正式费率/币种/有效期及来源修订，`readInputBound`需认证tokenizer或供应商计数收据，绑定原invocation/registrationHash/intentHash/configurationHash/priceHash。当前未找到其正式数据生产者，不以字符估算、当前价或合成种子替代，也不因此开放真实调用。
 
+`0b74345e`补齐同一服务器配置下的人类政策入口：标准`AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER`接原`AiScenePlanPolicyController`，仅管理order_explanation v1及ai.model.text/rental.order.explain；无执行配置仍不可用。原只读动作provider默认仍限三项读政策；明确服务器配置后可由当前同主体管理员逐项配置claim_run/claim_recovery_run/release_run/transition_task/takeover_run，不开放输入、建单或批准。沿原Auth/Guard、CAS、原政策审计事务及有限请求等待，不在创建任务时播种政策，也不创建财务占用。OpenAPI补原两条plan-policies路径；响应仍GenericObject，未宣布完整协议冻结。下一步需完整原请求→政策→执行的标准正向组合、可信费率/计数源及其余场景消费者，不把管理入口就绪等同运行放行。
+
 原生协议→Routed→Unified→原财务收据现先保留已核验usage，再进行文本交付复验、观察和当前授权下的结算；中断/写应答不明不自动重写或重发。旧预算组合若缺`recordUsage`现先拒绝，宿主须使用同一`PersistentGatewayBudget`，不能再建账本。任务/原请求/客户材料按真实关联核查清理；无法核验的来源仍明确`source_task_binding_unavailable`。原生流只合并同一有界网络块已验证片段，每个实际交付块仍复核，不用定时权限缓存。以下既有接点继续复用：
 
 1. **持久计价与标准执行装配。** 原任务Gateway支持服务端选择recorded或calls，未配置不回退。`composePersistedTaskGateway`及原场景/员工持久模型宿主现可由服务器显式指定`gateway.nativeProtocol:'openai_chat_completions'`，复用原有界/出网校验传输和受控订单工具协议；与adapters互斥，二者皆缺仍拒绝，不因省字段启用。配置、Vault、当前身份、能力收据和单账门仍逐调用复核；本地协议缺功能时先拒绝，不能以远端能力证据顶替。本原生选项不附带任意structured output schema，须另供正式适配器。默认审计接原OperationLog，绑定当前主体/原task/run/step/call、预留和dispatch关联，只留必要ID/hash，不存正文、密钥或原dispatch token。客户`createGateway/createPersistedGateway`现显式选择calls或recorded（tokens/money），已接回`client-request.application`原消费者；旧`createCallGateway/createPersistedCallGateway`保持兼容，混用参数、缺计价和recorded搭配vision均拒绝。这些客户入口及`composeAuthorizedPersistedTextProbeWorkflow`复用该审计生产者，缺日志仓储仍拒绝。审计COMMIT应答不明不重写、不据此派发，不代表标准应用执行放行。计价历史及发布收据仍可独立于生产器读取；显式`registerHttpPricingHistory`默认关闭。下一步仍需真实费率/可信token上界生产者、已发布能力及标准完整执行依赖；原生协议支持或calls调用计数不等于真实供应商/成本已验真。
@@ -40,6 +42,8 @@
 上文历史接点中的“未注册生产执行”指未提供启用配置、未开放真实运行；标准默认关闭的执行注册现已补齐，不应再重复造宿主。原审查不能据此整体结项。继续核对未接可信生产依赖和标准消费者；未知结果、缺正式来源和未验环境分别保留。不启动服务、Worker、Cron、真实模型调用或辅助开发线。
 
 ## 验证与交接边界
+
+- 政策入口一次定向stdin冒烟1/1，覆盖实际Auth/Guard、真实政策仓储适配、保存/启停、原键读取、CAS、禁注入工具、撤权、默认关闭及不自动授批准；DB/配置业务端为离线替身/哨兵，不证明MySQL锁或实际模型。API660 roots/0诊断和diff退出0；无新测试文件。首轮复用旧lane-a原请求夹具在其报价目录初始化时FORBIDDEN，尚未验证该夹具的授权漂移；未修改Guard或放宽断言，改用既有受权运行器夹具完成本片计划管理正向/拒绝冒烟，不声称原请求创建至动作配置正向已验。命令与日志沿`output/core-policy-management-20261018/`；旧失败继续保留。
 
 - 原订单预检中止冒烟首轮1 fail，修复后1/1；受控时钟期限1/1、装配/撤权复验1/1，API660 roots/0诊断、diff退出0。均stdin，无新测试文件；日志`standard-order-abort-{red|green}`、`standard-order-preflight-deadline`、`standard-order-provider-after-preflight`和`standard-order-preflight-typecheck`沿既有output目录保留。Auth/DB及外部依赖为哨兵/受控Promise，不代替真实取消、真库或供应商验收。
 
