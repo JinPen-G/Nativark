@@ -77,6 +77,16 @@ export interface AiTaskBudgetUsagePageDraft {
     | AiTaskBudgetUsageRecordDraft
   )>;
   nextAfter: string | null; observedAt: string; coverage: 'page_not_total'; totals: 'not_computed';
+  /** Integer atoms from this visible page only, not task totals or a provider
+   * invoice. Money uses micro-units; currencies and units never coalesce. */
+  pageAmounts?: {
+    coverage: 'visible_page_only'; basis: 'persisted_budget_records_not_provider_invoice';
+    recordedCount: number; notRecordedCount: number;
+    groups: Array<({ unit: 'money'; currency: string; scale: 6 } | { unit: 'tokens' | 'calls'; currency: null; scale: 0 }) & {
+      reservedAtoms: string; pendingAtoms: string; settledAtoms: string;
+      releasedReservationAtoms: string; settledExcessAtoms: string;
+    }>;
+  };
   consistency: 'revalidated_reads_not_atomic_snapshot'; absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
   businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
 }

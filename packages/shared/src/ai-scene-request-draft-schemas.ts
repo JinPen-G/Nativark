@@ -85,8 +85,17 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
     object({ invocationId: text(36), callId: text(128), accounting: choice('not_recorded') }),
     recordedUsage] }, 20), nextAfter: { oneOf: [text(36), { type: 'null' }] },
     observedAt: leafTime, coverage: choice('page_not_total'), totals: choice('not_computed'),
+    pageAmounts: object({ coverage: choice('visible_page_only'), basis: choice('persisted_budget_records_not_provider_invoice'),
+      recordedCount: integer(0, 20), notRecordedCount: integer(0, 20), groups: list({ oneOf: [
+        ...(['money', 'tokens', 'calls'] as const).map(unit => object({ unit: choice(unit),
+          currency: unit === 'money' ? { type: 'string', pattern: '^[A-Z]{3}$' } : { type: 'null' },
+          scale: integer(unit === 'money' ? 6 : 0, unit === 'money' ? 6 : 0),
+          ...Object.fromEntries(['reservedAtoms', 'pendingAtoms', 'settledAtoms', 'releasedReservationAtoms', 'settledExcessAtoms']
+            .map(field => [field, { type: 'string', pattern: '^(0|[1-9][0-9]{0,31})$' }])) }))
+      ] }, 20) }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
-    businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') }),
+    businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') },
+    ['taskId', 'items', 'nextAfter', 'observedAt', 'coverage', 'totals', 'consistency', 'absenceSemantics', 'businessExecution', 'admission']),
   AiSceneModelInputRefreshDraft: object({ original: originalReference, requestId: id(), expectedRevision: integer(1, 4294967293) }),
   AiSceneModelResumeDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
   AiSceneModelQuoteConfirmDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,

@@ -293,18 +293,39 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     }
   }
 
-  private record(row: { id: string; scopeId: string; scopeKind: string; actorId: string; status: string; dispatchState: string; reservedTokens: bigint | null; reservedCalls: number | null; reservedMoney: Prisma.Decimal | null; moneyCurrency: string | null; actualTokens?: bigint | null; actualCalls?: number | null; actualMoney?: Prisma.Decimal | null; unknownReason: string | null; expiresAt: Date; updatedAt: Date; callId: string; idempotencyKey: string; sceneCode: string; configRevision: number }, association: BudgetRecord['association']): BudgetRecord {
+  private record(row: { id: string; scopeId: string; scopeKind: string; actorId: string; unitKind: string; status: string; dispatchState: string; reservedTokens: bigint | null; reservedCalls: number | null; reservedMoney: Prisma.Decimal | null; moneyCurrency: string | null; actualTokens?: bigint | null; actualCalls?: number | null; actualMoney?: Prisma.Decimal | null; unknownReason: string | null; expiresAt: Date; updatedAt: Date; callId: string; idempotencyKey: string; sceneCode: string; configRevision: number }, association: BudgetRecord['association']): BudgetRecord {
+    // Persisted facts must not become zero or a known state through projection.
+    // Validate the meter before Decimal.toFixed can round malformed evidence.
+    if (!['reserved', 'settled', 'released', 'pending_reconciliation'].includes(row.status)
+      || !['not_dispatched', 'dispatched', 'unknown', 'completed'].includes(row.dispatchState)
+      || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(row.scopeKind)
+      || !['money', 'tokens', 'calls'].includes(row.unitKind)
+      || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())
+      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw new BudgetError('UNAVAILABLE');
+    const reservedValues = [row.reservedTokens, row.reservedCalls, row.reservedMoney];
+    const actualValues = [row.actualTokens, row.actualCalls, row.actualMoney];
+    const meter = ['tokens', 'calls', 'money'].indexOf(row.unitKind);
+    if (reservedValues.some((value, index) => (value !== null && value !== undefined) !== (index === meter))
+      || actualValues.some((value, index) => (value !== null && value !== undefined) !== (row.status === 'settled' && index === meter))
+      || (row.unitKind === 'money' ? typeof row.moneyCurrency !== 'string' || !/^[A-Z]{3}$/.test(row.moneyCurrency)
+        : row.moneyCurrency !== null)) throw new BudgetError('UNAVAILABLE');
+    for (const value of [row.reservedMoney, row.actualMoney]) {
+      if (value !== null && value !== undefined && (!Prisma.Decimal.isDecimal(value)
+        || !value.isFinite() || value.isNegative() || value.decimalPlaces() > 6)) throw new BudgetError('UNAVAILABLE');
+    }
     const tokenValue = row.reservedTokens === null ? null : Number(row.reservedTokens);
     if (tokenValue !== null && !Number.isSafeInteger(tokenValue)) throw new BudgetError('UNAVAILABLE');
-    const reserved = tokenValue !== null ? { unit: 'tokens' as const, value: tokenValue } : row.reservedCalls !== null ? { unit: 'calls' as const, value: row.reservedCalls } : { unit: 'money' as const, amount: row.reservedMoney?.toFixed(6) ?? '0.000000', currency: row.moneyCurrency ?? '', scale: 6 as const };
+    const reserved = tokenValue !== null ? { unit: 'tokens' as const, value: tokenValue } : row.reservedCalls !== null ? { unit: 'calls' as const, value: row.reservedCalls } : { unit: 'money' as const, amount: row.reservedMoney!.toFixed(6), currency: row.moneyCurrency!, scale: 6 as const };
     const actualTokenValue = row.actualTokens === undefined || row.actualTokens === null ? null : Number(row.actualTokens);
     if (actualTokenValue !== null && !Number.isSafeInteger(actualTokenValue)) throw new BudgetError('UNAVAILABLE');
     const actual = actualTokenValue !== null ? { unit: 'tokens' as const, value: actualTokenValue } : row.actualCalls !== undefined && row.actualCalls !== null ? { unit: 'calls' as const, value: row.actualCalls } : row.actualMoney ? { unit: 'money' as const, amount: row.actualMoney.toFixed(6), currency: row.moneyCurrency ?? '', scale: 6 as const } : null;
-    return { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind as BudgetRecord['scopeKind'], actorId: row.actorId, revision: row.configRevision, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: row.status === 'settled' ? 'settled' : row.status === 'released' ? 'released' : row.status === 'pending_reconciliation' ? 'pending_reconciliation' : 'reserved', reserved, actual, dispatched: ['dispatched', 'unknown', 'completed'].includes(row.dispatchState), unknownReason: row.unknownReason, expiresAt: row.expiresAt };
+    try { quantityAtoms(reserved); if (actual !== null) quantityAtoms(actual); }
+    catch { throw new BudgetError('UNAVAILABLE'); }
+    return { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind as BudgetRecord['scopeKind'], actorId: row.actorId, revision: row.configRevision, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: row.status as BudgetRecord['status'], reserved, actual, dispatched: ['dispatched', 'unknown', 'completed'].includes(row.dispatchState), unknownReason: row.unknownReason, expiresAt: row.expiresAt };
   }
 
   private async readRecord(db: Pick<Tx, 'aiBudgetReservation'>, id: string, association: BudgetRecord['association']) {
-    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, configurationHash: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
+    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, unitKind: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, configurationHash: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
     if (!row || row.scopeKind !== association.scope.kind.toUpperCase() || !row.configurationHash
       || row.configurationHash !== requestFingerprint(association.config)
       || row.requestId !== association.requestId || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId

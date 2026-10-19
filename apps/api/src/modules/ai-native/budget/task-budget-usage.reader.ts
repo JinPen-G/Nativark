@@ -8,6 +8,8 @@ import { BudgetError, type BudgetRecord } from './budget.ports';
 import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
+import { isDeepStrictEqual } from 'node:util';
+import { quantityAtoms, sameUnit } from './budget-quantity';
 
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
@@ -89,11 +91,15 @@ export class TaskBudgetUsageReader {
         || row.actorId !== before.actorId)) throw new BudgetError('UNAVAILABLE');
     const items = [];
     const observations = [];
+    const absentCalls: string[] = [];
+    const amounts = new Map<string, { unit: 'money' | 'tokens' | 'calls'; currency: string | null; scale: 0 | 6;
+      reservedAtoms: bigint; pendingAtoms: bigint; settledAtoms: bigint; releasedReservationAtoms: bigint; settledExcessAtoms: bigint }>();
     for (const row of rows.slice(0, command.limit)) {
       const reservation = structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
         scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: row.callId } },
         select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true } }));
       if (!reservation) {
+        absentCalls.push(row.callId);
         items.push({ invocationId: row.id, callId: row.callId, accounting: 'not_recorded' as const });
         continue;
       }
@@ -109,20 +115,54 @@ export class TaskBudgetUsageReader {
       const record = structuredClone(await this.records.get(reservation.id, binding.association));
       if (!record || record.actorId !== before.actorId || record.scopeId !== before.scopeId
         || record.callId !== row.callId || (record.status === 'settled' && record.actual === null)) throw new BudgetError('UNAVAILABLE');
-      observations.push({ record, fingerprint: requestFingerprint(record) });
+      observations.push(structuredClone(record));
+      const held = quantityAtoms(record.reserved), actual = record.actual === null ? null : quantityAtoms(record.actual);
+      if (record.actual !== null && !sameUnit(record.reserved, record.actual)
+        || record.status !== 'settled' && actual !== null) throw new BudgetError('UNAVAILABLE');
+      const currency = record.reserved.unit === 'money' ? record.reserved.currency : null;
+      const key = JSON.stringify([record.reserved.unit, currency]);
+      const group = amounts.get(key) ?? { unit: record.reserved.unit, currency, scale: record.reserved.unit === 'money' ? 6 as const : 0 as const,
+        reservedAtoms: 0n, pendingAtoms: 0n, settledAtoms: 0n, releasedReservationAtoms: 0n, settledExcessAtoms: 0n };
+      if (record.status === 'settled') {
+        if (actual === null) throw new BudgetError('UNAVAILABLE');
+        group.settledAtoms += actual;
+        if (actual > held) group.settledExcessAtoms += actual - held;
+      } else if (record.status === 'pending_reconciliation') group.pendingAtoms += held;
+      else if (record.status === 'released') group.releasedReservationAtoms += held;
+      else group.reservedAtoms += held;
+      amounts.set(key, group);
       items.push(presentTaskBudgetUsageRecord(row, record));
     }
     // Fresh original record observations; neither expiry nor a changed model
     // config authorizes release, settlement, retry or a replacement call.
     for (const observation of observations) {
-      const current = await this.records.get(observation.record.id, observation.record.association);
-      if (!current || requestFingerprint(current) !== observation.fingerprint) throw new BudgetError('PENDING_RECONCILIATION');
+      const current = await this.records.get(observation.id, observation.association);
+      if (!current || !isDeepStrictEqual(current, observation)) throw new BudgetError('PENDING_RECONCILIATION');
+    }
+    // No record is not zero consumption. If an original reservation appeared
+    // during this read, refuse a stale "not recorded" page rather than hide it.
+    for (const originalCallId of absentCalls) {
+      if (await this.db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
+        scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: originalCallId } }, select: { id: true } }))
+        throw new BudgetError('PENDING_RECONCILIATION');
     }
     const after = await this.current(command.taskId), now = this.clock();
     if (before.scopeId !== after.scopeId || identity(before.context) !== identity(after.context)) throw new BudgetError('FORBIDDEN');
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new BudgetError('UNAVAILABLE');
     const page = { taskId: command.taskId, items, nextAfter: rows.length > command.limit ? rows[command.limit - 1].id : null,
       observedAt: now.toISOString(), coverage: 'page_not_total' as const, totals: 'not_computed' as const,
+      pageAmounts: { coverage: 'visible_page_only' as const, basis: 'persisted_budget_records_not_provider_invoice' as const,
+        recordedCount: observations.length, notRecordedCount: absentCalls.length,
+        groups: [...amounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, group]) => {
+          const values = { reservedAtoms: group.reservedAtoms.toString(), pendingAtoms: group.pendingAtoms.toString(),
+            settledAtoms: group.settledAtoms.toString(), releasedReservationAtoms: group.releasedReservationAtoms.toString(),
+            settledExcessAtoms: group.settledExcessAtoms.toString() };
+          if (group.unit === 'money') {
+            if (typeof group.currency !== 'string') throw new BudgetError('UNAVAILABLE');
+            return { ...values, unit: group.unit, currency: group.currency, scale: 6 as const };
+          }
+          return { ...values, unit: group.unit, currency: null, scale: 0 as const };
+        }) },
       consistency: 'revalidated_reads_not_atomic_snapshot' as const,
       absenceSemantics: 'no_record_is_not_proof_of_no_consumption' as const,
       businessExecution: 'not_inferred_from_usage' as const, admission: 'not_granted' as const };
