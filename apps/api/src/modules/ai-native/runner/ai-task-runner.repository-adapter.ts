@@ -36,14 +36,27 @@ export interface AiTaskRunnerRepositoryAdapters {
   confirmation?: AiTaskRunnerConfirmationCheckpointPort;
 }
 
-function committed(value: { runRevision: number; event: AiTaskEventDraft }, previous: AiTaskRunnerLease,
-  ref: AiTaskRunnerStepRef, expectedStatus?: AiStepStatusDraft): AiTaskRunnerStepCommit {
+const uncertainCommit = () => new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'persistent transition acknowledgement requires original receipt');
+function snapshotCommit<T>(value: T): T {
+  try { return structuredClone(value); } catch { throw uncertainCommit(); }
+}
+function validEvent<T extends AiTaskEventDraft['type']>(event: AiTaskEventDraft | undefined, taskId: string, type: T, taskRevision: number): event is Extract<AiTaskEventDraft, { type: T }> {
+  return !!event && event.contractVersion === AI_TASK_DRAFT_VERSION && event.type === type
+    && event.taskId === taskId && event.taskRevision === taskRevision
+    && !!event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+    && typeof event.cursor === 'string' && /^[1-9][0-9]{0,19}$/u.test(event.cursor) && BigInt(event.cursor) <= 18446744073709551615n
+    && typeof event.occurredAt === 'string' && Number.isFinite(Date.parse(event.occurredAt));
+}
+function committed(observed: { runRevision: number; event: AiTaskEventDraft }, previous: AiTaskRunnerLease,
+  ref: AiTaskRunnerStepRef, reason: AiStepTransitionCommand['reason'], expectedStatus?: AiStepStatusDraft): AiTaskRunnerStepCommit {
+  const value = snapshotCommit(observed);
   const event = value?.event;
-  if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'step.changed'
-    || event.taskId !== previous.taskId || event.data.runId !== previous.runId || ref.registered.runId !== previous.runId
-    || event.data.stepId !== ref.registered.stepId || event.taskRevision !== ref.registered.taskRevision + 1
+  if (!validEvent(event, previous.taskId, 'step.changed', ref.registered.taskRevision + 1)
+    || event.data.runId !== previous.runId || ref.registered.runId !== previous.runId
+    || event.data.stepId !== ref.registered.stepId || event.data.reason !== reason
     || event.data.stepRevision !== ref.registered.stepRevision + 1 || value.runRevision !== previous.revision + 1
-    || (expectedStatus && event.data.status !== expectedStatus)) throw new Error('AI_STORAGE_UNAVAILABLE');
+    || !AI_STEP_STATUSES_DRAFT.includes(event.data.status as AiStepStatusDraft)
+    || (expectedStatus && event.data.status !== expectedStatus)) throw uncertainCommit();
   return { lease: { ...previous, revision: value.runRevision }, taskRevision: value.event.taskRevision };
 }
 
@@ -58,9 +71,14 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
     pause?: 'input' | 'confirmation' | 'external') => {
     ref = structuredClone(ref); lease = structuredClone(lease);
     const command = structuredClone(commands.transition(kind, structuredClone(ref), structuredClone(lease), resultRef, errorCode, pause));
+    if (command.taskId !== lease.taskId || command.stepId !== ref.registered.stepId || ref.registered.runId !== lease.runId
+      || command.expectedTaskRevision !== ref.registered.taskRevision || command.expectedStepRevision !== ref.registered.stepRevision
+      || command.lease.runId !== lease.runId || command.lease.holderId !== lease.holderId
+      || command.lease.revision !== lease.revision || command.lease.fencingToken !== lease.fencingToken
+      || (resultRef !== null && command.evidenceId !== resultRef)) throw new AiTaskRunnerError('AI_INVALID_INPUT');
     const result = await adapters.transitions.transition(command);
     const status = kind === 'start' ? 'running' : kind === 'succeed' ? 'succeeded' : kind === 'fail' ? 'failed' : kind === 'unknown' ? 'unknown' : undefined;
-    return committed(result, lease, ref, status);
+    return committed(result, lease, ref, command.reason, status);
   };
   const steps: AiTaskRunnerStepPort = {
     async register(plan, lease, existingOnly = false) {
@@ -113,16 +131,15 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       const ref = structuredClone(step), held = structuredClone(lease);
       if (!resultRef || ref.plan.operation !== 'idempotent' || !['rental.order.commit', 'tenant.notifications.commit'].includes(ref.plan.toolCode)
         || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION || typeof adapters.confirmation?.pause !== 'function') throw new Error('AI_RESOURCE_UNAVAILABLE');
-      const value = structuredClone(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
+      const value = snapshotCommit(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
         expectedTaskRevision: ref.registered.taskRevision, expectedStepRevision: ref.registered.stepRevision,
         checkpointRef: resultRef, lease: structuredClone(held) }));
       const event = value?.event;
-      if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'task.transition'
-        || event.taskId !== held.taskId || event.taskRevision !== ref.registered.taskRevision + 1
+      if (!validEvent(event, held.taskId, 'task.transition', ref.registered.taskRevision + 1)
         || event.data.from !== 'running' || event.data.to !== 'waiting_confirmation' || event.data.reason !== 'confirmation_required'
         || value.runId !== held.runId || ref.registered.runId !== held.runId || value.runRevision !== held.revision + 1
         || value.stepId !== ref.registered.stepId || value.stepRevision !== ref.registered.stepRevision
-        || value.checkpointRef !== resultRef) throw new Error('AI_STORAGE_UNAVAILABLE');
+        || value.checkpointRef !== resultRef) throw uncertainCommit();
       return { lease: { ...held, revision: value.runRevision }, taskRevision: event.taskRevision,
         confirmation: { stepId: value.stepId, stepRevision: value.stepRevision, checkpointRef: value.checkpointRef } };
     },
@@ -134,15 +151,15 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
   return {
     confirmation: resume ? { resume: async value => {
       const input = structuredClone(value), held = input.lease;
-      const result = structuredClone(await resume(structuredClone(input))), event = result?.event;
-      if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'task.transition'
-        || input.taskId !== held.taskId || event.taskId !== input.taskId || event.taskRevision !== input.expectedTaskRevision + 1
+      const result = snapshotCommit(await resume(structuredClone(input))), event = result?.event;
+      if (!validEvent(event, input.taskId, 'task.transition', input.expectedTaskRevision + 1)
+        || input.taskId !== held.taskId
         || event.data.from !== 'waiting_confirmation' || event.data.to !== 'running' || event.data.reason !== 'resume'
         || result.runId !== held.runId || result.runRevision !== held.revision + 1 || result.stepId !== input.stepId
         || result.stepRevision !== input.expectedStepRevision || result.checkpointRef !== input.checkpointRef
         || !['approved', 'rejected'].includes(result.decision) || typeof result.decisionRef !== 'string' || !result.decisionRef
         || !Number.isSafeInteger(result.remainingActiveMs) || result.remainingActiveMs < 1 || result.remainingActiveMs > 86400000
-        || !Number.isSafeInteger(result.remainingOutputBytes) || result.remainingOutputBytes < 1 || result.remainingOutputBytes > 16777216) throw new Error('AI_STORAGE_UNAVAILABLE');
+        || !Number.isSafeInteger(result.remainingOutputBytes) || result.remainingOutputBytes < 1 || result.remainingOutputBytes > 16777216) throw uncertainCommit();
       return { lease: { ...held, revision: result.runRevision }, taskRevision: event.taskRevision,
         continuation: { stepId: result.stepId, stepRevision: result.stepRevision, checkpointRef: result.checkpointRef,
           decisionRef: result.decisionRef, decision: result.decision, remainingActiveMs: result.remainingActiveMs, remainingOutputBytes: result.remainingOutputBytes } };

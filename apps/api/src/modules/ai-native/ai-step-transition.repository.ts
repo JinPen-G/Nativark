@@ -116,7 +116,7 @@ export class AiStepTransitionRepository {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, initial = await this.resolve(input);
-    let callbackCompleted = false;
+    let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.access.where, select: taskSelect });
@@ -124,6 +124,7 @@ export class AiStepTransitionRepository {
         if (task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION || !["RUNNING", "WAITING_EXTERNAL", "CANCEL_REQUESTED"].includes(task.status)
           || (task.status === "CANCEL_REQUESTED") !== (task.cancelRequestedAt !== null)) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
+        writeAttempted = true;
         const reserved = await tx.aiTask.updateMany({
           where: { ...initial.access.where, scopeId: task.scopeId, revision: task.revision, eventCursor: task.eventCursor, status: task.status, cancelRequestedAt: task.cancelRequestedAt },
           data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
@@ -183,8 +184,11 @@ export class AiStepTransitionRepository {
         return { event, runRevision: lease.revision + 1 };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw error;
+      // Once the callback returned, an error-shaped acknowledgement cannot
+      // prove rollback, even if it resembles a known CAS/access refusal.
       if (callbackCompleted) throw new AiStepTransitionResultUnknownError();
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (writeAttempted) throw new AiStepTransitionResultUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }

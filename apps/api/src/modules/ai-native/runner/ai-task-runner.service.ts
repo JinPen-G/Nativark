@@ -489,7 +489,7 @@ export class AiTaskRunner {
           if (recovery || stepPlan.operation !== 'idempotent' || !result.resultRef) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
           const commit = structuredClone(await this.persistResult(ref, structuredClone(lease), result));
           if (commit?.confirmation?.checkpointRef !== result.resultRef || commit.confirmation.stepId !== ref.registered.stepId
-            || commit.confirmation.stepRevision !== ref.registered.stepRevision || commit.taskRevision !== taskRevision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+            || commit.confirmation.stepRevision !== ref.registered.stepRevision || commit.taskRevision !== taskRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation checkpoint acknowledgement requires original receipt');
           // The checkpoint already committed the task pause; the step and its original charges remain open.
           advance(commit);
           activeResourceTicket = undefined;
