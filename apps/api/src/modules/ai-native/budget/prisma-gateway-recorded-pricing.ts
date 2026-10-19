@@ -9,7 +9,7 @@ import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord,
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaGatewayPricingRecords, gatewayPricingInvocationSelect, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
-import { priceGatewayTokens } from './gateway-pricing-evidence';
+import { priceGatewayTokens, priceGatewayTokenBound } from './gateway-pricing-evidence';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { quantityAtoms, sameUnit } from './budget-quantity';
 
@@ -44,7 +44,7 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     if (b.registrationHash !== invocation.registrationHash || b.intentHash !== invocation.intentHash
       || b.configurationHash !== invocation.configurationHash || b.priceVersion !== invocation.priceVersion
       || b.maxOutputTokens !== invocation.maxOutputTokens) throw new BudgetError('FORBIDDEN');
-    return { invocation, proof, quantity: priceGatewayTokens(proof.price.evidence, b.maxInputTokens, b.maxOutputTokens) };
+    return { invocation, proof, quantity: priceGatewayTokenBound(proof.price.evidence, b.maxInputTokens, b.maxOutputTokens) };
   }
   private async recheck(current: Awaited<ReturnType<PrismaGatewayRecordedPricing['current']>>) {
     const latest = await this.current();
@@ -118,12 +118,6 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     const record = structuredClone(value), parsed = usageSchema.safeParse(structuredClone(usageValue)), current = await this.current();
     if (!parsed.success || !record.dispatched || record.actorId !== current.gateway.actorId || record.reserved.unit === 'calls') throw new BudgetError('UNAVAILABLE');
     if (record.scopeId !== current.scope.id || record.scopeKind !== 'WORKSPACE') throw new BudgetError('FORBIDDEN');
-    // Plain input/output money rates do not cover provider cache read/write
-    // tiers. Retain the original counters/receipt but require real pricing
-    // evidence before settling; never silently charge them at ordinary rates.
-    if (record.reserved.unit === 'money' && parsed.data.billingDetails
-      && (parsed.data.billingDetails.cachedInputTokens > 0 || parsed.data.billingDetails.cacheCreationInputTokens > 0))
-      throw new BudgetError('PENDING_RECONCILIATION');
     const binding = await this.bindings.resolveForReservation(current.gateway, record.id);
     if (hash(binding.association) !== hash(record.association) || record.callId !== binding.association.requestId
       || record.sceneCode !== binding.sceneCode) throw new BudgetError('FORBIDDEN');
@@ -136,7 +130,7 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     // This method is called with usage from the original persisted dispatch
     // receipt. Truthful excess must reach the existing settlement/debt logic;
     // never clip it or pretend missing usage merely because the bound failed.
-    const actual = priceGatewayTokens(proof.price.evidence, usage.inputTokens, usage.outputTokens);
+    const actual = priceGatewayTokens(proof.price.evidence, usage.inputTokens, usage.outputTokens, usage.billingDetails);
     const again = await this.evidence(current, record.callId);
     if (again.proof.hash !== proof.hash || again.proof.price.hash !== proof.price.hash) throw new BudgetError('PENDING_RECONCILIATION');
     await this.recheck(current);

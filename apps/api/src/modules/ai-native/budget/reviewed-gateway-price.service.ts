@@ -10,21 +10,16 @@ import type { AiScopeRepository } from '../ai-scope.repository';
 import type { BudgetAuthorizationSource } from './budget-dependency-adapters';
 import { BudgetError } from './budget.ports';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
-import { gatewayPriceEvidenceSchema } from './gateway-pricing-evidence';
+import { gatewayPriceEvidenceSchema, gatewayPriceBillingSchema } from './gateway-pricing-evidence';
 import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 
 type Db = GatewayPricingRecordDb & Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTenantModelConfiguration'>;
 const key = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
-const amount = z.string().regex(/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u);
 export const reviewedGatewayPriceInput = z.object({ sceneCode: key, operationKey: key, configId: key.max(36),
   expectedConfigRevision: z.number().int().min(1).max(4294967295), priceVersion: key.max(64),
   validFrom: z.string().datetime({ offset: true }), expiresAt: z.string().datetime({ offset: true }),
-  billing: z.discriminatedUnion('unit', [
-    z.object({ unit: z.literal('tokens'), metric: z.literal('input_plus_output'), scale: z.literal(0), rounding: z.literal('exact') }).strict(),
-    z.object({ unit: z.literal('money'), currency: z.string().regex(/^[A-Z]{3}$/u), scale: z.literal(6),
-      inputPerMillion: amount, outputPerMillion: amount, rounding: z.literal('ceil_total_micro_units') }).strict()
-  ]), confirmReviewedRate: z.literal(true) }).strict();
+  billing: gatewayPriceBillingSchema, confirmReviewedRate: z.literal(true) }).strict();
 export const reviewedGatewayPriceReadInput = z.object({ sceneCode: key, operationKey: key }).strict();
 const stable = ({ authorizedAt: _at, requestId: _request, ...context }: AiExecutionContext) => hash(context);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
@@ -94,7 +89,7 @@ export class ReviewedGatewayPriceService {
     const commandHash = hash({ command, scopeId: before.scope.id, actorId: before.principal.actorId });
     const evidence = gatewayPriceEvidenceSchema.safeParse({ kind: 'gateway-price-1', configuration, priceVersion: command.priceVersion,
       validFrom: command.validFrom, expiresAt: command.expiresAt, billing: command.billing,
-      usageClass: 'plain_text_input_output_tokens', additionalBillingDimensions: 'none',
+      usageClass: 'plain_text_input_output_tokens', additionalBillingDimensions: command.billing.unit === 'money' && command.billing.inputCache ? 'input_cache_tokens' : 'none',
       provenance: { reference: command.operationKey, revision: String(command.expectedConfigRevision), documentHash: commandHash } });
     if (!evidence.success || Date.parse(command.expiresAt) <= this.clock().getTime()) throw new BudgetError('INVALID');
     const payloadHash = hash(evidence.data), configurationHash = hash(configuration);

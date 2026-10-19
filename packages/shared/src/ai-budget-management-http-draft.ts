@@ -12,7 +12,9 @@ export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   adoptPlatformPrice: 'pricing/platform/adopt', readPlatformPriceAdoption: 'pricing/platform/receipt'
 });
 export type AiGatewayReviewedPriceBillingDraft = { unit: 'tokens'; metric: 'input_plus_output'; scale: 0; rounding: 'exact' }
-  | { unit: 'money'; currency: string; scale: 6; inputPerMillion: string; outputPerMillion: string; rounding: 'ceil_total_micro_units' };
+  | { unit: 'money'; currency: string; scale: 6; inputPerMillion: string; outputPerMillion: string; rounding: 'ceil_total_micro_units';
+    /** Explicit reviewed budget rates, never inferred supplier discounts. */
+    inputCache?: { readPerMillion: string; writePerMillion: string } };
 export type AiGatewayPriceReviewDraft = { sceneCode: string; operationKey: string; configId: string; expectedConfigRevision: number;
   priceVersion: string; validFrom: string; expiresAt: string; billing: AiGatewayReviewedPriceBillingDraft; confirmReviewedRate: true };
 export type AiGatewayPriceReviewReadDraft = { sceneCode: string; operationKey: string };
@@ -76,10 +78,12 @@ const pricingHash = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
 const priceSummary = { id: pricingHash, evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 },
   configurationHash: pricingHash, validFrom: time, expiresAt: time,
   executionPermission: { type: 'boolean', const: false }, configurationMeaning: choice('historical_reference_not_current_selection') };
+const reviewedAmount = { type: 'string', pattern: '^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$' };
 const reviewedBilling: AiLeafSchemaDraft = { oneOf: [obj({ unit: choice('tokens'), metric: choice('input_plus_output'),
   scale: int(0, 0), rounding: choice('exact') }), obj({ unit: choice('money'), currency: { ...text(3, 3), pattern: '^[A-Z]{3}$' },
-  scale: int(6, 6), inputPerMillion: { type: 'string', pattern: '^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$' },
-  outputPerMillion: { type: 'string', pattern: '^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$' }, rounding: choice('ceil_total_micro_units') })] };
+  scale: int(6, 6), inputPerMillion: reviewedAmount, outputPerMillion: reviewedAmount, rounding: choice('ceil_total_micro_units'),
+  inputCache: obj({ readPerMillion: reviewedAmount, writePerMillion: reviewedAmount }) },
+  ['unit', 'currency', 'scale', 'inputPerMillion', 'outputPerMillion', 'rounding'])] };
 export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiGatewayPriceReviewDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 }, configId: text(36),
     expectedConfigRevision: int(1, 4294967295), priceVersion: { ...pricingKey, maxLength: 64 }, validFrom: time, expiresAt: time,

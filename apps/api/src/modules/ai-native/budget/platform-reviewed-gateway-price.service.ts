@@ -73,7 +73,8 @@ export class PlatformReviewedGatewayPriceService {
     const reference = this.reference(before.actorId, command.operationKey), commandHash = hash({ command, actorId: before.actorId, scopeId: before.scope.id });
     const parsedPayload = platformReviewedPricePayloadSchema.safeParse({ kind: 'platform-reviewed-price-record-1',
       evidence: { kind: 'gateway-price-1', configuration, priceVersion: command.priceVersion, validFrom: command.validFrom,
-        expiresAt: command.expiresAt, billing: command.billing, usageClass: 'plain_text_input_output_tokens', additionalBillingDimensions: 'none',
+        expiresAt: command.expiresAt, billing: command.billing, usageClass: 'plain_text_input_output_tokens',
+        additionalBillingDimensions: command.billing.unit === 'money' && command.billing.inputCache ? 'input_cache_tokens' : 'none',
         provenance: { reference, revision: String(command.expectedConfigRevision), documentHash: commandHash } },
       review: { actorId: before.actorId, operationKey: command.operationKey, sceneCode: command.sceneCode, profileId: this.profileId,
         expectedConfigRevision: command.expectedConfigRevision, commandHash, authority: 'platform_reviewed_budget_rate_not_provider_invoice' } });
