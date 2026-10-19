@@ -7,7 +7,6 @@ import addFormats from 'ajv-formats';
 import { BudgetError } from './budget.ports';
 import { composeRequestBoundBudgetManagement, type BudgetManagementDependencies, type BudgetManagementRequest } from './budget-management.application';
 import { GatewayPricingRequestFactory, type GatewayPricingHttpRequest } from './gateway-pricing-request.composition';
-import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from '../scenes/request-abort';
 
 export const AI_BUDGET_MANAGEMENT = Symbol('AI_BUDGET_MANAGEMENT');
@@ -121,7 +120,7 @@ export class AiBudgetManagementController {
  * or model driver. The global Guard and factory both enforce current authority. */
 @Controller(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath)
 export class AiGatewayPricingHistoryController {
-  constructor(@Inject(AI_GATEWAY_PRICING_HISTORY) private readonly application: GatewayPricingRequestFactory) {}
+  constructor(@Inject(AI_GATEWAY_PRICING_HISTORY) private readonly application: Pick<GatewayPricingRequestFactory, 'call'>) {}
   private read<T>(request: GatewayPricingHttpRequest, body: unknown, action: 'readPrice' | 'readPublication' | 'readInputBound',
     inputSchema: string, outputSchema: string): Promise<T> {
     return respondBudgetManagement<T>(async () => {
@@ -129,7 +128,14 @@ export class AiGatewayPricingHistoryController {
       const validateOutput = ajv.getSchema<T>(`urn:rental:budget-management:${outputSchema}`);
       if (!validateInput || !validateInput(body)) throw new BudgetError('INVALID');
       const command = structuredClone(body);
-      const result = await waitForTaskApplicationDependency(() => this.application.call(request, action, command), false);
+      let result: unknown;
+      try {
+        result = await withRequestAbort(request,
+          signal => this.application.call(request, action, command, signal), { maxWaitMs: 15000 });
+      } catch (error) {
+        if (error instanceof AiRequestWaitError) throw new BudgetError('UNAVAILABLE');
+        throw error;
+      }
       if (!validateOutput || !validateOutput(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 65536)
         throw new BudgetError('UNAVAILABLE');
       return structuredClone(result as T); // Closed shared schema checked above.

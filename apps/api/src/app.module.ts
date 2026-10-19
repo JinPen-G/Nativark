@@ -105,7 +105,8 @@ import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOri
 import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER, AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER, AI_NATIVE_CAPABILITY_PROBE_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/original-order-read.controller";
 import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/original-task-accounting-http.module";
-import { AiBudgetManagementController } from "./modules/ai-native/budget/budget-management.module";
+import { AiBudgetManagementController, AiGatewayPricingHistoryController } from "./modules/ai-native/budget/budget-management.module";
+import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
@@ -151,6 +152,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AiOriginalOrderReadController,
     AiOriginalTaskAccountingController,
     AiBudgetManagementController,
+    AiGatewayPricingHistoryController,
     AiModelSettingsController,
     AiPlatformModelSettingsController,
     HumanMemoryManagementController,
@@ -217,6 +219,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
     AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
+    AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,

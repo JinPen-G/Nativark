@@ -43,7 +43,8 @@ import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
 import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-accounting-http.module';
-import { AI_BUDGET_MANAGEMENT } from './budget/budget-management.module';
+import { AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY } from './budget/budget-management.module';
+import { GatewayPricingRequestFactory } from './budget/gateway-pricing-request.composition';
 import { composeRequestBoundBudgetManagement } from './budget/budget-management.application';
 import { BudgetError } from './budget/budget.ports';
 import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
@@ -465,6 +466,28 @@ export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapab
       taskActionPolicies: probeOperations.map(operation => ({ operation, requiredPermissions: ['system:params:manage'] })) });
   }
 };
+/** Management has its own server gate. Opening it does not open any model,
+ * order workflow, capability probe, financial admission or task policy. An
+ * explicitly disabled gate wins over the legacy order-root configuration. */
+export const AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION = Symbol('AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION');
+const budgetManagementConfiguration = z.discriminatedUnion('enabled', [
+  z.object({ enabled: z.literal(false) }).strict(),
+  z.object({ enabled: z.literal(true), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
+    priceVersion: gatewayPricingSelectionSchema.shape.priceVersion }).strict()
+]);
+function readBudgetManagementConfiguration(value: unknown, legacy: unknown) {
+  if (value === undefined) {
+    const previous = readOrderExecutionConfiguration(legacy);
+    return previous.enabled ? { enabled: true as const, platformProfileId: previous.platformProfileId,
+      priceVersion: previous.pricing.priceVersion } : { enabled: false as const };
+  }
+  try {
+    const parsed = budgetManagementConfiguration.safeParse(structuredClone(value));
+    if (parsed.success) return parsed.data;
+  } catch { /* Invalid DI is not a fallback to a more permissive gate. */ }
+  throw new BudgetError('UNAVAILABLE');
+}
+
 /** Explicit current-manager budget configuration, never budget initialization
  * at application startup. Missing trusted profile/configuration stays closed;
  * models, credentials and whitelist changes are not accepted from tenant bodies.
@@ -472,10 +495,11 @@ export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapab
 export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundBudgetManagement>> = {
   provide: AI_BUDGET_MANAGEMENT,
   inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
-    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
-    secrets: SecretBox, serverValue?: unknown) => {
-    const configuration = readOrderExecutionConfiguration(serverValue);
+    secrets: SecretBox, serverValue?: unknown, managementValue?: unknown) => {
+    const configuration = readBudgetManagementConfiguration(managementValue, serverValue);
     if (!configuration.enabled) {
       const unavailable = async (): Promise<never> => { throw new BudgetError('UNAVAILABLE'); };
       return Object.freeze({ read: unavailable, change: unavailable, initialize: unavailable,
@@ -488,10 +512,21 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
     return composeRequestBoundBudgetManagement({
       // The existing settings-only root exposes no pricing/reserve method;
       // this version never substitutes a calls price for token/money usage.
-      tenant: { db, auth, guard, subscriptions, callPriceVersion: configuration.pricing.priceVersion,
+      tenant: { db, auth, guard, subscriptions, callPriceVersion: configuration.priceVersion,
         initialConfiguration: { db, secrets, platformProfileId: configuration.platformProfileId } },
       platform: { db, guard, profileId: configuration.platformProfileId }
     }, { enabled: true });
+  }
+};
+/** Immutable pricing observations remain usable after execution shutdown.
+ * Only current management permission and original scope/owner are consumed;
+ * this provider has no publication source, connection resolver or model driver. */
+export const AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER: FactoryProvider<Pick<GatewayPricingRequestFactory, 'call'>> = {
+  provide: AI_GATEWAY_PRICING_HISTORY,
+  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService) => {
+    const history = GatewayPricingRequestFactory.history({ db, auth, guard, subscriptions });
+    return Object.freeze({ call: history.call.bind(history) });
   }
 };
 const originalReadOperations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
