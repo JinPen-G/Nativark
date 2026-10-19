@@ -51,7 +51,7 @@ for (const [name, mutate] of [
     transitions: { transition: async input => { calls++; const result = await repository.transition(input); mutate(result); return result; } } });
   await assert.rejects(port.commit({ taskId: command.taskId, taskRevision: h.state.task.revision,
     lease: { taskId: command.taskId, ...command.lease, revision: h.state.run.revision, expiresAt: h.state.run.leaseExpiresAt.toISOString() },
-    outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } }), /AI_STORAGE_UNAVAILABLE/);
+    outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } }), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(calls, 1); assert.equal(h.state.task.status, 'SUCCEEDED');
 });
 
