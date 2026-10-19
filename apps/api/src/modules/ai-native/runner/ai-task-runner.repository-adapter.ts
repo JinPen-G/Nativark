@@ -2,7 +2,8 @@ import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort,
 import type { AiTaskRepository } from "../ai-task.repository";
 import type { AiStepRegistrationCommand, AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
-import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
+import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
+import { AiTaskRunnerError } from './ai-task-runner.service';
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the
@@ -63,12 +64,37 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
   };
   const steps: AiTaskRunnerStepPort = {
     async register(plan, lease, existingOnly = false) {
+      plan = structuredClone(plan); lease = structuredClone(lease);
       const command = structuredClone(await commands.register(structuredClone(plan), structuredClone(lease)));
-      const result = await adapters.registrations.register(command, existingOnly);
+      if (command.taskId !== lease.taskId || command.registrationRef !== plan.registrationRef
+        || command.lease.runId !== lease.runId || command.lease.holderId !== lease.holderId
+        || command.lease.revision !== lease.revision || command.lease.fencingToken !== lease.fencingToken) throw new Error('AI_INVALID_INPUT');
+      const observed = await adapters.registrations.register(structuredClone(command), existingOnly);
+      let result: typeof observed;
+      const unknown = () => new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'step registration acknowledgement requires original receipt');
+      try { result = structuredClone(observed); } catch { throw unknown(); }
+      const validId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+      const revision = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 4294967295;
+      if (!result || typeof result.replayed !== 'boolean' || !validId(result.stepId) || result.runId !== lease.runId
+        || !revision(result.sequence) || !revision(result.stepRevision) || !revision(result.taskRevision)) throw unknown();
+      if (!result.replayed) {
+        const event = result.event;
+        // Registration may already be committed. Bind its public event and
+        // exact new revisions before letting the runner adopt either one.
+        if (existingOnly || result.stepRevision !== 1 || result.taskRevision !== command.expectedTaskRevision + 1
+          || result.runRevision !== lease.revision + 1 || !event || event.contractVersion !== AI_TASK_DRAFT_VERSION
+          || event.type !== 'step.registered' || event.taskId !== lease.taskId || event.taskRevision !== result.taskRevision
+          || !event.data || typeof event.data !== 'object'
+          || event.data.stepId !== result.stepId || event.data.runId !== lease.runId
+          || event.data.sequence !== result.sequence || event.data.stepRevision !== 1
+          || typeof event.cursor !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(event.cursor) || BigInt(event.cursor) > 18446744073709551615n
+          || typeof event.occurredAt !== 'string' || !Number.isFinite(Date.parse(event.occurredAt))) throw unknown();
+      } else if (result.event !== null || result.runRevision != null || result.taskRevision < command.expectedTaskRevision) throw unknown();
       const replay = result.replayed && adapters.replays
-        ? await adapters.replays.readReplay({ ...command, stepId: result.stepId, expectedStepRevision: result.stepRevision }) : null;
+        ? structuredClone(await adapters.replays.readReplay({ ...structuredClone(command), stepId: result.stepId, expectedStepRevision: result.stepRevision })) : null;
       if (replay && (replay.stepId !== result.stepId || replay.runId !== result.runId || replay.sequence !== result.sequence
-        || replay.stepRevision !== result.stepRevision)) throw new Error("AI_STORAGE_UNAVAILABLE");
+        || replay.stepRevision !== result.stepRevision || !revision(replay.taskRevision) || replay.taskRevision < result.taskRevision
+        || !AI_STEP_STATUSES_DRAFT.includes(replay.status))) throw unknown();
       return { stepId: result.stepId, runId: result.runId, sequence: result.sequence, stepRevision: result.stepRevision,
         taskRevision: replay?.taskRevision ?? result.taskRevision, runRevision: result.runRevision, replayed: result.replayed,
         existingStatus: result.replayed ? replay?.status ?? null : "pending", ...(replay ? { resultRef: replay.resultRef } : {}) };
