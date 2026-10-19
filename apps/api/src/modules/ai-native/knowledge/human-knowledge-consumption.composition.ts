@@ -6,9 +6,12 @@ import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependenci
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { documentSourceSchema, id, parse } from './knowledge-validation';
 import type { HumanKnowledgeConsumptionService } from './human-knowledge-consumption.service';
+import { composeKnowledgeFileApplication, type KnowledgeFileApplicationDependencies } from './knowledge-file.composition';
+import type { AiRequestAbortSource } from '../scenes/request-abort';
 
-export type HumanKnowledgeConsumptionDependencies = Omit<PrismaFormalKnowledgeDependencies, 'credentials' | 'policyManagement'>;
-export type HumanKnowledgeConsumptionHttpRequest = { headers: { authorization?: unknown } };
+export type HumanKnowledgeConsumptionDependencies = Omit<PrismaFormalKnowledgeDependencies, 'credentials' | 'policyManagement'>
+  | Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'policyManagement'>;
+export type HumanKnowledgeConsumptionHttpRequest = { headers: { authorization?: unknown } } & AiRequestAbortSource;
 export type HumanKnowledgeConsumptionRequest = {
   [K in keyof AiKnowledgeConsumptionHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeConsumptionHttpResponsesDraft[K]>;
 } & {
@@ -47,9 +50,11 @@ export class HumanKnowledgeConsumptionRequestFactory {
     requiredPort(dependencies?.auth, ['resolveAccessContext']);
     requiredPort(dependencies?.clock, ['now']);
     requiredPort(dependencies?.db, ['$transaction']);
-    requiredPort(dependencies?.policyDb?.aiKnowledgeActionPolicy, ['findUnique']);
-    requiredPort(dependencies?.policyDb?.aiKnowledgePolicyManagementOperation, ['findFirst']);
-    requiredPort(dependencies?.fileRuntime, ['readKnowledgeBytes', 'assertKnowledgeBinding']);
+    const policyDb = 'integrations' in dependencies ? dependencies.db : dependencies.policyDb;
+    requiredPort(policyDb?.aiKnowledgeActionPolicy, ['findUnique']);
+    requiredPort(policyDb?.aiKnowledgePolicyManagementOperation, ['findFirst']);
+    if ('integrations' in dependencies) requiredPort(dependencies.integrations, ['runtimeConfig', 'assertEnabledInTransaction']);
+    else requiredPort(dependencies.fileRuntime, ['readKnowledgeBytes', 'assertKnowledgeBinding']);
   }
 
   open(request: HumanKnowledgeConsumptionHttpRequest): HumanKnowledgeConsumptionRequest {
@@ -61,7 +66,17 @@ export class HumanKnowledgeConsumptionRequestFactory {
       if (authorization === undefined) return unavailable();
       return { authorization, requestId, audience: 'operator' as const };
     } };
-    const services = composePrismaFormalHumanKnowledge({ ...this.dependencies, credentials });
+    // The standard app must use the SAME request-owned file ACL/integration
+    // producer as document management, never a generic download runtime.
+    const requestAuth: typeof this.dependencies.auth = { resolveAccessContext: async (...args) => {
+      await credentials.current();
+      const access = await this.dependencies.auth.resolveAccessContext(...args);
+      await credentials.current();
+      return access;
+    } };
+    const services = 'integrations' in this.dependencies
+      ? composeKnowledgeFileApplication({ ...this.dependencies, auth: requestAuth, credentials })
+      : composePrismaFormalHumanKnowledge({ ...this.dependencies, auth: requestAuth, credentials });
     return {
       collectInput: (value, options) => services.consumption.collectInput(value, options),
       revalidateInput: value => services.consumption.revalidateInput(value),

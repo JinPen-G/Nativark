@@ -109,11 +109,12 @@ import { AiBudgetManagementController } from "./modules/ai-native/budget/budget-
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
-  AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+  AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
 import { HumanMemoryManagementController } from './modules/ai-native/knowledge/human-memory-management.controller';
 import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
 import { HumanKnowledgeManagementController } from './modules/ai-native/knowledge/human-knowledge-management.controller';
+import { HumanKnowledgeConsumptionController } from './modules/ai-native/knowledge/human-knowledge-consumption.controller';
 import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS, AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS, AI_NATIVE_QUOTE_ORDER_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AiHumanQuoteSelectionController, AiHumanQuoteOrderController, AiSelectedQuoteTaskController } from './modules/ai-native/task-request/human-quote-selection.controller';
 import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController,
@@ -155,6 +156,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     HumanMemoryManagementController,
     KnowledgePolicyManagementController,
     HumanKnowledgeManagementController,
+    HumanKnowledgeConsumptionController,
     OperatorAutomationController,
     StaffAutomationController,
     HumanAutomationPolicyRequestController,
@@ -220,6 +222,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
     AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
     AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER,
+    AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER,
     ...AI_NATIVE_BUSINESS_FAILURE_PROVIDERS,
     ...AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS,
     ...AI_NATIVE_QUOTE_ORDER_PROVIDERS,

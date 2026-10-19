@@ -52,6 +52,7 @@ import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } f
 import { AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, composeRequestBoundPlatformModelSettings } from './platform-model-settings.application';
 import { HumanMemoryManagementRequestFactory } from './knowledge/human-memory-management.composition';
 import { HumanKnowledgeManagementRequestFactory } from './knowledge/human-knowledge-management.composition';
+import { HumanKnowledgeConsumptionRequestFactory } from './knowledge/human-knowledge-consumption.composition';
 import { KNOWLEDGE_POLICY_MANAGEMENT, createKnowledgePolicyManagementFactory } from './knowledge/knowledge-policy-management.composition';
 import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
@@ -211,6 +212,13 @@ export const AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER: FactoryProvider = {
   provide: HumanKnowledgeManagementRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService],
   useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService) =>
     new HumanKnowledgeManagementRequestFactory({ db, auth, integrations, clock: { now: () => Date.now() } })
+};
+/** Current human reads only. No policy seed, task creation or model dispatch;
+ * file and memory access use their original request-bound authority sources. */
+export const AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER: FactoryProvider = {
+  provide: HumanKnowledgeConsumptionRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService],
+  useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService) =>
+    new HumanKnowledgeConsumptionRequestFactory({ db, auth, integrations, memory: { db }, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
   provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [PrismaService, AuthService, ApiAuthGuard],

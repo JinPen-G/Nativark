@@ -8,6 +8,7 @@ import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
@@ -2114,6 +2115,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `manageCurrentAiKnowledge_${action}`, permissions: ['system:params:manage'],
     summary: 'Current operator and exact persisted document/upload action policy, ACL, version and original file integration required. No ambient file grants or model call. Human confirmation is action-specific; upload, document commit and publication are separate facts. Unknown writes require original operation observation.',
     requestSchema: `AiKnowledgeManagement${request}`, responseSchema: `AiKnowledgeManagement${response}` })),
+  ...([
+    ['readDocument', 'AiKnowledgeDocumentReadRequestDraft', 'AiKnowledgeDocumentReadResponseDraft'],
+    ['openSource', 'AiKnowledgeSourceReadRequestDraft', 'AiKnowledgeSourceReadResponseDraft'],
+    ['readMemory', 'AiKnowledgeMemoryReadRequestDraft', 'AiKnowledgeMemoryReadResponseDraft'],
+    ['readPreferences', 'AiKnowledgePreferencesReadRequestDraft', 'AiKnowledgePreferencesReadResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT[action]}`, tag: 'AI Native',
+      operationId: `readCurrentAiKnowledge_${action}`, permissions: ['system:params:manage'],
+      summary: 'Existing operator management entry permission plus exact persisted knowledge/memory action policy and original document/version/file ACL are required; management permission alone grants no resource access. Confirmed owner preferences only. Bounded read-only request, no model, task, write, download URL or business authority.',
+    requestSchema, responseSchema })),
   ...([
     ['list', 'ListRequestDraft', 'ListResponseDraft'], ['state', 'StateRequestDraft', 'StateDraft'],
     ['read', 'ReadRequestDraft', 'MutationDraft'], ['propose', 'ProposeRequestDraft', 'MutationDraft'],

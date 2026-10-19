@@ -4,19 +4,29 @@ import { runWithRequestIdentity } from '../../../common/request-identity';
 import { HumanKnowledgeConsumptionRequestFactory, type HumanKnowledgeConsumptionHttpRequest,
   type HumanKnowledgeConsumptionRequest } from './human-knowledge-consumption.composition';
 import { KnowledgeError } from './knowledge-errors';
+import { withRequestAbort } from '../scenes/request-abort';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 @Controller(paths.basePath)
 export class HumanKnowledgeConsumptionController {
   constructor(@Inject(HumanKnowledgeConsumptionRequestFactory) private readonly requests: HumanKnowledgeConsumptionRequestFactory) {}
 
-  private async call<T>(request: HumanKnowledgeConsumptionHttpRequest,
-    read: (scoped: HumanKnowledgeConsumptionRequest) => Promise<T>): Promise<T> {
+  private async call<T>(request: HumanKnowledgeConsumptionHttpRequest, value: unknown,
+    read: (scoped: HumanKnowledgeConsumptionRequest, command: unknown) => Promise<T>): Promise<T> {
     try {
-      return await runWithRequestIdentity({}, async () => {
+      let command: unknown;
+      try {
+        command = structuredClone(value);
+        if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error();
+      } catch { throw new KnowledgeError('invalid_input'); }
+      return await withRequestAbort(request, signal => runWithRequestIdentity({}, async () => {
         const scoped = this.requests.open(request);
-        try { return await read(scoped); }
-        finally { scoped.close(); }
-      });
+        const close = () => scoped.close();
+        signal.addEventListener('abort', close, { once: true });
+        if (signal.aborted) close();
+        try { return await waitForTaskApplicationDependency(() => read(scoped, command), false, signal); }
+        finally { close(); signal.removeEventListener('abort', close); }
+      }), { maxWaitMs: 15000 });
     } catch (error) {
       const code = error instanceof KnowledgeError ? error.code : 'unavailable';
       const response: AiKnowledgeConsumptionHttpErrorDraft = {
@@ -31,20 +41,20 @@ export class HumanKnowledgeConsumptionController {
   @Post(paths.readDocument)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  readDocument(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, scoped => scoped.readDocument(value)); }
+  readDocument(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, value, (scoped, command) => scoped.readDocument(command)); }
 
   @Post(paths.openSource)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  openSource(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, scoped => scoped.openSource(value)); }
+  openSource(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, value, (scoped, command) => scoped.openSource(command)); }
 
   @Post(paths.readMemory)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  readMemory(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, scoped => scoped.readMemory(value)); }
+  readMemory(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, value, (scoped, command) => scoped.readMemory(command)); }
 
   @Post(paths.readPreferences)
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
-  readPreferences(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, scoped => scoped.readPreferences(value)); }
+  readPreferences(@Req() request: HumanKnowledgeConsumptionHttpRequest, @Body() value: unknown) { return this.call(request, value, (scoped, command) => scoped.readPreferences(command)); }
 }
