@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能提交：`40b29e8a`增加原任务运行/累计资源及原单账观测；`a43dbb79`补隐私清理/原收据的有限等待、断线关闭凭据与unknown核对。两组定向冒烟各2 pass/0 fail/0 skip/todo，无新增测试文件。API noEmit退出1：676 roots、3项诊断仍均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无诊断；diff退出0，不称整套通过。AIN-25按G1/G2登记50%，原28项等权64.3%，正式验收0/28；未伪报SLO或真实成本。原10份文档和支付/Core/客户端/后台/shared与相关测试WIP保留，任务文档只暂存本轮两项进度单元格，不夹带原正文。
+> 更新时间：2026-10-19。最新功能提交：`ee4b0199`从原资源charge汇聚逐步骤有效时长，沿`40b29e8a`的运行/单账观测入口消费；`a43dbb79`补隐私维护中断与unknown核对。两组最终定向冒烟各2 pass/0 fail/0 skip/todo，无新增测试文件。API noEmit退出1：676 roots、3项诊断仍均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无诊断；diff退出0，不称整套通过。AIN-25按G1/G2登记50%，原28项等权64.3%，正式验收0/28；未伪报SLO或真实成本。原10份文档和支付/Core/客户端/后台/shared与相关测试WIP保留，任务文档仅暂存本轮进度单元格，不夹带原正文。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -22,7 +22,7 @@
 
 ## 当前核心接点及下一步
 
-运行观测：`POST /api/ai-native/scene-requests/model/performance`接原观察provider，输入为原请求引用与usageLimit/usageAfter；不接受scope/actor或任意工具。`TaskPerformanceReader`复用当前任务动作政策和`TaskBudgetUsageReader`，读后复验身份、task修订/eventCursor、运行/步骤及资源头。运行最多50条、步骤200条、账务单页20条，截断不冒充全量；资源BigInt用字符串，未知占用不归零、各计量单位不相加，费用只展示原账。正常/取消未启动、超安全整数、跨空间/撤权/读中变化已冒烟；原场景来源为受控端口，完整标准原请求正向组合仍待核实。首字/首卡/工具耗时未采集、成功/接管率未统计、SLO/容量/公平性/告警及实际环境演练仍缺，AIN-25不升75%。
+运行观测：`POST /api/ai-native/scene-requests/model/performance`接原观察provider，输入为原请求引用与usageLimit/usageAfter；不接受scope/actor或任意工具。`TaskPerformanceReader`复用当前任务动作政策和`TaskBudgetUsageReader`，读后复验身份、task修订/eventCursor、运行/步骤、资源头及charge汇聚。运行最多50条、步骤200条、账务单页20条，截断不冒充全量；资源BigInt用字符串，未知占用不归零、各计量单位不相加，费用只展示原账。逐步骤`activeTime`从同scope/task/run/step的ACTIVE_MS原charge有界groupBy读取：RECORDED实值、RESERVED和UNKNOWN分别保留，仅未知时实值为null，窗口汇聚不能超过原任务资源头。此值不是供应商响应时延。正常/取消未启动、精度/未知占用/矛盾记录、跨空间/撤权/读中变化已冒烟；原场景来源为受控端口，完整标准原请求正向组合仍待核实。首字/首卡/完整工具墙钟时延未采集、成功/接管率未统计、SLO/容量/公平性/告警及实际环境演练仍缺，AIN-25不升75%。
 
 隐私维护现有cleanup/receipt/receipts沿标准provider；清理最多30秒等待，收据依赖5秒，断线关闭本次身份凭据，迟到读取不得进入下一项删除。清理可能已提交保持unknown并列原收据，读取中断仅unavailable；没有新增定时器、真实删除或存储访问。外部副本、真实删除传播和备份验收仍缺，不以HTTP收口宣称隐私全完成。
 

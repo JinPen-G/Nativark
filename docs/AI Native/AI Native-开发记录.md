@@ -31,6 +31,7 @@
 
 - `40b29e8a`（AIN-25/06/11）：新增`TaskPerformanceReader`和标准`model/performance`只读入口、shared/OpenAPI；按原请求、当前owner/动作政策、版本及水位复验，复用原账务读取。运行时长只认持久startedAt/endedAt，未启动取消的耗时为null；资源BigInt精确展示、unknown继续占用，50运行/200步骤/20账务上限，缺账不补零，不算跨单位总价。首字/首卡/工具时延和SLO未测明确保留。G1为公开观测契约与真实持久来源、G2为实际主读取路径；完整标准原请求组合、后续采集/统计/SLO及环境演练未验，不计G3/G4、不以已有资源限额冒充本项完成。
 - `a43dbb79`（AIN-04/24）：原清理及收据沿当前Auth/ALS，30秒清理/5秒读取依赖边界，快照输入、断线关闭凭据。迟到候选不能开始删除；已可能写入为unknown，仅核对原收据，不判回滚或重复删除。未启动定时器或执行真实删除。
+- `ee4b0199`：观测步骤追加`activeTime`，原ACTIVE_MS charge在同scope/task/run/step下最多600个group汇聚，复核当前owner及原资源头、读后再查；RECORDED精确值、RESERVED/UNKNOWN分开，仅未知不补实际0，不把资源时长当Provider或完整墙钟时延。沿同一stdin冒烟扩充超安全整数、unknown-only与账头矛盾拒绝，最终仍2/0/0/0，不重复累计用例；数据库groupBy为受控替身，非MySQL聚合/并发验收。
 - 验证沿本树双offline preload、固定无效DATABASE_URL、本树审计/TEMP，`node -`观测组合 **2 pass/0 fail/0 skip/todo**、隐私组合 **2/0/0/0**，退出0；无新增测试文件。实际Auth、持久动作政策、任务/财务reader、Controller及隐私服务运行，DB/原请求场景来源为受控替身，费用正向本轮仅未记录页，不冒称money/供应商成本通过。日志`output/core-task-performance-20261019/`；初轮夹具漏delegate、OpenAPI外层data断言及两处类型接线错误保留并修正，未放宽校验。
 - 最新`node output/typecheck-ai-native.cjs` **676 roots/3诊断、退出1**：仍为接手支付WIP的960/1049行TS2322、2114行TS2554，本片AI Native无诊断；diff退出0。未运行真实HTTP/DB/存储/模型、并发容量/SLO或独立验收。各功能片计数不累加称全量，原AIN-24等其他百分比不变。
 
