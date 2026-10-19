@@ -229,9 +229,23 @@ export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
   provide: AI_RETENTION_REQUESTS, inject: [PrismaService, AuthService, FileStorageRuntimeService],
   useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService): AiRetentionRequestFactory => request => {
-    const authorization = request.headers.authorization, requestId = randomUUID();
-    if (typeof authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    return new AiRetentionService(db, auth, { current: async () => ({ authorization, requestId, audience: 'operator' }) }, files);
+    const header = request?.headers?.authorization, requestId = randomUUID();
+    if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    let authorization: string | undefined = header;
+    const current = async () => {
+      if (!authorization) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return { authorization, requestId, audience: 'operator' as const };
+    };
+    const requestAuth: Pick<AuthService, 'resolveAccessContext'> = { resolveAccessContext: async (...args) => {
+      await current();
+      const result = await auth.resolveAccessContext(...args);
+      await current();
+      return result;
+    } };
+    const service = new AiRetentionService(db, requestAuth, { current }, files);
+    return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
+      receipts: value => service.receipts(value), close: () => { authorization = undefined; } };
   },
 };
 
