@@ -124,13 +124,15 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     const ordered = [...keys].sort((a, b) => scopeKinds.indexOf(a.scopeKind) - scopeKinds.indexOf(b.scopeKind) || a.scopeId.localeCompare(b.scopeId) || a.sceneCode.localeCompare(b.sceneCode));
     const rows = [] as Array<{ id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue }>;
     for (const key of ordered) {
-      const found = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+      const found = structuredClone(await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } }));
       if (!found) throw new BudgetError('UNAVAILABLE');
       // Locking the policy row is explicit and database-side; a stale update
       // cannot pass if another transaction changed its revision.
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_budget_policies WHERE id = ${found.id} FOR UPDATE`);
-      const locked = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+      const locked = structuredClone(await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } }));
       if (!locked) throw new BudgetError('UNAVAILABLE');
+      if (locked.id !== found.id || Object.entries(policyWhere(key)).some(([field, expected]) => locked[field as keyof typeof locked] !== expected))
+        throw new BudgetError('REVISION_CONFLICT');
       rows.push(locked);
     }
     return rows;
@@ -143,6 +145,52 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     if (association.scope.kind === 'platform') throw new BudgetError('FORBIDDEN');
     if (scope.tenantId !== association.scope.tenantId) throw new BudgetError('FORBIDDEN');
     if (row.scopeKind === 'WORKSPACE' && (association.scope.kind !== 'workspace' || scope.workspaceId !== association.scope.workspaceId)) throw new BudgetError('FORBIDDEN');
+  }
+
+  /** Read aggregate rows, never the policy's entire reservation history. The
+   * allocation join charges each consumer once to every intersected policy.
+   * Expired and unknown holds remain active; TTL is not non-consumption proof.
+   * Caller already holds the same fixed-order policy locks as reserve(). */
+  private async consumption(tx: Tx, policyId: string, quantity: BudgetQuote['quantity'], runId: string) {
+    const where: Prisma.AiBudgetReservationWhereInput = { allocations: { some: { policyId } },
+      status: { in: ['reserved', 'pending_reconciliation', 'settled'] } };
+    const groups = await tx.aiBudgetReservation.groupBy({ by: ['status', 'unitKind', 'moneyCurrency'], where,
+      orderBy: [{ status: 'asc' }, { unitKind: 'asc' }, { moneyCurrency: 'asc' }], take: 4,
+      _count: { _all: true, reservedTokens: true, reservedCalls: true, reservedMoney: true,
+        actualTokens: true, actualCalls: true, actualMoney: true },
+      _sum: { reservedTokens: true, reservedCalls: true, reservedMoney: true,
+        actualTokens: true, actualCalls: true, actualMoney: true } });
+    if (!Array.isArray(groups) || groups.length > 3) throw new BudgetError('UNAVAILABLE');
+    let used = 0n, concurrent = 0n;
+    const seen = new Set<string>();
+    for (const group of groups) {
+      if (!['reserved', 'pending_reconciliation', 'settled'].includes(group.status) || seen.has(group.status)
+        || !Number.isSafeInteger(group._count._all) || group._count._all < 1) throw new BudgetError('UNAVAILABLE');
+      seen.add(group.status);
+      if (group.unitKind !== quantity.unit || (quantity.unit === 'money'
+        ? group.moneyCurrency !== quantity.currency : group.moneyCurrency !== null)) throw new BudgetError('EXHAUSTED');
+      const field = `${group.status === 'settled' ? 'actual' : 'reserved'}${quantity.unit === 'tokens' ? 'Tokens' : quantity.unit === 'calls' ? 'Calls' : 'Money'}` as
+        'reservedTokens' | 'reservedCalls' | 'reservedMoney' | 'actualTokens' | 'actualCalls' | 'actualMoney';
+      const sum = group._sum[field];
+      // SQL SUM ignores NULL. Missing stored usage must not silently become 0.
+      if (group._count[field] !== group._count._all || sum === null) throw new BudgetError('UNAVAILABLE');
+      let atoms: bigint;
+      if (quantity.unit === 'money') {
+        if (!(sum instanceof Prisma.Decimal) || !sum.isFinite() || sum.isNegative() || sum.decimalPlaces() > 6) throw new BudgetError('UNAVAILABLE');
+        atoms = decimalAtoms(sum);
+      } else if (quantity.unit === 'tokens') {
+        if (typeof sum !== 'bigint' || sum < 0n) throw new BudgetError('UNAVAILABLE');
+        atoms = sum;
+      } else {
+        if (typeof sum !== 'number' || !Number.isSafeInteger(sum) || sum < 0) throw new BudgetError('UNAVAILABLE');
+        atoms = BigInt(sum);
+      }
+      used += atoms;
+      if (group.status !== 'settled') concurrent += BigInt(group._count._all);
+    }
+    const runCalls = await tx.aiBudgetReservation.count({ where: { ...where, runId } });
+    if (!Number.isSafeInteger(runCalls) || runCalls < 0) throw new BudgetError('UNAVAILABLE');
+    return { used, concurrent, runCalls: BigInt(runCalls) };
   }
 
   async reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>) {
@@ -160,20 +208,32 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
         if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === command.sceneCode)) throw new BudgetError('FORBIDDEN');
         for (const row of rows) await this.assertScopeOwnership(tx, row, quote.association);
+        // Exact retries observe the original reservation BEFORE checking free
+        // capacity: the first successful request may have taken the final unit.
+        // This is not a new reservation, lease, dispatch grant or retry of usage.
+        const existing = structuredClone(await tx.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_idempotencyKey: {
+          scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, idempotencyKey: quote.association.idempotencyKey
+        } }, select: { id: true, requestHash: true } }));
+        if (existing) {
+          if (existing.requestHash !== requestHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+          const links = await tx.aiBudgetAllocation.findMany({ where: { reservationId: existing.id },
+            select: { policyId: true }, take: 4 });
+          if (links.length !== rows.length || new Set(links.map(link => link.policyId)).size !== rows.length
+            || links.some(link => !rows.some(row => row.id === link.policyId))) throw new BudgetError('PENDING_RECONCILIATION');
+          const replay = structuredClone(await this.readRecord(tx, existing.id, quote.association));
+          if (!replay || replay.actorId !== quote.actorId || replay.callId !== quote.callId || replay.sceneCode !== quote.sceneCode) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+          await revalidate();
+          return replay;
+        }
         const requested = quantityAtoms(quote.quantity);
         for (const row of rows) {
           const settings = policy(row).settings;
-          const allocations = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] } } }, select: { reservation: { select: { status: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, actualTokens: true, actualCalls: true, actualMoney: true, moneyCurrency: true, runId: true } } } });
-          if (allocations.some(item => item.reservation.unitKind !== quote.quantity.unit
-            || quote.quantity.unit === 'money' && item.reservation.moneyCurrency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
-          const active = allocations.filter(item => item.reservation.status === 'reserved' || item.reservation.status === 'pending_reconciliation');
-          const concurrent = active.length;
-          if (concurrent >= settings.maxConcurrent || allocations.filter(item => item.reservation.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
           if (settings.budget.quantity.unit !== quote.quantity.unit || (settings.budget.quantity.unit === 'money' && quote.quantity.unit === 'money' && settings.budget.quantity.currency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           const limit = quantityAtoms(settings.budget.quantity);
-          const used = settings.budget.quantity.unit === 'tokens' ? allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualTokens ?? 0n) : (item.reservation.reservedTokens ?? 0n)), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualCalls ?? 0) : (item.reservation.reservedCalls ?? 0)), 0)) : allocations.reduce((sum, item) => sum + decimalAtoms(item.reservation.status === 'settled' ? item.reservation.actualMoney : item.reservation.reservedMoney), 0n);
-          if (used + requested > limit) throw new BudgetError('EXHAUSTED');
+          const usage = await this.consumption(tx, row.id, quote.quantity, quote.association.runId);
+          if (usage.concurrent >= BigInt(settings.maxConcurrent) || usage.runCalls >= BigInt(settings.maxCallsPerRun)
+            || usage.used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
         await revalidate();
         const data = { id: randomUUID(), tenantId, workspaceId, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
