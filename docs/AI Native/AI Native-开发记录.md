@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-19；最近完整功能：原生 OpenAI Responses / Claude Messages 接回原配置、能力验证和 Gateway 组合；不引入 SDK 或更换 Runtime。前片员工原收据/取消收敛继续保留。当前现场看协作接续，历史结果不相加称最新全量通过。
+> 归纳日期：2026-10-19；最近完整功能：客户历史答复/取消收据与从未启动任务取消收敛接回标准应用；原生双协议及原预算单账保留。当前现场看协作接续，历史结果不相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -11,6 +11,13 @@
 - “代码实现”“消费者装配”“离线验证”“真实环境验收”“生产开放”分别记录，不用其中一层替代另一层。
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
+
+## 近期功能：客户原收据与取消收敛（2026-10-19）
+
+- `9db10b7f`（AIN-04/06/21）：`readOriginalTaskModelInputReceipt` 使用原 Prisma `receiptReader`，不再要求新问题来源、当前报价有效或模型启用；等待输入取消改用原 `releasedCancellationWitness`。仍重读当前本人订单、身份/空间/发布及原创建关联；新输入提交/继续的原执行门不变。
+- 新增 `readOriginalTaskCancellationReceipt`、`readOriginalTaskCancellationSettlementReceipt`、`settleOriginalTaskUnstartedCancellation`，接回标准客户应用、web/微信 Controller、shared 和 OpenAPI。观察按原修订精确读事件，缺失为 unknown；新收敛需当前独立取消政策及原事务证明没有步骤/计划/结果/调用或预算，不退款、不授新执行。HTTP等待15秒，断线不证明回滚。
+- 快检：沿双 offline preload、固定无效 DATABASE_URL、本树绝对审计/TEMP，以 `node -` 分别驱动现有客户 Guard/Auth/事务夹具、原输入运行器/Prisma收据仓储、公开契约/中断宿主，**3 pass / 0 fail / 0 skip / 0 todo**，退出均0；`node output/typecheck-ai-native.cjs` **672 roots / 0诊断**、`git diff --check`退出0。含材料/计划过期、新执行关闭、原取消政策撤销后只读、未知调用禁收敛、COMMIT丢应答及仓储重建；无新增测试文件。日志：`output/client-original-lifecycle-20261019/`。
+- 保留失败：既有 `node --test --test-name-pattern='client scene authenticates through actual client Guard/Auth' tests/ai-native-lane-a-original-scene-host.test.cjs` 为 **0 pass / 1 fail**（旧夹具无 `serviceEnabled`，在模型配置选择处被 `DISABLED` 拒绝），未放宽生产门或改脚本变绿。stdin初轮同名变量、非法过期种子与漏表夹具修正后复验；不是产品授权失败被忽略。DB/身份目录及业务数据为离线替身；未验真实HTTP/MySQL并发、供应商或客户端，不提高整项百分比。
 
 ## 近期功能：原生双协议（2026-10-19）
 
