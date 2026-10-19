@@ -153,9 +153,11 @@ export class AiTaskRunner {
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
     let lease: AiTaskRunnerLease;
     try {
-      lease = structuredClone(await this.callBounded(() => recovery
+      const observed = await this.callBounded(() => recovery
         ? this.deps.leases.claimRecoveryRun(structuredClone(claimInput))
-        : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal));
+        : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal);
+      try { lease = structuredClone(observed); }
+      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is not snapshot-safe'); }
     } catch (error) {
       // A transaction may have committed. A late acknowledgement is observed
       // by callBounded but NEVER re-enters runHeld or grants execution rights.
@@ -164,6 +166,19 @@ export class AiTaskRunner {
         throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is uncertain');
       }
       throw error;
+    }
+    // Match the original CAS, not a later read or an adapter-selected holder.
+    // An invalid acknowledgement may still have acquired the requested lease;
+    // never enter execution, claim again or release a guessed/foreign token.
+    const fence = /^(0|[1-9][0-9]{0,19})$/u;
+    if (!lease || lease.taskId !== input.taskId || lease.runId !== input.runId || lease.holderId !== input.holderId
+      || !finiteInteger(input.expectedRunRevision, 1, 4294967294)
+      || lease.revision !== input.expectedRunRevision + 1
+      || typeof input.expectedFencingToken !== 'string' || !fence.test(input.expectedFencingToken)
+      || typeof lease.fencingToken !== 'string' || !fence.test(lease.fencingToken)
+      || BigInt(lease.fencingToken) !== BigInt(input.expectedFencingToken) + 1n
+      || typeof lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(lease.expiresAt))) {
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim does not match the original CAS');
     }
     return this.runHeld(input, recovery, initial, lease, signal, false, prepare);
   }
