@@ -3,6 +3,7 @@ import { AI_STAFF_INSPECTION_ACCOUNTING, type composeStaffInspectionAccounting }
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { z } from 'zod';
 import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 import { respondInspectionHttp, withInspectionRequestSignal, type InspectionHttpRequest } from './inspection-http';
 
 export const INSPECTION_RECOGNITION_TASKS = Symbol('INSPECTION_RECOGNITION_TASKS');
@@ -14,7 +15,10 @@ const resume = z.object({ reference: z.unknown(), submission: z.unknown() }).str
  * authority and persisted original task. No inspection submission or new lease. */
 @Controller(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath)
 export class InspectionRecognitionTaskController {
-  constructor(@Inject(INSPECTION_RECOGNITION_TASKS) private readonly tasks: InspectionRecognitionTaskApplication) {}
+  constructor(@Inject(INSPECTION_RECOGNITION_TASKS) private readonly tasks: Omit<InspectionRecognitionTaskApplication, 'requestCancel'> & {
+    requestCancel(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
+    readCancelReceipt?(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
+  }) {}
 
   private async respond<T>(work: () => Promise<T>, nextAction = 'read_creation') {
     return respondInspectionHttp(work, nextAction);
@@ -55,7 +59,15 @@ export class InspectionRecognitionTaskController {
   requestCancel(@Req() request: Request, @Body() body: unknown) {
     const current = this.snapshot(request), input = structuredClone(body);
     return this.respond(async () => { const parsed = cancellation.parse(input);
-      return this.run(request, signal => this.tasks.requestCancel(current, parsed.reference, parsed.expectedRevision, signal)); }, 'reconcile');
+      return this.run(request, signal => this.tasks.requestCancel(current, parsed.reference, parsed.expectedRevision, signal)); }, 'read_cancel_receipt');
+  }
+  @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancelReceipt)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readCancelReceipt(@Req() request: Request, @Body() body: unknown) {
+    const current = this.snapshot(request), input = structuredClone(body);
+    return this.respond(async () => { const parsed = cancellation.parse(input);
+      if (!this.tasks.readCancelReceipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return this.run(request, signal => this.tasks.readCancelReceipt!(current, parsed.reference, parsed.expectedRevision, signal)); }, 'read_cancel_receipt');
   }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readInput)
   @HttpCode(200) @Header('Cache-Control', 'no-store')

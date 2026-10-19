@@ -54,7 +54,7 @@ export const AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT = Object.freeze({
   basePath: 'staff/v1/ai-native/inspection-tasks', method: 'POST',
   create: 'create', readCreation: 'creation/read', start: 'start',
     readAccounting: 'accounting/read', reconcileAccounting: 'accounting/reconcile',
-    reconcile: 'reconcile', requestCancel: 'cancel', readInput: 'input/read', resume: 'input/resume',
+    reconcile: 'reconcile', requestCancel: 'cancel', readCancelReceipt: 'cancel/receipt', readInput: 'input/read', resume: 'input/resume',
     readAnswer: 'input/receipt', continueAnswer: 'input/continue',
 });
 /** Current same-staff-owner candidate-runtime policies only, never Core

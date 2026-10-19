@@ -2047,6 +2047,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; cancellation is not rollback; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
+  { method: 'post', path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancelReceipt}`, tag: 'AI Native',
+    operationId: 'staffRecognition_readCancelReceipt', permissions: ['rental-os:order:view'],
+    summary: 'Read the exact original task cancellation revision under CURRENT staff owner/resource/read policies, independently of NEW recognition enablement. Observation never cancels a provider, releases budget, retries execution or proves rollback. Not observed is not proof of an uncommitted write.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject' },
   ...(['readAccounting', 'reconcileAccounting'] as const).map(operation => ({
     method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
     operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],

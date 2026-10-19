@@ -26,6 +26,7 @@ import { runWithRequestIdentity } from '../../../common/request-identity';
 import { inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
 import { randomUUID } from 'node:crypto';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 
 export const AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION = Symbol('AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION');
 export const AI_NATIVE_STAFF_RECOGNITION_RUNTIME = Symbol('AI_NATIVE_STAFF_RECOGNITION_RUNTIME');
@@ -59,6 +60,55 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     scenes: [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },
       { kind: 'audio', code: STAFF_RECOGNITION_SCENES.audio, version: '1' }] });
   const absent = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+  // Original cancellation is a current action-policy operation, not a new
+  // recognition execution. No profile, object bytes, budget or lease is minted.
+  const cancellation = async (request: { headers: { authorization?: unknown } }, value: unknown,
+    revisionValue: number, observe: boolean, signal?: AbortSignal) => {
+    const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
+      inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict().parse(structuredClone(value));
+    const expectedRevision = z.number().int().min(1).max(4294967294).parse(revisionValue);
+    const authorization = request?.headers?.authorization;
+    if (typeof authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    let active = true;
+    const close = () => { active = false; }, requestId = randomUUID();
+    const credentials = { current: async () => {
+      if (!active || signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return { authorization, requestId, audience: 'staff' as const };
+    } };
+    signal?.addEventListener('abort', close, { once: true });
+    try {
+      return await runWithRequestIdentity({}, async () => {
+        const original = await receipts.readCreation({ headers: { authorization } }, reference, signal);
+        if (!original.task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const current = composePersistedTaskAuthorization({ db: d.db, auth: d.auth,
+          subscriptions: d.subscriptions, credentials, clock: d.clock });
+        const operation = observe ? 'read_events' as const : 'transition_task' as const;
+        const identity = (context: Awaited<ReturnType<typeof current.authority.resolve>>) => {
+          const { requestId: _id, authorizedAt: _at, ...stable } = context;
+          return requestFingerprint(stable);
+        };
+        const before = identity(await current.authority.resolve(original.task.taskId, operation));
+        const repository = new AiTaskTransitionRepository(d.db, current.authority, d.clock);
+        const selector = { taskId: original.task.taskId, expectedRevision };
+        const observed = await repository.readCancellationReceipt(selector);
+        const result = observe ? observed : { receipt: observed.event ? { event: observed.event, runRevision: undefined }
+          : await repository.transition({ ...selector, to: 'cancel_requested', reason: 'cancel_requested' }),
+          cancellation: 'requested_not_rollback' as const };
+        // Task status/revision may have advanced. Bind only the immutable
+        // original creation, then recheck the CURRENT permission after the write.
+        const after = await receipts.readCreation({ headers: { authorization } }, reference, signal);
+        if (!after.task || after.creationKey !== original.creationKey || after.task.taskId !== original.task.taskId
+          || after.task.runId !== original.task.runId
+          || identity(await current.authority.resolve(original.task.taskId, operation)) !== before)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return result;
+      });
+    } finally { signal?.removeEventListener('abort', close); close(); }
+  };
+  const requestCancel = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, false, signal);
+  const readCancelReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, true, signal);
   const readResultReview = async (request: { headers: { authorization?: unknown } }, value: unknown,
     resultValue: unknown, expectedTaskId?: string, signal?: AbortSignal) => {
     const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
@@ -90,20 +140,23 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
           // Ceiling validates the ORIGINAL frozen input; it is not a new plan,
           // model selection or output allowance for another invocation.
           policy: { kind, sceneCode: task.sceneCode, maxOutputTokens: 32768 } } }).open({ headers: { authorization }, requestId });
+        const closeReader = () => selected.close();
+        signal?.addEventListener('abort', closeReader, { once: true });
         try {
+          if (signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           const result = await selected.readRecognitionReview({ ...reference, taskId: original.task.taskId, resultId });
           const after = await receipts.readCreation({ headers: { authorization } }, reference, signal);
           if (requestFingerprint(original) !== requestFingerprint(after)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
           await current.authority.resolve(original.task.taskId, 'read_step_terminal');
           return result;
-        } finally { selected.close(); }
+        } finally { signal?.removeEventListener('abort', closeReader); selected.close(); }
       });
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
       readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer: absent,
-      continueAnswer: absent, requestCancel: absent }, policies: { read: absent, configure: absent, clear: absent } };
+      continueAnswer: absent, requestCancel, readCancelReceipt }, policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
     scene: { code: STAFF_RECOGNITION_SCENES[kind], version: '1' },
@@ -119,7 +172,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer: application.readAnswer.bind(application), continueAnswer: application.continueAnswer.bind(application),
-      requestCancel: application.requestCancel.bind(application) },
+      requestCancel, readCancelReceipt },
     policies: composeStaffInspectionTaskPolicies(dependencies, { enabled: true, ttlMs: 120000,
       operations: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run',
         'transition_task', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] }) };
