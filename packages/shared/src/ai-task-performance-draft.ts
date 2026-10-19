@@ -18,7 +18,11 @@ export type AiTaskPerformanceObservationDraft = {
     activeTime: { state: 'not_recorded' } | { state: 'recorded'; recordedMs: string | null; reservedMs: string;
       unknownMs: string; basis: 'persistent_resource_not_provider_latency' } }>; truncated: boolean; coverage: 'bounded_window' };
   financial: AiTaskBudgetUsagePageDraft;
+  modelDelivery: { items: Array<{ invocationId: string; runId: string; stepId: string; callId: string; mode: 'invoke' | 'stream';
+    transportWallMs: string; firstValidatedTextMs: string | null; basis: 'gateway_transport_including_usage_and_consumer_wait' }>;
+    unobservedInWindow: number; truncated: boolean; coverage: 'completed_gateway_observations_only' };
   measurements: { firstToken: 'not_recorded'; firstCard: 'not_recorded'; toolLatency: 'not_recorded' | 'resource_active_time_only';
+    modelLatency: 'not_recorded' | 'gateway_transport_wall_time_only';
     rates: 'not_computed'; slo: 'not_evaluated' };
   consistency: 'revalidated_reads_not_atomic_snapshot'; execution: 'read_only_no_dispatch_or_release';
 };
@@ -44,7 +48,12 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
         reservedMs: count, unknownMs: count, basis: choice('persistent_resource_not_provider_latency') })] } }), 200),
       truncated: flag, coverage: choice('bounded_window') }),
     financial: { $ref: '#/components/schemas/AiTaskBudgetUsagePageDraft' },
+    modelDelivery: object({ items: list(object({ invocationId: id, runId: id, stepId: id, callId: text(128),
+      mode: choice('invoke', 'stream'), transportWallMs: count, firstValidatedTextMs: nullable(count),
+      basis: choice('gateway_transport_including_usage_and_consumer_wait') }), 50),
+      unobservedInWindow: integer(0, 50), truncated: flag, coverage: choice('completed_gateway_observations_only') }),
     measurements: object({ firstToken: choice('not_recorded'), firstCard: choice('not_recorded'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
+      modelLatency: choice('not_recorded', 'gateway_transport_wall_time_only'),
       rates: choice('not_computed'), slo: choice('not_evaluated') }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') }),
 };

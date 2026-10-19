@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
@@ -87,6 +88,15 @@ export class UnifiedAiGatewayService {
   }
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
+
+  private deliveryTiming(start: number, firstText: number | null = null) {
+    const duration = performance.now() - start;
+    if (!Number.isFinite(duration) || duration < 0 || firstText !== null && (firstText < 0 || firstText > duration)) {
+      throw new ModelGatewayError('INVALID_RESPONSE');
+    }
+    return { version: 'gateway-delivery-time-1' as const, transportWallMs: Math.floor(duration),
+      firstValidatedTextMs: firstText === null ? null : Math.floor(firstText) };
+  }
 
   private async assertMediaCurrent(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal: AbortSignal) {
     const references = request.messages.flatMap(message => typeof message.content === 'string' ? []
@@ -213,6 +223,7 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       dispatched = true;
       const recordUsage = this.usageRecorder(call, usage.id);
+      const transportStarted = performance.now();
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)
         .then(async result => { if (result.usage) await recordUsage(result.usage); return result; })));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
@@ -221,6 +232,7 @@ export class UnifiedAiGatewayService {
         intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true) : rawResult;
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          timing: this.deliveryTiming(transportStarted),
           delivery: { mode: 'invoke' as const } })));
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
@@ -306,6 +318,8 @@ export class UnifiedAiGatewayService {
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
       const recordUsage = this.usageRecorder(call, usage.id);
+      const transportStarted = performance.now();
+      let firstText: number | null = null;
       let result: GatewayInvocationResult | undefined;
       iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)[Symbol.asyncIterator]();
       while (true) {
@@ -328,6 +342,7 @@ export class UnifiedAiGatewayService {
           deltaCount++;
           deltaDigest.update(delta, 'utf8');
           await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+          if (delta.length && firstText === null) firstText = performance.now() - transportStarted;
           yield { kind: 'text_delta', delta };
         } else throw new ModelGatewayError('INVALID_RESPONSE');
       }
@@ -336,6 +351,7 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          timing: this.deliveryTiming(transportStarted, firstText),
           delivery: { mode: 'stream' as const, eventCount, deltaCount, deltaBytes, deltaHash: deltaDigest.digest('hex') } })));
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');

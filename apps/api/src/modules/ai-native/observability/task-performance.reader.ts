@@ -9,8 +9,10 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAu
 import type { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
+import { gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
 
-type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'>;
+type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
+  | 'aiGatewayInvocation' | 'operationLog'>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional() }).strict();
 const taskSelect = { id: true, scopeId: true, sceneCode: true, sceneVersion: true, status: true, revision: true,
@@ -56,6 +58,54 @@ export class TaskPerformanceReader {
         || !AI_TASK_STATUSES_DRAFT.some(status => status === task.status.toLowerCase())) throw unavailable();
       uint(task.eventCursor);
       const related = { scopeId: task.scopeId, taskId: task.id, task: { is: access.where } };
+      const readInvocations = () => this.db.aiGatewayInvocation.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+        actorId: access.actorId, run: { is: { ...related, actorKind: access.actorKind, actorId: access.actorId } } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 51,
+        select: { id: true, scopeId: true, taskId: true, runId: true, stepId: true, actionId: true, actorId: true, callId: true,
+          mode: true, sceneCode: true, registrationHash: true, configurationHash: true, priceVersion: true,
+          accountingReceipts: { take: 2, select: { scopeId: true, taskId: true, invocationId: true, reservationId: true,
+            admissionId: true, dispatchToken: true, requestHash: true, state: true } } } });
+      const invocations = structuredClone(await readInvocations());
+      if (!Array.isArray(invocations) || invocations.length > 51 || new Set(invocations.map(row => row.id)).size !== invocations.length) throw unavailable();
+      for (const item of invocations) {
+        if (!id.safeParse(item.id).success || !id.safeParse(item.runId).success || !id.safeParse(item.stepId).success
+          || item.scopeId !== task.scopeId || item.taskId !== task.id
+          || item.actorId !== access.actorId || !['invoke', 'stream'].includes(item.mode)) throw unavailable();
+      }
+      const visibleInvocations = invocations.slice(0, 50), logIds = visibleInvocations.map(row => gatewayDeliveryLogId(task.scopeId, row.id));
+      const readDeliveryLogs = () => logIds.length ? this.db.operationLog.findMany({ where: {
+        id: { in: logIds }, tenantId: before.scope.kind === 'workspace' ? before.scope.tenantId : '',
+        workspaceId: before.scope.kind === 'workspace' ? before.scope.workspaceId : '',
+        action: 'ai.gateway.delivery_observed', userId: access.actorKind === 'USER' ? access.actorId : null },
+        orderBy: { id: 'asc' }, take: 51, select: { id: true, tenantId: true, workspaceId: true, userId: true, action: true, detail: true } }) : Promise.resolve([]);
+      const deliveryLogs = structuredClone(await readDeliveryLogs());
+      if (!Array.isArray(deliveryLogs) || deliveryLogs.length > 50 || new Set(deliveryLogs.map(row => row.id)).size !== deliveryLogs.length) throw unavailable();
+      const modelItems: AiTaskPerformanceObservationDraft['modelDelivery']['items'] = [];
+      for (const row of deliveryLogs) {
+        const invocation = visibleInvocations.find(item => gatewayDeliveryLogId(task.scopeId, item.id) === row.id);
+        const detail = row.detail as Record<string, unknown> | null;
+        const meta = detail?.metadata as Record<string, unknown> | null;
+        const receipt = invocation?.accountingReceipts?.[0], parsedTime = gatewayDeliveryTimingSchema.safeParse(meta?.timing);
+        if (!invocation || invocation.accountingReceipts.length !== 1 || !receipt || receipt.state !== 'dispatched'
+          || receipt.scopeId !== task.scopeId || receipt.taskId !== task.id || receipt.invocationId !== invocation.id
+          || !id.safeParse(receipt.reservationId).success || !id.safeParse(receipt.admissionId).success
+          || typeof receipt.dispatchToken !== 'string' || !receipt.dispatchToken.length
+          || row.tenantId !== before.scope.tenantId || row.workspaceId !== before.scope.workspaceId
+          || row.action !== 'ai.gateway.delivery_observed' || row.userId !== (access.actorKind === 'USER' ? access.actorId : null)
+          || !detail || detail.targetType !== 'ai_gateway_invocation' || detail.targetId !== invocation.id
+          || !meta || meta.version !== 'ai-gateway-delivery-audit-1' || meta.status !== 'accepted'
+          || meta.actorKind !== access.actorKind || meta.actorId !== access.actorId || meta.taskId !== task.id
+          || meta.runId !== invocation.runId || meta.stepId !== invocation.stepId || meta.actionId !== invocation.actionId
+          || meta.callId !== invocation.callId || meta.mode !== invocation.mode || meta.registrationHash !== invocation.registrationHash
+          || meta.configurationHash !== invocation.configurationHash || meta.priceVersion !== invocation.priceVersion || meta.sceneCode !== invocation.sceneCode
+          || meta.reservationId !== receipt.reservationId || meta.admissionId !== receipt.admissionId
+          || meta.requestHash !== receipt.requestHash || meta.dispatchBindingHash !== hash(receipt.dispatchToken)
+          || !parsedTime.success || invocation.mode === 'invoke' && parsedTime.data.firstValidatedTextMs !== null) throw unavailable();
+        modelItems.push({ invocationId: invocation.id, runId: invocation.runId, stepId: invocation.stepId, callId: invocation.callId,
+          mode: invocation.mode as 'invoke' | 'stream', transportWallMs: String(parsedTime.data.transportWallMs),
+          firstValidatedTextMs: parsedTime.data.firstValidatedTextMs === null ? null : String(parsedTime.data.firstValidatedTextMs),
+          basis: 'gateway_transport_including_usage_and_consumer_wait' });
+      }
       const readRuns = () => this.db.aiRun.findMany({ where: { ...related, actorKind: access.actorKind, actorId: access.actorId },
         orderBy: [{ sequence: 'asc' }, { id: 'asc' }], take: 51, select: runSelect });
       const readSteps = () => this.db.aiStep.findMany({ where: related,
@@ -139,7 +189,8 @@ export class TaskPerformanceReader {
       const latest = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: taskSelect }));
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
         || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
-        || !isDeepStrictEqual(await readActiveTime(), charges)) {
+        || !isDeepStrictEqual(await readActiveTime(), charges) || !isDeepStrictEqual(await readInvocations(), invocations)
+        || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs)) {
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
       const after = await this.actions.resolve(command.taskId, 'read_metadata'), now = this.clock();
@@ -168,7 +219,10 @@ export class TaskPerformanceReader {
             recordedMs: activeTimes.get(step.id)!.recordedMs?.toString() ?? null,
             reservedMs: activeTimes.get(step.id)!.reservedMs.toString(), unknownMs: activeTimes.get(step.id)!.unknownMs.toString(),
             basis: 'persistent_resource_not_provider_latency' } : { state: 'not_recorded' } })), truncated: steps.length > 200, coverage: 'bounded_window' }, financial,
+        modelDelivery: { items: modelItems, unobservedInWindow: visibleInvocations.length - modelItems.length,
+          truncated: invocations.length > 50, coverage: 'completed_gateway_observations_only' },
         measurements: { firstToken: 'not_recorded', firstCard: 'not_recorded',
+          modelLatency: modelItems.length ? 'gateway_transport_wall_time_only' : 'not_recorded',
           toolLatency: [...activeTimes.values()].some(item => item.recordedMs !== null) ? 'resource_active_time_only' : 'not_recorded',
           rates: 'not_computed', slo: 'not_evaluated' },
         consistency: 'revalidated_reads_not_atomic_snapshot', execution: 'read_only_no_dispatch_or_release' };

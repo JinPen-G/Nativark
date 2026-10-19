@@ -21,6 +21,9 @@ export interface GatewayInvocationObservation {
   reservationId: string;
   route: ProviderRouteDecision;
   result: GatewayInvocationResult;
+  /** Gateway monotonic clock, not provider-declared latency or client paint.
+   * Includes transport/usage receipt and stream consumer backpressure. */
+  timing?: { version: 'gateway-delivery-time-1'; transportWallMs: number; firstValidatedTextMs: number | null };
   /** Gateway-owned transport traversal, never a provider capability grant.
    * Optional only for preserved callers predating delivery observations. */
   delivery?: { mode: 'invoke' } | { mode: 'stream'; eventCount: number; deltaCount: number;

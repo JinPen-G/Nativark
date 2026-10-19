@@ -1,12 +1,13 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import type { AiScopeRepository } from './ai-scope.repository';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
 import type { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { isGatewayConfig } from './gateway-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
-import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
+import type { GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTask' | 'aiGatewayInvocation'
@@ -16,9 +17,16 @@ const entrySchema = z.object({ callId: id.max(128), tenantId: id, workspaceId: i
   event: z.enum(['ai.invoke.admitted', 'ai.stream.admitted']), status: z.literal('accepted') }).strict();
 const denied = () => new ModelGatewayError('FORBIDDEN');
 const invalid = () => new ModelGatewayError('CONFIG_INVALID');
+export const gatewayDeliveryTimingSchema = z.object({ version: z.literal('gateway-delivery-time-1'),
+  transportWallMs: z.number().int().min(0).max(120000), firstValidatedTextMs: z.number().int().min(0).max(120000).nullable() }).strict()
+  .refine(value => value.firstValidatedTextMs === null || value.firstValidatedTextMs <= value.transportWallMs);
+export function gatewayDeliveryLogId(scopeId: string, invocationId: string) {
+  const digest = requestFingerprint({ version: 'ai-gateway-delivery-audit-1', scopeId, invocationId });
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
 
-/** Durable admission audit in the existing OperationLog, never a second task
- * or financial ledger. Only original server-owned IDs/hashes are retained.
+/** Durable admission/delivery observations in the existing OperationLog,
+ * never a second task or financial ledger. Retain only IDs/hashes and timing.
  * An admission record attests neither provider dispatch nor business success.
  * A lost write acknowledgement is unknown: this adapter never retries writes. */
 export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
@@ -37,7 +45,23 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
     this.dispatch = facts.readDispatch.bind(facts);
   }
 
-  async append(value: Parameters<UnifiedGatewayAudit['append']>[0]) {
+  append(value: Parameters<UnifiedGatewayAudit['append']>[0]) { return this.persist(value); }
+
+  /** Completion observation only, not settlement, dispatch permission, token
+   * counting or a UI first-paint receipt. Never retain the response body. */
+  record(value: GatewayInvocationObservation) {
+    const observation = structuredClone(value), parsed = gatewayDeliveryTimingSchema.safeParse(observation.timing);
+    if (!parsed.success || !observation.delivery || !['invoke', 'stream'].includes(observation.delivery.mode)
+      || observation.delivery.mode === 'invoke' && parsed.data.firstValidatedTextMs !== null
+      || observation.delivery.mode === 'stream' && parsed.data.firstValidatedTextMs !== null && observation.delivery.deltaBytes < 1) {
+      throw new ModelGatewayError('INVALID_RESPONSE');
+    }
+    return this.persist({ tenantId: observation.call.context.tenantId, workspaceId: observation.call.context.workspaceId,
+      callId: observation.call.request.callId,
+      event: `ai.${observation.delivery.mode}.admitted`, status: 'accepted' }, observation);
+  }
+
+  private async persist(value: Parameters<UnifiedGatewayAudit['append']>[0], observation?: GatewayInvocationObservation) {
     const parsed = entrySchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     const entry = Object.freeze(parsed.data);
@@ -63,7 +87,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
         const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId, callId: entry.callId } },
           select: { id: true, scopeId: true, taskId: true, runId: true, stepId: true, actionId: true, actorId: true,
             callId: true, mode: true, sceneCode: true, configuration: true, configurationHash: true,
-            intentHash: true, priceVersion: true, maxOutputTokens: true } });
+            intentHash: true, registrationHash: true, priceVersion: true, maxOutputTokens: true } });
         if (!task || task.id !== this.taskId || task.scopeId !== scopeId || task.ownerKind !== before.subject.actorKind
           || task.ownerId !== before.subject.actorId || task.audience !== audience
           || task.contractVersion !== AI_TASK_DRAFT_VERSION || !invocation || invocation.taskId !== task.id
@@ -96,30 +120,47 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       };
       const options = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
       const source = await this.db.$transaction(load, options), { invocation, receipt, admission } = source;
-      await this.claim({ context: { tenantId: entry.tenantId, workspaceId: entry.workspaceId, actorId: before.subject.actorId },
+      if (observation && (observation.reservationId !== receipt.reservationId || observation.delivery?.mode !== invocation.mode
+        || observation.route.profile.id !== admission.profileId
+        || observation.call.binding.id !== admission.id || observation.call.binding.dispatchId !== receipt.dispatchToken
+        || observation.call.binding.requestHash !== receipt.requestHash || observation.call.binding.scope.id !== scopeId
+        || observation.call.binding.actorId !== before.subject.actorId || observation.call.context.actorId !== before.subject.actorId
+        || observation.call.request.intentHash !== invocation.intentHash || observation.call.request.model !== (invocation.configuration as { model: string }).model
+        || observation.call.request.maxOutputTokens !== invocation.maxOutputTokens
+        || !(observation.call.expiresAt instanceof Date) || observation.call.expiresAt.getTime() !== admission.expiresAt.getTime()
+        || !isGatewayConfig(invocation.configuration) || observation.route.profile.configRevision !== invocation.configuration.configRevision
+        || observation.route.profile.protocol !== invocation.configuration.protocol || observation.route.profile.provider !== invocation.configuration.provider
+        || observation.route.profile.model !== invocation.configuration.model || observation.route.profile.credentialRef !== invocation.configuration.credentialRef)) throw denied();
+      await this.claim(structuredClone(observation?.call ?? { context: { tenantId: entry.tenantId, workspaceId: entry.workspaceId, actorId: before.subject.actorId },
         binding: { scope: before.resolved.scope as { id: string; kind: 'WORKSPACE'; tenantId: string; workspaceId: string },
           id: admission.id, actorId: before.subject.actorId, callId: invocation.callId, profileId: admission.profileId,
           requestHash: receipt.requestHash, dispatchId: receipt.dispatchToken },
         request: { callId: invocation.callId, model: (invocation.configuration as { model: string }).model,
-          maxOutputTokens: invocation.maxOutputTokens, intentHash: invocation.intentHash }, expiresAt: admission.expiresAt });
+          maxOutputTokens: invocation.maxOutputTokens, intentHash: invocation.intentHash }, expiresAt: admission.expiresAt }));
       // Reuse the single ledger's full association verifier, not a caller's
       // assertion that "accepted" means unsent or eligible for a refund.
       const evidence = await this.dispatch(receipt.reservationId);
       if (evidence.reservationId !== receipt.reservationId || evidence.callId !== invocation.callId
         || evidence.dispatchToken !== receipt.dispatchToken || evidence.actorId !== before.subject.actorId
         || evidence.scopeKey !== `WORKSPACE:${scopeId}`) throw denied();
+      if (observation && evidence.state !== 'dispatched') throw denied();
       const digest = requestFingerprint({ version: 'ai-gateway-admission-audit-1', scopeId, invocationId: invocation.id, event: entry.event });
-      const auditId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+      const auditId = observation ? gatewayDeliveryLogId(scopeId, invocation.id)
+        : `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
       const data = { id: auditId, tenantId: entry.tenantId, workspaceId: entry.workspaceId,
-        userId: before.subject.actorKind === 'USER' ? before.subject.actorId : null, action: entry.event,
+        userId: before.subject.actorKind === 'USER' ? before.subject.actorId : null,
+        action: observation ? 'ai.gateway.delivery_observed' : entry.event,
         detail: { operator: 'AI Native Gateway', targetType: 'ai_gateway_invocation', targetId: invocation.id,
-          detail: 'Admission only; provider dispatch, billing and business success are not attested.',
-          metadata: { version: 'ai-gateway-admission-audit-1', status: entry.status, callId: invocation.callId,
+          detail: observation ? 'Gateway transport wall time only; not client paint, provider latency, settlement or business success.'
+            : 'Admission only; provider dispatch, billing and business success are not attested.',
+          metadata: { version: observation ? 'ai-gateway-delivery-audit-1' : 'ai-gateway-admission-audit-1', status: entry.status, callId: invocation.callId,
             taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId, actionId: invocation.actionId,
             actorKind: before.subject.actorKind, actorId: before.subject.actorId, sceneCode: invocation.sceneCode,
             configurationHash: invocation.configurationHash, priceVersion: invocation.priceVersion,
             reservationId: receipt.reservationId, admissionId: admission.id, requestHash: receipt.requestHash,
-            dispatchBindingHash: requestFingerprint(receipt.dispatchToken) } } };
+            dispatchBindingHash: requestFingerprint(receipt.dispatchToken),
+            ...(observation ? { mode: invocation.mode, registrationHash: invocation.registrationHash,
+              timing: gatewayDeliveryTimingSchema.parse(observation.timing) } : {}) } } };
       const check = (row: Prisma.OperationLogGetPayload<{}> | null) => {
         if (!row || row.id !== data.id || row.tenantId !== data.tenantId || row.workspaceId !== data.workspaceId
           || row.userId !== data.userId || row.action !== data.action || requestFingerprint(row.detail) !== requestFingerprint(data.detail)) throw invalid();
@@ -128,15 +169,16 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       try {
         await this.db.$transaction(async tx => {
           const latest = await load(tx);
-          if (requestFingerprint(latest) !== requestFingerprint(source)) throw denied();
+          if (!isDeepStrictEqual(latest, source)) throw denied();
           const previous = await tx.operationLog.findUnique({ where: { id: auditId } });
           if (previous) { check(previous); return; }
           const now = this.clock();
-          if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || latest.receipt.state !== 'reserved'
-            || latest.reservation.status !== 'reserved' || latest.reservation.dispatchState !== 'not_dispatched'
+          if (!(now instanceof Date) || !Number.isFinite(now.getTime())
+            || latest.receipt.state !== (observation ? 'dispatched' : 'reserved')
+            || latest.reservation.status !== 'reserved' || latest.reservation.dispatchState !== (observation ? 'dispatched' : 'not_dispatched')
             || latest.admission.status !== 'admitted' || latest.admission.revokedAt || latest.admission.completedAt
             || latest.admission.expiresAt <= now) throw denied();
-          // The audit is an original admission fact, not dispatch authority.
+          // Both admission and delivery observations are facts, not dispatch authority.
           // Current authorization is checked outside this transaction on both
           // sides; never wait on another authorization transaction while holding it.
           attemptedWrite = true;

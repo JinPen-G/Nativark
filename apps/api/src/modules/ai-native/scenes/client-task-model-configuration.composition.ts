@@ -145,6 +145,7 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
       // The same durable admission audit as operator tasks, bound to this
       // original customer task and ledger; no operator identity or second log.
       const audit = server.audit ?? new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock);
+      const deliveryObservation = new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock);
       const capabilities = createPersistedTextCapabilityEvidence(db, clock);
       const profiles = new PrismaProviderProfileRepository(db);
       const routing = new AiGatewayRoutingService(scopes, configuration,
@@ -153,7 +154,7 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
       const runtime: PublicGatewayRuntime = {
         evidence: 'live',
         ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
-          dispatch: new InvocationDispatchService(admissions), budget: accounting.budget, audit,
+          dispatch: new InvocationDispatchService(admissions), budget: accounting.budget, audit, observation: deliveryObservation,
           transport: new RoutedModelTransport({ platform: platformConnection, tenant: connection }, adapters) },
         verifyEvidence: async (resolution, mode) => {
           if (mode !== 'live' || resolution.scene !== routeScene) return false;

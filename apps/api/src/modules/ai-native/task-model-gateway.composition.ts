@@ -212,11 +212,12 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   const routing = new AiGatewayRoutingService(scopes, configuration,
     new ProviderRouterService({ profiles: new PrismaProviderProfileRepository(db), capabilities }), routeScene);
   const admissions = new PrismaAdmissionRepository(db);
+  const deliveryObservation = new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock);
   const runtime: PublicGatewayRuntime = {
     evidence: 'live',
     ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
       dispatch: new InvocationDispatchService(admissions), budget: accounting.budget,
-      audit: audit ?? new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock),
+      audit: audit ?? deliveryObservation, observation: deliveryObservation,
       transport: new RoutedModelTransport({ platform, tenant }, adapters), ...(media ? { media } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
