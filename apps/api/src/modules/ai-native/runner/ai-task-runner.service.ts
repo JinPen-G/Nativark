@@ -231,6 +231,7 @@ export class AiTaskRunner {
   private async runHeld(input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, recovery: boolean,
     initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false, prepare?: AiTaskHeldPreparation,
     continuation?: AiTaskRunnerConfirmationContinuation): Promise<AiTaskRunnerOutcome> {
+    const heldStartedAt = this.clock.now();
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, legacyCalls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
@@ -305,11 +306,25 @@ export class AiTaskRunner {
           || !finiteInteger(continuation.remainingOutputBytes, 1, plan.limits.maxOutputBytes)) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         outputBytes = plan.limits.maxOutputBytes - continuation.remainingOutputBytes;
       }
-      const startedAt = this.clock.now();
-      const checkCancel = async () => {
+      // Loading the trusted plan and opening its persistent resource gate are
+      // part of this held run, not a free prefix followed by a fresh timeout.
+      // Original result/charge checkpointing retains its separate bounded wait:
+      // an expired work window cannot prove rollback or justify abandoning debt.
+      const startedAt = heldStartedAt;
+      let stepStartedAt: number | null = null;
+      const workMs = () => {
+        const now = this.clock.now(), elapsed = now - startedAt,
+          stepElapsed = stepStartedAt === null ? 0 : now - stepStartedAt;
+        if (!Number.isFinite(elapsed) || !Number.isFinite(stepElapsed) || elapsed < 0 || stepElapsed < 0)
+          throw new AiTaskRunnerError('AI_RUN_LIMIT');
+        const remaining = Math.floor(Math.min(plan.limits.maxTotalMs - elapsed, plan.limits.maxStepMs - stepElapsed));
+        if (remaining < 1) throw new AiTaskRunnerError('AI_RUN_LIMIT');
+        return remaining;
+      };
+      const checkCancel = async (beforeNewWork = false) => {
         // A host abort must not skip reconciliation/checkpointing of a result
         // already persisted. This read remains bounded independently.
-        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), plan.limits.maxStepMs, 'cancel_metadata');
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), beforeNewWork ? workMs() : plan.limits.maxStepMs, 'cancel_metadata');
         if (current.cancelRequestedAt === null && current.status !== "cancel_requested") return false;
         taskRevision = current.revision;
         return true;
@@ -327,13 +342,14 @@ export class AiTaskRunner {
         return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
       }
       for (const stepPlan of plan.steps) {
+        stepStartedAt = this.clock.now();
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs
-          || (!this.deps.resources && legacyCalls >= plan.limits.maxCalls)) throw new AiTaskRunnerError("AI_RUN_LIMIT");
-        const cancelling = await checkCancel();
+        workMs();
+        if (!this.deps.resources && legacyCalls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+        const cancelling = await checkCancel(true);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
-        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), plan.limits.maxStepMs, 'step_register'));
+        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), workMs(), 'step_register'));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
@@ -392,16 +408,16 @@ export class AiTaskRunner {
           try {
             resourceTicket = structuredClone(await this.callWriteBounded(() => reconcile || continuing
               ? this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease))
-              : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
+              : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), workMs(), 'resource_reserve'));
           } catch (error) {
             if (reconcile) return { status: 'unavailable', completedSteps, cleanupFailed };
             throw error;
           }
           activeResourceTicket = resourceTicket;
         }
-        if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), plan.limits.maxStepMs, 'step_start'), ref);
+        if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), workMs(), 'step_start'), ref);
         if (!reconcile && !continuing && resourceTicket && this.deps.resources?.beforeExecute) {
-          resourceTicket = structuredClone(await this.callWriteBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'model_resource_reserve'));
+          resourceTicket = structuredClone(await this.callWriteBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), workMs(), 'model_resource_reserve'));
           activeResourceTicket = resourceTicket;
         }
         if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
@@ -411,8 +427,7 @@ export class AiTaskRunner {
           // Registration/start and resource accounting can consume the remaining
           // host budget. Do not mint a fresh millisecond to start a late effect.
           // Existing interrupted-receipt handling below preserves uncertainty.
-          const remaining = plan.limits.maxTotalMs - (this.clock.now() - startedAt);
-          if (remaining <= 0) throw new AiTaskRunnerError('AI_RUN_LIMIT');
+          const remaining = workMs();
           const raw = await this.callBounded(signal => continuing
             ? this.deps.effects.continueConfirmation!(structuredClone(stepPlan), signal, structuredClone(lease), structuredClone(continuation!))
             : reconcile ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
