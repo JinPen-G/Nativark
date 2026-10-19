@@ -22,6 +22,16 @@ export type GatewayPricingRecordDb = Pick<PrismaClient,
 export const gatewayPricingInvocationSelect = Object.freeze({ id: true, scopeId: true, callId: true, actorId: true,
   sceneCode: true, configuration: true, configurationHash: true, registrationHash: true,
   intentHash: true, priceVersion: true, maxOutputTokens: true } satisfies Prisma.AiGatewayInvocationSelect);
+/** Platform review and its price share one immutable row. Old bare evidence
+ * stays readable; a wrapper never changes the hash bound by input receipts. */
+export const platformReviewedPricePayloadSchema = z.object({ kind: z.literal('platform-reviewed-price-record-1'),
+  evidence: gatewayPriceEvidenceSchema, review: z.object({ actorId: key, operationKey: key.max(128), sceneCode: key.max(128),
+    profileId: key.max(36), expectedConfigRevision: z.number().int().min(1).max(4294967295),
+    commandHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    authority: z.literal('platform_reviewed_budget_rate_not_provider_invoice') }).strict() }).strict();
+export function platformReviewedPriceReference(profileId: string, actorId: string, operationKey: string) {
+  return `platform-reviewed:${hash({ profileId, actorId, operationKey })}`;
+}
 export interface GatewayPricingEvidenceSource {
   readPrice(reference: string, context: Readonly<AiExecutionContext>): Promise<unknown>;
   readInputBound(reference: string, context: Readonly<AiExecutionContext>, binding: Readonly<{
@@ -55,7 +65,13 @@ export class PrismaGatewayPricingRecords {
     const row = structuredClone(await this.db.aiGatewayPriceRecord.findUnique({ where: { id } }));
     if (!row || row.id !== id || row.scopeId !== scopeId || row.configurationHash !== configurationHash
       || row.priceVersion !== priceVersion || hash(row.payload) !== row.payloadHash) throw new BudgetError('UNAVAILABLE');
-    const evidence = parse(gatewayPriceEvidenceSchema, row.payload);
+    const wrapped = platformReviewedPricePayloadSchema.safeParse(row.payload);
+    const evidence = wrapped.success ? wrapped.data.evidence : parse(gatewayPriceEvidenceSchema, row.payload);
+    if (wrapped.success && (wrapped.data.review.profileId !== evidence.configuration.configId
+      || wrapped.data.review.expectedConfigRevision !== evidence.configuration.configRevision
+      || wrapped.data.review.commandHash !== evidence.provenance.documentHash
+      || evidence.provenance.reference !== platformReviewedPriceReference(wrapped.data.review.profileId,
+        wrapped.data.review.actorId, wrapped.data.review.operationKey))) throw new BudgetError('FORBIDDEN');
     if (hash(evidence.configuration) !== configurationHash || evidence.priceVersion !== priceVersion
       || row.sourceReference !== evidence.provenance.reference) throw new BudgetError('FORBIDDEN');
     return { id, hash: row.payloadHash, evidence };

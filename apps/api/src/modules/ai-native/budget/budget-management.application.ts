@@ -18,6 +18,10 @@ import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
 import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { ReviewedGatewayPriceService } from './reviewed-gateway-price.service';
+import { PlatformReviewedGatewayPriceService, PrismaPlatformReviewedPriceSource } from './platform-reviewed-gateway-price.service';
+import { PlatformModelConfigurationAuthority } from '../platform-model-config.authority';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
@@ -59,7 +63,8 @@ export type BudgetManagementDependencies = {
     initialConfiguration?: { db: Parameters<typeof createPersistedTenantModelConfiguration>[0]['db'];
       secrets: SecretBox; platformProfileId: string };
   };
-  platform?: Omit<Parameters<typeof createAuthorizedPlatformBudgetSettings>[0], 'credentials'>;
+  platform?: Omit<Parameters<typeof createAuthorizedPlatformBudgetSettings>[0], 'credentials'> & {
+    db: ConstructorParameters<typeof PlatformReviewedGatewayPriceService>[0] };
 };
 export type BudgetManagementRequest = { headers: { authorization?: unknown } };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
@@ -137,6 +142,50 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
     return new ReviewedGatewayPriceService(tenant.db, source.scopes, source, credentials.current.bind(credentials), tenant.clock);
   };
+  const platformPrices = (credentials: AiTaskCredentialSource) => {
+    if (!platform) throw new BudgetError('UNAVAILABLE');
+    const clock = platform.clock ?? (() => new Date());
+    const authority = new PlatformModelConfigurationAuthority(platform.guard, credentials, platform.profileId,
+      { resolve: async (): Promise<never> => { throw new BudgetError('FORBIDDEN'); } }, clock);
+    return new PlatformReviewedGatewayPriceService(platform.db, {
+      read: new AiScopeRepository(platform.db, { resolve: () => authority.resolveRead() }, clock),
+      write: new AiScopeRepository(platform.db, authority, clock) }, platform.profileId, credentials.current.bind(credentials), clock);
+  };
+  const adoptPlatformPrice = (request: BudgetManagementRequest, value: unknown, write: boolean, signal?: AbortSignal) => call(request, value,
+    async (credentials, value) => {
+      const selector = z.object({ sceneCode: code, priceId: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+      const parsed = (write ? selector.extend({ confirmPlatformRate: z.literal(true) }).strict() : selector).safeParse(value);
+      if (!parsed.success) throw new BudgetError('INVALID');
+      if (!tenant) throw new BudgetError('UNAVAILABLE');
+      const profileId = platform?.profileId ?? tenant.initialConfiguration?.platformProfileId;
+      if (!profileId) throw new BudgetError('UNAVAILABLE');
+      const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
+      const producer = new PrismaPlatformReviewedPriceSource(tenant.db, profileId, parsed.data.sceneCode, credentials.current.bind(credentials));
+      const management = new GatewayPricingRecordManagement(tenant.db, source.scopes, source,
+        write ? producer : undefined, undefined, parsed.data.sceneCode, tenant.clock);
+      const reference = `platform-rate:${parsed.data.priceId}`;
+      let publicationReturned = false;
+      try {
+        if (write) { await management.publishPrice({ reference }); publicationReturned = true; }
+        // Read original adoption independently of profile, rate expiry or a new
+        // adoption producer. No global reviewer identity reaches tenant output.
+        const record = await management.readPublication({ reference }), evidence = record.evidence;
+        if (evidence.configuration.serviceMode !== 'platform_managed'
+          || requestFingerprint(evidence) !== requestFingerprint(await producer.readPriceHistory(reference, await source.resolveContext())))
+          throw new BudgetError('FORBIDDEN');
+        // History verification performs further awaits. Reauthorize the owned
+        // adoption afterwards; an optional provenance read cannot retain data
+        // access after the current manager loses permission or changes scope.
+        const after = await management.readPublication({ reference });
+        if (after.id !== record.id || after.hash !== record.hash) throw new BudgetError('FORBIDDEN');
+        return { state: 'recorded' as const, operationKey: reference, id: record.id, evidenceHash: record.hash,
+          priceVersion: evidence.priceVersion, configurationHash: requestFingerprint(evidence.configuration),
+          configId: evidence.configuration.configId, configRevision: evidence.configuration.configRevision,
+          validFrom: evidence.validFrom, expiresAt: evidence.expiresAt, billing: structuredClone(evidence.billing),
+          rateAuthority: 'platform_reviewed_budget_rate_not_provider_invoice' as const,
+          inputCounting: 'not_certified_by_rate_review' as const, executionPermission: false as const };
+      } catch (error) { if (publicationReturned) throw new BudgetError('PENDING_RECONCILIATION'); throw error; }
+    }, write, signal);
   // First provisioning and explicit re-binding use the same actual config
   // producer. Re-binding never resets allocations or opens a gate by itself.
   const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
@@ -243,6 +292,12 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       (credentials, command) => reviewedPrices(credentials).review(command), true, signal),
     readPriceReview: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (credentials, command) => reviewedPrices(credentials).receipt(command), false, signal),
+    platformReviewPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, command) => platformPrices(credentials).review(command), true, signal),
+    platformPriceReviewReceipt: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, command) => platformPrices(credentials).receipt(command), false, signal),
+    adoptPlatformPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, true, signal),
+    readPlatformPriceAdoption: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, false, signal),
     platformRead: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformRead.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');

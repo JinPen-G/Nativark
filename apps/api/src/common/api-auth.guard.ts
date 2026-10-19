@@ -175,9 +175,11 @@ const aiManagementRoutes = new Set([AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDG
 const budgetTenantRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.change,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.initialize, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.priceRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.pricePublicationRead,
-  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceReview]
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceReview,
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.adoptPlatformPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPlatformPriceAdoption]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
-const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave]
+const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave,
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
 const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRoutes.has(`${method.toUpperCase()} ${path}`);
 // Exact preparation transport only. Each request still verifies its stored
@@ -258,6 +260,8 @@ export function requiredPermissions(method: string, path: string) {
     AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.clear]
     .some(action => path === `/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
   if (budgetTenantRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
+  if (method.toUpperCase() === 'POST' && path === `/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt}`)
+    return ['system:ai-provider:view'];
   if (isBudgetPlatformRoute(method, path)) return ['system:ai-provider:manage'];
   if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST'

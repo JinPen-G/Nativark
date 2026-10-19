@@ -480,6 +480,8 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
       const unavailable = async (): Promise<never> => { throw new BudgetError('UNAVAILABLE'); };
       return Object.freeze({ read: unavailable, change: unavailable, initialize: unavailable,
         refreshConfiguration: unavailable, reviewPrice: unavailable, readPriceReview: unavailable,
+        platformReviewPrice: unavailable, platformPriceReviewReceipt: unavailable,
+        adoptPlatformPrice: unavailable, readPlatformPriceAdoption: unavailable,
         platformRead: unavailable, platformSave: unavailable });
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') throw new BudgetError('UNAVAILABLE');

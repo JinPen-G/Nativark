@@ -2255,13 +2255,20 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
     ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
     ['reviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
-    ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft']
+    ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['platformReviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['platformPriceReviewReceipt', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['adoptPlatformPrice', 'AiGatewayPlatformPriceAdoptionDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['readPlatformPriceAdoption', 'AiGatewayPlatformPriceAdoptionReadDraft', 'AiGatewayPriceReviewResponseDraft']
   ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageAiBudgetSettings_${action}`, authRequired: true,
-    permissions: [action === 'platformRead' || action === 'platformSave' ? 'system:ai-provider:manage' : 'system:params:manage'],
+    permissions: [action === 'platformPriceReviewReceipt' ? 'system:ai-provider:view'
+      : action.startsWith('platform') ? 'system:ai-provider:manage' : 'system:params:manage'],
     requestSchema, responseSchema,
-    summary: action === 'reviewPrice' || action === 'readPriceReview'
+    summary: action === 'platformReviewPrice' || action === 'platformPriceReviewReceipt' || action === 'adoptPlatformPrice' || action === 'readPlatformPriceAdoption'
+      ? 'SaaS authority reviews immutable platform budget rates under the server-selected Profile. Tenants may explicitly adopt only that exact rate and version, never override its billing. Original review/adoption receipts remain readable under current authority after profile changes; unknown does not authorize another publication. Review and evidence share the original price store; no supplier invoice, input counting, budget or dispatch grant. Default disabled with the original settings host.'
+      : action === 'reviewPrice' || action === 'readPriceReview'
       ? 'Current authorized BYOK administrator reviews an immutable versioned budget rate, not a provider invoice or token-count certificate. Tenant profile revision and ownership are verified under locks; original price and review receipt commit atomically. Lost responses require pricing/review/receipt with the original key; no new version retry. Platform-managed rates, input certification, reservation and dispatch are not granted. Default unavailable with the standard settings host.'
       : 'Standard server-composed settings host, default unavailable without trusted execution configuration. Current tenant/workspace or distinct platform management Guard, version CAS and original single-ledger policies remain mandatory. No policy seed, unlimited default, model call, reservation or dispatch. Rebinding uses the current server-selected profile and disables its policy gate; unknown writes require same-policy read, never blind retry.' })),
   ...([

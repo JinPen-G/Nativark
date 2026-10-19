@@ -75,6 +75,22 @@ export class AiBudgetManagementController {
   readPriceReview(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, false, async signal => this.priceReviewResult(await this.application.readPriceReview(request, body, signal), false), false);
   }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReviewPrice) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  platformReviewPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.priceReviewResult(await this.application.platformReviewPrice(request, body, signal), true), false);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  platformPriceReviewReceipt(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => this.priceReviewResult(await this.application.platformPriceReviewReceipt(request, body, signal), false), false);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.adoptPlatformPrice) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  adoptPlatformPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.priceReviewResult(await this.application.adoptPlatformPrice(request, body, signal), true), false);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPlatformPriceAdoption) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPlatformPriceAdoption(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => this.priceReviewResult(await this.application.readPlatformPriceAdoption(request, body, signal), false), false);
+  }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, false, async signal => this.checked(await this.application.read(request, body, signal), false));
