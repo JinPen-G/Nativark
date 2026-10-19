@@ -41,6 +41,15 @@ type Step = Prisma.AiStepGetPayload<{ select: typeof stepSelect }>;
 const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
 const denied = () => new AiTaskRepositoryError("AI_ACCESS_DENIED");
 
+/** The original registration may be durable. Neither retry nor lease cleanup
+ * may infer rollback from the missing transaction acknowledgement. */
+export class AiStepRegistrationCommitUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN' as const;
+  readonly retryable = false;
+  readonly nextAction = 'reconcile' as const;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
+
 /** Creates PENDING/NONE metadata, never a business action or a dispatch permit. */
 export class AiStepRegistrationRepository {
   constructor(
@@ -76,6 +85,7 @@ export class AiStepRegistrationRepository {
       if (current.access.bindingKey !== initial.access.bindingKey || current.digest !== initial.digest) throw denied();
       return current;
     };
+    let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.access.where, select: taskSelect });
@@ -92,6 +102,7 @@ export class AiStepRegistrationRepository {
         if (existingOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (!["QUEUED", "RUNNING"].includes(task.status) || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
+        writeAttempted = true;
         const locked = await tx.aiTask.updateMany({
           where: { ...initial.access.where, scopeId: task.scopeId, revision: task.revision, status: task.status, eventCursor: task.eventCursor, cancelRequestedAt: null },
           data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
@@ -137,13 +148,16 @@ export class AiStepRegistrationRepository {
           payload: { data: event.data, registration: { reference: input.registrationRef, digest: current.digest },
             initiator: { kind: "worker", id: lease.holderId, actorKind: current.access.actorKind, actorId: current.access.actorId } }
         }, select: { cursor: true } });
+        callbackCompleted = true;
         return { stepId, runId: lease.runId, sequence, stepRevision: 1, taskRevision: task.revision + 1,
           replayed: false as const, event, runRevision: lease.revision + 1 };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
+      if (writeAttempted && callbackCompleted) throw new AiStepRegistrationCommitUnknownError();
       if (error instanceof AiTaskRepositoryError) throw error;
       // Even a uniqueness race never retries a write; an explicit caller replay reads the existing action.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw conflict();
+      if (writeAttempted) throw new AiStepRegistrationCommitUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }
