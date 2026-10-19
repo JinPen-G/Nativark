@@ -19,6 +19,7 @@ export class InspectionRecognitionTaskController {
     requestCancel(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
     readCancelReceipt?(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
     settleUnstartedCancellation?(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
+    settleReleasedInputCancellation?(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
     readCancellationSettlementReceipt?(request: { headers: { authorization?: unknown } }, reference: unknown, revision: number, signal?: AbortSignal): Promise<unknown>;
   }) {}
 
@@ -71,20 +72,24 @@ export class InspectionRecognitionTaskController {
       if (!this.tasks.readCancelReceipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return this.run(request, signal => this.tasks.readCancelReceipt!(current, parsed.reference, parsed.expectedRevision, signal)); }, 'read_cancel_receipt');
   }
-  private cancellationSettlement(request: Request, body: unknown, observe: boolean) {
+  private cancellationSettlement(request: Request, body: unknown, mode: 'read' | 'unstarted' | 'released_input') {
     const current = this.snapshot(request), input = structuredClone(body);
     return this.respond(async () => { const parsed = cancellation.parse(input);
-      const operation = observe ? this.tasks.readCancellationSettlementReceipt : this.tasks.settleUnstartedCancellation;
+      const operation = mode === 'read' ? this.tasks.readCancellationSettlementReceipt
+        : mode === 'unstarted' ? this.tasks.settleUnstartedCancellation : this.tasks.settleReleasedInputCancellation;
       if (!operation) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return this.run(request, signal => operation.call(this.tasks, current, parsed.reference, parsed.expectedRevision, signal));
     }, 'read_cancel_settlement_receipt');
   }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.settleUnstartedCancellation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleUnstartedCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, false); }
+  settleUnstartedCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'unstarted'); }
+  @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.settleReleasedInputCancellation)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleReleasedInputCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'released_input'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancellationSettlementReceipt)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readCancellationSettlementReceipt(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, true); }
+  readCancellationSettlementReceipt(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'read'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readInput)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readInput(@Req() request: Request, @Body() reference: unknown) {

@@ -117,25 +117,30 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   const readCancelReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
     expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, true, signal);
   const cancellationSettlement = (request: { headers: { authorization?: unknown } }, reference: unknown,
-    revisionValue: number, observe: boolean, signal?: AbortSignal) => {
+    revisionValue: number, mode: 'read' | 'unstarted' | 'released_input', signal?: AbortSignal) => {
     const expectedRevision = z.number().int().min(1).max(4294967294).parse(revisionValue);
-    return withOriginalTask(request, reference, observe ? 'read_events' : 'transition_task', signal, async (current, taskId, originalRunId) => {
+    return withOriginalTask(request, reference, mode === 'read' ? 'read_events' : 'transition_task', signal, async (current, taskId, originalRunId) => {
       const repository = new AiTaskTransitionRepository(d.db, current.authority, d.clock), selector = { taskId, expectedRevision };
       const original = await repository.readCancellationSettlementReceipt(selector);
-      if (observe) return original;
-      // The ORIGINAL repository locks/CASes the task and proves absence of
-      // steps/plans/inputs/results/invocations/resource charges/reservations.
-      // Any started/unknown work is refused; TTL is never this evidence.
+      if (mode === 'read') return original;
+      // Both paths use the ORIGINAL aggregate transaction: absence for an
+      // unstarted run, or released + fully measured original model wait.
+      // Running/unknown/unmeasured work is refused. Neither path refunds usage.
+      const command = { ...selector, to: 'cancelled', reason: 'cancel_settled' };
       const receipt = original.event ? { event: original.event, runRevision: undefined }
-        : await repository.settleUnstartedCancellation({ ...selector, to: 'cancelled', reason: 'cancel_settled' }, originalRunId);
+        : mode === 'unstarted' ? await repository.settleUnstartedCancellation(command, originalRunId)
+          : await repository.settleInputCancellation(command,
+            PrismaTaskInputRepository.releasedCancellationWitness(d.db, current.tasks, d.clock));
       return { receipt, cancellation: 'task_cancelled_not_business_rollback' as const,
         remoteCancellation: 'not_attested' as const, automaticRetry: false as const, admission: 'not_granted' as const };
     });
   };
   const settleUnstartedCancellation = (request: { headers: { authorization?: unknown } }, reference: unknown,
-    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, false, signal);
+    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, 'unstarted', signal);
+  const settleReleasedInputCancellation = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, 'released_input', signal);
   const readCancellationSettlementReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
-    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, true, signal);
+    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, 'read', signal);
   const readAnswer = (request: { headers: { authorization?: unknown } }, reference: unknown, value: unknown, signal?: AbortSignal) => {
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -193,7 +198,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
       readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
-      continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, readCancellationSettlementReceipt },
+      continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt },
     policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
@@ -210,7 +215,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer, continueAnswer: application.continueAnswer.bind(application),
-      requestCancel, readCancelReceipt, settleUnstartedCancellation, readCancellationSettlementReceipt },
+      requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt },
     policies: composeStaffInspectionTaskPolicies(dependencies, { enabled: true, ttlMs: 120000,
       operations: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run',
         'transition_task', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] }) };

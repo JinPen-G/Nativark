@@ -56,6 +56,7 @@ export const AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT = Object.freeze({
     readAccounting: 'accounting/read', reconcileAccounting: 'accounting/reconcile',
     reconcile: 'reconcile', requestCancel: 'cancel', readCancelReceipt: 'cancel/receipt', readInput: 'input/read', resume: 'input/resume',
     settleUnstartedCancellation: 'cancel/settle-unstarted', readCancellationSettlementReceipt: 'cancel/settlement/receipt',
+    settleReleasedInputCancellation: 'cancel/settle-released-input',
     readAnswer: 'input/receipt', continueAnswer: 'input/continue',
 });
 /** Current same-staff-owner candidate-runtime policies only, never Core
