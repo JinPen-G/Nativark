@@ -85,7 +85,16 @@ export class ModelEgressTransport implements ModelJsonTransport {
     const url = modelEgressUrl(input.url), limit = modelByteLimit(input.maxResponseBytes);
     if (input.redirects !== "error" || typeof input.body !== "string" || Buffer.byteLength(input.body) > MODEL_REQUEST_BYTES || !input.signal || input.signal.aborted) throw new ModelGatewayError(input.signal?.aborted ? "CANCELLED" : "CONFIG_INVALID");
     const entries = Object.entries(input.headers);
-    if (entries.length !== 2 || entries.some(([name, value]) => !["authorization", "content-type"].includes(name.toLowerCase()) || typeof value !== "string" || /[^\x20-\x7e]/u.test(value)) || !/^Bearer \S+$/u.test(input.headers.Authorization ?? "") || input.headers["Content-Type"] !== "application/json" || entries.reduce((n, [key, value]) => n + Buffer.byteLength(key + value), 0) > MODEL_HEADER_BYTES) throw new ModelGatewayError("CONFIG_INVALID");
+    // Exactly one protocol authentication shape; never arbitrary SDK headers,
+    // ambient credentials, duplicate casing or mixed Bearer/API-key modes.
+    const bearer = entries.length === 2 && Object.keys(input.headers).every(key => ['Authorization', 'Content-Type'].includes(key))
+      && /^Bearer [\x21-\x7e]{1,8192}$/u.test(input.headers.Authorization ?? '');
+    const messages = entries.length === 3 && Object.keys(input.headers).every(key => ['x-api-key', 'anthropic-version', 'Content-Type'].includes(key))
+      && /^[\x21-\x7e]{1,8192}$/u.test(input.headers['x-api-key'] ?? '') && input.headers['anthropic-version'] === '2023-06-01';
+    if ((!bearer && !messages) || input.headers['Content-Type'] !== 'application/json'
+      || entries.some(([, value]) => typeof value !== 'string' || /[^\x20-\x7e]/u.test(value))
+      || entries.reduce((n, [key, value]) => n + Buffer.byteLength(key + value), 0) > MODEL_HEADER_BYTES) throw new ModelGatewayError('CONFIG_INVALID');
+    input = { ...input, headers: Object.freeze({ ...input.headers }) };
     const start = this.dependencies.now();
     if (!Number.isFinite(start)) throw new ModelGatewayError("CONFIG_INVALID");
     const deadline = start + this.timeoutMs;
@@ -120,7 +129,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
           else callback(null, pinned.address, pinned.family);
         };
         request = this.dependencies.request({ protocol: "https:", hostname: host, port: url.port || 443, path: url.pathname,
-          method: "POST", headers: { Authorization: input.headers.Authorization, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(input.body) },
+          method: "POST", headers: { ...input.headers, "Content-Length": Buffer.byteLength(input.body) },
           agent: false, lookup, rejectUnauthorized: true, servername: isIP(host) ? "" : host, maxHeaderSize: MODEL_HEADER_BYTES }, incoming => {
           response = incoming;
           incoming.on("error", () => finish(new ModelGatewayError("PROVIDER_FAILED")));

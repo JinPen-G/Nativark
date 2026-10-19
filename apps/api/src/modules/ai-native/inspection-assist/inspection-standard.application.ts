@@ -2,6 +2,7 @@
  * and ledger. Inert until explicit SERVER configuration plus current persisted
  * policies/capabilities/entitlement/budget; never an inspection submitter. */
 import { z } from 'zod';
+import { NATIVE_MODEL_PROTOCOLS } from '../native-model-protocols';
 import { isAiTaskInputSubmissionDraft } from '@rental-os/shared';
 import type { ModuleRef } from '@nestjs/core';
 import type { AuthService } from '../../auth/auth.service';
@@ -205,7 +206,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     scene: { code: STAFF_RECOGNITION_SCENES[kind], version: '1' },
     gatewayScene: { sceneCode: STAFF_RECOGNITION_SCENES[kind], routeScene: 'vision' as const, maxOutputTokens: config.maxOutputTokens },
     gateway: { secrets: d.secrets, platformProfileId: config.platformProfileId, callPriceVersion: config.callPriceVersion,
-      routeScene: 'vision' as const, ...(d.adapters ? { adapters: [...d.adapters] } : { nativeProtocol: 'openai_chat_completions' as const }) } });
+      routeScene: 'vision' as const, ...(d.adapters ? { adapters: [...d.adapters] } : { nativeProtocol: NATIVE_MODEL_PROTOCOLS }) } });
   const dependencies: InspectionRecognitionTaskDependencies = { enabled: true, inspection, limits: selected.limits,
     model: select('image', selected.image), ...(selected.audio ? { audioModel: select('audio', selected.audio) } : {}) };
   const application = new InspectionRecognitionTaskApplication(dependencies);

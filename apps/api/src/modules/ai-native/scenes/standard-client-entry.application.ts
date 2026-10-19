@@ -9,8 +9,7 @@ import { AiClientEntryController, type AiClientEntryApplication } from './client
 import { composeRequestBoundClientApplication, type AiClientApplicationRequest, type AiClientRequestDependencies } from './client-request.application';
 import type { SecretBox } from '../../../common/secret-box';
 import type { ModelAdapter } from '../model-gateway.ports';
-import { ChatCompletionsAdapter } from '../chat-completions.adapter';
-import { createNativeModelEgressTransport } from '../model-egress.transport';
+import { createNativeModelAdapters } from '../native-model-adapters';
 import { gatewayPricingSelectionSchema } from '../budget/gateway-pricing-evidence';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 
@@ -38,7 +37,7 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
     || suppliedAdapters !== undefined && (!Array.isArray(suppliedAdapters) || !suppliedAdapters.length))
     throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_dependencies');
   const gatewayScene = { sceneCode: 'quote_clarification', routeScene: 'chat' as const, maxOutputTokens: config.maxOutputTokens };
-  const adapters = suppliedAdapters ? [...suppliedAdapters] : [new ChatCompletionsAdapter(createNativeModelEgressTransport())];
+  const adapters = suppliedAdapters ? [...suppliedAdapters] : createNativeModelAdapters();
   return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
     inputSource: 'original_client', gatewayScene,
     gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },

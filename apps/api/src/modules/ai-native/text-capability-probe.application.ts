@@ -1,5 +1,5 @@
 import type { ModelJsonTransport } from './chat-completions.adapter';
-import { ChatCompletionsAdapter } from './chat-completions.adapter';
+import { createNativeModelAdapter } from './native-model-adapters';
 import { createNativeModelEgressTransport } from './model-egress.transport';
 import { RoutedModelTransport, TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
 import { PublicAiGatewayService } from './public-ai-gateway.service';
@@ -16,7 +16,7 @@ import type { TenantModelConfigurationAuthority } from './tenant-model-config.au
 import type { TenantModelConfigService } from './tenant-model-config.service';
 import type { AiScopeRepository } from './ai-scope.repository';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
-import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
+import { ModelGatewayError, modelAdapterSupportsCapabilities, type GatewayContext } from './model-gateway.ports';
 import { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
@@ -51,7 +51,7 @@ export class TextCapabilityProbeApplication {
   private readonly accounting;
   private readonly admission;
   private readonly dispatch;
-  private readonly adapter;
+  private readonly protocol: ModelJsonTransport;
   constructor(private readonly input: TextCapabilityProbeDependencies) {
     if (!input || [input.management?.authorize, input.scopes?.resolveCurrent, input.scopes?.resolveRoutingScopes,
       input.configuration?.selectionForInvocation, input.configuration?.profile, input.configuration?.credential,
@@ -71,7 +71,18 @@ export class TextCapabilityProbeApplication {
     const admissions = new PrismaAdmissionRepository(input.db);
     this.admission = new InvocationAdmissionService(admissions, input.clock);
     this.dispatch = new InvocationDispatchService(admissions);
-    this.adapter = new ChatCompletionsAdapter(input.protocol ?? createNativeModelEgressTransport(), { mediaInput: ['image', 'audio'] });
+    this.protocol = input.protocol ?? createNativeModelEgressTransport();
+  }
+  private adapter(protocol: string, command: TextProbeCommand, scopeId: string) {
+    const prepared = textProbeIntent(command.operationId, scopeId, textProbeCapability(command));
+    const adapter = createNativeModelAdapter(protocol,
+      textProbeCapability(command) === 'structured_output' ? { structuredOutput: {
+        name: 'rental_capability_token', schema: { type: 'object', properties: { token: { type: 'string', maxLength: 22,
+          const: (JSON.parse(prepared.expected) as { token: string }).token } }, required: ['token'], additionalProperties: false } } }
+        : textProbeCapability(command) === 'tools' ? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } }
+          : { mediaInput: ['image', 'audio'] }, this.protocol);
+    if (!modelAdapterSupportsCapabilities(adapter, textProbeRequirements(command))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    return adapter;
   }
   private authority(context: GatewayContext, command: TextProbeCommand) {
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
@@ -176,6 +187,7 @@ export class TextCapabilityProbeApplication {
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
+    this.adapter(resolution.route.profile.protocol, command, resolution.consumerScope.id);
     this.requirePlatformConnection(resolution.route.profile.serviceMode);
     const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command));
     return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile, context.tenantId) };
@@ -229,6 +241,9 @@ export class TextCapabilityProbeApplication {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
     const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command)), profile = resolution.route.profile;
+    // Refuse an absent local protocol capability before registration, receipt
+    // creation or a budget/dispatch attempt; remote proof cannot add audio.
+    const adapter = this.adapter(profile.protocol, command, resolution.consumerScope.id);
     const configuration = textProbeConfiguration(profile, context.tenantId);
     const descriptor = textProbeDescriptorSchema.parse({ command, context, scopeId: resolution.consumerScope.id, profileId: profile.id,
       profileFingerprint: command.profileFingerprint, methodVersion: textProbeMethod(command), callId: prepared.intent.requestId,
@@ -259,13 +274,6 @@ export class TextCapabilityProbeApplication {
     await authority.assertCurrent(context, resolution);
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
-    const adapter = textProbeCapability(command) === 'structured_output'
-      ? new ChatCompletionsAdapter(this.input.protocol ?? createNativeModelEgressTransport(), { structuredOutput: {
-        name: 'rental_capability_token', schema: { type: 'object', properties: { token: { type: 'string', maxLength: 22,
-          const: (JSON.parse(prepared.expected) as { token: string }).token } }, required: ['token'], additionalProperties: false } } })
-      : textProbeCapability(command) === 'tools'
-        ? new ChatCompletionsAdapter(this.input.protocol ?? createNativeModelEgressTransport(), {
-          orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } }) : this.adapter;
     const transport = new RoutedModelTransport({ tenant, platform }, [adapter], authority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit
@@ -274,11 +282,11 @@ export class TextCapabilityProbeApplication {
         ?? new PrismaTaskGatewayAudit(this.input.db, this.input.scopes, this.accounting.facts, charges[0].taskId, this.input.clock),
       ...(authority.media ? { media: authority.media } : {}),
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,
-        this.adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
-    }, evidence: this.adapter.evidenceMode, verifyEvidence: async (route, mode) => {
+        adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
+    }, evidence: adapter.evidenceMode, verifyEvidence: async (route, mode) => {
       await authority.assertCurrent(context, route);
       const proof = route.route.probe;
-      return mode === this.adapter.evidenceMode && proof?.purpose === 'capability_text_probe'
+      return mode === adapter.evidenceMode && proof?.purpose === 'capability_text_probe'
         && proof.operationId === command.operationId && proof.profileFingerprint === command.profileFingerprint
         && proof.intentHash === prepared.intentHash;
     } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32,
@@ -308,6 +316,7 @@ export class TextCapabilityProbeApplication {
     context = probeContextSchema.parse(structuredClone(context));
     command = textProbeCommandSchema.parse(structuredClone(command));
     const authority = this.authority(context, command), current = await authority.resolve(context, textProbeRequirements(command));
+    this.adapter(current.route.profile.protocol, command, current.consumerScope.id);
     const result = await this.capabilities.preflight(current.route.profile, textProbeRequirements(command));
     await authority.assertCurrent(context, current);
     return result;

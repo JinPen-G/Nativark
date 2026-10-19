@@ -21,7 +21,7 @@ const platformCapabilities = { type: 'array', maxItems: 8, uniqueItems: true,
 const platformSaved = { profileId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][\\w.:-]{0,35}$' },
   revision: int(1, 4294967295), enabled: bool, credentialConfigured: bool };
 export const AI_USAGE_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
-  AiPlatformModelSettingsInputDraft: obj({ expectedRevision: int(0, 4294967294), operationKey, protocol: choice('openai_chat_completions'),
+  AiPlatformModelSettingsInputDraft: obj({ expectedRevision: int(0, 4294967294), operationKey, protocol: choice('openai_chat_completions', 'openai_responses', 'anthropic_messages'),
     model, baseUrl, enabled: bool, maxOutputTokens: int(1, 32768), allowedCapabilities: platformCapabilities,
     secretChange: { oneOf: [obj({ operation: choice('retain') }), obj({ operation: choice('replace'),
       apiKey: { type: 'string', minLength: 1, maxLength: 8192, pattern: '^[\\x21-\\x7e]+$', writeOnly: true } }), obj({ operation: choice('clear') })] }

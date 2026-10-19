@@ -47,7 +47,7 @@ export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
  * URL profile identity is validated separately; a body cannot override it. */
 export const AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({ basePath: 'platform/ai/providers' } as const);
 export type AiPlatformModelSettingsInputDraft = {
-  expectedRevision: number; protocol: 'openai_chat_completions'; model: string; baseUrl: string;
+  expectedRevision: number; protocol: 'openai_chat_completions' | 'openai_responses' | 'anthropic_messages'; model: string; baseUrl: string;
   operationKey?: string;
   enabled: boolean; maxOutputTokens: number;
   allowedCapabilities?: ('text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning')[];

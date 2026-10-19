@@ -30,8 +30,8 @@ import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
 import { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';
 import { BudgetError } from './budget/budget.ports';
-import { ChatCompletionsAdapter } from './chat-completions.adapter';
-import { createNativeModelEgressTransport } from './model-egress.transport';
+import { createNativeModelAdapters } from './native-model-adapters';
+import { isNativeModelProtocol, type NativeModelProtocol } from './native-model-protocols';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
@@ -46,7 +46,7 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   /** Explicit server selection of the existing bounded transport, instead of
    * injected adapters. Neither omission nor an empty array enables transport.
    * This is protocol support only, never a live provider/capability grant. */
-  nativeProtocol?: 'openai_chat_completions';
+  nativeProtocol?: NativeModelProtocol | readonly NativeModelProtocol[];
   /** Optional explicit audit sink. Otherwise use the existing durable OperationLog. */
   audit?: UnifiedGatewayAudit;
   /** Server-created original attachment ACL/ObjectReader adapter, not request
@@ -147,7 +147,9 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
     || !['chat', 'builder', 'vision', 'knowledge', 'reasoning'].includes(input.routeScene)
     || 'callPriceVersion' in input
-    || input.nativeProtocol !== undefined && input.nativeProtocol !== 'openai_chat_completions'
+    || input.nativeProtocol !== undefined && !(typeof input.nativeProtocol === 'string'
+      ? isNativeModelProtocol(input.nativeProtocol) : Array.isArray(input.nativeProtocol)
+        && input.nativeProtocol.length > 0 && input.nativeProtocol.every(isNativeModelProtocol))
     || input.nativeProtocol !== undefined && input.adapters !== undefined
     || input.nativeProtocol === undefined && (!Array.isArray(input.adapters) || !input.adapters.length)
     || input.audit !== undefined && typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
@@ -158,11 +160,11 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   const { db, auth, credentials, subscriptions, guard, secrets, taskId, platformProfileId,
     routeScene, audit } = input;
   const clock = input.clock ?? (() => new Date());
-  const adapters = input.nativeProtocol === 'openai_chat_completions'
-    ? [new ChatCompletionsAdapter(createNativeModelEgressTransport(), {
+  const adapters = input.nativeProtocol !== undefined
+    ? createNativeModelAdapters(input.nativeProtocol, {
       orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION },
       ...(input.media ? { mediaInput: ['image', 'audio'] as const } : {})
-    })] : [...input.adapters!];
+    }) : [...input.adapters!];
   const dependencies = { db, auth, credentials, subscriptions, clock };
   const authorization = composePersistedTaskAuthorization(dependencies);
   const invocation = { resolve: () => authorization.execution.authorize(taskId) };

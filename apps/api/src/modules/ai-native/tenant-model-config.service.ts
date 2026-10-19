@@ -16,9 +16,10 @@ import { modelConfigurationOperationKey, type ModelConfigurationOperationWrite }
 import type { AiModelConfigurationOperationDraft } from '@rental-os/shared';
 import type { AiLegacyModelConfigurationDraft } from '@rental-os/shared';
 import type { LegacyModelConfigurationBasis, LegacyModelConfigurationSource } from './tenant-model-config.repository';
+import { NATIVE_MODEL_PROTOCOLS } from './native-model-protocols';
 
 /** Protocol support, never a supplier/model catalogue. Extend through tested adapters. */
-export const tenantModelProtocols = ["openai_chat_completions"] as const;
+export const tenantModelProtocols = NATIVE_MODEL_PROTOCOLS;
 export const tenantModelSettingsSchema = z.object({
   enabled: z.boolean().default(false), protocol: z.enum(tenantModelProtocols),
   baseUrl: z.string().min(1).max(2048), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),

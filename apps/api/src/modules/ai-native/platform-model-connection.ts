@@ -12,6 +12,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { AiModelConfigurationResultUnknownError, AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import { parseAiProviderProfileRecord } from './provider-profile.repository';
+import { NATIVE_MODEL_PROTOCOLS, isNativeModelProtocol } from './native-model-protocols';
 import { modelConfigurationOperationKey, readModelConfigurationOperation, appendModelConfigurationOperation,
   type ModelConfigurationOperationDb } from './model-configuration-operation';
 
@@ -20,7 +21,7 @@ const revision = z.number().int().min(1).max(4294967295);
 const saveSchema = z.object({
   profileId: id, expectedRevision: z.number().int().min(0).max(4294967294),
   operationKey: modelConfigurationOperationKey.optional(),
-  protocol: z.literal('openai_chat_completions'), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
+  protocol: z.enum(NATIVE_MODEL_PROTOCOLS), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   baseUrl: z.string().min(1).max(2048), enabled: z.boolean(),
   maxOutputTokens: z.number().int().min(1).max(32768),
   allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(items => new Set(items).size === items.length).optional(),
@@ -227,7 +228,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     const context = structuredClone(value), profile = structuredClone(selected);
     if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== 'string' || !/^[\w.:-]{1,128}$/u.test(v))) throw new ModelGatewayError('INVALID_REQUEST');
     if (!profile?.enabled || profile.disabledAt || profile.scopeKind !== 'PLATFORM'
-      || profile.serviceMode !== 'platform_managed' || profile.protocol !== 'openai_chat_completions'
+      || profile.serviceMode !== 'platform_managed' || !isNativeModelProtocol(profile.protocol)
       || profile.credentialRef !== this.reference(profile.id, profile.configRevision)) throw new ModelGatewayError('CONFIG_INVALID');
     const current = async () => {
       try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }

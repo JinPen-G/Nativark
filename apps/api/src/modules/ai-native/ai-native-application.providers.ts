@@ -6,6 +6,7 @@
 import type { FactoryProvider } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { z } from 'zod';
+import { NATIVE_MODEL_PROTOCOLS } from './native-model-protocols';
 import { SecretBox } from '../../common/secret-box';
 import { PrismaService } from '../database/prisma.service';
 import { AuthService } from '../auth/auth.service';
@@ -590,7 +591,7 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
-        pricing: configuration.pricing, nativeProtocol: 'openai_chat_completions' },
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host,
       orderReadChain: { enabled: true, answerRoundTrip: true } }));
