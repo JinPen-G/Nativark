@@ -10,7 +10,7 @@ import type { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 
-type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget'>;
+type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional() }).strict();
 const taskSelect = { id: true, scopeId: true, sceneCode: true, sceneVersion: true, status: true, revision: true,
@@ -79,6 +79,43 @@ export class TaskPerformanceReader {
           || !AI_STEP_STATUSES_DRAFT.some(status => status === step.status.toLowerCase())
           || !['NONE', 'POSSIBLE', 'COMMITTED'].includes(step.effect)) throw unavailable();
       }
+      const visibleSteps = steps.slice(0, 200), stepIds = visibleSteps.map(step => step.id);
+      // Group only this bounded, owner-authorized step window in SQL. Do not
+      // load every historical charge or label updatedAt-createdAt tool latency.
+      const readActiveTime = () => stepIds.length ? this.db.aiTaskExecutionCharge.groupBy({
+        by: ['scopeId', 'taskId', 'runId', 'stepId', 'status'],
+        where: { scopeId: task.scopeId, taskId: task.id, resource: 'ACTIVE_MS', stepId: { in: stepIds },
+          budget: { is: { task: { is: access.where } } } },
+        _sum: { amount: true, actualAmount: true }, _count: { _all: true, actualAmount: true },
+        orderBy: [{ runId: 'asc' }, { stepId: 'asc' }, { status: 'asc' }], take: 601,
+      }) : Promise.resolve([]);
+      const charges = structuredClone(await readActiveTime());
+      if (!Array.isArray(charges) || charges.length > 600) throw unavailable();
+      const activeTimes = new Map<string, { recordedMs: bigint | null; reservedMs: bigint; unknownMs: bigint }>();
+      const chargeKeys = new Set<string>();
+      for (const charge of charges) {
+        const step = visibleSteps.find(item => item.id === charge.stepId), key = JSON.stringify([charge.runId, charge.stepId, charge.status]);
+        if (!step || charge.scopeId !== task.scopeId || charge.taskId !== task.id || charge.runId !== step.runId
+          || !['RECORDED', 'RESERVED', 'UNKNOWN'].includes(charge.status) || chargeKeys.has(key)
+          || !Number.isSafeInteger(charge._count._all) || charge._count._all < 1) throw unavailable();
+        chargeKeys.add(key);
+        const current = activeTimes.get(step.id) ?? { recordedMs: null, reservedMs: 0n, unknownMs: 0n };
+        if (charge.status === 'RECORDED') {
+          if (charge._count.actualAmount !== charge._count._all || charge._sum.actualAmount === null) throw unavailable();
+          current.recordedMs = uint(charge._sum.actualAmount);
+        } else {
+          if (charge._sum.amount === null) throw unavailable();
+          if (charge.status === 'UNKNOWN') current.unknownMs = uint(charge._sum.amount);
+          else current.reservedMs = uint(charge._sum.amount);
+        }
+        activeTimes.set(step.id, current);
+      }
+      if (!budget && charges.length) throw unavailable();
+      if (budget) {
+        const measured = [...activeTimes.values()];
+        if (measured.reduce((total, item) => total + (item.recordedMs ?? 0n), 0n) > uint(budget.consumedActiveMs)
+          || measured.reduce((total, item) => total + item.reservedMs + item.unknownMs, 0n) > uint(budget.reservedActiveMs)) throw unavailable();
+      }
       let resources: AiTaskPerformanceObservationDraft['resources'] = { state: 'not_recorded' };
       if (budget) {
         if (budget.scopeId !== task.scopeId || budget.taskId !== task.id || !revision(budget.revision)
@@ -101,7 +138,8 @@ export class TaskPerformanceReader {
       if (financial.taskId !== task.id) throw unavailable();
       const latest = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: taskSelect }));
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
-        || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)) {
+        || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
+        || !isDeepStrictEqual(await readActiveTime(), charges)) {
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
       const after = await this.actions.resolve(command.taskId, 'read_metadata'), now = this.clock();
@@ -124,10 +162,15 @@ export class TaskPerformanceReader {
         resources, runs: { items: runs.slice(0, 50).map(run => ({ runId: run.id, sequence: run.sequence,
           status: run.status.toLowerCase(), startedAt: run.startedAt?.toISOString() ?? null, endedAt: run.endedAt?.toISOString() ?? null,
           elapsedMs: elapsed(run.startedAt, run.endedAt) })), truncated: runs.length > 50, coverage: 'bounded_window' },
-        steps: { items: steps.slice(0, 200).map(step => ({ stepId: step.id, runId: step.runId, sequence: step.sequence,
+        steps: { items: visibleSteps.map(step => ({ stepId: step.id, runId: step.runId, sequence: step.sequence,
           toolCode: step.toolCode, toolVersion: step.toolVersion, status: step.status.toLowerCase(), effect: step.effect.toLowerCase(),
-          revision: step.revision })), truncated: steps.length > 200, coverage: 'bounded_window' }, financial,
-        measurements: { firstToken: 'not_recorded', firstCard: 'not_recorded', toolLatency: 'not_recorded', rates: 'not_computed', slo: 'not_evaluated' },
+          revision: step.revision, activeTime: activeTimes.has(step.id) ? { state: 'recorded',
+            recordedMs: activeTimes.get(step.id)!.recordedMs?.toString() ?? null,
+            reservedMs: activeTimes.get(step.id)!.reservedMs.toString(), unknownMs: activeTimes.get(step.id)!.unknownMs.toString(),
+            basis: 'persistent_resource_not_provider_latency' } : { state: 'not_recorded' } })), truncated: steps.length > 200, coverage: 'bounded_window' }, financial,
+        measurements: { firstToken: 'not_recorded', firstCard: 'not_recorded',
+          toolLatency: [...activeTimes.values()].some(item => item.recordedMs !== null) ? 'resource_active_time_only' : 'not_recorded',
+          rates: 'not_computed', slo: 'not_evaluated' },
         consistency: 'revalidated_reads_not_atomic_snapshot', execution: 'read_only_no_dispatch_or_release' };
       if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 131072) throw unavailable();
       return result;

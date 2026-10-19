@@ -14,9 +14,11 @@ export type AiTaskPerformanceObservationDraft = {
   runs: { items: Array<{ runId: string; sequence: number; status: string; startedAt: string | null;
     endedAt: string | null; elapsedMs: string | null }>; truncated: boolean; coverage: 'bounded_window' };
   steps: { items: Array<{ stepId: string; runId: string; sequence: number; toolCode: string; toolVersion: string;
-    status: string; effect: string; revision: number }>; truncated: boolean; coverage: 'bounded_window' };
+    status: string; effect: string; revision: number;
+    activeTime: { state: 'not_recorded' } | { state: 'recorded'; recordedMs: string | null; reservedMs: string;
+      unknownMs: string; basis: 'persistent_resource_not_provider_latency' } }>; truncated: boolean; coverage: 'bounded_window' };
   financial: AiTaskBudgetUsagePageDraft;
-  measurements: { firstToken: 'not_recorded'; firstCard: 'not_recorded'; toolLatency: 'not_recorded';
+  measurements: { firstToken: 'not_recorded'; firstCard: 'not_recorded'; toolLatency: 'not_recorded' | 'resource_active_time_only';
     rates: 'not_computed'; slo: 'not_evaluated' };
   consistency: 'revalidated_reads_not_atomic_snapshot'; execution: 'read_only_no_dispatch_or_release';
 };
@@ -37,9 +39,12 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
     runs: object({ items: list(object({ runId: id, sequence: revision, status: text(32), startedAt: nullable(time),
       endedAt: nullable(time), elapsedMs: nullable(count) }), 50), truncated: flag, coverage: choice('bounded_window') }),
     steps: object({ items: list(object({ stepId: id, runId: id, sequence: revision, toolCode: text(191), toolVersion: text(191),
-      status: text(32), effect: text(32), revision }), 200), truncated: flag, coverage: choice('bounded_window') }),
+      status: text(32), effect: text(32), revision,
+      activeTime: { oneOf: [object({ state: choice('not_recorded') }), object({ state: choice('recorded'), recordedMs: nullable(count),
+        reservedMs: count, unknownMs: count, basis: choice('persistent_resource_not_provider_latency') })] } }), 200),
+      truncated: flag, coverage: choice('bounded_window') }),
     financial: { $ref: '#/components/schemas/AiTaskBudgetUsagePageDraft' },
-    measurements: object({ firstToken: choice('not_recorded'), firstCard: choice('not_recorded'), toolLatency: choice('not_recorded'),
+    measurements: object({ firstToken: choice('not_recorded'), firstCard: choice('not_recorded'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
       rates: choice('not_computed'), slo: choice('not_evaluated') }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') }),
 };
