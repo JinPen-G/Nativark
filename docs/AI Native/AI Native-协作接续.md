@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能：`ddb3b155`将原调用的预算拒绝观察接入invoke/stream、原OperationLog及任务性能消费者；不改账、不派发，unknown不能冒充拒绝证明。实际授权/预算/Prisma组合stdin 2/2、既有Gateway冒烟3/3，均0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。原精确成本和释放恢复保留。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行，不称只剩环境。原28项等权64.3%、验收0/28，百分比不变；其他WIP保留。
+> 更新时间：2026-10-19。最新收口：`d4dede80`运行/单步准备与执行共用剩余工作时间，`ccf65af6`登记回执精确绑定并快照，`efa6c570`登记写应答不明保留unknown与原步骤，不猜旧租约释放。实际授权/运行器/Prisma组合stdin两组最终2/2、3/3，均0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。原预算拒绝、成本与恢复保留。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行，不称只剩环境。原28项等权64.3%、验收0/28，百分比不变；其他WIP保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,10 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+运行器工作窗和登记恢复：本次held run计时从进入持有阶段开始，计划/资源准备不再获得免费前缀；每步的取消前检、登记、资源准备、start及effect共用该步剩余时间和本次总工作时间。时间不足不登记/执行新动作，不补1毫秒；已发生结果的原收据、资源结算及租约善后仍保留各自有限等待，不能将工作窗结束当作回滚或无消耗证明。领取前和计划尚未取得时沿既有5秒边界，不宣称全部HTTP墙钟严格等于计划工作时间。持久累计资源门不变，恢复不清零。
+
+原登记适配器先核对command对应的task/registrationRef/holder/CAS，返回后立即快照原结果；新登记必须匹配原step.registered事件、task/run/step/sequence与精确新task/run revision，重放不产生新run revision。读回等待期间生产者修改共享对象不改变原观察。畸形已写回执为AI_RESULT_UNKNOWN；仓储已尝试写入后的不明事务，以及回调完成但COMMIT丢应答，现抛AiStepRegistrationCommitUnknownError，不重试、不报告普通未提交失败、不尝试释放猜测的旧租约。按当前原任务快照/事件及既有登记重放读取核对，不新建收据系统或HTTP。实际离线组合已核对原PENDING步骤和游标可读；混合步骤/全部宿主、真实多进程/宕机仍未验，可信计数及完整标准消费仍待补，不扩大AIN-06验收结论。
 
 预算拒绝观测：Unified仅在原预算`reserve`明确返回`BUDGET_UNAVAILABLE`时调用既有观察者的`budgetDenied`，最多等待1秒、沿宿主取消；失败保留原拒绝，不转换为成功、退额或重试。标准运营/员工、客户与能力探测沿已有`PrismaTaskGatewayAudit`实例接入，未覆盖的自定义观察者不补造记录。生产者复核当前身份、原task/invocation/configuration/registration、领取token及有效期；原预留或会计收据存在时不制造“干净拒绝”依据。只向原OperationLog追加ID/hash和固定代码，同键同载荷可观察、COMMIT应答不明不重写。`TaskPerformanceReader.budgetAdmission`仅返回当前owner的50调用窗口中已记录拒绝，读后复验；没有记录不等于准入成功，拒绝不是未消耗证明，不计算完整拒绝率或SLO。资金/调用账本未新增写入，未注册新HTTP或启用配置。下一步仍补可信计数生产和标准全链，不以此片宣称AIN-25已到75%。
 
