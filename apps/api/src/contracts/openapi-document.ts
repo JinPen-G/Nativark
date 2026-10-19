@@ -2092,7 +2092,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
   { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
-    summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
+    summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write. Preparation is bounded and disconnect closes request credentials; a write acknowledgement timeout is unknown and must be observed by the same original request key, never recreated.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
   ...([
     ['observeUpload', 'ObserveUploadRequestDraft', 'ObserveUploadResponseDraft'],
@@ -2216,10 +2216,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema, responseSchema: 'GenericObject' })),
   ...(['read', 'material', 'recovery'] as const).map(action => ({ method: 'post' as const,
     path: `/api/ai-native/scene-requests/${action}`, tag: 'AI Native', operationId: `readOriginalOrderFacts_${action}`,
-    summary: 'Read the exact original owner-bound request/current authorized facts; no worker, new run, approval or model invocation.',
+    summary: 'Read the exact original owner-bound request/current authorized facts with bounded dependency waits and request-local cancellation; no worker, new run, approval or model invocation. A closed observation is not evidence of rollback or unused budget.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestReadDraft' })),
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
-    summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
+    summary: 'Observe the exact original request key after an uncertain acknowledgement, using bounded current authorization and no write/retry. Absence or an interrupted observation is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
   ...([
     ['start', 'AiSceneOrderReadReferenceDraft'], ['recover', 'AiSceneOrderReadReferenceDraft'],

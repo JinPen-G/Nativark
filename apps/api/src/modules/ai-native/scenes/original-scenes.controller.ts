@@ -153,10 +153,18 @@ export class AiOriginalTaskActionPolicyController {
 export class AiOriginalScenesController {
   constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}
   private readonly respond = respondAiScene;
+  /** Bound the original request, not its durable task. Body/auth snapshots
+   * precede all waits; interruption is never proof that a write rolled back. */
+  private call<T>(request: SceneRunHttpRequest, body: unknown,
+    consume: (current: AiSceneHttpRequest, command: unknown, signal: AbortSignal) => Promise<T>) {
+    return this.respond(() => {
+      const current = { headers: { authorization: request?.headers?.authorization } }, command = structuredClone(body);
+      return withRequestAbort(request, signal => consume(current, command, signal), { maxWaitMs: 15000 });
+    });
+  }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders) @HttpCode(200) @Header('Cache-Control', 'no-store')
   queryOrders(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    const current = { headers: { authorization: request?.headers?.authorization } }, query = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, signal => this.scenes.queryOrders(current, query, signal), { maxWaitMs: 15000 }));
+    return this.call(request, body, (current, command, signal) => this.scenes.queryOrders(current, command, signal));
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension) @HttpCode(200) @Header('Cache-Control', 'no-store')
   previewOrderExtension(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
@@ -166,22 +174,22 @@ export class AiOriginalScenesController {
       return withRequestAbort(request, signal => this.scenes.previewOrderExtension(request, command, signal));
     });
   }
-  @Post()
-  create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.create(request, body)); }
-  @Post('read')
-  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.read(request, body)); }
-  @Post('reissue')
-  reissue(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reissue(request, body)); }
-  @Post('reconcile')
-  reconcile(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reconcile(request, body)); }
-  @Post('reconcile-reissue')
-  reconcileReissue(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reconcileReissue(request, body)); }
-  @Post('create-task')
-  createTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.createTask(request, body)); }
-  @Post('material')
-  material(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.prepareTaskMaterial(request, body)); }
-  @Post('recovery')
-  recovery(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readRecovery(request, body)); }
+  @Post() @Header('Cache-Control', 'no-store')
+  create(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.create(current, command, signal)); }
+  @Post('read') @Header('Cache-Control', 'no-store')
+  read(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.read(current, command, signal)); }
+  @Post('reissue') @Header('Cache-Control', 'no-store')
+  reissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reissue(current, command, signal)); }
+  @Post('reconcile') @Header('Cache-Control', 'no-store')
+  reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reconcile(current, command, signal)); }
+  @Post('reconcile-reissue') @Header('Cache-Control', 'no-store')
+  reconcileReissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reconcileReissue(current, command, signal)); }
+  @Post('create-task') @Header('Cache-Control', 'no-store')
+  createTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.createTask(current, command, signal)); }
+  @Post('material') @Header('Cache-Control', 'no-store')
+  material(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.prepareTaskMaterial(current, command, signal)); }
+  @Post('recovery') @Header('Cache-Control', 'no-store')
+  recovery(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.readRecovery(current, command, signal)); }
   /** Read current preparation for the stored original request, never quote creation. */
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
   quoteReview(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
