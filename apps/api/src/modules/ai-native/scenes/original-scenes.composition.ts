@@ -56,6 +56,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     }
   };
   return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
+    queryOrders: tools.orders.read.bind(tools.orders),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),
     readOpeningSection: facts.readOpeningSection.bind(facts),

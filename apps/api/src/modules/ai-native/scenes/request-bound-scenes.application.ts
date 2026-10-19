@@ -1281,6 +1281,8 @@ function composeQuoteTaskCenterReaders(input: HumanQuoteOrderDependencies, confi
 export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
   const call = bindRequests(dependencies, options, composeAiOriginalScenes);
   return Object.freeze({
+    queryOrders: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.queryOrders(command), { write: false, signal }),
     create: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.create(command)),
     read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command)),
     reissue: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reissue(command)),

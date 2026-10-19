@@ -153,6 +153,11 @@ export class AiOriginalTaskActionPolicyController {
 export class AiOriginalScenesController {
   constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}
   private readonly respond = respondAiScene;
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  queryOrders(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, query = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, signal => this.scenes.queryOrders(current, query, signal), { maxWaitMs: 15000 }));
+  }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension) @HttpCode(200) @Header('Cache-Control', 'no-store')
   previewOrderExtension(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return this.respond(() => {

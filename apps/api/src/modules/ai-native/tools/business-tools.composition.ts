@@ -29,6 +29,7 @@ import { AiOrderInspectionFactsService } from './order-inspection-facts.service'
 import { composeAiSettingsBusinessConsumer, type AiSettingsBusinessDependencies } from '../scenes/settings-business-consumer.composition';
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
 import { AiOrderExtensionPreviewService } from './order-extension-preview.service';
+import { AiOrderCandidatesService } from './order-candidates.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -38,7 +39,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   credentials: AiOrderRouteCredentialSource;
   core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
-    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage'>>;
+    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage' | 'queryOrders'>>;
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
@@ -101,6 +102,8 @@ export function composeAiAuthorizedBusinessTools(input: {
       quoteAuthority: routes, quote: quotePreparation
     }),
     catalog: reads.catalog,
+    orders: new AiOrderCandidatesService(typeof input.core.queryOrders === 'function'
+      ? { queryOrders: input.core.queryOrders.bind(input.core) } : undefined, routes, input.clock),
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
     memberProfileDifference: new AiMemberProfileDifferenceService(reads.membershipCandidates, routes),

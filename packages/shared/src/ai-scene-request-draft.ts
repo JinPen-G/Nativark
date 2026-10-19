@@ -180,7 +180,7 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
   quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare',
-  previewOrderExtension: 'order-extension-preview'
+  previewOrderExtension: 'order-extension-preview', queryOrders: 'order-candidates/read'
 } as const);
 /** Owner-only operator policy management; never execution or business approval. */
 export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({

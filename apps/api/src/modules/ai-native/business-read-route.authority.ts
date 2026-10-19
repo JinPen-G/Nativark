@@ -12,12 +12,13 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import type { RentalQuoteRequest, RentalOrderExtensionRequest, SystemUserRow } from '@rental-os/shared';
 import { z } from 'zod';
 
-export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
+export type AiBusinessReadKind = 'catalog' | 'order_candidates' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
 export interface AiBusinessReadAuthority {
   withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
 const routes = {
   catalog: { method: 'GET', path: '/rental/v1/item-groups' },
+  order_candidates: { method: 'GET', path: '/rental/v1/orders' },
   availability: { method: 'POST', path: '/rental/v1/availability' },
   membership_candidates: { method: 'GET', path: '/rental/v1/booking-members' },
   booking_identity_options: { method: 'GET', path: '/rental/v1/booking-members/:customerId/booking-options' },
