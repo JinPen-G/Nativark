@@ -181,20 +181,34 @@ export class AiTaskRunner {
   async continueConfirmation(value: AiTaskRunnerConfirmationRequest, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
     const input = structuredClone(value);
     if (!this.deps.confirmation || !this.deps.effects.continueConfirmation || signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
-    const initial = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal);
-    if (initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
+    const initial = structuredClone(await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal));
+    if (initial.taskId !== input.taskId || initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
       || initial.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     let committed: Awaited<ReturnType<NonNullable<AiTaskRunnerDependencies['confirmation']>['resume']>>;
-    try { committed = await this.callBounded(() => this.deps.confirmation!.resume(input), 5000, 'confirmation_resume', signal); }
-    catch (error) {
-      if (error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      throw error;
-    }
-    if (committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
+    // Both commands and acknowledgements cross asynchronous ports. Preserve
+    // the original basis and holder even if their producer reuses an object.
+    const observed = await this.callWriteBounded(() => this.deps.confirmation!.resume(structuredClone(input)), 5000, 'confirmation_resume', signal);
+    try { committed = structuredClone(observed); }
+    catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement is not snapshot-safe'); }
+    if (!committed || !committed.lease || !committed.continuation
+      || committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
       || committed.lease.holderId !== input.lease.holderId || committed.lease.fencingToken !== input.lease.fencingToken
       || committed.lease.revision !== input.lease.revision + 1 || committed.continuation.stepId !== input.stepId
-      || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
-    const current = await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal);
+      || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef
+      || !['approved', 'rejected'].includes(committed.continuation.decision)
+      || typeof committed.continuation.decisionRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(committed.continuation.decisionRef)
+      || !finiteInteger(committed.continuation.remainingActiveMs, 1, 86400000)
+      || !finiteInteger(committed.continuation.remainingOutputBytes, 1, 16 * 1024 * 1024)
+      || typeof committed.lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(committed.lease.expiresAt))) {
+      // Resume may already be durable. A malformed observation cannot authorize
+      // another approval consumption, a guessed outcome or releasing its holder.
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement requires original receipt');
+    }
+    const current = structuredClone(await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal));
+    if (current.taskId !== input.taskId || current.revision !== committed.taskRevision
+      || current.status !== 'running' || current.cancelRequestedAt !== null) {
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation state changed before continuation');
+    }
     return this.runHeld({ taskId: input.taskId, runId: input.lease.runId }, false, current, committed.lease,
       signal, false, undefined, committed.continuation);
   }
@@ -213,7 +227,12 @@ export class AiTaskRunner {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
         || !commit.lease || commit.lease.taskId !== lease.taskId || commit.lease.runId !== lease.runId
         || commit.lease.holderId !== lease.holderId || commit.lease.fencingToken !== lease.fencingToken
-        || !finiteInteger(commit.lease.revision, lease.revision + 1, 4294967295)) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
+        || !finiteInteger(commit.lease.revision, lease.revision + 1, 4294967295)) {
+        // Every caller has already attempted a durable task/step transition.
+        // Without its exact new fence/revision we cannot release the old holder
+        // or report an ordinary unavailable result and imply safe retry.
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'persistent step acknowledgement requires original receipt');
+      }
       lease = structuredClone(commit.lease); taskRevision = commit.taskRevision;
       if (ref) ref.registered = { ...ref.registered, stepRevision: ref.registered.stepRevision + 1, taskRevision, runRevision: lease.revision };
     };
@@ -513,8 +532,8 @@ export class AiTaskRunner {
     if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
       || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
       || committed.lease.holderId !== lease.holderId || !Number.isSafeInteger(committed.lease.revision)
-      || committed.lease.revision <= lease.revision || committed.lease.fencingToken !== lease.fencingToken) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
-    if (committed.outcomeStatus !== undefined && !['succeeded', 'partially_succeeded', 'cancelled'].includes(committed.outcomeStatus)) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+      || committed.lease.revision <= lease.revision || committed.lease.fencingToken !== lease.fencingToken) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'task outcome acknowledgement requires original receipt');
+    if (committed.outcomeStatus !== undefined && !['succeeded', 'partially_succeeded', 'cancelled'].includes(committed.outcomeStatus)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'task outcome observation is invalid');
     const result: AiTaskRunnerOutcome = committed.outcomeStatus
       ? { status: committed.outcomeStatus, completedSteps: outcome.completedSteps, cleanupFailed: outcome.cleanupFailed } : outcome;
     return { outcome: result, lease: committed.lease, taskRevision: committed.taskRevision };
