@@ -345,7 +345,8 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.eventKey)) throw new BudgetError('INVALID');
     if (input.usage && !sameUnit(record.reserved, input.usage.quantity)) throw new BudgetError('INVALID');
     if ((input.action === 'settle' || input.action === 'reconcile') && !input.usage) throw new BudgetError('INVALID');
-    return this.db.$transaction(async tx => {
+    let callbackCompleted = false;
+    try { return await this.db.$transaction(async tx => {
       await revalidate();
       const { rows, links } = await this.lockReservationPolicies(tx, record);
       const current = await this.readRecord(tx, record.id, record.association);
@@ -356,8 +357,15 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         if (!sameLedgerPayload(existing, input)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
         const replay = await this.readRecord(tx, record.id, record.association);
         if (!replay) throw new BudgetError('UNAVAILABLE');
+        await revalidate();
+        callbackCompleted = true;
         return replay;
       }
+      // Terminal facts can only be observed through their original event;
+      // they cannot acquire a second release or settlement key.
+      if (current.status === 'settled' || current.status === 'released'
+        || input.action === 'release' && (current.dispatched || current.status !== 'reserved')
+        || input.action === 'settle' && current.status === 'pending_reconciliation') throw new BudgetError('PENDING_RECONCILIATION');
       await revalidate();
       if (input.action === 'dispatch') {
         for (const row of rows) {
@@ -376,7 +384,15 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       await tx.aiBudgetLedgerEntry.create({ data: { id: randomUUID(), reservationId: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, tenantId: record.association.scope.kind === 'platform' ? null : record.association.scope.tenantId, eventKey: input.eventKey, kind: input.action, evidenceHash: input.usage?.evidenceHash, reason: input.reason, ...(input.usage ? ledgerQuantityFields(input.usage.quantity) : {}) } });
       const result = await this.readRecord(tx, record.id, record.association);
       if (!result) throw new BudgetError('FORBIDDEN');
+      await revalidate();
+      callbackCompleted = true;
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
+    catch (error) {
+      // A completed callback is not a COMMIT acknowledgement. This includes
+      // exact replay reads; never turn an ambiguous transaction into a retry.
+      if (callbackCompleted || !(error instanceof BudgetError)) throw new BudgetError('PENDING_RECONCILIATION');
+      throw error;
+    }
   }
 }

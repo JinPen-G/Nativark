@@ -117,6 +117,11 @@ export class BudgetService {
   }
   async release(id: string, association: AiUsageAssociationDraft, eventKey: string) {
     const { record, session } = await this.load('release', id, association);
+    // A completed original release may only replay its exact ledger event.
+    // The repository refuses a new key here; this is not a second release or
+    // fresh proof that a different/unknown invocation was never dispatched.
+    if (record.status === 'released' && !record.dispatched)
+      return this.repository.mutate(record, { action: 'release', eventKey }, session.revalidate);
     if (record.dispatched || record.status !== 'reserved' || await this.evidence.dispatch(record) !== 'not_dispatched') throw new BudgetError('PENDING_RECONCILIATION');
     await session.revalidate();
     return this.repository.mutate(record, { action: 'release', eventKey }, session.revalidate);
