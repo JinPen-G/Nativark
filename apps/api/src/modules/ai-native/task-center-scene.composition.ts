@@ -74,6 +74,7 @@ export async function readSettingsTaskCenterScene(
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
   usage?: { read(value: unknown): Promise<unknown> };
+  performance?: { read(value: unknown): Promise<import('@rental-os/shared').AiTaskPerformanceObservationDraft> };
   events?: Pick<AiTaskEventRepository, 'readPage'> & Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>;
   settings?: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>;
   modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
@@ -120,6 +121,18 @@ export function composeAiTaskCenterScene(input: {
       const parsed = page.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return input.list.readPage(parsed.data);
+    },
+    readPerformance: async (value: unknown) => {
+      const parsed = taskRead.extend({ usageLimit: z.number().int().min(1).max(20), usageAfter: z.string().min(1).max(36).optional() })
+        .strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (!input.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = parsed.data, task = await readObservedTask(command.original, command.taskId);
+      const result = await input.performance.read({ taskId: task.taskId, usageLimit: command.usageLimit,
+        ...(command.usageAfter ? { usageAfter: command.usageAfter } : {}) });
+      if (result.task.taskId !== task.taskId || result.task.revision !== task.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await assertStillCurrent(command.original, task);
+      return freezeOriginalInput(result);
     },
     readUsage: async (value: unknown) => {
       const parsed = taskRead.extend({ limit: z.number().int().min(1).max(20), after: z.string().min(1).max(36).optional() })

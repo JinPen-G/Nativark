@@ -9,6 +9,7 @@ import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authorit
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { composePrismaTaskCurrentActionAuthority } from './prisma-task-action-policy.source';
 import { TaskBudgetUsageReader, type TaskBudgetUsageDb } from './budget/task-budget-usage.reader';
+import { TaskPerformanceReader } from './observability/task-performance.reader';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskResultArtifact' | 'aiScope' | 'aiTaskActionPolicy'>;
 
@@ -23,6 +24,7 @@ export function composePersistedTaskCenter(input: {
   credentials: AiTaskCredentialSource;
   clock?: () => Date;
   usageDb?: TaskBudgetUsageDb;
+  performanceDb?: ConstructorParameters<typeof TaskPerformanceReader>[0];
 }) {
   const clock = input.clock ?? (() => new Date());
   const identity = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, clock);
@@ -37,5 +39,7 @@ export function composePersistedTaskCenter(input: {
   const results = new AiTaskResultRepository(input.db, tasks, clock);
   if (input.usageDb && !Object.is(input.db, input.usageDb)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const usage = input.usageDb ? new TaskBudgetUsageReader(input.usageDb, actions, scopes, clock) : undefined;
-  return Object.freeze({ list, events, results, usage });
+  if (input.performanceDb && (!usage || !Object.is(input.db, input.performanceDb))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const performance = usage && input.performanceDb ? new TaskPerformanceReader(input.performanceDb, actions, usage, clock) : undefined;
+  return Object.freeze({ list, events, results, usage, performance });
 }

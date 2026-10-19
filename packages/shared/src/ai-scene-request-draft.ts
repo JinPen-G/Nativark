@@ -205,7 +205,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   settleReleasedInputCancellation: 'cancel/settle-input-wait',
   readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
   reopenOpeningModelSource: 'source/opening-section',
-  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
+  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskPerformance: 'performance', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
   createSettingsTask: 'settings/create-task', readSettingsTaskCreation: 'settings/create-task/receipt',
   readCurrentSettings: 'settings/current', prepareOriginalSettingsChange: 'settings/change/prepare',

@@ -199,6 +199,7 @@ const selectedQuoteRoutes = new Map<string, string>([AI_QUOTE_SELECTION_HTTP_DRA
     [`POST /${contract.basePath}${action ? `/${action}` : ''}`, name] as const)));
 const originalTaskObservationRoutes = new Set([
   AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage,
+  AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance,
   AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene,
   AI_SCENE_MODEL_HTTP_DRAFT.readInput,
   AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt,

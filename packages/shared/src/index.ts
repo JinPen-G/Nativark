@@ -61,3 +61,4 @@ export * from "./ai-memory-management-http-draft";
 export * from "./ai-budget-management-http-draft";
 export * from "./ai-text-capability-http-draft";
 export * from "./ai-automation-review-queue-http-draft";
+export * from "./ai-task-performance-draft";

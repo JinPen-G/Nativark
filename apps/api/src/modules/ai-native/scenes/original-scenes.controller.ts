@@ -231,6 +231,11 @@ export class AiOriginalSceneObservationController {
   readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readTaskScene(request, body));
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskPerformance(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request,
+      signal => this.observations.readTaskPerformance(request, body, signal), { maxWaitMs: 15000 }));
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readInput(request, body));

@@ -2332,6 +2332,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
       after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['original', 'after', 'limit'], false)],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage, 'AiSceneTaskUsageReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance, 'AiSceneTaskPerformanceReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene, 'AiSceneModelTaskSceneDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readInput, 'AiSceneRequestReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' }, runId: { type: 'string', minLength: 1, maxLength: 191 } }, ['original', 'runId'], false)],
@@ -2347,6 +2348,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, 'AiSceneOpeningModelSourceReadDraft'],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft' : undefined,
     permissions: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene
       ? ['rental-os:order:view', 'rental-os:order:create', 'rental-os:price:manage'] : ['rental-os:order:view'], authRequired: true, requestSchema,
     summary: 'Current owner, scope, original resource and action policy are rechecked. Fixed scene aggregation can consume original selected-quote approval/Core receipts or notification-settings preparation and waiting/receipt readers even while new execution is closed. Read-only observation without a model, runner start, execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),

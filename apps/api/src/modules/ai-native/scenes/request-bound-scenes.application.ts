@@ -680,7 +680,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     const scenes = composeAiOriginalScenes(input);
     // The current formal root must not construct a model/Gateway merely to
     // reconnect. Keep the existing repositories and source-bound consumer.
-    const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db });
+    const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db, performanceDb: input.db });
     // Construct knowledge services only for actual result/source reads. These
     // still revalidate current ACL/consent; absence never means trusted content.
     const resultReader = () => {
@@ -701,7 +701,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
     };
     const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
-      usage: persistedCenter.usage, scenes, ...(resultPolicy ? { input: { read: pending } } : {}), modelResults: {
+      usage: persistedCenter.usage, performance: persistedCenter.performance, scenes, ...(resultPolicy ? { input: { read: pending } } : {}), modelResults: {
         read: value => resultReader().read(value), reopenSource: value => resultReader().reopenSource(value)
       } });
     return { scenes, center, resultReader, tasks: authorization.tasks, db: input.db,
@@ -736,6 +736,8 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
     readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
+    readTaskPerformance: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.center.readPerformance(command), { write: false, signal }),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
       () => call(request, value, (root, command) => root.center.readScene(command)), false),
     readInput: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
@@ -1082,6 +1084,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readTaskEvents: recoveryReaders.readTaskEvents,
     readTaskReconnect: recoveryReaders.readTaskReconnect,
     readTaskUsage: recoveryReaders.readTaskUsage,
+    readTaskPerformance: recoveryReaders.readTaskPerformance,
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
@@ -1209,6 +1212,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       requireSettingsRequests().startSettingsTask(request, value, signal),
+    readTaskPerformance: recoveryReaders.readTaskPerformance,
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       requireSettingsRequests().readSettingsConfirmation(request, value),
     decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
