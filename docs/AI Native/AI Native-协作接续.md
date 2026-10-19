@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能：`7a9d3e4c`原账本的分页精确成本/占用接回任务用量与性能读取，`ea48f760`原释放事件幂等核对及事务应答不明收敛。两片stdin分别3/3、2/2，均0 fail/skip/todo、退出0，无新增测试脚本。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。独立预算管理/历史入口和缓存费率保留；可信计数/上界生产者及完整执行验收仍缺，历史用量JSON迁移未执行，不称只剩环境。原28项等权64.3%、验收0/28，百分比不变；其他WIP保留。
+> 更新时间：2026-10-19。最新功能：`ddb3b155`将原调用的预算拒绝观察接入invoke/stream、原OperationLog及任务性能消费者；不改账、不派发，unknown不能冒充拒绝证明。实际授权/预算/Prisma组合stdin 2/2、既有Gateway冒烟3/3，均0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。原精确成本和释放恢复保留。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行，不称只剩环境。原28项等权64.3%、验收0/28，百分比不变；其他WIP保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,8 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+预算拒绝观测：Unified仅在原预算`reserve`明确返回`BUDGET_UNAVAILABLE`时调用既有观察者的`budgetDenied`，最多等待1秒、沿宿主取消；失败保留原拒绝，不转换为成功、退额或重试。标准运营/员工、客户与能力探测沿已有`PrismaTaskGatewayAudit`实例接入，未覆盖的自定义观察者不补造记录。生产者复核当前身份、原task/invocation/configuration/registration、领取token及有效期；原预留或会计收据存在时不制造“干净拒绝”依据。只向原OperationLog追加ID/hash和固定代码，同键同载荷可观察、COMMIT应答不明不重写。`TaskPerformanceReader.budgetAdmission`仅返回当前owner的50调用窗口中已记录拒绝，读后复验；没有记录不等于准入成功，拒绝不是未消耗证明，不计算完整拒绝率或SLO。资金/调用账本未新增写入，未注册新HTTP或启用配置。下一步仍补可信计数生产和标准全链，不以此片宣称AIN-25已到75%。
 
 原账成本与恢复：`TaskBudgetUsageReader.read`的可选`pageAmounts`由原`PrismaBudgetRepository`读取，现有`TaskPerformanceReader.financial`直接消费；按money币种及tokens/calls分别汇聚reserved/pending/settled/releasedReservation/settledExcess的整数原子字符串。仅本页，绝非全任务总账、退款额或供应商账单；缺记录不补零、过期unknown仍占用、超额实耗不截断。缺记录期间出现原占用或原账Date版本变化拒绝旧结果。仓储按真实unitKind及列、状态和精度读回，非法状态、缺金额、混合单位或多余小数拒绝，不能默认reserved/零或先四舍五入。下一步仍需全任务成本与预算拒绝等有界采集和标准全链，不据本页汇总提升AIN-25。
 
