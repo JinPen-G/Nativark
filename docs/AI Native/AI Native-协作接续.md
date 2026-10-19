@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最近核心收口：`dfba2169`确认继续及持久步骤/终态回执异常保留unknown；`ff01ac7d`领取回执绑定原CAS，不携带另一task/run/holder执行或释放。确认/持久回执/领取stdin分别4/4、2/2、6/6，原持久审批两阶段用例1/1，API672 roots/0诊断、diff退出0；不是全量或真库验收。旧客户组合因夹具缺serviceEnabled仍1 fail，未重跑或掩盖。未新增测试文件或真实调用，其他已有源码及10份文档WIP保留；开工以实际Git现场为准，不回退旧SHA。
+> 更新时间：2026-10-19。最新功能提交：`19d956c3`原Core受权分页订单候选；`9f69ba0d`原请求创建/读取/核对的有限等待与断线传递。当前功能及原键恢复冒烟见开发记录，无新增测试文件。最新API noEmit退出1：674 roots、3项诊断均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无类型诊断；diff退出0，不能称整套通过。原10份文档及其他开发者的支付/Core/客户端/后台/shared与相关测试WIP全部保留，负责人再次确认其已停写；不夹带、不回退。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -18,9 +18,13 @@
 
 四条辅助树仍保留在同级目录：`codex-ai-native-lane-a`、`codex-ai-native-lane-b`、`claude-ai-native-lane-a`、`claude-ai-native-lane-b`。上次交接已实际同步四树到`71dbdd65`，当时均干净且与主线差异0/0；本轮主线已有新提交，辅助树未再同步，不宣称它们仍与最新主线一致。不复制私有生成物。本地main仍为`46cbaf0f`，本次没有合main或推送授权。
 
-开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录），全部保留、不夹带；正式任务仅选择性暂存本轮百分比变化。源码已按完整功能提交，接手以实际status为准。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
+开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+当前新增经营入口：`AI_NATIVE_ORIGINAL_REQUEST_PROVIDER`的`queryOrders`和`POST /api/ai-native/scene-requests/order-candidates/read`，复用当前Guard/ALS及Core分页仓储，最多20条，只读最少订单字段与同订单版本来源。时间范围是租期重叠，不是今日新增/待取还统计；不返回客户隐私或资金，不新增模型工具、任务、派发或库存预占。选中后沿原订单解释原请求入口重新受权，不能把候选版本当授权。
+
+原请求`create/reissue/createTask`及读取/材料/核对/恢复准备复用现有5秒依赖边界；标准Controller接断线、15秒外层等待、命令/认证快照及no-store，原HTTP状态未改。中断关闭本次凭据，迟到依赖不进入后续动作；写入可能已提交时保持unknown，仅原requestKey/inputRef核对。此限制不施加到实际runner的正常运行，不授重试、退额或换ID权。其他执行/观察宿主仍按既有边界独立核查，不声称所有入口只剩真环境。
 
 负责人最新选择：现在自己实现两种主流协议，不安装pi-ai，不切换Harness。`native-model-protocols.ts`列出三种已实现协议，原服务端配置选择具体协议；工厂注册不是能力证明。平台/BYOK、标准后台/员工/客户与原能力探测均消费相同适配器，当前权限、能力收据和单账门继续生效。新协议文本/流式、既有受控工具和闭合结构化输出已作离线冒烟；图像编码仍待完整媒体验证，Messages/Responses不支持本实现的WAV audio，先于能力派发拒绝。下一步继续正式计价/计数来源及原任务依赖，不因协议已实现猜价格或开放真实模型。未来Harness只在正式替换适配阶段进入，专有类型不得扩散到业务层，原unknown不重发。
 
