@@ -27,6 +27,9 @@ import { composeTaskModelHost, type TaskModelHostDependencies } from './runner/m
 import type { GatewayMediaAttachmentResolver } from './gateway-intent';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
+import { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
+import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';
+import { BudgetError } from './budget/budget.ports';
 import { ChatCompletionsAdapter } from './chat-completions.adapter';
 import { createNativeModelEgressTransport } from './model-egress.transport';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
@@ -79,6 +82,34 @@ export function composePersistedTaskCallAccountingRecovery(input: PersistedTaskA
   if (!input || 'pricing' in input) throw new ModelGatewayError('CONFIG_INVALID');
   const { callPriceVersion, ...dependencies } = input;
   return composePersistedTaskAccountingRecovery({ ...dependencies, pricing: { kind: 'calls', priceVersion: callPriceVersion } });
+}
+
+/** Original dispatch evidence only. No pricing/configuration/transport is
+ * constructed, and this port cannot read usage, settle or create a reservation.
+ * Current same-owner task read authority remains mandatory on both sides. */
+export function composePersistedTaskDispatchEvidence(input: PersistedTaskAuthorizationDependencies) {
+  const clock = input.clock ?? (() => new Date()), authorization = composePersistedTaskAuthorization(input);
+  const scopes = authorization.scopes, bindings = new PrismaGatewayInvocationBindings(input.db, scopes, clock);
+  const facts = new PrismaGatewayAccountingFacts(input.db, bindings, scopes,
+    { quantity: async () => { throw new BudgetError('UNAVAILABLE'); } }, clock);
+  return Object.freeze({ readDispatch: async (reservationId: string) => {
+    const current = async () => {
+      const scope = await scopes.resolveCurrent(), principal = gatewayBudgetPrincipal(scope.context);
+      const row = await input.db.aiBudgetReservation.findUnique({ where: { id: reservationId },
+        select: { scopeId: true, scopeKind: true, actorId: true, callId: true } });
+      if (!row || row.scopeId !== scope.scope.id || row.scopeKind !== 'WORKSPACE' || row.actorId !== principal.actorId)
+        throw new ModelGatewayError('FORBIDDEN');
+      const invocation = await input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: row.scopeId, callId: row.callId } },
+        select: { id: true, scopeId: true, taskId: true, actorId: true, registrationHash: true } });
+      if (!invocation || invocation.scopeId !== row.scopeId || invocation.actorId !== principal.actorId) throw new ModelGatewayError('FORBIDDEN');
+      const context = await authorization.authority.resolve(invocation.taskId, 'read_step_terminal');
+      const { requestId: _id, authorizedAt: _at, ...identity } = context;
+      return requestFingerprint({ identity, invocation, reservationId });
+    };
+    const before = await current(), evidence = await facts.readDispatch(reservationId);
+    if (await current() !== before) throw new ModelGatewayError('FORBIDDEN');
+    return evidence;
+  } });
 }
 
 /** Original recorded pricing is read by the accounting adapter, even after

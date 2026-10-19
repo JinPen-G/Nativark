@@ -19,6 +19,13 @@ import { InspectionRecognitionTaskApplication, type InspectionRecognitionTaskDep
 import { StaffInspectionRequestFactory } from './inspection-assist.composition';
 import { composeStaffInspectionTaskReceiptReader } from '../staff-inspection-task-receipt.composition';
 import { composeStaffInspectionTaskPolicies } from '../staff-inspection-task-policy.composition';
+import { composePersistedTaskAuthorization } from '../task-authorization.composition';
+import { aiTaskAccessFromContext } from '../ai-task.repository';
+import { composePersistedTaskDispatchEvidence } from '../task-model-gateway.composition';
+import { runWithRequestIdentity } from '../../../common/request-identity';
+import { inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
+import { randomUUID } from 'node:crypto';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 export const AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION = Symbol('AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION');
 export const AI_NATIVE_STAFF_RECOGNITION_RUNTIME = Symbol('AI_NATIVE_STAFF_RECOGNITION_RUNTIME');
@@ -52,9 +59,50 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     scenes: [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },
       { kind: 'audio', code: STAFF_RECOGNITION_SCENES.audio, version: '1' }] });
   const absent = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+  const readResultReview = async (request: { headers: { authorization?: unknown } }, value: unknown,
+    resultValue: unknown, expectedTaskId?: string, signal?: AbortSignal) => {
+    const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
+      inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict().parse(structuredClone(value));
+    const resultId = inspectionId.parse(resultValue), authorization = request?.headers?.authorization;
+    if (typeof authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    let active = true;
+    const requestId = randomUUID(), close = () => { active = false; };
+    const credentials = { current: async () => {
+      if (!active || signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return { authorization, requestId, audience: 'staff' as const };
+    } };
+    signal?.addEventListener('abort', close, { once: true });
+    try {
+      return await runWithRequestIdentity({}, async () => {
+        const original = await receipts.readCreation({ headers: { authorization } }, reference, signal);
+        if (!original.task || expectedTaskId !== undefined && original.task.taskId !== expectedTaskId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const dependencies = { db: d.db, auth: d.auth, subscriptions: d.subscriptions, credentials, clock: d.clock };
+        const current = composePersistedTaskAuthorization(dependencies);
+        const context = await current.authority.resolve(original.task.taskId, 'read_step_terminal');
+        const access = aiTaskAccessFromContext(context, original.task.taskId, d.clock?.() ?? new Date());
+        const task = await d.db.aiTask.findFirst({ where: access.where, select: { sceneCode: true, sceneVersion: true } });
+        const kind = task?.sceneCode === STAFF_RECOGNITION_SCENES.image ? 'image'
+          : task?.sceneCode === STAFF_RECOGNITION_SCENES.audio ? 'audio' : null;
+        if (!kind || task?.sceneVersion !== '1') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const selected = new StaffInspectionRequestFactory({ ...inspection, recognitionResults: { ...dependencies,
+          financialEvidence: composePersistedTaskDispatchEvidence(dependencies),
+          // Ceiling validates the ORIGINAL frozen input; it is not a new plan,
+          // model selection or output allowance for another invocation.
+          policy: { kind, sceneCode: task.sceneCode, maxOutputTokens: 32768 } } }).open({ headers: { authorization }, requestId });
+        try {
+          const result = await selected.readRecognitionReview({ ...reference, taskId: original.task.taskId, resultId });
+          const after = await receipts.readCreation({ headers: { authorization } }, reference, signal);
+          if (requestFingerprint(original) !== requestFingerprint(after)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          await current.authority.resolve(original.task.taskId, 'read_step_terminal');
+          return result;
+        } finally { selected.close(); }
+      });
+    } finally { signal?.removeEventListener('abort', close); close(); }
+  };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
-      readResultReview: absent, saveResultReview: absent, readInput: absent, resume: absent, readAnswer: absent,
+      readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer: absent,
       continueAnswer: absent, requestCancel: absent }, policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
@@ -68,7 +116,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   return { enabled: true as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: application.create.bind(application), readCreation: receipts.readCreation.bind(receipts),
       start: application.start.bind(application), reconcile: application.reconcile.bind(application),
-      readResultReview: application.readResultReview.bind(application), saveResultReview: application.saveResultReview.bind(application),
+      readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer: application.readAnswer.bind(application), continueAnswer: application.continueAnswer.bind(application),
       requestCancel: application.requestCancel.bind(application) },

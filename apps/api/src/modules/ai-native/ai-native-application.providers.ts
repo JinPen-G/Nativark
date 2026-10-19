@@ -237,7 +237,7 @@ function readStaffManualConfiguration(value: unknown) {
   return parsed.data;
 }
 const staffReceiptOperations = ['history-read', 'receipt-host-read', 'result-save-receipt',
-  'draft-operation', 'submission-preparation', 'submission-read'] as const;
+  'draft-operation', 'submission-preparation', 'submission-read', 'result-read'] as const;
 const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit',
   'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
   'submission-review', 'submission-prepare', 'submission-submit'] as const;
@@ -281,7 +281,7 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   inject: [{ token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
   useFactory: (value?: unknown, recognition?: unknown) => Object.freeze([...staffReceiptOperations,
     ...(readStaffManualConfiguration(value).enabled ? staffManualOperations : []),
-    ...(readStaffRecognitionConfiguration(recognition).enabled ? ['input-prepare', 'input-receipt', 'result-read', 'result-save'] : [])])
+    ...(readStaffRecognitionConfiguration(recognition).enabled ? ['input-prepare', 'input-receipt', 'result-save'] : [])])
 }];
 
 /** Standard application wiring, not an execution enable switch. No startup
