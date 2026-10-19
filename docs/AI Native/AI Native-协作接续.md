@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能提交：`e0e32b65`将明确审阅的缓存读/写费率接入平台/BYOK原价格、预算预留上界和实耗结算；不推测缓存比例或供应商折扣。stdin组合2 pass/0 fail/0 skip/todo、退出0，无新增测试脚本。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。可信输入计数/上界生产者和完整执行验收仍缺，历史用量JSON追加迁移尚未执行，不称只剩环境。原28项等权64.3%、验收0/28，不提高百分比；其他文档/源码/测试WIP保留。
+> 更新时间：2026-10-19。最新功能提交：`238740e3`将预算管理从模型执行门独立出来，标准AppModule接入原历史费率/发布/输入上界只读入口；新执行关闭后仍沿当前Guard/ALS和原对象读取，不授派发。stdin组合2 pass/0 fail/0 skip/todo、退出0，无新增测试脚本。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。`e0e32b65`缓存分层预算费率保留；可信输入计数/上界生产者和完整执行验收仍缺，历史用量JSON追加迁移尚未执行，不称只剩环境。原28项等权64.3%、验收0/28，不提高百分比；其他文档/源码/测试WIP保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,8 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+预算管理与历史观察：显式服务端`AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION`接`{enabled:true,platformProfileId,priceVersion}`，无需同时开放订单模型执行；显式false优先，未提供时兼容原执行配置，无配置仍默认关闭。它不播种政策、不授权预留或派发。标准`pricing/{price|publication|input-bound}`已接原Controller与只读provider；前两者按当前经营空间管理权读取，input-bound另核对原调用owner并从持久invocation取得scene，不接客户端scene或计数声明。历史到期/Profile停用不阻断原依据读取。5秒依赖/15秒HTTP边界及断线关闭当前凭据，迟到结果不交付；撤权映射为access denied。平台审阅、租户采用和BYOK原服务继续复用，无新账本/供应商请求。本批仅离线实际Auth/Guard/Controller/仓储适配及事务替身，不是标准HTTP监听、MySQL或完整模型验收。
 
 用量计价：Responses、Messages及Chat Completions的invoke/stream保留缓存读写计数，已包含在inputTokens内，不重复相加；原`usageDetails`与总量/hash原子保存，重放同明细，旧NULL不反推历史缓存。平台/BYOK money审阅可明确提供`inputCache.readPerMillion/writePerMillion`，两项同时提供、六位精度且可显式为零；预留对可信总输入上界采用三种已审阅输入费率的最大值，结算按普通/缓存读/缓存写互斥数量与输出费率BigInt合计后一次向上取微单位。实际超额如实计入；缺缓存费率仍待核对，不猜折扣、命中率或不同缓存期限的供应商成本。tokens/calls及公开C03总量不变。这是预算费率，不是供应商账单认证。追加迁移`20261019100000_ai_gateway_usage_billing_details`尚未执行。下一实质缺口：原`GatewayPricingRecordManagement.publishInputBound`已有消费者但无实际可信计数生产者；需绑定同一冻结输入/工具schema/配置、受控计数请求与持久收据，不能另发未计量HTTP、用字符数或用户填写上界代替认证。本片离线组合的上界为合成证据，不授生产money准入。
 
