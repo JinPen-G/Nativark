@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能提交：`98d879e7`将BYOK受权费率审阅、原价格仓储及同事务操作收据接回标准预算管理；原Gateway计时、运行/单账读取和隐私中断继续复用。本轮stdin组合2/2，0 fail/skip/todo，无新增测试文件。API noEmit退出1：677 roots、3项诊断仍均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无诊断；diff退出0，不称整套通过。原28项等权64.3%，正式验收0/28；未伪报SLO或供应商成本。原10份文档和支付/Core/客户端/后台/shared与相关测试WIP保留，本轮未改任务百分比或夹带原正文。
+> 更新时间：2026-10-19。最新功能提交：`97cdc7f0`将SaaS受权平台费率发布、租户按原版本采用及历史收据接回标准预算管理，沿用BYOK和原价格仓储，不新增账本。stdin组合2/2，0 fail/skip/todo，无新增测试文件；数据库/锁/事务及用户目录为受控替身。API noEmit退出1：678 roots、3项诊断仍均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无诊断；diff退出0，不称整套通过。可信输入计数/上界及完整标准执行验收仍缺，未访问真实服务。原28项等权64.3%，正式验收0/28，不提高百分比；原10份文档及其他源码/测试WIP保留，不夹带提交。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -22,7 +22,7 @@
 
 ## 当前核心接点及下一步
 
-计价生产：标准预算Controller/provider新增`POST /api/ai-native/budget-settings/pricing/{review|review/receipt}`，沿原当前Auth/Guard/ALS和`system:params:manage`。本片仅当前租户BYOK/default Profile：服务器读取模型/协议/凭据引用，管理员明确确认tokens口径或六位小数money费率、币种/版本/有效期，不能传入scope/actor或认证token数。先锁租户配置、再锁Profile，锁后复验expectedConfigRevision，费率与原OperationLog审阅收据同事务追加；同键改载荷冲突，配置变化重审，旧价格不覆盖。排队事务在新写前检查本次凭据是否已关闭，COMMIT/断线不明只读原operationKey收据；停用、切模式、改版或费率过期不阻断当前受权的历史收据读取。输出不含密钥引用，明确`tenant_reviewed_budget_rate_not_provider_invoice`及`not_certified_by_rate_review`，不能将此算成供应商实际成本或调用许可。沿标准预算宿主显式配置默认关闭，未开生产。平台统一费率仍须SaaS正式来源，可信计数/输入上界仍缺；不能凭review返回recorded就发模型或启用money准入。官方Responses计数规范已核对，当前未另建计数HTTP旁路。
+计价生产：标准预算Controller/provider保留BYOK的`pricing/{review|review/receipt}`，新增平台`platform/pricing/{review|review/receipt}`及租户`pricing/platform/{adopt|receipt}`（均POST，前缀`/api/ai-native/budget-settings/`）。平台发布沿真实SaaS身份与`system:ai-provider:manage`，历史读取沿`view`；租户采用沿当前Auth/Guard/ALS及原设置权限，不得改平台费率或借用其他场景。服务器选择Profile、模型/协议/凭据引用；人类审阅tokens口径或六位money费率/币种/版本/有效期不认证token数、不开放预算。平台锁Profile后复验版本与当前权限，审阅与价格同一不可变行，原价格reader兼容旧记录并保留完整payloadHash。租户只采用同一原价的受权投影，沿原仓储/财务账本；原采用后继续复核当前权限，跨空间或读取期间撤权拒绝。BYOK仍锁租户配置再锁Profile，与原OperationLog收据同事务追加。同键异载荷冲突，写应答不明保持unknown，只读原operationKey/priceId收据，不能另换版本重试；配置改版、停用、切模式或到期不重授新采用，但原收据可按当前权限读取。输出不含凭据/平台审阅人，明确人类审阅预算费率非供应商账单、非输入计数或派发许可。标准宿主显式配置仍默认关闭；可信计数/输入上界生产者及完整执行验收仍缺，不能凭recorded启用money准入。官方Responses计数规范已核对，尚未另建计数HTTP旁路。
 
 运行观测：`POST /api/ai-native/scene-requests/model/performance`接原观察provider，输入为原请求引用与usageLimit/usageAfter；不接受scope/actor或任意工具。`TaskPerformanceReader`复用当前任务动作政策和原账，读后复验身份、task修订/eventCursor、运行/步骤、资源、调用及审计。上限50运行/200步骤/20账务/50调用，截断不冒充全量，BigInt字符串精确展示、unknown占用不归零。步骤`activeTime`来自原ACTIVE_MS charge，仅未知时实值null，不是供应商时延。原运营/员工及客户Gateway显式组合现接`PrismaTaskGatewayAudit.record`，同一OperationLog保留唯一调用/预留/配置/价格/派发hash与单调时钟采样，不存正文或原token。`modelDelivery`仅展示有原派发绑定的完成观察；传输墙钟含usage收据/权限复验及流消费者等待，非纯Provider耗时。首个非空、复验后的文本片段有服务端计时；invoke无逐片依据为null，未观测不补0；不把片段当token数或端侧首屏。写应答不明保持原账unknown，不重发、重写或退额；按原审计和账务核对。当前无首次页面卡片/端侧首字证据、完整工具墙钟、成功/接管率、SLO/容量/公平性/告警与真实演练，标准原请求全链仍待核实，AIN-25不升75%。
 
