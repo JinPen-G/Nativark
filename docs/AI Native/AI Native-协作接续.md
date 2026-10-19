@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最近核心功能：员工媒体原任务/政策/结果标准装配、客户文本执行依赖及原结果观察、客户场景政策与计划管理入口。仍需当前可信配置/能力/权益/预算，服务器默认关闭；本批不代表媒体/客户单账派发全链已验。固定提交及证据见开发记录，开工以实际Git现场为准，不回退旧SHA。
+> 更新时间：2026-10-19。最近核心功能：客户原材料/任务正式入口、历史观察与新执行分离、独立原账核对及本地协议准入；客户calls单账正向及PNG/WAV原媒体宿主已有离线组合证据。真实费率/认证计数、标准员工HTTP全链及对象环境仍缺实现或验证，默认关闭。固定提交及边界见开发记录，开工以实际Git现场为准，不回退旧SHA。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -24,13 +24,13 @@
 
 继续原 AIN-03/04/05/06/07/11 依赖，不以界面或空包装代替核心。当前场景交付矩阵与剩余实施缺口见[开发记录](<AI Native-开发记录.md>)；优先补可信价格/计数生产与完整标准执行依赖、其他输入格式/规模下的来源关系及真实删除传播，不以正确拒绝算正向交付。
 
-**当前收口结果：** AIN-12/20/23补齐原G3，分别75%；原28项等权60.7%、正式验收0/28，不代表全部功能只剩验收。`AI_NATIVE_STAFF_MANUAL_CONFIGURATION`只开放原人工检查草稿/提交，不开放识别；停用后原操作/提交收据仍受权可读。`AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION`只开放原治理草稿/校验，仍受原平台预览门和权限限制，没有发布/采用旁路。任务中心标准scene观察已接原报价批准/订单收据及通知设置等待/结果，不因刷新重启run；原Controller通过ModuleRef延迟取原实例，避免Nest把Controller误当provider。
+**当前收口结果：** AIN-19/21在原标准装配基础上补齐主消费证据，按G3登记75%；原28项等权62.5%、正式验收0/28，不代表全部功能只剩验收。`AI_NATIVE_STAFF_MANUAL_CONFIGURATION`只开放原人工检查草稿/提交，不开放识别；停用后原操作/提交收据仍受权可读。`AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION`只开放原治理草稿/校验，仍受原平台预览门和权限限制，没有发布/采用旁路。任务中心标准scene观察已接原报价批准/订单收据及通知设置等待/结果，不因刷新重启run；原Controller通过ModuleRef延迟取原实例，避免Nest把Controller误当provider。
 
-**下一缺口（先核实实际实现，不重造）：** 通知设置“prepare新变更→create新任务→当前政策CAS→start-original发布→等待→真人批准→原Core提交/收据”已用实际服务离线贯通，不再列为未实现；其余配置分区/普通资料写入消费者、标准报价原请求→显式选择整链仍待补齐或复验。员工媒体标准任务装配已存在，尚需完整正向单账派发/结果消费组合及实际对象环境；客户已有标准文本依赖和原政策生产入口，尚需完整请求至单账派发正向、可信计价生产、正式模型澄清来源与企业资格；本次闭合文本计划不冒充完整多轮澄清。品类仍缺高风险发布/资格/采用的确认消费；安全保留仍缺外部副本/真实删除传播及集中独立验收。AIN-25～28不能靠现有资源限额或局部冒烟抬分。原报价/设置/主动事件执行配置继续独立，当前授权、原输入/计划、人类批准和单账预算不省略；unknown仅原键核对，不换ID/Provider重试。
+**下一缺口（先核实实际实现，不重造）：** 通知设置“prepare新变更→create新任务→当前政策CAS→start-original发布→等待→真人批准→原Core提交/收据”已用实际服务离线贯通，不再列为未实现；其余配置分区/普通资料写入消费者、标准报价原请求→显式选择整链仍待补齐或复验。原PNG/WAV宿主至单账派发/计量已有离线正向，标准员工HTTP至真实对象/模型及完整草稿应用仍待核验；客户标准原材料→任务→原计划/runner→Gateway→三层calls→结算/原结果和独立原账核对已贯通离线，尚需可信计价生产、正式模型澄清来源与企业资格；本次闭合文本计划不冒充完整多轮澄清。品类仍缺高风险发布/资格/采用的确认消费；安全保留仍缺外部副本/真实删除传播及集中独立验收。AIN-25～28不能靠现有资源限额或局部冒烟抬分。原报价/设置/主动事件执行配置继续独立，当前授权、原输入/计划、人类批准和单账预算不省略；unknown仅原键核对，不换ID/Provider重试。
 
-**当前可接入口：** 员工`AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION`显式选择image及可选audio的profile/calls版本、host/limits；原文件ObjectReader、inspection-tasks、inspection-task-policies和结果保存桥均已接AppModule，人工检查门不随之自动开放。客户`AI_NATIVE_CLIENT_MODEL_CONFIGURATION`明确提供pricing/prompt/output/limits/host，web/微信共用原文本Gateway；`AI_NATIVE_CLIENT_POLICY_CONFIGURATION`另行开放`/api/ai-native/client-task-policies`的原政策read/change/operation及model-plan CAS，固定quote_clarification场景，不播种政策。两种管理/执行开关不互相授权。原结果读取不需要模型开放；客户original_client输入源只接受同一冻结输入、单步骤计划及已完整计量的原文本结果，拒绝未知结果、工具动作和自造答案。当前范围/字段及GenericObject合同缺口见源码与开发记录，不另建Runtime/SDK协议。
+**当前可接入口：** 员工`AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION`显式选择image及可选audio的profile/calls版本、host/limits；原文件ObjectReader、inspection-tasks、inspection-task-policies和结果保存桥均已接AppModule，人工检查门不随之自动开放。客户`AI_NATIVE_CLIENT_MODEL_CONFIGURATION`明确提供pricing/prompt/output/limits/host，web/微信共用原文本Gateway；`AI_NATIVE_CLIENT_POLICY_CONFIGURATION`另行开放`/api/ai-native/client-task-policies`的原政策read/change/operation及model-plan CAS，固定quote_clarification场景，不播种政策。两种管理/执行开关不互相授权。原结果读取不需要模型开放；客户original_client输入源只接受同一冻结输入、单步骤计划及已完整计量的原文本结果，拒绝未知结果、工具动作和自造答案。当前范围/字段及GenericObject合同缺口见源码与开发记录，不另建Runtime/SDK协议。 客户web/微信另接`orders/material/{prepare|receipt}`、`tasks/{create|creation/read}`及`tasks/accounting/{read|reconcile}`；原账按当前本人/原调用及可信用量收敛，不要求模型仍开启，不暴露内部计价/配置，不授新派发。
 
-**本批证据：** 员工标准创建/原收据/政策与缺依赖零派发1/1；客户标准依赖与已持久结果输入源1/1（其结果来源的transport/财务为旧夹具替身，不是客户单账全链）；客户正式Auth/Guard→政策/计划CAS→原操作收据1/1，均退出0、0 fail/skip/todo。最终API源码668 roots/0诊断、diff退出0；stdin与既有夹具，不新增测试文件。记录`output/core-media-execution-20261019/`，保留首轮失败。新入口未启用、未连库/模型/存储、未运行构建或真实HTTP；AIN-19/21/22暂不因这些局部证据升为75%。接续下述旧批次证据不作本批全量通过。
+**本批证据：** 原材料/任务及丢应答观察1/1、变更/过期后原任务观察1/1；客户标准calls单账正向1/1、停执行/换政策/过期后原账核对与重复不增账1/1；原PNG/WAV至持久预算/结果宿主2/2，均0 fail/skip/todo、退出0。API668 roots/0诊断、diff退出0；无新增测试文件、构建或迁移。日志`output/core-scene-closure-20261019/`保留首轮失败。DB/能力历史/协议和媒体对象流是替身，客户商业数据端口模拟；媒体未经过标准员工HTTP，不能当真库锁、真实费率/计数、供应商/存储/浏览器/微信或整项验收。
 
 **本轮验证边界：** 员工人工链、品类原治理链（含内存Nest DI）、设置等待聚合、报价原订单结果聚合、通知新变更至原任务审批执行，五个不同场景各1/1、0 fail/skip/todo、退出0，不与旧批次/复验相加。API源码664 roots/0诊断、diff退出0；日志`output/core-consumer-closure-20261018/`保留首轮失败，未新增测试文件，未加载正式AppModule、监听端口或改变共享产物。DB、Core数据/检查提交/设置存储和候选为替身，报价采用受控monotonic，仅验证原资源门未放宽。旧事件组合0/1、旧宿主1 pass/1 fail及旧shared JS缺schema仍是历史失败，本轮未重跑、不算通过。新配置收据迁移只完成前序隔离generate/validate/diff，未执行；真实MySQL、供应商/存储及浏览器/微信设备未验。
 
