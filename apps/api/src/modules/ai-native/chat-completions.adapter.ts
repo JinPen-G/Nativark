@@ -2,7 +2,7 @@ import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest, type ModelProtocolInvocation } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
-import { ChatCompletionsStream, chatCompletionsUsageSchema } from "./chat-completions-stream";
+import { ChatCompletionsStream, chatCompletionsUsageSchema, chatCompletionsUsage } from "./chat-completions-stream";
 import Ajv, { type ValidateFunction } from 'ajv';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
@@ -217,8 +217,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (!parsed.success) throw new ModelGatewayError("INVALID_RESPONSE");
     // Persist only protocol-validated original counts before cancellation or
     // rejected text/tool/structured output. Never serialize this callback to HTTP.
-    if (parsed.data.usage) await input.recordUsage?.({ inputTokens: parsed.data.usage.prompt_tokens,
-      outputTokens: parsed.data.usage.completion_tokens });
+    if (parsed.data.usage) await input.recordUsage?.(chatCompletionsUsage(parsed.data.usage));
     if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     const choice = parsed.data.choices[0];
     // Partial/truncated, refused or tool responses must not be presented as a complete text answer.
@@ -226,8 +225,6 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (choice.message.refusal || choice.finish_reason !== (calls.length ? 'tool_calls' : 'stop') || (!calls.length && choice.message.content === null) || text.length > 128_000 || text.includes(credential) || calls.some(call => call.function.arguments.includes(credential))) throw new ModelGatewayError("INVALID_RESPONSE");
     const extras = selected.parse(text, calls);
     if (JSON.stringify(extras).includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
-    return { text, ...extras, usage: parsed.data.usage ? {
-      inputTokens: parsed.data.usage.prompt_tokens, outputTokens: parsed.data.usage.completion_tokens
-    } : undefined };
+    return { text, ...extras, usage: parsed.data.usage ? chatCompletionsUsage(parsed.data.usage) : undefined };
   }
 }

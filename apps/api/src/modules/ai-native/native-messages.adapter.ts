@@ -35,24 +35,29 @@ function list(value: unknown, max = 32): unknown[] {
 function protocolUsage(protocol: Protocol, value: unknown): ModelUsage | undefined {
   if (value === undefined || value === null) return undefined;
   const usage = object(value), input = count(usage.input_tokens), output = count(usage.output_tokens);
+  let cachedInputTokens = 0;
   if (protocol === 'openai_responses') {
     if (usage.total_tokens !== undefined && BigInt(count(usage.total_tokens)) !== BigInt(input) + BigInt(output)) invalid();
     if (usage.input_tokens_details != null) {
       const cached = object(usage.input_tokens_details).cached_tokens;
-      if (cached !== undefined && count(cached) > input) invalid();
+      if (cached !== undefined) cachedInputTokens = count(cached);
+      if (cachedInputTokens > input) invalid();
     }
     if (usage.output_tokens_details != null) {
       const reasoning = object(usage.output_tokens_details).reasoning_tokens;
       if (reasoning !== undefined && count(reasoning) > output) invalid();
     }
-    return { inputTokens: input, outputTokens: output };
+    return { inputTokens: input, outputTokens: output, ...(cachedInputTokens ? {
+      billingDetails: { cachedInputTokens, cacheCreationInputTokens: 0 } } : {}) };
   }
   // Messages reports cached input separately, unlike Responses. Count every
   // token once, without translating these counters into a guessed money rate.
-  const total = BigInt(input) + BigInt(usage.cache_read_input_tokens === undefined ? 0 : count(usage.cache_read_input_tokens))
-    + BigInt(usage.cache_creation_input_tokens === undefined ? 0 : count(usage.cache_creation_input_tokens));
+  cachedInputTokens = usage.cache_read_input_tokens === undefined ? 0 : count(usage.cache_read_input_tokens);
+  const cacheCreationInputTokens = usage.cache_creation_input_tokens === undefined ? 0 : count(usage.cache_creation_input_tokens);
+  const total = BigInt(input) + BigInt(cachedInputTokens) + BigInt(cacheCreationInputTokens);
   if (total > BigInt(Number.MAX_SAFE_INTEGER)) invalid();
-  return { inputTokens: Number(total), outputTokens: output };
+  return { inputTokens: Number(total), outputTokens: output, ...(cachedInputTokens || cacheCreationInputTokens
+    ? { billingDetails: { cachedInputTokens, cacheCreationInputTokens } } : {}) };
 }
 function responseContent(protocol: Protocol, raw: unknown): { text: string; calls: ProtocolToolCall[] } {
   const value = object(raw), calls: ProtocolToolCall[] = []; let result = '';
@@ -109,7 +114,7 @@ class NativeMessageStream {
   private readonly blocks: ObjectValue[] = []; private readonly closed = new Set<number>();
   private startUsage?: ObjectValue; private outputTokens = 0; private stopReason?: unknown; private messageDelta = false;
   constructor(private readonly protocol: Protocol, private readonly policy: ChatProtocolPolicy, private readonly credential: string) {}
-  accountingUsage() { return this.usage && { ...this.usage }; }
+  accountingUsage() { return this.usage && structuredClone(this.usage); }
   push(chunk: Uint8Array): string {
     if (this.failed) return invalid();
     try {

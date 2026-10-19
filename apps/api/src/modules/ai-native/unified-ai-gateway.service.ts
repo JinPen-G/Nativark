@@ -7,7 +7,7 @@ import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
-import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, modelUsageSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -16,9 +16,8 @@ import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
 type UnresolvedProtocolRequest = Omit<ModelProtocolRequest, 'model'> & { model?: string };
 type IntentExecutionBinding = GatewayTextIntentBinding & { intentHash: string };
-const reportedTokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const textResultSchema = z.object({
-  text: z.string(), usage: z.object({ inputTokens: reportedTokens, outputTokens: reportedTokens }).strict().optional(),
+  text: z.string(), usage: modelUsageSchema.optional(),
   toolRequests: z.array(z.never()).max(0).optional()
 }).strict();
 

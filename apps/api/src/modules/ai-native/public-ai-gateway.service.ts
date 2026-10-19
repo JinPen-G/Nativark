@@ -114,7 +114,7 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
       return { draftVersion: VERSION, requestId: intent.requestId, actual: structuredClone(actual), evidence: this.runtime.evidence };
     };
     const completed = (result: GatewayInvocationResult): AiGatewayResultDraft => {
-      const usage: AiGatewayUsageDraft = result.usage ? { kind: 'reported', ...result.usage }
+      const usage: AiGatewayUsageDraft = result.usage ? { kind: 'reported', inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }
         : { kind: 'unknown', reason: 'not_returned', nextAction: 'reconcile' };
       const proposed = binding.orderExplainTool === true && intent.requiredFeatures.includes('tools')
         ? result.toolRequests ?? [] : [];

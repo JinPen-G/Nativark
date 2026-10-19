@@ -6,7 +6,7 @@ import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import type { GatewayAccountingCall } from '../gateway-accounting.ports';
 import { dispatchBindingSchema } from '../invocation-dispatch.service';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import type { ModelUsage } from '../model-gateway.ports';
+import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError, type BudgetRecord } from './budget.ports';
 import type { BudgetGatewayBindingSource } from './budget-gateway-adapter';
@@ -19,7 +19,7 @@ type Reader = Omit<Db, '$transaction'>;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const callSchema = z.object({ context: z.object({ tenantId: id, workspaceId: id, actorId: id }).strict(), binding: dispatchBindingSchema,
   request: z.object({ callId: id.max(128), model: z.string().min(1).max(256), maxOutputTokens: z.number().int().min(1).max(32768), intentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), expiresAt: z.date() }).strict();
-const usageSchema = z.object({ inputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), outputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict();
+const usageSchema = modelUsageSchema;
 export interface GatewayActualUsagePricing {
   quantity(record: Readonly<BudgetRecord>, usage: Readonly<ModelUsage>): Promise<AiUsageQuantityDraft>;
 }
@@ -155,11 +155,13 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       if (rows.receipt.state !== 'dispatched') throw new BudgetError('PENDING_RECONCILIATION');
       const usageHash = this.usageHash(rows.receipt, usage);
       if (rows.receipt.usageHash !== null) {
-        if (rows.receipt.usageHash !== usageHash || rows.receipt.inputTokens !== BigInt(usage.inputTokens) || rows.receipt.outputTokens !== BigInt(usage.outputTokens)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+        if (rows.receipt.usageHash !== usageHash || rows.receipt.inputTokens !== BigInt(usage.inputTokens) || rows.receipt.outputTokens !== BigInt(usage.outputTokens)
+          || requestFingerprint(rows.receipt.usageDetails ?? null) !== requestFingerprint(usage.billingDetails ?? null)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
         return rows.receipt.id;
       }
       const changed = await tx.aiGatewayAccountingReceipt.updateMany({ where: { id: rows.receipt.id, state: 'dispatched', usageHash: null, inputTokens: null, outputTokens: null },
-        data: { inputTokens: BigInt(usage.inputTokens), outputTokens: BigInt(usage.outputTokens), usageHash } });
+        data: { inputTokens: BigInt(usage.inputTokens), outputTokens: BigInt(usage.outputTokens), usageHash,
+          ...(usage.billingDetails ? { usageDetails: { ...usage.billingDetails } } : {}) } });
       if (changed.count !== 1) throw new BudgetError('PENDING_RECONCILIATION');
       return rows.receipt.id;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
@@ -176,6 +178,7 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       invocationId: receipt.invocationId, admissionId: receipt.admissionId, state: receipt.state,
       dispatchToken: receipt.dispatchToken, requestHash: receipt.requestHash, usageHash: receipt.usageHash,
       inputTokens: receipt.inputTokens?.toString() ?? null, outputTokens: receipt.outputTokens?.toString() ?? null,
+      usageDetails: receipt.usageDetails ?? null,
       intentHash: invocation.intentHash, model: invocation.configuration, maxOutputTokens: invocation.maxOutputTokens,
       actorId: admission.actorId, profileId: admission.profileId,
       admissionStatus: admission.status ?? null, admissionRevokedAt: admission.revokedAt?.toISOString() ?? null,
@@ -206,7 +209,8 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
     const initial = await this.current(reservationId), { binding } = initial;
     const rows = await this.rows(this.db, reservationId), receipt = rows.receipt;
     if (receipt.id !== evidenceRef || receipt.state !== 'dispatched' || receipt.inputTokens === null || receipt.outputTokens === null || !receipt.usageHash) throw new BudgetError('PENDING_RECONCILIATION');
-    const usage = usageSchema.parse({ inputTokens: Number(receipt.inputTokens), outputTokens: Number(receipt.outputTokens) });
+    const usage = usageSchema.parse({ inputTokens: Number(receipt.inputTokens), outputTokens: Number(receipt.outputTokens),
+      ...(receipt.usageDetails != null ? { billingDetails: receipt.usageDetails } : {}) });
     if (this.usageHash(receipt, usage) !== receipt.usageHash) throw new BudgetError('FORBIDDEN');
     const record = await new PrismaBudgetRepository(this.db).get(reservationId, binding.association);
     if (!record) throw new BudgetError('FORBIDDEN');

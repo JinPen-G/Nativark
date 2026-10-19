@@ -614,6 +614,8 @@ model AiGatewayAccountingReceipt {
   state         String @default("reserved") @db.VarChar(16)
   inputTokens   BigInt? @db.UnsignedBigInt
   outputTokens  BigInt? @db.UnsignedBigInt
+  /// Validated protocol billing dimensions, atomically bound by usageHash.
+  usageDetails  Json?
   usageHash     String? @db.Char(64)
   createdAt     DateTime @default(now()) @db.DateTime(3)
   updatedAt     DateTime @updatedAt @db.DateTime(3)

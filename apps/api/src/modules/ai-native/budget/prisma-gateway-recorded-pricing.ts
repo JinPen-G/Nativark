@@ -1,11 +1,10 @@
 import type { PrismaClient } from '@prisma/client';
-import { z } from 'zod';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import type { ModelUsage } from '../model-gateway.ports';
+import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';
 import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from './budget.ports';
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
@@ -18,8 +17,7 @@ const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
   return hash(value);
 };
-const usageSchema = z.object({ inputTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  outputTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict();
+const usageSchema = modelUsageSchema;
 export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayActualUsagePricing {
   private readonly records;
   private readonly bindings;
@@ -120,6 +118,12 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     const record = structuredClone(value), parsed = usageSchema.safeParse(structuredClone(usageValue)), current = await this.current();
     if (!parsed.success || !record.dispatched || record.actorId !== current.gateway.actorId || record.reserved.unit === 'calls') throw new BudgetError('UNAVAILABLE');
     if (record.scopeId !== current.scope.id || record.scopeKind !== 'WORKSPACE') throw new BudgetError('FORBIDDEN');
+    // Plain input/output money rates do not cover provider cache read/write
+    // tiers. Retain the original counters/receipt but require real pricing
+    // evidence before settling; never silently charge them at ordinary rates.
+    if (record.reserved.unit === 'money' && parsed.data.billingDetails
+      && (parsed.data.billingDetails.cachedInputTokens > 0 || parsed.data.billingDetails.cacheCreationInputTokens > 0))
+      throw new BudgetError('PENDING_RECONCILIATION');
     const binding = await this.bindings.resolveForReservation(current.gateway, record.id);
     if (hash(binding.association) !== hash(record.association) || record.callId !== binding.association.requestId
       || record.sceneCode !== binding.sceneCode) throw new BudgetError('FORBIDDEN');

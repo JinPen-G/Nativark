@@ -1,12 +1,19 @@
 import { z } from "zod";
-import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ProtocolToolCall } from "./model-gateway.ports";
+import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ModelUsage, type ProtocolToolCall } from "./model-gateway.ports";
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 /** Protocol-owned counters, never an estimate or a price. Do not synthesize
  * missing usage or replace contradicting provider totals with a guessed sum. */
 export const chatCompletionsUsageSchema = z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
-  total_tokens: tokenCount.optional() }).refine(usage => usage.total_tokens === undefined
-    || BigInt(usage.total_tokens) === BigInt(usage.prompt_tokens) + BigInt(usage.completion_tokens),
+  prompt_tokens_details: z.object({ cached_tokens: tokenCount.optional() }).optional(),
+  total_tokens: tokenCount.optional() }).refine(usage => (usage.total_tokens === undefined
+    || BigInt(usage.total_tokens) === BigInt(usage.prompt_tokens) + BigInt(usage.completion_tokens))
+    && (usage.prompt_tokens_details?.cached_tokens ?? 0) <= usage.prompt_tokens,
   'Provider token counters disagree');
+export function chatCompletionsUsage(value: z.infer<typeof chatCompletionsUsageSchema>): ModelUsage {
+  const cached = value.prompt_tokens_details?.cached_tokens ?? 0;
+  return { inputTokens: value.prompt_tokens, outputTokens: value.completion_tokens,
+    ...(cached ? { billingDetails: { cachedInputTokens: cached, cacheCreationInputTokens: 0 } } : {}) };
+}
 const fragment = z.object({ index: z.number().int().min(0).max(7), id: z.string().min(1).max(128).optional(), type: z.literal('function').optional(), function: z.object({ name: z.string().max(64).optional(), arguments: z.string().max(16000).optional() }).strict().optional() }).strict();
 const frame = z.object({ choices: z.array(z.object({ index: z.literal(0), delta: z.object({ content: z.string().nullable().optional(), role: z.literal("assistant").optional(), tool_calls: z.array(z.unknown()).max(8).optional(), refusal: z.string().nullable().optional() }), finish_reason: z.string().nullable().optional() })).max(1), usage: chatCompletionsUsageSchema.optional() });
 /** Bounded incremental text/tool decoder; structured values are validated only at termination. */
@@ -23,7 +30,7 @@ export class ChatCompletionsStream {
   private readonly calls = new Map<number, { id?: string; type?: 'function'; name: string; arguments: string }>();
   private readonly callIds = new Set<string>();
   /** Only validated terminal protocol counters, never interim estimates or text. */
-  accountingUsage(): AdapterResult['usage'] { return this.failed || !this.usage ? undefined : { ...this.usage }; }
+  accountingUsage(): AdapterResult['usage'] { return this.failed || !this.usage ? undefined : structuredClone(this.usage); }
   constructor(private readonly credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy) {
     if (!credential || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1_048_576) throw new ModelGatewayError("CONFIG_INVALID");
   }
@@ -64,7 +71,7 @@ export class ChatCompletionsStream {
       if (this.usage || (!this.stopped && choice?.finish_reason !== 'stop' && choice?.finish_reason !== 'tool_calls')) {
         throw new ModelGatewayError("INVALID_RESPONSE");
       }
-      this.usage = { inputTokens: value.usage.prompt_tokens, outputTokens: value.usage.completion_tokens };
+      this.usage = chatCompletionsUsage(value.usage);
     }
     if (!choice) return "";
     if (this.stopped) throw new ModelGatewayError('INVALID_RESPONSE');

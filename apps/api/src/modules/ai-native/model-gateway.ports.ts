@@ -94,7 +94,15 @@ export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRe
   }
 });
 export type ModelProtocolRequest = z.infer<typeof modelProtocolRequestSchema>;
-export interface ModelUsage { inputTokens: number; outputTokens: number; }
+/** Original protocol counters. Cache reads/writes are part of inputTokens,
+ * not extra tokens; their rates cannot be inferred from a plain-input price. */
+export interface ModelUsage { inputTokens: number; outputTokens: number;
+  billingDetails?: { cachedInputTokens: number; cacheCreationInputTokens: number }; }
+const usageCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const modelUsageSchema = z.object({ inputTokens: usageCount, outputTokens: usageCount,
+  billingDetails: z.object({ cachedInputTokens: usageCount, cacheCreationInputTokens: usageCount }).strict().optional()
+}).strict().refine(value => !value.billingDetails || BigInt(value.billingDetails.cachedInputTokens)
+  + BigInt(value.billingDetails.cacheCreationInputTokens) <= BigInt(value.inputTokens));
 /** Trusted in-process protocol callback, excluded from serialized requests.
  * Counters survive rejected text; this does not authorize text or settlement. */
 export type ModelProtocolInvocation = Readonly<ModelProtocolRequest> & {
