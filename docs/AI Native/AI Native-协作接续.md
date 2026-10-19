@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能提交：`97cdc7f0`将SaaS受权平台费率发布、租户按原版本采用及历史收据接回标准预算管理，沿用BYOK和原价格仓储，不新增账本。stdin组合2/2，0 fail/skip/todo，无新增测试文件；数据库/锁/事务及用户目录为受控替身。API noEmit退出1：678 roots、3项诊断仍均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无诊断；diff退出0，不称整套通过。可信输入计数/上界及完整标准执行验收仍缺，未访问真实服务。原28项等权64.3%，正式验收0/28，不提高百分比；原10份文档及其他源码/测试WIP保留，不夹带提交。
+> 更新时间：2026-10-19。最新功能提交：`ae61462a`保留三协议缓存用量依据，沿原单账收据原子持久化与重建；普通money费率不能静默结算缓存读写。stdin组合2/2、既有Gateway3/3，均0 fail/skip/todo、退出0，无新增测试脚本。追加迁移只做离线validate/diff和隔离client generate，退出0、共享产物未变，未执行迁移。API noEmit退出1：678 roots、3项诊断仍在接手支付WIP，AI Native无诊断；diff退出0。可信输入计数/上界、缓存分层费率和完整执行验收仍缺，不称只剩环境。原28项等权64.3%、验收0/28，不提高百分比；其他文档/源码/测试WIP保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,8 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+用量计价：Responses、Messages及Chat Completions的invoke/stream现保留缓存读取/写入计数；它们已包含在inputTokens内，不重复相加。原`AiGatewayAccountingReceipt.usageDetails`与总量/usageHash同事务写入，重放须同明细，读回复核hash及当前原调用权限；旧NULL记录保持兼容但不反推历史缓存。普通money费率缺对应缓存依据时保留待核对，tokens/calls原口径不变，公开C03仍只返回既有总量。追加迁移`20261019100000_ai_gateway_usage_billing_details`尚未执行，后续经授权部署必须先应用；无后台循环或真实调用。下一实质缺口：原`GatewayPricingRecordManagement.publishInputBound`虽能消费可信证据，尚无实际计数生产者；需将同一冻结输入/工具schema/配置编码、受控计数请求的授权及原调用控制、持久计数收据接回该消费者，不能直接向供应商增发未计量HTTP、用字符数或把用户填的上界标认证。缓存分层费率尚未定义，不能把本片正确拒绝算作money完整正向。
 
 计价生产：标准预算Controller/provider保留BYOK的`pricing/{review|review/receipt}`，新增平台`platform/pricing/{review|review/receipt}`及租户`pricing/platform/{adopt|receipt}`（均POST，前缀`/api/ai-native/budget-settings/`）。平台发布沿真实SaaS身份与`system:ai-provider:manage`，历史读取沿`view`；租户采用沿当前Auth/Guard/ALS及原设置权限，不得改平台费率或借用其他场景。服务器选择Profile、模型/协议/凭据引用；人类审阅tokens口径或六位money费率/币种/版本/有效期不认证token数、不开放预算。平台锁Profile后复验版本与当前权限，审阅与价格同一不可变行，原价格reader兼容旧记录并保留完整payloadHash。租户只采用同一原价的受权投影，沿原仓储/财务账本；原采用后继续复核当前权限，跨空间或读取期间撤权拒绝。BYOK仍锁租户配置再锁Profile，与原OperationLog收据同事务追加。同键异载荷冲突，写应答不明保持unknown，只读原operationKey/priceId收据，不能另换版本重试；配置改版、停用、切模式或到期不重授新采用，但原收据可按当前权限读取。输出不含凭据/平台审阅人，明确人类审阅预算费率非供应商账单、非输入计数或派发许可。标准宿主显式配置仍默认关闭；可信计数/输入上界生产者及完整执行验收仍缺，不能凭recorded启用money准入。官方Responses计数规范已核对，尚未另建计数HTTP旁路。
 
