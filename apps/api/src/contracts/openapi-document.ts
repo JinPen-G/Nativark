@@ -2044,7 +2044,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...(['create', 'readCreation', 'start', 'reconcile', 'requestCancel', 'readInput', 'resume', 'readAnswer', 'continueAnswer'] as const).map(operation => ({
     method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
     operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
-    summary: 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; cancellation is not rollback; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
+    summary: ['readCreation', 'requestCancel', 'readAnswer'].includes(operation)
+      ? 'Original owned staff task metadata, exact cancellation revision or exact human-answer receipt. Current order/resource and task action policies remain required independently of NEW recognition configuration, profile or draft expiry. Receipts do not resume execution, reopen attachment bytes, release budget or attest remote rollback. Unknown is observed only by the original key. Draft payload remains GenericObject.'
+      : 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
   { method: 'post', path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancelReceipt}`, tag: 'AI Native',

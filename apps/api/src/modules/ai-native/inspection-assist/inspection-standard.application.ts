@@ -2,6 +2,7 @@
  * and ledger. Inert until explicit SERVER configuration plus current persisted
  * policies/capabilities/entitlement/budget; never an inspection submitter. */
 import { z } from 'zod';
+import { isAiTaskInputSubmissionDraft } from '@rental-os/shared';
 import type { ModuleRef } from '@nestjs/core';
 import type { AuthService } from '../../auth/auth.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
@@ -27,6 +28,7 @@ import { inspectionId, inspectionTargetSchema } from './inspection-assist.valida
 import { randomUUID } from 'node:crypto';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
+import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 
 export const AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION = Symbol('AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION');
 export const AI_NATIVE_STAFF_RECOGNITION_RUNTIME = Symbol('AI_NATIVE_STAFF_RECOGNITION_RUNTIME');
@@ -60,13 +62,13 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     scenes: [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },
       { kind: 'audio', code: STAFF_RECOGNITION_SCENES.audio, version: '1' }] });
   const absent = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
-  // Original cancellation is a current action-policy operation, not a new
-  // recognition execution. No profile, object bytes, budget or lease is minted.
-  const cancellation = async (request: { headers: { authorization?: unknown } }, value: unknown,
-    revisionValue: number, observe: boolean, signal?: AbortSignal) => {
+  // Original metadata/answer receipts and cancellation use current action
+  // policies, not new recognition. No profile, bytes, budget or lease is minted.
+  const withOriginalTask = async <T>(request: { headers: { authorization?: unknown } }, value: unknown,
+    operation: 'read_metadata' | 'read_events' | 'transition_task', signal: AbortSignal | undefined,
+    work: (current: ReturnType<typeof composePersistedTaskAuthorization>, taskId: string) => Promise<T>) => {
     const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
       inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict().parse(structuredClone(value));
-    const expectedRevision = z.number().int().min(1).max(4294967294).parse(revisionValue);
     const authorization = request?.headers?.authorization;
     if (typeof authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     let active = true;
@@ -82,18 +84,12 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
         if (!original.task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const current = composePersistedTaskAuthorization({ db: d.db, auth: d.auth,
           subscriptions: d.subscriptions, credentials, clock: d.clock });
-        const operation = observe ? 'read_events' as const : 'transition_task' as const;
         const identity = (context: Awaited<ReturnType<typeof current.authority.resolve>>) => {
           const { requestId: _id, authorizedAt: _at, ...stable } = context;
           return requestFingerprint(stable);
         };
         const before = identity(await current.authority.resolve(original.task.taskId, operation));
-        const repository = new AiTaskTransitionRepository(d.db, current.authority, d.clock);
-        const selector = { taskId: original.task.taskId, expectedRevision };
-        const observed = await repository.readCancellationReceipt(selector);
-        const result = observe ? observed : { receipt: observed.event ? { event: observed.event, runRevision: undefined }
-          : await repository.transition({ ...selector, to: 'cancel_requested', reason: 'cancel_requested' }),
-          cancellation: 'requested_not_rollback' as const };
+        const result = await work(current, original.task.taskId);
         // Task status/revision may have advanced. Bind only the immutable
         // original creation, then recheck the CURRENT permission after the write.
         const after = await receipts.readCreation({ headers: { authorization } }, reference, signal);
@@ -105,10 +101,31 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       });
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
+  const cancellation = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    revisionValue: number, observe: boolean, signal?: AbortSignal) => {
+    const expectedRevision = z.number().int().min(1).max(4294967294).parse(revisionValue);
+    return withOriginalTask(request, reference, observe ? 'read_events' : 'transition_task', signal, async (current, taskId) => {
+      const repository = new AiTaskTransitionRepository(d.db, current.authority, d.clock), selector = { taskId, expectedRevision };
+      const observed = await repository.readCancellationReceipt(selector);
+      return observe ? observed : { receipt: observed.event ? { event: observed.event, runRevision: undefined }
+        : await repository.transition({ ...selector, to: 'cancel_requested', reason: 'cancel_requested' }),
+        cancellation: 'requested_not_rollback' as const };
+    });
+  };
   const requestCancel = (request: { headers: { authorization?: unknown } }, reference: unknown,
     expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, false, signal);
   const readCancelReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
     expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, true, signal);
+  const readAnswer = (request: { headers: { authorization?: unknown } }, reference: unknown, value: unknown, signal?: AbortSignal) => {
+    const submission = structuredClone(value);
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return withOriginalTask(request, reference, 'read_metadata', signal, async (current, taskId) => {
+      if (submission.taskId !== taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // This exact original answer receipt cannot submit an answer, select a
+      // newer question/run, grant a lease or reconstruct execution dependencies.
+      return PrismaTaskInputRepository.receiptReader(d.db, current.tasks, d.clock).readSubmission(submission);
+    });
+  };
   const readResultReview = async (request: { headers: { authorization?: unknown } }, value: unknown,
     resultValue: unknown, expectedTaskId?: string, signal?: AbortSignal) => {
     const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
@@ -155,7 +172,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
-      readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer: absent,
+      readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
       continueAnswer: absent, requestCancel, readCancelReceipt }, policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
@@ -171,7 +188,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       start: application.start.bind(application), reconcile: application.reconcile.bind(application),
       readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
-      readAnswer: application.readAnswer.bind(application), continueAnswer: application.continueAnswer.bind(application),
+      readAnswer, continueAnswer: application.continueAnswer.bind(application),
       requestCancel, readCancelReceipt },
     policies: composeStaffInspectionTaskPolicies(dependencies, { enabled: true, ttlMs: 120000,
       operations: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run',
