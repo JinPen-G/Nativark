@@ -2253,13 +2253,17 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['initialize', 'AiBudgetSettingsInitializeDraft', 'AiBudgetSettingsChangeResponseDraft'],
     ['refreshConfiguration', 'AiBudgetSettingsRefreshConfigurationDraft', 'AiBudgetSettingsChangeResponseDraft'],
     ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
-    ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft']
+    ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['reviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft']
   ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageAiBudgetSettings_${action}`, authRequired: true,
     permissions: [action === 'platformRead' || action === 'platformSave' ? 'system:ai-provider:manage' : 'system:params:manage'],
     requestSchema, responseSchema,
-    summary: 'Standard server-composed settings host, default unavailable without trusted execution configuration. Current tenant/workspace or distinct platform management Guard, version CAS and original single-ledger policies remain mandatory. No policy seed, unlimited default, model call, reservation or dispatch. Rebinding uses the current server-selected profile and disables its policy gate; unknown writes require same-policy read, never blind retry.' })),
+    summary: action === 'reviewPrice' || action === 'readPriceReview'
+      ? 'Current authorized BYOK administrator reviews an immutable versioned budget rate, not a provider invoice or token-count certificate. Tenant profile revision and ownership are verified under locks; original price and review receipt commit atomically. Lost responses require pricing/review/receipt with the original key; no new version retry. Platform-managed rates, input certification, reservation and dispatch are not granted. Default unavailable with the standard settings host.'
+      : 'Standard server-composed settings host, default unavailable without trusted execution configuration. Current tenant/workspace or distinct platform management Guard, version CAS and original single-ledger policies remain mandatory. No policy seed, unlimited default, model call, reservation or dispatch. Rebinding uses the current server-selected profile and disables its policy gate; unknown writes require same-policy read, never blind retry.' })),
   ...([
     ['priceRead', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft'],
     ['pricePublicationRead', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft'],

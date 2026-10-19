@@ -1,6 +1,7 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Post, Req, type DynamicModule } from '@nestjs/common';
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS, AI_USAGE_DRAFT_SCHEMAS,
-  type AiBudgetSettingsHttpFailureDraft, type AiGatewayPriceSummaryDraft, type AiGatewayInputBoundSummaryDraft } from '@rental-os/shared';
+  type AiBudgetSettingsHttpFailureDraft, type AiGatewayPriceSummaryDraft, type AiGatewayInputBoundSummaryDraft,
+  type AiGatewayPriceReviewResponseDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { BudgetError } from './budget.ports';
@@ -51,14 +52,28 @@ export class AiBudgetManagementController {
     }
     return structuredClone(value);
   }
-  private async respond<T>(request: SettingsRequest, write: boolean, work: (signal: AbortSignal) => Promise<T>) {
+  private async respond<T>(request: SettingsRequest, write: boolean, work: (signal: AbortSignal) => Promise<T>, policyReadback = true) {
     return respondBudgetManagement(async () => {
       try { return await withRequestAbort(request, work); }
       catch (error) {
         if (error instanceof AiRequestWaitError) throw new BudgetError(write ? 'PENDING_RECONCILIATION' : 'UNAVAILABLE');
         throw error;
       }
-    });
+    }, policyReadback);
+  }
+  private priceReviewResult(value: unknown, write: boolean) {
+    const validate = ajv.getSchema<AiGatewayPriceReviewResponseDraft>('urn:rental:budget-management:AiGatewayPriceReviewResponseDraft');
+    if (!validate?.(value) || Buffer.byteLength(JSON.stringify(value), 'utf8') > 65536)
+      throw new BudgetError(write ? 'PENDING_RECONCILIATION' : 'UNAVAILABLE');
+    return structuredClone(value as AiGatewayPriceReviewResponseDraft);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reviewPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, true, async signal => this.priceReviewResult(await this.application.reviewPrice(request, body, signal), true), false);
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPriceReview(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => this.priceReviewResult(await this.application.readPriceReview(request, body, signal), false), false);
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: SettingsRequest, @Body() body: unknown) {

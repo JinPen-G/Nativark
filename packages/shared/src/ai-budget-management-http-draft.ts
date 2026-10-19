@@ -6,8 +6,18 @@ import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, 
 export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
   read: 'read', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
-  priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound'
+  priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound',
+  reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt'
 });
+export type AiGatewayReviewedPriceBillingDraft = { unit: 'tokens'; metric: 'input_plus_output'; scale: 0; rounding: 'exact' }
+  | { unit: 'money'; currency: string; scale: 6; inputPerMillion: string; outputPerMillion: string; rounding: 'ceil_total_micro_units' };
+export type AiGatewayPriceReviewDraft = { sceneCode: string; operationKey: string; configId: string; expectedConfigRevision: number;
+  priceVersion: string; validFrom: string; expiresAt: string; billing: AiGatewayReviewedPriceBillingDraft; confirmReviewedRate: true };
+export type AiGatewayPriceReviewReadDraft = { sceneCode: string; operationKey: string };
+export type AiGatewayPriceReviewResponseDraft = { state: 'recorded'; operationKey: string; id: string; evidenceHash: string;
+  priceVersion: string; configurationHash: string; configId: string; configRevision: number; validFrom: string; expiresAt: string;
+  billing: AiGatewayReviewedPriceBillingDraft; rateAuthority: 'tenant_reviewed_budget_rate_not_provider_invoice';
+  inputCounting: 'not_certified_by_rate_review'; executionPermission: false };
 export type AiGatewayPriceReadDraft = { configurationHash: string; priceVersion: string };
 export type AiGatewayPricePublicationReadDraft = { reference: string };
 export type AiGatewayInputBoundReadDraft = { callId: string };
@@ -62,7 +72,20 @@ const pricingHash = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
 const priceSummary = { id: pricingHash, evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 },
   configurationHash: pricingHash, validFrom: time, expiresAt: time,
   executionPermission: { type: 'boolean', const: false }, configurationMeaning: choice('historical_reference_not_current_selection') };
+const reviewedBilling: AiLeafSchemaDraft = { oneOf: [obj({ unit: choice('tokens'), metric: choice('input_plus_output'),
+  scale: int(0, 0), rounding: choice('exact') }), obj({ unit: choice('money'), currency: { ...text(3, 3), pattern: '^[A-Z]{3}$' },
+  scale: int(6, 6), inputPerMillion: { type: 'string', pattern: '^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$' },
+  outputPerMillion: { type: 'string', pattern: '^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$' }, rounding: choice('ceil_total_micro_units') })] };
 export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiGatewayPriceReviewDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 }, configId: text(36),
+    expectedConfigRevision: int(1, 4294967295), priceVersion: { ...pricingKey, maxLength: 64 }, validFrom: time, expiresAt: time,
+    billing: reviewedBilling, confirmReviewedRate: { type: 'boolean', const: true } }),
+  AiGatewayPriceReviewReadDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 } }),
+  AiGatewayPriceReviewResponseDraft: obj({ state: choice('recorded'), operationKey: { ...pricingKey, maxLength: 128 },
+    id: pricingHash, evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 }, configurationHash: pricingHash,
+    configId: text(36), configRevision: int(1, 4294967295), validFrom: time, expiresAt: time, billing: reviewedBilling,
+    rateAuthority: choice('tenant_reviewed_budget_rate_not_provider_invoice'), inputCounting: choice('not_certified_by_rate_review'),
+    executionPermission: { type: 'boolean', const: false } }),
   AiGatewayPriceReadDraft: obj({ configurationHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 } }),
   AiGatewayPricePublicationReadDraft: obj({ reference: pricingKey }),
   AiGatewayInputBoundReadDraft: obj({ callId: { ...pricingKey, maxLength: 128 } }),

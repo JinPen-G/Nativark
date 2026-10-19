@@ -175,7 +175,7 @@ const aiManagementRoutes = new Set([AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDG
 const budgetTenantRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.change,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.initialize, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.priceRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.pricePublicationRead,
-  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead]
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceReview]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
 const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));

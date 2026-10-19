@@ -17,6 +17,7 @@ import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiUsageSettings
 import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
 import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import { ReviewedGatewayPriceService } from './reviewed-gateway-price.service';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
@@ -131,6 +132,11 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     if (!platform) throw new BudgetError('UNAVAILABLE');
     return createAuthorizedPlatformBudgetSettings({ ...platform, credentials });
   };
+  const reviewedPrices = (credentials: AiTaskCredentialSource) => {
+    if (!tenant) throw new BudgetError('UNAVAILABLE');
+    const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
+    return new ReviewedGatewayPriceService(tenant.db, source.scopes, source, credentials.current.bind(credentials), tenant.clock);
+  };
   // First provisioning and explicit re-binding use the same actual config
   // producer. Re-binding never resets allocations or opens a gate by itself.
   const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
@@ -233,6 +239,10 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       }
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
     }, true, signal),
+    reviewPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, command) => reviewedPrices(credentials).review(command), true, signal),
+    readPriceReview: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, command) => reviewedPrices(credentials).receipt(command), false, signal),
     platformRead: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformRead.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
