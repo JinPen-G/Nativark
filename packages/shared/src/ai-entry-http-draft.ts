@@ -16,6 +16,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
   /** Request only; observe the original snapshot after success or unknown. */
   requestTaskCancellation: 'tasks/cancel/request',
+  readTaskCancellationReceipt: 'tasks/cancel/receipt/read',
+  readTaskCancellationSettlementReceipt: 'tasks/cancel/settlement/receipt/read',
+  settleTaskUnstartedCancellation: 'tasks/cancel/unstarted/settle',
   /** Converge only a proved released input wait, never arbitrary active work. */
   reconcileTaskInputCancellation: 'tasks/cancel/input-wait/reconcile',
   /** Reads the original clarification, never starts or resumes a run. */

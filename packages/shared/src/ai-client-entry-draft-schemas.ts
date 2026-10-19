@@ -59,6 +59,22 @@ export const aiClientTaskInputCancellationReceiptSchema = aiClientTaskCancelRece
   externalRollback: z.literal('not_claimed')
 }).strict();
 export type AiClientTaskInputCancellationReceipt = z.infer<typeof aiClientTaskInputCancellationReceiptSchema>;
+/** Task cancellation is not business rollback or a financial release. */
+export const aiClientTaskUnstartedCancellationReceiptSchema = aiClientTaskInputCancellationReceiptSchema.extend({
+  cancellation: z.literal('unstarted_task_settled')
+}).strict();
+export type AiClientTaskUnstartedCancellationReceipt = z.infer<typeof aiClientTaskUnstartedCancellationReceiptSchema>;
+/** Observe one exact original revision, not today's status or latest event. */
+export const aiClientTaskCancellationObservationSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
+  expectedRevision: z.number().int().min(1).max(4294967294), state: z.enum(['observed', 'unknown']),
+  transition: aiClientTaskCancelReceiptSchema.pick({ taskRevision: true, cursor: true, observedAt: true })
+    .extend({ status: z.enum(['cancel_requested', 'cancelled']) }).strict().nullable(),
+  execution: z.literal('not_authorized_by_observation'), externalRollback: z.literal('not_claimed'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_task')
+}).strict().refine(value => value.state === 'observed'
+  ? value.transition !== null && value.transition.taskRevision === value.expectedRevision + 1 : value.transition === null);
+export type AiClientTaskCancellationObservation = z.infer<typeof aiClientTaskCancellationObservationSchema>;
 /** The original input contract remains authoritative; no parallel field DSL. */
 export const aiClientTaskInputReadResponseSchema = z.discriminatedUnion('state', [
   z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('pending'),

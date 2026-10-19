@@ -21,7 +21,7 @@ import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
-import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
   type AiClientHostCapabilities } from '@rental-os/shared';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
@@ -578,6 +578,38 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const configuredTaskInputSource = dependencies.taskInputs && {
     ...dependencies.taskInputs, gatewayScene: structuredClone(dependencies.taskInputs.gatewayScene) };
+  // Original receipts/convergence need persistence, not a live question source,
+  // model profile, price or new execution grant. Current ownership is still read
+  // through the original Guard/ALS/publication-aware order loader on every use.
+  const originalTaskDb = dependencies.taskInputs?.db ?? dependencies.taskModel?.db ?? dependencies.taskAccounting?.db;
+  const withOriginalTaskReceipt = async <T>(request: AiClientApplicationRequest, value: unknown,
+    consume: (authorized: ReturnType<typeof composePersistedClientTaskAuthorization>,
+      db: typeof originalTaskDb) => Promise<T>, signal?: AbortSignal, db = originalTaskDb) => {
+    if (!server.entry || !taskDependencies || db && db !== dependencies.db)
+      throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_task_dependencies_missing');
+    const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+    return withBinding(structuredClone(request), true, 'order', async bound => {
+      const loadMaterial = async (materialRef: string) => {
+        await bound.assertCurrent();
+        const row = await repository.findSource(scopeOf(bound), materialRef);
+        if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await verify(bound, row, true);
+        await bound.assertCurrent();
+        return { row, identity: structuredClone(bound.identity) };
+      };
+      const authorized = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
+      const before = await authorized.execution.readOriginalGrant();
+      const result = await consume(authorized, db);
+      const after = await authorized.execution.readGrant(before.taskId, 'read');
+      const stable = (context: typeof before.context) => {
+        const { requestId: _id, authorizedAt: _at, ...identity } = context;
+        return requestFingerprint(identity);
+      };
+      if (stable(before.context) !== stable(after.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      await bound.assertCurrent();
+      return result;
+    }, signal);
+  };
   const configuredModel = (): PersistedClientModelServerDependencies => {
     const model = dependencies.taskModel;
     if (!model || model.db !== dependencies.db || model.gateway?.db !== dependencies.db
@@ -759,12 +791,27 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     /** Server-only, original released-input witness; not a generic cancellation
      * finalizer and never a model/provider or budget-dependent operation. */
     reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,
-      source = configuredTaskInputSource) {
-      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
-      return withOriginalTaskInput(request, value, source, reader => reader.settleInputCancellation());
+      source = configuredTaskInputSource, signal?: AbortSignal) {
+      if (source && source.db !== dependencies.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return withOriginalTaskReceipt(request, value, (authorized, db) => {
+        if (!db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+        return authorized.cancellation.settleReleasedInputWait(db);
+      }, signal, source?.db);
     },
-    /** Original customer cancellation request only. No caller task/run/holder,
-     * provider, approval, budget release or claim of external rollback. */
+    /** Exact original events, not current status or execution permission. */
+    readOriginalTaskCancellationReceipt(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const { expectedRevision, ...original } = parseEntry(aiClientTaskCancelRequestSchema, structuredClone(value));
+      return withOriginalTaskReceipt(request, original, authorized => authorized.cancellation.readReceipt({ expectedRevision }), signal);
+    },
+    readOriginalTaskCancellationSettlementReceipt(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const { expectedRevision, ...original } = parseEntry(aiClientTaskCancelRequestSchema, structuredClone(value));
+      return withOriginalTaskReceipt(request, original, authorized => authorized.cancellation.readReceipt({ expectedRevision }, true), signal);
+    },
+    settleOriginalTaskUnstartedCancellation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const { expectedRevision, ...original } = parseEntry(aiClientTaskCancelRequestSchema, structuredClone(value));
+      return withOriginalTaskReceipt(request, original, authorized => authorized.cancellation.settleUnstarted({ expectedRevision }), signal);
+    },
+    /** Original cancellation request only; no provider, financial release or rollback. */
     async requestOriginalTaskCancellation(request: AiClientApplicationRequest, value: unknown) {
       if (!server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
       if (!taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_task_dependencies_missing');
@@ -1011,14 +1058,19 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       return runOriginalTaskModel(request, command, model, signal, submission, 'continue');
     },
     async readOriginalTaskModelInputReceipt(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
-      source = configuredTaskInputSource) {
-      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+      source = configuredTaskInputSource, signal?: AbortSignal) {
+      if (source && source.db !== dependencies.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));
       if (!parsed.success || Object.prototype.hasOwnProperty.call(parsed.data, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const submission = { ...parsed.data, taskId: 'validation-only' };
       if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { taskId: _taskId, ...answers } = submission;
-      return withOriginalTaskInput(request, value, source, reader => reader.readSubmission(answers));
+      return withOriginalTaskReceipt(request, value, async (authorized, db) => {
+        if (!db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+        const grant = await authorized.execution.readOriginalGrant();
+        return PrismaTaskInputRepository.receiptReader(db, authorized.tasks, clock)
+          .readSubmission({ ...answers, taskId: grant.taskId });
+      }, signal, source?.db);
     },
     async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {
       parseEntry(aiClientHostCapabilitiesRequestSchema, structuredClone(value));

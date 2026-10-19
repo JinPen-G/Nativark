@@ -1,5 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
+  aiClientTaskUnstartedCancellationReceiptSchema, aiClientTaskCancellationObservationSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
@@ -25,6 +26,7 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
+  'readOriginalTaskCancellationReceipt' | 'readOriginalTaskCancellationSettlementReceipt' | 'settleOriginalTaskUnstartedCancellation' |
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
@@ -252,6 +254,46 @@ export class AiClientEntryController {
       return receipt.data;
     }, 'read_original_task');
   }
+  private observeCancellation(request: ClientModelHttpRequest, body: unknown, settled: boolean) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const result = await (settled ? this.application.readOriginalTaskCancellationSettlementReceipt(current, input, signal)
+        : this.application.readOriginalTaskCancellationReceipt(current, input, signal));
+      const event = result.event;
+      if (event && event.data.to !== (settled ? 'cancelled' : 'cancel_requested'))
+        throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      const response = aiClientTaskCancellationObservationSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
+        taskId: result.taskId, expectedRevision: result.expectedRevision, state: event ? 'observed' : 'unknown',
+        transition: event ? { taskRevision: event.taskRevision, cursor: event.cursor,
+          observedAt: event.occurredAt, status: event.data.to } : null,
+        execution: 'not_authorized_by_observation', externalRollback: 'not_claimed',
+        retryable: false, nextAction: 'read_original_task' });
+      if (!response.success) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskCancellationReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.observeCancellation(request, body, false);
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationSettlementReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskCancellationSettlementReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.observeCancellation(request, body, true);
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleTaskUnstartedCancellation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const result = await this.application.settleOriginalTaskUnstartedCancellation(current, input, signal), event = result.receipt.event;
+      if (event.data.to !== 'cancelled') throw new AiTaskTransitionResultUnknownError();
+      const response = aiClientTaskUnstartedCancellationReceiptSchema.safeParse({ contractVersion: event.contractVersion,
+        taskId: event.taskId, taskRevision: event.taskRevision, cursor: event.cursor, observedAt: event.occurredAt,
+        status: 'cancelled', cancellation: result.cancellation, externalRollback: result.externalRollback,
+        retryable: false, nextAction: 'read_original_task' });
+      if (!response.success) throw new AiTaskTransitionResultUnknownError();
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_original_task');
+  }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitTaskInput(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(async () => {
@@ -265,27 +307,29 @@ export class AiClientEntryController {
     }, 'read_original_task_input_receipt');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readTaskInputReceipt(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
-      const parsed = aiClientTaskInputSubmissionRequestSchema.parse(body);
+  readTaskInputReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const parsed = aiClientTaskInputSubmissionRequestSchema.parse(input);
       const { submission, ...command } = parsed;
-      const result = await this.application.readOriginalTaskModelInputReceipt(request, command, submission);
+      const result = await this.application.readOriginalTaskModelInputReceipt(current, command, submission, undefined, signal);
       const receipt = result.state === 'observed' ? { taskId: result.taskId, requestId: result.requestId,
         receiptId: result.receiptId, taskRevision: result.taskRevision } : null;
       const response = aiClientTaskInputReceiptReadResponseSchema.safeParse({ state: result.state, receipt,
         contractVersion: AI_TASK_INPUT_DRAFT_VERSION, execution: 'not_inferred_from_receipt' });
       if (!response.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return response.data;
-    }, 'read_original_task_input_receipt');
+    }, { maxWaitMs: 15000 }), 'read_original_task_input_receipt');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readOrderExplanation(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reconcileTaskInputCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
-      const result = await this.application.reconcileOriginalTaskInputCancellation(request, body);
+  reconcileTaskInputCancellation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const result = await this.application.reconcileOriginalTaskInputCancellation(current, input, undefined, signal);
       const event = result.receipt.event;
       if (event.data.to !== 'cancelled') throw new AiTaskTransitionResultUnknownError();
       const receipt = aiClientTaskInputCancellationReceiptSchema.safeParse({ contractVersion: event.contractVersion,
@@ -294,7 +338,7 @@ export class AiClientEntryController {
         retryable: false, nextAction: 'read_original_task' });
       if (!receipt.success) throw new AiTaskTransitionResultUnknownError();
       return receipt.data;
-    }, 'read_original_task');
+    }, { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSource(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

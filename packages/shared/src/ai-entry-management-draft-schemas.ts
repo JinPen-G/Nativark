@@ -13,6 +13,11 @@ const date = { type: 'string', format: 'date-time' };
 const literal = (value: string | boolean | number) => ({ const: value });
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) =>
   ({ type: 'object', properties, required, additionalProperties: false });
+const taskRevision = { type: 'integer', minimum: 1, maximum: 4294967295 };
+const cancelTransition = { taskRevision, cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' }, observedAt: date };
+const cancelObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
+  expectedRevision: { ...taskRevision, maximum: 4294967294 }, execution: literal('not_authorized_by_observation'),
+  externalRollback: literal('not_claimed'), retryable: literal(false), nextAction: literal('read_original_task') };
 const permissions = { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
   items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$' } };
 const scope = object({ kind: literal('workspace'), tenantId: id, workspaceId: id });
@@ -58,6 +63,16 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
       status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
     execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
+  AiClientTaskCancelRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
+    expectedRevision: { ...taskRevision, maximum: 4294967294 } }),
+  AiClientTaskUnstartedCancellationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    taskId: { ...id, maxLength: 36 }, ...cancelTransition, status: literal('cancelled'),
+    cancellation: literal('unstarted_task_settled'), externalRollback: literal('not_claimed'),
+    retryable: literal(false), nextAction: literal('read_original_task') }),
+  AiClientTaskCancellationObservation: { oneOf: [
+    object({ ...cancelObservation, state: literal('observed'),
+      transition: object({ ...cancelTransition, status: { enum: ['cancel_requested', 'cancelled'] } }) }),
+    object({ ...cancelObservation, state: literal('unknown'), transition: { type: 'null' } })] },
   AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
   AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),
   AiTaskAccountingObservation: { $ref: '#/components/schemas/AiClientTaskAccountingResponse' },
