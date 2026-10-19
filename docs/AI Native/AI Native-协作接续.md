@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最近核心功能：员工原账独立核对、停用新识别后的原结果复查与取消/原收据观察；标准员工创建→原runner/Gateway→calls单账→结果，PNG/WAV已有控制器内离线证据。未启动HTTP或读取真实对象，真实费率/认证计数及外部环境仍缺实现或验证，默认关闭。固定提交及边界见开发记录，开工以实际Git现场为准，不回退旧SHA。
+> 更新时间：2026-10-19。最近核心功能：员工失效草稿的原任务/回答收据，以及从未启动、已计量释放的等待输入两种取消收敛；均复用原权限、事务和账本，不退额或重派。标准员工两轮澄清保持一份累计资源账，离线正向已核实。未启动HTTP或读取真实对象，真实费率/认证计数及外部环境仍缺实现或验证，默认关闭。固定提交及边界见开发记录，开工以实际Git现场为准，不回退旧SHA。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -30,9 +30,9 @@
 
 **当前可接入口：** 员工`AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION`显式选择image及可选audio的profile/calls版本、host/limits；原文件ObjectReader、inspection-tasks、inspection-task-policies和结果保存桥均已接AppModule，人工检查门不随之自动开放。客户`AI_NATIVE_CLIENT_MODEL_CONFIGURATION`明确提供pricing/prompt/output/limits/host，web/微信共用原文本Gateway；`AI_NATIVE_CLIENT_POLICY_CONFIGURATION`另行开放`/api/ai-native/client-task-policies`的原政策read/change/operation及model-plan CAS，固定quote_clarification场景，不播种政策。两种管理/执行开关不互相授权。原结果读取不需要模型开放；客户original_client输入源只接受同一冻结输入、单步骤计划及已完整计量的原文本结果，拒绝未知结果、工具动作和自造答案。当前范围/字段及GenericObject合同缺口见源码与开发记录，不另建Runtime/SDK协议。 客户web/微信另接`orders/material/{prepare|receipt}`、`tasks/{create|creation/read}`及`tasks/accounting/{read|reconcile}`；原账按当前本人/原调用及可信用量收敛，不要求模型仍开启，不暴露内部计价/配置，不授新派发。
 
-**本批证据：** 员工原账收敛1/1；标准PNG/WAV创建/派发/停用后原结果复查2/2、取消/原修订观察2/2，三组均0 fail/skip/todo、退出0，不与前序批次相加称全量。API669 roots/0诊断、diff退出0；无新测试文件、构建、迁移或服务。沿原双offline preload、固定无效DATABASE_URL和本树绝对审计/TEMP运行stdin；`output/core-original-accounting-20261019/`保留失败及复验。Auth/Guard/订阅、runner/Gateway/Prisma账本与Controller为实际实现；DB、能力历史、协议回复和对象流为替身，不是HTTP路由、真库锁、真实费率/存储/供应商/设备验收。原28项62.5%、整项验收0/28不变。
+**本批证据：** 失效草稿元数据/取消、两轮澄清及原回答收据、从未启动取消、释放的输入等待取消，四组stdin各1/1、0 fail/skip/todo、退出0，不与前序批次相加称全量。API669 roots/0诊断、diff退出0；无新测试文件、构建、迁移或服务。沿原双offline preload、固定无效DATABASE_URL和本树绝对审计/TEMP运行；`output/core-staff-original-lifecycle-20261019/`保留旧实现阻塞复现及夹具修正。Auth/Guard/订阅、runner/Gateway/Prisma仓储与Controller为实际实现；DB、能力历史、协议和对象流为替身，不是HTTP/真库锁、真实计价/存储/供应商/设备验收。原28项62.5%、整项验收0/28不变。
 
-**员工善后入口：** `16f0ee84`提供`inspection-tasks/accounting/{read|reconcile}`，按当前同员工任务读政策及原invocation/dispatch/usage收敛，不依赖新识别配置、文件、profile或lease；只返回调用状态。`11432ef4`将`inspection-assist/result-read`接回默认关闭的标准根，复核原任务/附件/冻结输入及当前权限，读取不打开对象正文、不再调用模型；`0c5d7972`将`inspection-tasks/cancel`及`cancel/receipt`接原事务状态转换与精确修订事件。重复取消复用原事件，不增账、不证明远端取消/业务回滚；unknown只读原收据。当前结果/取消仍要求原草稿和附件绑定有效；草稿已过期或变更时的历史载荷、澄清输入及回答善后仍需核实，不能说只剩真实环境。新启动/恢复、结果保存和人工提交各自维持原门，不因观察入口开放。
+**员工善后入口：** `inspection-tasks/accounting/{read|reconcile}`继续按当前同员工任务政策及原invocation/dispatch/usage收敛，不依赖新识别配置/文件/profile/lease。`c5dfe92c`让`creation/read`、取消和原收据只核对当前订单读权、原草稿关联及原任务输入，不因草稿过期/修改/附件移除消失；原草稿关联缺失仍拒绝，不读附件或表单正文。`0279dfe5`让`input/receipt`精确核对原问题、回答键/内容指纹、计划及原run，停用后可读但不继续执行。`53df5cec`/`91ec248c`提供`cancel/settle-unstarted`、`cancel/settle-released-input`和`cancel/settlement/receipt`：只有原事务证明无执行证据，或原模型结果及四种资源全部计量且执行槽已释放时才关闭任务；重复复用原事件，未知/运行中/未计量拒绝，不退额、不回滚业务。候选正文的`inspection-assist/result-read`及保存/采用仍需有效原附件/草稿绑定；这些历史载荷、其他恢复窗口及全端失效处理尚未齐，不能说只剩环境。新启动/恢复、保存和人工提交保持各自原门。
 
 **本轮验证边界：** 员工人工链、品类原治理链（含内存Nest DI）、设置等待聚合、报价原订单结果聚合、通知新变更至原任务审批执行，五个不同场景各1/1、0 fail/skip/todo、退出0，不与旧批次/复验相加。API源码664 roots/0诊断、diff退出0；日志`output/core-consumer-closure-20261018/`保留首轮失败，未新增测试文件，未加载正式AppModule、监听端口或改变共享产物。DB、Core数据/检查提交/设置存储和候选为替身，报价采用受控monotonic，仅验证原资源门未放宽。旧事件组合0/1、旧宿主1 pass/1 fail及旧shared JS缺schema仍是历史失败，本轮未重跑、不算通过。新配置收据迁移只完成前序隔离generate/validate/diff，未执行；真实MySQL、供应商/存储及浏览器/微信设备未验。
 
