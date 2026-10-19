@@ -21,6 +21,9 @@ export type AiTaskPerformanceObservationDraft = {
   modelDelivery: { items: Array<{ invocationId: string; runId: string; stepId: string; callId: string; mode: 'invoke' | 'stream';
     transportWallMs: string; firstValidatedTextMs: string | null; basis: 'gateway_transport_including_usage_and_consumer_wait' }>;
     unobservedInWindow: number; truncated: boolean; coverage: 'completed_gateway_observations_only' };
+  budgetAdmission?: { denials: Array<{ invocationId: string; runId: string; stepId: string; callId: string;
+    observedAt: string; code: 'budget_unavailable'; observation: 'gate_rejected_not_release_evidence' }>;
+    truncated: boolean; coverage: 'recorded_rejections_only' };
   measurements: { firstToken: 'not_recorded'; firstCard: 'not_recorded'; toolLatency: 'not_recorded' | 'resource_active_time_only';
     modelLatency: 'not_recorded' | 'gateway_transport_wall_time_only';
     rates: 'not_computed'; slo: 'not_evaluated' };
@@ -52,8 +55,12 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
       mode: choice('invoke', 'stream'), transportWallMs: count, firstValidatedTextMs: nullable(count),
       basis: choice('gateway_transport_including_usage_and_consumer_wait') }), 50),
       unobservedInWindow: integer(0, 50), truncated: flag, coverage: choice('completed_gateway_observations_only') }),
+    budgetAdmission: object({ denials: list(object({ invocationId: id, runId: id, stepId: id, callId: text(128),
+      observedAt: time, code: choice('budget_unavailable'), observation: choice('gate_rejected_not_release_evidence') }), 50),
+      truncated: flag, coverage: choice('recorded_rejections_only') }),
     measurements: object({ firstToken: choice('not_recorded'), firstCard: choice('not_recorded'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
       modelLatency: choice('not_recorded', 'gateway_transport_wall_time_only'),
       rates: choice('not_computed'), slo: choice('not_evaluated') }),
-    consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') }),
+    consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') },
+    ['version', 'observedAt', 'task', 'timing', 'resources', 'runs', 'steps', 'financial', 'modelDelivery', 'measurements', 'consistency', 'execution']),
 };

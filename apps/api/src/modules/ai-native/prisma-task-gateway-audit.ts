@@ -4,10 +4,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import type { AiScopeRepository } from './ai-scope.repository';
 import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
+import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
 import type { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { isGatewayConfig } from './gateway-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
-import type { GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
+import type { GatewayBudgetDenialObservation, GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTask' | 'aiGatewayInvocation'
@@ -22,6 +23,10 @@ export const gatewayDeliveryTimingSchema = z.object({ version: z.literal('gatewa
   .refine(value => value.firstValidatedTextMs === null || value.firstValidatedTextMs <= value.transportWallMs);
 export function gatewayDeliveryLogId(scopeId: string, invocationId: string) {
   const digest = requestFingerprint({ version: 'ai-gateway-delivery-audit-1', scopeId, invocationId });
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
+export function gatewayBudgetDenialLogId(scopeId: string, invocationId: string) {
+  const digest = requestFingerprint({ version: 'ai-gateway-budget-denial-1', scopeId, invocationId });
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
@@ -46,6 +51,98 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
   }
 
   append(value: Parameters<UnifiedGatewayAudit['append']>[0]) { return this.persist(value); }
+
+  /** Original budget-gate rejection only. No reservation, financial event,
+   * provider error details or proof that an external effect did not happen. */
+  async budgetDenied(value: GatewayBudgetDenialObservation, signal?: AbortSignal) {
+    const input = structuredClone(value), call = checkedAccountingCall(input.call);
+    if (input.code !== 'BUDGET_UNAVAILABLE') throw new ModelGatewayError('INVALID_REQUEST');
+    const open = () => { if (signal?.aborted) throw new ModelGatewayError('CANCELLED'); };
+    open();
+    let attemptedWrite = false;
+    try {
+      const current = async () => {
+        open();
+        const resolved = structuredClone(await this.resolve()), subject = gatewayBudgetPrincipal(resolved.context);
+        if (resolved.scope.kind !== 'WORKSPACE' || resolved.scope.id !== call.binding.scope.id
+          || resolved.scope.tenantId !== subject.tenantId || resolved.scope.workspaceId !== subject.workspaceId
+          || subject.actorId !== call.context.actorId || subject.tenantId !== call.context.tenantId
+          || subject.workspaceId !== call.context.workspaceId) throw denied();
+        const { authorizedAt: _at, requestId: _request, ...identity } = resolved.context;
+        return { resolved, subject, hash: requestFingerprint({ identity, scope: resolved.scope }) };
+      };
+      const before = await current(); open();
+      await this.claim(structuredClone(call)); open();
+      const load = async (tx: Prisma.TransactionClient) => {
+        open();
+        const task = await tx.aiTask.findFirst({ where: { id: this.taskId, scopeId: call.binding.scope.id,
+          ownerKind: before.subject.actorKind, ownerId: before.subject.actorId,
+          audience: before.resolved.context.audience === 'client' ? 'CLIENT' : before.resolved.context.audience === 'staff' ? 'STAFF' : 'OPERATOR',
+          archivedAt: null }, select: { id: true, contractVersion: true } });
+        const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
+          scopeId: call.binding.scope.id, callId: call.request.callId } }, select: { id: true, scopeId: true, taskId: true,
+          runId: true, stepId: true, actionId: true, callId: true, actorId: true, mode: true, sceneCode: true,
+          intentHash: true, registrationHash: true, configuration: true, configurationHash: true, priceVersion: true, maxOutputTokens: true } });
+        const admission = await tx.aiInvocationAdmission.findUnique({ where: { id: call.binding.id }, select: {
+          id: true, tenantId: true, workspaceId: true, actorId: true, callId: true, profileId: true, dispatchId: true,
+          requestHash: true, status: true, revokedAt: true, completedAt: true, expiresAt: true } });
+        const now = this.clock();
+        if (!task || task.contractVersion !== AI_TASK_DRAFT_VERSION || !invocation || invocation.taskId !== task.id
+          || invocation.scopeId !== call.binding.scope.id || invocation.actorId !== call.context.actorId
+          || invocation.callId !== call.request.callId || invocation.intentHash !== call.request.intentHash
+          || invocation.maxOutputTokens !== call.request.maxOutputTokens || !['invoke', 'stream'].includes(invocation.mode)
+          || !isGatewayConfig(invocation.configuration) || requestFingerprint(invocation.configuration) !== invocation.configurationHash
+          || invocation.configuration.configId !== call.binding.profileId || invocation.configuration.model !== call.request.model
+          || !admission || admission.id !== call.binding.id || admission.tenantId !== call.context.tenantId || admission.workspaceId !== call.context.workspaceId
+          || admission.actorId !== call.context.actorId || admission.callId !== call.request.callId
+          || admission.profileId !== call.binding.profileId || admission.dispatchId !== call.binding.dispatchId
+          || admission.requestHash !== call.binding.requestHash || admission.status !== 'admitted' || admission.revokedAt || admission.completedAt
+          || !(now instanceof Date) || !Number.isFinite(now.getTime()) || admission.expiresAt <= now
+          || !(admission.expiresAt instanceof Date) || admission.expiresAt.getTime() !== call.expiresAt.getTime()) throw denied();
+        // A failed link/COMMIT is not a clean budget denial. Never manufacture
+        // a refusal observation around an existing original financial hold.
+        const reservation = await tx.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
+          scopeId: invocation.scopeId, scopeKind: 'WORKSPACE', callId: invocation.callId } }, select: { id: true } });
+        const receipt = await tx.aiGatewayAccountingReceipt.findUnique({ where: { invocationId: invocation.id }, select: { id: true } });
+        if (reservation || receipt) throw new ModelGatewayError('ACCOUNTING_PENDING');
+        open(); return { task, invocation, admission };
+      };
+      const options = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
+      const source = await this.db.$transaction(load, options), { invocation } = source;
+      const auditId = gatewayBudgetDenialLogId(invocation.scopeId, invocation.id);
+      const data = { id: auditId, tenantId: call.context.tenantId, workspaceId: call.context.workspaceId,
+        userId: before.subject.actorKind === 'USER' ? before.subject.actorId : null, action: 'ai.gateway.budget_denied',
+        detail: { operator: 'AI Native Gateway', targetType: 'ai_gateway_invocation', targetId: invocation.id,
+          metadata: { version: 'ai-gateway-budget-denial-1', code: input.code, taskId: invocation.taskId,
+            runId: invocation.runId, stepId: invocation.stepId, actionId: invocation.actionId, callId: invocation.callId,
+            actorKind: before.subject.actorKind, actorId: before.subject.actorId, mode: invocation.mode, sceneCode: invocation.sceneCode,
+            registrationHash: invocation.registrationHash, configurationHash: invocation.configurationHash, priceVersion: invocation.priceVersion,
+            admissionId: call.binding.id, requestHash: call.binding.requestHash, dispatchBindingHash: requestFingerprint(call.binding.dispatchId),
+            observation: 'gate_rejected_not_release_evidence' } } };
+      const check = (row: Prisma.OperationLogGetPayload<{}> | null) => {
+        if (!row || row.tenantId !== data.tenantId || row.workspaceId !== data.workspaceId || row.userId !== data.userId
+          || row.id !== auditId || row.action !== data.action || !isDeepStrictEqual(row.detail, data.detail)) throw invalid();
+      };
+      if ((await current()).hash !== before.hash) throw denied();
+      open();
+      try {
+        await this.db.$transaction(async tx => {
+          if (!isDeepStrictEqual(await load(tx), source)) throw denied();
+          const existing = await tx.operationLog.findUnique({ where: { id: auditId } });
+          if (existing) { check(existing); return; }
+          open(); attemptedWrite = true;
+          check(await tx.operationLog.create({ data }));
+        }, options);
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+        open(); check(await this.db.operationLog.findUnique({ where: { id: auditId } }));
+      }
+      if ((await current()).hash !== before.hash) throw denied();
+    } catch (error) {
+      if (error instanceof ModelGatewayError) throw error;
+      throw new ModelGatewayError(attemptedWrite ? 'ACCOUNTING_PENDING' : 'PROVIDER_UNAVAILABLE');
+    }
+  }
 
   /** Completion observation only, not settlement, dispatch permission, token
    * counting or a UI first-paint receipt. Never retain the response body. */

@@ -116,6 +116,22 @@ export class UnifiedAiGatewayService {
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   }
 
+  private async reserveBudget(call: GatewayAccountingCall, signal: AbortSignal) {
+    try { return await this.ports.budget.reserve(structuredClone(call)); }
+    catch (error) {
+      const observer = this.ports.observation?.budgetDenied ? this.ports.observation : this.ports.audit;
+      if (error instanceof ModelGatewayError && error.code === 'BUDGET_UNAVAILABLE' && observer.budgetDenied && !signal.aborted) {
+        // Observation is optional and bounded. Its absence/failure must not
+        // change a budget denial into permission, refund evidence or a retry.
+        const wait = new GatewayDeadline(1000, signal);
+        try { await wait.wait(() => observer.budgetDenied!({ call: structuredClone(call), code: 'BUDGET_UNAVAILABLE' }, wait.controller.signal)); }
+        catch { /* unrecorded observation stays unrecorded; original denial wins */ }
+        finally { wait.close(); }
+      }
+      throw error;
+    }
+  }
+
   private usageRecorder(value: GatewayAccountingCall, reservationId: string) {
     const call = structuredClone(value);
     let fingerprint: string | undefined, pending: Promise<void> | undefined;
@@ -209,7 +225,7 @@ export class UnifiedAiGatewayService {
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
         request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
       const call = structuredClone(budgetCall);
-      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+      const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
         else reservationId = record.id;
         return record;
@@ -303,7 +319,7 @@ export class UnifiedAiGatewayService {
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
         request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
       const call = structuredClone(budgetCall);
-      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+      const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
         else reservationId = record.id;
         return record;

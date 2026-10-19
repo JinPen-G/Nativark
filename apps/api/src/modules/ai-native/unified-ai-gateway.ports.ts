@@ -29,5 +29,10 @@ export interface GatewayInvocationObservation {
   delivery?: { mode: 'invoke' } | { mode: 'stream'; eventCount: number; deltaCount: number;
     deltaBytes: number; deltaHash: string };
 }
-export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>; }
-export interface UnifiedGatewayPorts { routing: Pick<AiGatewayRoutingService, 'resolve' | 'assertCurrent'>; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void> }; }
+export interface GatewayBudgetDenialObservation {
+  call: import('./gateway-accounting.ports').GatewayAccountingCall;
+  code: 'BUDGET_UNAVAILABLE';
+}
+export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>;
+  budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void>; }
+export interface UnifiedGatewayPorts { routing: Pick<AiGatewayRoutingService, 'resolve' | 'assertCurrent'>; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void>; budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void> }; }

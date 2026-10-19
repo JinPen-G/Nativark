@@ -9,7 +9,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAu
 import type { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
-import { gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
+import { gatewayBudgetDenialLogId, gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
   | 'aiGatewayInvocation' | 'operationLog'>;
@@ -80,6 +80,34 @@ export class TaskPerformanceReader {
         orderBy: { id: 'asc' }, take: 51, select: { id: true, tenantId: true, workspaceId: true, userId: true, action: true, detail: true } }) : Promise.resolve([]);
       const deliveryLogs = structuredClone(await readDeliveryLogs());
       if (!Array.isArray(deliveryLogs) || deliveryLogs.length > 50 || new Set(deliveryLogs.map(row => row.id)).size !== deliveryLogs.length) throw unavailable();
+      const denialIds = visibleInvocations.map(row => gatewayBudgetDenialLogId(task.scopeId, row.id));
+      const readDenials = () => denialIds.length ? this.db.operationLog.findMany({ where: { id: { in: denialIds },
+        tenantId: before.scope.kind === 'workspace' ? before.scope.tenantId : '',
+        workspaceId: before.scope.kind === 'workspace' ? before.scope.workspaceId : '',
+        action: 'ai.gateway.budget_denied', userId: access.actorKind === 'USER' ? access.actorId : null },
+        orderBy: { id: 'asc' }, take: 51, select: { id: true, tenantId: true, workspaceId: true, userId: true, action: true, detail: true, createdAt: true } }) : Promise.resolve([]);
+      const denials = structuredClone(await readDenials());
+      if (!Array.isArray(denials) || denials.length > 50 || new Set(denials.map(row => row.id)).size !== denials.length) throw unavailable();
+      const denialItems: NonNullable<AiTaskPerformanceObservationDraft['budgetAdmission']>['denials'] = [];
+      for (const row of denials) {
+        const invocation = visibleInvocations.find(item => gatewayBudgetDenialLogId(task.scopeId, item.id) === row.id);
+        const detail = row.detail as Record<string, unknown> | null, meta = detail?.metadata as Record<string, unknown> | null;
+        if (!invocation || row.action !== 'ai.gateway.budget_denied' || row.tenantId !== before.scope.tenantId
+          || row.workspaceId !== before.scope.workspaceId || row.userId !== access.actorId
+          || !detail || detail.targetType !== 'ai_gateway_invocation' || detail.targetId !== invocation.id
+          || !meta || meta.version !== 'ai-gateway-budget-denial-1' || meta.code !== 'BUDGET_UNAVAILABLE'
+          || meta.observation !== 'gate_rejected_not_release_evidence' || meta.actorKind !== access.actorKind || meta.actorId !== access.actorId
+          || meta.taskId !== task.id || meta.runId !== invocation.runId || meta.stepId !== invocation.stepId
+          || meta.actionId !== invocation.actionId || meta.callId !== invocation.callId || meta.mode !== invocation.mode
+          || meta.sceneCode !== invocation.sceneCode || meta.registrationHash !== invocation.registrationHash
+          || meta.configurationHash !== invocation.configurationHash || meta.priceVersion !== invocation.priceVersion
+          || !id.safeParse(meta.admissionId).success || !z.string().regex(/^[a-f0-9]{64}$/u).safeParse(meta.requestHash).success
+          || !z.string().regex(/^[a-f0-9]{64}$/u).safeParse(meta.dispatchBindingHash).success
+          || time(row.createdAt) < time(task.createdAt) || time(row.createdAt) > time(this.clock())) throw unavailable();
+        denialItems.push({ invocationId: invocation.id, runId: invocation.runId, stepId: invocation.stepId,
+          callId: invocation.callId, observedAt: row.createdAt.toISOString(), code: 'budget_unavailable',
+          observation: 'gate_rejected_not_release_evidence' });
+      }
       const modelItems: AiTaskPerformanceObservationDraft['modelDelivery']['items'] = [];
       for (const row of deliveryLogs) {
         const invocation = visibleInvocations.find(item => gatewayDeliveryLogId(task.scopeId, item.id) === row.id);
@@ -190,7 +218,7 @@ export class TaskPerformanceReader {
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
         || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
         || !isDeepStrictEqual(await readActiveTime(), charges) || !isDeepStrictEqual(await readInvocations(), invocations)
-        || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs)) {
+        || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs) || !isDeepStrictEqual(await readDenials(), denials)) {
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
       const after = await this.actions.resolve(command.taskId, 'read_metadata'), now = this.clock();
@@ -221,6 +249,7 @@ export class TaskPerformanceReader {
             basis: 'persistent_resource_not_provider_latency' } : { state: 'not_recorded' } })), truncated: steps.length > 200, coverage: 'bounded_window' }, financial,
         modelDelivery: { items: modelItems, unobservedInWindow: visibleInvocations.length - modelItems.length,
           truncated: invocations.length > 50, coverage: 'completed_gateway_observations_only' },
+        budgetAdmission: { denials: denialItems, truncated: invocations.length > 50, coverage: 'recorded_rejections_only' },
         measurements: { firstToken: 'not_recorded', firstCard: 'not_recorded',
           modelLatency: modelItems.length ? 'gateway_transport_wall_time_only' : 'not_recorded',
           toolLatency: [...activeTimes.values()].some(item => item.recordedMs !== null) ? 'resource_active_time_only' : 'not_recorded',
