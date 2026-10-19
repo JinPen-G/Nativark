@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-19。最新功能提交：`68c3315a`预算原allocation→三层政策锁→新派发复核，旧账收敛不受新执行门停用影响；`ad379d29`有界预算聚合/原键重读及既有经营订单、原请求有限等待保留。当前冒烟见开发记录，无新增测试文件。最新API noEmit退出1：674 roots、3项诊断均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无类型诊断；diff退出0，不能称整套通过。原10份文档及其他开发者的支付/Core/客户端/后台/shared与相关测试WIP全部保留，负责人再次确认其已停写；不夹带、不回退。
+> 更新时间：2026-10-19。最新功能提交：`bef36af1`将知识/确认记忆只读消费者接回标准AppModule、精确Guard路由及OpenAPI，复用原Auth、资源政策、文件ACL和持久仓储；读取有界、断线关闭凭据。当前定向冒烟3 pass/0 fail/0 skip/todo，无新增测试文件。最新API noEmit退出1：674 roots、3项诊断均在接手的`integrations/payment.runtime.service.ts` WIP，本片AI Native无类型诊断；diff退出0，不能称整套通过。预算三层政策锁及旧账收敛沿`68c3315a`保留。原10份文档及其他开发者的支付/Core/客户端/后台/shared与相关测试WIP全部保留；不夹带、不回退。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,8 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+知识消费现有四个标准POST入口：`/api/ai-native/knowledge-consumption/{documents/read|sources/read|memories/read|preferences/read}`，请求工厂为`AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER`。当前仅运营人类入口，沿原`system:params:manage`门，再逐资源核对持久动作政策；无政策仍拒绝，管理员权限不自动授予正文或偏好。当前确认记录/版本/空间复验、撤回后禁用、来源定位沿原服务；无模型调用、任务创建、下载URL或自动授权。HTTP最长15秒、依赖5秒，取消只停止本次读取，不宣称数据删除。下一步继续正式内容来源及文件/删除传播、可信价格/计数与标准执行的完整组合；本片已验证已解析合成内容和确认生命周期，不代表对象存储或真实环境已验。
 
 预算仓储现用原三层政策锁下的 `AiBudgetReservation.groupBy/count`，不再全量载入政策历史；新预留必须含适用的全部层级/场景，不能由quote漏层。派发/结算/释放/unknown/reconcile沿原allocation取得相同固定顺序锁；新标记派发另核对原政策修订、当前门/白名单及有效期CAS，预算标记不是供应商派发许可。旧账依当前独立权限/证据收敛，不要求新执行门仍开。两项本批Service/Prisma仓储stdin先0/2、修后2/2；数据库聚合/事务为替身，旧通用夹具尚无groupBy/count，未跑全回归或MySQL实锁。下一步仍需正式费率与可信计数/输入上界生产者、完整执行消费；不能用模型名、字符数或估计价格补成已验。
 

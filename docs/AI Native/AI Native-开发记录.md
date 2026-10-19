@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-19；最近功能：预算占用到派发的政策复核及旧账独立收敛、有界聚合/原键重读、Core受权分页订单候选与原请求有限等待。原运行器、客户收据、双协议和预算单账保留。当前现场看协作接续，历史结果不相加称最新全量通过。
+> 归纳日期：2026-10-19；最近功能：标准知识/确认记忆受权读取、预算占用到派发的政策复核及旧账独立收敛、有界聚合/原键重读、Core受权分页订单候选与原请求有限等待。原运行器、客户收据、双协议和预算单账保留。当前现场看协作接续，历史结果不相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -26,6 +26,12 @@
 - `9f69ba0d`（AIN-03/04/06）：原请求创建/重发/元数据创建及读/核对/材料/恢复准备复用原5秒有限等待，HTTP接断线和15秒外层等待，关闭凭据、快照输入、禁止缓存；可能提交的写入仍unknown，仅原键观察，不释放/重发、不压缩runner正常运行期限。
 - 快检沿双offline preload、固定无效DATABASE_URL、本树绝对审计/TEMP，以`node -`驱动实际标准provider/controller、Guard/Auth、Core及Prisma仓储。订单查询/拒绝/撤权/契约组合 **1/1**；中断组合先 **0 pass/1 fail**、修后 **1/1**；正常原请求创建及COMMIT丢应答后的原键核对 **1/1**，HTTP中断 **1/1**，均0 skip/todo、退出0，不叠加复验次数。数据库/业务数据为受控替身，HTTP中断项注入的是受控操作端口；未验HTTP监听、MySQL、模型或浏览器。日志`output/core-order-candidates-20261019/`，无新增测试文件。
 - 保留失败：初轮订单严格schema误拒Core完整行及OpenAPI不支持default已修；旧`lane-a-original-request.cjs`在初始化报价时缺正式商品分页源，正向旧夹具仍1 fail，没有改成全量读取。最新API `node output/typecheck-ai-native.cjs` **674 roots/3诊断、退出1**：接手支付WIP的960/1049行TS2322、2114行TS2554；本片无诊断，不能称类型全过。`git diff --check`退出0。可信价格/计数生产、多场景完整消费及正式环境仍缺，不调整原28项62.5%/正式验收0/28。
+
+## 近期功能：标准知识与确认记忆读取（2026-10-19）
+
+- `bef36af1`（AIN-04/10）：将既有四个知识消费POST入口接回标准provider/AppModule/Guard/OpenAPI；复用原当前身份、资源动作政策、同一文件ACL与持久记忆确认，不创建授权或模型调用。输入快照、65KB上限、5秒依赖/15秒HTTP等待与断线关闭凭据已接；资源政策缺失仍拒绝。入口沿现有管理权限，不把该权限当正文授权。
+- 双offline preload、固定无效DATABASE_URL及本树审计/TEMP下，`node -`驱动实际标准provider/controller、Auth/Guard、知识仓储 **2 pass/0 fail/0 skip/todo**；原用例`node --test --test-name-pattern='read-only HTTP uses request-local credentials' tests/ai-native-knowledge-lane-b-input-composition.test.cjs` **1/1**，退出均0，含确认/撤回、空间隔离、来源打开及严格公开形状。首轮缺标准provider的红测与后续夹具缺分页/通用元数据政策、政策键格式错误均留在`output/core-knowledge-consumer-20261019/`；修正夹具未放宽生产授权，无新增测试文件。
+- `node output/typecheck-ai-native.cjs` **674 roots/3诊断、退出1**（接手支付WIP的960/1049行TS2322、2114行TS2554；本片无诊断），diff退出0。真实服务/仓储运行，DB、政策与已解析内容为离线种子，既有确认用例的Auth是受控端口；未验实际HTTP/存储/MySQL或模型，不提高AIN-10原75%或宣布整项完成。后续仍补正式内容/删除传播和完整执行依赖。
 
 ## 近期核心收口：运行器确认与领取回执（2026-10-19）
 
