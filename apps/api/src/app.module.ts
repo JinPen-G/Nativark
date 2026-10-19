@@ -124,7 +124,7 @@ import { AiRetentionController } from "./modules/ai-native/privacy/retention.con
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
 import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_STAFF_RECOGNITION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
-import { InspectionRecognitionTaskController } from './modules/ai-native/inspection-assist/inspection-recognition-task.controller';
+import { InspectionRecognitionTaskController, StaffInspectionAccountingController } from './modules/ai-native/inspection-assist/inspection-recognition-task.controller';
 import { StaffInspectionTaskPolicyController } from './modules/ai-native/inspection-assist/inspection-task-policy.controller';
 import { ClientTaskPolicyController } from './modules/ai-native/scenes/client-task-policy.controller';
 import { AI_NATIVE_CLIENT_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -141,6 +141,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
   ],
   controllers: [
     InspectionRecognitionTaskController,
+    StaffInspectionAccountingController,
     StaffInspectionTaskPolicyController,
     ClientTaskPolicyController,
     AiCategoryDraftController,

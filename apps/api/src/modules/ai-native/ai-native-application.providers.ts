@@ -59,6 +59,7 @@ import { StaffInspectionRequestFactory } from './inspection-assist/inspection-as
 import { composeStandardStaffRecognition, readStaffRecognitionConfiguration, STAFF_RECOGNITION_SCENES,
   AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, AI_NATIVE_STAFF_RECOGNITION_RUNTIME, AI_NATIVE_STAFF_RECOGNITION_ADAPTERS } from './inspection-assist/inspection-standard.application';
 import { INSPECTION_RECOGNITION_TASKS } from './inspection-assist/inspection-recognition-task.controller';
+import { AI_STAFF_INSPECTION_ACCOUNTING, composeStaffInspectionAccounting } from './staff-inspection-accounting.composition';
 import { AI_STAFF_INSPECTION_TASK_POLICIES } from './staff-inspection-task-policy.composition';
 import { INSPECTION_OBJECT_READER } from './inspection-assist/inspection-media.reader';
 import { TenantInspectionObjectReader } from '../integrations/inspection-object-reader';
@@ -241,6 +242,11 @@ const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'dr
   'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
   'submission-review', 'submission-prepare', 'submission-submit'] as const;
 export const AI_NATIVE_STAFF_RECOGNITION_PROVIDERS: FactoryProvider[] = [{
+  provide: AI_STAFF_INSPECTION_ACCOUNTING, inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService) =>
+    composeStaffInspectionAccounting({ db, auth, guard, subscriptions }, [
+      { code: STAFF_RECOGNITION_SCENES.image, version: '1' }, { code: STAFF_RECOGNITION_SCENES.audio, version: '1' }])
+}, {
   provide: INSPECTION_OBJECT_READER,
   inject: [PrismaService, TenantIntegrationService, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, integrations: TenantIntegrationService, value?: unknown) =>

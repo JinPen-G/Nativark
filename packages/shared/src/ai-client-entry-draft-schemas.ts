@@ -31,7 +31,8 @@ export const aiClientTaskCancelRequestSchema = aiClientTaskReadRequestSchema.ext
 }).strict();
 /** Original call selector, not customer-supplied usage, price or authority. */
 export const aiClientTaskAccountingRequestSchema = aiClientTaskReadRequestSchema.extend({ callId: id.max(128) }).strict();
-export const aiClientTaskAccountingResponseSchema = z.object({ contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
+/** Audience-neutral status shape; the owning endpoint supplies current authority. */
+export const aiTaskAccountingObservationSchema = z.object({ contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
   callId: id.max(128), state: z.enum(['observed', 'unknown']),
   account: z.object({ status: z.enum(['reserved', 'settled', 'released', 'pending_reconciliation']),
     usageRecorded: z.boolean(), dispatched: z.boolean() }).strict().nullable(),
@@ -40,6 +41,8 @@ export const aiClientTaskAccountingResponseSchema = z.object({ contractVersion: 
   retryable: z.literal(false), nextAction: z.literal('read_original_accounting') }).strict()
   .refine(value => (value.state === 'observed') === (value.account !== null))
   .refine(value => !value.account || (value.account.status === 'settled') === value.account.usageRecorded);
+export const aiClientTaskAccountingResponseSchema = aiTaskAccountingObservationSchema;
+export const aiStaffTaskAccountingRequestSchema = z.object({ taskId: id.max(36), callId: id.max(128) }).strict();
 export const aiClientTaskCancelReceiptSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),

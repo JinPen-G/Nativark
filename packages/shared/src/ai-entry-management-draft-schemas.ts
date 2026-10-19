@@ -59,6 +59,8 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
     execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
   AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
+  AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),
+  AiTaskAccountingObservation: { $ref: '#/components/schemas/AiClientTaskAccountingResponse' },
   AiClientTaskAccountingResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
     state: { enum: ['observed', 'unknown'] }, account: { anyOf: [object({ status: { enum: ['reserved', 'settled', 'released', 'pending_reconciliation'] },
       usageRecorded: { type: 'boolean' }, dispatched: { type: 'boolean' } }), { type: 'null' }] },

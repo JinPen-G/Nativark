@@ -1,4 +1,5 @@
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
+import { AI_STAFF_INSPECTION_ACCOUNTING, type composeStaffInspectionAccounting } from '../staff-inspection-accounting.composition';
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { z } from 'zod';
 import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
@@ -83,4 +84,20 @@ export class InspectionRecognitionTaskController {
     return this.respond(async () => { const parsed = resume.parse(input);
       return this.run(request, signal => this.tasks.continueAnswer(current, parsed.reference, parsed.submission, signal)); }, 'read_answer');
   }
+}
+
+/** Original financial receipts stay available when NEW recognition is disabled.
+ * This controller has no file/model configuration or task-start dependency. */
+@Controller(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath)
+export class StaffInspectionAccountingController {
+  constructor(@Inject(AI_STAFF_INSPECTION_ACCOUNTING) private readonly accounting: ReturnType<typeof composeStaffInspectionAccounting>) {}
+  private observe(request: Request, body: unknown, reconcile: boolean) {
+    const current = { headers: { authorization: request?.headers?.authorization } }, command = structuredClone(body);
+    return respondInspectionHttp(() => withInspectionRequestSignal(request,
+      signal => this.accounting[reconcile ? 'reconcile' : 'read'](current, command, signal), 15000), 'read_original_accounting');
+  }
+  @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  read(@Req() request: Request, @Body() body: unknown) { return this.observe(request, body, false); }
+  @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.reconcileAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcile(@Req() request: Request, @Body() body: unknown) { return this.observe(request, body, true); }
 }

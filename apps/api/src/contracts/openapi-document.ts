@@ -2047,6 +2047,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; cancellation is not rollback; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
+  ...(['readAccounting', 'reconcileAccounting'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Current same-staff task read policy and original invocation/usage only. Available independently of NEW recognition enablement, profile, input freshness or file storage. Does not dispatch, reserve, submit an inspection or prove business payment; unknown is observed by the original call key.',
+    requestSchema: 'AiStaffTaskAccountingRequest', responseSchema: 'AiTaskAccountingObservation'
+  })),
   ...(['read', 'configure', 'clear'] as const).map(operation => ({
     method: 'post' as const, path: `/api/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT[operation]}`, tag: 'AI Native',
     operationId: `staffRecognitionPolicy_${operation}`, permissions: ['rental-os:order:view'],
