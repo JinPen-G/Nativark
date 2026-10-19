@@ -2053,6 +2053,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: 'staffRecognition_readCancelReceipt', permissions: ['rental-os:order:view'],
     summary: 'Read the exact original task cancellation revision under CURRENT staff owner/resource/read policies, independently of NEW recognition enablement. Observation never cancels a provider, releases budget, retries execution or proves rollback. Not observed is not proof of an uncommitted write.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject' },
+  ...(['settleUnstartedCancellation', 'readCancellationSettlementReceipt'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Original owned staff task cancellation settlement/receipt, not provider cancellation or business rollback. Current resource and task action policies required. The original task transaction must prove never-started work with no plan, step, result, invocation, resource budget/charge or financial reservation. Started or unknown work is refused; expiry is not proof. No refund, new run or model dispatch; lost acknowledgement is observed by the original revision only.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   ...(['readAccounting', 'reconcileAccounting'] as const).map(operation => ({
     method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
     operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],

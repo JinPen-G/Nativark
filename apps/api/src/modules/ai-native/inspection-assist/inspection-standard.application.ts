@@ -66,7 +66,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   // policies, not new recognition. No profile, bytes, budget or lease is minted.
   const withOriginalTask = async <T>(request: { headers: { authorization?: unknown } }, value: unknown,
     operation: 'read_metadata' | 'read_events' | 'transition_task', signal: AbortSignal | undefined,
-    work: (current: ReturnType<typeof composePersistedTaskAuthorization>, taskId: string) => Promise<T>) => {
+    work: (current: ReturnType<typeof composePersistedTaskAuthorization>, taskId: string, originalRunId: string) => Promise<T>) => {
     const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
       inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict().parse(structuredClone(value));
     const authorization = request?.headers?.authorization;
@@ -89,7 +89,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
           return requestFingerprint(stable);
         };
         const before = identity(await current.authority.resolve(original.task.taskId, operation));
-        const result = await work(current, original.task.taskId);
+        const result = await work(current, original.task.taskId, original.task.runId);
         // Task status/revision may have advanced. Bind only the immutable
         // original creation, then recheck the CURRENT permission after the write.
         const after = await receipts.readCreation({ headers: { authorization } }, reference, signal);
@@ -116,6 +116,26 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, false, signal);
   const readCancelReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
     expectedRevision: number, signal?: AbortSignal) => cancellation(request, reference, expectedRevision, true, signal);
+  const cancellationSettlement = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    revisionValue: number, observe: boolean, signal?: AbortSignal) => {
+    const expectedRevision = z.number().int().min(1).max(4294967294).parse(revisionValue);
+    return withOriginalTask(request, reference, observe ? 'read_events' : 'transition_task', signal, async (current, taskId, originalRunId) => {
+      const repository = new AiTaskTransitionRepository(d.db, current.authority, d.clock), selector = { taskId, expectedRevision };
+      const original = await repository.readCancellationSettlementReceipt(selector);
+      if (observe) return original;
+      // The ORIGINAL repository locks/CASes the task and proves absence of
+      // steps/plans/inputs/results/invocations/resource charges/reservations.
+      // Any started/unknown work is refused; TTL is never this evidence.
+      const receipt = original.event ? { event: original.event, runRevision: undefined }
+        : await repository.settleUnstartedCancellation({ ...selector, to: 'cancelled', reason: 'cancel_settled' }, originalRunId);
+      return { receipt, cancellation: 'task_cancelled_not_business_rollback' as const,
+        remoteCancellation: 'not_attested' as const, automaticRetry: false as const, admission: 'not_granted' as const };
+    });
+  };
+  const settleUnstartedCancellation = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, false, signal);
+  const readCancellationSettlementReceipt = (request: { headers: { authorization?: unknown } }, reference: unknown,
+    expectedRevision: number, signal?: AbortSignal) => cancellationSettlement(request, reference, expectedRevision, true, signal);
   const readAnswer = (request: { headers: { authorization?: unknown } }, reference: unknown, value: unknown, signal?: AbortSignal) => {
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -173,7 +193,8 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
       readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
-      continueAnswer: absent, requestCancel, readCancelReceipt }, policies: { read: absent, configure: absent, clear: absent } };
+      continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, readCancellationSettlementReceipt },
+    policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
     scene: { code: STAFF_RECOGNITION_SCENES[kind], version: '1' },
@@ -189,7 +210,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer, continueAnswer: application.continueAnswer.bind(application),
-      requestCancel, readCancelReceipt },
+      requestCancel, readCancelReceipt, settleUnstartedCancellation, readCancellationSettlementReceipt },
     policies: composeStaffInspectionTaskPolicies(dependencies, { enabled: true, ttlMs: 120000,
       operations: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run',
         'transition_task', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] }) };
