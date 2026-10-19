@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-19；最近完整功能：员工失效草稿元数据/原回答观察，以及从未启动、已计量释放等待两类取消收敛；标准两轮澄清保持一份任务累计资源账。当前现场看协作接续，历史结果不相加称最新全量通过。
+> 归纳日期：2026-10-19；最近完整功能：原生 OpenAI Responses / Claude Messages 接回原配置、能力验证和 Gateway 组合；不引入 SDK 或更换 Runtime。前片员工原收据/取消收敛继续保留。当前现场看协作接续，历史结果不相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -11,6 +11,15 @@
 - “代码实现”“消费者装配”“离线验证”“真实环境验收”“生产开放”分别记录，不用其中一层替代另一层。
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
+
+## 近期功能：原生双协议（2026-10-19）
+
+- `308c1b1b`：`ResponsesAdapter` / `AnthropicMessagesAdapter` 与 `createNativeModelAdapters` 消费原 `ModelAdapter`，接回租户/平台配置、原能力探测、后台任务、员工与客户标准装配；shared 平台输入/OpenAPI 同步增加 `openai_responses`、`anthropic_messages`，原 Chat Completions 保留。未安装依赖、未构建 shared 或开放执行。
+- 实际映射：Responses `/responses`、Bearer、`store:false`、typed SSE；Messages `/v1/messages`、`x-api-key` / 固定版本、独立 system、content-block SSE。原受控订单工具/闭合 JSON schema 复用原校验器，不开放任意工具；PNG/JPEG 仅在显式媒体能力/原 ACL 就绪时编码，两个新协议不声明 WAV/audio。后置 system、未接内容类型、截断/拒绝/乱序均拒绝，不换协议重试。
+- 同一受控 egress 保留 TLS/DNS pinning、取消及字节上限，仅增加严格互斥的 Messages 认证头；原凭据/配置、invocation/dispatch、财务与任务资源链不变。有效终态 usage 先交原账务，再校验/交付文本；缺 usage 不补零，错误不变成成功。Messages 缓存输入计数归一化为总输入 tokens，**不代表缓存差异费率或 money 已认证**；正式费率/可信计数生产依赖仍缺。
+- 快检：同一 stdin 组合 **6 pass / 0 fail / 0 skip / 0 todo**（两协议 JSON/UTF8流/工具/结构化/取消/变异/受控 egress、实际 Routed + Prisma 预算预留/原 usage/三层 allocation/幂等结算）；另工具流 stdin **1/1**，既有 Chat 用例 `node --test --test-name-pattern='actual pinned transport feeds tool fragments' tests/ai-native-protocol-output.test.cjs` **1/1**，退出均0。沿双 offline preload、固定无效 DATABASE_URL、本树绝对审计/TEMP；`node output/typecheck-ai-native.cjs` **672 roots / 0诊断**，`git diff --check` 退出0。没有新增测试文件。日志在 `output/native-responses-messages-20261019/`。
+- 首轮保留：类型检查2项headers联合类型错误已修；首轮4组stdin为2 pass/2 fail（夹具漏expectedRevision、误把允许重复ping作故障）；另工具stdin语法、旧用例缺ES2022 lib均修正调用后复验，未放宽断言。DB/身份目录/订阅及网络对端为离线替身，预算/Auth/仓储/协议实现实际运行；未验真实HTTP/MySQL/供应商、媒体全链、全场景或独立验收，原任务百分比不变。
+- 后续替换：框架/SDK只替换 `ModelAdapter` 编解码与显式工厂，必须保留相同协议键、原调用/usage/unknown关联和受控出网；原收据由原账核对，不得换 Harness、ID 或 Provider重发。当前没有安装或适配 Harness Runtime。
 
 ## 原28项当前实施摘要
 
