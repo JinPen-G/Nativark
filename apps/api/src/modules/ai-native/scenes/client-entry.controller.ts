@@ -183,7 +183,10 @@ export class AiClientEntryController {
       ? { kind: wrapped.kind, outcome: {
         status: 'status' in wrapped.outcome ? wrapped.outcome.status : undefined,
         completedSteps: 'completedSteps' in wrapped.outcome ? wrapped.outcome.completedSteps : undefined,
-        cleanupFailed: 'cleanupFailed' in wrapped.outcome ? wrapped.outcome.cleanupFailed : undefined } }
+        cleanupFailed: 'cleanupFailed' in wrapped.outcome ? wrapped.outcome.cleanupFailed : undefined,
+        ...('errorCode' in wrapped.outcome ? { errorCode: wrapped.outcome.errorCode } : {}),
+        ...('stopReason' in wrapped.outcome ? { stopReason: wrapped.outcome.stopReason } : {}),
+        ...('nextAction' in wrapped.outcome ? { nextAction: wrapped.outcome.nextAction } : {}) } }
       : wrapped && typeof wrapped === 'object' && 'kind' in wrapped && wrapped.kind === 'not_started'
         ? { kind: wrapped.kind, reason: 'reason' in wrapped ? wrapped.reason : undefined } : null;
     const response = aiClientTaskModelControlResponseSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,

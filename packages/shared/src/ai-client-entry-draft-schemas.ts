@@ -95,8 +95,15 @@ export const aiClientTaskModelControlResponseSchema = z.object({
     z.object({ kind: z.literal('run_outcome'), outcome: z.object({
       status: z.enum(['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed']),
       completedSteps: z.number().int().min(0).max(4294967295),
-      cleanupFailed: z.number().int().min(0).max(4294967295)
-    }).strict() }).strict()
+      cleanupFailed: z.number().int().min(0).max(4294967295),
+      errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u).optional(),
+      stopReason: z.literal('input_limit_reached').optional(), nextAction: z.literal('manual_handoff').optional()
+    }).strict().superRefine((value, context) => {
+      if (value.errorCode !== undefined && value.status !== 'failed'
+        || (value.stopReason !== undefined || value.nextAction !== undefined)
+          && (value.status !== 'unavailable' || value.stopReason !== 'input_limit_reached' || value.nextAction !== 'manual_handoff'))
+        context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent model run observation' });
+    }) }).strict()
   ]), businessExecution: z.literal('not_inferred_from_model_result'),
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict();

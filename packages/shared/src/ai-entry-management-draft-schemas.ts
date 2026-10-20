@@ -4,6 +4,8 @@ import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_
 import { RENTAL_FULFILLMENT_MODES } from './core';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, AI_CLIENT_MATERIAL_RECEIPT_VERSION } from './ai-client-entry-draft-schemas';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_INPUT_DRAFT_VERSION } from './ai-task-input-draft';
+import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 
 const id = { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const uuid = { type: 'string', format: 'uuid' };
@@ -31,6 +33,14 @@ const selection = object({ quoteId: id, timeZone: { type: 'string', minLength: 1
     scheduledEndAt: date, serviceLocationId: id }, ['serviceId', 'quantity']) }
 }, ['quoteId', 'timeZone', 'startAt', 'endAt', 'fulfillmentMode', 'fulfillmentLocationId', 'bookingIdentity', 'lines']);
 const nullableId = { anyOf: [id, { type: 'null' }] };
+const { taskId: _submissionTaskId, ...clientAnswerProperties } = AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft.properties!;
+const clientAnswer = object(clientAnswerProperties);
+const inputReceipt = { taskId: { ...id, maxLength: 36 }, requestId: { ...id, maxLength: 36 },
+  receiptId: { ...id, maxLength: 36 }, taskRevision };
+const runObservation = object({ status: { enum: ['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed'] },
+  completedSteps: { type: 'integer', minimum: 0, maximum: 4294967295 }, cleanupFailed: { type: 'integer', minimum: 0, maximum: 4294967295 },
+  errorCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,127}$' }, stopReason: literal('input_limit_reached'), nextAction: literal('manual_handoff') },
+  ['status', 'completedSteps', 'cleanupFailed']);
 const amount = { type: 'number', minimum: 0 };
 const quote = object({ quoteId: id, quoteVersion: hash, pricingPlanVersion: id, ruleVersion: id,
   priceVersionId: nullableId, calendarVersion: nullableId, categoryVersionId: nullableId,
@@ -63,6 +73,22 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
       status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
     execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
+  AiClientTaskInputSubmissionRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
+  AiClientTaskInputReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('pending'),
+    question: object({ requestId: { ...id, maxLength: 36 }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 },
+      expiresAt: date, contract: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputContractDraft }), execution: literal('not_authorized_by_observation') }),
+    object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('not_pending'), question: { type: 'null' },
+      execution: literal('not_authorized_by_observation') })] },
+  AiClientTaskInputSubmissionReceipt: object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), status: literal('input_received'),
+    ...inputReceipt, replayed: { type: 'boolean' }, execution: literal('not_inferred_from_receipt') }),
+  AiClientTaskInputReceiptReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('observed'),
+    receipt: object(inputReceipt), execution: literal('not_inferred_from_receipt') }),
+    object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('not_observed'), receipt: { type: 'null' },
+      execution: literal('not_inferred_from_receipt') })] },
+  AiClientTaskModelControlResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    execution: { oneOf: [object({ kind: literal('not_started'), reason: { enum: ['host_aborted', 'plan_unavailable', 'task_not_runnable', 'lease_held', 'recovery_lease_unavailable'] } }),
+      object({ kind: literal('run_outcome'), outcome: runObservation })] },
+    businessExecution: literal('not_inferred_from_model_result'), retryable: literal(false), nextAction: literal('read_original_task') }),
   AiClientTaskModelResultReadResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
     taskRevision, workflowStatus: { enum: [...AI_TASK_STATUSES_DRAFT] },
     resultPurpose: { enum: ['answer', 'clarification', 'not_attested'] }, state: { enum: ['observed', 'not_observed'] },
