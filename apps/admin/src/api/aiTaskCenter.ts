@@ -2,11 +2,12 @@
  * Canonical HTTP retains tenant/session handling; both lifetimes abort reads. */
 import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMetadataQueryDraft,
   type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type ApiResult,
-  type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft } from "@rental-os/shared";
+  type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft,
+  type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
-async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation", data: unknown, signal: AbortSignal): Promise<T> {
+async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt", data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
   return result.data.data;
@@ -17,5 +18,8 @@ export const aiTaskCenterApi = Object.freeze({
   events: (taskId: string, after: string, signal: AbortSignal) => read<AiTaskEventPageDraft | AiTaskEventResetDraft>("events", { taskId, after, limit: 50 }, signal),
   result: (taskId: string, resultId: string, signal: AbortSignal) => read<AiTaskModelObservationDraft>("result", { taskId, resultId }, signal),
   usage: (taskId: string, signal: AbortSignal, after?: string) => read<AiTaskBudgetUsagePageDraft>("usage", { taskId, limit: 20, ...(after ? { after } : {}) }, signal),
-  confirmation: (input: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => read<AiTaskConfirmationHistoryDraft>("confirmation", input, signal)
+  confirmation: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskConfirmationHistoryDraft>("confirmation", input, signal),
+  review: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskHumanReviewDraft>("review", input, signal),
+  decision: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decision", input, signal),
+  decisionReceipt: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decisionReceipt", input, signal)
 });

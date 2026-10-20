@@ -2174,6 +2174,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.list}`,
     tag: 'AI Native', operationId: 'aiTaskCenterList', summary: 'Read current owner task metadata; no task/run creation',
     permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskMetadataQueryDraft', responseSchema: 'AiTaskMetadataPageDraft' },
+  ...(['review', 'decision', 'decisionReceipt'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `aiTaskCenterHuman_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    summary: action === 'review' ? 'Read deterministic original waiting-step order/settings proposal under current domain authority.'
+      : action === 'decision' ? 'Explicit human decision on the exact reviewed proposal; server gate and current task/domain authority required. No runner continuation or Core execution. Unknown: read original decision receipt, never auto retry.'
+        : 'Read original same-actor decision after expiry or new-execution closure. Missing is not rollback or permission to resubmit.',
+    requestSchema: action === 'review' ? 'AiTaskReviewQueryDraft' : 'AiTaskDecisionQueryDraft',
+    responseSchema: action === 'review' ? 'AiTaskHumanReviewDraft' : 'AiTaskHumanDecisionReceiptDraft' })),
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.result}`,
     tag: 'AI Native', operationId: 'aiTaskCenterOriginalModelResult',
     summary: 'Read original order/opening/quote model text via current business/source authorization. No raw artifact fallback or model invocation.',

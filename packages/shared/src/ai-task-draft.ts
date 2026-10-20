@@ -151,7 +151,8 @@ export interface AiTaskEventResetDraft {
  * model text and original usage have separate current-authorized reads. No
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
-  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation" } as const);
+  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
+  review: "review", decision: "decision", decisionReceipt: "decision-receipt" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -174,3 +175,19 @@ export interface AiTaskModelObservationDraft {
   businessExecution: "not_inferred_from_model_result";
   execution: "read_only_no_start_no_reconnect_side_effect";
 }
+
+/** Original waiting-step lookup, not an execution or approval credential. */
+export interface AiTaskReviewQueryDraft { taskId: string; runId: string; stepId: string }
+export interface AiTaskDecisionQueryDraft extends AiTaskReviewQueryDraft {
+  proposal: import('./ai-approval-application-draft').AiApprovalApplicationDecisionDraft;
+}
+export type AiTaskHumanReviewDraft = AiTaskReviewQueryDraft & {
+  taskRevision: number; checkpointRef: string; businessExecution: 'not_attested';
+} & (
+  | { kind: 'order'; review: import('./ai-approval-application-draft').AiApprovalApplicationReviewDraft }
+  | { kind: 'settings'; review: import('./ai-approved-settings-draft').AiApprovedSettingsReviewDraft }
+);
+export type AiTaskHumanDecisionReceiptDraft = AiTaskReviewQueryDraft & {
+  receipt: import('./ai-approval-application-draft').AiApprovalApplicationReceiptDraft;
+  businessExecution: 'not_attested';
+};

@@ -24,6 +24,15 @@ const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCurs
 /** Shared task shapes, including the owner-only read transport. Execution and
  * state transitions still require their existing application/DB authority. */
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  AiTaskReviewQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 } }),
+  AiTaskDecisionQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    proposal: ref('AiApprovalApplicationDecisionDraft') }),
+  AiTaskHumanReviewDraft: { oneOf: ['order', 'settings'].map(kind => closed({
+    taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 }, taskRevision: revision,
+    checkpointRef: { ...id(), maxLength: 36 }, kind: choice(kind),
+    review: ref(kind === 'order' ? 'AiApprovalApplicationReviewDraft' : 'AiApprovedSettingsReviewDraft'), businessExecution: choice('not_attested') })) },
+  AiTaskHumanDecisionReceiptDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    receipt: ref('AiApprovalApplicationReceiptDraft'), businessExecution: choice('not_attested') }),
   AiStepOutcomeDraft: { oneOf: [
     closed({ status: choice("pending", "cancelled"), effect: choice("none") }),
     closed({ status: choice("running"), effect: choice("none", "possible") }),

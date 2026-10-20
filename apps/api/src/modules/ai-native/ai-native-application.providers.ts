@@ -180,11 +180,24 @@ export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox) =>
     composeRequestBoundModelSettings({ db, auth, guard, secrets })
 };
+export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
-  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS],
+  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
+    ApiAuthGuard, SubscriptionService, RentalCoreService, RentalOrderConfirmationService, RentalBusinessFactRepository,
+    { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
-    originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>) =>
-    composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults })
+    originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
+    subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
+    quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown) => {
+    const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
+    return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults,
+      humanApprovals: {
+        order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
+        settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },
+        decisions: { order: order.enabled, settings: settings.enabled }
+      } });
+  }
 };
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],
@@ -541,7 +554,6 @@ const originalOrderExecutionOperations = ['claim_run', 'claim_recovery_run', 're
 
 /** One existing quote-selection/approval/Core runner, never a second order
  * execution path. No configuration grants a task policy or business approval. */
-export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
 const quoteOrderConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
   z.object({ enabled: z.literal(true), host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     leaseMs: z.number().int().min(1).max(120000) }).strict(), limits: aiTaskRunnerLimitsSchema }).strict()]);

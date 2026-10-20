@@ -14,6 +14,7 @@ import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
 import { readTaskCenterDetail } from "./task-center-reader";
 import { TaskUsageObservation } from "./TaskUsageObservation";
+import { TaskHumanApproval } from "./TaskHumanApproval";
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -94,7 +95,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const data = query.error ? undefined : query.data;
   useEffect(() => { if (query.error || data && selected && !data.items.some(row => row.taskId === selected)) setSelected(null); }, [query.error, data, selected]);
   return <section aria-label={t("AI 任务观察")}>
-    <Alert type="info" title={t("只读本人任务，不启动、恢复或重新派发。")}
+    <Alert type="info" title={t("观察本人任务，原提案决定需另行明确审阅；不启动、恢复或重新派发。")}
       description={t("首次进入不请求 AI 数据；点击读取后按当前权限查询。切换空间或身份后清空当前视图，人工业务页面始终保留。")}/>
     <div className="panel-toolbar">
       <ActionButton label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}
@@ -111,6 +112,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
         setSelected(null); setPage(next); }} />}
+    {opened && visible && selected && data?.items.some(row => row.taskId === selected)
+      && <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
+        onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
     {opened && visible && selected && data?.items.some(row => row.taskId === selected)
       && <TaskUsageObservation key={selected} taskId={selected} current={current}
         onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
