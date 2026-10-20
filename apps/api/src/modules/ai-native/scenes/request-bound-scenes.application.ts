@@ -684,35 +684,47 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db, performanceDb: input.db });
     // Construct knowledge services only for actual result/source reads. These
     // still revalidate current ACL/consent; absence never means trusted content.
-    const resultReader = (sceneCode = resultPolicy?.sceneCode) => {
+    const observationPolicy = (sceneCode = resultPolicy?.sceneCode) => {
       if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       // Observation does not use the order scene's policy for every saved
       // result. Choose only a known, server-registered original scene; this
       // grants no tools, model route, fresh plan or execution entitlement.
       if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(sceneCode ?? '')
         || !input.creationRules.some(rule => rule.sceneCode === sceneCode)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
-      const selected = sceneCode === resultPolicy.sceneCode ? resultPolicy
+      return sceneCode === resultPolicy.sceneCode ? resultPolicy
         : { ...resultPolicy, sceneCode: sceneCode!, orderExplainTool: false };
+    };
+    const resultReader = (sceneCode = resultPolicy?.sceneCode) => {
+      const selected = observationPolicy(sceneCode);
+      const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
       return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, selected, input.clock, knowledge);
+    };
+    const originalResultReader = async (value: unknown) => {
+      const parsed = z.object({ original: originalRequestReferenceSchema }).passthrough().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const original = await scenes.requests.readHistorical(parsed.data.original);
+      return resultReader(original.request.sceneCode);
     };
     const pending = async (value: unknown) => {
       const reference = originalRequestReferenceSchema.parse(structuredClone(value));
-      if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const scene = input.creationRules.find(rule => rule.sceneCode === resultPolicy.sceneCode);
+      const original = await scenes.requests.readHistorical(reference);
+      const policy = observationPolicy(original.request.sceneCode);
+      const scene = input.creationRules.find(rule => rule.sceneCode === original.request.sceneCode
+        && rule.sceneVersion === original.receipt.sceneVersion);
       if (!scene) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await scenes.readTaskReceipt(reference.inputRef);
       if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
-        scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: resultPolicy,
-        results: { read: command => resultReader().read(command) } });
+        scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
+        results: { read: command => resultReader(scene.sceneCode).read(command) } });
       return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
     };
     const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
       usage: persistedCenter.usage, performance: persistedCenter.performance, scenes, ...(resultPolicy ? { input: { read: pending } } : {}), modelResults: {
-        read: value => resultReader().read(value), reopenSource: value => resultReader().reopenSource(value)
+        read: async value => (await originalResultReader(value)).read(value),
+        reopenSource: async value => (await originalResultReader(value)).reopenSource(value)
       } });
-    return { scenes, center, resultReader, tasks: authorization.tasks, db: input.db,
+    return { scenes, center, resultReader, originalResultReader, tasks: authorization.tasks, db: input.db,
       answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
       inputCancellation: () => PrismaTaskInputRepository.releasedCancellationWitness(input.db, authorization.tasks, input.clock),
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
@@ -804,7 +816,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       });
     },
     reopenOpeningModelSource(request: AiSceneHttpRequest, value: unknown) {
-      return call(request, value, (root, command) => root.resultReader().reopenOpeningSection(command));
+      return call(request, value, async (root, command) => (await root.originalResultReader(command)).reopenOpeningSection(command));
     },
     readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
       const parsed = snapshotSchema.safeParse(structuredClone(value));
