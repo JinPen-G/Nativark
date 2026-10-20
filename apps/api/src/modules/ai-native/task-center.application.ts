@@ -32,9 +32,7 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   originalDb?: Pick<PrismaClient, 'aiTaskOriginalRequest'>;
   usageDb?: TaskBudgetUsageDb;
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown>;
-    reopenModelSource?(request: Request, value: unknown): Promise<unknown>;
-    requestCancellationIntent?(request: Request, value: unknown): Promise<unknown>;
-    readCancellationReceipt?(request: Request, value: unknown): Promise<unknown> };
+    reopenModelSource?(request: Request, value: unknown): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
@@ -85,7 +83,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
         if (before.audience !== 'operator' || !('access' in before)
           || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(permission => before.access.permissions.includes(permission)))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const root = composePersistedTaskCenter({ ...input, credentials });
+        const root = composePersistedTaskCenter({ ...input, credentials, includeCancellation: action === 'stop' || action === 'stopReceipt' });
         const originalResult = async (query = schemas.result.parse(command)): Promise<AiTaskModelObservationDraft> => {
           if (!input.originalDb || !readOriginalResult) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const access = await root.tasks.resolveAccess(query.taskId, 'read_step_terminal');
@@ -162,32 +160,28 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           return approvals.decisionReceipt(command);
         };
         const originalStop = async () => {
-          const query = schemas.stop.parse(command), source = input.originalResults;
-          if (!input.originalDb || !source?.readCancellationReceipt || action === 'stop' && !source.requestCancellationIntent)
-            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const query = schemas.stop.parse(command);
+          if (!root.cancellation) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const access = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
           const task = await input.db.aiTask.findFirst({ where: access.where });
           if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          const original = await readOriginalTaskModelProvenance(input.originalDb, task);
-          const reference = { original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: original.inputRef }, expectedRevision: query.expectedRevision };
-          const request = { headers: { authorization: header.data } };
           if (action === 'stop') {
             if (task.revision !== query.expectedRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
             // The original repository owns transition policy, task CAS, audit
             // event and cancellation state. No lease, remote cancel or refund.
-            await source.requestCancellationIntent!(request, reference);
+            await root.cancellation.request(query);
           }
           try {
-            const result = z.object({ receipt: z.object({ taskId: id, expectedRevision: z.number().int(),
+            const result = z.object({ taskId: id, expectedRevision: z.number().int(),
               status: z.enum(['observed', 'not_observed']), cancellation: z.literal('request_not_rollback'),
-              automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough() }).passthrough()
-              .safeParse(await source.readCancellationReceipt(request, reference));
-            if (!result.success || result.data.receipt.taskId !== query.taskId || result.data.receipt.expectedRevision !== query.expectedRevision)
+              automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough()
+              .safeParse(await root.cancellation.read(query));
+            if (!result.success || result.data.taskId !== query.taskId || result.data.expectedRevision !== query.expectedRevision)
               throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-            if (action === 'stop' && result.data.receipt.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (action === 'stop' && result.data.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
             const latest = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
             if (access.bindingKey !== latest.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-            return { ...query, status: result.data.receipt.status, cancellation: 'request_not_rollback' as const,
+            return { ...query, status: result.data.status, cancellation: 'request_not_rollback' as const,
               automaticRetry: false as const, remoteCancellation: 'not_attested' as const, budgetRelease: 'not_attempted' as const };
           } catch (error) {
             if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
