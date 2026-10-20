@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-20。最新功能提交：`e7b88f97`，订单/通知设置原确认历史及现有消费入口；完成、取消、继续应答不明后只读核对，不重新领取、批准或执行。stdin冒烟4/4、退出0，无新测试文件；API noEmit退出1（680 roots，仅支付WIP两项诊断），diff退出0。原单账、预算汇总及运行器恢复保留；可信计数/上界生产者、完整标准执行及SLO仍缺，用量JSON迁移未执行。原28项等权64.3%、验收0/28，不改百分比；其他WIP与四线暂停保留。
+> 更新时间：2026-10-20。最新功能提交：`bac89d6b`；本批客户受控澄清、原输入收据/资源起点、执行停用后读取、结果用途及两渠道契约已接回。stdin最终6/6、退出0，无新测试脚本；API noEmit退出1（680 roots，仅支付WIP两项诊断），diff退出0。原确认历史、单账与预算汇总保留。可信计数/上界生产者、完整标准模型/客户执行、主动场景和多端验收仍未齐，用量JSON迁移未执行；原28项64.3%、ENTRY48.6%、验收0/28，不改百分比。其他WIP与四线暂停保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,10 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+客户上下文澄清：标准服务器模型DI可显式设置`clarification:true`，选择原`original_client_clarification`来源；默认仍只做原摘要，不自动开启模型或任务政策。只解释同一原task/run/step/frozen input及已测量结果中的固定问题代码，输出原`clarification_text`合同；回答为context_only，不是客户/商品选择、报价确认或建单批准。最多两轮追问且受原政策maxCalls、原材料及五分钟问题期限约束；原输入仓储持久化问题/回答/同键收据，后续run沿原resourceOriginRunId，不清零资源、不覆盖旧输入。关闭新执行或新提问后，原问题读取/回答收据仍走当前独立政策；该读入口不能创建问题/调用模型。客户model/result按持久workflowStatus区分answer/clarification/not_attested，模型单轮成功不等于业务成功；website/wechat的input/submit/receipt/continue与模型control/result已有shared/OpenAPI契约，Controller保留受控停止原因。
+
+达到澄清上限：实际输入仓储在写新问题前确认`input_limit_reached`，运行器返回unavailable/manual_handoff、释放原worker租约，保留已计量步骤/费用，不将全成功步骤伪造为FAILED或把未完成目标报成功。现有任务FSM没有“全部登记步骤成功但目标仍待人工”的独立终态，本片保持原任务非终态，由原取消/人工流程办理，不另造状态；重建按原记录仍停止，不授新额度。COMMIT应答不明仍unknown，不能当明确上限重试。后续须补完整客户当前身份/政策/标准HTTP/单账正向及多轮真实供应商验收，再收口自然语言→明确业务参数/选择→原报价和预约，而非把纯上下文回答当参数选择。可信计数缺正式生产者时保持recorded拒绝，其他合法功能继续；不引入第二计数派发器或猜token。
 
 原确认历史：`PrismaTaskApplication.readConfirmationHistory({taskId,runId,stepId})`已接订单/通知设置宿主；选报价及通知原请求的既有`readConfirmation`在非等待状态返回只读history（通知尚无步骤时为null），等待状态仍走原有效checkpoint，不以历史授权继续。原phase/receipt/plan/人类decision和事件关联复验，最多两阶段/两次转换、两次一致快照；审批到期按原事件时点核验，不因现在到期否认历史，不授新执行。当前read_step_terminal/read_events撤权或串绑定拒绝；缺记录不证明未执行，阶段成功不证明Core业务成功。shared/OpenAPI已有结构，未新注册HTTP/生产驱动。实际Auth、Prisma适配、运行器、人类审批与Core组合的DB/业务事实为替身；通知原请求HTTP消费者只做代码/类型核对，未宣称全宿主或MySQL验收。后续沿原依赖补可信计数/标准执行及剩余恢复窗口，不重复此历史读取或把已关闭执行门改成默认成功。
 
@@ -90,7 +94,7 @@ AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务�
 
 `b09b0215`已让清理消费原冻结输入的知识/偏好/媒体引用，核查原输入指纹、原请求和空间；仅实际引用的未决任务保留对应来源，不重新打开已撤回正文。每类最多核查50条、50个任务及每任务50份模型输入，超限/旧格式/孤立账务关联仍unavailable，不把页内未出现当无引用；当前不代表全格式或生产规模删除完成。`2aaaa910`将原账务read/releaseUnsent/reconcile整个请求含前置Auth/DB等待设为有界，取消/期限后关闭本次凭据，迟到compose不继续消费；可能写入不明仍unknown、不重试。
 
-**可信计价的精确剩余：** 当前租户BYOK已可经正式管理入口向原`AiGatewayPriceRecord`追加人类审阅的版本化预算费率；这不是官方供应商账单校验，亦未提供平台统一费率来源。`GatewayPricingEvidenceSource.readInputBound`仍需认证tokenizer或经过原受控通道的供应商计数收据，绑定原invocation/registrationHash/intentHash/configurationHash/priceHash，不能从用户提交的数量生成认证。当前未找到完整的正式计数生产者，不以字符估算、当前价或合成种子替代，也不因此开放真实调用。后续核对平台费率发布及计数在同一受控Gateway中的合法接点，不新建供应商派发器。
+**可信计价的精确剩余：** 平台人类审阅费率发布/租户采用及租户BYOK费率生产已实现，复用原`AiGatewayPriceRecord`；它们不是供应商账单校验。`GatewayPricingEvidenceSource.readInputBound`仍需认证tokenizer或经过原受控通道的供应商计数收据，绑定原invocation/registrationHash/intentHash/configurationHash/priceHash；`PrismaPlatformReviewedPriceSource.readInputBound`仍明确UNAVAILABLE。当前没有完整正式计数生产者，不以字符估算、用户自报上界、当前价或合成种子替代，也不因此开放recorded调用。后续补同一受控Gateway内的合法计数/计量接点，不重复费率管理、不新建未计量的计数派发器；真实计数/外部访问须另获授权。
 
 原预算标准设置、首次配置与显式重绑定已复验离线正向，沿同一可信服务器DI配置默认关闭；初始化/重绑定只消费正式当前配置、保留旧债务并关闭本层政策门，不自动开额度、派发或建立第二账本。当前平台/租户Guard和CAS不省略，写应答不明只读原政策；未释放/已计量占用不能换成不同单位或币种，不经停用/未配置清零，不自动换汇。平台模式、tokens/money首次配置的完整组合、真实费率/计数与模型执行仍待核实，不再重复列租户BYOK首次配置为完全未验。
 
