@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-20。最新功能提交：`bac89d6b`；本批客户受控澄清、原输入收据/资源起点、执行停用后读取、结果用途及两渠道契约已接回。stdin最终6/6、退出0，无新测试脚本；API noEmit退出1（680 roots，仅支付WIP两项诊断），diff退出0。原确认历史、单账与预算汇总保留。可信计数/上界生产者、完整标准模型/客户执行、主动场景和多端验收仍未齐，用量JSON迁移未执行；原28项64.3%、ENTRY48.6%、验收0/28，不改百分比。其他WIP与四线暂停保留。
-> **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
+> 更新时间：2026-10-20。最新功能提交：`b8ccc7b4`，前置`5088ead5`、`c268885d`。本批接回租户双轨设置、平台Profile配置及原保存收据、后台本人任务中心只读列表/快照/事件；三组stdin分别6/6、4/4、3/3、退出0，无新增测试脚本。Admin noEmit224 roots/0诊断/退出0；API681 roots/2项原支付WIP诊断/退出1，AI Native无诊断；diff退出0。原28项64.3%、ENTRY48.6%、验收0/28不变；真实环境与完整执行未验，不以后台入口存在宣布底座完成。
+> **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
 
@@ -21,6 +21,12 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+后台配置现沿原API实际装配：租户“服务与渠道→AI服务设置”（`/settings/ai`）复用C07与原Auth/Guard/CAS/Profile，平台模式无需供应商输入，BYOK支持三种已有原生协议；切换保留原加密配置，清密钥同时停用。旧系统配置单独审阅来源版本，只有明确新密钥+disabled替换才保存，不自动导入。平台“平台AI配置”（`/platform/ai`）沿原GET/PUT `/platform/ai/providers/{profileId}`和原operation接口；严格按当前SaaS view/manage分别显示和保存，不给所有SaaS账号自动权限。暂无Profile目录读取端口，需人工输入已知编号；首次配置是明确CAS修订0且停用，不把读取失败当不存在。两端仅sessionStorage保存原操作引用/修订，绝不保存密钥；未知锁住新保存、只核对原收据，收据确认后重新读当前配置。配置保存不会开放预算、能力验证或执行。能力验证/价格/预算及正式后台审批、场景完整消费仍待补，不重复这些设置宿主。
+
+后台任务中心（`/ai/tasks`）复用`composePersistedTaskCenter`、原当前身份/动作政策和owner查询，标准POST `/ai-native/task-center/{list|snapshot|events}`已注册并补shared/OpenAPI。首次页面零AI读，人工读取后有界分页/筛选和选中快照；没有新建/继续/领取或模型/账本端口，不自动轮询。事件重置只读，不重启run；每条包括分页探测行均核metadata政策，快照另核事件和步骤读权。页内只展示状态/步骤元数据与持久水位，不含模型正文/人工批准或Core成功证据。完整模型回答/审批/业务收据的全局页面消费、事件连续刷新及浏览器行为仍未验/未齐，不能把此元数据入口称完整可执行工作台。
+
+下一步优先可信计数/上界正式生产者、标准模型单账正向执行和剩余恢复窗口，再补后台能力/预算/审批与场景消费；不能用calls换算token、猜计数、恒真权限或默认开关补齐。平台费率与BYOK审阅生产者已存在，不重复开发。全部源码/类型/离线证据不代替shared正常构建、真实MySQL/供应商及浏览器验收；本批未构建dist、迁移或启用。
 
 客户上下文澄清：标准服务器模型DI可显式设置`clarification:true`，选择原`original_client_clarification`来源；默认仍只做原摘要，不自动开启模型或任务政策。只解释同一原task/run/step/frozen input及已测量结果中的固定问题代码，输出原`clarification_text`合同；回答为context_only，不是客户/商品选择、报价确认或建单批准。最多两轮追问且受原政策maxCalls、原材料及五分钟问题期限约束；原输入仓储持久化问题/回答/同键收据，后续run沿原resourceOriginRunId，不清零资源、不覆盖旧输入。关闭新执行或新提问后，原问题读取/回答收据仍走当前独立政策；该读入口不能创建问题/调用模型。客户model/result按持久workflowStatus区分answer/clarification/not_attested，模型单轮成功不等于业务成功；website/wechat的input/submit/receipt/continue与模型control/result已有shared/OpenAPI契约，Controller保留受控停止原因。
 
@@ -82,7 +88,7 @@
 
 AIN-01已复核原15项目录与实际消费者，补齐当前实现/原业务入口/仅候选/缺依赖的区分；四品类原报价与确认、实际目录消费者及归档证据链接已用现有入口快检。当前按原G3将AIN-01/05/11更新为75%，整项验收仍0/28，不改分母或门槛。AIN-01尚缺完整人工流程/指标及目标环境版本；本轮补上`rental.change.preview`中的续租预览：`business-tools.orderExtensionPreview(orderId).read`及原`next_steps`请求的`previewOrderExtension`→标准同名POST入口。订单由原请求绑定，原view及extend/operate权限、订单版本、服务地点和读后身份均复验；只复用原Core试算，不保存/批准/执行，也未登记自动模型工具。其他变更类型、完整响应协议及真实HTTP/四品类全范围仍未验。其他任务具备门槛证据再更新，不批量估分。
 
-配置标准入口支持租户双轨read/save与平台Profile读写，仍复用原C07/CAS/Profile/Vault。原键收据已同事务接入，`POST /api/ai-native/model-settings/operation`及平台`GET /api/platform/ai/providers/{profileId}/operations/{operationKey}`只返回当前原主体的安全保存结果，异载荷/跨主体拒绝。`POST /api/ai-native/model-settings/legacy`仅审阅原来源/版本，不回显旧密钥；显式替换需原版本、operationKey、全新替换密钥和disabled，原记录保留，不自动导入、复用掩码或认证能力。不支持的旧协议继续拒绝。`20261018090000_ai_tenant_service_gate`及新增`20261018100000_ai_model_configuration_operations`均未执行；后台表单正式消费、真实升级/并发及旧客户端无原键的保存恢复仍未齐，不把当前修订补造成原收据。
+配置标准入口支持租户双轨read/save与平台Profile读写，复用原C07/CAS/Profile/Vault。租户及平台后台表单与原键收据核对现已消费，具体入口见本节顶部；`POST /api/ai-native/model-settings/operation`及平台`GET /api/platform/ai/providers/{profileId}/operations/{operationKey}`只返回当前原主体的安全保存结果，异载荷/跨主体拒绝。`POST /api/ai-native/model-settings/legacy`仅审阅原来源/版本，显式替换需原版本、operationKey、全新密钥和disabled，原记录保留，不自动导入或认证能力。不支持旧协议仍拒绝。`20261018090000_ai_tenant_service_gate`及`20261018100000_ai_model_configuration_operations`未执行；真实升级/并发、旧客户端无原键的保存恢复及后台浏览器验收仍未齐，不把当前修订补造成原收据。
 
 知识/记忆标准管理已接回原实现：`e46b4c76`注册`HumanMemoryManagementController`和`KnowledgePolicyManagementController`，`2784aedd`注册`HumanKnowledgeManagementController`，均为当前人类操作。记忆提议/确认/撤回、政策prepare/commit/原operation及文件上传/创建/解析/发布/撤回沿原仓储、正式政策和原文件集成；新增`index/{read|request|resume|operation-read}`复用原词法索引协调器/收据，不启动worker。取消及5秒等待关闭本次凭据，未知写入只核对原操作。缺正式管理authority或动作政策仍不可用，不播种授权。AIN-03已按标准持久消费者与实际仓储冒烟跨G3为75%，真实迁移/并发及完整升级回退仍未验；其余百分比不因入口数量变化。BYOK配置→租户/场景预算首次初始化→配置变更后显式重绑定，已用标准预算provider/controller及真实Auth/Guard/订阅/仓储实现跑通离线正向；旧unknown债务/占用不归零，重绑定关闭本层执行门，未提供服务器配置仍拒绝。该结果不证明平台模式、tokens/money或模型派发全链。下一步继续可信价格/计数生产、完整标准执行、知识authority配置/正式内容消费及真实删除传播，不重复造已接回的管理服务或索引器。
 

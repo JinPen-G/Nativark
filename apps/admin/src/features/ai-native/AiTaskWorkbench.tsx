@@ -244,8 +244,8 @@ export function AiTaskWorkbench({
               />
             )}
             {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
-            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权订单事实">
-              <h3>当前受权订单事实（非模型生成）</h3>
+            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权事实">
+              <h3>当前受权事实（非模型生成）</h3>
               <dl>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
                 <dt>{safeDisplayText(row.label, 100)}</dt><dd style={{ overflowWrap: "anywhere" }}>{safeDisplayText(row.value, 1000)}</dd>
               </div>)}</dl>
