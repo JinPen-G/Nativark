@@ -12,7 +12,7 @@ import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.reposito
 import { parseTaskModelInput, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 
 const contextQuestion = z.object({ kind: z.literal('client-context-question-1'),
   code: z.enum(['rental_requirements', 'rental_time', 'rental_preferences']) }).strict();
@@ -92,7 +92,7 @@ export function clientCompletedModelInputSource(db: PrismaClient, tasks: Pick<Ai
     if (!limits.success) throw denied();
     // At most two follow-up rounds, always inside the existing task-wide call
     // ceiling. Exhaustion is not a completed answer and never grants a new run.
-    if (run.sequence >= Math.min(limits.data.maxCalls, 3)) throw new AiTaskRunnerError('AI_RUN_LIMIT');
+    if (run.sequence >= Math.min(limits.data.maxCalls, 3)) throw new AiTaskInputLimitError();
     const expires = Math.min(Date.parse(result.observedAt) + 300000, frozen.expiresAt.getTime(), current.expiresAt.getTime());
     if (!Number.isFinite(expires)) throw denied();
     const latestPolicy = structuredClone(await db.aiTaskPlanPolicy.findFirst({ where: policyWhere }));

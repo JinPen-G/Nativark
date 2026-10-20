@@ -12,7 +12,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { AiTaskInputBinding, AiTaskInputContext, AiTaskInputReader, AiTaskInputSource } from './task-input.ports';
-import { AiTaskInputResultUnknownError } from './task-input.errors';
+import { AiTaskInputResultUnknownError, AiTaskInputLimitError } from './task-input.errors';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskInputRequest' | 'aiTaskInputReceipt'>;
 type Tx = Prisma.TransactionClient;
@@ -302,7 +302,16 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       if (ref.registered.runId !== run.id || ref.registered.stepRevision !== facts.step.revision || requestFingerprint(ref.plan) !== requestFingerprint(facts.planned)) throw denied();
       const prior = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_runId_stepId_planHash: {
         scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id, planHash: facts.binding.planHash } } });
-      const requirement = await this.requirement(facts.binding);
+      let requirement;
+      try { requirement = await this.requirement(facts.binding); }
+      catch (error) {
+        // No write has occurred in this transaction. Return an acknowledged
+        // observation so the runner can stop and hand off the original task;
+        // never confuse a source ceiling with an uncertain write timeout.
+        if (!(error instanceof AiTaskInputLimitError)) throw error;
+        await this.access(task.id, 'read_step_terminal', before);
+        return { kind: 'input_limit_reached' as const };
+      }
       if (prior) {
         await this.access(task.id, 'request_input', before);
         const contract = this.validateRequest(prior, facts.binding, before);

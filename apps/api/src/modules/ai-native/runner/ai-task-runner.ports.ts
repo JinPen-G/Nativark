@@ -184,7 +184,8 @@ export interface AiTaskRunnerClock {
 }
 
 export interface AiTaskRunnerInputPort {
-  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | null>;
+  /** input_limit_reached attests no new question/transition was written. */
+  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | { kind: 'input_limit_reached' } | null>;
 }
 
 export interface AiTaskRunnerDependencies {
@@ -217,5 +218,7 @@ export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
 }
 
 export type AiTaskRunnerOutcome =
-  | { status: "succeeded" | "partially_succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
+  | { status: "succeeded" | "partially_succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown"; completedSteps: number; cleanupFailed: number }
+  | { status: 'unavailable'; completedSteps: number; cleanupFailed: number;
+      stopReason?: 'input_limit_reached'; nextAction?: 'manual_handoff' }
   | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };

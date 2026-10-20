@@ -334,6 +334,14 @@ export class AiTaskRunner {
         const current = { ...structuredClone(ref), registered: { ...ref.registered, taskRevision, runRevision: lease.revision } };
         const committed = structuredClone(await this.callWriteBounded(() => this.deps.inputs!.afterSucceeded(current, structuredClone(lease)), plan.limits.maxStepMs, 'input_wait'));
         if (!committed) return false;
+        if ('kind' in committed) {
+          if (committed.kind !== 'input_limit_reached' || Object.keys(committed).length !== 1)
+            throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          // All registered steps may have succeeded without satisfying the
+          // user's goal. The existing FSM must not falsely mark that success,
+          // fail a successful step or invent an unresolved external effect.
+          return 'input_limit_reached' as const;
+        }
         if (committed.taskRevision !== taskRevision + 1 || committed.lease?.revision !== lease.revision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
         advance(committed);
         return true;
@@ -370,7 +378,10 @@ export class AiTaskRunner {
             }
           }
           completedSteps++;
-          if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
+          const pause = await pauseForInput(ref);
+          if (pause === 'input_limit_reached') return { status: 'unavailable', completedSteps, cleanupFailed,
+            stopReason: 'input_limit_reached', nextAction: 'manual_handoff' };
+          if (pause) return { status: 'paused', completedSteps, cleanupFailed };
           continue;
         }
         if (registered.replayed && registered.existingStatus === 'failed' && this.deps.resources) {
@@ -514,7 +525,10 @@ export class AiTaskRunner {
         // Cleanup uncertainty is local operational uncertainty. With all
         // steps successful, the existing FSM cannot claim unresolved effects.
         if (cleanupUnavailable) return { status: 'unknown', completedSteps, cleanupFailed };
-        if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
+        const pause = await pauseForInput(ref);
+        if (pause === 'input_limit_reached') return { status: 'unavailable', completedSteps, cleanupFailed,
+          stopReason: 'input_limit_reached', nextAction: 'manual_handoff' };
+        if (pause) return { status: 'paused', completedSteps, cleanupFailed };
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
