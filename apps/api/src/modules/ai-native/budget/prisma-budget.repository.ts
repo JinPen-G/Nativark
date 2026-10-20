@@ -232,8 +232,16 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     const tenantId = quote.association.scope.kind === 'platform' ? null : quote.association.scope.tenantId;
     const workspaceId = quote.association.scope.kind === 'workspace' ? quote.association.scope.workspaceId : null;
     const requestHash = hash({ identityHash, association: quote.association, callId: quote.callId, sceneCode: quote.sceneCode, model: quote.model, actorId: quote.actorId, consumerScope: quote.consumerScope, quantity: quote.quantity, policies: quote.policies, evidenceHash: quote.evidenceHash, expiresAt: quote.expiresAt.toISOString() });
+    const assertFresh = () => {
+      const now = this.clock();
+      if (!(now instanceof Date) || !Number.isFinite(now.getTime())
+        || !(command.expiresAt instanceof Date) || !(quote.expiresAt instanceof Date)
+        || !Number.isFinite(command.expiresAt.getTime()) || !Number.isFinite(quote.expiresAt.getTime())
+        || command.expiresAt <= now || quote.expiresAt <= now) throw new BudgetError('UNAVAILABLE');
+    };
+    let callbackCompleted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      const result = structuredClone(await this.db.$transaction(async tx => {
         const rows = await this.lockPolicies(tx, quote.policies);
         if (rows.some(row => row.sceneCode !== command.sceneCode)) throw new BudgetError('EXHAUSTED');
         if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
@@ -254,6 +262,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           const replay = structuredClone(await this.readRecord(tx, existing.id, quote.association));
           if (!replay || replay.actorId !== quote.actorId || replay.callId !== quote.callId || replay.sceneCode !== quote.sceneCode) throw new BudgetError('IDEMPOTENCY_CONFLICT');
           await revalidate();
+          callbackCompleted = true;
           return replay;
         }
         const requested = quantityAtoms(quote.quantity);
@@ -267,12 +276,21 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
             || usage.used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
         await revalidate();
+        assertFresh();
         const data = { id: randomUUID(), tenantId, workspaceId, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
         const created = await tx.aiBudgetReservation.create({ data, select: { id: true, tenantId: true, workspaceId: true, scopeId: true, scopeKind: true, sceneCode: true, actorId: true, requestId: true, runId: true, stepId: true, actionId: true, callId: true, idempotencyKey: true, configRevision: true, priceVersion: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, status: true, dispatchState: true, unknownReason: true, expiresAt: true, updatedAt: true } });
-        await tx.aiBudgetAllocation.createMany({ data: rows.map(row => ({ reservationId: created.id, policyId: row.id, policyRevision: row.configRevision })) });
-        return this.record(created, quote.association);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        const record = structuredClone(this.record(created, quote.association));
+        await tx.aiBudgetAllocation.createMany({ data: rows.map(row => ({ reservationId: record.id, policyId: row.id, policyRevision: row.configRevision })) });
+        await revalidate();
+        assertFresh();
+        callbackCompleted = true;
+        return record;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }));
+      // Revocation after COMMIT cannot undo a possibly durable reservation.
+      await revalidate();
+      return result;
     } catch (error) {
+      if (callbackCompleted) throw new BudgetError('PENDING_RECONCILIATION');
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
         // A transaction/commit failure does not prove that no reservation was
         // committed. Never translate it into EXHAUSTED, which would invite a
@@ -281,11 +299,14 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         throw new BudgetError('PENDING_RECONCILIATION');
       }
       if (error instanceof BudgetError) throw error;
-      const existing = await this.db.aiBudgetReservation.findFirst({ where: { scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, idempotencyKey: quote.association.idempotencyKey }, select: { id: true, requestHash: true } });
+      await revalidate();
+      const existing = structuredClone(await this.db.aiBudgetReservation.findFirst({ where: { scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, idempotencyKey: quote.association.idempotencyKey }, select: { id: true, requestHash: true } }));
       if (existing?.requestHash === requestHash) {
-        const replay = await this.get(existing.id, quote.association);
-        if (replay) return replay;
+        const replay = structuredClone(await this.get(existing.id, quote.association));
+        await revalidate();
+        if (replay && replay.actorId === quote.actorId && replay.callId === quote.callId && replay.sceneCode === quote.sceneCode) return replay;
       }
+      await revalidate();
       if (existing) throw new BudgetError('IDEMPOTENCY_CONFLICT');
       // A unique-key race whose winner is not visible yet is also ambiguous;
       // do not claim exhaustion or issue a second reservation.
