@@ -44,6 +44,7 @@ const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/Ten
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
 const AiModelSettingsPage = lazy(() => import("@/features/ai-native/AiModelSettingsPage").then((module) => ({ default: module.AiModelSettingsPage })));
 const TaskCenterPage = lazy(() => import("@/features/ai-native/TaskCenterPage").then((module) => ({ default: module.TaskCenterPage })));
+const PlatformModelSettingsPage = lazy(() => import("@/features/ai-native/PlatformModelSettingsPage").then((module) => ({ default: module.PlatformModelSettingsPage })));
 const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
 const AppearancePage = lazy(() => import("@/features/appearance/AppearancePage").then((module) => ({ default: module.AppearancePage })));
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
@@ -150,6 +151,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.subscriptionCatalog.path} element={guard(APP_ROUTES.subscriptionCatalog, <SubscriptionCatalogPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
+            <Route path={APP_ROUTES.platformAi.path} element={guard(APP_ROUTES.platformAi, <PlatformModelSettingsPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />
             <Route path={APP_ROUTES.platformTools.path} element={guard(APP_ROUTES.platformTools, <PlatformToolsPage />)} />
             <Route path={APP_ROUTES.platformOfficialCalendars.path} element={guard(APP_ROUTES.platformOfficialCalendars, <OfficialCalendarSourcePage />)} />
