@@ -269,5 +269,9 @@ export function composePersistedTaskModelHost(input:
   const runtime = composePersistedTaskGateway({ ...gateway, db: host.db, auth: host.auth,
     credentials: host.credentials, subscriptions: host.subscriptions, guard: host.guard,
     taskId: host.task.taskId, clock: host.clock });
-  return composeTaskModelHost({ ...host, ...runtime });
+  return Object.freeze({ ...composeTaskModelHost({ ...host, ...runtime }),
+    // Financial convergence is not task continuation. Reuse this task-bound
+    // ledger after an uncertain response, without rebuilding pricing/transport
+    // or treating a settled charge as permission to retry the model.
+    accountingRecovery: runtime.accountingRecovery });
 }
