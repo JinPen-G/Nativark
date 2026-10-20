@@ -181,8 +181,10 @@ export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
     composeRequestBoundModelSettings({ db, auth, guard, secrets })
 };
 export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
-  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [PrismaService, AuthService],
-  useFactory: (db: PrismaService, auth: AuthService) => composeRequestBoundTaskCenter({ db, auth })
+  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS],
+  useFactory: (db: PrismaService, auth: AuthService,
+    originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>) =>
+    composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults })
 };
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],

@@ -12,6 +12,8 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { AiTaskWorkbench, type AiTaskDetailReader } from "./AiTaskWorkbench";
 import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
+import { readTaskCenterDetail } from "./task-center-reader";
+import { TaskUsageObservation } from "./TaskUsageObservation";
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -60,16 +62,22 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const readTask: AiTaskDetailReader = useCallback(async (taskId, _context, signal) => {
     const same = () => identityKey() === identity && !signal.aborted && !document.hidden;
     if (!same()) throw Error("AI_SCOPE_CHANGED");
-    const snapshot = await aiTaskCenterApi.snapshot(taskId, signal);
+    const { snapshot, result, coverage } = await readTaskCenterDetail(aiTaskCenterApi, taskId, signal, same);
     if (!same() || snapshot.contractVersion !== AI_TASK_DRAFT_VERSION || snapshot.taskId !== taskId
       || !AI_TASK_STATUSES_DRAFT.includes(snapshot.status) || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000
       || !/^(0|[1-9][0-9]{0,19})$/u.test(snapshot.cursor)) throw Error("AI_RESOURCE_UNAVAILABLE");
     return { task: { id: taskId, status: displayStatus(snapshot.status), scene: snapshot.sceneCode, updatedAt: snapshot.updatedAt },
+      ...(result?.status === "available" ? { modelText: result.text!.value } : {}),
       steps: snapshot.steps.map(step => ({ id: step.stepId, taskId, status: step.status === "pending" ? "registered" : step.status,
         action: `${step.runId} / ${step.sequence}`, occurredAt: null })),
       factRows: [{ label: t("任务修订"), value: String(snapshot.revision) }, { label: t("持久事件水位"), value: snapshot.cursor },
         { label: t("观察时间依据"), value: formatTimestamp(snapshot.updatedAt).value },
-        { label: t("读取边界"), value: t("仅任务状态和步骤元数据，不包含模型正文、业务成功收据或执行许可。") }] };
+        { label: t("事件范围"), value: t(coverage === "reset_required" ? "历史游标已失效，不补造事件；仅按现存引用独立复验结果。"
+          : coverage === "first_page_only" ? "仅前50条保留事件，未加载后续；本页结果不是最新结果保证。" : "当前保留事件，未证明完整业务历史。") },
+        { label: t("原结果"), value: t(result?.status === "available" ? "当前事实及来源复验后可读，AI文本不是业务执行证据。"
+          : result?.status === "stale" ? "事实已变化，旧正文不显示，请回原业务页核对。"
+            : result?.status === "unknown" ? "结果待核对，不自动重试。" : result?.status === "failed" ? "原步骤失败，未产生可展示答案。"
+              : "本次没有可读取的结果，不能推断未执行或已成功。") }] };
   }, [identity, t]);
   const data = query.error ? undefined : query.data;
   useEffect(() => { if (query.error || data && selected && !data.items.some(row => row.taskId === selected)) setSelected(null); }, [query.error, data, selected]);
@@ -91,5 +99,8 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
         setSelected(null); setPage(next); }} />}
+    {opened && visible && selected && data?.items.some(row => row.taskId === selected)
+      && <TaskUsageObservation key={selected} taskId={selected} current={current}
+        onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
   </section>;
 }

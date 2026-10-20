@@ -41,5 +41,5 @@ export function composePersistedTaskCenter(input: {
   const usage = input.usageDb ? new TaskBudgetUsageReader(input.usageDb, actions, scopes, clock) : undefined;
   if (input.performanceDb && (!usage || !Object.is(input.db, input.performanceDb))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const performance = usage && input.performanceDb ? new TaskPerformanceReader(input.performanceDb, actions, usage, clock) : undefined;
-  return Object.freeze({ list, events, results, usage, performance });
+  return Object.freeze({ tasks, list, events, results, usage, performance });
 }

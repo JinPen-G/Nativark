@@ -12,6 +12,7 @@ import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
 import { consumePolledEvents } from "./polling-consumer";
 import { safeDisplayText } from "./safe-display";
+import { ModelText } from "./ModelText";
 import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
 export type AiWorkbenchContext = Readonly<{
@@ -244,6 +245,7 @@ export function AiTaskWorkbench({
               />
             )}
             {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
+            {detailSynchronized && typeof currentDetail.modelText === "string" && <ModelText text={currentDetail.modelText} />}
             {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权事实">
               <h3>当前受权事实（非模型生成）</h3>
               <dl>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>

@@ -134,7 +134,9 @@ export interface AiTaskSnapshotDraft {
   updatedAt: string;
   cancelRequestedAt: string | null;
   cursor: string;
-  steps: Array<{ stepId: string; runId: string; sequence: number; revision: number; status: AiStepStatusDraft }>;
+  steps: Array<{ stepId: string; runId: string; sequence: number; revision: number; status: AiStepStatusDraft;
+    /** Lookup reference only; the original result/source reader must authorize it again. */
+    resultId?: string }>;
 }
 export interface AiTaskEventResetDraft {
   contractVersion: typeof AI_TASK_DRAFT_VERSION;
@@ -143,10 +145,11 @@ export interface AiTaskEventResetDraft {
   reason: "cursor_expired" | "unsupported_version";
 }
 
-/** Owner-only metadata transport. No execution, input/output body or lease is
- * returned; cursor continuation always repeats current resource authorization. */
+/** Owner-only observation transport. Metadata, source-revalidated original
+ * model text and original usage have separate current-authorized reads. No
+ * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
-  list: "list", snapshot: "snapshot", events: "events" } as const);
+  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -155,4 +158,17 @@ export interface AiTaskMetadataPageDraft {
   items: Array<{ taskId: string; status: AiTaskStatusDraft; revision: number; sceneCode: string; sceneVersion: string;
     createdAt: string; updatedAt: string; cancelRequestedAt: string | null }>;
   nextCursor: string | null;
+}
+
+/** A source-revalidated original model observation, not a generic artifact
+ * download or business receipt. Other scene/result kinds remain unavailable. */
+export interface AiTaskModelObservationDraft {
+  contractVersion: typeof AI_TASK_DRAFT_VERSION;
+  taskId: string; runId: string; resultId: string;
+  sceneCode: "order_explanation" | "opening_diagnosis" | "quote_clarification";
+  status: "available" | "stale" | "unknown" | "failed";
+  text: { value: string; trust: "unverified_model_text_not_execution_evidence" } | null;
+  observedAt: string;
+  businessExecution: "not_inferred_from_model_result";
+  execution: "read_only_no_start_no_reconnect_side_effect";
 }

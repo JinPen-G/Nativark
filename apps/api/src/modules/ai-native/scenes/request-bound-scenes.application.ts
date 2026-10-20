@@ -683,10 +683,17 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db, performanceDb: input.db });
     // Construct knowledge services only for actual result/source reads. These
     // still revalidate current ACL/consent; absence never means trusted content.
-    const resultReader = () => {
+    const resultReader = (sceneCode = resultPolicy?.sceneCode) => {
       if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      // Observation does not use the order scene's policy for every saved
+      // result. Choose only a known, server-registered original scene; this
+      // grants no tools, model route, fresh plan or execution entitlement.
+      if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(sceneCode ?? '')
+        || !input.creationRules.some(rule => rule.sceneCode === sceneCode)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
-      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
+      const selected = sceneCode === resultPolicy.sceneCode ? resultPolicy
+        : { ...resultPolicy, sceneCode: sceneCode!, orderExplainTool: false };
+      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, selected, input.clock, knowledge);
     };
     const pending = async (value: unknown) => {
       const reference = originalRequestReferenceSchema.parse(structuredClone(value));
@@ -775,7 +782,13 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       });
     },
     readModelResult(request: AiSceneHttpRequest, value: unknown) {
-      return call(request, value, (root, command) => root.resultReader().read(command));
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().min(1).max(191) }).strict()
+          .safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = await root.scenes.requests.readHistorical(parsed.data.original);
+        return root.resultReader(original.request.sceneCode).read(parsed.data);
+      });
     },
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, (root, command) => root.resultReader().reopenSource(command));
