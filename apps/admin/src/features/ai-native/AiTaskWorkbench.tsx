@@ -13,7 +13,8 @@ import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus
 import { consumePolledEvents } from "./polling-consumer";
 import { safeDisplayText } from "./safe-display";
 import { ModelText } from "./ModelText";
-import type { AiTaskConfirmationHistoryDraft } from "@rental-os/shared";
+import { TaskModelSources, type TaskModelSourceReader } from "./TaskModelSources";
+import type { AiTaskConfirmationHistoryDraft, AiTaskModelObservationDraft } from "@rental-os/shared";
 import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
 export type AiWorkbenchContext = Readonly<{
@@ -27,6 +28,7 @@ export type AiTaskDetailProjection = Readonly<{
   task?: unknown;
   steps?: readonly unknown[];
   modelText?: string;
+  modelObservation?: AiTaskModelObservationDraft;
   fields?: readonly MissingField[];
   draft?: Record<string, string>;
   proposal?: ProposalPreviewData | null;
@@ -71,6 +73,7 @@ export interface AiTaskWorkbenchProps {
   onCancel?: () => Promise<unknown>;
   onRecover?: () => Promise<unknown>;
   readConfirmation?: (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => Promise<AiTaskConfirmationHistoryDraft>;
+  readSource?: TaskModelSourceReader;
 }
 
 type DetailState = "idle" | "unavailable" | "loading" | "ready" | "failed" | "hidden";
@@ -100,6 +103,7 @@ export function AiTaskWorkbench({
   onCancel,
   onRecover,
   readConfirmation,
+  readSource,
 }: AiTaskWorkbenchProps) {
   const contextKey = JSON.stringify([context.audience, context.tenantId ?? null, context.workspaceId ?? null]);
   const [selection, setSelection] = useState({ contextKey, taskId: controlledTaskId ?? null });
@@ -279,6 +283,8 @@ export function AiTaskWorkbench({
                 onRecover={onRecover}
               />
             )}
+            {detailSynchronized && currentDetail.modelObservation && readSource
+              && <TaskModelSources key={identity} result={currentDetail.modelObservation} read={readSource} />}
             {detailSynchronized && currentDetail.sources && <KnowledgeSources sources={currentDetail.sources} />}
             {detailSynchronized && currentDetail.memories && <MemoryPreferences items={currentDetail.memories} />}
             {detailSynchronized && currentDetail.serviceSummary && <AiServiceSummary summary={currentDetail.serviceSummary} />}

@@ -66,6 +66,11 @@ export async function readTaskCenterDetail(reads: Reads, taskId: string, signal:
     if (result && (result.contractVersion !== AI_TASK_DRAFT_VERSION || result.taskId !== taskId || result.resultId !== resultId
       || result.sceneCode !== first.sceneCode || !["available", "stale", "unknown", "failed"].includes(result.status)
       || result.execution !== "read_only_no_start_no_reconnect_side_effect" || result.businessExecution !== "not_inferred_from_model_result"
+      || !Array.isArray(result.sources) || result.sources.length > 9
+      || result.sources.some(source => !source || !['order', 'knowledge'].includes(source.kind)
+        || !Number.isInteger(source.index) || source.index < 0 || source.index > 4 || !/^[a-f0-9]{64}$/u.test(source.referenceHash))
+      || new Set(result.sources.map(source => `${source.kind}:${source.index}`)).size !== result.sources.length
+      || result.status !== 'available' && result.sources.length !== 0
       || result.status === "available" && (!result.text || typeof result.text.value !== "string"
         || result.text.value.length > 131072 || result.text.trust !== "unverified_model_text_not_execution_evidence")
       || result.status !== "available" && result.text !== null)) throw invalid();

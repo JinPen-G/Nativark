@@ -791,7 +791,13 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       });
     },
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
-      return call(request, value, (root, command) => root.resultReader().reopenSource(command));
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().min(1).max(191),
+          sourceIndex: z.number().int().min(0).max(4), sourceKind: z.enum(['order', 'knowledge']).optional() }).strict().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = await root.scenes.requests.readHistorical(parsed.data.original);
+        return root.resultReader(original.request.sceneCode).reopenSource(parsed.data);
+      });
     },
     reopenOpeningModelSource(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, (root, command) => root.resultReader().reopenOpeningSection(command));

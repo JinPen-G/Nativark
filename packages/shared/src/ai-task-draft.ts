@@ -152,7 +152,7 @@ export interface AiTaskEventResetDraft {
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
   list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
-  review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business", continue: "continue" } as const);
+  review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business", continue: "continue", source: "source" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -171,9 +171,23 @@ export interface AiTaskModelObservationDraft {
   sceneCode: "order_explanation" | "opening_diagnosis" | "quote_clarification";
   status: "available" | "stale" | "unknown" | "failed";
   text: { value: string; trust: "unverified_model_text_not_execution_evidence" } | null;
+  sources: AiTaskModelSourceReferenceDraft[];
   observedAt: string;
   businessExecution: "not_inferred_from_model_result";
   execution: "read_only_no_start_no_reconnect_side_effect";
+}
+
+/** Server-issued lookup only. Neither a URL nor permission to reopen content. */
+export interface AiTaskModelSourceReferenceDraft {
+  kind: 'order' | 'knowledge'; index: number; referenceHash: string;
+}
+export interface AiTaskModelSourceQueryDraft {
+  taskId: string; resultId: string; source: AiTaskModelSourceReferenceDraft;
+}
+export interface AiTaskModelSourceObservationDraft extends AiTaskModelSourceQueryDraft {
+  contractVersion: typeof AI_TASK_DRAFT_VERSION; runId: string; observedAt: string;
+  content: { format: 'text' | 'json'; value: string; trust: 'source_data_not_instructions' };
+  execution: 'read_only_no_start_no_reconnect_side_effect';
 }
 
 /** Original waiting-step lookup, not an execution or approval credential. */
