@@ -32,7 +32,9 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   originalDb?: Pick<PrismaClient, 'aiTaskOriginalRequest'>;
   usageDb?: TaskBudgetUsageDb;
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown>;
-    reopenModelSource?(request: Request, value: unknown): Promise<unknown> };
+    reopenModelSource?(request: Request, value: unknown): Promise<unknown>;
+    requestCancellationIntent?(request: Request, value: unknown): Promise<unknown>;
+    readCancellationReceipt?(request: Request, value: unknown): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
@@ -49,6 +51,8 @@ const schemas = {
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
   continue: taskCenterContinueSchema,
+  stop: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
+  stopReceipt: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()
 };
 const modelObservation = z.object({ taskId: id, runId: id, resultId: id, sceneCode: z.enum(['order_explanation', 'opening_diagnosis', 'quote_clarification']),
@@ -157,6 +161,40 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           if (action === 'decision') return approvals.decision(command);
           return approvals.decisionReceipt(command);
         };
+        const originalStop = async () => {
+          const query = schemas.stop.parse(command), source = input.originalResults;
+          if (!input.originalDb || !source?.readCancellationReceipt || action === 'stop' && !source.requestCancellationIntent)
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const access = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
+          const task = await input.db.aiTask.findFirst({ where: access.where });
+          if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const original = await readOriginalTaskModelProvenance(input.originalDb, task);
+          const reference = { original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: original.inputRef }, expectedRevision: query.expectedRevision };
+          const request = { headers: { authorization: header.data } };
+          if (action === 'stop') {
+            if (task.revision !== query.expectedRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+            // The original repository owns transition policy, task CAS, audit
+            // event and cancellation state. No lease, remote cancel or refund.
+            await source.requestCancellationIntent!(request, reference);
+          }
+          try {
+            const result = z.object({ receipt: z.object({ taskId: id, expectedRevision: z.number().int(),
+              status: z.enum(['observed', 'not_observed']), cancellation: z.literal('request_not_rollback'),
+              automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough() }).passthrough()
+              .safeParse(await source.readCancellationReceipt(request, reference));
+            if (!result.success || result.data.receipt.taskId !== query.taskId || result.data.receipt.expectedRevision !== query.expectedRevision)
+              throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+            if (action === 'stop' && result.data.receipt.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            const latest = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
+            if (access.bindingKey !== latest.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            return { ...query, status: result.data.receipt.status, cancellation: 'request_not_rollback' as const,
+              automaticRetry: false as const, remoteCancellation: 'not_attested' as const, budgetRelease: 'not_attempted' as const };
+          } catch (error) {
+            if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;
+            if (action === 'stop') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            throw error;
+          }
+        };
         const business = () => {
           if (!input.business || input.business.db !== input.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           return readTaskCenterBusiness(input.business, input.humanApprovals?.settings, credentials, root.tasks,
@@ -167,7 +205,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           return continueTaskCenterOriginal(input.continuation, input.humanApprovals, credentials, root.tasks,
             { headers: { authorization: header.data } }, command, signal);
         };
-        const result = action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
+        const result = action === 'stop' || action === 'stopReceipt' ? await originalStop() : action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
           ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
             : action === 'result' ? await originalResult() : action === 'source' ? await originalSource() : action === 'confirmation'
               ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
@@ -183,7 +221,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return structuredClone(result);
       });
-      if (action !== 'continue') return await waitForTaskApplicationDependency(work, action === 'decision', signal);
+      if (action !== 'continue') return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop', signal);
       try { return await callAiTaskRunnerDependency(work, 120000, 'task_center_original_continue', signal); }
       catch (error) {
         if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))
@@ -197,6 +235,8 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     events: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'events', signal),
     result: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'result', signal),
     source: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'source', signal),
+    stop: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'stop', signal),
+    stopReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'stopReceipt', signal),
     usage: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'usage', signal),
     review: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'review', signal),
     decision: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decision', signal),
@@ -211,7 +251,7 @@ export class AiTaskCenterController {
   constructor(@Inject(AI_NATIVE_TASK_CENTER_REQUESTS) private readonly center: ReturnType<typeof composeRequestBoundTaskCenter>) {}
   private respond(request: Request, value: unknown, action: keyof typeof schemas) {
     return respondAiScene(() => withRequestAbort(request, signal => this.center[action](request, value, signal)),
-      action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : action === 'continue' ? 'read_original_business' : 'reconcile');
+      action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : action === 'stop' ? 'read_stop_receipt' : action === 'continue' ? 'read_original_business' : 'reconcile');
   }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.list) @HttpCode(200) @Header('Cache-Control', 'no-store')
   list(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'list'); }
@@ -223,6 +263,10 @@ export class AiTaskCenterController {
   result(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'result'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.source) @HttpCode(200) @Header('Cache-Control', 'no-store')
   source(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'source'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.stop) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  stop(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'stop'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.stopReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  stopReceipt(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'stopReceipt'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.usage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   usage(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'usage'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.confirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')

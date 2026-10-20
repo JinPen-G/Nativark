@@ -2196,6 +2196,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
       resultId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'resultId'], false),
     responseSchema: 'AiTaskModelObservationDraft' },
+  ...(['stop', 'stopReceipt'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `aiTaskCenterOriginal_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    summary: action === 'stop' ? 'Explicit cancellation intent through the owned original request transition policy/CAS. Not rollback, remote cancellation or refund. Unknown: read exact original receipt; never resubmit.'
+      : 'Read cancellation request at exact original task revision and current owner/metadata/event authority, independent of new execution. Absence grants no retry.',
+    requestSchema: 'AiTaskStopQueryDraft', responseSchema: 'AiTaskStopObservationDraft' })),
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.source}`,
     tag: 'AI Native', operationId: 'aiTaskCenterOriginalModelSource', permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
     summary: 'Reopen one server-issued frozen source through current original scene authority and knowledge ACL. Hash/index are lookups, not authorization. Bounded inert text/JSON only; never a URL, download, model invocation or execution.',

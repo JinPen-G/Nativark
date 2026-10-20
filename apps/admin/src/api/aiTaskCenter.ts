@@ -6,11 +6,12 @@ import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMet
   type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft,
   type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft,
   type AiTaskBusinessObservationDraft, type AiTaskHumanContinueDraft, type AiTaskHumanContinuationDraft,
-  type AiTaskModelSourceQueryDraft, type AiTaskModelSourceObservationDraft } from "@rental-os/shared";
+  type AiTaskModelSourceQueryDraft, type AiTaskModelSourceObservationDraft,
+  type AiTaskStopQueryDraft, type AiTaskStopObservationDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
-async function read<T>(action: "list" | "snapshot" | "events" | "result" | "source" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business" | "continue", data: unknown, signal: AbortSignal): Promise<T> {
+async function read<T>(action: "list" | "snapshot" | "events" | "result" | "source" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business" | "continue" | "stop" | "stopReceipt", data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
   return result.data.data;
@@ -21,6 +22,8 @@ export const aiTaskCenterApi = Object.freeze({
   events: (taskId: string, after: string, signal: AbortSignal) => read<AiTaskEventPageDraft | AiTaskEventResetDraft>("events", { taskId, after, limit: 50 }, signal),
   result: (taskId: string, resultId: string, signal: AbortSignal) => read<AiTaskModelObservationDraft>("result", { taskId, resultId }, signal),
   source: (input: AiTaskModelSourceQueryDraft, signal: AbortSignal) => read<AiTaskModelSourceObservationDraft>("source", input, signal),
+  stop: (input: AiTaskStopQueryDraft, signal: AbortSignal) => read<AiTaskStopObservationDraft>('stop', input, signal),
+  stopReceipt: (input: AiTaskStopQueryDraft, signal: AbortSignal) => read<AiTaskStopObservationDraft>('stopReceipt', input, signal),
   usage: (taskId: string, signal: AbortSignal, after?: string) => read<AiTaskBudgetUsagePageDraft>("usage", { taskId, limit: 20, ...(after ? { after } : {}) }, signal),
   confirmation: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskConfirmationHistoryDraft>("confirmation", input, signal),
   review: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskHumanReviewDraft>("review", input, signal),
