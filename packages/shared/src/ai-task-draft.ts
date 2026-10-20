@@ -152,7 +152,7 @@ export interface AiTaskEventResetDraft {
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
   list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
-  review: "review", decision: "decision", decisionReceipt: "decision-receipt" } as const);
+  review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -191,3 +191,12 @@ export type AiTaskHumanDecisionReceiptDraft = AiTaskReviewQueryDraft & {
   receipt: import('./ai-approval-application-draft').AiApprovalApplicationReceiptDraft;
   businessExecution: 'not_attested';
 };
+/** Original Core receipt only; not a lease, retry instruction or payment fact. */
+export type AiTaskBusinessObservationDraft = AiTaskReviewQueryDraft & {
+  observedAt: string; execution: 'read_only_no_start_no_reconnect_side_effect';
+  payment: 'not_inferred'; fulfillment: 'not_inferred';
+} & (
+  | { status: 'committed'; kind: 'order'; order: { id: string; status: string; quoteId: string } }
+  | { status: 'committed'; kind: 'settings'; receipt: import('./ai-approved-settings-draft').AiApprovedSettingsOperationReceiptDraft }
+  | { status: 'unknown' | 'not_observed'; kind: 'order' | 'settings'; retryable: false }
+);

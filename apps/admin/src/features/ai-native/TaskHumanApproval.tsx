@@ -2,7 +2,7 @@
  * Persist only the exact pending decision reference, never proposal contents. */
 import { useEffect, useId, useRef, useState } from "react";
 import { AI_PROPOSAL_DRAFT_VERSION, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
-  type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft } from "@rental-os/shared";
+  type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { useLocale } from "@/app/locale";
 import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
@@ -52,6 +52,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
   const [steps, setSteps] = useState<AiTaskReviewQueryDraft[]>([]), [selected, setSelected] = useState<string | null>(null);
   const [review, setReview] = useState<AiTaskHumanReviewDraft | null>(null);
   const [receipt, setReceipt] = useState<AiTaskHumanDecisionReceiptDraft | null>(null);
+  const [business, setBusiness] = useState<AiTaskBusinessObservationDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const active = useRef({ current, onAccessDenied }); active.current = { current, onAccessDenied };
   const flight = useRef<AbortController | null>(null);
@@ -63,7 +64,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     try { await work(controller.signal); if (!same()) throw Error("AI_SCOPE_CHANGED"); }
     catch (error) {
       if (same()) {
-        setReview(null); setReceipt(null);
+        setReview(null); setReceipt(null); setBusiness(null);
         setMessage(write ? t("决定应答未确认，只能核对原决定收据；不要再次提交。") : t("当前不可读取，请核对权限、原版本或人工业务页。"));
         if ([401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0)) active.current.onAccessDenied();
       }
@@ -72,17 +73,17 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
   };
   const same = (signal: AbortSignal) => active.current.current() && !signal.aborted;
   const readSteps = () => run(async signal => {
-    setReview(null); setReceipt(null); setSteps([]); setSelected(null);
+    setReview(null); setReceipt(null); setBusiness(null); setSteps([]); setSelected(null);
     const snapshot = await aiTaskCenterApi.snapshot(taskId, signal);
     if (!same(signal)) return;
     if (snapshot.taskId !== taskId || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000) throw Error("AI_RESOURCE_UNAVAILABLE");
-    const candidates = snapshot.status === "waiting_confirmation" ? snapshot.steps.filter(row => row.kind === "confirmation" && row.status === "running") : [];
+    const candidates = snapshot.steps.filter(row => row.kind === "confirmation");
     if (candidates.length > 20) throw Error("AI_RESOURCE_UNAVAILABLE");
     setSteps(candidates.map(row => ({ taskId, runId: row.runId, stepId: row.stepId })));
-    if (!candidates.length) setMessage(t("本次没有可审阅的等待步骤。历史阶段请用原确认历史读取，不代表业务未执行。"));
+    if (!candidates.length) setMessage(t("本次没有可观察的原业务步骤。没有记录不代表业务未执行。"));
   });
   const readReview = () => run(async signal => {
-    setReview(null); setReceipt(null);
+    setReview(null); setReceipt(null); setBusiness(null);
     const target = steps.find(step => `${step.runId}:${step.stepId}` === selected);
     if (!target) throw Error("AI_INVALID_INPUT");
     const value = await aiTaskCenterApi.review(target, signal);
@@ -126,11 +127,25 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     <h3>{t("原提案人工审阅")}</h3>
     <p>{t("服务器按原任务定位提案并复验业务权限。只有明确审阅后才能提交决定；这里不继续执行、不建单、不修改设置。")}</p>
     <div className="panel-toolbar">
-      <ActionButton label={t("读取待审阅步骤")} disabled={busy || !!original} onAction={readSteps} />
-      {!!steps.length && <><label id={labelId}>{t("原等待步骤")}</label><Select aria-labelledby={labelId} value={selected}
+      <ActionButton label={t("读取原业务步骤")} disabled={busy || !!original} onAction={readSteps} />
+      {!!steps.length && <><label id={labelId}>{t("原业务步骤")}</label><Select aria-labelledby={labelId} value={selected}
         disabled={busy || !!original} options={steps.map(step => ({ value: `${step.runId}:${step.stepId}`, label: safeDisplayText(step.stepId, 36) }))}
-        onChange={value => { setSelected(String(value)); setReview(null); setReceipt(null); }} />
-        <ActionButton label={t("审阅选中提案")} disabled={!selected || busy || !!original} onAction={readReview} /></>}
+        onChange={value => { setSelected(String(value)); setReview(null); setReceipt(null); setBusiness(null); }} />
+        <ActionButton label={t("审阅当前等待提案")} disabled={!selected || busy || !!original} onAction={readReview} /></>}
+      <ActionButton label={t("读取原业务结果")} disabled={busy || !selected && (!original || original === "invalid")}
+        onAction={() => run(async signal => {
+          setBusiness(null);
+          const target = steps.find(step => `${step.runId}:${step.stepId}` === selected)
+            ?? (original && original !== "invalid" ? { taskId, runId: original.runId, stepId: original.stepId } : null);
+          if (!target) throw Error("AI_RESOURCE_UNAVAILABLE");
+          const result = await aiTaskCenterApi.business(target, signal);
+          if (!same(signal)) return;
+          if (result.taskId !== taskId || result.runId !== target.runId || result.stepId !== target.stepId
+            || result.execution !== "read_only_no_start_no_reconnect_side_effect" || result.payment !== "not_inferred"
+            || result.fulfillment !== "not_inferred" || !["committed", "unknown", "not_observed"].includes(result.status)
+            || !["order", "settings"].includes(result.kind)) throw Error("AI_RESOURCE_UNAVAILABLE");
+          setBusiness(result);
+        })} />
     </div>
     {message && <Alert type="warning" title={message} />}
     {original === "invalid" && <Alert type="warning" title={t("原决定引用不可读取。请通过原业务页核对，不再提交新决定。")}/>}
@@ -148,5 +163,13 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     {receipt && <p role="status" aria-live="polite">{t(receipt.receipt.kind === "recorded"
       ? receipt.receipt.record.decision === "approved" ? "原批准已记录，不代表业务已执行。" : "原拒绝已记录，不代表业务已回滚。"
       : "原决定尚未确认，保留原引用，不自动重试或推断未提交。")}</p>}
+    {business && <div role="status" aria-live="polite" style={{ overflowWrap: "anywhere" }}>
+      <p>{t("业务观察时间")}: {formatTimestamp(business.observedAt).value}</p>
+      {business.status === "committed" ? business.kind === "order"
+        ? <p>{t("原Core订单已确认提交")}: {safeDisplayText(business.order.id, 191)} · {t("当前状态")}: {safeDisplayText(business.order.status, 128)}</p>
+        : <p>{t("原设置修改已确认提交")}: {t("结果修订")} {business.receipt.resultRevision} · {formatTimestamp(business.receipt.committedAt).value}</p>
+        : <p>{t(business.status === "unknown" ? "原业务结果待核对，不能自动重试。" : "尚未观察到原业务收据，不证明未提交。")}</p>}
+      <p>{t("订单创建不等于付款或履约完成；设置历史收据不等于之后没有其他修改。")}</p>
+    </div>}
   </section>;
 }

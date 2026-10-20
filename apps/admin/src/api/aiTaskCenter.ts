@@ -3,11 +3,12 @@
 import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMetadataQueryDraft,
   type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type ApiResult,
   type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft,
-  type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft } from "@rental-os/shared";
+  type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft,
+  type AiTaskBusinessObservationDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
-async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt", data: unknown, signal: AbortSignal): Promise<T> {
+async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business", data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
   return result.data.data;
@@ -21,5 +22,6 @@ export const aiTaskCenterApi = Object.freeze({
   confirmation: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskConfirmationHistoryDraft>("confirmation", input, signal),
   review: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskHumanReviewDraft>("review", input, signal),
   decision: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decision", input, signal),
-  decisionReceipt: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decisionReceipt", input, signal)
+  decisionReceipt: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decisionReceipt", input, signal),
+  business: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskBusinessObservationDraft>("business", input, signal)
 });

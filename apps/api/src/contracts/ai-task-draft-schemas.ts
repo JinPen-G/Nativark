@@ -33,6 +33,12 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     review: ref(kind === 'order' ? 'AiApprovalApplicationReviewDraft' : 'AiApprovedSettingsReviewDraft'), businessExecution: choice('not_attested') })) },
   AiTaskHumanDecisionReceiptDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     receipt: ref('AiApprovalApplicationReceiptDraft'), businessExecution: choice('not_attested') }),
+  AiTaskBusinessObservationDraft: { oneOf: ([
+    { status: choice('committed'), kind: choice('order'), order: closed({ id: id(), status: id(), quoteId: id() }) },
+    { status: choice('committed'), kind: choice('settings'), receipt: ref('AiApprovedSettingsOperationReceiptDraft') },
+    { status: choice('unknown', 'not_observed'), kind: choice('order', 'settings'), retryable: { type: 'boolean', enum: [false] } }
+  ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    observedAt: time, execution: choice('read_only_no_start_no_reconnect_side_effect'), payment: choice('not_inferred'), fulfillment: choice('not_inferred'), ...result })) },
   AiStepOutcomeDraft: { oneOf: [
     closed({ status: choice("pending", "cancelled"), effect: choice("none") }),
     closed({ status: choice("running"), effect: choice("none", "possible") }),

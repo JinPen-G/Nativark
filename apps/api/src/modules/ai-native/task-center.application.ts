@@ -1,5 +1,5 @@
-/** Standard operator read-only host over the original task center. Current
- * Auth/owner/action policies are mandatory; no Gateway, runner or quota writes. */
+/** Standard operator task observations and explicit human decisions. Current
+ * domain/owner/action policies are mandatory; no Gateway, runner or quota writes. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -21,6 +21,7 @@ import type { TaskBudgetUsageDb } from './budget/task-budget-usage.reader';
 import { PrismaTaskConfirmationHistoryReader } from './runner/prisma-task-confirmation-history.reader';
 import { composeTaskCenterApproval, taskCenterReviewSchema, taskCenterDecisionSchema,
   type TaskCenterApprovalDependencies } from './task-center-approval.composition';
+import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './task-center-business.reader';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -29,6 +30,7 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   usageDb?: TaskBudgetUsageDb;
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
+  business?: TaskCenterBusinessDependencies;
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
@@ -38,7 +40,7 @@ const schemas = {
   events: z.object({ taskId: id, after: z.string().max(20).regex(/^(0|[1-9][0-9]*)$/u), limit: z.number().int().min(1).max(100) }).strict(),
   result: z.object({ taskId: id, resultId: id }).strict(),
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
-  review: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
+  review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()
 };
 const modelObservation = z.object({ taskId: id, runId: id, resultId: id, sceneCode: z.enum(['order_explanation', 'opening_diagnosis', 'quote_clarification']),
@@ -106,7 +108,12 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           if (action === 'decision') return approvals.decision(command);
           return approvals.decisionReceipt(command);
         };
-        const result = ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
+        const business = () => {
+          if (!input.business || input.business.db !== input.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return readTaskCenterBusiness(input.business, input.humanApprovals?.settings, credentials, root.tasks,
+            { headers: { authorization: header.data } }, command, input.clock);
+        };
+        const result = action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
           ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
             : action === 'result' ? await originalResult() : action === 'confirmation'
               ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
@@ -132,6 +139,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     review: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'review', signal),
     decision: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decision', signal),
     decisionReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decisionReceipt', signal),
+    business: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'business', signal),
     confirmation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'confirmation', signal) });
 }
 
@@ -160,4 +168,6 @@ export class AiTaskCenterController {
   decision(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'decision'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.decisionReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   decisionReceipt(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'decisionReceipt'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.business) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  business(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'business'); }
 }
