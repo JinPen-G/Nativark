@@ -154,10 +154,13 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
       }
       waiting = await readWaiting(input);
     }
-    await locate(input, true);
     if (signal.aborted || waiting.kind !== 'waiting_reference') return { kind: 'unknown', payload: material(waiting, 'unresolved') };
+    // Observing the proposal just persisted is not another execution. Preserve
+    // its waiting/result receipt if new execution closes during preparation;
+    // a later commit still needs today's full execute authority below.
     if (waiting.receipt.kind !== 'recorded') return { kind: 'paused', pause: 'confirmation', payload: material(waiting, 'awaiting_decision') };
     if (waiting.receipt.record.decision === 'rejected') return { kind: 'failed', errorCode: 'AI_APPROVAL_REJECTED', payload: material(waiting, 'rejected') };
+    await locate(input, true);
     try {
       await app.commitApprovedChange({ ...waiting.reference, operationKey: initial.operationKey, approvalId: waiting.receipt.record.approvalId });
     } catch (error) {

@@ -4,7 +4,7 @@ import {
   AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionBudgetSnapshot,
   type AiTaskExecutionChargeEvidence, type AiTaskExecutionChargeReceipt, type AiTaskExecutionChargeRequest,
   type AiTaskExecutionCounters, type AiTaskExecutionLease,
-  type AiTaskExecutionPolicy, type AiTaskExecutionResource, type AiTaskExecutionSettlementRequest, type AiTaskExecutionEvidenceSource,
+  type AiTaskExecutionPolicy, type AiTaskExecutionResource, type AiTaskExecutionSettlementRequest, type AiTaskExecutionEvidenceSource, type AiTaskExecutionPolicySource,
 } from '../task-execution-budget.ports';
 
 type Db = PrismaClient;
@@ -48,7 +48,7 @@ function validateResource(resource: AiTaskExecutionResource, amount: bigint) {
  */
 export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudgetPort {
   constructor(private readonly db: Db, private readonly scopes: AiTaskExecutionScopeSource,
-    private readonly policies: { resolve(taskId: string, lease: AiTaskExecutionLease): Promise<AiTaskExecutionPolicy> },
+    private readonly policies: AiTaskExecutionPolicySource,
     private readonly evidenceSource?: AiTaskExecutionEvidenceSource, private readonly clock: () => Date = () => new Date()) {
     if (!db || typeof db.$transaction !== 'function' || typeof scopes?.resolve !== 'function' || typeof policies?.resolve !== 'function'
       || (evidenceSource !== undefined && typeof evidenceSource.read !== 'function')) {
@@ -77,8 +77,10 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
       || !await tx.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true } })) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
   }
 
-  private async policy(taskId: string, lease: AiTaskExecutionLease) {
-    const policy = structuredClone(await this.policies.resolve(taskId, structuredClone(lease)));
+  private async policy(taskId: string, lease: AiTaskExecutionLease, originalOnly = false) {
+    const read = originalOnly && this.policies.resolveReconciliation ? this.policies.resolveReconciliation.bind(this.policies)
+      : this.policies.resolve.bind(this.policies);
+    const policy = structuredClone(await read(taskId, structuredClone(lease)));
     validatePolicy(policy);
     return policy;
   }
@@ -135,7 +137,7 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
 
   async load(taskId: string, lease: AiTaskExecutionLease) {
     lease = structuredClone(lease);
-    const access = await this.access(taskId, lease, 'read'), policy = await this.policy(taskId, lease);
+    const access = await this.access(taskId, lease, 'read'), policy = await this.policy(taskId, lease, true);
     if (!await this.db.aiTask.findFirst({ where: { AND: [access.taskWhere, { scopeId: access.scopeId }] }, select: { id: true } })) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const result = await this.readBudget(access.scopeId, taskId, lease, policy);
     const current = await this.access(taskId, lease, 'read');
@@ -163,7 +165,8 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
   private async mutate(input: AiTaskExecutionChargeRequest, action: 'reserve' | 'record' | 'reconcile' | 'unknown', evidence?: AiTaskExecutionChargeEvidence, expectedFingerprint = this.fingerprint(input)) {
     validateLease(input.taskId, input.lease); validateResource(input.resource, input.amount);
     if (!id(input.chargeId, 36) || !input.target || !['run', 'step'].includes(input.target.kind)) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
-    const access = await this.access(input.taskId, input.lease), scopeId = access.scopeId, policy = await this.policy(input.taskId, input.lease), expected = expectedFingerprint;
+    const access = await this.access(input.taskId, input.lease), scopeId = access.scopeId,
+      policy = await this.policy(input.taskId, input.lease, action !== 'reserve'), expected = expectedFingerprint;
     if (evidence && (evidence.scopeId !== scopeId || evidence.taskId !== input.taskId || evidence.runId !== input.lease.runId || evidence.chargeId !== input.chargeId
       || evidence.requestFingerprint !== expected || evidence.resource !== input.resource || !counter(evidence.actualAmount) || !id(evidence.evidenceRef) || !/^[a-f0-9]{64}$/u.test(evidence.evidenceHash))) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const result = await this.db.$transaction(async tx => {

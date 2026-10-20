@@ -64,6 +64,8 @@ export interface AiTaskExecutionBudgetPort {
 
 export interface AiTaskExecutionPolicySource {
   resolve(taskId: string, lease: AiTaskExecutionLease): Promise<AiTaskExecutionPolicy>;
+  /** Current-authorized original plan bounds; does not grant any new resource. */
+  resolveReconciliation?(taskId: string, lease: AiTaskExecutionLease): Promise<AiTaskExecutionPolicy>;
 }
 export interface AiTaskExecutionChargeEvidence {
   scopeId: string;

@@ -16,7 +16,8 @@ import { aiMembershipCandidateReadInputSchema } from '../membership-candidate-re
 import { aiOpeningReadInputSchema, aiRiskReadInputSchema } from '../tools/diagnostic-read-facts.service';
 import { isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
-import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
+import { aiStepActionId, type AiStepRegistrationAuthority, type AiStepRegistrationCommand,
+  type AiStepOriginalRegistrationGrant } from '../ai-step-registration.repository';
 import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerPlan } from './ai-task-runner.ports';
@@ -153,11 +154,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall() || !['QUEUED', 'RUNNING'].includes(run.status)) throw denied();
   }
 
-  private async input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }) {
+  private async input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }, originalOnly = false) {
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
       || !id.max(36).safeParse(row.id).success || row.toolCode !== this.toolCode || row.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !rev.safeParse(row.policyRevision).success || !id.safeParse(row.registrationRef).success
-      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
+      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || !originalOnly && row.expiresAt <= this.wall()) throw unavailable();
     const payload = await this.parseInput(row.payload);
     if (this.fingerprint(payload) !== row.fingerprint) throw denied();
     return { id: row.id, registrationRef: row.registrationRef, toolCode: row.toolCode, toolVersion: row.toolVersion,
@@ -414,6 +415,49 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       identity: identity(current.context), steps: plan.steps, limits: plan.limits, inputs }),
       policyVersion: `scene-policy-${before.policy.revision}`,
       expiresAt: new Date(Math.min(Date.parse(before.policy.expiresAt), ...inputs.map(i => Date.parse(i.expiresAt)))).toISOString() };
+  }
+
+  /** Observe an already registered action under today's independent read
+   * permission. Original plan/input hashes, task owner and held generation
+   * remain mandatory; this proof cannot register or execute anything new. */
+  async resolveOriginal(raw: Readonly<AiStepRegistrationCommand>): Promise<AiStepOriginalRegistrationGrant> {
+    const command = structuredClone(raw);
+    const context = structuredClone(await this.authorization.resolve(command.taskId, 'read_step_terminal'));
+    const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
+    const observed = await this.db.$transaction(async tx => {
+      const task = await tx.aiTask.findFirst({ where: access.where });
+      if (!task || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId || task.audience !== access.audience
+        || task.archivedAt !== null) throw denied();
+      const run = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: command.lease.runId } });
+      if (!run || run.actorKind !== access.actorKind || run.actorId !== access.actorId || run.leaseOwnerId !== command.lease.holderId
+        || run.revision !== command.lease.revision || run.fencingToken.toFixed(0) !== command.lease.fencingToken
+        || run.status !== 'RUNNING' || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()) throw denied();
+      const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
+      const stored = await tx.aiTaskRunPlan.findFirst({ where: key });
+      if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== key.runId
+        || !/^[a-f0-9]{64}$/u.test(stored.authorityHash) || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
+      const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
+      const selected = plan.steps.filter(step => step.registrationRef === command.registrationRef);
+      if (plan.taskId !== task.id || plan.runId !== run.id || selected.length !== 1 || selected[0].toolCode !== this.toolCode
+        || selected[0].toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      const input = await this.input(await tx.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
+        { ...key, registrationRef: command.registrationRef }, true);
+      if (stored.policyVersion !== `scene-policy-${input.policyRevision}`) throw denied();
+      const inputRef = this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id;
+      const fingerprint = this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint;
+      const actionId = aiStepActionId(access.scope, task.id, command.registrationRef);
+      const step = await tx.aiStep.findFirst({ where: { ...key, actionId, toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
+        inputRef, requestFingerprint: fingerprint } });
+      if (!step || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId || step.actionId !== actionId
+        || step.inputRef !== inputRef || step.requestFingerprint !== fingerprint || step.toolCode !== this.toolCode
+        || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      return { inputRef, fingerprint, planHash: stored.planHash, inputHash: input.fingerprint, stepId: step.id };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    const current = await this.authorization.resolve(command.taskId, 'read_step_terminal');
+    if (identity(current) !== identity(context)) throw denied();
+    return { context: structuredClone(current), registrationAllowed: false, taskId: command.taskId,
+      registrationRef: command.registrationRef, authorizationKey: `original-step-${requestFingerprint(observed)}`,
+      toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: observed.inputRef, requestFingerprint: observed.fingerprint };
   }
 
   async resolve(raw: Readonly<AiStepRegistrationCommand>) {

@@ -26,11 +26,18 @@ const grantSchema = z.object({
   toolCode: stepCode, toolVersion: id, inputRef: id,
   requestFingerprint: z.string().regex(/^[0-9a-f]{64}$/u)
 }).strict();
+const originalGrantSchema = grantSchema.omit({ expiresAt: true }).extend({ registrationAllowed: z.literal(false) });
+export type AiStepOriginalRegistrationGrant = z.infer<typeof originalGrantSchema> & { context: AiExecutionContext };
 export interface AiStepRegistrationAuthority {
   /** Resolve an immutable server action-plan reference and its Core input fingerprint.
    * A model cannot mint the reference or grant. Registration is not permission to execute.
    */
   resolve(command: Readonly<AiStepRegistrationCommand>): Promise<z.infer<typeof grantSchema> & { context: AiExecutionContext }>;
+  /** Existing persisted registration only. Cannot authorize an insertion. */
+  resolveOriginal?(command: Readonly<AiStepRegistrationCommand>): Promise<AiStepOriginalRegistrationGrant>;
+}
+export function aiStepActionId(scope: ReturnType<typeof aiTaskAccessFromContext>['scope'], taskId: string, registrationRef: string) {
+  return `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope, taskId, registrationRef })}`;
 }
 const taskSelect = { id: true, scopeId: true, revision: true, eventCursor: true, status: true, contractVersion: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const stepSelect = {
@@ -62,16 +69,19 @@ export class AiStepRegistrationRepository {
     if (!authority || typeof authority.resolve !== "function") throw denied();
   }
 
-  private async resolve(input: AiStepRegistrationCommand) {
+  private async resolve(input: AiStepRegistrationCommand, originalOnly = false) {
     try {
-      const grant = grantSchema.parse(structuredClone(await this.authority.resolve(structuredClone(input))));
+      const historical = originalOnly && typeof this.authority.resolveOriginal === 'function';
+      const grant = historical ? originalGrantSchema.parse(structuredClone(await this.authority.resolveOriginal!(structuredClone(input))))
+        : grantSchema.parse(structuredClone(await this.authority.resolve(structuredClone(input))));
       if (!isAiStepExecutionContext(grant.context)) throw denied();
       const access = aiTaskAccessFromContext(grant.context, input.taskId, this.clock());
-      if (grant.taskId !== input.taskId || grant.registrationRef !== input.registrationRef || Date.parse(grant.expiresAt) <= access.now.getTime()) throw denied();
+      if (grant.taskId !== input.taskId || grant.registrationRef !== input.registrationRef
+        || grant.registrationAllowed && Date.parse(grant.expiresAt) <= access.now.getTime()) throw denied();
       const { context, ...evidence } = grant;
       const { authorizedAt: _, requestId: __, ...authorization } = context;
       // This namespace identifies one AI logical action. It is NOT the Core business idempotency key.
-      const actionId = `ai-action-${requestFingerprint({ version: "ai-step-registration-1", scope: access.scope, taskId: input.taskId, registrationRef: input.registrationRef })}`;
+      const actionId = aiStepActionId(access.scope, input.taskId, input.registrationRef);
       return { grant, access, actionId, digest: requestFingerprint({ ...evidence, authorization }) };
     } catch { throw denied(); }
   }
@@ -79,9 +89,9 @@ export class AiStepRegistrationRepository {
   async register(value: unknown, existingOnly = false) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-    const input = parsed.data, initial = await this.resolve(input);
+    const input = parsed.data, initial = await this.resolve(input, existingOnly);
     const verifyCurrent = async () => {
-      const current = await this.resolve(input);
+      const current = await this.resolve(input, existingOnly);
       if (current.access.bindingKey !== initial.access.bindingKey || current.digest !== initial.digest) throw denied();
       return current;
     };
@@ -167,7 +177,7 @@ export class AiStepRegistrationRepository {
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
     const { stepId, expectedStepRevision, ...registration } = input;
-    const initial = await this.resolve(registration);
+    const initial = await this.resolve(registration, true);
     const authorizeRead = async () => {
       try {
         if (!this.readAuthority) throw denied();
@@ -194,7 +204,7 @@ export class AiStepRegistrationRepository {
           || (["succeeded", "failed", "unknown"].includes(status) && !id.safeParse(row.resultRef).success)
           || (status === "unknown" && row.effect !== "POSSIBLE")
           || (status === "succeeded" && !["NONE", "COMMITTED"].includes(row.effect))) throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
-        const current = await this.resolve(registration);
+        const current = await this.resolve(registration, true);
         if (current.digest !== initial.digest) throw denied();
         const after = await authorizeRead();
         if (after.digest !== before.digest) throw denied();
