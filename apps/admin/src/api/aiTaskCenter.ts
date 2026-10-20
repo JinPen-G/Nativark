@@ -1,14 +1,15 @@
-/** Original observations only. Reconnection cannot claim, resume or dispatch.
- * Canonical HTTP retains tenant/session handling; both lifetimes abort reads. */
+/** Observation methods never execute. Only explicit human decision/continue
+ * methods mutate; original server domain policies and hosts remain mandatory.
+ * Canonical HTTP retains tenant/session handling and abort lifetimes. */
 import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMetadataQueryDraft,
   type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type ApiResult,
   type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft,
   type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft,
-  type AiTaskBusinessObservationDraft } from "@rental-os/shared";
+  type AiTaskBusinessObservationDraft, type AiTaskHumanContinueDraft, type AiTaskHumanContinuationDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
-async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business", data: unknown, signal: AbortSignal): Promise<T> {
+async function read<T>(action: "list" | "snapshot" | "events" | "result" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business" | "continue", data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
   return result.data.data;
@@ -23,5 +24,6 @@ export const aiTaskCenterApi = Object.freeze({
   review: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskHumanReviewDraft>("review", input, signal),
   decision: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decision", input, signal),
   decisionReceipt: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decisionReceipt", input, signal),
-  business: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskBusinessObservationDraft>("business", input, signal)
+  business: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskBusinessObservationDraft>("business", input, signal),
+  continue: (input: AiTaskHumanContinueDraft, signal: AbortSignal) => read<AiTaskHumanContinuationDraft>("continue", input, signal)
 });

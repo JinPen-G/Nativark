@@ -186,14 +186,18 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     ApiAuthGuard, SubscriptionService, RentalCoreService, RentalOrderConfirmationService, RentalBusinessFactRepository,
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true }],
+    { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
+    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
     quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown,
-    selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown> }) => {
+    selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
+      continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
+    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> }) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
     return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults, business: { db, selectedOrderResult },
+      continuation: { db, order: selectedOrderResult, settings: settingsTask },
       humanApprovals: {
         order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
         settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },

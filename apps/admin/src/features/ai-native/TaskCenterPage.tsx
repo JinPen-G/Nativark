@@ -1,5 +1,5 @@
-/** Owner-only task observation. User-initiated entry has no model/worker/write
- * port; a snapshot cursor is observation, not permission to continue execution. */
+/** Owner task observation and explicit human approval/continuation. A cursor
+ * grants no execution; original domain services and server configuration do. */
 import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from "@rental-os/shared";
@@ -95,7 +95,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const data = query.error ? undefined : query.data;
   useEffect(() => { if (query.error || data && selected && !data.items.some(row => row.taskId === selected)) setSelected(null); }, [query.error, data, selected]);
   return <section aria-label={t("AI 任务观察")}>
-    <Alert type="info" title={t("观察本人任务，原提案决定需另行明确审阅；不启动、恢复或重新派发。")}
+    <Alert type="info" title={t("观察本人任务；批准和继续分别明确确认，不自动运行或重新派发。")}
       description={t("首次进入不请求 AI 数据；点击读取后按当前权限查询。切换空间或身份后清空当前视图，人工业务页面始终保留。")}/>
     <div className="panel-toolbar">
       <ActionButton label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}

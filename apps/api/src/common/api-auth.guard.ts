@@ -230,7 +230,7 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
-  if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'usage', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business'] as const)
+  if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'usage', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue'] as const)
     .some(action => path === `/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`))
     return [...AI_TASK_CENTER_ENTRY_PERMISSIONS]; // entry alternatives only; original per-task owner/action checks still apply
   if (method.toUpperCase() === 'POST' && (['read', 'change', 'operation', 'readModelPlan', 'changeModelPlan'] as const)

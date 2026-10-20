@@ -152,7 +152,7 @@ export interface AiTaskEventResetDraft {
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
   list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
-  review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business" } as const);
+  review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business", continue: "continue" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -199,4 +199,16 @@ export type AiTaskBusinessObservationDraft = AiTaskReviewQueryDraft & {
   | { status: 'committed'; kind: 'order'; order: { id: string; status: string; quoteId: string } }
   | { status: 'committed'; kind: 'settings'; receipt: import('./ai-approved-settings-draft').AiApprovedSettingsOperationReceiptDraft }
   | { status: 'unknown' | 'not_observed'; kind: 'order' | 'settings'; retryable: false }
+);
+export interface AiTaskHumanContinueDraft extends AiTaskReviewQueryDraft {
+  checkpointRef: string; expectedTaskRevision: number;
+  proposal: import('./ai-approval-application-draft').AiApprovalApplicationReferenceDraft;
+}
+/** A runner response is not a Core receipt. Observe the original business
+ * result independently; never auto retry an interrupted continuation. */
+export type AiTaskHumanContinuationDraft = AiTaskReviewQueryDraft & {
+  automaticRetry: false; businessExecution: 'read_original_receipt';
+} & (
+  | { kind: 'not_started'; reason: string }
+  | { kind: 'run_outcome'; status: 'succeeded' | 'partially_succeeded' | 'paused' | 'cancel_requested' | 'cancelled' | 'unknown' | 'unavailable' | 'failed' }
 );

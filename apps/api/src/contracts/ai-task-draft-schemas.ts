@@ -27,6 +27,13 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AiTaskReviewQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 } }),
   AiTaskDecisionQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     proposal: ref('AiApprovalApplicationDecisionDraft') }),
+  AiTaskHumanContinueDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    checkpointRef: { type: 'string', format: 'uuid', maxLength: 36 }, expectedTaskRevision: revision, proposal: ref('AiApprovalApplicationReferenceDraft') }),
+  AiTaskHumanContinuationDraft: { oneOf: ([
+    { kind: choice('not_started'), reason: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z_]+$' } },
+    { kind: choice('run_outcome'), status: choice('succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed') }
+  ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    automaticRetry: { type: 'boolean', enum: [false] }, businessExecution: choice('read_original_receipt'), ...result })) },
   AiTaskHumanReviewDraft: { oneOf: ['order', 'settings'].map(kind => closed({
     taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 }, taskRevision: revision,
     checkpointRef: { ...id(), maxLength: 36 }, kind: choice(kind),

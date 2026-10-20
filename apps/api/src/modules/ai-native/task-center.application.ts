@@ -22,6 +22,8 @@ import { PrismaTaskConfirmationHistoryReader } from './runner/prisma-task-confir
 import { composeTaskCenterApproval, taskCenterReviewSchema, taskCenterDecisionSchema,
   type TaskCenterApprovalDependencies } from './task-center-approval.composition';
 import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './task-center-business.reader';
+import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterContinuationDependencies } from './task-center-continuation.composition';
+import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -31,6 +33,7 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
+  continuation?: TaskCenterContinuationDependencies;
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
@@ -41,6 +44,7 @@ const schemas = {
   result: z.object({ taskId: id, resultId: id }).strict(),
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
+  continue: taskCenterContinueSchema,
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()
 };
 const modelObservation = z.object({ taskId: id, runId: id, resultId: id, sceneCode: z.enum(['order_explanation', 'opening_diagnosis', 'quote_clarification']),
@@ -67,7 +71,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+      const work = () => runWithRequestIdentity({}, async () => {
         const identity = new AiTaskCurrentIdentityAuthority(input.auth, credentials, input.clock);
         const before = await identity.resolve();
         if (before.audience !== 'operator' || !('access' in before)
@@ -113,7 +117,12 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           return readTaskCenterBusiness(input.business, input.humanApprovals?.settings, credentials, root.tasks,
             { headers: { authorization: header.data } }, command, input.clock);
         };
-        const result = action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
+        const continueOriginal = () => {
+          if (!input.continuation || input.continuation.db !== input.db || !input.humanApprovals) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return continueTaskCenterOriginal(input.continuation, input.humanApprovals, credentials, root.tasks,
+            { headers: { authorization: header.data } }, command, signal);
+        };
+        const result = action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
           ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
             : action === 'result' ? await originalResult() : action === 'confirmation'
               ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
@@ -128,7 +137,14 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
         if (!active || originalIdentityHash(await identity.resolve()) !== originalIdentityHash(before))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return structuredClone(result);
-      }), action === 'decision', signal);
+      });
+      if (action !== 'continue') return await waitForTaskApplicationDependency(work, action === 'decision', signal);
+      try { return await callAiTaskRunnerDependency(work, 120000, 'task_center_original_continue', signal); }
+      catch (error) {
+        if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))
+          throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        throw error;
+      }
     } finally { close(); signal?.removeEventListener('abort', close); }
   };
   return Object.freeze({ list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
@@ -140,6 +156,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     decision: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decision', signal),
     decisionReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decisionReceipt', signal),
     business: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'business', signal),
+    continue: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'continue', signal),
     confirmation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'confirmation', signal) });
 }
 
@@ -148,7 +165,7 @@ export class AiTaskCenterController {
   constructor(@Inject(AI_NATIVE_TASK_CENTER_REQUESTS) private readonly center: ReturnType<typeof composeRequestBoundTaskCenter>) {}
   private respond(request: Request, value: unknown, action: keyof typeof schemas) {
     return respondAiScene(() => withRequestAbort(request, signal => this.center[action](request, value, signal)),
-      action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : 'reconcile');
+      action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : action === 'continue' ? 'read_original_business' : 'reconcile');
   }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.list) @HttpCode(200) @Header('Cache-Control', 'no-store')
   list(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'list'); }
@@ -170,4 +187,6 @@ export class AiTaskCenterController {
   decisionReceipt(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'decisionReceipt'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.business) @HttpCode(200) @Header('Cache-Control', 'no-store')
   business(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'business'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.continue) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  continue(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'continue'); }
 }
