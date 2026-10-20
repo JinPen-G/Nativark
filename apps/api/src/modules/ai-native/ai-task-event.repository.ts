@@ -32,7 +32,7 @@ const snapshotSchema = z.object({
   updatedAt: z.string().datetime({ offset: true }), cancelRequestedAt: z.string().datetime({ offset: true }).nullable(),
   cursor: z.string().refine(value => { try { aiPersistenceEventCursor(value); return true; } catch { return false; } }),
   steps: z.array(z.object({ stepId: id, runId: id, sequence: revision, revision,
-    status: z.enum(AI_STEP_STATUSES_DRAFT), resultId: id.optional() }).strict()).max(1000)
+    status: z.enum(AI_STEP_STATUSES_DRAFT), resultId: id.optional(), kind: z.enum(['model', 'confirmation']).optional() }).strict()).max(1000)
 }).strict();
 const eventSelect = { scopeId: true, taskId: true, cursor: true, taskRevision: true, type: true, payload: true, occurredAt: true } satisfies Prisma.AiTaskEventSelect;
 type EventRow = Prisma.AiTaskEventGetPayload<{ select: typeof eventSelect }>;
@@ -70,7 +70,7 @@ export class AiTaskEventRepository {
    * model result IDs are lookup keys only, not permission or success proof.
    * Reading never claims a run or restarts execution after a reset.
    */
-  async readSnapshot(value: unknown): Promise<AiTaskSnapshotDraft> {
+  async readSnapshot(value: unknown, includeReadReferences = false): Promise<AiTaskSnapshotDraft> {
     const parsed = z.object({ taskId: id }).strict().safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const taskId = parsed.data.taskId;
@@ -97,7 +97,9 @@ export class AiTaskEventRepository {
           cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null, cursor: task.eventCursor.toString(),
           steps: rows.map(row => ({ stepId: row.id, runId: row.runId, sequence: row.sequence, revision: row.revision,
             status: row.status.toLowerCase(),
-            ...(['SUCCEEDED', 'FAILED'].includes(row.status) && row.resultRef
+            ...(includeReadReferences && ['rental.order.commit', 'tenant.notifications.commit'].includes(row.toolCode) ? { kind: 'confirmation' }
+              : includeReadReferences && [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE].some(code => code === row.toolCode) ? { kind: 'model' } : {}),
+            ...(includeReadReferences && ['SUCCEEDED', 'FAILED'].includes(row.status) && row.resultRef
               && [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE].some(code => code === row.toolCode)
               ? { resultId: row.resultRef } : {}) })) });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });

@@ -136,7 +136,9 @@ export interface AiTaskSnapshotDraft {
   cursor: string;
   steps: Array<{ stepId: string; runId: string; sequence: number; revision: number; status: AiStepStatusDraft;
     /** Lookup reference only; the original result/source reader must authorize it again. */
-    resultId?: string }>;
+    resultId?: string;
+    /** Registered step category only, not an allowed action or approval. */
+    kind?: 'model' | 'confirmation' }>;
 }
 export interface AiTaskEventResetDraft {
   contractVersion: typeof AI_TASK_DRAFT_VERSION;
@@ -149,7 +151,7 @@ export interface AiTaskEventResetDraft {
  * model text and original usage have separate current-authorized reads. No
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
-  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage" } as const);
+  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation" } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);

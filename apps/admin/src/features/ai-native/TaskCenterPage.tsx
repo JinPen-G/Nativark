@@ -67,6 +67,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       || !AI_TASK_STATUSES_DRAFT.includes(snapshot.status) || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000
       || !/^(0|[1-9][0-9]{0,19})$/u.test(snapshot.cursor)) throw Error("AI_RESOURCE_UNAVAILABLE");
     return { task: { id: taskId, status: displayStatus(snapshot.status), scene: snapshot.sceneCode, updatedAt: snapshot.updatedAt },
+      confirmationSteps: snapshot.steps.filter(step => step.kind === "confirmation").map(step => ({ runId: step.runId, stepId: step.stepId })),
       ...(result?.status === "available" ? { modelText: result.text!.value } : {}),
       steps: snapshot.steps.map(step => ({ id: step.stepId, taskId, status: step.status === "pending" ? "registered" : step.status,
         action: `${step.runId} / ${step.sequence}`, occurredAt: null })),
@@ -79,6 +80,17 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
             : result?.status === "unknown" ? "结果待核对，不自动重试。" : result?.status === "failed" ? "原步骤失败，未产生可展示答案。"
               : "本次没有可读取的结果，不能推断未执行或已成功。") }] };
   }, [identity, t]);
+  const readConfirmation = useCallback(async (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => {
+    if (!current() || signal.aborted) throw Error("AI_SCOPE_CHANGED");
+    try {
+      const result = await aiTaskCenterApi.confirmation(reference, signal);
+      if (!current() || signal.aborted) throw Error("AI_SCOPE_CHANGED");
+      return result;
+    } catch (failure) {
+      if ([401, 403].includes((failure as { response?: { status?: number } }).response?.status ?? 0)) { setSelected(null); setOpened(false); }
+      throw failure;
+    }
+  }, [identity]);
   const data = query.error ? undefined : query.data;
   useEffect(() => { if (query.error || data && selected && !data.items.some(row => row.taskId === selected)) setSelected(null); }, [query.error, data, selected]);
   return <section aria-label={t("AI 任务观察")}>
@@ -92,7 +104,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         onChange={value => { setSelected(null); setStatus(String(value)); setPage(1); setCursors([null]); }} />
     </div>
     {opened && <AiTaskWorkbench context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
-      selectedTaskId={data?.items.some(row => row.taskId === selected) ? selected : null} onSelectTask={setSelected} readTask={readTask}
+      selectedTaskId={data?.items.some(row => row.taskId === selected) ? selected : null} onSelectTask={setSelected} readTask={readTask} readConfirmation={readConfirmation}
       tasks={(data?.items ?? []).map(row => ({ id: row.taskId, status: displayStatus(row.status), scene: safeDisplayText(row.sceneCode), updatedAt: row.updatedAt }))}
       loading={query.isFetching} paging={query.isFetching} page={page} hasNext={!!data?.nextCursor}
       error={query.error ? t("当前任务不可读取，请重新核对权限或稍后重试。") : null}

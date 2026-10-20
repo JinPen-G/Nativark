@@ -63,7 +63,7 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     sceneCode: id(), sceneVersion: id(), createdAt: time, updatedAt: time,
     cancelRequestedAt: { ...time, nullable: true }, cursor,
     steps: list({ type: 'object', properties: { stepId: id(), runId: id(), sequence: revision, revision,
-      status: choice(...AI_STEP_STATUSES_DRAFT), resultId: id() }, required: ['stepId', 'runId', 'sequence', 'revision', 'status'], additionalProperties: false }, 1000) }),
+      status: choice(...AI_STEP_STATUSES_DRAFT), resultId: id(), kind: choice('model', 'confirmation') }, required: ['stepId', 'runId', 'sequence', 'revision', 'status'], additionalProperties: false }, 1000) }),
   AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") }),
   AiTaskMetadataQueryDraft: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 },
     cursor: { type: 'string', maxLength: 512 }, status, sceneCode: id() }, additionalProperties: false },

@@ -18,6 +18,7 @@ import { respondAiScene } from './scenes/original-scenes.controller';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';
 import { BudgetError } from './budget/budget.ports';
 import type { TaskBudgetUsageDb } from './budget/task-budget-usage.reader';
+import { PrismaTaskConfirmationHistoryReader } from './runner/prisma-task-confirmation-history.reader';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -33,6 +34,7 @@ const schemas = {
   snapshot: z.object({ taskId: id }).strict(),
   events: z.object({ taskId: id, after: z.string().max(20).regex(/^(0|[1-9][0-9]*)$/u), limit: z.number().int().min(1).max(100) }).strict(),
   result: z.object({ taskId: id, resultId: id }).strict(),
+  confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()
 };
 const modelObservation = z.object({ taskId: id, runId: id, resultId: id, sceneCode: z.enum(['order_explanation', 'opening_diagnosis', 'quote_clarification']),
@@ -94,8 +96,9 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
             businessExecution: r.businessExecution, execution: 'read_only_no_start_no_reconnect_side_effect' };
         };
         const result = action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
-          ? await root.events.readSnapshot(command) : action === 'events' ? await root.events.readPage(command)
-            : action === 'result' ? await originalResult() : await (async () => {
+          ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
+            : action === 'result' ? await originalResult() : action === 'confirmation'
+              ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
               if (!root.usage) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
               try { return await root.usage.read(command); }
               catch (error) {
@@ -114,7 +117,8 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     snapshot: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'snapshot', signal),
     events: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'events', signal),
     result: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'result', signal),
-    usage: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'usage', signal) });
+    usage: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'usage', signal),
+    confirmation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'confirmation', signal) });
 }
 
 @Controller(AI_TASK_CENTER_HTTP_DRAFT.basePath)
@@ -133,4 +137,6 @@ export class AiTaskCenterController {
   result(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'result'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.usage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   usage(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'usage'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.confirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  confirmation(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'confirmation'); }
 }
