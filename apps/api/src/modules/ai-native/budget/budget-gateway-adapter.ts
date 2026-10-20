@@ -1,5 +1,5 @@
 import type { AiUsageAssociationDraft } from '@rental-os/shared';
-import type { GatewayContext, ModelUsage } from '../model-gateway.ports';
+import { modelRequestSchema, type GatewayContext, type ModelUsage } from '../model-gateway.ports';
 import { BudgetError, type BudgetRecord } from './budget.ports';
 import { BudgetService } from './budget.service';
 
@@ -39,7 +39,7 @@ const boundedIdentifier = (value: unknown): value is string => typeof value === 
   && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
 
 function assertReserveRequest(request: Readonly<GatewayBudgetReserveRequest>) {
-  if (!request || !boundedIdentifier(request.callId) || !boundedIdentifier(request.model)
+  if (!request || !boundedIdentifier(request.callId) || !modelRequestSchema.shape.model.safeParse(request.model).success
     || !Number.isInteger(request.maxOutputTokens) || request.maxOutputTokens < 1 || request.maxOutputTokens > 32768) {
     throw new BudgetError('INVALID');
   }

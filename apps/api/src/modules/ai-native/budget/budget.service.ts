@@ -4,6 +4,7 @@ import { isAiStepExecutionContext } from '../task-contract-validation';
 import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
+import { modelRequestSchema } from '../model-gateway.ports';
 
 function fingerprint(value: unknown): string {
   const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical) : item && typeof item === 'object'
@@ -85,7 +86,7 @@ export class BudgetService {
     const session = await this.session('reserve', { association: command.association });
     const quote = structuredClone(await this.quotes.quote(command, session.grant));
     if (!same(quote.association, command.association) || quote.callId !== command.callId || quote.sceneCode !== command.sceneCode
-      || !identifier(quote.model, 256) || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
+      || !modelRequestSchema.shape.model.safeParse(quote.model).success || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
       || !Array.isArray(quote.policies) || quote.policies.length < 1 || quote.policies.length > 3
       || !quote.consumerScope || quote.consumerScope.sceneCode !== command.sceneCode || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)
       || !quote.policies.some(policy => policy.scopeId === quote.consumerScope.scopeId && policy.scopeKind === quote.consumerScope.scopeKind)) throw new BudgetError('INVALID');
