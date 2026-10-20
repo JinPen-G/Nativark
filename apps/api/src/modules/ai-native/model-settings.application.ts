@@ -105,7 +105,8 @@ export class AiModelSettingsController {
       const code = error instanceof Error && 'code' in error ? error.code : undefined;
       const mapped: Record<string, [string, number]> = {
         FORBIDDEN: ['AI_ACCESS_DENIED', 403], AI_ACCESS_DENIED: ['AI_ACCESS_DENIED', 403],
-        INVALID_REQUEST: ['AI_INVALID_INPUT', 400], AI_REVISION_CONFLICT: ['AI_REVISION_CONFLICT', 409],
+        INVALID_REQUEST: ['AI_INVALID_INPUT', 400], CONFIG_INVALID: ['AI_INVALID_INPUT', 400],
+        CREDENTIAL_UNAVAILABLE: ['AI_INVALID_INPUT', 400], AI_REVISION_CONFLICT: ['AI_REVISION_CONFLICT', 409],
         AI_RESULT_UNKNOWN: [write ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE', write ? 409 : 503],
         PENDING_RECONCILIATION: ['AI_RESULT_UNKNOWN', 409]
       };
