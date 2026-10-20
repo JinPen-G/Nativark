@@ -116,8 +116,22 @@ export function composeRequestBoundSettingsTaskReads(
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return consume(request, freezeOriginalInput(parsed.data), async (center, taskId, runId, change, bound) => {
         const snapshot = await center.events.readSnapshot({ taskId });
-        if (snapshot.status !== 'waiting_confirmation') return freezeOriginalInput({ state: 'not_waiting' as const,
-          snapshot, execution: 'not_attested' as const, continuation: 'not_invoked' as const });
+        if (snapshot.status !== 'waiting_confirmation') {
+          const authorization = composePersistedTaskAuthorization(bound);
+          const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, authorization.tasks);
+          const original = await recovery.read({ taskId, runId });
+          const steps = original.steps;
+          if (steps.length > 1 || steps.some(step => step.toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE
+            || step.toolVersion !== AI_TOOL_DRAFT_VERSION || step.inputRef !== change.changeId || step.fingerprint !== change.changeHash))
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const history = steps.length ? await PrismaTaskApplication.readConfirmationHistory(
+            { db: bound.db, tasks: authorization.tasks }, { taskId, runId, stepId: steps[0].stepId }) : null;
+          if (requestFingerprint(await center.events.readSnapshot({ taskId })) !== requestFingerprint(snapshot)
+            || requestFingerprint(await recovery.read({ taskId, runId })) !== requestFingerprint(original))
+            throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          return freezeOriginalInput({ state: 'not_waiting' as const, snapshot, history,
+            execution: 'not_attested' as const, continuation: 'not_invoked' as const });
+        }
         const steps = snapshot.steps.filter(step => step.runId === runId && step.status === 'running');
         if (steps.length !== 1) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const authorization = composePersistedTaskAuthorization(bound);

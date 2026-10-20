@@ -229,6 +229,7 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
+      readConfirmationHistory: application.readConfirmationHistory.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),
       continueOriginalConfirmation: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, true, signal),
       reconcileOriginal: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, false, signal),

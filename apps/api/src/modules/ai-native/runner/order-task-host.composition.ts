@@ -109,5 +109,6 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
   return Object.freeze({ orders, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
+      readConfirmationHistory: application.readConfirmationHistory.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application) }) });
 }

@@ -279,7 +279,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       if (after.bindingKey !== before.bindingKey || requestFingerprint(await read()) !== requestFingerprint(selected)) throw denied();
     };
     await verify();
-    return { proof, root, key, verify, planHash: saved?.planHash };
+    return { proof, root, key, verify, planHash: saved?.planHash, taskStatus: task.status };
   };
   const parse = <T>(schema: z.ZodType<T>, value: unknown) => {
     const parsed = schema.safeParse(structuredClone(value));
@@ -423,8 +423,16 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       return result;
     },
     async readConfirmation(value: unknown) {
-      const command = parse(selectedTaskWait, value), { proof, root, verify } = await observe(() => resolve(command.selection, false, true));
-      const waiting = await root.application.readConfirmation({ taskId: proof.taskId, runId: proof.runId, stepId: command.stepId });
+      const command = parse(selectedTaskWait, value), { proof, root, verify, taskStatus } = await observe(() => resolve(command.selection, false, true));
+      const original = { taskId: proof.taskId, runId: proof.runId, stepId: command.stepId };
+      if (taskStatus !== 'WAITING_CONFIRMATION') {
+        const history = await root.application.readConfirmationHistory(original);
+        if (history.task.status === 'waiting_confirmation') throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        await observe(verify);
+        return freezeOriginalInput({ state: 'not_waiting' as const, history,
+          execution: 'not_attested' as const, continuation: 'not_invoked' as const });
+      }
+      const waiting = await root.application.readConfirmation(original);
       await observe(() => orders.readSelectedProposal({ selection: proof, proposal: waiting.proposal }));
       await observe(verify);
       return waiting;

@@ -11,6 +11,7 @@ import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskRunner, type 
 import type { AiTaskRunnerClock, AiTaskRunnerOutcome } from './ai-task-runner.ports';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
+import { PrismaTaskConfirmationHistoryReader } from './prisma-task-confirmation-history.reader';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -79,6 +80,19 @@ export class PrismaTaskApplication {
    * lease nor approval; continuation still validates the full original proof. */
   readConfirmation(value: unknown) {
     return PrismaTaskApplication.readConfirmation(this.deps, value);
+  }
+
+  readConfirmationHistory(value: unknown) {
+    return PrismaTaskApplication.readConfirmationHistory(this.deps, value);
+  }
+
+  /** Original receipts remain observations, not a replacement for the live
+   * checkpoint/approval checks required by continueConfirmation. */
+  static readConfirmationHistory(dependencies: Pick<Dependencies, 'db' | 'tasks' | 'clock'>, value: unknown) {
+    const command = structuredClone(value);
+    return waitForTaskApplicationDependency(
+      () => new PrismaTaskConfirmationHistoryReader(dependencies.db, dependencies.tasks).read(command),
+      false, undefined, dependencies.clock);
   }
 
   /** The same durable wait reader without constructing an execution host. */

@@ -44,6 +44,10 @@ const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevisio
 }).strict().refine(p => p.steps.length <= p.limits.maxSteps && p.limits.maxStepMs <= p.limits.maxTotalMs
   && new Set(p.steps.map(s => s.registrationRef)).size === p.steps.length);
 export { planSchema as aiTaskRunPlanSchema };
+// Read-only original receipt consumers share the persisted validators, not
+// the live execution/lease authorization performed by this repository.
+export { orderPhasePayloadSchema as aiTaskConfirmationPhasePayloadSchema,
+  resumedConfirmationSchema as aiTaskResumedConfirmationSchema };
 const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u), policyVersion: id.max(64), expiresAt: z.string().datetime({ offset: true }) }).strict();
 export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
