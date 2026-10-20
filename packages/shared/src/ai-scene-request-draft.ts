@@ -90,6 +90,21 @@ export interface AiTaskBudgetUsagePageDraft {
   consistency: 'revalidated_reads_not_atomic_snapshot'; absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
   businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
 }
+/** All registered calls within a fixed observation bound. Unrecorded calls
+ * prevent a complete accounting total; this never certifies a provider bill. */
+export type AiTaskBudgetUsageSummaryDraft = {
+  taskId: string; observedAt: string; invocationLimit: 50;
+  consistency: 'revalidated_reads_not_atomic_snapshot';
+  execution: 'read_only_no_dispatch_or_release';
+  basis: 'persisted_budget_records_not_provider_invoice';
+  absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
+  businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
+} & (
+  | { state: 'limit_exceeded'; coverage: 'not_computed' }
+  | { state: 'observed'; coverage: 'all_registered_invocations'; invocationCount: number;
+    recordedCount: number; notRecordedCount: number; accountingComplete: boolean;
+    groups: NonNullable<AiTaskBudgetUsagePageDraft['pageAmounts']>['groups'] }
+);
 /** Explicit same-owner recovery takeover. Revisions describe an observed
  * original run; they are not permission or a caller-selected worker lease. */
 export interface AiSceneModelTakeoverDraft {

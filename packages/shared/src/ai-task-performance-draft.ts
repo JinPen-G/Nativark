@@ -1,5 +1,5 @@
 /** Persisted observations, not an SLO verdict, provider bill or execution grant. */
-import type { AiTaskBudgetUsagePageDraft } from './ai-scene-request-draft';
+import type { AiTaskBudgetUsagePageDraft, AiTaskBudgetUsageSummaryDraft } from './ai-scene-request-draft';
 import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList as list,
   leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -18,6 +18,7 @@ export type AiTaskPerformanceObservationDraft = {
     activeTime: { state: 'not_recorded' } | { state: 'recorded'; recordedMs: string | null; reservedMs: string;
       unknownMs: string; basis: 'persistent_resource_not_provider_latency' } }>; truncated: boolean; coverage: 'bounded_window' };
   financial: AiTaskBudgetUsagePageDraft;
+  taskFinancial?: AiTaskBudgetUsageSummaryDraft;
   modelDelivery: { items: Array<{ invocationId: string; runId: string; stepId: string; callId: string; mode: 'invoke' | 'stream';
     transportWallMs: string; firstValidatedTextMs: string | null; basis: 'gateway_transport_including_usage_and_consumer_wait' }>;
     unobservedInWindow: number; truncated: boolean; coverage: 'completed_gateway_observations_only' };
@@ -35,7 +36,7 @@ const count: AiLeafSchemaDraft = { type: 'string', pattern: '^(0|[1-9][0-9]{0,19
 const nullable = (schema: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [schema, { type: 'null' }] });
 export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiSceneTaskPerformanceReadDraft: object({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
-    taskId: id, usageLimit: integer(1, 20), usageAfter: id }, ['original', 'usageLimit']),
+    taskId: id, usageLimit: integer(1, 20), usageAfter: id, includeTaskFinancial: flag }, ['original', 'usageLimit']),
   AiTaskPerformanceObservationDraft: object({ version: choice('task-performance-1'), observedAt: time,
     task: object({ taskId: id, sceneCode: text(128), sceneVersion: text(64), status: text(32), revision,
       createdAt: time, lastChangedAt: time, cancelRequestedAt: nullable(time) }),
@@ -51,6 +52,7 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
         reservedMs: count, unknownMs: count, basis: choice('persistent_resource_not_provider_latency') })] } }), 200),
       truncated: flag, coverage: choice('bounded_window') }),
     financial: { $ref: '#/components/schemas/AiTaskBudgetUsagePageDraft' },
+    taskFinancial: { $ref: '#/components/schemas/AiTaskBudgetUsageSummaryDraft' },
     modelDelivery: object({ items: list(object({ invocationId: id, runId: id, stepId: id, callId: text(128),
       mode: choice('invoke', 'stream'), transportWallMs: count, firstValidatedTextMs: nullable(count),
       basis: choice('gateway_transport_including_usage_and_consumer_wait') }), 50),

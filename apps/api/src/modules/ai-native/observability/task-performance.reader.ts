@@ -14,7 +14,7 @@ import { gatewayBudgetDenialLogId, gatewayDeliveryLogId, gatewayDeliveryTimingSc
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
   | 'aiGatewayInvocation' | 'operationLog'>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional() }).strict();
+const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional(), includeTaskFinancial: z.boolean().optional() }).strict();
 const taskSelect = { id: true, scopeId: true, sceneCode: true, sceneVersion: true, status: true, revision: true,
   eventCursor: true, createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const runSelect = { id: true, scopeId: true, taskId: true, actorKind: true, actorId: true, sequence: true,
@@ -42,7 +42,7 @@ function elapsed(start: Date | null, end: Date | null): string | null {
 
 export class TaskPerformanceReader {
   constructor(private readonly db: Db, private readonly actions: Pick<AiTaskRepositoryAuthority, 'resolve'>,
-    private readonly usage: Pick<TaskBudgetUsageReader, 'read'>, private readonly clock: () => Date = () => new Date()) {}
+    private readonly usage: Pick<TaskBudgetUsageReader, 'read'> & Partial<Pick<TaskBudgetUsageReader, 'summary'>>, private readonly clock: () => Date = () => new Date()) {}
 
   async read(value: unknown): Promise<AiTaskPerformanceObservationDraft> {
     const parsed = commandSchema.safeParse(structuredClone(value));
@@ -214,6 +214,15 @@ export class TaskPerformanceReader {
       const financial = await this.usage.read({ taskId: task.id, limit: command.usageLimit,
         ...(command.usageAfter ? { after: command.usageAfter } : {}) });
       if (financial.taskId !== task.id) throw unavailable();
+      if (command.includeTaskFinancial && typeof this.usage.summary !== 'function') throw unavailable();
+      const taskFinancial = command.includeTaskFinancial ? await this.usage.summary!({ taskId: task.id }) : undefined;
+      if (taskFinancial && taskFinancial.taskId !== task.id) throw unavailable();
+      if (taskFinancial) {
+        const { observedAt: _, ...originalPage } = financial;
+        const { observedAt: __, ...currentPage } = await this.usage.read({ taskId: task.id, limit: command.usageLimit,
+          ...(command.usageAfter ? { after: command.usageAfter } : {}) });
+        if (!isDeepStrictEqual(originalPage, currentPage)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
       const latest = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: taskSelect }));
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
         || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
@@ -247,6 +256,7 @@ export class TaskPerformanceReader {
             recordedMs: activeTimes.get(step.id)!.recordedMs?.toString() ?? null,
             reservedMs: activeTimes.get(step.id)!.reservedMs.toString(), unknownMs: activeTimes.get(step.id)!.unknownMs.toString(),
             basis: 'persistent_resource_not_provider_latency' } : { state: 'not_recorded' } })), truncated: steps.length > 200, coverage: 'bounded_window' }, financial,
+        ...(taskFinancial ? { taskFinancial } : {}),
         modelDelivery: { items: modelItems, unobservedInWindow: visibleInvocations.length - modelItems.length,
           truncated: invocations.length > 50, coverage: 'completed_gateway_observations_only' },
         budgetAdmission: { denials: denialItems, truncated: invocations.length > 50, coverage: 'recorded_rejections_only' },

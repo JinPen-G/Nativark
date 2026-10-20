@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
-import type { AiTaskRepositoryAuthority } from '../ai-task.repository';
+import { aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { BudgetError, type BudgetRecord } from './budget.ports';
-import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft } from '@rental-os/shared';
+import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft, type AiTaskBudgetUsageSummaryDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { isDeepStrictEqual } from 'node:util';
@@ -18,11 +18,13 @@ const refs = (value: unknown): unknown => Array.isArray(value) ? value.map(refs)
     ? child.replace(/^#\/components\/schemas\//u, 'urn:rental:task-usage:') : refs(child)])) : value;
 for (const [name, schema] of Object.entries({ ...AI_USAGE_DRAFT_SCHEMAS,
   AiTaskBudgetUsageRecordDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsageRecordDraft,
+  AiTaskBudgetUsageSummaryDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsageSummaryDraft,
   AiTaskBudgetUsagePageDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiTaskBudgetUsagePageDraft })) {
   ajv.addSchema(refs(schema) as object, `urn:rental:task-usage:${name}`);
 }
 const checkedPage = ajv.getSchema<AiTaskBudgetUsagePageDraft>('urn:rental:task-usage:AiTaskBudgetUsagePageDraft')!;
 const checkedRecord = ajv.getSchema<AiTaskBudgetUsageRecordDraft>('urn:rental:task-usage:AiTaskBudgetUsageRecordDraft')!;
+const checkedSummary = ajv.getSchema<AiTaskBudgetUsageSummaryDraft>('urn:rental:task-usage:AiTaskBudgetUsageSummaryDraft')!;
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const callId = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -73,6 +75,73 @@ export class TaskBudgetUsageReader {
       || !['operator', 'staff'].includes(context.audience)) throw new BudgetError('FORBIDDEN');
     return { context, scopeId: current.scope.id, actorId: context.actor.userId,
       gateway: { actorId: context.actor.userId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId } };
+  }
+  /** An explicit, bounded original-task read. Reuse the same per-call binding
+   * and ledger projections as pagination, not a second accounting algorithm.
+   * Oversized tasks return no total, and missing/unsettled records stay visible. */
+  async summary(value: unknown): Promise<AiTaskBudgetUsageSummaryDraft> {
+    const parsed = z.object({ taskId: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const { taskId } = parsed.data, before = await this.current(taskId);
+    const access = aiTaskAccessFromContext(before.context, taskId, this.clock());
+    const window = async () => structuredClone(await this.db.aiGatewayInvocation.findMany({
+      where: { scopeId: before.scopeId, taskId, run: { is: { scopeId: before.scopeId, taskId,
+        task: { is: access.where } } } }, orderBy: { id: 'asc' }, take: 51,
+      select: { id: true, scopeId: true, taskId: true, actorId: true, callId: true,
+        configurationHash: true, priceVersion: true, runId: true, stepId: true, actionId: true } }));
+    const rows = await window();
+    if (!Array.isArray(rows) || rows.length > 51 || new Set(rows.map(row => row.id)).size !== rows.length
+      || new Set(rows.map(row => row.callId)).size !== rows.length || rows.some((row, index) =>
+        !id.safeParse(row.id).success || !callId.safeParse(row.callId).success || row.scopeId !== before.scopeId
+        || row.taskId !== taskId || row.actorId !== before.actorId || index > 0 && row.id <= rows[index - 1].id)) throw new BudgetError('UNAVAILABLE');
+    const pages: Array<{ command: { taskId: string; limit: number; after?: string }; page: AiTaskBudgetUsagePageDraft }> = [];
+    if (rows.length <= 50) {
+      let after: string | undefined;
+      // At most three pages, then one revalidation per page. No open-ended
+      // pagination, retries, per-scope scans or background collection.
+      for (let offset = 0; offset < rows.length; offset += 20) {
+        const command = { taskId, limit: 20, ...(after ? { after } : {}) }, page = await this.read(command);
+        const expected = rows.slice(offset, offset + 20);
+        if (page.taskId !== taskId || !page.pageAmounts || page.items.length !== expected.length
+          || page.items.some((item, index) => item.invocationId !== expected[index].id || item.callId !== expected[index].callId)
+          || page.nextAfter !== (offset + 20 < rows.length ? expected.at(-1)!.id : null)) throw new BudgetError('PENDING_RECONCILIATION');
+        pages.push({ command, page });
+        after = page.nextAfter ?? undefined;
+      }
+      for (const { command, page } of pages) {
+        const { observedAt: _, ...original } = page;
+        const { observedAt: __, ...current } = await this.read(command);
+        if (!isDeepStrictEqual(current, original)) throw new BudgetError('PENDING_RECONCILIATION');
+      }
+    }
+    if (!isDeepStrictEqual(await window(), rows)) throw new BudgetError('PENDING_RECONCILIATION');
+    const current = await this.current(taskId), now = this.clock();
+    if (current.scopeId !== before.scopeId || identity(current.context) !== identity(before.context)) throw new BudgetError('FORBIDDEN');
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new BudgetError('UNAVAILABLE');
+    const base = { taskId, observedAt: now.toISOString(), invocationLimit: 50 as const,
+      consistency: 'revalidated_reads_not_atomic_snapshot' as const, execution: 'read_only_no_dispatch_or_release' as const,
+      basis: 'persisted_budget_records_not_provider_invoice' as const,
+      absenceSemantics: 'no_record_is_not_proof_of_no_consumption' as const,
+      businessExecution: 'not_inferred_from_usage' as const, admission: 'not_granted' as const };
+    if (rows.length > 50) return { ...base, state: 'limit_exceeded', coverage: 'not_computed' };
+    const groups = new Map<string, NonNullable<AiTaskBudgetUsagePageDraft['pageAmounts']>['groups'][number]>();
+    const fields = ['reservedAtoms', 'pendingAtoms', 'settledAtoms', 'releasedReservationAtoms', 'settledExcessAtoms'] as const;
+    let recordedCount = 0, notRecordedCount = 0, unresolved = false;
+    for (const { page } of pages) {
+      recordedCount += page.pageAmounts!.recordedCount;
+      notRecordedCount += page.pageAmounts!.notRecordedCount;
+      unresolved ||= page.items.some(item => item.accounting === 'recorded' && !['settled', 'released'].includes(item.status));
+      for (const entry of page.pageAmounts!.groups) {
+        const key = JSON.stringify([entry.unit, entry.currency]), existing = groups.get(key);
+        if (!existing) groups.set(key, structuredClone(entry));
+        else for (const field of fields) existing[field] = (BigInt(existing[field]) + BigInt(entry[field])).toString();
+      }
+    }
+    const summary = { ...base, state: 'observed' as const, coverage: 'all_registered_invocations' as const,
+      invocationCount: rows.length, recordedCount, notRecordedCount, accountingComplete: notRecordedCount === 0 && !unresolved,
+      groups: [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, group]) => group) };
+    if (!checkedSummary(summary) || recordedCount + notRecordedCount !== rows.length) throw new BudgetError('UNAVAILABLE');
+    return summary;
   }
   async read(value: unknown): Promise<AiTaskBudgetUsagePageDraft> {
     const parsed = request.safeParse(structuredClone(value));

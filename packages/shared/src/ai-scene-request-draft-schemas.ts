@@ -31,7 +31,24 @@ const recordedUsage = object({ invocationId: text(36), callId: text(128), accoun
   actual: { oneOf: [{ $ref: '#/components/schemas/AiUsageQuantityDraft' }, { type: 'null' }] }, budgetDispatchMarked: { type: 'boolean' },
   modelPolicy: { oneOf: [object({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI') }),
     object({ mode: choice('tenant_managed'), model: text(256) })] } });
+const budgetAmountGroup: AiLeafSchemaDraft = { oneOf: [
+  ...(['money', 'tokens', 'calls'] as const).map(unit => object({ unit: choice(unit),
+    currency: unit === 'money' ? { type: 'string', pattern: '^[A-Z]{3}$' } : { type: 'null' },
+    scale: integer(unit === 'money' ? 6 : 0, unit === 'money' ? 6 : 0),
+    ...Object.fromEntries(['reservedAtoms', 'pendingAtoms', 'settledAtoms', 'releasedReservationAtoms', 'settledExcessAtoms']
+      .map(field => [field, { type: 'string', pattern: '^(0|[1-9][0-9]{0,31})$' }])) }))
+] };
+const budgetSummary = { taskId: text(36), observedAt: leafTime, invocationLimit: integer(50, 50),
+  consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release'),
+  basis: choice('persisted_budget_records_not_provider_invoice'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
+  businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') };
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiTaskBudgetUsageSummaryDraft: { oneOf: [
+    object({ ...budgetSummary, state: choice('limit_exceeded'), coverage: choice('not_computed') }),
+    object({ ...budgetSummary, state: choice('observed'), coverage: choice('all_registered_invocations'),
+      invocationCount: integer(0, 50), recordedCount: integer(0, 50), notRecordedCount: integer(0, 50),
+      accountingComplete: { type: 'boolean' }, groups: list(budgetAmountGroup, 50) })
+  ] },
   AiSceneOrderExtensionPreviewDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
     expectedOrderVersion: leafTime,
     extension: object({ newEndAt: leafTime, services: list(object({ serviceId: id(), quantity: { type: 'number', minimum: 1 },
@@ -86,13 +103,7 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
     recordedUsage] }, 20), nextAfter: { oneOf: [text(36), { type: 'null' }] },
     observedAt: leafTime, coverage: choice('page_not_total'), totals: choice('not_computed'),
     pageAmounts: object({ coverage: choice('visible_page_only'), basis: choice('persisted_budget_records_not_provider_invoice'),
-      recordedCount: integer(0, 20), notRecordedCount: integer(0, 20), groups: list({ oneOf: [
-        ...(['money', 'tokens', 'calls'] as const).map(unit => object({ unit: choice(unit),
-          currency: unit === 'money' ? { type: 'string', pattern: '^[A-Z]{3}$' } : { type: 'null' },
-          scale: integer(unit === 'money' ? 6 : 0, unit === 'money' ? 6 : 0),
-          ...Object.fromEntries(['reservedAtoms', 'pendingAtoms', 'settledAtoms', 'releasedReservationAtoms', 'settledExcessAtoms']
-            .map(field => [field, { type: 'string', pattern: '^(0|[1-9][0-9]{0,31})$' }])) }))
-      ] }, 20) }),
+      recordedCount: integer(0, 20), notRecordedCount: integer(0, 20), groups: list(budgetAmountGroup, 20) }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
     businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') },
     ['taskId', 'items', 'nextAfter', 'observedAt', 'coverage', 'totals', 'consistency', 'absenceSemantics', 'businessExecution', 'admission']),

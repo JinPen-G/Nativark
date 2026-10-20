@@ -123,12 +123,13 @@ export function composeAiTaskCenterScene(input: {
       return input.list.readPage(parsed.data);
     },
     readPerformance: async (value: unknown) => {
-      const parsed = taskRead.extend({ usageLimit: z.number().int().min(1).max(20), usageAfter: z.string().min(1).max(36).optional() })
+      const parsed = taskRead.extend({ usageLimit: z.number().int().min(1).max(20), usageAfter: z.string().min(1).max(36).optional(), includeTaskFinancial: z.boolean().optional() })
         .strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (!input.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const command = parsed.data, task = await readObservedTask(command.original, command.taskId);
       const result = await input.performance.read({ taskId: task.taskId, usageLimit: command.usageLimit,
+        ...(command.includeTaskFinancial !== undefined ? { includeTaskFinancial: command.includeTaskFinancial } : {}),
         ...(command.usageAfter ? { usageAfter: command.usageAfter } : {}) });
       if (result.task.taskId !== task.taskId || result.task.revision !== task.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       await assertStillCurrent(command.original, task);
