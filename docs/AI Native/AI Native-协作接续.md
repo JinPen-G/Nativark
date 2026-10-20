@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新核心：`7f1ee594`。预算预留在allocation后/提交前、提交应答后及唯一键冲突的原记录读取后复核权限；提交可能成功后的拒绝统一待核对，不冒充未占用。锁等待及写入期间报价/请求过期拒绝新占用，原记录观察不套新准入。四个事务窗口、一个过期窗口及两个正常准入场景最终通过（各0 fail/skip/todo/退出0），首轮分别0/4、0/1。API noEmit684 roots仍仅原支付两项诊断/退出1，diff退出0。实际Service/Prisma适配，授权/报价与DB/锁/提交为离线替身，非MySQL/完整单账验收；无新脚本/生成/迁移/外联。原28项64.3%、ENTRY48.6%、验收0/28不变。
+> 更新时间：2026-10-21。最新核心：`f0ecd92e`。正式持久模型宿主暴露同一任务的`accountingRecovery`，原账读取/核对不必重组Gateway或计价；它与任务继续分离。文本及图片calls单账正向、结算中断后关新执行→原账核对、正式宿主只读/缺配置拒绝及跨任务拒绝，最终各1 pass/0 fail/skip/todo/退出0。实际Auth/任务/资源/财务服务与Prisma适配，DB/锁/协议传输及部分路由/派发为替身；不冒称完整正式HTTP/供应商链。API684 roots仍仅原支付两项/退出1、diff退出0；旧整例DISABLED/PROVIDER_UNAVAILABLE预期不一致尚未收口。无新脚本/外联，原28项64.3%、ENTRY48.6%、验收0/28不变。
 > **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
@@ -29,6 +29,8 @@
 下一步优先可信计数/上界正式生产者、标准模型单账正向执行和剩余恢复窗口，再补后台能力/预算/审批与场景消费；不能用calls换算token、猜计数、恒真权限或默认开关补齐。平台费率与BYOK审阅生产者已存在，不重复开发。已收到的原派发usage可独立于结果交付、取消或当前执行门变化保存；提交丢应答不自动重写，善后仍要求当前权限和同一派发证据。适配器与Unified响应快照已收口，不用重建协议或派发器。全部源码/类型/离线证据不代替shared正常构建、真实MySQL/供应商及浏览器验收；本批未构建dist、迁移或启用。
 
 预算新占用与原记录读取仍是不同语义：原Service和Prisma仓储现覆盖提交前撤权回滚、提交后撤权/丢应答待核对、P2002同键观察的当前复核及锁后过期拒绝。后两种可能已有原占用，必须走现有readCall/read与原证据核对，不换键预留、释放unknown或从重读获得派发权。事务结果与返回值独立快照，不修改原三层锁/并发/每run限额。相关离线时钟均显式传给服务与仓储，不能用历史夹具误判生产时间门。
+
+正式持久模型宿主：`composePersistedTaskModelHost`与calls兼容入口现返回同一原任务绑定的`accountingRecovery.{readCall,read,releaseUnsent,reconcile}`，复用原Gateway创建的预算，不创建第二份服务账本。已离线驱动真实运行器/累计资源/金融Prisma链：文本与图片各一次派发、一预留、三allocation、一settle；结算事务失败后usage保留，关Profile/执行门仍可按原证据reconcile一次。财务settled不把UNKNOWN模型步骤变为成功，恢复不重发；跨任务拒绝，缺配置及善后零凭据读取/新派发。路由/dispatch/协议/文件来源及DB为明确替身，calls不是金额/token的替代方案；可信计数生产、标准正式配置→HTTP全链与真实环境仍待验。旧夹具不转发事务选项、缺SQL聚合的差异仅在一次性命令补齐；原脚本/断言未改，旧整例默认DISABLED的预期差异不得报通过。
 
 客户上下文澄清：标准服务器模型DI可显式设置`clarification:true`，选择原`original_client_clarification`来源；默认仍只做原摘要，不自动开启模型或任务政策。只解释同一原task/run/step/frozen input及已测量结果中的固定问题代码，输出原`clarification_text`合同；回答为context_only，不是客户/商品选择、报价确认或建单批准。最多两轮追问且受原政策maxCalls、原材料及五分钟问题期限约束；原输入仓储持久化问题/回答/同键收据，后续run沿原resourceOriginRunId，不清零资源、不覆盖旧输入。关闭新执行或新提问后，原问题读取/回答收据仍走当前独立政策；该读入口不能创建问题/调用模型。客户model/result按持久workflowStatus区分answer/clarification/not_attested，模型单轮成功不等于业务成功；website/wechat的input/submit/receipt/continue与模型control/result已有shared/OpenAPI契约，Controller保留受控停止原因。
 
