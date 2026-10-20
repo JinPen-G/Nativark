@@ -13,18 +13,23 @@ type Reads = {
 const cursor = (value: unknown): value is string => typeof value === "string" && /^(0|[1-9][0-9]{0,19})$/u.test(value);
 const invalid = () => Error("AI_RESOURCE_UNAVAILABLE");
 
+/** Shared validation for manual detail reads and the opt-in snapshot follower. */
+export function validateTaskCenterSnapshot(value: AiTaskSnapshotDraft, taskId: string) {
+  if (!value || value.contractVersion !== AI_TASK_DRAFT_VERSION || value.taskId !== taskId
+    || !AI_TASK_STATUSES_DRAFT.includes(value.status) || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || !cursor(value.cursor) || !Array.isArray(value.steps) || value.steps.length > 1000
+    || new Set(value.steps.map(step => step?.stepId)).size !== value.steps.length
+    || value.steps.some(step => !step || typeof step.stepId !== "string" || typeof step.runId !== "string"
+      || !AI_STEP_STATUSES_DRAFT.includes(step.status)
+      || step.resultId !== undefined && (typeof step.resultId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(step.resultId)))) throw invalid();
+  return value;
+}
+
 export async function readTaskCenterDetail(reads: Reads, taskId: string, signal: AbortSignal, current: () => boolean) {
   const check = () => { if (signal.aborted || !current()) throw Error("AI_SCOPE_CHANGED"); };
   const snapshot = async () => {
     check(); const value = await reads.snapshot(taskId, signal); check();
-    if (!value || value.contractVersion !== AI_TASK_DRAFT_VERSION || value.taskId !== taskId
-      || !AI_TASK_STATUSES_DRAFT.includes(value.status) || !Number.isSafeInteger(value.revision) || value.revision < 1
-      || !cursor(value.cursor) || !Array.isArray(value.steps) || value.steps.length > 1000
-      || new Set(value.steps.map(step => step?.stepId)).size !== value.steps.length
-      || value.steps.some(step => !step || typeof step.stepId !== "string" || typeof step.runId !== "string"
-        || !AI_STEP_STATUSES_DRAFT.includes(step.status)
-        || step.resultId !== undefined && (typeof step.resultId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(step.resultId)))) throw invalid();
-    return value;
+    return validateTaskCenterSnapshot(value, taskId);
   };
   const first = await snapshot();
   const events = await reads.events(taskId, "0", signal); check();

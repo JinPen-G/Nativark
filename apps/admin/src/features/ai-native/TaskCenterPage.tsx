@@ -1,8 +1,8 @@
 /** Owner task observation and explicit human approval/continuation. A cursor
  * grants no execution; original domain services and server configuration do. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from "@rental-os/shared";
+import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiTaskSnapshotDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useLocale } from "@/app/locale";
@@ -12,7 +12,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { AiTaskWorkbench, type AiTaskDetailReader } from "./AiTaskWorkbench";
 import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
-import { readTaskCenterDetail } from "./task-center-reader";
+import { readTaskCenterDetail, validateTaskCenterSnapshot } from "./task-center-reader";
 import { TaskUsageObservation } from "./TaskUsageObservation";
 import { TaskHumanApproval } from "./TaskHumanApproval";
 
@@ -43,9 +43,17 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
+  const [followTask, setFollowTask] = useState<string | null>(null);
+  const [followEpoch, setFollowEpoch] = useState(0);
+  const [followError, setFollowError] = useState(false);
+  const [liveSnapshot, setLiveSnapshot] = useState<AiTaskSnapshotDraft | null>(null);
+  const followOwner = useRef<{ active: boolean; reads: number; deadline: number; request?: AbortController }>(
+    { active: false, reads: 0, deadline: 0 });
+  const stopFollowing = () => { followOwner.current.active = false; followOwner.current.request?.abort(); setFollowTask(null); };
   const [visible, setVisible] = useState(() => !document.hidden);
-  useEffect(() => { const change = () => { setVisible(!document.hidden); setSelected(null); };
+  useEffect(() => { const change = () => { stopFollowing(); setLiveSnapshot(null); setVisible(!document.hidden); setSelected(null); };
     document.addEventListener("visibilitychange", change); return () => document.removeEventListener("visibilitychange", change); }, []);
+  useEffect(() => () => { followOwner.current.active = false; followOwner.current.request?.abort(); }, [identity, selected]);
   const current = () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden;
   const query = useQuery({ queryKey: ["ai-task-center", identity, status, cursors[page - 1]], enabled: opened && visible,
     // One explicit refresh. No ambient query polling creates AI activity.
@@ -60,6 +68,33 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         || result.nextCursor !== null && (typeof result.nextCursor !== "string" || result.nextCursor.length > 512)) throw Error("AI_RESOURCE_UNAVAILABLE");
       return result;
     } });
+  // A single React Query owner reads the persisted snapshot, never starts or
+  // resumes a run. No polling before a separate, explicit human opt-in.
+  const follow = useQuery<AiTaskSnapshotDraft>({ queryKey: ['ai-task-center-follow', identity, followTask, followEpoch],
+    enabled: opened && visible && selected !== null && followTask === selected,
+    retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, gcTime: 0,
+    meta: { liveRefresh: false },
+    refetchInterval: query => query.state.status === 'error' || !followOwner.current.active
+      || followOwner.current.reads >= 200 || performance.now() >= followOwner.current.deadline
+      || query.state.data && ['succeeded', 'partially_succeeded', 'cancelled', 'failed'].includes(query.state.data.status) ? false : 3000,
+    queryFn: async ({ signal }) => {
+      const taskId = followTask, owner = followOwner.current;
+      const same = () => current() && owner.active && owner === followOwner.current && !signal.aborted;
+      if (!taskId || !same() || owner.reads >= 200 || performance.now() >= owner.deadline) throw Error('AI_SCOPE_CHANGED');
+      const controller = new AbortController(); owner.request = controller; owner.reads++;
+      try {
+        const value = validateTaskCenterSnapshot(await aiTaskCenterApi.snapshot(taskId,
+          AbortSignal.any([signal, controller.signal, AbortSignal.timeout(6000)])), taskId);
+        if (!same() || controller.signal.aborted) throw Error('AI_SCOPE_CHANGED');
+        setLiveSnapshot(value);
+        return value;
+      } finally { if (owner.request === controller) owner.request = undefined; }
+    } });
+  const followFailed = followTask === selected && followOwner.current.active && follow.isError;
+  // Preserve the last observation when the user stops. Clearing it would
+  // change the detail reader and accidentally trigger another read on stop.
+  const observed = !followFailed && liveSnapshot?.taskId === selected ? liveSnapshot : undefined;
+  const observationKey = observed ? `${observed.taskId}:${observed.revision}:${observed.cursor}` : '';
   const readTask: AiTaskDetailReader = useCallback(async (taskId, _context, signal) => {
     const same = () => identityKey() === identity && !signal.aborted && !document.hidden;
     if (!same()) throw Error("AI_SCOPE_CHANGED");
@@ -80,7 +115,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
           : result?.status === "stale" ? "事实已变化，旧正文不显示，请回原业务页核对。"
             : result?.status === "unknown" ? "结果待核对，不自动重试。" : result?.status === "failed" ? "原步骤失败，未产生可展示答案。"
               : "本次没有可读取的结果，不能推断未执行或已成功。") }] };
-  }, [identity, t]);
+  }, [identity, t, observationKey]);
   const readConfirmation = useCallback(async (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => {
     if (!current() || signal.aborted) throw Error("AI_SCOPE_CHANGED");
     try {
@@ -103,30 +138,53 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       throw failure;
     }
   }, [identity]);
-  const data = query.error ? undefined : query.data;
-  useEffect(() => { if (query.error || data && selected && !data.items.some(row => row.taskId === selected)) setSelected(null); }, [query.error, data, selected]);
+  const originalPage = query.error ? undefined : query.data;
+  // Only this currently reauthorized row is refreshed; not a claim that every
+  // page/order was observed, nor a model-derived optimistic status update.
+  const data = originalPage && { ...originalPage, items: originalPage.items.map(row => observed?.taskId === row.taskId
+    ? { ...row, status: observed.status, revision: observed.revision, updatedAt: observed.updatedAt, cancelRequestedAt: observed.cancelRequestedAt } : row)
+    .filter(row => status === 'all' || row.status === status) };
+  const selectedVisible = !!data?.items.some(row => row.taskId === selected);
+  useEffect(() => { if (query.error || followFailed || originalPage && selected && !selectedVisible) {
+    if (followFailed) setFollowError(true);
+    stopFollowing(); setLiveSnapshot(null); setSelected(null);
+    const code = (follow.error as { response?: { status?: number } })?.response?.status;
+    if (code === 401 || code === 403) setOpened(false);
+  } }, [query.error, followFailed, originalPage, selected, selectedVisible]);
   return <section aria-label={t("AI 任务观察")}>
     <Alert type="info" title={t("观察本人任务；批准和继续分别明确确认，不自动运行或重新派发。")}
       description={t("首次进入不请求 AI 数据；点击读取后按当前权限查询。切换空间或身份后清空当前视图，人工业务页面始终保留。")}/>
     <div className="panel-toolbar">
       <ActionButton label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}
-        onAction={async () => { setSelected(null); if (!opened) setOpened(true); await query.refetch({ throwOnError: true }); }} />
+        onAction={async () => { stopFollowing(); setLiveSnapshot(null); setFollowError(false); setSelected(null); if (!opened) setOpened(true); await query.refetch({ throwOnError: true }); }} />
       <Select aria-label={t("任务状态")} value={status} disabled={!opened || query.isFetching}
         options={[{ value: "all", label: t("全部状态") }, ...AI_TASK_STATUSES_DRAFT.map(value => ({ value, label: t(statusLabels[value]) }))]}
-        onChange={value => { setSelected(null); setStatus(String(value)); setPage(1); setCursors([null]); }} />
+        onChange={value => { stopFollowing(); setLiveSnapshot(null); setSelected(null); setStatus(String(value)); setPage(1); setCursors([null]); }} />
     </div>
+    {opened && visible && selected && <div className="panel-toolbar">
+      <ActionButton label={t(followTask === selected ? '停止跟随当前任务' : '跟随当前任务状态')}
+        successLabel={t('只读跟随设置已更新')} onAction={async () => {
+          if (followTask === selected) { stopFollowing(); return; }
+          stopFollowing(); setFollowError(false); followOwner.current = { active: true, reads: 0, deadline: performance.now() + 600000 };
+          setFollowEpoch(value => value + 1); setFollowTask(selected);
+        }} />
+      <span role="status">{t(followFailed ? '状态读取失败，已停止；旧详情已清除，请手动重读。'
+        : '主动开启后每3秒读取当前任务，最多200次或10分钟；终态、页面隐藏或切换后停止。不执行或重派任务。')}</span>
+    </div>}
+    {(followFailed || followError) && <Alert type="warning" title={t('任务状态当前不可读取，已停止跟随并清除详情；请核对权限后重新读取。')} />}
     {opened && <AiTaskWorkbench context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
-      selectedTaskId={data?.items.some(row => row.taskId === selected) ? selected : null} onSelectTask={setSelected} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}
+      selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
+      onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}
       tasks={(data?.items ?? []).map(row => ({ id: row.taskId, status: displayStatus(row.status), scene: safeDisplayText(row.sceneCode), updatedAt: row.updatedAt }))}
       loading={query.isFetching} paging={query.isFetching} page={page} hasNext={!!data?.nextCursor}
       error={query.error ? t("当前任务不可读取，请重新核对权限或稍后重试。") : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
-        setSelected(null); setPage(next); }} />}
-    {opened && visible && selected && data?.items.some(row => row.taskId === selected)
+        stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} />}
+    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
       && <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
         onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
-    {opened && visible && selected && data?.items.some(row => row.taskId === selected)
+    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
       && <TaskUsageObservation key={selected} taskId={selected} current={current}
         onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
   </section>;
