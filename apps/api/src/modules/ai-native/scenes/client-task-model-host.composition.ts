@@ -15,7 +15,7 @@ import { isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@
 import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
-import { clientCompletedModelInputSource } from './client-completed-model-input.source';
+import { clientCompletedModelInputSource, CLIENT_CONTEXT_QUESTION_INSTRUCTION } from './client-completed-model-input.source';
 
 type Dependencies = Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'task' | 'scene' | 'planTools' | 'kind' | 'inputSource'> & {
   db: PrismaClient;
@@ -23,7 +23,7 @@ type Dependencies = Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'ta
   loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>;
   /** Trusted scene configuration, not a client/model supplied system message. */
   systemPrompt: string;
-  inputSource: AiTaskInputSource | 'original_client';
+  inputSource: AiTaskInputSource | 'original_client' | 'original_client_clarification';
   /** Optional narrower server ceiling. The persisted scene policy remains the
    * authority; omitting this never supplies an unlimited/default budget. */
   limits?: TaskModelHostDependencies['task']['limits'];
@@ -47,8 +47,9 @@ export async function composeClientOriginalTaskInputReader(input: Pick<Dependenc
   await authorization.authority.resolve(taskId, 'read_metadata');
   const plans = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     TASK_TEXT_MODEL_TOOL, undefined, { sceneCode: gatewayScene.sceneCode, maxOutputTokens: gatewayScene.maxOutputTokens });
-  const source = input.inputSource === 'original_client'
-    ? clientCompletedModelInputSource(input.db, authorization.tasks, taskId, gatewayScene, clock) : input.inputSource;
+  const source = input.inputSource === 'original_client' || input.inputSource === 'original_client_clarification'
+    ? clientCompletedModelInputSource(input.db, authorization.tasks, taskId, gatewayScene, clock,
+      input.inputSource === 'original_client_clarification') : input.inputSource;
   const inputs = new PrismaTaskInputRepository(input.db, authorization.tasks, plans, source, clock);
   return Object.freeze({
     async readPending() {
@@ -91,7 +92,8 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   input = { ...input, clientScene: structuredClone(input.clientScene), gatewayScene: structuredClone(input.gatewayScene),
     limits: structuredClone(input.limits), host: structuredClone(input.host) };
   const command = clientTaskCommandSchema.parse(structuredClone(value));
-  const prompt = z.string().min(1).max(8000).parse(input.systemPrompt);
+  const prompt = z.string().min(1).max(8000).parse(input.systemPrompt
+    + (input.inputSource === 'original_client_clarification' ? `\n${CLIENT_CONTEXT_QUESTION_INSTRUCTION}` : ''));
   const clientDependencies = { db: input.db, subscriptions: input.subscriptions, ...structuredClone(input.clientScene) };
   const clock = input.clock ?? (() => new Date());
   const authorization = composePersistedClientTaskAuthorization(clientDependencies, command, input.loadMaterial, clock);
@@ -135,8 +137,9 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   const scene = { code: clientDependencies.sceneCode, version: clientDependencies.sceneVersion };
   if (input.gatewayScene.sceneCode !== scene.code) throw denied();
   const model = composeCurrentAuthorizedTaskModelInput({ ...input, scene, kind: undefined }, authorization);
-  const inputSource = input.inputSource === 'original_client'
-    ? clientCompletedModelInputSource(input.db, authorization.tasks, taskId, input.gatewayScene, clock) : input.inputSource;
+  const inputSource = input.inputSource === 'original_client' || input.inputSource === 'original_client_clarification'
+    ? clientCompletedModelInputSource(input.db, authorization.tasks, taskId, input.gatewayScene, clock,
+      input.inputSource === 'original_client_clarification') : input.inputSource;
   const host = composeTaskModelHostWithModel({ ...input, inputSource, scene, kind: undefined, task: {
     taskId, runId: receipt.task.runId, registrationRef: `client-model:${receipt.inputRef}`,
     material: { messages: [{ role: 'system', content: [{ kind: 'text', text: prompt }] },

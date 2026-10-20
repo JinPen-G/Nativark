@@ -20,12 +20,13 @@ export const AI_NATIVE_CLIENT_MODEL_ADAPTERS = Symbol('AI_NATIVE_CLIENT_MODEL_AD
 const modelConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
   z.object({ enabled: z.literal(true), pricing: gatewayPricingSelectionSchema, systemPrompt: z.string().min(1).max(8000),
     maxOutputTokens: z.number().int().min(1).max(32768), limits: aiTaskRunnerLimitsSchema,
+    clarification: z.boolean().optional().default(false),
     host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
       leaseMs: z.number().int().min(1).max(120000) }).strict() }).strict()]);
 
 /** Inert standard dependency producer. Model/configuration/entitlement/price
- * records are not seeded here. Only original authorized text summaries can
- * finish this closed plan; explicit booking parameter selection stays manual. */
+ * records are not seeded here. Clarification needs separate server opt-in;
+ * explicit booking parameter selection and approval stay in the original flow. */
 export function standardClientModelDependencies(db: PrismaClient, secrets: SecretBox, value?: unknown,
   suppliedAdapters?: readonly ModelAdapter[]): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults' | 'taskAccounting'> {
   let config: z.infer<typeof modelConfiguration>;
@@ -38,10 +39,11 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
     throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_dependencies');
   const gatewayScene = { sceneCode: 'quote_clarification', routeScene: 'chat' as const, maxOutputTokens: config.maxOutputTokens };
   const adapters = suppliedAdapters ? [...suppliedAdapters] : createNativeModelAdapters();
+  const inputSource = config.clarification ? 'original_client_clarification' as const : 'original_client' as const;
   return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
-    inputSource: 'original_client', gatewayScene,
+    inputSource, gatewayScene,
     gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },
-    taskInputs: { db, inputSource: 'original_client', gatewayScene }, taskResults: { db }, taskAccounting: { db } };
+    taskInputs: { db, inputSource, gatewayScene }, taskResults: { db }, taskAccounting: { db } };
 }
 type Dependencies = AiClientRequestDependencies & {
   db: PrismaClient;
