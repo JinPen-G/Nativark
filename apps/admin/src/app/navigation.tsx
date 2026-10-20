@@ -96,6 +96,7 @@ export const APP_ROUTES = {
   // 圆角与本地音效设置；品牌标识、主题色仍在客户端渠道维护。
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
   aiSettings: { path: "/settings/ai", label: "AI 服务设置", permission: "system:params:manage", audience: "tenant", icon: <SettingOutlined />, menu: true },
+  aiTasks: { path: "/ai/tasks", label: "AI 任务中心", permission: "rental-os:order:view", legacyPermissions: ["rental-os:order:create", "rental-os:price:manage", "system:params:manage"], audience: "tenant", icon: <FileTextOutlined />, menu: true },
   paymentReconciliation: { path: "/rental/payment-reconciliation", label: "支付对账", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
   platformCategories: { path: "/platform/rental-categories", label: "租赁品类", permission: "system:rental-category:view", audience: "saas", icon: <AppstoreOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
@@ -126,7 +127,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   // 混在一个九项长列表里。这里只调整菜单分组，不改变任何路由或权限边界。
   { key: "operations-foundation", label: "经营基础", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.qualificationTypes, APP_ROUTES.rentalCapabilities, APP_ROUTES.subscription] },
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, routes: [APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },
-  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.aiSettings, APP_ROUTES.clientChannel, APP_ROUTES.appearance] },
+  { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.aiSettings, APP_ROUTES.aiTasks, APP_ROUTES.clientChannel, APP_ROUTES.appearance] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, routes: [APP_ROUTES.paymentReconciliation] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformDemoRequests, APP_ROUTES.platformSubscriptions, APP_ROUTES.subscriptionCatalog, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];

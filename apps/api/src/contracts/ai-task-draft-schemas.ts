@@ -21,7 +21,8 @@ const positiveCursor: SchemaObject = { type: "string", minLength: 1, maxLength: 
 const cursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^(0|[1-9][0-9]*)$" };
 const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCursor, taskRevision: revision, occurredAt: time };
 
-/** C04只发布文档组件；没有运行路由。字段关系/状态转换/归属仍需应用和数据库校验。 */
+/** Shared task shapes, including the owner-only read transport. Execution and
+ * state transitions still require their existing application/DB authority. */
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AiStepOutcomeDraft: { oneOf: [
     closed({ status: choice("pending", "cancelled"), effect: choice("none") }),
@@ -54,6 +55,7 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     closed({ ...eventBase, type: choice("step.registered"), data: closed({ stepId: id(), runId: id(), sequence: { type: "integer", minimum: 1, maximum: 4294967295 }, stepRevision: { type: "integer", enum: [1] } }) }),
     closed({ ...eventBase, type: choice("step.changed"), data: closed({ stepId: id(), runId: id(), stepRevision: revision, status: choice(...AI_STEP_STATUSES_DRAFT), reason: choice(...AI_STEP_TRANSITION_REASONS_DRAFT) }) }),
     closed({ ...eventBase, type: choice("task.output_ready"), data: closed({ resultId: id() }) }),
+    closed({ ...eventBase, type: choice("task.input_refreshed"), data: closed({ requestId: id(), previousRevision: revision, revision }) }),
     closed({ ...eventBase, type: choice("access.revoked"), data: closed({ code: choice("AI_ACCESS_DENIED", "AI_SCOPE_CHANGED") }) })
   ] },
   AiTaskEventPageDraft: closed({ contractVersion: version, taskId: id(), events: list(ref("AiTaskEventDraft"), 100), nextCursor: cursor, hasMore: { type: "boolean" } }),
@@ -62,5 +64,10 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     cancelRequestedAt: { ...time, nullable: true }, cursor,
     steps: list(closed({ stepId: id(), runId: id(), sequence: revision, revision,
       status: choice(...AI_STEP_STATUSES_DRAFT) }), 1000) }),
-  AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") })
+  AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") }),
+  AiTaskMetadataQueryDraft: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 },
+    cursor: { type: 'string', maxLength: 512 }, status, sceneCode: id() }, additionalProperties: false },
+  AiTaskMetadataPageDraft: closed({ items: list(closed({ taskId: id(), status, revision, sceneCode: id(), sceneVersion: id(),
+    createdAt: time, updatedAt: time, cancelRequestedAt: { ...time, nullable: true } }), 50),
+    nextCursor: { type: 'string', maxLength: 512, nullable: true } })
 };

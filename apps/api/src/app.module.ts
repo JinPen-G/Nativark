@@ -109,6 +109,8 @@ import { AiBudgetManagementController, AiGatewayPricingHistoryController } from 
 import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
+import { AiTaskCenterController } from './modules/ai-native/task-center.application';
+import { AI_NATIVE_TASK_CENTER_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
   AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
@@ -154,6 +156,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AiBudgetManagementController,
     AiGatewayPricingHistoryController,
     AiModelSettingsController,
+    AiTaskCenterController,
     AiPlatformModelSettingsController,
     HumanMemoryManagementController,
     KnowledgePolicyManagementController,
@@ -221,6 +224,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
     AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
+    AI_NATIVE_TASK_CENTER_PROVIDER,
     AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
     AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,

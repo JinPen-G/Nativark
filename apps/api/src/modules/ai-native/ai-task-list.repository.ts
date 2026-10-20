@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiExecutionContext, type AiTaskMetadataPageDraft } from '@rental-os/shared';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -31,10 +31,7 @@ export interface AiTaskListAuthority {
   authorizeMetadata?(taskId: string): Promise<AiExecutionContext>;
 }
 
-export interface AiTaskMetadataPage {
-  items: Array<{ taskId: string; status: string; revision: number; sceneCode: string; sceneVersion: string; createdAt: string; updatedAt: string; cancelRequestedAt: string | null }>;
-  nextCursor: string | null;
-}
+export type AiTaskMetadataPage = AiTaskMetadataPageDraft;
 
 function encodeCursor(updatedAt: Date, id: string, filters: Pick<z.infer<typeof inputSchema>, 'status' | 'sceneCode'>) {
   return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id, ...filters }), 'utf8').toString('base64url');
@@ -94,7 +91,7 @@ export class AiTaskListRepository {
         || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime())
         || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime()))) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     const page = rows.slice(0, input.limit);
-    const items = page.map(row => ({ taskId: row.id, status: row.status.toLowerCase(), revision: row.revision,
+    const items = page.map(row => ({ taskId: row.id, status: z.enum(AI_TASK_STATUSES_DRAFT).parse(row.status.toLowerCase()), revision: row.revision,
       sceneCode: row.sceneCode, sceneVersion: row.sceneVersion, createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(), cancelRequestedAt: row.cancelRequestedAt?.toISOString() ?? null }));
     return { items, nextCursor: rows.length > input.limit && page.length ? encodeCursor(page[page.length - 1].updatedAt, page[page.length - 1].id,

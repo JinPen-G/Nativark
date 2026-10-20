@@ -142,3 +142,17 @@ export interface AiTaskEventResetDraft {
   status: "reset_required";
   reason: "cursor_expired" | "unsupported_version";
 }
+
+/** Owner-only metadata transport. No execution, input/output body or lease is
+ * returned; cursor continuation always repeats current resource authorization. */
+export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
+  list: "list", snapshot: "snapshot", events: "events" } as const);
+export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
+  "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
+] as const);
+export interface AiTaskMetadataQueryDraft { limit?: number; cursor?: string; status?: AiTaskStatusDraft; sceneCode?: string }
+export interface AiTaskMetadataPageDraft {
+  items: Array<{ taskId: string; status: AiTaskStatusDraft; revision: number; sceneCode: string; sceneVersion: string;
+    createdAt: string; updatedAt: string; cancelRequestedAt: string | null }>;
+  nextCursor: string | null;
+}
