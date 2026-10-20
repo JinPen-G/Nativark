@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-20。最新收口：`abde21b6`步骤及审批暂停/继续回执绑定与提交未知，`4bf3dd58`任务启动/恢复衔接/终态的原命令及事件绑定。异常已写回执不驱动执行或释放猜测旧租约，原快照仍可按当前权限核对。实际服务stdin三组最终3/3、3/3、2/2；既有受影响用例25/25，均0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、3项接手支付WIP诊断，AI Native无诊断；diff退出0。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行；原28项等权64.3%、验收0/28、百分比不变。其他WIP与四线暂停保留。
+> 更新时间：2026-10-20。最新收口：`4f57c7ca`原任务预算有界汇总，复用原单账及当前任务权限，接回性能Controller/任务中心/shared/OpenAPI；≤50个已登记调用跨页核对，超限不返回总额，缺账和unknown不补零。实际Auth/仓储/消费入口stdin最终3/3、0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、2项支付WIP诊断，AI Native无诊断；diff退出0，未改支付WIP。原运行器回执恢复保留。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行；原28项等权64.3%、验收0/28、百分比不变。其他WIP与四线暂停保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -22,6 +22,8 @@
 
 ## 当前核心接点及下一步
 
+原任务预算汇总：原`POST /api/ai-native/scene-requests/model/performance`请求可显式增加`includeTaskFinancial:true`，返回可选`taskFinancial`；不传则保持原单页路径。`TaskBudgetUsageReader.summary({taskId})`沿当前Auth/任务动作政策和原Prisma调用/预留绑定，最多51条探测、3页账务和每页一次复验，按原run→task owner范围读取，不新建账本或统计存储。≤50个已登记调用全部观察才给分单位/币种的整数原子汇总；reserved、pending、settled、releasedReservation及settledExcess分开，缺账计数明示，未全部结算/释放时accountingComplete=false。>50返回limit_exceeded/not_computed且无金额；空记录不证明无消耗，完整性仅针对已登记调用，不是供应商账单或派发许可。跨页版本/调用集合变化或撤权拒绝旧汇总。当前仍无大任务全量成本、全局成功/接管率、正式SLO/容量及真实环境证据，AIN-25不据此升75%。
+
 运行器事务接点：步骤start/result、审批checkpoint/resume及任务start/resume/outcome均先绑定原task/run/step、修订与holder，已写回执立即快照并核对事件data、状态/原因、游标、时间及精确新修订。畸形回执为AI_RESULT_UNKNOWN，不再抛普通存储失败或发生空data异常后尝试旧租约清理。Task/Step事务回调完成后的错误即使形似CAS拒绝仍为unknown；已尝试写入的非确定事务错误也保留未知，确定的事务内权限/CAS拒绝不放宽。原快照/事件用于核对，不借观察重新取得执行权。正常订单host已离线驱动暂停→人类审批→原Core提交→同一批资源结算；DB/业务事实是替身，不是MySQL、真实模型或全宿主验收。下一步沿原依赖补可信输入计量生产者与标准Gateway/预算执行、混合恢复及取消边界，不把已收口回执重复开发，也不声称仅剩环境。
 
 运行器工作窗和登记恢复：本次held run计时从进入持有阶段开始，计划/资源准备不再获得免费前缀；每步的取消前检、登记、资源准备、start及effect共用该步剩余时间和本次总工作时间。时间不足不登记/执行新动作，不补1毫秒；已发生结果的原收据、资源结算及租约善后仍保留各自有限等待，不能将工作窗结束当作回滚或无消耗证明。领取前和计划尚未取得时沿既有5秒边界，不宣称全部HTTP墙钟严格等于计划工作时间。持久累计资源门不变，恢复不清零。
@@ -30,7 +32,7 @@
 
 预算拒绝观测：Unified仅在原预算`reserve`明确返回`BUDGET_UNAVAILABLE`时调用既有观察者的`budgetDenied`，最多等待1秒、沿宿主取消；失败保留原拒绝，不转换为成功、退额或重试。标准运营/员工、客户与能力探测沿已有`PrismaTaskGatewayAudit`实例接入，未覆盖的自定义观察者不补造记录。生产者复核当前身份、原task/invocation/configuration/registration、领取token及有效期；原预留或会计收据存在时不制造“干净拒绝”依据。只向原OperationLog追加ID/hash和固定代码，同键同载荷可观察、COMMIT应答不明不重写。`TaskPerformanceReader.budgetAdmission`仅返回当前owner的50调用窗口中已记录拒绝，读后复验；没有记录不等于准入成功，拒绝不是未消耗证明，不计算完整拒绝率或SLO。资金/调用账本未新增写入，未注册新HTTP或启用配置。下一步仍补可信计数生产和标准全链，不以此片宣称AIN-25已到75%。
 
-原账成本与恢复：`TaskBudgetUsageReader.read`的可选`pageAmounts`由原`PrismaBudgetRepository`读取，现有`TaskPerformanceReader.financial`直接消费；按money币种及tokens/calls分别汇聚reserved/pending/settled/releasedReservation/settledExcess的整数原子字符串。仅本页，绝非全任务总账、退款额或供应商账单；缺记录不补零、过期unknown仍占用、超额实耗不截断。缺记录期间出现原占用或原账Date版本变化拒绝旧结果。仓储按真实unitKind及列、状态和精度读回，非法状态、缺金额、混合单位或多余小数拒绝，不能默认reserved/零或先四舍五入。下一步仍需全任务成本与预算拒绝等有界采集和标准全链，不据本页汇总提升AIN-25。
+原账成本与恢复：`TaskBudgetUsageReader.read`的可选`pageAmounts`由原`PrismaBudgetRepository`读取，现有`TaskPerformanceReader.financial`直接消费；按money币种及tokens/calls分别汇聚reserved/pending/settled/releasedReservation/settledExcess的整数原子字符串。此字段仍仅本页，跨页汇总另见上述显式taskFinancial；二者都不是退款额或供应商账单。缺记录不补零、过期unknown仍占用、超额实耗不截断；原账版本变化或新出现占用拒绝旧页。仓储按真实计量列、状态与精度读回，非法/缺额/混合单位拒绝。下一步仍需大任务成本、完整标准全链及SLO，不以局部观察提升AIN-25。
 
 `BudgetService.release`允许当前正式权限下观察已释放的同一原eventKey，仓储必须存在同载荷原事件；新键、unknown/已派发释放仍拒绝，不再退额或授派发。`mutate`各生命周期写及同键读取遇COMMIT应答丢失统一待核对、不自动重试；原占用与账本仍同事务，提交前与重放返回前复验当前授权。重建服务可读原结果，不凭异常认定回滚。本片沿实际Auth/订阅/任务预算授权、Service和Prisma仓储，DB/锁/事务及派发证据是受控替身，不是MySQL或外部调用验收。
 
