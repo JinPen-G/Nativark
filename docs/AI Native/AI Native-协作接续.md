@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-20。最新收口：`4f57c7ca`原任务预算有界汇总，复用原单账及当前任务权限，接回性能Controller/任务中心/shared/OpenAPI；≤50个已登记调用跨页核对，超限不返回总额，缺账和unknown不补零。实际Auth/仓储/消费入口stdin最终3/3、0 fail/skip/todo、退出0，无新测试文件。API noEmit退出1：678 roots、2项支付WIP诊断，AI Native无诊断；diff退出0，未改支付WIP。原运行器回执恢复保留。可信计数/上界生产者、完整标准执行及SLO仍缺，历史用量JSON迁移未执行；原28项等权64.3%、验收0/28、百分比不变。其他WIP与四线暂停保留。
+> 更新时间：2026-10-20。最新功能提交：`e7b88f97`，订单/通知设置原确认历史及现有消费入口；完成、取消、继续应答不明后只读核对，不重新领取、批准或执行。stdin冒烟4/4、退出0，无新测试文件；API noEmit退出1（680 roots，仅支付WIP两项诊断），diff退出0。原单账、预算汇总及运行器恢复保留；可信计数/上界生产者、完整标准执行及SLO仍缺，用量JSON迁移未执行。原28项等权64.3%、验收0/28，不改百分比；其他WIP与四线暂停保留。
 > **负责人已确认全部停写，本会话接回主线核心源码开发。** 保留接手时未提交文档成果；维护本接续/开发记录，本轮按负责人要求仅另外更新任务百分比与其核对日期，不夹带其他既有正文，不启动A/B、辅助施工或真实服务。
 
 ## 权威依据
@@ -21,6 +21,8 @@
 开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本轮未跨新验收门，不修改任务百分比。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 ## 当前核心接点及下一步
+
+原确认历史：`PrismaTaskApplication.readConfirmationHistory({taskId,runId,stepId})`已接订单/通知设置宿主；选报价及通知原请求的既有`readConfirmation`在非等待状态返回只读history（通知尚无步骤时为null），等待状态仍走原有效checkpoint，不以历史授权继续。原phase/receipt/plan/人类decision和事件关联复验，最多两阶段/两次转换、两次一致快照；审批到期按原事件时点核验，不因现在到期否认历史，不授新执行。当前read_step_terminal/read_events撤权或串绑定拒绝；缺记录不证明未执行，阶段成功不证明Core业务成功。shared/OpenAPI已有结构，未新注册HTTP/生产驱动。实际Auth、Prisma适配、运行器、人类审批与Core组合的DB/业务事实为替身；通知原请求HTTP消费者只做代码/类型核对，未宣称全宿主或MySQL验收。后续沿原依赖补可信计数/标准执行及剩余恢复窗口，不重复此历史读取或把已关闭执行门改成默认成功。
 
 原任务预算汇总：原`POST /api/ai-native/scene-requests/model/performance`请求可显式增加`includeTaskFinancial:true`，返回可选`taskFinancial`；不传则保持原单页路径。`TaskBudgetUsageReader.summary({taskId})`沿当前Auth/任务动作政策和原Prisma调用/预留绑定，最多51条探测、3页账务和每页一次复验，按原run→task owner范围读取，不新建账本或统计存储。≤50个已登记调用全部观察才给分单位/币种的整数原子汇总；reserved、pending、settled、releasedReservation及settledExcess分开，缺账计数明示，未全部结算/释放时accountingComplete=false。>50返回limit_exceeded/not_computed且无金额；空记录不证明无消耗，完整性仅针对已登记调用，不是供应商账单或派发许可。跨页版本/调用集合变化或撤权拒绝旧汇总。当前仍无大任务全量成本、全局成功/接管率、正式SLO/容量及真实环境证据，AIN-25不据此升75%。
 
