@@ -167,10 +167,12 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
     }
     if (waiting.kind !== 'waiting_reference' || waiting.receipt.kind === 'unknown') return unknown(material(waiting, 'unresolved'));
     if (waiting.receipt.kind === 'absent') {
-      await policy.authorizePreparation(input.taskId);
-      await app.source.readForExecution(input);
+      // A persisted proposal can still be observed and paused after new work
+      // closes. Do not discard its measurement or grant a fresh preparation;
+      // approval and submission retain their separate current execution gates.
+      await policy.authorizeRead(input.taskId);
       const latest = await readWaiting(input);
-      await policy.authorizePreparation(input.taskId);
+      await policy.authorizeRead(input.taskId);
       if (signal.aborted || requestFingerprint(latest) !== requestFingerprint(waiting)) return unknown(material(waiting, 'unresolved'));
       return { kind: 'paused', pause: 'confirmation', payload: material(waiting, 'awaiting_decision') };
     }
