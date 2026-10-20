@@ -109,6 +109,25 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
   }
   protected override async additionalEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext) {
+    // Preserve an original result under today's independent task permission;
+    // removing an unrelated execution permission must not erase its frozen
+    // caller binding or metering. Starts and other task producers retain the
+    // strict current-identity path. This never grants another invocation.
+    if (artifact && typeof this.modelDb.aiTaskOriginalRequest?.findFirst === 'function') {
+      const access = aiTaskAccessFromContext(context, step.taskId, this.clock());
+      const task = await this.modelDb.aiTask.findFirst({ where: access.where });
+      if (!task || task.scopeId !== step.scopeId) throw denied();
+      if (task.inputRef && task.creationKey === `scene-request:${task.inputRef}`) {
+        const db = { aiTaskOriginalRequest: this.modelDb.aiTaskOriginalRequest };
+        const original = await readOriginalTaskModelProvenance(db, task);
+        const evidence = await this.modelEvidence(step, artifact, charges, context, original.authorizationHash);
+        const current = await this.modelAuthorization.resolve(step.taskId, 'transition_task');
+        const latest = await this.modelDb.aiTask.findFirst({ where: aiTaskAccessFromContext(current, step.taskId, this.clock()).where });
+        if (taskModelIdentity(current) !== taskModelIdentity(context) || !latest
+          || (await readOriginalTaskModelProvenance(db, latest)).bindingHash !== original.bindingHash) throw denied();
+        return evidence;
+      }
+    }
     return this.modelEvidence(step, artifact, charges, context);
   }
   private async modelEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,

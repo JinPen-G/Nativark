@@ -313,7 +313,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return this.writeTransaction(async tx => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
-      if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== ref.registered.taskRevision) throw conflict();
+      if (!['RUNNING', 'WAITING_EXTERNAL'].includes(task.status) || task.cancelRequestedAt !== null
+        || task.revision !== ref.registered.taskRevision) throw conflict();
       const facts = await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease, true);
       if (ref.registered.runId !== run.id || ref.registered.stepRevision !== facts.step.revision || requestFingerprint(ref.plan) !== requestFingerprint(facts.planned)) throw denied();
       const prior = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_runId_stepId_planHash: {
@@ -328,6 +329,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         await this.access(task.id, 'read_step_terminal', before);
         return { kind: 'input_limit_reached' as const };
       }
+      // Reconciliation may cross an already completed prefix while the task
+      // waits for a later unknown effect. A closed source may attest that no
+      // input is needed, but that is not permission to create/resume input.
+      if (task.status !== 'RUNNING' && (prior || requirement.kind !== 'not_required')) throw conflict();
       if (prior) {
         await this.access(task.id, 'request_input', before);
         const contract = this.validateRequest(prior, facts.binding, before);

@@ -18,6 +18,7 @@ import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evid
 import type { AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { AiStepTransitionAuthority } from '../ai-step-transition.repository';
+import type { AiStepRegistrationCommand } from '../ai-step-registration.repository';
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
@@ -101,7 +102,30 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     ...(task.answerRegistrationRef ? [{ registrationRef: task.answerRegistrationRef,
       toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' as const }] : [])
   ];
-  const planAuthority: AiTaskPlanEvidenceAuthority = { authorize: async (value, lease) => {
+  const originalRegistration = async (value: Readonly<AiStepRegistrationCommand>) => {
+    const command = structuredClone(value);
+    if (command.taskId !== task.taskId || command.lease.runId !== task.runId
+      || !expectedSteps.some(step => step.registrationRef === command.registrationRef)) throw denied();
+    await assertOriginal();
+    const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
+    const owner = await input.db.aiTask.findFirst({ where: access.where });
+    if (!owner) throw denied();
+    const key = { scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId };
+    const saved = structuredClone(await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } }));
+    if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId) throw denied();
+    const plan = aiTaskRunPlanSchema.parse(structuredClone(saved.payload));
+    if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+      || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
+    const grant = await model.planAuthority.resolveOriginal(command);
+    await assertOriginal();
+    const latest = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+    if (!latest || latest.scopeId !== key.scopeId || latest.taskId !== key.taskId || latest.runId !== key.runId
+      || latest.planHash !== saved.planHash || latest.authorityHash !== saved.authorityHash
+      || latest.policyVersion !== saved.policyVersion || requestFingerprint(latest.payload) !== saved.planHash) throw denied();
+    if ((await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+    return grant;
+  };
+  const planAuthority: AiTaskPlanEvidenceAuthority = { resolveOriginal: originalRegistration, authorize: async (value, lease) => {
     const plan = aiTaskRunPlanSchema.parse(structuredClone(value));
     if (plan.taskId !== task.taskId || plan.runId !== task.runId
       || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
@@ -116,8 +140,19 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
     const row = await input.db.aiTask.findFirst({ where: access.where });
     if (!row) throw denied();
-    const storedOrder = await order.source.readOrderExplainInput(binding);
-    if (storedOrder.registrationRef !== task.orderRegistrationRef || storedOrder.input.input.orderId !== task.orderId) throw denied();
+    const storedOrder = forExecution ? await order.source.readOrderExplainInput(binding) : await (async () => {
+      const step = await input.db.aiStep.findFirst({ where: { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId,
+        inputRef: binding.inputRef, requestFingerprint: binding.fingerprint, toolCode: 'rental.order.explain',
+        toolVersion: AI_TOOL_DRAFT_VERSION } });
+      // Before the next read was ever registered, retain the strict current
+      // input gate. This fallback cannot register or execute that read.
+      if (!step) return order.source.readOrderExplainInput(binding);
+      const stored = await order.source.readReadonlyResultInput({ taskId: task.taskId, runId: task.runId, stepId: step.id });
+      if (stored.inputRef !== binding.inputRef || stored.fingerprint !== binding.fingerprint) throw denied();
+      return stored;
+    })();
+    if (storedOrder.registrationRef !== task.orderRegistrationRef || !isGatewayOrderExplainRequest(storedOrder.input)
+      || storedOrder.input.input.orderId !== task.orderId) throw denied();
     const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
     const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: task.modelRegistrationRef } });
     if (!frozen || frozen.scopeId !== key.scopeId || frozen.taskId !== task.taskId || frozen.runId !== task.runId
@@ -151,7 +186,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if (step.toolCode === TASK_TEXT_MODEL_TOOL) return modelEvidence.resolve(command);
     if (step.toolCode !== 'rental.order.explain' || !step.inputRef) throw denied();
     await readEvidence.resolve(command);
-    const proof = await candidate({ taskId: task.taskId, runId: task.runId, inputRef: step.inputRef, fingerprint: step.requestFingerprint });
+    const proof = await candidate({ taskId: task.taskId, runId: task.runId, inputRef: step.inputRef, fingerprint: step.requestFingerprint }, command.reason === 'start');
     const grant = await readEvidence.resolve(command);
     return { ...grant, authorizationKey: `${grant.authorizationKey}:candidate-${requestFingerprint(proof)}` };
   } };
@@ -214,17 +249,17 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
         || frozen.id !== binding.inputRef || frozen.registrationRef !== binding.registrationRef
         || frozen.fingerprint !== binding.inputHash || frozen.toolCode !== binding.toolCode
         || frozen.toolVersion !== binding.toolVersion) throw denied();
-      const proof = await modelEvidence.readCompletedEvidence(task.taskId, binding.stepId, binding.basisResultRef);
+      const proof = await modelEvidence.readOriginalCompletedEvidence(task.taskId, binding.stepId, binding.basisResultRef);
       if (proof.step.runId !== task.runId || proof.step.inputRef !== binding.inputRef
         || proof.step.fingerprint !== binding.inputHash || proof.artifact.id !== binding.basisResultRef) throw denied();
       if (binding.registrationRef === task.modelRegistrationRef) {
         const target = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: task.orderRegistrationRef } });
         if (!target) throw unavailable();
-        if ((await candidate({ ...key, inputRef: target.id, fingerprint: target.fingerprint })).resultId !== binding.basisResultRef) throw denied();
+        if ((await candidate({ ...key, inputRef: target.id, fingerprint: target.fingerprint }, false)).resultId !== binding.basisResultRef) throw denied();
       } else {
         const result = proof.artifact.payload;
         if (!isGatewayResult(result) || result.status !== 'completed' || result.toolRequests.length) throw denied();
-        await verifyAnswerSnapshot(binding.inputRef);
+        await verifyAnswerSnapshot(binding.inputRef, false);
       }
       const latest = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
       if (!latest || latest.planHash !== saved.planHash || requestFingerprint(latest.payload) !== binding.planHash
@@ -237,7 +272,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const modelInputSource = input.inputSource ? Object.freeze({ resolve: input.inputSource.resolve.bind(input.inputSource),
     validateAnswers: input.inputSource.validateAnswers.bind(input.inputSource) }) : completedModelInput;
   const root = composeCurrentAuthorizedPersistentTaskInputRunner({ db: input.db, wall: input.clock, monotonic: input.monotonic,
-    planAuthority, transitionAuthority, registrationAuthority: { resolve: async command => {
+    planAuthority, transitionAuthority, registrationAuthority: { resolveOriginal: originalRegistration, resolve: async command => {
       if (command.registrationRef === task.modelRegistrationRef) return model.planAuthority.resolve(command);
       if (command.registrationRef === task.answerRegistrationRef) return model.planAuthority.resolve(command);
       if (command.registrationRef === task.orderRegistrationRef) return order.source.resolve(command);
