@@ -127,12 +127,13 @@ async function readOriginalTaskSnapshot(scenes: Pick<ReturnType<typeof composeAi
 }
 
 function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequestOptions,
-  compose: (input: D & { credentials: AiTaskCredentialSource }, command: unknown) => A | Promise<A>) {
+  compose: (input: D & { credentials: AiTaskCredentialSource }, command: unknown) => A | Promise<A>,
+  defaultLifetime?: { write: boolean }) {
   const parsed = optionsSchema.safeParse(options);
   if (!parsed.success || 'credentials' in dependencies || 'originals' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const server = { ...dependencies }, { audience } = parsed.data;
   return async <R>(request: AiSceneHttpRequest, value: unknown, consume: (app: A, command: unknown) => Promise<R>,
-    lifetime?: { write: boolean; signal?: AbortSignal; preflightOnly?: true }): Promise<R> => {
+    lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true } | undefined = defaultLifetime): Promise<R> => {
     const header = bearerSchema.safeParse(request?.headers?.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
@@ -717,7 +718,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
-  });
+    // This root only observes old work or submits the three explicit cancel
+    // mutations below. A stalled read must close its own request credentials;
+    // it must not occupy a host indefinitely or continue after an outer timeout.
+  }, { write: false });
   const cancellation = (request: AiSceneHttpRequest, value: unknown, settled: boolean) => {
     const parsed = cancellationSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -745,10 +749,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
     readTaskPerformance: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (root, command) => root.center.readPerformance(command), { write: false, signal }),
-    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
-      () => call(request, value, (root, command) => root.center.readScene(command)), false),
-    readInput: (request: AiSceneHttpRequest, value: unknown) => waitForTaskApplicationDependency(
-      () => call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input), false),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.center.readScene(command)),
+    readInput: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
     readAnswer(request: AiSceneHttpRequest, value: unknown) {
       const parsed = answerSchema.safeParse(structuredClone(value));
       if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -845,7 +849,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const,
           settlement: null, settlementState: 'not_attempted' as const });
-      });
+      }, { write: true });
     },
     /** This does not cancel started work or release any financial reservation. */
     settleUnstartedCancellation(request: AiSceneHttpRequest, value: unknown) {
@@ -865,7 +869,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return freezeOriginalInput({ original: input.original, receipt,
           cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });
-      });
+      }, { write: true });
     },
     readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, false),
     /** Close only the original released, fully measured clarification wait.
@@ -888,7 +892,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
         return freezeOriginalInput({ original: input.original, receipt,
           cancellation: 'released_input_wait_cancelled_not_business_rollback' as const,
           resourceRelease: 'not_attempted' as const, automaticRetry: false as const });
-      });
+      }, { write: true });
     },
     readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, true),
     readTakeoverReceipt(request: AiSceneHttpRequest, value: unknown) {
