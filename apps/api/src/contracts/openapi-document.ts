@@ -2015,6 +2015,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskModelResult, 'AiClientTaskReadRequest', 'AiClientTaskModelResultReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationReceipt, 'AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationSettlementReceipt, 'AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskUnstartedCancellationReceipt'],

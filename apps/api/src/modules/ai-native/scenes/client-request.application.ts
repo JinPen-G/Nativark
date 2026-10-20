@@ -754,7 +754,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           if (steps.length > 1 || steps.some(step => step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION))
             throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           if (steps[0]?.resultRef && run.status === 'QUEUED') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          return { scopeId: task.scopeId, taskId: task.id, taskRevision: task.revision,
+          return { scopeId: task.scopeId, taskId: task.id, taskRevision: task.revision, taskStatus: task.status,
             runId: run.id, runRevision: run.revision, step: steps[0] ?? null };
         }, { maxWait: 2500, timeout: 5000 });
         const result = selected.step?.resultRef ? await new AiTaskResultRepository(db, authorized.tasks, clock)
@@ -780,6 +780,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         await bound.assertCurrent();
         const response = aiClientTaskModelResultReadResponseSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
           taskId: selected.taskId, taskRevision: selected.taskRevision, state: result ? 'observed' : 'not_observed',
+          workflowStatus: selected.taskStatus.toLowerCase(),
+          resultPurpose: result?.status !== 'succeeded' ? 'not_attested'
+            : selected.taskStatus === 'WAITING_INPUT' ? 'clarification' : selected.taskStatus === 'SUCCEEDED' ? 'answer' : 'not_attested',
           result: result ? { resultId: result.resultId, status: result.status, observedAt: result.observedAt, text } : null,
           authority: 'generated_text_not_business_fact', businessExecution: 'not_inferred_from_model_result',
           retryable: false, nextAction: 'read_original_task' });

@@ -33,7 +33,14 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
   try { config = modelConfiguration.parse(structuredClone(value ?? { enabled: false })); }
   catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
   // Original result observation needs neither an enabled model nor a Provider.
-  if (!config.enabled) return { taskResults: { db }, taskAccounting: { db } };
+  if (!config.enabled) return {
+    taskResults: { db }, taskAccounting: { db },
+    // Observe only a question already persisted by the original runner. The
+    // widest parser ceiling is not a model/cost grant; exact original limits,
+    // current client read/answer policy and question expiry remain mandatory.
+    taskInputs: { db, inputSource: 'original_client_clarification', gatewayScene: {
+      sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: 32768 } }
+  };
   if (config.limits.maxStepMs > config.limits.maxTotalMs || !secrets
     || suppliedAdapters !== undefined && (!Array.isArray(suppliedAdapters) || !suppliedAdapters.length))
     throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_dependencies');
@@ -43,7 +50,10 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
   return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
     inputSource, gatewayScene,
     gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },
-    taskInputs: { db, inputSource, gatewayScene }, taskResults: { db }, taskAccounting: { db } };
+    // Turning off NEW questions must not hide an original persisted wait.
+    // This reader/submission surface cannot publish questions or invoke a model.
+    taskInputs: { db, inputSource: 'original_client_clarification', gatewayScene },
+    taskResults: { db }, taskAccounting: { db } };
 }
 type Dependencies = AiClientRequestDependencies & {
   db: PrismaClient;

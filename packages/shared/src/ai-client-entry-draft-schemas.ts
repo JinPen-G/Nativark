@@ -103,6 +103,8 @@ export const aiClientTaskModelControlResponseSchema = z.object({
 export const aiClientTaskModelResultReadResponseSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),
+  workflowStatus: z.enum(AI_TASK_STATUSES_DRAFT).optional(),
+  resultPurpose: z.enum(['answer', 'clarification', 'not_attested']).optional(),
   state: z.enum(['observed', 'not_observed']),
   result: z.object({ resultId: id.max(36), status: z.enum(['succeeded', 'failed', 'unknown']),
     observedAt: z.string().datetime({ offset: true }), text: z.string().max(32768).nullable() }).strict().nullable(),
@@ -110,7 +112,9 @@ export const aiClientTaskModelResultReadResponseSchema = z.object({
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict().superRefine((value, context) => {
   if ((value.state === 'observed') !== (value.result !== null)
-    || (value.result && (value.result.status === 'succeeded') !== (value.result.text !== null)))
+    || (value.result && (value.result.status === 'succeeded') !== (value.result.text !== null))
+    || value.resultPurpose === 'answer' && (value.workflowStatus !== 'succeeded' || value.result?.status !== 'succeeded')
+    || value.resultPurpose === 'clarification' && (value.workflowStatus !== 'waiting_input' || value.result?.status !== 'succeeded'))
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent model result observation' });
 });
 export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestSchema.extend({
