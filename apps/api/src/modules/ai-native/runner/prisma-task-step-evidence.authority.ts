@@ -62,7 +62,20 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     if (matching.length !== 1 || !this.accepts(step, matching[0].operation) || matching[0].toolCode !== step.toolCode
       || matching[0].toolVersion !== step.toolVersion || step.effect !== (this.modelStep && command.reason !== 'start' ? 'POSSIBLE' : 'NONE')) throw unavailable();
     const lease = { taskId: key.taskId, ...command.lease, expiresAt: run.leaseExpiresAt.toISOString() };
-    const proof = structuredClone(await this.plans.authorize(structuredClone(plan), lease));
+    const original = command.reason !== 'start' && this.plans.resolveOriginal
+      ? structuredClone(await this.plans.resolveOriginal({ taskId: task.id, registrationRef: matching[0].registrationRef,
+        expectedTaskRevision: task.revision, lease: structuredClone(command.lease) })) : null;
+    if (original && (original.registrationAllowed !== false || original.taskId !== task.id
+      || original.registrationRef !== matching[0].registrationRef || original.inputRef !== step.inputRef
+      || original.requestFingerprint !== step.requestFingerprint || original.toolCode !== step.toolCode
+      || original.toolVersion !== step.toolVersion || identity(original.context) !== identity(context)
+      || !/^[a-f0-9]{64}$/u.test(saved.authorityHash) || typeof saved.policyVersion !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(saved.policyVersion))) throw denied();
+    // Completing a measured original result is not a new tool invocation.
+    // Legacy adapters without original evidence retain their stricter gate.
+    const proof = original ? { authorityHash: saved.authorityHash, policyVersion: saved.policyVersion,
+      expiresAt: run.leaseExpiresAt.toISOString() }
+      : structuredClone(await this.plans.authorize(structuredClone(plan), lease));
     if (proof.authorityHash !== saved.authorityHash || proof.policyVersion !== saved.policyVersion
       || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
     const previous: AiStepStateDraft = { stepId: step.id, runId: step.runId, sequence: step.sequence, revision: step.revision,

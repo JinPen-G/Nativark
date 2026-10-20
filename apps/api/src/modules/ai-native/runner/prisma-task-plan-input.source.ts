@@ -438,26 +438,28 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         || !/^[a-f0-9]{64}$/u.test(stored.authorityHash) || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
       const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
       const selected = plan.steps.filter(step => step.registrationRef === command.registrationRef);
-      if (plan.taskId !== task.id || plan.runId !== run.id || selected.length !== 1 || selected[0].toolCode !== this.toolCode
+      if (plan.taskId !== task.id || plan.runId !== run.id || selected.length !== 1
         || selected[0].toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
-      const input = await this.input(await tx.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
+      const source = selected[0].toolCode === this.toolCode ? this : this.planSources?.get(selected[0].toolCode as PersistedTaskInputTool);
+      if (!source) throw denied();
+      const input = await source.input(await tx.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
         { ...key, registrationRef: command.registrationRef }, true);
       if (stored.policyVersion !== `scene-policy-${input.policyRevision}`) throw denied();
-      const inputRef = this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id;
-      const fingerprint = this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint;
+      const inputRef = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id;
+      const fingerprint = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint;
       const actionId = aiStepActionId(access.scope, task.id, command.registrationRef);
-      const step = await tx.aiStep.findFirst({ where: { ...key, actionId, toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
+      const step = await tx.aiStep.findFirst({ where: { ...key, actionId, toolCode: source.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
         inputRef, requestFingerprint: fingerprint } });
       if (!step || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId || step.actionId !== actionId
-        || step.inputRef !== inputRef || step.requestFingerprint !== fingerprint || step.toolCode !== this.toolCode
+        || step.inputRef !== inputRef || step.requestFingerprint !== fingerprint || step.toolCode !== source.toolCode
         || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
-      return { inputRef, fingerprint, planHash: stored.planHash, inputHash: input.fingerprint, stepId: step.id };
+      return { inputRef, fingerprint, planHash: stored.planHash, inputHash: input.fingerprint, stepId: step.id, toolCode: source.toolCode };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
     const current = await this.authorization.resolve(command.taskId, 'read_step_terminal');
     if (identity(current) !== identity(context)) throw denied();
     return { context: structuredClone(current), registrationAllowed: false, taskId: command.taskId,
       registrationRef: command.registrationRef, authorizationKey: `original-step-${requestFingerprint(observed)}`,
-      toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: observed.inputRef, requestFingerprint: observed.fingerprint };
+      toolCode: observed.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: observed.inputRef, requestFingerprint: observed.fingerprint };
   }
 
   async resolve(raw: Readonly<AiStepRegistrationCommand>) {
@@ -601,7 +603,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         taskId: task.id, registrationRef: row.registrationRef })}`;
       const input = await this.parseInput(structuredClone(row.payload));
       if (step.actionId !== expectedAction || this.fingerprint(input) !== row.fingerprint) throw denied();
-      return { context, input, binding: requestFingerprint({ taskId: task.id, scopeId: task.scopeId,
+      return { context, input, inputRef: row.id, fingerprint: row.fingerprint, registrationRef: row.registrationRef,
+        binding: requestFingerprint({ taskId: task.id, scopeId: task.scopeId,
         runId: step.runId, stepId: step.id, actionId: step.actionId, inputRef: row.id,
         fingerprint: row.fingerprint, toolCode: row.toolCode, toolVersion: row.toolVersion,
         policyRevision: row.policyRevision, registrationRef: row.registrationRef }) };

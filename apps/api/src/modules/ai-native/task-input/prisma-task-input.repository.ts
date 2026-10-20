@@ -6,7 +6,7 @@ import {
   isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft, type AiTaskEventDraft
 } from '@rental-os/shared';
-import { AiTaskRepositoryError, type AiTaskRepository, type AiTaskRepositoryOperation } from '../ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository, type AiTaskRepositoryOperation } from '../ai-task.repository';
 import { evaluateAiTaskTransitionDraft, type AiTaskTransitionStateDraft } from '../task-transition-draft';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
@@ -225,12 +225,12 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     if (run.id !== lease.runId || run.taskId !== lease.taskId || run.revision !== lease.revision || run.leaseOwnerId !== lease.holderId
       || run.fencingToken.toFixed(0) !== lease.fencingToken || !run.leaseExpiresAt || run.leaseExpiresAt <= this.clock()) throw conflict();
   }
-  private async facts(tx: Tx, scopeId: string, taskId: string, runId: string, stepId: string, lease?: AiTaskRunnerLease) {
+  private async facts(tx: Tx, scopeId: string, taskId: string, runId: string, stepId: string, lease?: AiTaskRunnerLease, observingCompletion = false) {
     const row = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId, runId } } });
     if (!row || row.scopeId !== scopeId || row.taskId !== taskId || row.runId !== runId) throw unavailable();
     const parsed = aiTaskRunPlanSchema.safeParse(row.payload);
     if (!parsed.success || parsed.data.taskId !== taskId || parsed.data.runId !== runId || requestFingerprint(parsed.data) !== row.planHash) throw denied();
-    if (lease) {
+    if (lease && !observingCompletion) {
       if (!this.plans) throw unavailable();
       const proof = structuredClone(await this.plans.authorize(structuredClone(parsed.data), structuredClone(lease)));
       if (proof?.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion || !Number.isFinite(Date.parse(proof.expiresAt))
@@ -242,6 +242,22 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const index = parsed.data.steps.findIndex(p => step.actionId === `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: access.scope, taskId, registrationRef: p.registrationRef })}`);
     const planned = parsed.data.steps[index];
     if (!planned || planned.toolCode !== step.toolCode || planned.toolVersion !== step.toolVersion) throw denied();
+    if (lease && observingCompletion) {
+      if (!this.plans) throw unavailable();
+      if (this.plans.resolveOriginal) {
+        const original = await this.plans.resolveOriginal({ taskId, registrationRef: planned.registrationRef,
+          expectedTaskRevision: (await this.task(tx, taskId, access)).revision,
+          lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } });
+        if (original.registrationAllowed !== false || original.taskId !== taskId || original.inputRef !== step.inputRef
+          || original.requestFingerprint !== step.requestFingerprint || original.toolCode !== step.toolCode
+          || original.toolVersion !== step.toolVersion || original.registrationRef !== planned.registrationRef
+          || aiTaskAccessFromContext(original.context, taskId, this.clock()).bindingKey !== access.bindingKey) throw denied();
+      } else {
+        const proof = await this.plans.authorize(structuredClone(parsed.data), structuredClone(lease));
+        if (proof.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion
+          || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.clock().getTime()) throw denied();
+      }
+    }
     const artifact = await tx.aiTaskResultArtifact.findUnique({ where: { scopeId_taskId_id: { scopeId, taskId, id: step.resultRef } } });
     if (!artifact || artifact.id !== step.resultRef || artifact.scopeId !== scopeId || artifact.taskId !== taskId || artifact.runId !== runId
       || artifact.stepId !== stepId || artifact.actionId !== step.actionId || artifact.stepFingerprint !== step.requestFingerprint
@@ -298,7 +314,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
       if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== ref.registered.taskRevision) throw conflict();
-      const facts = await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease);
+      const facts = await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease, true);
       if (ref.registered.runId !== run.id || ref.registered.stepRevision !== facts.step.revision || requestFingerprint(ref.plan) !== requestFingerprint(facts.planned)) throw denied();
       const prior = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_runId_stepId_planHash: {
         scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id, planHash: facts.binding.planHash } } });
@@ -327,6 +343,9 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         if ((await this.tasks.resolveAccess(task.id, 'read_step_terminal')).bindingKey !== before.bindingKey) throw denied();
         return null;
       }
+      // An original completion can be observed with execution closed, but
+      // creating another human-input request still needs the live plan gate.
+      await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease);
       await this.access(task.id, 'request_input', before);
       const modelContinuation = facts.planned.operation === 'external_unknown' && continuableModel(facts.planned.toolCode)
         && facts.plan.steps.length === 1;

@@ -52,6 +52,8 @@ const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u
 export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
+  /** Current-authorized binding of an existing step, never a start grant. */
+  resolveOriginal?: import('../ai-step-registration.repository').AiStepRegistrationAuthority['resolveOriginal'];
 }
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
 type Tx = Prisma.TransactionClient;
