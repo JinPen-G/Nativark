@@ -240,7 +240,12 @@ export class UnifiedAiGatewayService {
       const recordUsage = this.usageRecorder(call, usage.id);
       const transportStarted = performance.now();
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)
-        .then(async result => { if (result.usage) await recordUsage(result.usage); return result; })));
+        .then(async value => {
+          // Pin the returned payload before receipt persistence yields to its owner.
+          const result = structuredClone(value);
+          if (result.usage) await recordUsage(result.usage);
+          return result;
+        })));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       const result = intentBinding ? this.textResult(rawResult,
         intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true,
@@ -338,7 +343,8 @@ export class UnifiedAiGatewayService {
       let result: GatewayInvocationResult | undefined;
       iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)[Symbol.asyncIterator]();
       while (true) {
-        const item = await life.wait(() => iterator!.next().then(async item => {
+        const item = await life.wait(() => iterator!.next().then(async value => {
+          const item = structuredClone(value);
           if (!item.done && !result && item.value?.kind === 'result' && item.value.result?.usage) await recordUsage(item.value.result.usage);
           return item;
         }));

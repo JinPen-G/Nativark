@@ -106,7 +106,8 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder) {
     try {
       const prepared = await this.prepare(context, request, route, signal, false);
-      const result = await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl });
+      // Adapter-owned objects must not change while accounting or authorization awaits.
+      const result = structuredClone(await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl }));
       if (result.usage) await recordUsage?.(structuredClone(result.usage));
       this.cancelled(signal); this.rejectSecret(result, prepared.connection.credential);
       await prepared.recheck();
@@ -117,7 +118,8 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;
-      for await (const event of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
+      for await (const value of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
+        const event = structuredClone(value);
         if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
         this.cancelled(signal);
         if (terminal) throw new ModelGatewayError('INVALID_RESPONSE');
