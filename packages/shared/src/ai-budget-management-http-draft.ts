@@ -41,6 +41,17 @@ export type AiGatewayInputBoundSummaryDraft = {
   price: AiGatewayPriceSummaryDraft; executionPermission: false;
 };
 export type AiBudgetSettingsReadDraft = { scope: 'tenant' | 'workspace'; sceneCode: string };
+/** Existing management HTTP projection, never budget admission or a live
+ * model selection. Matches AiBudgetSettingsSummaryDraft below. */
+export type AiBudgetSettingsSummaryDraft = AiBudgetSettingsReadDraft & { admission: 'not_granted' } & (
+  | { state: 'not_configured'; revision: null; settings: null; modelPolicy: null }
+  | { state: 'configured'; revision: number;
+      settings: Pick<AiUsageSettingsDraft, 'gates' | 'budget' | 'allowedScenes' | 'maxConcurrent' | 'maxCallsPerRun'>;
+      modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI'; selection: 'managed_by_platform' }
+        | { mode: 'tenant_managed'; allowedModels: string[] };
+      configurationMeaning: 'saved_policy_reference_not_current_selection' });
+export type AiBudgetSettingsChangeResponseDraft = { savedRevision: number; policy: AiBudgetSettingsSummaryDraft;
+  observation: 'same_revision' | 'changed_after_save' };
 export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: number;
   /** Config, credentials, models and scene whitelist remain server-owned. */
