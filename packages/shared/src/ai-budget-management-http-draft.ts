@@ -5,7 +5,8 @@ import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, 
 /** Explicit server registration only. These paths are not production switches. */
 export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
-  read: 'read', readOperation: 'operation', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
+  read: 'read', readOperation: 'operation', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration',
+  platformRead: 'platform/read', platformSave: 'platform/save', platformReadOperation: 'platform/operation',
   priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound',
   readPriceConfiguration: 'pricing/configuration', reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt',
   platformReviewPrice: 'platform/pricing/review', platformPriceReviewReceipt: 'platform/pricing/review/receipt',
@@ -74,6 +75,15 @@ export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
   changes: { budget?: AiBudgetLimitDraft; maxConcurrent?: number; maxCallsPerRun?: number; enabled?: boolean };
 };
 export type AiPlatformBudgetSettingsReadDraft = { sceneCode: string };
+export type AiPlatformBudgetSettingsOperationReadDraft = AiPlatformBudgetSettingsReadDraft & { operationKey: string };
+export type AiPlatformBudgetSettingsSummaryDraft = AiPlatformBudgetSettingsReadDraft & { scope: 'platform'; admission: 'not_granted' } & (
+  | { state: 'not_configured'; revision: null; settings: null }
+  | { state: 'configured'; revision: number;
+      settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun'> });
+export type AiPlatformBudgetSettingsOperationReceiptDraft = AiPlatformBudgetSettingsOperationReadDraft & {
+  scope: 'platform'; admission: 'not_granted'; automaticRetry: false } & (
+  | { state: 'unknown' }
+  | { state: 'recorded'; action: 'platformSave'; expectedRevision: number; savedRevision: number; commandHash: string; recordedAt: string });
 export type AiBudgetSettingsInitializeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: 0; operationKey?: string; budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number; enabled: boolean;
 };
@@ -83,7 +93,7 @@ export type AiBudgetSettingsRefreshConfigurationDraft = AiBudgetSettingsReadDraf
   expectedRevision: number; operationKey?: string; confirmCurrentConfiguration: true;
 };
 export type AiPlatformBudgetSettingsSaveDraft = AiPlatformBudgetSettingsReadDraft & {
-  expectedRevision: number;
+  expectedRevision: number; operationKey?: string;
   settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun'>;
 };
 /** All failures are non-retry instructions. Keyed saves use the original
@@ -155,8 +165,15 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiBudgetSettingsChangeDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: int(0, 4294967294), changes: {
     ...obj({ budget: ref('AiBudgetLimitDraft'), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, []), minProperties: 1 } }, ['scope', 'sceneCode', 'expectedRevision', 'changes']),
   AiPlatformBudgetSettingsReadDraft: obj({ sceneCode: scene }),
-  AiPlatformBudgetSettingsSaveDraft: obj({ sceneCode: scene, expectedRevision: int(0, 4294967294),
-    settings: obj({ ...settings, allowedModels: list(text(256), 100) }) }),
+  AiPlatformBudgetSettingsOperationReadDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 } }),
+  AiPlatformBudgetSettingsOperationReceiptDraft: { oneOf: [
+    obj({ scope: choice('platform'), sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 }, admission,
+      automaticRetry: { type: 'boolean', const: false }, state: choice('unknown') }),
+    obj({ scope: choice('platform'), sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 }, admission,
+      automaticRetry: { type: 'boolean', const: false }, state: choice('recorded'), action: choice('platformSave'),
+      expectedRevision: int(0, 4294967294), savedRevision: int(1, 4294967295), commandHash: pricingHash, recordedAt: time })] },
+  AiPlatformBudgetSettingsSaveDraft: obj({ sceneCode: scene, expectedRevision: int(0, 4294967294), operationKey: { ...pricingKey, maxLength: 128 },
+    settings: obj({ ...settings, allowedModels: list(text(256), 100) }) }, ['sceneCode', 'expectedRevision', 'settings']),
   AiBudgetSettingsSummaryDraft: { oneOf: [
     obj({ ...selector, state: choice('not_configured'), revision: none, settings: none, modelPolicy: none, admission }),
     obj({ ...selector, state: choice('configured'), revision: int(1, 4294967295), settings: obj(settings), modelPolicy,

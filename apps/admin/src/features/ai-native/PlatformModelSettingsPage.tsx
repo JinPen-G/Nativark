@@ -11,6 +11,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { PLATFORM_MODEL_CAPABILITIES, PlatformModelSettingsSession } from "./platform-model-settings-session";
 import { safeDisplayText } from './safe-display';
 import { PlatformPriceReview } from './PlatformPriceReview';
+import { PlatformBudgetSettings } from './PlatformBudgetSettings';
 
 const identityKey = () => JSON.stringify([useAuthStore.getState().user, currentSessionEpoch()]);
 const feedback = { idle: "配置、能力验证、费率及预算分别管理，不会因保存而开放调用。", saved: "平台配置已保存，请重新读取当前配置。",
@@ -34,6 +35,7 @@ export function PlatformModelSettingsPage() {
       <ActionButton label={t("选择配置对象")} successLabel={t("对象已选择，请读取或准备首次配置")}
         disabled={!/^[A-Za-z0-9][\w.:-]{0,35}$/u.test(target)} onAction={async () => { setSelected(target); }} />
       {selected && <ProfileHost key={identityKey() + selected} profileId={selected} identity={identityKey()} />}
+      <PlatformBudgetSettings key={`budget:${identityKey()}`} identity={identityKey()} />
     </section> : <Alert type="warning" title={t("需要 SaaS 平台 AI 配置读取权限。")}/>}
   </>;
 }

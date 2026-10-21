@@ -143,7 +143,16 @@ export class AiBudgetManagementController {
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave) @HttpCode(200) @Header('Cache-Control', 'no-store')
   platformSave(@Req() request: SettingsRequest, @Body() body: unknown) {
-    return this.respond(request, true, async signal => this.checked(await this.application.platformSave(request, body, signal), true, true));
+    return this.respond(request, true, async signal => this.checked(await this.application.platformSave(request, body, signal), true, true), true, this.hasOperationKey(body));
+  }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReadOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  platformReadOperation(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => {
+      const result = await this.application.platformReadOperation(request, body, signal);
+      const validate = ajv.getSchema('urn:rental:budget-management:AiPlatformBudgetSettingsOperationReceiptDraft');
+      if (!validate?.(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 4096) throw new BudgetError('UNAVAILABLE');
+      return structuredClone(result);
+    }, false);
   }
 }
 

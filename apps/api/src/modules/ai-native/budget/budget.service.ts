@@ -76,7 +76,10 @@ export class BudgetService {
     const session = await this.session('settings_write', { policy: key });
     if (operation) {
       const context = session.grant.context;
-      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+      if (operation.kind === 'platform') {
+        if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform' || key.scopeKind !== 'PLATFORM'
+          || context.actor.userId !== operation.actorId) throw new BudgetError('FORBIDDEN');
+      } else if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
         || context.actor.userId !== operation.actorId || context.scope.tenantId !== operation.tenantId
         || context.scope.workspaceId !== operation.workspaceId) throw new BudgetError('FORBIDDEN');
     }

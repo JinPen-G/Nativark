@@ -54,7 +54,7 @@ const refreshConfiguration = read.extend({ ...operation, expectedRevision: z.num
   confirmCurrentConfiguration: z.literal(true) }).strict();
 const gate = z.object({ enabled: z.boolean(), revision: z.number().int().min(1).max(4294967295) }).strict();
 const platformRead = z.object({ sceneCode: code }).strict();
-const platformSave = platformRead.extend({ expectedRevision: revision, settings: z.object({
+const platformSave = platformRead.extend({ expectedRevision: revision, operationKey: code.optional(), settings: z.object({
   gates: z.object({ platform: gate, tenant: gate, scene: gate }).strict(), allowedModels: z.array(z.string().min(1).max(256)).max(100),
   allowedScenes: z.array(code).max(100), budget, maxConcurrent: count, maxCallsPerRun: count }).strict() }).strict();
 
@@ -329,6 +329,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       if (!parsed.success) throw new BudgetError('INVALID');
       return platformView(parsed.data.sceneCode, await platformRoot(credentials).read(parsed.data));
     }, false, signal),
+    platformReadOperation: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, value) => platformRoot(credentials).readOperation(value), false, signal),
     platformSave: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformSave.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');

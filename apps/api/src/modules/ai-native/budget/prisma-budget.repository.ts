@@ -6,10 +6,11 @@ import { quantityAtoms, sameUnit } from './budget-quantity';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { BudgetSettingsOperation } from './budget.ports';
-import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
+import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperationId,
+  platformBudgetOperationWhere, platformBudgetReceiptSchema } from './budget-settings-operation';
 
 type Db = Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>
-  & Partial<Pick<PrismaClient, 'operationLog'>>;
+  & Partial<Pick<PrismaClient, 'operationLog' | 'aiModelConfigurationOperation'>>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 type StoredPolicy = { id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue };
 const scopeKinds = ['PLATFORM', 'TENANT', 'WORKSPACE'] as const;
@@ -72,6 +73,16 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     key = structuredClone(key);
     settings = structuredClone(settings);
     operation = operation && checkedSettingsOperation(operation);
+    const original = async (db: Partial<Pick<Prisma.TransactionClient, 'operationLog' | 'aiModelConfigurationOperation'>>) => {
+      if (!operation) return null;
+      if (operation.kind === 'platform') {
+        if (key.scopeKind !== 'PLATFORM' || !db.aiModelConfigurationOperation) throw new BudgetError('UNAVAILABLE');
+        return db.aiModelConfigurationOperation.findUnique({ where: {
+          scopeId_scopeKind_targetId_operationKey: platformBudgetOperationWhere(key, operation.operationKey) } });
+      }
+      if (key.scopeKind === 'PLATFORM' || !db.operationLog) throw new BudgetError('UNAVAILABLE');
+      return db.operationLog.findUnique({ where: { id: settingsOperationId(key, operation.operationKey) } });
+    };
     validateBudgetSettings(settings);
     if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
@@ -80,15 +91,24 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     try {
       return await this.db.$transaction(async tx => {
         if (operation) {
-          if (key.scopeKind === 'PLATFORM' || typeof tx.operationLog?.findUnique !== 'function'
-            || typeof tx.operationLog?.create !== 'function') throw new BudgetError('UNAVAILABLE');
           // Any reused key is observation-only, including a lost COMMIT reply.
           // Do not run another CAS or return today's policy as the old result.
-          if (await tx.operationLog.findUnique({ where: { id: settingsOperationId(key, operation.operationKey) } }))
+          if (await original(tx))
             throw new BudgetError('PENDING_RECONCILIATION');
         }
         const receipt = async (saved: BudgetPolicy) => {
           if (!operation) return;
+          if (operation.kind === 'platform') {
+            const detail = platformBudgetReceiptSchema.safeParse({ ...operation, version: 'platform-budget-settings-save-1',
+              ...policyWhere(key), policyId: saved.id, expectedRevision, savedRevision: saved.revision,
+              settingsHash: requestFingerprint(saved.settings) });
+            if (!detail.success) throw new BudgetError('INVALID');
+            await tx.aiModelConfigurationOperation.create({ data: { id: randomUUID(), ...platformBudgetOperationWhere(key, operation.operationKey),
+              actorId: operation.actorId, workspaceId: null, expectedRevision, resultRevision: saved.revision, commandHash: operation.commandHash,
+              result: json(detail.data), resultHash: requestFingerprint(detail.data), recordedAt: this.clock() } });
+            await revalidate();
+            return;
+          }
           const detail = budgetSettingsReceiptSchema.safeParse({ ...operation, version: 'budget-settings-save-1',
             ...policyWhere(key), policyId: saved.id, expectedRevision, savedRevision: saved.revision,
             settingsHash: requestFingerprint(saved.settings) });
@@ -146,10 +166,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         // while our CAS waited. A conflict cannot erase its unknown-save lock.
         try {
           await revalidate();
-          if (!this.db.operationLog) throw new BudgetError('UNAVAILABLE');
-          const original = await this.db.operationLog.findUnique({ where: { id: settingsOperationId(key, operation.operationKey) } });
+          const recorded = await original(this.db);
           await revalidate();
-          if (original) throw new BudgetError('PENDING_RECONCILIATION');
+          if (recorded) throw new BudgetError('PENDING_RECONCILIATION');
         } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
       }
       if (error instanceof BudgetError) throw error;

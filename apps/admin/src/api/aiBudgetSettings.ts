@@ -6,10 +6,12 @@ import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT as routes, type AiBudgetSettingsReadDra
 import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared';
 import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceConfigurationReadDraft } from '@rental-os/shared';
 import type { AiGatewayPlatformPriceAdoptionDraft, AiGatewayPlatformPriceAdoptionReadDraft } from '@rental-os/shared';
+import type { AiPlatformBudgetSettingsReadDraft, AiPlatformBudgetSettingsSaveDraft, AiPlatformBudgetSettingsOperationReadDraft } from '@rental-os/shared';
 import { http } from './http';
 import { currentSessionSignal } from '@/app/queryClient';
 import type { ApiResult } from '@rental-os/shared';
 const post = async (action: 'read' | 'readOperation' | 'change' | 'initialize' | 'refreshConfiguration'
+  | 'platformRead' | 'platformSave' | 'platformReadOperation'
   | 'readPriceConfiguration' | 'reviewPrice' | 'readPriceReview'
   | 'platformReviewPrice' | 'platformPriceReviewReceipt' | 'previewPlatformPrice' | 'adoptPlatformPrice' | 'readPlatformPriceAdoption', data: unknown, signal: AbortSignal) => {
   const response = await http.request<ApiResult<unknown>>({ url: `/${routes.basePath}/${routes[action]}`, method: 'post', data,
@@ -17,6 +19,9 @@ const post = async (action: 'read' | 'readOperation' | 'change' | 'initialize' |
   return response.data.data;
 };
 export const aiBudgetSettingsApi = Object.freeze({
+  platformRead: (value: AiPlatformBudgetSettingsReadDraft, signal: AbortSignal) => post('platformRead', value, signal),
+  platformSave: (value: AiPlatformBudgetSettingsSaveDraft, signal: AbortSignal) => post('platformSave', value, signal),
+  platformReadOperation: (value: AiPlatformBudgetSettingsOperationReadDraft, signal: AbortSignal) => post('platformReadOperation', value, signal),
   readPriceConfiguration: (value: AiGatewayPriceConfigurationReadDraft, signal: AbortSignal) => post('readPriceConfiguration', value, signal),
   reviewPrice: (value: AiGatewayPriceReviewDraft, signal: AbortSignal) => post('reviewPrice', value, signal),
   readPriceReview: (value: AiGatewayPriceReviewReadDraft, signal: AbortSignal) => post('readPriceReview', value, signal),

@@ -10,10 +10,9 @@ export type BudgetStatus = 'reserved' | 'settled' | 'released' | 'pending_reconc
 export interface BudgetPolicyKey { scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; sceneCode: string; }
 export interface BudgetPolicy extends BudgetPolicyKey { id: string; revision: number; settings: AiUsageSettingsDraft; }
 /** Server-bound management operation, not budget admission or a dispatch token. */
-export interface BudgetSettingsOperation {
-  operationKey: string; action: 'change' | 'initialize' | 'refreshConfiguration'; commandHash: string;
-  tenantId: string; workspaceId: string; actorId: string;
-}
+export type BudgetSettingsOperation = { operationKey: string; commandHash: string; actorId: string } & (
+  | { kind?: undefined; action: 'change' | 'initialize' | 'refreshConfiguration'; tenantId: string; workspaceId: string }
+  | { kind: 'platform'; action: 'platformSave' });
 export interface BudgetGrant {
   context: AiExecutionContext;
   /** Fresh, action-specific result from the server authorization adapter. */

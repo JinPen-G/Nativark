@@ -182,6 +182,7 @@ const budgetTenantRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read, AI_BUD
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.previewPlatformPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.adoptPlatformPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPlatformPriceAdoption]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
 const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformSave,
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReadOperation,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
 const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRoutes.has(`${method.toUpperCase()} ${path}`);
@@ -266,7 +267,9 @@ export function requiredPermissions(method: string, path: string) {
     AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.clear]
     .some(action => path === `/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
   if (budgetTenantRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
-  if (method.toUpperCase() === 'POST' && path === `/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt}`)
+  if (method.toUpperCase() === 'POST' && [AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt,
+    AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReadOperation]
+    .some(action => path === `/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${action}`))
     return ['system:ai-provider:view'];
   if (isBudgetPlatformRoute(method, path)) return ['system:ai-provider:manage'];
   if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];

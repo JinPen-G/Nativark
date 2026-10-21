@@ -10,7 +10,7 @@ const code = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9]
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
 // Same sorted JSON SHA-256 convention as the server request fingerprint.
 // Persist only this digest and the original key, never the edited policy body.
-async function commandHash(value: unknown): Promise<string> {
+export async function commandHash(value: unknown): Promise<string> {
   const sorted = (v: unknown): unknown => Array.isArray(v) ? v.map(sorted) : object(v)
     ? Object.fromEntries(Object.keys(v).sort().map(key => [key, sorted(v[key])])) : v;
   const bytes = new TextEncoder().encode(JSON.stringify(sorted(value)));
@@ -34,6 +34,16 @@ function limit(v: unknown): AiBudgetLimitDraft {
   return v.state === 'zero' ? { state: 'zero', quantity: { unit: q.unit as 'tokens' | 'calls', value: 0 } }
     : { state: 'limited', quantity: { unit: q.unit as 'tokens' | 'calls', value: q.value } };
 }
+/** Shared exact policy fields, with no platform/tenant authorization inference. */
+export function budgetPolicyFields(s: unknown) {
+  if (!object(s) || !object(s.gates) || !integer(s.maxConcurrent, 0, 10000) || !integer(s.maxCallsPerRun, 0, 10000)
+    || !Array.isArray(s.allowedScenes) || s.allowedScenes.length > 100 || !s.allowedScenes.every(code)) return invalid();
+  const gate = (key: string) => { const g = (s.gates as Record<string, unknown>)[key];
+    if (!object(g) || typeof g.enabled !== 'boolean' || !integer(g.revision, 1, 4294967295)) return invalid();
+    return { enabled: g.enabled, revision: g.revision }; };
+  return { gates: { platform: gate('platform'), tenant: gate('tenant'), scene: gate('scene') }, budget: limit(s.budget),
+    allowedScenes: [...s.allowedScenes] as string[], maxConcurrent: s.maxConcurrent, maxCallsPerRun: s.maxCallsPerRun };
+}
 /** Select only existing shared display fields; never expose extension JSON. */
 export function budgetSettingsSummary(value: unknown, selector: AiBudgetSettingsReadDraft): AiBudgetSettingsSummaryDraft {
   if (!object(value) || value.scope !== selector.scope || value.sceneCode !== selector.sceneCode || value.admission !== 'not_granted') return invalid();
@@ -42,12 +52,7 @@ export function budgetSettingsSummary(value: unknown, selector: AiBudgetSettings
     return { ...base, state: 'not_configured', revision: null, settings: null, modelPolicy: null };
   if (value.state !== 'configured' || !integer(value.revision, 1, 4294967295) || !object(value.settings)
     || value.configurationMeaning !== 'saved_policy_reference_not_current_selection' || !object(value.modelPolicy)) return invalid();
-  const s = value.settings;
-  if (!object(s.gates) || !integer(s.maxConcurrent, 0, 10000) || !integer(s.maxCallsPerRun, 0, 10000)
-    || !Array.isArray(s.allowedScenes) || s.allowedScenes.length > 100 || !s.allowedScenes.every(code)) return invalid();
-  const gate = (key: string) => { const g = (s.gates as Record<string, unknown>)[key];
-    if (!object(g) || typeof g.enabled !== 'boolean' || !integer(g.revision, 1, 4294967295)) return invalid();
-    return { enabled: g.enabled, revision: g.revision }; };
+  const fields = budgetPolicyFields(value.settings);
   const m = value.modelPolicy;
   let modelPolicy: Extract<AiBudgetSettingsSummaryDraft, { state: 'configured' }>['modelPolicy'];
   if (m.mode === 'platform_managed' && m.serviceName === 'Rental OS AI' && m.selection === 'managed_by_platform')
@@ -57,8 +62,7 @@ export function budgetSettingsSummary(value: unknown, selector: AiBudgetSettings
     modelPolicy = { mode: m.mode, allowedModels: [...m.allowedModels] as string[] };
   else return invalid();
   return { ...base, state: 'configured', revision: value.revision, modelPolicy,
-    configurationMeaning: value.configurationMeaning, settings: { gates: { platform: gate('platform'), tenant: gate('tenant'), scene: gate('scene') },
-      budget: limit(s.budget), allowedScenes: [...s.allowedScenes], maxConcurrent: s.maxConcurrent, maxCallsPerRun: s.maxCallsPerRun } };
+    configurationMeaning: value.configurationMeaning, settings: fields };
 }
 export type BudgetForm = { state: 'not_configured' | 'zero' | 'limited'; unit: 'calls' | 'tokens' | 'money';
   amount: string; currency: string; concurrent: string; calls: string; enabled: boolean };

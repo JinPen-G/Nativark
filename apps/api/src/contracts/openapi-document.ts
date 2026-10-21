@@ -2334,6 +2334,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['refreshConfiguration', 'AiBudgetSettingsRefreshConfigurationDraft', 'AiBudgetSettingsChangeResponseDraft'],
     ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
     ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['platformReadOperation', 'AiPlatformBudgetSettingsOperationReadDraft', 'AiPlatformBudgetSettingsOperationReceiptDraft'],
     ['readPriceConfiguration', 'AiGatewayPriceConfigurationReadDraft', 'AiGatewayPriceConfigurationDraft'],
     ['reviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
     ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
@@ -2345,10 +2346,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageAiBudgetSettings_${action}`, authRequired: true,
-    permissions: [action === 'platformPriceReviewReceipt' ? 'system:ai-provider:view'
+    permissions: [['platformPriceReviewReceipt', 'platformRead', 'platformReadOperation'].includes(action) ? 'system:ai-provider:view'
       : action.startsWith('platform') ? 'system:ai-provider:manage' : 'system:params:manage'],
     requestSchema, responseSchema,
-    summary: action === 'readPriceConfiguration'
+    summary: action === 'platformRead' || action === 'platformSave' || action === 'platformReadOperation'
+      ? 'Current SaaS authority manages the original platform/scene policy with CAS and server-selected configuration. Keyed saves append an immutable, actor/scope/scene/hash-bound configuration receipt in the same policy transaction; original observation requires only current platform view, not a live Profile or new execution permission. Lost replies never authorize another save or imply rollback. No tenant audit attribution, budget admission, supplier call or second ledger.'
+      : action === 'readPriceConfiguration'
       ? 'Current tenant settings-read authority resolves the unique tenant-owned default BYOK Profile and revision under current selection. Bounded read with identity and configuration revalidation; no caller-selected owner, model/credential disclosure, price publication, input-count proof or execution grant. Tenant settings object ID is not the Profile ID. Original review receipts remain independent of current configuration.'
       : action === 'previewPlatformPrice'
       ? 'Current tenant settings-read authority reviews one immutable platform rate under current server-selected platform configuration and validity. No reviewer identity, provider, model, credential, adoption, input-count certification or execution grant. Preview is read-only; adoption remains an explicit separate write; original adoption receipts remain independently readable.'
