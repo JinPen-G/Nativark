@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新功能`003589b2`：平台配置页接原正式费率审阅/收据接口，已读取Profile修订、明确人类确认、版本/有效期、精确费率与缓存维度；unknown只留原引用/hash、重载核对，不换版本重发。实际前端会话→Auth/Guard/Controller/Prisma费率服务离线冒烟1 pass/0 fail/skip/todo/退出0；Admin235 roots/0诊断/退出0，API686 roots仅继承支付两项/退出1，diff/UI静态检查退出0。未改后端协议/账本、无新测试脚本/生成/外联；TSX仅类型/静态，真库/HTTP/浏览器未验。AIN-11/ENTRY-05仍G3/75%，原28项64.3%、增量52.8%、验收0/28不变。
+> 更新时间：2026-10-21。最新功能`af4b00c3`：租户设置页接平台费率只读预览→明确采用→原收据核对；复用原计价/权限/存储，预览不写，不返回平台供应商、模型或凭据，unknown只按原引用核对。实际前端会话→Auth/Guard/Controller/Prisma计价服务离线冒烟1 pass/0 fail/skip/todo/退出0；Admin237 roots/0诊断/退出0，API686 roots仅继承支付两项/退出1，diff/定向UI静态/原组件hash检查退出0。无新测试脚本、迁移/生成/外联；TSX仅类型/静态，真库/HTTP/浏览器未验。AIN-11/ENTRY-05仍G3/75%，原28项64.3%、增量52.8%、验收0/28不变。
 > **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
@@ -24,7 +24,9 @@
 
 ## 当前核心接点及下一步
 
-平台`/platform/ai`的原ProfileHost现挂载`PlatformPriceReview`，新审阅仅取原服务已读取的profileId/revision，配置保存进行中或unknown时禁止新费率；字段/修订变化清人类确认，默认零计价读取或发布。复用`budget-settings/platform/pricing/{review|review/receipt}`、现有shared及SaaS view/manage；服务器仍只接受正式管理配置指定的Profile，不能由页面选中自授权。金额/缓存费率按六位字符串，不猜供应商价格/缓存折扣/汇率；也可明确Token原量计量，不代替可信计数。原键/场景/内容hash留sessionStorage，unknown锁重提；原Profile变化、无当前配置或只剩view权限时仍可核对原收据，撤权清旧结果。结果是原版本，不证明当前配置、租户采用、预算、能力或执行可用。**后续仍缺后台BYOK费率、租户采用平台原费率、平台预算及能力消费者**；可信输入计数生产者仍按下文拒绝，不能因本页可保存费率就开启模型。
+平台`/platform/ai`的原ProfileHost挂载`PlatformPriceReview`，新审阅仅取原服务已读取的profileId/revision，配置保存进行中或unknown时禁止新费率；字段/修订变化清人类确认，默认零计价读取或发布。复用`budget-settings/platform/pricing/{review|review/receipt}`、现有shared及SaaS view/manage；服务器只接受正式管理配置指定的Profile，不能由页面选中自授权。金额/缓存费率按六位字符串，不猜供应商价格/缓存折扣/汇率；也可明确Token原量计量，不代替可信计数。原键/场景/内容hash留sessionStorage，unknown锁重提；原Profile变化、无当前配置或只剩view权限时仍可核对原收据，撤权清旧结果。结果是原版本，不证明当前配置、预算、能力或执行可用。
+
+租户`/settings/ai`挂载`TenantPlatformRate`：手工输入平台给出的原费率引用与场景，零初始读；先通过`POST /ai-native/budget-settings/pricing/platform/preview`读取原价，再明确采用已有`adopt`，`receipt`独立观察原采用。预览复用`GatewayPricingRecordManagement.previewPrice`的当前settings_read、平台模式/原Profile与有效期、双次来源及读后权限复核，不写任何记录，shared命名schema/Guard/OpenAPI/默认关闭provider齐备。租户无价格覆盖输入，输出不含平台供应商/模型/凭据/审阅者；采用仍走原publishPrice与当前写权。原引用/evidenceHash按tenant/workspace/actor留sessionStorage，unknown锁住新采用，重载后只核对原键；模式/Profile变化不阻止合法历史读取，缺收据或撤权不推定未采用。费率采用是空间原价记录，不改额度、不授计数/模型执行，不新建账本。**后续仍缺后台BYOK费率、平台预算及能力消费者**；可信输入计数生产者仍按下文拒绝，不能因费率链可用就开启模型。
 
 后台`/settings/ai`的`TenantBudgetSettings`复用原`budget-settings/{read|change|initialize|refresh-configuration}`，明确选择当前tenant/workspace与scene；入口仍需当前`system:params:manage`及服务端Auth/Guard/Scope复核。not_configured/zero/limited分开，六位金额字符串、不重算；白名单只读，平台模型细节不外泄，首次停用、重绑定保留旧债务。新保存携带原operationKey，政策CAS和`OperationLog`收据在同事务提交，绑定原actor/workspace/scene、动作、请求指纹及原修订。`POST /ai-native/budget-settings/operation`沿当前读权限和原归属观察，不依赖活跃Profile，不授执行；重复原键只核对，不再写。后台仅存原引用/指纹，unknown锁重提；核对匹配后清锁但清空政策，必须再读当前修订。缺收据、错指纹和旧版无原键记录保持unknown/人工核对，不按TTL或当前值解锁。原调用的结算/占用账本不变；平台预算/价格/能力后台、可信计数和完整模型执行仍未齐。
 
