@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiProviderProfileRole } from './provider-profile.ports';
+import { MAX_AI_PROVIDER_PROFILES } from './provider-profile.ports';
 import type { ProviderRouteDecision, ProviderRouteRequest, ProviderRouterPorts, AiRouteScene } from './provider-router.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -42,7 +43,7 @@ export class ProviderRouterService {
       : consumer.kind === 'PLATFORM' || scope.kind !== 'TENANT' || scope.tenantId !== consumer.tenantId
         || (consumer.kind === 'TENANT' && consumer.id !== scope.id)) throw new ModelGatewayError('INVALID_REQUEST');
     let rows;
-    try { rows = z.array(profileSchema).max(100).parse(await this.ports.profiles.list(structuredClone(scope))); }
+    try { rows = z.array(profileSchema).max(MAX_AI_PROVIDER_PROFILES).parse(await this.ports.profiles.list(structuredClone(scope))); }
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }
     if (new Set(rows.map(r => r.id)).size !== rows.length) throw new ModelGatewayError('CONFIG_INVALID');
     const desired = roleFor(request.scene);
