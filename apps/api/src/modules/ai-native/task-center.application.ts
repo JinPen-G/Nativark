@@ -52,7 +52,7 @@ const schemas = {
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
   continue: taskCenterContinueSchema,
-  input: taskCenterInputQuery, resumeInput: taskCenterInputAnswer, inputReceipt: taskCenterInputReceipt, continueInput: taskCenterInputAnswer,
+  input: taskCenterInputQuery, resumeInput: taskCenterInputAnswer, inputReceipt: taskCenterInputReceipt, continueInput: taskCenterInputReceipt,
   stop: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   stopReceipt: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()

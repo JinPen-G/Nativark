@@ -754,18 +754,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
         execution: 'read_only_no_lease_or_dispatch' as const });
     });
   };
-  return Object.freeze({
-    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readPage(command)),
-    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
-    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
-    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
-    readTaskPerformance: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (root, command) => root.center.readPerformance(command), { write: false, signal }),
-    readTaskScene: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (root, command) => root.center.readScene(command)),
-    readInput: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
-    readAnswer(request: AiSceneHttpRequest, value: unknown) {
+  const readAnswer = (request: AiSceneHttpRequest, value: unknown, resolve: boolean) => {
       const receiptQuery = z.union([answerSchema.extend({ submission: z.custom<import('@rental-os/shared').AiTaskInputSubmissionDraft>(isAiTaskInputSubmissionDraft) }), z.object({ original: originalRequestReferenceSchema,
         reference: taskInputReceiptReferenceSchema }).strict()]);
       const parsed = receiptQuery.safeParse(structuredClone(value));
@@ -778,7 +767,9 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
         const task = await root.scenes.readTaskReceipt(input.original.inputRef);
         if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (reference.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const receipt = 'submission' in input ? await root.answers().readSubmission(input.submission)
+        if (resolve && !('reference' in input)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const resolved = resolve && 'reference' in input ? await root.answers().resolveSubmissionReference(input.reference) : null;
+        const receipt = resolved ? resolved.observation : 'submission' in input ? await root.answers().readSubmission(input.submission)
           : await root.answers().readSubmissionReference(input.reference);
         if (receipt.state === 'observed') {
           const access = await root.tasks.resolveAccess(task.taskId, 'read_metadata');
@@ -798,8 +789,26 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
           || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
           || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        return freezeOriginalInput(receipt);
+        return freezeOriginalInput({ receipt, submission: resolved?.submission ?? null });
       });
+  };
+  return Object.freeze({
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readPage(command)),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
+    readTaskPerformance: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.center.readPerformance(command), { write: false, signal }),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.center.readScene(command)),
+    readInput: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
+    readAnswer: async (request: AiSceneHttpRequest, value: unknown) => (await readAnswer(request, value, false)).receipt,
+    /** Server-internal material for explicit continuation; not an HTTP reader. */
+    resolveAnswerContinuation: async (request: AiSceneHttpRequest, value: unknown) => {
+      const result = await readAnswer(request, value, true);
+      if (!result.submission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return result.submission;
     },
     readModelResult(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, async (root, command) => {

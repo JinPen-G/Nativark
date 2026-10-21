@@ -209,6 +209,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults, business: { db, selectedOrderResult },
       originalInputs: { readInput: originalResults.readInput.bind(originalResults),
         readAnswer: originalResults.readAnswer.bind(originalResults),
+        resolveAnswerContinuation: originalResults.resolveAnswerContinuation.bind(originalResults),
         execution: clarification },
       continuation: { db, order: selectedOrderResult, settings: settingsTask },
       humanApprovals: {

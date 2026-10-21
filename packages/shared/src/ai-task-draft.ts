@@ -246,11 +246,13 @@ export interface AiTaskClarificationObservationDraft extends AiTaskClarification
   execution: 'read_only_no_start_no_reconnect_side_effect';
 }
 export interface AiTaskClarificationAnswerDraft { submission: import('./ai-task-input-draft').AiTaskInputSubmissionDraft }
-/** Read-only receipt lookup, safe to retain without answer content. It cannot
- * be used with resume/continue, nor prove that an absent receipt permits retry. */
+/** Safe original-operation reference without answer content. Receipt lookup is
+ * read-only; explicit continue must resolve stored answers on the server and
+ * pass the original execution host. Never a new submission or retry grant. */
 export interface AiTaskClarificationReceiptQueryDraft {
   reference: Pick<import('./ai-task-input-draft').AiTaskInputSubmissionDraft, 'taskId' | 'requestId' | 'expectedRevision' | 'submissionKey'>;
 }
+export type AiTaskClarificationContinueQueryDraft = AiTaskClarificationAnswerDraft | AiTaskClarificationReceiptQueryDraft;
 export interface AiTaskClarificationProgressDraft {
   taskId: string; requestId: string; automaticRetry: false; businessExecution: 'not_inferred_from_input';
   receipt: { state: 'not_observed' } | { state: 'observed'; receiptId: string; taskRevision: number;

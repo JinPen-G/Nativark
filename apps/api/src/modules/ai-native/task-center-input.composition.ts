@@ -17,6 +17,7 @@ type Request = { headers: { authorization?: unknown } };
 export interface TaskCenterInputDependencies {
   readInput(request: Request, value: unknown): Promise<unknown>;
   readAnswer(request: Request, value: unknown): Promise<unknown>;
+  resolveAnswerContinuation?(request: Request, value: unknown): Promise<unknown>;
   resume?(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown>;
   continueAnswer?(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown>;
   execution?(): Pick<TaskCenterInputDependencies, 'resume' | 'continueAnswer'>;
@@ -46,12 +47,13 @@ export async function callTaskCenterInput(d: { db: Pick<PrismaClient, 'aiTask' |
   credentials: AiTaskCredentialSource }, request: Request, value: unknown, action: Action, signal?: AbortSignal):
   Promise<AiTaskClarificationObservationDraft | AiTaskClarificationProgressDraft> {
   const command = structuredClone(value);
-  const receiptQuery = action === 'inputReceipt' ? taskCenterInputReceipt.parse(command) : undefined;
+  const receiptQuery = action === 'inputReceipt' || action === 'continueInput' ? taskCenterInputReceipt.parse(command) : undefined;
   const submission = action === 'input' ? undefined : receiptQuery && 'reference' in receiptQuery
     ? receiptQuery.reference : taskCenterInputAnswer.parse(command).submission;
   const readInput = d.original.readInput.bind(d.original), readAnswer = d.original.readAnswer.bind(d.original);
   const resume = d.original.resume?.bind(d.original), continueAnswer = d.original.continueAnswer?.bind(d.original);
   const resolveExecution = d.original.execution?.bind(d.original);
+  const resolveAnswer = d.original.resolveAnswerContinuation?.bind(d.original);
   const taskId = submission?.taskId ?? taskCenterInputQuery.parse(command).taskId;
   // The original repository distinguishes a new authorized submission from
   // same-key receipt replay. Do not require a fresh mutation grant to observe
@@ -95,10 +97,21 @@ export async function callTaskCenterInput(d: { db: Pick<PrismaClient, 'aiTask' |
     method = action === 'resumeInput' ? execution.resume?.bind(execution) : execution.continueAnswer?.bind(execution);
   }
   if (typeof method !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  let originalQuery: unknown = receiptQuery && 'reference' in receiptQuery ? { original, reference: receiptQuery.reference } : { original, submission };
+  if (action === 'continueInput' && !observeOnly && receiptQuery && 'reference' in receiptQuery) {
+    if (!resolveAnswer) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const persisted = structuredClone(await resolveAnswer(request, originalQuery));
+    if (!isAiTaskInputSubmissionDraft(persisted) || persisted.taskId !== submission!.taskId
+      || persisted.requestId !== submission!.requestId || persisted.expectedRevision !== submission!.expectedRevision
+      || persisted.submissionKey !== submission!.submissionKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const latest = await verify(); await d.credentials.current();
+    if (latest.status !== 'RUNNING' || latest.revision !== current.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    if (signal?.aborted) throw unknown();
+    originalQuery = { original, submission: persisted };
+  }
   const mutated = action !== 'inputReceipt' && !observeOnly;
   let returned = false;
   try {
-    const originalQuery = receiptQuery && 'reference' in receiptQuery ? { original, reference: receiptQuery.reference } : { original, submission };
     const raw = structuredClone(await method(request, originalQuery, signal));
     returned = true;
     await verify();

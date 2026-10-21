@@ -214,7 +214,7 @@ export class AiOriginalScenesController {
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
 export class AiOriginalSceneObservationController {
   constructor(@Inject(AI_ORIGINAL_SCENE_RECOVERY_REQUESTS)
-    protected readonly observations: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>) {}
+    protected readonly observations: Omit<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'resolveAnswerContinuation'>) {}
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readTaskPage(request, body));
@@ -296,7 +296,7 @@ export class AiOriginalSceneRecoveryController extends AiOriginalSceneObservatio
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
 export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecoveryController {
   constructor(@Inject(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS)
-    protected readonly model: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders> &
+    protected readonly model: Omit<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'resolveAnswerContinuation'> &
       Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>,
         'start' | 'readInput' | 'refreshInput' | 'resume' | 'readQuotePreparation' | 'confirmClarifiedQuote' |
         'readClarifiedQuoteReceipt' | 'continueAnswer' | 'reconcile' | 'recover' | 'readExecution' | 'takeover' | 'requestCancel'>) { super(model); }

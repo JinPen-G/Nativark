@@ -103,11 +103,12 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
           submissionKey: submission.submissionKey }); setLocked(true); setDraft({}); setInput(null);
       }
       const reference = submission ?? (saved !== 'invalid' ? saved : null);
-      if (!reference || operation !== 'receipt' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
+      if (!reference || operation === 'submit' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
       dispatched = true;
       const result = validateTaskClarificationProgress(await (operation === 'receipt'
         ? aiTaskCenterApi.inputReceipt(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)
-        : aiTaskCenterApi[operation === 'submit' ? 'resumeInput' : 'continueInput']({ submission: structuredClone(submission!) }, controller.signal)), reference);
+        : operation === 'submit' ? aiTaskCenterApi.resumeInput({ submission: structuredClone(submission!) }, controller.signal)
+          : aiTaskCenterApi.continueInput(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)), reference);
       if (same(controller.signal)) setReceipt(result);
       if (operation === 'submit' && result.receipt.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
     } catch (failure) {
@@ -128,7 +129,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
     <div className="panel-toolbar">
       <ActionButton label={t('读取当前问题')} pendingLabel={t('读取中…')} disabled={busy} onAction={() => run('read')} />
       {(original || saved && saved !== 'invalid') && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}
-      {original && receipt?.receipt.state === 'observed' && <ConfirmAction label={t('明确继续原任务')}
+      {(original || saved && saved !== 'invalid') && receipt?.receipt.state === 'observed' && <ConfirmAction label={t('明确继续原任务')}
         prompt={t('按这份已保存的回答继续？仍须当前权限、原计划和累计限额；不会自动批准业务。')}
         doneLabel={t('已获得继续结果')} disabled={busy} onConfirm={() => run('continue')} />}
     </div>
@@ -156,7 +157,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
     {expired && <Alert type="warning" title={t('问题已过期，请重新读取；不能沿用旧问题提交。')} />}
     {locked && !original && <Alert type="warning" title={t(saved === 'invalid'
       ? '原回答引用不可读取，已禁止重新提交；请通过原任务和人工流程核对。'
-      : '已恢复原回答操作引用，可只读核对收据。回答内容未保存在浏览器，不会重发或自动继续。')} />}
+      : '已恢复原回答操作引用。先核对收据，再明确选择是否继续；回答内容未保存在浏览器，不会重发或自动继续。')} />}
     {error && <p id={`${label}-error`} role="alert">{t('本次未获得可靠结果。请核对必填项、数值范围、明确UTC时间、权限或原回答收据；不会自动重发。')}</p>}
     {receipt && <p role="status" aria-live="polite">{t(receipt.receipt.state !== 'observed'
       ? '尚未观察到原回答收据，不代表未提交；请勿另建操作重发。'

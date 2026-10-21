@@ -165,7 +165,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   static receiptReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
     const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, true);
     return Object.freeze({ readSubmission: repository.readSubmission.bind(repository),
-      readSubmissionReference: repository.readSubmissionReference.bind(repository) });
+      readSubmissionReference: repository.readSubmissionReference.bind(repository),
+      resolveSubmissionReference: repository.resolveSubmissionReference.bind(repository) });
   }
 
   /** Current questions still require their original source revalidation. This
@@ -542,12 +543,19 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
 
   /** Exact original answer receipt, never submit/retry or latest-run selection. */
   async readSubmission(value: unknown) {
-    return this.observeSubmission(value, false);
+    return (await this.observeSubmission(value, false)).observation;
   }
   /** Reference-only recovery never returns answers or grants continuation.
    * The persisted payload/digest is still independently verified below. */
   async readSubmissionReference(value: unknown) {
-    return this.observeSubmission(value, true);
+    return (await this.observeSubmission(value, true)).observation;
+  }
+  /** Internal continuation material, not a public answer-reading endpoint.
+   * Resolving it grants no lease/dispatch; the original host must reauthorize. */
+  async resolveSubmissionReference(value: unknown) {
+    const result = await this.observeSubmission(value, true);
+    if (!result.submission || result.observation.state !== 'observed') throw unavailable();
+    return result;
   }
   private async observeSubmission(value: unknown, referenceOnly: boolean) {
     const submission = structuredClone(value);
@@ -569,7 +577,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         scopeId: task.scopeId, taskId: task.id, submissionKey: reference.submissionKey } } });
       if (!stored) {
         await this.access(task.id, 'read_metadata', before);
-        return { state: 'not_observed' as const, retryable: false as const };
+        return { observation: { state: 'not_observed' as const, retryable: false as const }, submission: null };
       }
       if (reference.expectedRevision !== request.revision - 1 || stored.submissionKey !== reference.submissionKey) throw conflict();
       const receipt = this.receipt(request, stored, before, referenceOnly ? undefined : submission as AiTaskInputSubmissionDraft);
@@ -581,9 +589,12 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         || successor.resourceOriginRunId !== (parent.resourceOriginRunId ?? parent.id))) throw denied();
       if (facts.plan.steps.length === 1 && continuableModel(facts.planned.toolCode) && !successor) throw unavailable();
       await this.access(task.id, 'read_metadata', before);
-      return { state: 'observed' as const, retryable: false as const, taskId: task.id, requestId: request.id,
+      return { observation: { state: 'observed' as const, retryable: false as const, taskId: task.id, requestId: request.id,
         receiptId: receipt.id, taskRevision: receipt.consumedTaskRevision!, runId: successor?.id ?? parent.id,
-        execution: 'not_inferred_from_receipt' as const };
+        execution: 'not_inferred_from_receipt' as const }, submission: structuredClone({
+          draftVersion: AI_TASK_INPUT_DRAFT_VERSION, ...reference,
+          answers: receipt.answers as unknown as AiTaskInputSubmissionDraft['answers']
+        }) };
     });
   }
 

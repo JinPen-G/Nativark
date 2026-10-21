@@ -2181,11 +2181,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     method: 'post' as const, path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `aiTaskCenterOriginalClarification_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
     requestSchema: action === 'input' ? 'AiTaskClarificationQueryDraft' : action === 'inputReceipt'
-      ? 'AiTaskClarificationReceiptRequestDraft' : 'AiTaskClarificationAnswerDraft',
+      ? 'AiTaskClarificationReceiptRequestDraft' : action === 'continueInput' ? 'AiTaskClarificationContinueQueryDraft' : 'AiTaskClarificationAnswerDraft',
     responseSchema: action === 'input' ? 'AiTaskClarificationObservationDraft' : 'AiTaskClarificationProgressDraft',
     summary: action === 'input' || action === 'inputReceipt'
       ? 'Read same-owner original question or exact answer receipt under current task/source authority. No start, model call, approval or automatic retry.'
-      : 'Explicit original answer/continuation through the existing configured host. Binds immutable question revision/submission key and cumulative resources; answers do not approve Core writes. Unknown: read exact input receipt, never resubmit or redispatch automatically.' })),
+      : 'Explicit original answer/continuation through the existing configured host. Continuation accepts the exact original reference, resolving verified stored answers internally; it does not submit answers again. Binds immutable question revision/submission key and cumulative resources; answers do not approve Core writes. Unknown: read exact input receipt, never resubmit or redispatch automatically.' })),
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.list}`,
     tag: 'AI Native', operationId: 'aiTaskCenterList', summary: 'Read current owner task metadata; no task/run creation',
     permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskMetadataQueryDraft', responseSchema: 'AiTaskMetadataPageDraft' },
