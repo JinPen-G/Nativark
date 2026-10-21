@@ -14,6 +14,8 @@
 
 ## 近期核心：平台配置目录与正式选择（2026-10-21）
 
+- 后续`80711a6e`补原路由/能力probe共用Prisma Profile发现的实际查询上限：take101与原Router max100统一，超量拒绝不截断；list/get校验scope/原键、scope入参快照，避免仅在全量加载后才拒绝。双offline preload下stdin实际仓储+Router正常、超量零preflight、串scope/重复拒绝及await迟改1 pass/0 fail/skip/todo/退出0；API685 roots仍仅原支付两项/退出1，diff退出0。DB查询及能力证据为替身，非MySQL性能/供应商验收；无新测试脚本、非新路由/框架或计数证书。
+
 - `783cead7`（AIN-04/05/11）：原平台配置应用增加`GET /platform/ai/providers`，真实SaaS view/Guard/ALS、平台scope、显式DB上限/游标与读后身份复核；仅安全元数据，不查询或返回密钥、URL和能力证明。shared/OpenAPI与后台目录实际接回原CAS编辑器，保留手工首次创建和默认关闭，不自动读取/测试/启用。
 - 双offline preload、固定无效DB、本树audit/TEMP的`node -`：实际Auth/Guard/Scope/Controller的两页、范围/上限/最少select、读中撤权、租户含通配权拒绝、会话失效；实际TSX→同Controller的零初始读/明确选择/伪造候选拒绝/撤权清页/并发与卸载迟到，两组各1 pass/0 fail/skip/todo/退出0。首轮离线身份夹具缺findWorkspaceScopedUser及错误通配权预期已仅修内联验证入口，未改生产权限；SaaS通配按原Guard有效、非SaaS仍拒绝。新增类型诊断修后API685 roots仅原支付960/1049两项TS2322/退出1，Admin230 roots/0诊断/退出0；diff/定向antd lint/机械UI检查退出0。UIArc/主题不变，无新测试文件/生成/外联；DB与UI hooks/组件为替身，非MySQL/HTTP/浏览器验收。可信输入计数生产者仍缺，不调百分比或夹带继承WIP。
 
