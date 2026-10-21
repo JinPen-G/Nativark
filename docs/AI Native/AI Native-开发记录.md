@@ -14,6 +14,8 @@
 
 ## 近期核心：任务中心原澄清与后台回答（2026-10-21）
 
+- 后续`f62178d6`：原`PrismaTaskInputRepository.receiptReader`支持仅原task/request/revision/submissionKey恢复，复用历史/持久answerHash和原后继绑定；只读根/任务中心/命名OpenAPI/后台重载实际接通，无回答正文回传或浏览器持久化，不授继续或新执行。`node -`实际原报价宿主/仓储的丢应答→只读重建/错修订/篡改/撤权、实际TSX重载后只读收据/仍锁重提两组各1 pass/0 fail/skip/todo/退出0；API685 roots仅原支付两项/退出1，Admin230 roots/0诊断/退出0，diff退出0。新增类型诊断修后复验，原脚本不改；替身与外部未验边界同下，后续结果不回写为前批全量通过。仅有引用仍不能显式继续，其他场景全部追问/真实宿主待验。
+
 - `7de1a62b`、`68c4ed06`（AIN-04/06/09/12）：标准input/resume/receipt/continue从当前任务派生持久原输入，复用原问题/回答仓储与正式模型宿主；终态继续只观察，缺宿主拒绝，外层期限传入原执行。后台明确选项及字段校验、提交反馈、unknown锁重提/原收据核对，零初始读取；UIArc/主题不变，无新运行器/账本/自动批准。
 - 双offline preload、固定无效DB、本树audit/TEMP的`node -`：实际报价问题→原提交→后继成功/两次模型调用/同键不重发/终态观察/撤权/命名schema及Guard，丢应答→原收据/缺宿主拒绝，各1/1；实际TSX/hooks正常输入、无默认选择、非法输入保留、unknown/重载锁、并发和卸载迟到1/1。最终各0 fail/skip/todo/退出0；初轮缺接口为红，期间原收据形状/类型/终态误claim缺陷已修。后台两次首次运行分别遇ts-node未注册/ESM加载，修内联入口后通过，未新增或改测试脚本。
 - API `node output/typecheck-ai-native.cjs`685 roots仅原支付960/1049两项TS2322/退出1；Admin内联Compiler API230 roots/0诊断/退出0；diff、定向antd lint和Impeccable机械检测退出0。DB/锁/财务生命周期/传输、目录分页与UI hooks/组件含替身，不是完整金融单账/真实HTTP/MySQL/供应商/浏览器/屏幕阅读器；普通构建未跑。后台正文不存浏览器，重载后只有引用不能独立观察原回答，保持禁止重提并提示人工核对；其他场景全部澄清变体仍待补。继承24项WIP、正式依据及百分比不动。
