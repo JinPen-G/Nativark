@@ -174,6 +174,7 @@ function isPublicRoute(path: string) {
 const aiManagementRoutes = new Set([AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_MODEL_SETTINGS_HTTP_DRAFT]
   .flatMap(({ basePath, method, ...operations }) => Object.values(operations).map(operation => `${method} /${basePath}/${operation}`)));
 const budgetTenantRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.read, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.change,
+  AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readOperation,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.initialize, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.priceRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.pricePublicationRead,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.inputBoundRead, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceReview,

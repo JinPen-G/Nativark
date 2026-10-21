@@ -9,6 +9,11 @@ export function isOriginalBudgetLifecycleAction(action: BudgetAction): boolean {
 export type BudgetStatus = 'reserved' | 'settled' | 'released' | 'pending_reconciliation';
 export interface BudgetPolicyKey { scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; sceneCode: string; }
 export interface BudgetPolicy extends BudgetPolicyKey { id: string; revision: number; settings: AiUsageSettingsDraft; }
+/** Server-bound management operation, not budget admission or a dispatch token. */
+export interface BudgetSettingsOperation {
+  operationKey: string; action: 'change' | 'initialize' | 'refreshConfiguration'; commandHash: string;
+  tenantId: string; workspaceId: string; actorId: string;
+}
 export interface BudgetGrant {
   context: AiExecutionContext;
   /** Fresh, action-specific result from the server authorization adapter. */
@@ -59,7 +64,7 @@ export interface BudgetEvidencePort {
 }
 export interface BudgetTransactionRepository {
   settings(key: BudgetPolicyKey): Promise<BudgetPolicy | null>;
-  saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>): Promise<BudgetPolicy>;
+  saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>, operation?: BudgetSettingsOperation): Promise<BudgetPolicy>;
   reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>): Promise<BudgetRecord>;
   get(id: string, association: AiUsageAssociationDraft): Promise<BudgetRecord | null>;
   /** All mutations and ledger events are one DB transaction. No blind retry. */

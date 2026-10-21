@@ -25,6 +25,7 @@ import { GatewayPricingRecordManagement } from './prisma-gateway-pricing-records
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
+const operation = { operationKey: code.optional() };
 const count = z.number().int().min(0).max(10000);
 const quantity = z.discriminatedUnion('unit', [
   z.object({ unit: z.literal('calls'), value: z.number().int().min(0).max(4294967295) }).strict(),
@@ -44,12 +45,12 @@ const budget = z.union([
     ? value.quantity.amount !== '0.000000' : value.quantity.value > 0)
 ]);
 const revision = z.number().int().min(0).max(4294967294);
-const change = read.extend({ expectedRevision: revision, changes: z.object({ budget: budget.optional(),
+const change = read.extend({ ...operation, expectedRevision: revision, changes: z.object({ budget: budget.optional(),
   maxConcurrent: count.optional(), maxCallsPerRun: count.optional(), enabled: z.boolean().optional() })
   .strict().refine(value => Object.keys(value).length > 0) }).strict();
-const initialize = read.extend({ expectedRevision: z.literal(0), budget, maxConcurrent: count,
+const initialize = read.extend({ ...operation, expectedRevision: z.literal(0), budget, maxConcurrent: count,
   maxCallsPerRun: count, enabled: z.boolean() }).strict();
-const refreshConfiguration = read.extend({ expectedRevision: z.number().int().min(1).max(4294967294),
+const refreshConfiguration = read.extend({ ...operation, expectedRevision: z.number().int().min(1).max(4294967294),
   confirmCurrentConfiguration: z.literal(true) }).strict();
 const gate = z.object({ enabled: z.boolean(), revision: z.number().int().min(1).max(4294967295) }).strict();
 const platformRead = z.object({ sceneCode: code }).strict();
@@ -137,6 +138,12 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     if (!platform) throw new BudgetError('UNAVAILABLE');
     return createAuthorizedPlatformBudgetSettings({ ...platform, credentials });
   };
+  const checkOriginalSave = async (root: Awaited<ReturnType<typeof tenantRoot>>,
+    command: { scope: 'tenant' | 'workspace'; sceneCode: string; operationKey?: string }) => {
+    if (command.operationKey && (await root.settings.readOperation({ scope: command.scope,
+      sceneCode: command.sceneCode, operationKey: command.operationKey })).state === 'recorded')
+      throw new BudgetError('PENDING_RECONCILIATION');
+  };
   const reviewedPrices = (credentials: AiTaskCredentialSource) => {
     if (!tenant) throw new BudgetError('UNAVAILABLE');
     const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
@@ -196,6 +203,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const expected = refresh ? undefined : await registerCurrentAiConfigurationScopes({ ...tenant, credentials });
       const root = await tenantRoot(credentials, expected);
       const selector = { scope: command.scope, sceneCode: command.sceneCode };
+      await checkOriginalSave(root, command);
       const previous = await root.settings.read(selector);
       if (refresh ? !previous || previous.revision !== command.expectedRevision : previous !== null) throw new BudgetError('REVISION_CONFLICT');
       const invocation = new AiTaskCurrentIdentityAuthority(tenant.auth, credentials, tenant.clock);
@@ -246,7 +254,9 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
         const layer = command.scope === 'tenant' ? 'tenant' : 'scene';
         settings.gates[layer] = { enabled: false, revision: command.expectedRevision + 1 };
       }
-      const saved = await root.settings.save({ ...selector, expectedRevision: command.expectedRevision, settings }, async () => {
+      const saved = await root.settings.save({ ...selector, expectedRevision: command.expectedRevision, settings,
+        operation: command.operationKey ? { operationKey: command.operationKey,
+          action: refresh ? 'refreshConfiguration' : 'initialize', commandHash: requestFingerprint(command) } : undefined }, async () => {
         if ((await selectConfiguration()).fingerprint !== selected.fingerprint) throw new BudgetError('REVISION_CONFLICT');
       });
       try {
@@ -258,6 +268,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
     }, true, signal);
   return Object.freeze({
+    readOperation: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, command) =>
+      (await tenantRoot(credentials)).settings.readOperation(command), false, signal),
     read: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, command) =>
       (await tenantRoot(credentials)).settings.summary(command), false, signal),
     initialize: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => configure(request, value, false, signal),
@@ -266,6 +278,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const parsed = change.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, root = await tenantRoot(credentials), selector = { scope: command.scope, sceneCode: command.sceneCode };
+      await checkOriginalSave(root, command);
       const previous = await root.settings.read(selector);
       // Initial provisioning needs the server's selected, verified Profile.
       // Never invent one or accept config/credential fields from this body.
@@ -279,7 +292,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
         const layer = command.scope === 'tenant' ? 'tenant' : 'scene';
         settings.gates[layer] = { enabled: patch.enabled, revision: previous.revision + 1 };
       }
-      const saved = await root.settings.save({ ...selector, settings, expectedRevision: command.expectedRevision });
+      const saved = await root.settings.save({ ...selector, settings, expectedRevision: command.expectedRevision,
+        operation: command.operationKey ? { operationKey: command.operationKey, action: 'change', commandHash: requestFingerprint(command) } : undefined });
       try {
         const policy = await root.settings.summary(selector);
         if (policy.revision !== null && policy.revision < saved.revision) throw new BudgetError('PENDING_RECONCILIATION');

@@ -5,6 +5,7 @@ import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type B
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
 import { modelRequestSchema } from '../model-gateway.ports';
+import type { BudgetSettingsOperation } from './budget.ports';
 
 function fingerprint(value: unknown): string {
   const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical) : item && typeof item === 'object'
@@ -65,19 +66,26 @@ export class BudgetService {
     return result;
   }
   async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number,
-    revalidateConfiguration?: () => Promise<void>) {
+    revalidateConfiguration?: () => Promise<void>, operation?: BudgetSettingsOperation) {
     key = structuredClone(key);
     settings = structuredClone(settings);
+    operation = operation && structuredClone(operation);
     validateBudgetSettings(settings);
     if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
     const session = await this.session('settings_write', { policy: key });
+    if (operation) {
+      const context = session.grant.context;
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+        || context.actor.userId !== operation.actorId || context.scope.tenantId !== operation.tenantId
+        || context.scope.workspaceId !== operation.workspaceId) throw new BudgetError('FORBIDDEN');
+    }
     return this.repository.saveSettings(structuredClone(key), structuredClone(settings), expectedRevision, async () => {
       // An application may add a current-profile check, never replace the
       // mandatory action/entitlement revalidation with its own success gate.
       await session.revalidate();
       await revalidateConfiguration?.();
-    });
+    }, operation);
   }
   async reserve(value: BudgetReserveCommand) {
     const command = structuredClone(value);

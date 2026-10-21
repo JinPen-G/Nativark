@@ -1,4 +1,5 @@
 import type { AiScopeRepository } from '../ai-scope.repository';
+import type { PrismaClient } from '@prisma/client';
 import type { SubscriptionService } from '../../subscription/subscription.service';
 import { BudgetError, type BudgetQuotePort, type BudgetPolicyKey } from './budget.ports';
 import type { AiUsageSettingsDraft } from '@rental-os/shared';
@@ -18,10 +19,12 @@ import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-author
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
+import { budgetSettingsOperationSchema, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
 import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
 
 export function createPersistedGatewayBudget(input: {
-  db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0];
+  db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0]
+    & Partial<Pick<PrismaClient, 'operationLog'>>;
   scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
   authorization: BudgetAuthorizationSource;
@@ -34,7 +37,8 @@ export function createPersistedGatewayBudget(input: {
     quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
   const selector = z.object({ scope: z.enum(['tenant', 'workspace']),
     sceneCode: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
-  const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown() }).strict();
+  const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown(),
+    operation: budgetSettingsOperationSchema.pick({ operationKey: true, action: true, commandHash: true }).optional() }).strict();
   const identity = (value: Awaited<ReturnType<typeof input.scopes.resolveCurrent>>) => {
     const { requestId: _, authorizedAt: __, ...context } = value.context;
     return requestFingerprint({ context, scope: value.scope });
@@ -54,7 +58,7 @@ export function createPersistedGatewayBudget(input: {
       if (identity(current) !== identity(structuredClone(await input.scopes.resolveCurrent()))) throw new BudgetError('FORBIDDEN');
     };
     await recheck();
-    return { key, tenantId, recheck };
+    return { key, tenantId, context: current.context, recheck };
   };
   // Management consumers use the SAME service/repository/entitlement as the
   // financial lifecycle. These are internal server methods, not public DTOs
@@ -72,6 +76,32 @@ export function createPersistedGatewayBudget(input: {
   };
   const settings = Object.freeze({
     read: readSettings,
+    readOperation: async (value: unknown) => {
+      const parsed = selector.extend({ operationKey: budgetSettingsOperationSchema.shape.operationKey }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const { operationKey, ...selection } = parsed.data, current = await target(selection), context = current.context;
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+      // Observation uses current read permission, not a live Profile, write
+      // permission or permission to admit a new model call.
+      await readSettings(selection);
+      if (typeof input.db.operationLog?.findFirst !== 'function') throw new BudgetError('UNAVAILABLE');
+      const row = structuredClone(await input.db.operationLog.findFirst({ where: { id: settingsOperationId(current.key, operationKey),
+        tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
+        action: 'ai.budget.settings.saved' }, select: { id: true, tenantId: true, workspaceId: true, userId: true,
+          action: true, detail: true, createdAt: true } }));
+      await readSettings(selection); await current.recheck();
+      const base = { ...selection, operationKey, admission: 'not_granted' as const, automaticRetry: false as const };
+      if (!row || row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+        || row.userId !== context.actor.userId) return { ...base, state: 'unknown' as const };
+      const detail = budgetSettingsReceiptSchema.safeParse(row.detail);
+      if (row.action !== 'ai.budget.settings.saved' || !detail.success || row.id !== settingsOperationId(current.key, operationKey)
+        || detail.data.operationKey !== operationKey || detail.data.scopeKind !== current.key.scopeKind
+        || detail.data.scopeId !== current.key.scopeId || detail.data.sceneCode !== current.key.sceneCode
+        || detail.data.tenantId !== row.tenantId || detail.data.workspaceId !== row.workspaceId || detail.data.actorId !== row.userId
+        || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime())) throw new BudgetError('UNAVAILABLE');
+      return { ...base, state: 'recorded' as const, action: detail.data.action, expectedRevision: detail.data.expectedRevision,
+        savedRevision: detail.data.savedRevision, commandHash: detail.data.commandHash, recordedAt: row.createdAt.toISOString() };
+    },
     /** Tenant-facing data projection, not a model capability/dispatch grant.
      * The raw read above remains an internal server management result. */
     summary: async (value: unknown) => {
@@ -125,7 +155,11 @@ export function createPersistedGatewayBudget(input: {
         await current.recheck();
       };
       await revalidateConfiguration();
-      const saved = await service.saveSettings(current.key, proposed, command.expectedRevision, revalidateConfiguration);
+      const context = current.context;
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+      const saved = await service.saveSettings(current.key, proposed, command.expectedRevision, revalidateConfiguration,
+        command.operation && { ...command.operation, tenantId: context.scope.tenantId,
+          workspaceId: context.scope.workspaceId, actorId: context.actor.userId });
       // If current identity changed after COMMIT, do not disclose the saved
       // policy or pretend that the write was rolled back.
       try { await current.recheck(); } catch { throw new BudgetError('PENDING_RECONCILIATION'); }

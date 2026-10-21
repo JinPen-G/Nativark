@@ -5,7 +5,7 @@ import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, 
 /** Explicit server registration only. These paths are not production switches. */
 export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
-  read: 'read', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
+  read: 'read', readOperation: 'operation', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
   priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound',
   reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt',
   platformReviewPrice: 'platform/pricing/review', platformPriceReviewReceipt: 'platform/pricing/review/receipt',
@@ -41,6 +41,12 @@ export type AiGatewayInputBoundSummaryDraft = {
   price: AiGatewayPriceSummaryDraft; executionPermission: false;
 };
 export type AiBudgetSettingsReadDraft = { scope: 'tenant' | 'workspace'; sceneCode: string };
+export type AiBudgetSettingsOperationReadDraft = AiBudgetSettingsReadDraft & { operationKey: string };
+/** Immutable original save only; unknown is not evidence of rollback. */
+export type AiBudgetSettingsOperationReceiptDraft = AiBudgetSettingsOperationReadDraft & { admission: 'not_granted'; automaticRetry: false } & (
+  | { state: 'unknown' }
+  | { state: 'recorded'; action: 'change' | 'initialize' | 'refreshConfiguration'; expectedRevision: number;
+      savedRevision: number; commandHash: string; recordedAt: string });
 /** Existing management HTTP projection, never budget admission or a live
  * model selection. Matches AiBudgetSettingsSummaryDraft below. */
 export type AiBudgetSettingsSummaryDraft = AiBudgetSettingsReadDraft & { admission: 'not_granted' } & (
@@ -53,28 +59,28 @@ export type AiBudgetSettingsSummaryDraft = AiBudgetSettingsReadDraft & { admissi
 export type AiBudgetSettingsChangeResponseDraft = { savedRevision: number; policy: AiBudgetSettingsSummaryDraft;
   observation: 'same_revision' | 'changed_after_save' };
 export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
-  expectedRevision: number;
+  expectedRevision: number; operationKey?: string;
   /** Config, credentials, models and scene whitelist remain server-owned. */
   changes: { budget?: AiBudgetLimitDraft; maxConcurrent?: number; maxCallsPerRun?: number; enabled?: boolean };
 };
 export type AiPlatformBudgetSettingsReadDraft = { sceneCode: string };
 export type AiBudgetSettingsInitializeDraft = AiBudgetSettingsReadDraft & {
-  expectedRevision: 0; budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number; enabled: boolean;
+  expectedRevision: 0; operationKey?: string; budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number; enabled: boolean;
 };
 /** Rebinds the server-selected current configuration, retaining limits and
  * historical reservations. The changed policy gate is saved disabled. */
 export type AiBudgetSettingsRefreshConfigurationDraft = AiBudgetSettingsReadDraft & {
-  expectedRevision: number; confirmCurrentConfiguration: true;
+  expectedRevision: number; operationKey?: string; confirmCurrentConfiguration: true;
 };
 export type AiPlatformBudgetSettingsSaveDraft = AiPlatformBudgetSettingsReadDraft & {
   expectedRevision: number;
   settings: Pick<AiUsageSettingsDraft, 'gates' | 'allowedModels' | 'allowedScenes' | 'budget' | 'maxConcurrent' | 'maxCallsPerRun'>;
 };
-/** All failures are non-retry instructions. An uncertain settings write is read
- * by its same scope/scene key, never assumed rolled back or resubmitted. */
+/** All failures are non-retry instructions. Keyed saves use the original
+ * operation receipt; a current policy value is never proof of that save. */
 export type AiBudgetSettingsHttpFailureDraft = {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT' | 'AI_RESULT_UNKNOWN';
-  retryable: false; nextAction?: 'read_same_policy';
+  retryable: false; nextAction?: 'read_same_policy' | 'read_original_operation';
 };
 
 const scene = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
@@ -119,12 +125,18 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
     method: choice('provider_count_tokens_receipt', 'certified_tokenizer_bound'), validFrom: time, expiresAt: time,
     price: ref('AiGatewayPriceSummaryDraft'), executionPermission: { type: 'boolean', const: false } }),
   AiBudgetSettingsReadDraft: obj(selector),
-  AiBudgetSettingsRefreshConfigurationDraft: obj({ ...selector, expectedRevision: int(1, 4294967294),
-    confirmCurrentConfiguration: { type: 'boolean', const: true } }),
-  AiBudgetSettingsInitializeDraft: obj({ ...selector, expectedRevision: { type: 'integer', const: 0 }, budget: ref('AiBudgetLimitDraft'),
-    maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }),
-  AiBudgetSettingsChangeDraft: obj({ ...selector, expectedRevision: int(0, 4294967294), changes: {
-    ...obj({ budget: ref('AiBudgetLimitDraft'), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, []), minProperties: 1 } }),
+  AiBudgetSettingsOperationReadDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 } }),
+  AiBudgetSettingsOperationReceiptDraft: { oneOf: [
+    obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, admission, automaticRetry: { type: 'boolean', const: false }, state: choice('unknown') }),
+    obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, admission, automaticRetry: { type: 'boolean', const: false }, state: choice('recorded'),
+      action: choice('change', 'initialize', 'refreshConfiguration'), expectedRevision: int(0, 4294967294),
+      savedRevision: int(1, 4294967295), commandHash: pricingHash, recordedAt: time })] },
+  AiBudgetSettingsRefreshConfigurationDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: int(1, 4294967294),
+    confirmCurrentConfiguration: { type: 'boolean', const: true } }, ['scope', 'sceneCode', 'expectedRevision', 'confirmCurrentConfiguration']),
+  AiBudgetSettingsInitializeDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: { type: 'integer', const: 0 }, budget: ref('AiBudgetLimitDraft'),
+    maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, ['scope', 'sceneCode', 'expectedRevision', 'budget', 'maxConcurrent', 'maxCallsPerRun', 'enabled']),
+  AiBudgetSettingsChangeDraft: obj({ ...selector, operationKey: { ...pricingKey, maxLength: 128 }, expectedRevision: int(0, 4294967294), changes: {
+    ...obj({ budget: ref('AiBudgetLimitDraft'), maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }, []), minProperties: 1 } }, ['scope', 'sceneCode', 'expectedRevision', 'changes']),
   AiPlatformBudgetSettingsReadDraft: obj({ sceneCode: scene }),
   AiPlatformBudgetSettingsSaveDraft: obj({ sceneCode: scene, expectedRevision: int(0, 4294967294),
     settings: obj({ ...settings, allowedModels: list(text(256), 100) }) }),
@@ -139,5 +151,5 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiBudgetSettingsChangeResponseDraft: obj({ savedRevision: int(1, 4294967295), policy: ref('AiBudgetSettingsSummaryDraft'),
     observation: choice('same_revision', 'changed_after_save') }),
   AiBudgetSettingsHttpFailureDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT', 'AI_RESULT_UNKNOWN'),
-    retryable: { type: 'boolean', const: false }, nextAction: choice('read_same_policy') }, ['code', 'retryable'])
+    retryable: { type: 'boolean', const: false }, nextAction: choice('read_same_policy', 'read_original_operation') }, ['code', 'retryable'])
 };

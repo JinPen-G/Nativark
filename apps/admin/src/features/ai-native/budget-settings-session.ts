@@ -2,11 +2,21 @@
  * a current policy read is not an immutable receipt for an earlier save. */
 import type { AiBudgetLimitDraft, AiBudgetSettingsReadDraft, AiBudgetSettingsSummaryDraft,
   AiBudgetSettingsChangeDraft, AiBudgetSettingsInitializeDraft, AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/shared';
+import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared';
 
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const integer = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 const code = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(v);
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
+// Same sorted JSON SHA-256 convention as the server request fingerprint.
+// Persist only this digest and the original key, never the edited policy body.
+async function commandHash(value: unknown): Promise<string> {
+  const sorted = (v: unknown): unknown => Array.isArray(v) ? v.map(sorted) : object(v)
+    ? Object.fromEntries(Object.keys(v).sort().map(key => [key, sorted(v[key])])) : v;
+  const bytes = new TextEncoder().encode(JSON.stringify(sorted(value)));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('');
+}
 function limit(v: unknown): AiBudgetLimitDraft {
   if (!object(v)) return invalid();
   if (v.state === 'not_configured') return { state: v.state };
@@ -61,18 +71,20 @@ export function prepareBudgetFields(v: BudgetForm) {
   return { budget, maxConcurrent: natural(v.concurrent, 10000), maxCallsPerRun: natural(v.calls, 10000), enabled: v.enabled };
 }
 type Ports = { read(v: AiBudgetSettingsReadDraft, s: AbortSignal): Promise<unknown>;
+  readOperation(v: AiBudgetSettingsOperationReadDraft, s: AbortSignal): Promise<unknown>;
   change(v: AiBudgetSettingsChangeDraft, s: AbortSignal): Promise<unknown>;
   initialize(v: AiBudgetSettingsInitializeDraft, s: AbortSignal): Promise<unknown>;
   refreshConfiguration(v: AiBudgetSettingsRefreshConfigurationDraft, s: AbortSignal): Promise<unknown> };
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
 export type BudgetEditorState = Readonly<{ busy: boolean; policy: AiBudgetSettingsSummaryDraft | null; locked: boolean;
-  feedback: 'idle' | 'saved' | 'changed' | 'unknown' | 'conflict' | 'denied' | 'unavailable' | 'invalid' }>;
+  feedback: 'idle' | 'saved' | 'recorded' | 'changed' | 'unknown' | 'conflict' | 'denied' | 'unavailable' | 'invalid' }>;
 export class BudgetSettingsSession {
   private active = true; private request: AbortController | null = null; private listeners = new Set<() => void>();
   private state: BudgetEditorState;
   private readonly selector: AiBudgetSettingsReadDraft;
   constructor(selector: AiBudgetSettingsReadDraft, private readonly ports: Ports, private readonly current: () => boolean,
-    private readonly storage: Storage | undefined, private readonly key: string) {
+    private readonly storage: Storage | undefined, private readonly key: string,
+    private readonly newOperationKey: () => string = () => globalThis.crypto.randomUUID()) {
     if (!['tenant', 'workspace'].includes(selector.scope) || !code(selector.sceneCode)) invalid();
     this.selector = Object.freeze(structuredClone(selector));
     let locked = true; try { locked = !storage || storage.getItem(key) !== null; } catch { /* no safe unknown recovery */ }
@@ -87,6 +99,39 @@ export class BudgetSettingsSession {
   read = () => this.run();
   save = (fields: BudgetForm) => this.run(structuredClone(fields));
   refresh = () => this.run('refresh');
+  reconcile = async () => {
+    this.check(); if (this.request) throw Error('AI_BUSY');
+    const controller = new AbortController(); this.request = controller;
+    this.publish({ busy: true, policy: null });
+    try {
+      const marker = this.storage?.getItem(this.key);
+      if (!marker || marker.length > 1024) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const pending: unknown = JSON.parse(marker);
+      // Legacy markers have no original key: never manufacture a receipt key
+      // or treat today's policy value as confirmation of that old save.
+      if (!object(pending) || pending.scope !== this.selector.scope || pending.sceneCode !== this.selector.sceneCode
+        || !code(pending.operationKey) || !integer(pending.expectedRevision, 0, 4294967294)
+        || typeof pending.commandHash !== 'string' || !/^[a-f0-9]{64}$/u.test(pending.commandHash)
+        || !['change', 'initialize', 'refreshConfiguration'].includes(String(pending.operation))) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const raw = structuredClone(await this.ports.readOperation({ ...this.selector, operationKey: pending.operationKey }, controller.signal));
+      this.check(controller.signal);
+      if (!object(raw) || raw.scope !== this.selector.scope || raw.sceneCode !== this.selector.sceneCode
+        || raw.operationKey !== pending.operationKey || raw.admission !== 'not_granted' || raw.automaticRetry !== false) throw Error('AI_RESULT_UNKNOWN');
+      if (raw.state !== 'recorded' || raw.action !== pending.operation || raw.expectedRevision !== pending.expectedRevision
+        || raw.savedRevision !== pending.expectedRevision + 1 || raw.commandHash !== pending.commandHash
+        || typeof raw.recordedAt !== 'string' || !Number.isFinite(Date.parse(raw.recordedAt))) throw Error('AI_RESULT_UNKNOWN');
+      if (this.storage?.getItem(this.key) !== marker) throw Error('AI_RESULT_UNKNOWN');
+      this.storage.removeItem(this.key);
+      if (this.storage.getItem(this.key) !== null) throw Error('AI_RESULT_UNKNOWN');
+      this.publish({ locked: false, policy: null, feedback: 'recorded' }); return raw;
+    } catch (error) {
+      if (this.active && !controller.signal.aborted) {
+        const denied = !this.current() || [401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0);
+        this.publish({ locked: true, policy: null, feedback: denied ? 'denied' : 'unknown' });
+      }
+      throw error;
+    } finally { if (this.request === controller) this.request = null; if (this.active) this.publish({ busy: false }); }
+  };
   private async run(change?: BudgetForm | 'refresh') {
     this.check(); if (this.request) throw Error('AI_BUSY');
     const controller = new AbortController(); this.request = controller;
@@ -103,17 +148,26 @@ export class BudgetSettingsSession {
       const expectedRevision = old.revision ?? 0;
       const fields = change === 'refresh' ? null : prepareBudgetFields(change);
       if (old.state === 'not_configured' && fields?.enabled) return invalid();
-      const marker = JSON.stringify({ ...this.selector, expectedRevision, operation: change === 'refresh' ? 'refresh' : old.state === 'configured' ? 'change' : 'initialize' });
+      const operationKey = this.newOperationKey(); if (!code(operationKey)) return invalid();
+      const command = change === 'refresh' ? { ...this.selector, expectedRevision, operationKey, confirmCurrentConfiguration: true as const }
+        : old.state === 'not_configured' ? { ...this.selector, expectedRevision: 0 as const, operationKey, ...fields! }
+          : { ...this.selector, expectedRevision, operationKey, changes: fields! };
+      const fingerprint = await commandHash(command);
+      this.check(controller.signal);
+      if (this.storage.getItem(this.key) !== null) { this.publish({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
+      const marker = JSON.stringify({ ...this.selector, expectedRevision, operationKey, commandHash: fingerprint,
+        operation: change === 'refresh' ? 'refreshConfiguration' : old.state === 'configured' ? 'change' : 'initialize' });
       this.storage.setItem(this.key, marker); if (this.storage.getItem(this.key) !== marker) throw Error('AI_RESOURCE_UNAVAILABLE');
       this.publish({ locked: true }); this.check(controller.signal); attempted = true;
       const raw = structuredClone(await (change === 'refresh'
-        ? this.ports.refreshConfiguration({ ...this.selector, expectedRevision, confirmCurrentConfiguration: true }, controller.signal)
-        : old.state === 'not_configured' ? this.ports.initialize({ ...this.selector, expectedRevision: 0, ...fields! }, controller.signal)
-          : this.ports.change({ ...this.selector, expectedRevision, changes: fields! }, controller.signal)));
+        ? this.ports.refreshConfiguration(command as AiBudgetSettingsRefreshConfigurationDraft, controller.signal)
+        : old.state === 'not_configured' ? this.ports.initialize(command as AiBudgetSettingsInitializeDraft, controller.signal)
+          : this.ports.change(command as AiBudgetSettingsChangeDraft, controller.signal)));
       this.check(controller.signal);
       if (!object(raw) || raw.savedRevision !== expectedRevision + 1 || !['same_revision', 'changed_after_save'].includes(String(raw.observation))) throw Error('AI_RESULT_UNKNOWN');
       const policy = budgetSettingsSummary(raw.policy, this.selector);
       if (policy.state !== 'configured' || (raw.observation === 'same_revision' ? policy.revision !== raw.savedRevision : policy.revision <= raw.savedRevision)) throw Error('AI_RESULT_UNKNOWN');
+      if (this.storage.getItem(this.key) !== marker) throw Error('AI_RESULT_UNKNOWN');
       this.storage.removeItem(this.key);
       if (this.storage.getItem(this.key) !== null) throw Error('AI_RESULT_UNKNOWN');
       this.publish({ locked: false, policy: raw.observation === 'same_revision' ? policy : null,

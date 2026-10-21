@@ -12,8 +12,9 @@ import { safeDisplayText } from './safe-display';
 
 const messages = { idle: '预算读取与模型执行相互独立；不会自动测试或调用模型。',
   saved: '预算政策已保存；不代表平台、租户、场景交集已放行，也不代表模型可执行。',
+  recorded: '已核对原保存收据；只证明原修订已提交。请重新读取当前政策后再编辑，不会重做原保存。',
   changed: '保存已确认，但政策随后发生变化；请重新读取，不能沿用旧修订。',
-  unknown: '原保存结果待核对，已禁止再次保存。只能读取同一政策现状；现状不是原操作收据，需管理员核对原修订。',
+  unknown: '原保存结果待核对，已禁止再次保存。请核对原保存收据；未知或旧版无原键的保存仍需人工核对，当前政策相同也不能证明原保存成功。',
   conflict: '政策修订已变化，请重新读取后审阅；未覆盖其他人的修改。',
   denied: '当前无权管理预算，已清除旧政策。', unavailable: '预算或依赖当前不可用，未视为零额度或不限额。',
   invalid: '请检查额度、单位、六位小数币种和整数上限。' };
@@ -65,6 +66,8 @@ function BudgetEditor({ identity, selector }: { identity: string; selector: AiBu
   return <section aria-label={t('当前预算政策')} aria-busy={state.busy}>
     <Alert type={state.feedback === 'saved' ? 'success' : state.locked ? 'warning' : 'info'} title={t(messages[state.feedback])} />
     <ActionButton label={t('读取同一政策现状')} successLabel={t('现状已读取')} disabled={state.busy} onAction={session.read} />
+    {state.locked && <ActionButton label={t('核对原保存收据')} successLabel={t('原保存已核对，请重读现状')}
+      disabled={state.busy} onAction={session.reconcile} />}
     {policy && <>
       <p>{t('场景')}: {safeDisplayText(policy.sceneCode, 128)}；{t('修订')}: {policy.revision ?? t('未配置')}</p>
       {policy.state === 'configured' && <>

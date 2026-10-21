@@ -542,7 +542,7 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
     const configuration = readBudgetManagementConfiguration(managementValue, serverValue);
     if (!configuration.enabled) {
       const unavailable = async (): Promise<never> => { throw new BudgetError('UNAVAILABLE'); };
-      return Object.freeze({ read: unavailable, change: unavailable, initialize: unavailable,
+      return Object.freeze({ read: unavailable, readOperation: unavailable, change: unavailable, initialize: unavailable,
         refreshConfiguration: unavailable, reviewPrice: unavailable, readPriceReview: unavailable,
         platformReviewPrice: unavailable, platformPriceReviewReceipt: unavailable,
         adoptPlatformPrice: unavailable, readPlatformPriceAdoption: unavailable,

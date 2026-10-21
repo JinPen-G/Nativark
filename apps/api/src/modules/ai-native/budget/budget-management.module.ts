@@ -24,7 +24,8 @@ for (const [name, schema] of Object.entries({ ...AI_USAGE_DRAFT_SCHEMAS, ...AI_B
 const tenantSummary = ajv.getSchema('urn:rental:budget-management:AiBudgetSettingsSummaryDraft')!;
 const platformSummary = ajv.getSchema('urn:rental:budget-management:AiPlatformBudgetSettingsSummaryDraft')!;
 const tenantChange = ajv.getSchema('urn:rental:budget-management:AiBudgetSettingsChangeResponseDraft')!;
-async function respondBudgetManagement<T>(work: () => Promise<T>, policyReadback = true) {
+const tenantOperation = ajv.getSchema('urn:rental:budget-management:AiBudgetSettingsOperationReceiptDraft')!;
+async function respondBudgetManagement<T>(work: () => Promise<T>, policyReadback = true, originalOperation = false) {
   try { return await work(); }
   catch (error) {
     const codes: Record<string, [AiBudgetSettingsHttpFailureDraft['code'], number]> = {
@@ -37,7 +38,7 @@ async function respondBudgetManagement<T>(work: () => Promise<T>, policyReadback
     const [code, status] = Object.prototype.hasOwnProperty.call(codes, raw)
       ? codes[raw] : ['AI_RESOURCE_UNAVAILABLE', 503] as const;
     const body: AiBudgetSettingsHttpFailureDraft = { code, retryable: false,
-      ...(code === 'AI_RESULT_UNKNOWN' && policyReadback ? { nextAction: 'read_same_policy' as const } : {}) };
+      ...(code === 'AI_RESULT_UNKNOWN' && policyReadback ? { nextAction: originalOperation ? 'read_original_operation' as const : 'read_same_policy' as const } : {}) };
     throw new HttpException(body, status);
   }
 }
@@ -51,14 +52,18 @@ export class AiBudgetManagementController {
     }
     return structuredClone(value);
   }
-  private async respond<T>(request: SettingsRequest, write: boolean, work: (signal: AbortSignal) => Promise<T>, policyReadback = true) {
+  private hasOperationKey(body: unknown) {
+    return !!body && typeof body === 'object' && 'operationKey' in body && typeof body.operationKey === 'string'
+      && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(body.operationKey);
+  }
+  private async respond<T>(request: SettingsRequest, write: boolean, work: (signal: AbortSignal) => Promise<T>, policyReadback = true, originalOperation = false) {
     return respondBudgetManagement(async () => {
       try { return await withRequestAbort(request, work); }
       catch (error) {
         if (error instanceof AiRequestWaitError) throw new BudgetError(write ? 'PENDING_RECONCILIATION' : 'UNAVAILABLE');
         throw error;
       }
-    }, policyReadback);
+    }, policyReadback, originalOperation);
   }
   private priceReviewResult(value: unknown, write: boolean) {
     const validate = ajv.getSchema<AiGatewayPriceReviewResponseDraft>('urn:rental:budget-management:AiGatewayPriceReviewResponseDraft');
@@ -94,17 +99,25 @@ export class AiBudgetManagementController {
   read(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, false, async signal => this.checked(await this.application.read(request, body, signal), false));
   }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOperation(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => {
+      const result = await this.application.readOperation(request, body, signal);
+      if (!tenantOperation(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 4096) throw new BudgetError('UNAVAILABLE');
+      return structuredClone(result);
+    }, false);
+  }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.change) @HttpCode(200) @Header('Cache-Control', 'no-store')
   change(@Req() request: SettingsRequest, @Body() body: unknown) {
-    return this.respond(request, true, async signal => this.checked(await this.application.change(request, body, signal), false, true));
+    return this.respond(request, true, async signal => this.checked(await this.application.change(request, body, signal), false, true), true, this.hasOperationKey(body));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.initialize) @HttpCode(200) @Header('Cache-Control', 'no-store')
   initialize(@Req() request: SettingsRequest, @Body() body: unknown) {
-    return this.respond(request, true, async signal => this.checked(await this.application.initialize(request, body, signal), false, true));
+    return this.respond(request, true, async signal => this.checked(await this.application.initialize(request, body, signal), false, true), true, this.hasOperationKey(body));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration) @HttpCode(200) @Header('Cache-Control', 'no-store')
   refreshConfiguration(@Req() request: SettingsRequest, @Body() body: unknown) {
-    return this.respond(request, true, async signal => this.checked(await this.application.refreshConfiguration(request, body, signal), false, true));
+    return this.respond(request, true, async signal => this.checked(await this.application.refreshConfiguration(request, body, signal), false, true), true, this.hasOperationKey(body));
   }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
   platformRead(@Req() request: SettingsRequest, @Body() body: unknown) {
