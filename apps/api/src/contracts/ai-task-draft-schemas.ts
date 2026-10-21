@@ -24,6 +24,23 @@ const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCurs
 /** Shared task shapes, including the owner-only read transport. Execution and
  * state transitions still require their existing application/DB authority. */
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  AiTaskClarificationQueryDraft: closed({ taskId: { ...id(), maxLength: 36 } }),
+  AiTaskClarificationAnswerDraft: closed({ submission: ref('AiTaskInputSubmissionDraft') }),
+  AiTaskClarificationObservationDraft: closed({ taskId: { ...id(), maxLength: 36 }, input: { oneOf: [{ type: 'null' },
+    closed({ requestId: { ...id(), maxLength: 36 }, revision, expiresAt: time, contract: ref('AiTaskInputContractDraft') })] },
+    execution: choice('read_only_no_start_no_reconnect_side_effect') }),
+  AiTaskClarificationProgressDraft: closed({ taskId: { ...id(), maxLength: 36 }, requestId: { ...id(), maxLength: 36 },
+    automaticRetry: { type: 'boolean', enum: [false] }, businessExecution: choice('not_inferred_from_input'),
+    receipt: { oneOf: [closed({ state: choice('not_observed') }), closed({ state: choice('observed'),
+      receiptId: { ...id(), maxLength: 36 }, taskRevision: revision,
+      runId: { oneOf: [{ ...id(), maxLength: 36 }, { type: 'null' }] }, replayed: { oneOf: [{ type: 'boolean' }, { type: 'null' }] } })] },
+    continuation: { oneOf: [closed({ kind: choice('not_attempted') }),
+      closed({ kind: choice('not_started'), reason: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z_]+$' } }),
+      closed({ kind: choice('unavailable'), errorCode: { type: 'string', maxLength: 128, pattern: '^AI_[A-Z_]+$' } }),
+      closed({ kind: choice('run_outcome'), status: choice('succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed'),
+        stopReason: { oneOf: [choice('input_limit_reached'), { type: 'null' }] },
+        nextAction: { oneOf: [choice('manual_handoff'), { type: 'null' }] },
+        errorCode: { oneOf: [{ type: 'string', maxLength: 128, pattern: '^AI_[A-Z_]+$' }, { type: 'null' }] } })] } }),
   AiTaskReviewQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 } }),
   AiTaskDecisionQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     proposal: ref('AiApprovalApplicationDecisionDraft') }),

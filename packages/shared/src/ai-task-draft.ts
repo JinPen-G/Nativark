@@ -153,7 +153,8 @@ export interface AiTaskEventResetDraft {
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
   list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
   review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business", continue: "continue", source: "source",
-  stop: 'stop', stopReceipt: 'stop-receipt' } as const);
+  stop: 'stop', stopReceipt: 'stop-receipt', input: 'input', resumeInput: 'input/resume',
+  inputReceipt: 'input/receipt', continueInput: 'input/continue' } as const);
 export const AI_TASK_CENTER_ENTRY_PERMISSIONS = Object.freeze([
   "rental-os:order:view", "rental-os:order:create", "rental-os:price:manage", "system:params:manage"
 ] as const);
@@ -235,3 +236,21 @@ export type AiTaskHumanContinuationDraft = AiTaskReviewQueryDraft & {
   | { kind: 'not_started'; reason: string }
   | { kind: 'run_outcome'; status: 'succeeded' | 'partially_succeeded' | 'paused' | 'cancel_requested' | 'cancelled' | 'unknown' | 'unavailable' | 'failed' }
 );
+
+/** Original clarification only. A response/selection is not business approval;
+ * resuming can run the existing configured successor, never a caller's plan. */
+export interface AiTaskClarificationQueryDraft { taskId: string }
+export interface AiTaskClarificationObservationDraft extends AiTaskClarificationQueryDraft {
+  input: { requestId: string; revision: number; expiresAt: string;
+    contract: import('./ai-task-input-draft').AiTaskInputContractDraft } | null;
+  execution: 'read_only_no_start_no_reconnect_side_effect';
+}
+export interface AiTaskClarificationAnswerDraft { submission: import('./ai-task-input-draft').AiTaskInputSubmissionDraft }
+export interface AiTaskClarificationProgressDraft {
+  taskId: string; requestId: string; automaticRetry: false; businessExecution: 'not_inferred_from_input';
+  receipt: { state: 'not_observed' } | { state: 'observed'; receiptId: string; taskRevision: number;
+    runId: string | null; replayed: boolean | null };
+  continuation: { kind: 'not_attempted' } | { kind: 'not_started'; reason: string } | { kind: 'unavailable'; errorCode: string }
+    | { kind: 'run_outcome'; status: 'succeeded' | 'partially_succeeded' | 'paused' | 'cancel_requested' | 'cancelled' | 'unknown' | 'unavailable' | 'failed';
+      stopReason: 'input_limit_reached' | null; nextAction: 'manual_handoff' | null; errorCode: string | null };
+}

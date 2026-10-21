@@ -1,5 +1,6 @@
-/** Standard operator task observations and explicit human decisions. Current
- * domain/owner/action policies are mandatory; no Gateway, runner or quota writes. */
+/** Standard operator task observations, human decisions and explicit original
+ * clarification/continuation. Current owner/action policies remain mandatory;
+ * execution delegates to existing hosts, never another runner or ledger. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -25,6 +26,7 @@ import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './t
 import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterContinuationDependencies } from './task-center-continuation.composition';
 import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, type TaskCenterInputDependencies } from './task-center-input.composition';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -36,6 +38,7 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
+  originalInputs?: TaskCenterInputDependencies;
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
@@ -49,6 +52,7 @@ const schemas = {
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
   continue: taskCenterContinueSchema,
+  input: taskCenterInputQuery, resumeInput: taskCenterInputAnswer, inputReceipt: taskCenterInputAnswer, continueInput: taskCenterInputAnswer,
   stop: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   stopReceipt: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()
@@ -64,7 +68,11 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     const header = z.string().max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u).safeParse(request?.headers?.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     let command: unknown;
-    try { command = structuredClone(value); if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 8192) throw Error(); }
+    try {
+      command = structuredClone(value);
+      const limit = ['resumeInput', 'inputReceipt', 'continueInput'].includes(action) ? 65536 : 8192;
+      if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > limit) throw Error();
+    }
     catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
     if (!schemas[action].safeParse(command).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const requestId = randomUUID();
@@ -77,7 +85,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
     try {
-      const work = () => runWithRequestIdentity({}, async () => {
+      const work = (activeSignal = signal) => runWithRequestIdentity({}, async () => {
         const identity = new AiTaskCurrentIdentityAuthority(input.auth, credentials, input.clock);
         const before = await identity.resolve();
         if (before.audience !== 'operator' || !('access' in before)
@@ -197,9 +205,16 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
         const continueOriginal = () => {
           if (!input.continuation || input.continuation.db !== input.db || !input.humanApprovals) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           return continueTaskCenterOriginal(input.continuation, input.humanApprovals, credentials, root.tasks,
-            { headers: { authorization: header.data } }, command, signal);
+            { headers: { authorization: header.data } }, command, activeSignal);
         };
-        const result = action === 'stop' || action === 'stopReceipt' ? await originalStop() : action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
+        const originalInput = () => {
+          if (!input.originalDb || !input.originalInputs) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return callTaskCenterInput({ db: { aiTask: input.db.aiTask, aiTaskOriginalRequest: input.originalDb.aiTaskOriginalRequest },
+            original: input.originalInputs, tasks: root.tasks, credentials }, { headers: { authorization: header.data } }, command,
+            action as 'input' | 'resumeInput' | 'inputReceipt' | 'continueInput', activeSignal);
+        };
+        const result = ['input', 'resumeInput', 'inputReceipt', 'continueInput'].includes(action) ? await originalInput()
+          : action === 'stop' || action === 'stopReceipt' ? await originalStop() : action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
           ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
             : action === 'result' ? await originalResult() : action === 'source' ? await originalSource() : action === 'confirmation'
               ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
@@ -215,7 +230,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return structuredClone(result);
       });
-      if (action !== 'continue') return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop', signal);
+      if (!['continue', 'resumeInput', 'continueInput'].includes(action)) return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop', signal);
       try { return await callAiTaskRunnerDependency(work, 120000, 'task_center_original_continue', signal); }
       catch (error) {
         if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))
@@ -237,6 +252,10 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     decisionReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decisionReceipt', signal),
     business: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'business', signal),
     continue: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'continue', signal),
+    input: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'input', signal),
+    resumeInput: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'resumeInput', signal),
+    inputReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'inputReceipt', signal),
+    continueInput: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'continueInput', signal),
     confirmation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'confirmation', signal) });
 }
 
@@ -275,4 +294,12 @@ export class AiTaskCenterController {
   business(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'business'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.continue) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continue(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'continue'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.input) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  input(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'input'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.resumeInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  resumeInput(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'resumeInput'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.inputReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  inputReceipt(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'inputReceipt'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.continueInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  continueInput(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'continueInput'); }
 }

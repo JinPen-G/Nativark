@@ -58,7 +58,7 @@ import { HumanKnowledgeConsumptionRequestFactory } from './knowledge/human-knowl
 import { KNOWLEDGE_POLICY_MANAGEMENT, createKnowledgePolicyManagementFactory } from './knowledge/knowledge-policy-management.composition';
 import { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeCommandSchema } from './text-capability-probe';
 import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AI_ORIGINAL_TASK_ACTION_POLICIES,
-  AI_SCENE_PLAN_POLICIES } from './scenes/original-scenes.controller';
+  AI_SCENE_PLAN_POLICIES, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { composeStandardStaffRecognition, readStaffRecognitionConfiguration, STAFF_RECOGNITION_SCENES,
   AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, AI_NATIVE_STAFF_RECOGNITION_RUNTIME, AI_NATIVE_STAFF_RECOGNITION_ADAPTERS } from './inspection-assist/inspection-standard.application';
@@ -187,16 +187,29 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
-    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }],
+    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
     quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown,
     selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
-    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> }) => {
+    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
+    moduleRef?: Pick<ModuleRef, 'get'>) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
+    const clarification = () => {
+      type Call = (request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) => Promise<unknown>;
+      let original: { resume?: Call; continueAnswer?: Call } | undefined;
+      const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      try { original = moduleRef?.get(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, { strict: false }); }
+      catch { throw unavailable(); }
+      if (typeof original?.resume !== 'function' || typeof original.continueAnswer !== 'function') throw unavailable();
+      return { resume: original.resume.bind(original), continueAnswer: original.continueAnswer.bind(original) };
+    };
     return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, originalResults, business: { db, selectedOrderResult },
+      originalInputs: { readInput: originalResults.readInput.bind(originalResults),
+        readAnswer: originalResults.readAnswer.bind(originalResults),
+        execution: clarification },
       continuation: { db, order: selectedOrderResult, settings: settingsTask },
       humanApprovals: {
         order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
