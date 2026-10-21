@@ -22,9 +22,9 @@ const userSchema = z.object({ id: z.string().min(1), isActive: z.literal(true), 
 export class PlatformModelConfigurationAuthority implements PlatformConnectionAuthority, AiCurrentScopeAuthority {
   private readonly invocation: TenantModelConfigurationAuthority;
   constructor(private readonly guard: Pick<ApiAuthGuard, 'canActivate'>,
-    private readonly credentials: AiOrderRouteCredentialSource, private readonly profileId: string,
+    private readonly credentials: AiOrderRouteCredentialSource, private readonly profileId: string | undefined,
     invocation: AiCurrentScopeAuthority, private readonly clock: () => Date = () => new Date()) {
-    if (!profileIdSchema.safeParse(profileId).success || typeof clock !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if (profileId !== undefined && !profileIdSchema.safeParse(profileId).success || typeof clock !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     this.invocation = new TenantModelConfigurationAuthority(guard, credentials, invocation);
   }
   async manage(profileId: string): Promise<void> {
@@ -38,11 +38,14 @@ export class PlatformModelConfigurationAuthority implements PlatformConnectionAu
   invoke(context: GatewayContext) { return this.invocation.authorize(context, 'invoke'); }
   resolve(): Promise<AiExecutionContext> { return this.current('PUT'); }
   resolveRead(): Promise<AiExecutionContext> { return this.current('GET'); }
-  private async current(method: 'GET' | 'PUT'): Promise<AiExecutionContext> {
+  /** Directory is a separate current read action, not a fabricated Profile. */
+  resolveDirectoryRead(): Promise<AiExecutionContext> { return this.current('GET', true); }
+  private async current(method: 'GET' | 'PUT', directory = false): Promise<AiExecutionContext> {
     try {
+      if (!directory && this.profileId === undefined) throw Error();
       const credential = credentialsSchema.parse(structuredClone(await this.credentials.current()));
       return await runWithRequestIdentity({}, async () => {
-        const path = `/api/platform/ai/providers/${this.profileId}`;
+        const path = directory ? '/api/platform/ai/providers' : `/api/platform/ai/providers/${this.profileId}`;
         const request = { url: path, originalUrl: path, method, headers: { authorization: credential.authorization }, query: {}, user: undefined as unknown };
         if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw Error();
         const user = userSchema.parse(request.user), identity = getRequestIdentity(), now = this.clock();

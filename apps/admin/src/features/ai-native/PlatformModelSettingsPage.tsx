@@ -1,7 +1,7 @@
 /** SaaS Profile editor over the existing encrypted CAS management API. No
  * provider requests, automatic capability claims, model catalogue or quota. */
-import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
-import type { AiPlatformModelSettingsInputDraft } from "@rental-os/shared";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { AiPlatformModelSettingsInputDraft, AiPlatformModelDirectoryDraft } from "@rental-os/shared";
 import { platformAiSettingsApi } from "@/api/platformAiSettings";
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useLocale } from "@/app/locale";
@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ActionButton, Alert, Input, Segmented, Select, Switch } from "@/components/ui";
 import { useAuthStore } from "@/features/auth/authStore";
 import { PLATFORM_MODEL_CAPABILITIES, PlatformModelSettingsSession } from "./platform-model-settings-session";
+import { safeDisplayText } from './safe-display';
 
 const identityKey = () => JSON.stringify([useAuthStore.getState().user, currentSessionEpoch()]);
 const feedback = { idle: "配置、能力验证、费率及预算分别管理，不会因保存而开放调用。", saved: "平台配置已保存，请重新读取当前配置。",
@@ -24,6 +25,8 @@ export function PlatformModelSettingsPage() {
   return <>
     <PageHeader title={t("平台 AI 配置")} description={t("管理平台供应商连接，不读取租户 BYOK 密钥。")} />
     {allowed ? <section aria-label={t("平台 AI 配置")}>
+      <PlatformModelDirectory key={identityKey()} identity={identityKey()} onSelect={value => { setTarget(value); setSelected(value); }}
+        onClear={() => { setTarget(''); setSelected(''); }} />
       <p className="muted">{t("按正式 Profile 编号读取；首次配置须明确选择修订零创建，不会把读取失败当作不存在。")}</p>
       <label htmlFor={id}>{t("Profile 编号")}</label>
       <Input id={id} value={target} maxLength={36} onChange={e => { setTarget(e.target.value); setSelected(""); }} />
@@ -32,6 +35,57 @@ export function PlatformModelSettingsPage() {
       {selected && <ProfileHost key={identityKey() + selected} profileId={selected} identity={identityKey()} />}
     </section> : <Alert type="warning" title={t("需要 SaaS 平台 AI 配置读取权限。")}/>}
   </>;
+}
+/** Explicit bounded directory read. Selection is not a connection test or an
+ * invocation; manual first setup and the original CAS editor remain intact. */
+export function PlatformModelDirectory({ identity, onSelect, onClear }: {
+  identity: string; onSelect: (profileId: string) => void; onClear: () => void;
+}) {
+  const { t } = useLocale(), label = useId();
+  const [page, setPage] = useState<AiPlatformModelDirectoryDraft | null>(null);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(false), [selected, setSelected] = useState<string>();
+  const flight = useRef<AbortController | null>(null), mounted = useRef(true);
+  const active = useRef({ identity, onSelect, onClear }); active.current = { identity, onSelect, onClear };
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; flight.current?.abort(); }; }, []);
+  const current = () => mounted.current && active.current.identity === identity && identityKey() === identity
+    && !!useAuthStore.getState().token && !!useAuthStore.getState().user?.isSaasAdmin
+    && useAuthStore.getState().hasPermission('system:ai-provider:view');
+  const read = async (after?: string) => {
+    if (flight.current || !current()) throw Error('AI_ACCESS_DENIED');
+    const controller = new AbortController(); flight.current = controller; setBusy(true); setError(false); setPage(null); setSelected(undefined);
+    try {
+      const result = structuredClone(await platformAiSettingsApi.list({ limit: 20, ...(after ? { after } : {}) }, controller.signal));
+      if (!current() || controller.signal.aborted) return;
+      if (!result || result.observation !== 'configuration_catalog_not_capability_evidence' || !Array.isArray(result.items) || result.items.length > 20
+        || new Set(result.items.map(row => row.profileId)).size !== result.items.length
+        || result.items.some(row => !/^[A-Za-z0-9][\w.:-]{0,35}$/u.test(row.profileId)
+          || !Number.isInteger(row.revision) || row.revision < 1 || row.revision > 4294967295
+          || typeof row.enabled !== 'boolean' || typeof row.model !== 'string' || row.model.length > 256
+          || typeof row.protocol !== 'string' || row.protocol.length > 64)
+        || result.nextCursor !== null && (!/^[A-Za-z0-9][\w.:-]{0,35}$/u.test(result.nextCursor)
+          || result.items.at(-1)?.profileId !== result.nextCursor)) throw Error('AI_RESOURCE_UNAVAILABLE');
+      setPage(result);
+    } catch (failure) {
+      if (current() && !controller.signal.aborted) { setError(true); active.current.onClear(); }
+      throw failure;
+    } finally { if (flight.current === controller) flight.current = null; if (current()) setBusy(false); }
+  };
+  return <section aria-label={t('已有平台 AI 配置')}>
+    <div className="panel-toolbar">
+      <ActionButton label={t('读取已有配置')} pendingLabel={t('读取中…')} disabled={busy} onAction={() => read()} />
+      {page?.nextCursor && <ActionButton label={t('下一页配置')} pendingLabel={t('读取中…')} disabled={busy}
+        onAction={() => read(page.nextCursor!)} />}
+    </div>
+    {page && <><p><label htmlFor={label}>{t('选择已有配置（不自动读取或启用）')}</label></p>
+      <Select id={label} value={selected} disabled={busy || !page.items.length}
+        options={page.items.map(row => ({ value: row.profileId,
+          label: `${safeDisplayText(row.profileKey, 64)} · ${safeDisplayText(row.model, 256)} · ${t(row.enabled ? '配置启用' : '配置停用')} · ${t('修订')}${row.revision}` }))}
+        onChange={value => { if (!current() || flight.current || busy || !page.items.some(row => row.profileId === value)) return;
+          setSelected(String(value)); active.current.onSelect(String(value)); }} />
+      {!page.items.length && <p role="status">{t('本页没有已登记配置；不代表读取失败或允许覆盖其他配置。首次配置仍需原管理权限和修订零。')}</p>}
+      <p className="muted">{t('目录仅显示当前平台配置元数据，不代表连接、能力、预算或调用权限已验证；不读取租户 BYOK 或密钥。')}</p></>}
+    {error && <Alert type="warning" title={t('配置目录暂不可读取，已清除旧目录。请核对平台读取权限后手动重试。')} />}
+  </section>;
 }
 function ProfileHost({ profileId, identity }: { profileId: string; identity: string }) {
   const { t } = useLocale();

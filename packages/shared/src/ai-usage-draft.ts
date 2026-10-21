@@ -46,6 +46,15 @@ export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
 /** Platform manager resource, never tenant-side configuration or dispatch.
  * URL profile identity is validated separately; a body cannot override it. */
 export const AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({ basePath: 'platform/ai/providers' } as const);
+export interface AiPlatformModelDirectoryQueryDraft { limit?: number; after?: string }
+/** Safe metadata only; a directory entry does not prove capability, connection
+ * health, policy admission, available budget or permission to invoke. */
+export interface AiPlatformModelDirectoryDraft {
+  items: { profileId: string; profileKey: string; role: 'DEFAULT' | 'REASONING' | 'VISION' | 'EMBEDDING';
+    protocol: string; provider: string; model: string; revision: number; enabled: boolean }[];
+  nextCursor: string | null;
+  observation: 'configuration_catalog_not_capability_evidence';
+}
 export type AiPlatformModelSettingsInputDraft = {
   expectedRevision: number; protocol: 'openai_chat_completions' | 'openai_responses' | 'anthropic_messages'; model: string; baseUrl: string;
   operationKey?: string;
