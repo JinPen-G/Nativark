@@ -1,7 +1,9 @@
 /** Human-reviewed rates over the original pricing API. No supplier request,
- * input counting, financial admission or execution. Unknown retains its key. */
+ * input counting, financial admission or execution. Unknown retains its key.
+ * Platform mode pins the configured Profile; tenant mode takes only the
+ * server-discovered live Profile, while its historical journal binds the old ID. */
 import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceReviewResponseDraft,
-  AiGatewayReviewedPriceBillingDraft } from '@rental-os/shared';
+  AiGatewayReviewedPriceBillingDraft, AiGatewayPriceConfigurationDraft } from '@rental-os/shared';
 import { formSnapshotFingerprint } from '../../app/serverFormSnapshot';
 
 const row = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -11,6 +13,12 @@ const rev = (v: unknown): v is number => typeof v === 'number' && Number.isInteg
 const amount = (v: unknown): v is string => typeof v === 'string' && /^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(v);
 const time = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(v) && Number.isFinite(Date.parse(v));
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
+export function byokPriceConfiguration(v: unknown, sceneCode: string): AiGatewayPriceConfigurationDraft {
+  if (!row(v) || v.state !== 'configured' || v.sceneCode !== sceneCode || !code(v.configId, 36) || !rev(v.configRevision)
+    || v.serviceMode !== 'tenant_managed' || v.observation !== 'current_configuration_not_rate_or_capability') return invalid();
+  return { state: 'configured', sceneCode, configId: v.configId, configRevision: v.configRevision,
+    serviceMode: 'tenant_managed', observation: 'current_configuration_not_rate_or_capability' };
+}
 export function reviewedPriceBilling(v: unknown): AiGatewayReviewedPriceBillingDraft {
   if (!row(v)) return invalid();
   if (v.unit === 'tokens' && v.metric === 'input_plus_output' && v.scale === 0 && v.rounding === 'exact')
@@ -35,22 +43,23 @@ export function preparePlatformPrice(v: PlatformPriceForm): Pick<AiGatewayPriceR
       : { unit: 'money', currency: v.currency, scale: 6, inputPerMillion: v.inputPerMillion, outputPerMillion: v.outputPerMillion,
           rounding: 'ceil_total_micro_units', ...(v.includeCache ? { inputCache: { readPerMillion: v.readPerMillion, writePerMillion: v.writePerMillion } } : {}) }) };
 }
-function receipt(v: unknown, key: string, profileId: string): AiGatewayPriceReviewResponseDraft {
+function receipt(v: unknown, key: string, profileId: string, audience: 'platform' | 'tenant'): AiGatewayPriceReviewResponseDraft {
+  const rateAuthority = audience === 'platform' ? 'platform_reviewed_budget_rate_not_provider_invoice' : 'tenant_reviewed_budget_rate_not_provider_invoice';
   if (!row(v) || v.state !== 'recorded' || v.operationKey !== key || v.configId !== profileId || !rev(v.configRevision)
     || !hash(v.id) || !hash(v.evidenceHash) || !hash(v.configurationHash) || !code(v.priceVersion, 64)
     || !time(v.validFrom) || !time(v.expiresAt) || Date.parse(v.validFrom) >= Date.parse(v.expiresAt)
-    || v.rateAuthority !== 'platform_reviewed_budget_rate_not_provider_invoice'
+    || v.rateAuthority !== rateAuthority
     || v.inputCounting !== 'not_certified_by_rate_review' || v.executionPermission !== false) return invalid();
   return { state: 'recorded', operationKey: key, id: v.id, evidenceHash: v.evidenceHash, configurationHash: v.configurationHash,
     configId: profileId, configRevision: v.configRevision, priceVersion: v.priceVersion, validFrom: v.validFrom, expiresAt: v.expiresAt,
-    billing: reviewedPriceBilling(v.billing), rateAuthority: v.rateAuthority, inputCounting: v.inputCounting, executionPermission: false };
+    billing: reviewedPriceBilling(v.billing), rateAuthority, inputCounting: v.inputCounting, executionPermission: false };
 }
 const content = (v: AiGatewayPriceReviewResponseDraft | AiGatewayPriceReviewDraft) => ({ configId: v.configId,
   revision: 'configRevision' in v ? v.configRevision : v.expectedConfigRevision, priceVersion: v.priceVersion,
   validFrom: v.validFrom, expiresAt: v.expiresAt, billing: v.billing });
 const digest = async (v: unknown) => Array.from(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256',
   new TextEncoder().encode(formSnapshotFingerprint(v)))), n => n.toString(16).padStart(2, '0')).join('');
-type Pending = { operationKey: string; sceneCode: string; fingerprint: string };
+type Pending = { operationKey: string; sceneCode: string; fingerprint: string; configId?: string };
 type Ports = { platformReviewPrice(v: AiGatewayPriceReviewDraft, s: AbortSignal): Promise<unknown>;
   platformPriceReviewReceipt(v: AiGatewayPriceReviewReadDraft, s: AbortSignal): Promise<unknown> };
 type Profile = { profileId: string; revision: number };
@@ -62,19 +71,22 @@ export class PlatformPriceReviewSession {
   constructor(private readonly profileId: string, private readonly ports: Ports, private readonly current: () => boolean,
     private readonly canManage: () => boolean, private readonly profile: () => Profile | null,
     private readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined, private readonly storageKey: string,
-    private readonly newKey = () => globalThis.crypto.randomUUID()) {
+    private readonly newKey = () => globalThis.crypto.randomUUID(), private readonly audience: 'platform' | 'tenant' = 'platform') {
     if (!code(profileId, 36)) invalid();
     let locked = true, pending: Pending | null = null;
     try { const raw = storage?.getItem(storageKey); locked = !storage || raw !== null;
       const p: unknown = raw && JSON.parse(raw);
-      if (row(p) && code(p.operationKey) && code(p.sceneCode) && hash(p.fingerprint))
-        pending = Object.freeze({ operationKey: p.operationKey, sceneCode: p.sceneCode, fingerprint: p.fingerprint });
+      if (row(p) && code(p.operationKey) && code(p.sceneCode) && hash(p.fingerprint)
+        && (p.configId === undefined ? audience === 'platform' : code(p.configId, 36)))
+        pending = Object.freeze({ operationKey: p.operationKey, sceneCode: p.sceneCode, fingerprint: p.fingerprint,
+          ...(typeof p.configId === 'string' ? { configId: p.configId } : {}) });
     } catch { /* Invalid/absent storage is not permission to forget unknown. */ }
     this.state = { busy: false, locked, pending, result: null, feedback: locked ? 'unknown' : 'idle' };
   }
   snapshot = () => this.state;
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
   activate() { if (!this.active) { this.active = true; this.update({ busy: false }); } }
+  clearObservation() { this.update({ result: null }); } // Never clears an unknown operation journal.
   dispose() { this.active = false; this.generation++; this.flight?.abort(); this.flight = null; }
   private check(signal: AbortSignal, generation: number) {
     if (!this.active || !this.current() || signal.aborted || generation !== this.generation) throw Error('AI_SCOPE_CHANGED');
@@ -94,10 +106,11 @@ export class PlatformPriceReviewSession {
         if (!this.canManage()) throw Error('AI_ACCESS_DENIED');
         if (this.state.locked || !this.storage || marker !== null) { this.update({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
         const profile = structuredClone(this.profile());
-        if (!profile || profile.profileId !== this.profileId || !rev(profile.revision)) throw Error('AI_RESOURCE_UNAVAILABLE');
+        if (!profile || !code(profile.profileId, 36) || (this.audience === 'platform' && profile.profileId !== this.profileId)
+          || !rev(profile.revision)) throw Error('AI_RESOURCE_UNAVAILABLE');
         const prepared = preparePlatformPrice(v), operationKey = this.newKey(); if (!code(operationKey)) invalid();
         const command: AiGatewayPriceReviewDraft = { ...prepared, configId: profile.profileId, expectedConfigRevision: profile.revision, operationKey };
-        pending = Object.freeze({ sceneCode: command.sceneCode, operationKey, fingerprint: await digest(content(command)) });
+        pending = Object.freeze({ sceneCode: command.sceneCode, operationKey, configId: profile.profileId, fingerprint: await digest(content(command)) });
         this.check(controller.signal, generation);
         if (!this.canManage() || formSnapshotFingerprint(this.profile()) !== formSnapshotFingerprint(profile)) throw Error('AI_SCOPE_CHANGED');
         if (this.storage.getItem(this.storageKey) !== null) { this.update({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
@@ -111,7 +124,7 @@ export class PlatformPriceReviewSession {
       }
       this.check(controller.signal, generation);
       if (!pending) throw Error('AI_RESULT_UNKNOWN');
-      const recorded = receipt(structuredClone(result), pending.operationKey, this.profileId);
+      const recorded = receipt(structuredClone(result), pending.operationKey, pending.configId ?? this.profileId, this.audience);
       if (await digest(content(recorded)) !== pending.fingerprint) throw Error('AI_RESULT_UNKNOWN');
       this.check(controller.signal, generation);
       if (!this.storage || this.storage.getItem(this.storageKey) !== marker) throw Error('AI_RESULT_UNKNOWN');

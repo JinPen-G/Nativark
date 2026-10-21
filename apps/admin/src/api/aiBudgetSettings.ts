@@ -4,18 +4,22 @@ import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT as routes, type AiBudgetSettingsReadDra
   type AiBudgetSettingsChangeDraft, type AiBudgetSettingsInitializeDraft,
   type AiBudgetSettingsRefreshConfigurationDraft } from '@rental-os/shared';
 import type { AiBudgetSettingsOperationReadDraft } from '@rental-os/shared';
-import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft } from '@rental-os/shared';
+import type { AiGatewayPriceReviewDraft, AiGatewayPriceReviewReadDraft, AiGatewayPriceConfigurationReadDraft } from '@rental-os/shared';
 import type { AiGatewayPlatformPriceAdoptionDraft, AiGatewayPlatformPriceAdoptionReadDraft } from '@rental-os/shared';
 import { http } from './http';
 import { currentSessionSignal } from '@/app/queryClient';
 import type { ApiResult } from '@rental-os/shared';
 const post = async (action: 'read' | 'readOperation' | 'change' | 'initialize' | 'refreshConfiguration'
+  | 'readPriceConfiguration' | 'reviewPrice' | 'readPriceReview'
   | 'platformReviewPrice' | 'platformPriceReviewReceipt' | 'previewPlatformPrice' | 'adoptPlatformPrice' | 'readPlatformPriceAdoption', data: unknown, signal: AbortSignal) => {
   const response = await http.request<ApiResult<unknown>>({ url: `/${routes.basePath}/${routes[action]}`, method: 'post', data,
     signal: AbortSignal.any([signal, currentSessionSignal()]), headers: { 'Cache-Control': 'no-store' } });
   return response.data.data;
 };
 export const aiBudgetSettingsApi = Object.freeze({
+  readPriceConfiguration: (value: AiGatewayPriceConfigurationReadDraft, signal: AbortSignal) => post('readPriceConfiguration', value, signal),
+  reviewPrice: (value: AiGatewayPriceReviewDraft, signal: AbortSignal) => post('reviewPrice', value, signal),
+  readPriceReview: (value: AiGatewayPriceReviewReadDraft, signal: AbortSignal) => post('readPriceReview', value, signal),
   previewPlatformPrice: (value: AiGatewayPlatformPriceAdoptionReadDraft, signal: AbortSignal) => post('previewPlatformPrice', value, signal),
   adoptPlatformPrice: (value: AiGatewayPlatformPriceAdoptionDraft, signal: AbortSignal) => post('adoptPlatformPrice', value, signal),
   readPlatformPriceAdoption: (value: AiGatewayPlatformPriceAdoptionReadDraft, signal: AbortSignal) => post('readPlatformPriceAdoption', value, signal),

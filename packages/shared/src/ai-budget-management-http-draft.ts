@@ -7,7 +7,7 @@ export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
   read: 'read', readOperation: 'operation', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save',
   priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound',
-  reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt',
+  readPriceConfiguration: 'pricing/configuration', reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt',
   platformReviewPrice: 'platform/pricing/review', platformPriceReviewReceipt: 'platform/pricing/review/receipt',
   previewPlatformPrice: 'pricing/platform/preview', adoptPlatformPrice: 'pricing/platform/adopt', readPlatformPriceAdoption: 'pricing/platform/receipt'
 });
@@ -18,6 +18,10 @@ export type AiGatewayReviewedPriceBillingDraft = { unit: 'tokens'; metric: 'inpu
 export type AiGatewayPriceReviewDraft = { sceneCode: string; operationKey: string; configId: string; expectedConfigRevision: number;
   priceVersion: string; validFrom: string; expiresAt: string; billing: AiGatewayReviewedPriceBillingDraft; confirmReviewedRate: true };
 export type AiGatewayPriceReviewReadDraft = { sceneCode: string; operationKey: string };
+export type AiGatewayPriceConfigurationReadDraft = { sceneCode: string };
+/** Safe current owner-bound Profile reference; never a model capability grant. */
+export type AiGatewayPriceConfigurationDraft = AiGatewayPriceConfigurationReadDraft & { state: 'configured';
+  configId: string; configRevision: number; serviceMode: 'tenant_managed'; observation: 'current_configuration_not_rate_or_capability' };
 export type AiGatewayPlatformPriceAdoptionReadDraft = { sceneCode: string; priceId: string };
 export type AiGatewayPlatformPriceAdoptionDraft = AiGatewayPlatformPriceAdoptionReadDraft & { confirmPlatformRate: true };
 /** Current tenant-authorized offer, not an adoption receipt or supplier fact. */
@@ -108,6 +112,9 @@ const reviewedBilling: AiLeafSchemaDraft = { oneOf: [obj({ unit: choice('tokens'
   inputCache: obj({ readPerMillion: reviewedAmount, writePerMillion: reviewedAmount }) },
   ['unit', 'currency', 'scale', 'inputPerMillion', 'outputPerMillion', 'rounding'])] };
 export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiGatewayPriceConfigurationReadDraft: obj({ sceneCode: scene }),
+  AiGatewayPriceConfigurationDraft: obj({ sceneCode: scene, state: choice('configured'), configId: text(36), configRevision: int(1, 4294967295),
+    serviceMode: choice('tenant_managed'), observation: choice('current_configuration_not_rate_or_capability') }),
   AiGatewayPriceReviewDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 }, configId: text(36),
     expectedConfigRevision: int(1, 4294967295), priceVersion: { ...pricingKey, maxLength: 64 }, validFrom: time, expiresAt: time,
     billing: reviewedBilling, confirmReviewedRate: { type: 'boolean', const: true } }),

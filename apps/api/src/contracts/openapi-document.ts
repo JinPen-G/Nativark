@@ -2334,6 +2334,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['refreshConfiguration', 'AiBudgetSettingsRefreshConfigurationDraft', 'AiBudgetSettingsChangeResponseDraft'],
     ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
     ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['readPriceConfiguration', 'AiGatewayPriceConfigurationReadDraft', 'AiGatewayPriceConfigurationDraft'],
     ['reviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
     ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
     ['platformReviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
@@ -2347,7 +2348,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: [action === 'platformPriceReviewReceipt' ? 'system:ai-provider:view'
       : action.startsWith('platform') ? 'system:ai-provider:manage' : 'system:params:manage'],
     requestSchema, responseSchema,
-    summary: action === 'previewPlatformPrice'
+    summary: action === 'readPriceConfiguration'
+      ? 'Current tenant settings-read authority resolves the unique tenant-owned default BYOK Profile and revision under current selection. Bounded read with identity and configuration revalidation; no caller-selected owner, model/credential disclosure, price publication, input-count proof or execution grant. Tenant settings object ID is not the Profile ID. Original review receipts remain independent of current configuration.'
+      : action === 'previewPlatformPrice'
       ? 'Current tenant settings-read authority reviews one immutable platform rate under current server-selected platform configuration and validity. No reviewer identity, provider, model, credential, adoption, input-count certification or execution grant. Preview is read-only; adoption remains an explicit separate write; original adoption receipts remain independently readable.'
       : action === 'platformReviewPrice' || action === 'platformPriceReviewReceipt' || action === 'adoptPlatformPrice' || action === 'readPlatformPriceAdoption'
       ? 'SaaS authority reviews immutable platform budget rates under the server-selected Profile, optionally including explicit cache read/write per-million rates. Tenants adopt only that exact version, without rate overrides. Reservations use the maximum reviewed input rate; settlement uses persisted disjoint token counters with one six-decimal rounding. Missing cache rates retain unknown accounting. Original review/adoption receipts remain readable under current authority after profile changes; unknown does not authorize another publication. No supplier invoice, input counting or dispatch grant. The default-disabled management gate is independent of model execution.'

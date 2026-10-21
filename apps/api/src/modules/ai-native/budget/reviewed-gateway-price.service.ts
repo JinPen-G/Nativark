@@ -21,6 +21,7 @@ export const reviewedGatewayPriceInput = z.object({ sceneCode: key, operationKey
   validFrom: z.string().datetime({ offset: true }), expiresAt: z.string().datetime({ offset: true }),
   billing: gatewayPriceBillingSchema, confirmReviewedRate: z.literal(true) }).strict();
 export const reviewedGatewayPriceReadInput = z.object({ sceneCode: key, operationKey: key }).strict();
+const configurationRead = z.object({ sceneCode: key }).strict();
 const stable = ({ authorizedAt: _at, requestId: _request, ...context }: AiExecutionContext) => hash(context);
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 const configurationSelect = { tenantId: true, mode: true, revision: true } satisfies Prisma.AiTenantModelConfigurationSelect;
@@ -75,6 +76,29 @@ export class ReviewedGatewayPriceService {
       configRevision: evidence.configuration.configRevision, validFrom: evidence.validFrom, expiresAt: evidence.expiresAt,
       billing: structuredClone(evidence.billing), rateAuthority: 'tenant_reviewed_budget_rate_not_provider_invoice' as const,
       inputCounting: 'not_certified_by_rate_review' as const, executionPermission: false as const };
+  }
+  /** Resolve the actual default BYOK Profile, not the tenant settings object's
+   * tenantId. No caller-supplied owner/profile, secrets or execution permission. */
+  async configurationSummary(value: unknown) {
+    const parsed = configurationRead.safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const { sceneCode } = parsed.data, before = await this.current(sceneCode, 'settings_read');
+    const tenantId = before.principal.tenantId;
+    const owner = structuredClone(await this.db.aiScope.findFirst({ where: { kind: 'TENANT', tenantId, workspaceId: null },
+      select: { id: true, kind: true, tenantId: true, workspaceId: true } }));
+    if (!owner || owner.kind !== 'TENANT' || owner.tenantId !== tenantId || owner.workspaceId !== null) throw new BudgetError('UNAVAILABLE');
+    const profiles = structuredClone(await this.db.aiProviderProfile.findMany({ where: { scopeId: owner.id, scopeKind: 'TENANT',
+      profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed' }, select: { id: true, configRevision: true }, take: 2,
+      orderBy: { id: 'asc' } }));
+    if (profiles.length !== 1) throw new BudgetError('UNAVAILABLE');
+    const profile = profiles[0];
+    const snapshot = await this.configuration(this.db, tenantId, profile.id, profile.configRevision);
+    await this.recheck(before, sceneCode, 'settings_read');
+    if (!isDeepStrictEqual(snapshot, await this.configuration(this.db, tenantId, profile.id, profile.configRevision)))
+      throw new BudgetError('REVISION_CONFLICT');
+    await this.recheck(before, sceneCode, 'settings_read');
+    return { state: 'configured' as const, sceneCode, configId: profile.id, configRevision: profile.configRevision,
+      serviceMode: 'tenant_managed' as const, observation: 'current_configuration_not_rate_or_capability' as const };
   }
   async review(value: unknown) {
     const parsed = reviewedGatewayPriceInput.safeParse(structuredClone(value));

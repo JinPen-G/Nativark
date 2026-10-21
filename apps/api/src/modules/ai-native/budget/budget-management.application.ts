@@ -311,6 +311,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       }
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
     }, true, signal),
+    readPriceConfiguration: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (credentials, command) => reviewedPrices(credentials).configurationSummary(command), false, signal),
     reviewPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (credentials, command) => reviewedPrices(credentials).review(command), true, signal),
     readPriceReview: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,

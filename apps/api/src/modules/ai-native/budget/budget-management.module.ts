@@ -71,6 +71,15 @@ export class AiBudgetManagementController {
       throw new BudgetError(write ? 'PENDING_RECONCILIATION' : 'UNAVAILABLE');
     return structuredClone(value as AiGatewayPriceReviewResponseDraft);
   }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPriceConfiguration) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPriceConfiguration(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => {
+      const result = await this.application.readPriceConfiguration(request, body, signal);
+      const validate = ajv.getSchema('urn:rental:budget-management:AiGatewayPriceConfigurationDraft');
+      if (!validate?.(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 2048) throw new BudgetError('UNAVAILABLE');
+      return structuredClone(result);
+    }, false);
+  }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.reviewPrice) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reviewPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, true, async signal => this.priceReviewResult(await this.application.reviewPrice(request, body, signal), true), false);

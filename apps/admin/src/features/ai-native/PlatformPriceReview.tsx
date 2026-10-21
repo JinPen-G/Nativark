@@ -1,7 +1,6 @@
-/** Explicit SaaS pricing consumer. Configuration, rate review, capability
- * proof, input counting and dispatch remain separate server decisions. */
+/** Shared reviewed-rate editor over the original platform/BYOK services.
+ * Configuration, capability, counting and dispatch stay server decisions. */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { AiPlatformModelSettingsSummaryDraft } from '@rental-os/shared';
 import { aiBudgetSettingsApi } from '@/api/aiBudgetSettings';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { useLocale } from '@/app/locale';
@@ -11,37 +10,49 @@ import { PlatformPriceReviewSession, type PlatformPriceForm } from './platform-p
 import { safeDisplayText } from './safe-display';
 
 const identityKey = () => JSON.stringify([useAuthStore.getState().user, currentSessionEpoch()]);
+const tenantIdentity = () => { const a = useAuthStore.getState(); return JSON.stringify([a.tenant?.tenantId, a.currentWorkspaceId, a.user]); };
 const messages = { idle: '仅登记管理员核对的预算费率，不是供应商账单或计数证明，也不会启用模型。',
-  recorded: '原费率审阅已记录。以下是原版本，不证明当前配置仍相同；租户采用、计数、预算与派发仍独立校验。',
+  recorded: '原费率审阅已记录。以下是原版本，不证明当前配置仍相同；计数、预算与派发仍独立校验。',
   unknown: '原审阅待核对。禁止换编号或版本重发；核对原收据不会再次发布费率。',
   denied: '当前权限或身份已变化，已清除旧费率。原操作可能已经保存，只能在重新授权后核对原收据。',
   invalid: '请明确场景、费率版本、带时区的有效期和六位小数费率，并确认已核对。',
   conflict: '配置修订或费率版本冲突，没有覆盖旧费率；请重新读取配置并审阅。',
   unavailable: '当前配置、计价管理依赖或本地原键存储不可用，未发布新的费率。' };
-export function PlatformPriceReview({ profileId, identity, profile, blocked }: {
-  profileId: string; identity: string; profile: AiPlatformModelSettingsSummaryDraft | null; blocked: boolean;
+export function PlatformPriceReview({ profileId, identity, profile, blocked, audience = 'platform' }: {
+  profileId: string; identity: string; profile: { profileId: string; revision: number } | null; blocked: boolean; audience?: 'platform' | 'tenant';
 }) {
   const { t } = useLocale(), [form] = Form.useForm<PlatformPriceForm>();
   const currentProfile = useRef({ profile, blocked }); currentProfile.current = { profile, blocked };
-  const canManage = useAuthStore(s => s.hasPermission('system:ai-provider:manage'));
+  const managePermission = audience === 'platform' ? 'system:ai-provider:manage' : 'system:params:manage';
+  const canManage = useAuthStore(s => s.hasPermission(managePermission));
   const session = useMemo(() => {
+    const epoch = currentSessionEpoch();
     let storage: Storage | undefined; try { storage = window.sessionStorage; } catch { /* no safe unknown recovery */ }
-    return new PlatformPriceReviewSession(profileId, aiBudgetSettingsApi, () => {
+    const ports = audience === 'platform' ? aiBudgetSettingsApi : {
+      platformReviewPrice: aiBudgetSettingsApi.reviewPrice, platformPriceReviewReceipt: aiBudgetSettingsApi.readPriceReview };
+    return new PlatformPriceReviewSession(profileId, ports, () => {
       const a = useAuthStore.getState();
-      return identityKey() === identity && !!a.token && !!a.user?.isSaasAdmin && a.hasPermission('system:ai-provider:view') && !document.hidden;
-    }, () => useAuthStore.getState().hasPermission('system:ai-provider:manage'), () => {
+      return currentSessionEpoch() === epoch && !!a.token && !document.hidden && (audience === 'platform'
+        ? identityKey() === identity && !!a.user?.isSaasAdmin && a.hasPermission('system:ai-provider:view')
+        : tenantIdentity() === identity && !a.user?.isSaasAdmin && !!a.tenant?.tenantId && !!a.currentWorkspaceId
+          && !!a.user?.id && a.hasPermission('system:params:manage'));
+    }, () => useAuthStore.getState().hasPermission(managePermission), () => {
       const current = currentProfile.current;
       return current.blocked || !current.profile ? null : { profileId: current.profile.profileId, revision: current.profile.revision };
-    }, storage, `rental_platform_ai_rate:${JSON.stringify([useAuthStore.getState().user?.id, profileId])}`);
-  }, [profileId, identity]);
+    }, storage, audience === 'platform' ? `rental_platform_ai_rate:${JSON.stringify([useAuthStore.getState().user?.id, profileId])}`
+      : `rental_tenant_ai_rate:${JSON.stringify([useAuthStore.getState().tenant?.tenantId, useAuthStore.getState().currentWorkspaceId,
+          useAuthStore.getState().user?.id])}`, () => globalThis.crypto.randomUUID(), audience);
+  }, [profileId, identity, audience, managePermission]);
   useEffect(() => { session.activate(); return () => session.dispose(); }, [session]);
-  useEffect(() => { form.setFieldValue('confirmReviewedRate', false); }, [form, profile?.revision]);
+  useEffect(() => { if (blocked) session.clearObservation(); }, [session, blocked]);
+  useEffect(() => { form.setFieldValue('confirmReviewedRate', false); }, [form, profile?.profileId, profile?.revision]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const unit = Form.useWatch('unit', form), cache = Form.useWatch('includeCache', form);
   const disabled = blocked || state.busy || state.locked || !canManage || !profile;
   const result = state.result;
-  return <section aria-label={t('平台预算费率审阅')} aria-busy={state.busy}>
-    <h3>{t('平台预算费率审阅')}</h3>
+  const title = audience === 'platform' ? t('平台预算费率审阅') : t('BYOK 预算费率审阅');
+  return <section aria-label={title} aria-busy={state.busy}>
+    <h3>{title}</h3>
     <Alert type={state.feedback === 'recorded' ? 'success' : state.locked || state.feedback === 'denied' ? 'warning' : 'info'} title={t(messages[state.feedback])} />
     <p>{t('新审阅绑定已读取的配置修订')}: {profile?.revision ?? t('尚未读取')}。{t('此入口不查询供应商，不重算业务金额；非服务器指定的计价 Profile 会被拒绝。')}</p>
     {state.pending && <><p role="status">{t('原场景')}: {safeDisplayText(state.pending.sceneCode, 128)}；{t('原操作编号')}: <code>{state.pending.operationKey}</code></p>
