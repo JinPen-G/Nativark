@@ -11,7 +11,7 @@ import { PrismaTaskActionPolicyRepository, type AiTaskActionPolicyMutation,
   type AiTaskActionPolicyMutationAuthority } from './prisma-task-action-policy.repository';
 
 type Dependencies = {
-  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskActionPolicy'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskActionPolicy'> & Partial<Pick<PrismaClient, 'operationLog'>>;
   auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
   guard: Pick<ApiAuthGuard, 'canActivate'>; clock?: () => Date;
 };
@@ -59,14 +59,17 @@ export function composeTaskActionPolicyManagement(input: Dependencies) {
     read(taskId: string, operation: AiTaskActionPolicyMutation['operation']) {
       return new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock).read(taskId, operation);
     },
+    readMutation(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null) {
+      return new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock).readMutation(taskId, operation, expectedRevision);
+    },
     /** Required permissions are server-selected existing codes, never inferred
      * from a model. The manager must currently hold every selected permission;
      * CAS/null-create still follows the existing repository contract. */
-    put(value: AiTaskActionPolicyMutation, expectedRevision: number | null) {
+    put(value: AiTaskActionPolicyMutation, expectedRevision: number | null, recordOriginalReceipt = false) {
       const command = structuredClone(value);
       if (!Array.isArray(command?.requiredPermissions)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const repository = new PrismaTaskActionPolicyRepository(input.db, scopes, authority([...command.requiredPermissions]), clock);
-      return repository.put(command, expectedRevision);
+      return repository.put(command, expectedRevision, recordOriginalReceipt);
     },
     clear(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number) {
       const repository = new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock);

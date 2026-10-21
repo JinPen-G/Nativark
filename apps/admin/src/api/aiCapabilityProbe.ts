@@ -7,7 +7,7 @@ import { currentSessionSignal } from '@/app/queryClient';
 import { http } from './http';
 
 export type CapabilityProbeAction = 'prepare' | 'publish' | 'readOriginal' | 'createTask' | 'readTask' | 'start' | 'inspect'
-  | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'preflight' | 'readTaskAction' | 'configureTaskAction';
+  | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'preflight' | 'readTaskAction' | 'configureTaskAction' | 'readTaskActionReceipt';
 export const aiCapabilityProbeApi = Object.freeze({
   async call<K extends CapabilityProbeAction>(action: K, value: AiTextCapabilityPrepareRequestDraft | AiTextCapabilityCancelRequestDraft
     | AiTextCapabilityConfigureActionDraft | AiTextCapabilityActionRequestDraft, signal: AbortSignal): Promise<AiTextCapabilityHttpResponsesDraft[K]> {

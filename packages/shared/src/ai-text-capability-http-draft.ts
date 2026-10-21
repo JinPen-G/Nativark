@@ -8,6 +8,7 @@ export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   prepare: 'prepare', publish: 'original/publish', readOriginal: 'original/read',
   createTask: 'task/create', readTask: 'task/read', start: 'task/start', inspect: 'task/inspect',
   configureTaskAction: 'task/action/configure', readTaskAction: 'task/action/read',
+  readTaskActionReceipt: 'task/action/receipt',
   cancel: 'task/cancel', reconcile: 'task/reconcile', readCapabilityReceipt: 'receipt/read', preflight: 'preflight', readHistory: 'history/read',
   readAccounting: 'accounting/read', releaseUnsent: 'accounting/release-unsent', reconcileAccounting: 'accounting/reconcile',
 });
@@ -40,6 +41,8 @@ export type AiTextCapabilityHttpResponsesDraft = {
     semantics: 'action_policy_not_dispatch_or_business_approval' };
   readTaskAction: AiTextCapabilityRequestDraft & { state: 'observed' | 'not_observed'; policy: ActionPolicy | null; retryable: false;
     semantics: 'action_policy_not_dispatch_or_business_approval' };
+  readTaskActionReceipt: AiTextCapabilityConfigureActionDraft & { state: 'recorded' | 'not_observed'; policy: ActionPolicy | null;
+    retryable: false; semantics: 'original_action_policy_save_not_current_permission' };
   prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; methodVersion: string;
     configurationRevision: number; execution: 'not_started' };
   publish: AiTextCapabilityRequestDraft & { state: 'stored'; inputRef: string; inputHash: string; replayed: boolean; retryable: false };
@@ -72,7 +75,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
 export type AiTextCapabilityHttpErrorDraft = {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_SCOPE_CHANGED' | 'AI_RESOURCE_UNAVAILABLE'
     | 'AI_REVISION_CONFLICT' | 'AI_STORAGE_UNAVAILABLE' | 'AI_RESULT_UNKNOWN';
-  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'readTaskAction' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'readAccounting';
+  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'readTaskAction' | 'readTaskActionReceipt' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'readAccounting';
 };
 const id: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const hash: AiLeafSchemaDraft = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
@@ -100,6 +103,10 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
   AiTextCapabilityReadActionResponseDraft: obj({ ...key, state: choice('observed', 'not_observed'),
     policy: { oneOf: [actionPolicy, { type: 'null' }] }, retryable: no,
     semantics: choice('action_policy_not_dispatch_or_business_approval') }),
+  AiTextCapabilityActionReceiptResponseDraft: obj({ ...key, operation: text(64), expectedRevision: {
+    oneOf: [int(1, 4294967293), { type: 'null' }] }, state: choice('recorded', 'not_observed'),
+    policy: { oneOf: [actionPolicy, { type: 'null' }] }, retryable: no,
+    semantics: choice('original_action_policy_save_not_current_permission') }),
   AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') }, ['requestKey']),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
   AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), methodVersion: text(64),
@@ -134,5 +141,5 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     semantics: choice('current_preflight_not_dispatch_permission') }),
   AiTextCapabilityHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_RESOURCE_UNAVAILABLE',
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,
-    nextAction: choice('readOriginal', 'readTask', 'readTaskAction', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory', 'readAccounting') }, ['code', 'retryable']),
+    nextAction: choice('readOriginal', 'readTask', 'readTaskAction', 'readTaskActionReceipt', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory', 'readAccounting') }, ['code', 'retryable']),
 };

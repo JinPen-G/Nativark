@@ -14,7 +14,7 @@ const unknownRead: Record<Method, NonNullable<AiTextCapabilityHttpErrorDraft['ne
   start: 'reconcile', inspect: 'inspect', cancel: 'inspect', reconcile: 'reconcile', readCapabilityReceipt: 'readCapabilityReceipt', preflight: 'readCapabilityReceipt',
   readHistory: 'readHistory',
   readAccounting: 'readAccounting', releaseUnsent: 'readAccounting', reconcileAccounting: 'readAccounting',
-  configureTaskAction: 'readTaskAction', readTaskAction: 'readTaskAction',
+  configureTaskAction: 'readTaskActionReceipt', readTaskAction: 'readTaskAction', readTaskActionReceipt: 'readTaskActionReceipt',
 };
 const statuses = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403, AI_SCOPE_CHANGED: 403, AI_RESOURCE_UNAVAILABLE: 404,
   AI_REVISION_CONFLICT: 409, AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 } as const;
@@ -68,6 +68,8 @@ export class TextCapabilityProbeController {
   configureTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('configureTaskAction', request, body); }
   @Post(routes.readTaskAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('readTaskAction', request, body); }
+  @Post(routes.readTaskActionReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskActionReceipt(@Req() request: Request, @Body() body: unknown) { return this.call('readTaskActionReceipt', request, body); }
   @Post(routes.publish) @HttpCode(200) @Header('Cache-Control', 'no-store')
   publish(@Req() request: Request, @Body() body: unknown) { return this.call('publish', request, body); }
   @Post(routes.readOriginal) @HttpCode(200) @Header('Cache-Control', 'no-store')

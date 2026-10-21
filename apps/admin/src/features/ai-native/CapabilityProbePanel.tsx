@@ -54,6 +54,10 @@ export function CapabilityProbePanel({ identity }: { identity: string }) {
         <ActionButton label={t('读取原任务')} successLabel={t('原任务已读取')} disabled={state.busy} onAction={() => session.act('readTask')} />
         <ActionButton label={t('只读历史观察')} successLabel={t('历史观察已读取')} disabled={state.busy} onAction={() => session.act('readHistory')} />
       </div>
+      {journal.policyWrite && <ActionButton label={t('核对原动作政策保存')} successLabel={t('原保存观察已返回')} disabled={state.busy}
+        onAction={() => session.act('readTaskActionReceipt')} />}
+      {state.policyReceipt && <p role="status">{t('已确认原动作政策保存修订')}: {state.policyReceipt.revision}；
+        {t('原到期时间')}: {state.policyReceipt.expiresAt}。{t('不代表当前政策仍有效；须重新读取当前动作政策，不能据此启动或重派。')}</p>}
       {state.prepared && <p>{t('准备时配置修订')}: {state.prepared.configurationRevision}；{t('验证方法')}: {safeDisplayText(state.prepared.methodVersion, 64)}</p>}
       <ConfirmAction label={t('保存原验证请求')} prompt={t('保存当前准备的不可变验证请求？不会启动任务或模型。')}
         doneLabel={t('原请求已保存')} disabled={frozen || !state.prepared || state.published || !!journal.started} onConfirm={() => session.act('publish')} />

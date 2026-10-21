@@ -36,10 +36,13 @@ export interface AiTaskActionPolicyMutationResult {
   expiresAt: string;
 }
 
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiTaskActionPolicy'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiTaskActionPolicy'> & Partial<Pick<PrismaClient, 'operationLog'>>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 const error = (code: ConstructorParameters<typeof AiTaskRepositoryError>[0]) => new AiTaskRepositoryError(code);
+const receiptAction = 'ai_native_task_policy_saved';
+const receiptId = (scopeId: string, taskId: string, operation: string, expectedRevision: number | null) =>
+  `task-policy:${requestFingerprint({ scopeId, taskId, operation, revision: (expectedRevision ?? 0) + 1 })}`;
 
 export class AiTaskActionPolicyResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
@@ -129,12 +132,44 @@ export class PrismaTaskActionPolicyRepository {
     return { state: 'observed' as const, policy: this.project(row), retryable: false as const, nextAction: 'read_original_policy' as const };
   }
 
-  async put(value: AiTaskActionPolicyMutation, expectedRevision: number | null): Promise<AiTaskActionPolicyMutationResult> {
+  /** Observe the exact CAS transition, never infer a save from today's policy.
+   * This receipt grants neither current policy validity nor dispatch rights. */
+  async readMutation(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number | null) {
+    if (!operations.includes(operation) || expectedRevision !== null
+      && (!Number.isInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision)) throw error('AI_INVALID_INPUT');
+    if (typeof this.db.operationLog?.findUnique !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    const access = await this.access(taskId), context = access.context;
+    if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw error('AI_ACCESS_DENIED');
+    const key = receiptId(access.scopeId, taskId, operation, expectedRevision);
+    let row;
+    try { row = structuredClone(await this.db.operationLog.findUnique({ where: { id: key } })); }
+    catch { throw error('AI_STORAGE_UNAVAILABLE'); }
+    await this.recheck(taskId, access.bindingKey);
+    const absent = { state: 'not_observed' as const, policy: null, retryable: false as const };
+    if (!row || row.id !== key || row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+      || row.userId !== context.actor.userId || row.action !== receiptAction) return absent;
+    const detail = row.detail as { payload?: { kind?: string; scopeId?: string; taskId?: string; operation?: string;
+      expectedRevision?: number | null; result?: AiTaskActionPolicyMutationResult }; payloadHash?: string } | null;
+    const payload = detail?.payload, result = payload?.result;
+    if (!payload || detail?.payloadHash !== requestFingerprint(payload) || payload.kind !== 'ai-task-action-policy-save-1'
+      || payload.scopeId !== access.scopeId || payload.taskId !== taskId || payload.operation !== operation
+      || payload.expectedRevision !== expectedRevision || !result || result.taskId !== taskId || result.operation !== operation
+      || result.revision !== (expectedRevision ?? 0) + 1 || typeof result.expiresAt !== 'string') throw error('AI_STORAGE_UNAVAILABLE');
+    const policy = this.project({ ...result, expiresAt: new Date(result.expiresAt) });
+    await this.recheck(taskId, access.bindingKey);
+    return { state: 'recorded' as const, policy, retryable: false as const };
+  }
+
+  async put(value: AiTaskActionPolicyMutation, expectedRevision: number | null, recordOriginalReceipt = false): Promise<AiTaskActionPolicyMutationResult> {
     const next = this.validate(value);
     if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision > maxRevision)) throw error('AI_INVALID_INPUT');
     const access = await this.access(next.taskId);
+    const context = access.context;
+    if (recordOriginalReceipt && (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
+      || typeof this.db.operationLog?.findUnique !== 'function')) throw error('AI_RESOURCE_UNAVAILABLE');
+    let completed = false;
     try {
-      return await this.db.$transaction(async (tx: Tx) => {
+      const saved = await this.db.$transaction(async (tx: Tx) => {
         const task = await tx.aiTask.findFirst({ where: { scopeId: access.scopeId, id: next.taskId, archivedAt: null }, select: { id: true } });
         if (!task || task.id !== next.taskId) throw error('AI_RESOURCE_UNAVAILABLE');
         const where = { scopeId_taskId_operation: { scopeId: access.scopeId, taskId: next.taskId, operation: next.operation } };
@@ -152,11 +187,27 @@ export class PrismaTaskActionPolicyRepository {
         }
         if (!row) throw error('AI_STORAGE_UNAVAILABLE');
         const result = this.project(row);
+        if (result.taskId !== next.taskId || result.operation !== next.operation || result.revision !== revision
+          || result.expiresAt !== next.expiresAt.toISOString()
+          || requestFingerprint(result.requiredPermissions) !== requestFingerprint(next.requiredPermissions)) throw error('AI_STORAGE_UNAVAILABLE');
+        if (recordOriginalReceipt) {
+          if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
+            || typeof tx.operationLog?.create !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+          const payload = { kind: 'ai-task-action-policy-save-1', scopeId: access.scopeId, taskId: next.taskId,
+            operation: next.operation, expectedRevision, result };
+          await tx.operationLog.create({ data: { id: receiptId(access.scopeId, next.taskId, next.operation, expectedRevision),
+            tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
+            action: receiptAction, detail: JSON.parse(JSON.stringify({ payloadHash: requestFingerprint(payload), payload })) as Prisma.InputJsonValue } });
+        }
         await this.recheck(next.taskId, access.bindingKey);
         this.validate(next);
+        completed = true;
         return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      await this.recheck(next.taskId, access.bindingKey);
+      return saved;
     } catch (cause) {
+      if (completed) throw new AiTaskActionPolicyResultUnknownError();
       if (cause instanceof AiTaskRepositoryError) throw cause;
       if (cause instanceof Prisma.PrismaClientKnownRequestError && cause.code === 'P2002') throw error('AI_REVISION_CONFLICT');
       throw new AiTaskActionPolicyResultUnknownError();

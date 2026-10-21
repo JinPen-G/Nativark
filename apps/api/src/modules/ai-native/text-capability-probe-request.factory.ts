@@ -155,7 +155,7 @@ export class TextCapabilityProbeRequestFactory {
         if (!Number.isFinite(now) || !Number.isFinite(originalExpiry) || originalExpiry <= now) throw unavailable();
         const policy = await root.workflow.taskPolicies.put({ taskId: target.taskId, operation: target.template.operation,
           requiredPermissions: target.template.requiredPermissions,
-          expiresAt: new Date(Math.min(originalExpiry, now + dependencies.taskActionPolicyTtlMs!)) }, expectedRevision);
+          expiresAt: new Date(Math.min(originalExpiry, now + dependencies.taskActionPolicyTtlMs!)) }, expectedRevision, true);
         return { requestKey, state: 'configured' as const, policy, retryable: false as const,
           semantics: 'action_policy_not_dispatch_or_business_approval' as const };
       }, true),
@@ -164,6 +164,11 @@ export class TextCapabilityProbeRequestFactory {
         const result = await root.workflow.taskPolicies.read(target.taskId, target.template.operation);
         return { requestKey, state: result.state, policy: result.state === 'observed' ? result.policy : null,
           retryable: false as const, semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      }),
+      readTaskActionReceipt: value => run(actionConfigureSchema, value, async ({ requestKey, operation, expectedRevision }) => {
+        const result = await root.workflow.readTaskPolicyMutation(requestKey, operation as AiTaskRepositoryOperation, expectedRevision);
+        return { requestKey, operation, expectedRevision, ...result,
+          semantics: 'original_action_policy_save_not_current_permission' as const };
       }),
       prepare: value => run(prepareSchema, value, async ({ requestKey, capability }) => {
         const kind = selected(capability);

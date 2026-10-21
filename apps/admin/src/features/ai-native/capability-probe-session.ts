@@ -6,13 +6,15 @@ import type { CapabilityProbeAction, aiCapabilityProbeApi } from '@/api/aiCapabi
 
 type Capability = NonNullable<AiTextCapabilityPrepareRequestDraft['capability']>;
 type Write = 'publish' | 'createTask' | 'start' | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'configureTaskAction';
-type Journal = { requestKey: string; capability: Capability; started: boolean; uncertain: Write | null };
+type PolicyWrite = { taskId: string; operation: string; expectedRevision: number | null };
+type Journal = { requestKey: string; capability: Capability; started: boolean; uncertain: Write | null; policyWrite?: PolicyWrite };
 type Task = { taskId: string; runId?: string; revision: number; status: string };
 type Observation = { status: 'supported' | 'unsupported' | 'unverified'; capability: Capability; mode: 'mock' | 'live' | null;
   checkedAt: string | null; expiresAt: string | null; configurationRevision: number | null };
 type State = Readonly<{ busy: boolean; journal: Journal | null; locked: boolean;
   prepared: { configurationRevision: number; methodVersion: string } | null; published: boolean; task: Task | null;
   policy: { operation: string; revision: number | null } | null; receipt: Observation | null;
+  policyReceipt: { revision: number; expiresAt: string } | null;
   preflight: { allowed: boolean; missing: boolean; stale: boolean } | null;
   history: { state: 'historical' | 'not_observed'; originalValidity: string; taskStatus: string; resultObserved: boolean } | null;
   feedback: 'idle' | 'observed' | 'unknown' | 'denied' | 'invalid' | 'unavailable' }>;
@@ -38,12 +40,15 @@ export class CapabilityProbeSession {
     try { const raw = storage?.getItem(storageKey); locked = !storage || raw !== null;
       const v: unknown = raw && raw.length <= 1024 ? JSON.parse(raw) : null;
       if (object(v) && code(v.requestKey) && PROBE_CAPABILITIES.includes(v.capability as Capability) && typeof v.started === 'boolean'
-        && (v.uncertain === null || writes.includes(v.uncertain as Write))) {
-        journal = { requestKey: v.requestKey, capability: v.capability as Capability, started: v.started, uncertain: v.uncertain as Write | null }; locked = false;
+        && (v.uncertain === null || writes.includes(v.uncertain as Write)) && (v.policyWrite === undefined || object(v.policyWrite)
+          && code(v.policyWrite.taskId) && code(v.policyWrite.operation, 64) && (v.policyWrite.expectedRevision === null
+            || revision(v.policyWrite.expectedRevision) && v.policyWrite.expectedRevision <= 4294967293))) {
+        journal = { requestKey: v.requestKey, capability: v.capability as Capability, started: v.started, uncertain: v.uncertain as Write | null,
+          ...(v.policyWrite === undefined ? {} : { policyWrite: v.policyWrite as PolicyWrite }) }; locked = false;
       }
     } catch { /* Corrupt/absent original reference storage cannot authorize a fresh request. */ }
     this.state = { busy: false, journal, locked, prepared: null, published: false, task: null, policy: null,
-      receipt: null, preflight: null, history: null, feedback: locked || journal?.uncertain ? 'unknown' : 'idle' };
+      receipt: null, policyReceipt: null, preflight: null, history: null, feedback: locked || journal?.uncertain ? 'unknown' : 'idle' };
   }
   snapshot = () => this.state;
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
@@ -67,7 +72,7 @@ export class CapabilityProbeSession {
     let attempted = false;
     try {
       this.check(c, g);
-      this.update({ busy: true, receipt: null, preflight: null, history: null });
+      this.update({ busy: true, receipt: null, policyReceipt: null, preflight: null, history: null });
       if (this.state.locked) throw Error('AI_RESOURCE_UNAVAILABLE');
       let journal = structuredClone(this.state.journal);
       if (!journal) {
@@ -85,11 +90,15 @@ export class CapabilityProbeSession {
         || action === 'start' && (!this.state.task || journal.started) || action === 'cancel' && !this.state.task) return invalid();
       if (['readTaskAction', 'configureTaskAction'].includes(action) && (!code(operation, 64) || !this.state.task)) return invalid();
       if (action === 'configureTaskAction' && this.state.policy?.operation !== operation) return invalid();
+      if (action === 'readTaskActionReceipt' && !journal.policyWrite) return invalid();
       const value = { requestKey: journal.requestKey,
         ...(['prepare', 'publish'].includes(action) ? { capability: journal.capability } : {}),
         ...(action === 'cancel' ? { expectedRevision: this.state.task!.revision } : {}),
         ...(['readTaskAction', 'configureTaskAction'].includes(action) ? { operation: operation! } : {}),
-        ...(action === 'configureTaskAction' ? { expectedRevision: this.state.policy!.revision } : {}) };
+        ...(action === 'configureTaskAction' ? { expectedRevision: this.state.policy!.revision } : {}),
+        ...(action === 'readTaskActionReceipt' ? { operation: journal.policyWrite!.operation, expectedRevision: journal.policyWrite!.expectedRevision } : {}) };
+      if (action === 'configureTaskAction') journal = { ...journal, policyWrite: { taskId: this.state.task!.taskId,
+        operation: operation!, expectedRevision: this.state.policy!.revision } };
       if (write) { journal = { ...journal, uncertain: action as Write, started: journal.started || action === 'start' || action === 'reconcile' }; this.persist(journal); }
       this.check(c, g); attempted = write;
       const raw: unknown = structuredClone(await this.ports.call(action, value, c.signal)); this.check(c, g);
@@ -119,6 +128,15 @@ export class CapabilityProbeSession {
         else if (['observed', 'configured'].includes(String(raw.state)) && object(raw.policy) && raw.policy.operation === operation
           && raw.policy.taskId === this.state.task?.taskId && revision(raw.policy.revision)) this.update({ policy: { operation: operation!, revision: raw.policy.revision } });
         else return invalid();
+      } else if (action === 'readTaskActionReceipt') {
+        const original = journal.policyWrite!;
+        if (raw.semantics !== 'original_action_policy_save_not_current_permission' || raw.retryable !== false
+          || raw.operation !== original.operation || raw.expectedRevision !== original.expectedRevision) return invalid();
+        if (raw.state === 'recorded' && object(raw.policy) && raw.policy.taskId === original.taskId
+          && raw.policy.operation === original.operation && raw.policy.revision === (original.expectedRevision ?? 0) + 1 && time(raw.policy.expiresAt)) {
+          this.update({ policy: null, policyReceipt: { revision: raw.policy.revision as number, expiresAt: raw.policy.expiresAt } });
+          cleared = journal.uncertain === 'configureTaskAction';
+        } else if (raw.state !== 'not_observed' || raw.policy !== null) return invalid();
       } else if (action === 'readCapabilityReceipt') {
         if (raw.semantics !== 'original_receipt_not_task_outcome' || raw.capability !== journal.capability
           || !['supported', 'unsupported', 'unverified'].includes(String(raw.status)) || raw.retryable !== false) return invalid();
@@ -152,7 +170,7 @@ export class CapabilityProbeSession {
       if (this.active && !c.signal.aborted && g === this.generation) {
         const e = error as { message?: string; response?: { status?: number; data?: { code?: string } } };
         const denied = !this.current() || [401, 403].includes(e.response?.status ?? 0) || e.message === 'AI_SCOPE_CHANGED';
-        this.update({ prepared: null, published: false, task: null, policy: null, receipt: null, preflight: null, history: null,
+        this.update({ prepared: null, published: false, task: null, policy: null, receipt: null, policyReceipt: null, preflight: null, history: null,
           feedback: denied ? 'denied' : attempted || this.state.journal?.uncertain ? 'unknown'
             : e.message === 'AI_INVALID_INPUT' || e.response?.data?.code === 'AI_INVALID_INPUT' ? 'invalid' : 'unavailable' });
       }

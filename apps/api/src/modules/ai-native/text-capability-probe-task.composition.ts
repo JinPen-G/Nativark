@@ -22,6 +22,7 @@ import type { AiTaskRunnerClock, AiTaskRunnerLease, AiTaskRunnerStepRef } from '
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
+import type { AiTaskActionPolicyMutation } from './prisma-task-action-policy.repository';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';
 import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';
@@ -282,6 +283,22 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   const workflow = Object.freeze({
     // Server management capability, never a model tool or automatic seed.
     taskPolicies,
+    async readTaskPolicyMutation(requestKey: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null) {
+      const original = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
+      if (!original) throw unavailable();
+      const where = { ...original.owner, scopeKind: 'WORKSPACE' as const, sceneCode: TEXT_PROBE_SCENE,
+        sceneVersion: original.sceneVersion, creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
+        inputRevision: original.inputRevision, inputHash: original.inputHash };
+      const rows = structuredClone(await observe(() => input.db.aiTask.findMany({ where, take: 2,
+        select: { id: true, scopeId: true, scopeKind: true, audience: true, ownerKind: true, ownerId: true,
+          sceneCode: true, sceneVersion: true, creationKey: true, inputRef: true, inputRevision: true, inputHash: true } })));
+      if (rows.length !== 1 || Object.entries(where).some(([key, value]) => rows[0][key as keyof typeof rows[0]] !== value)) throw unavailable();
+      const result = await observe(() => taskPolicies.readMutation(rows[0].id, operation, expectedRevision));
+      const after = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
+      if (!after || after.inputRef !== original.inputRef || after.inputHash !== original.inputHash
+        || requestFingerprint(after.owner) !== requestFingerprint(original.owner)) throw denied();
+      return result;
+    },
     publishOriginal: (value: unknown) => producer.originals.publish(value),
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
     readOriginalCapability: (requestKey: string) => producer.originals.readOriginalCapability(requestKey),
@@ -355,10 +372,14 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
         resultObserved: snapshot.steps.some(step => step.artifacts.length > 0), configurationRevision, observation };
     },
     async readTaskMetadataOriginal(value: unknown) {
-      const { task, root } = await observe(() => originalTask(structuredClone(value)));
-      const before = await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
-      const metadata = await observe(() => root.authorization.tasks.readMetadata(task.taskId));
-      if ((await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'))).bindingKey !== before.bindingKey) throw denied();
+      const found = await observe(() => producer.readCreation(structuredClone(value)));
+      if (!found.task) throw unavailable();
+      // Observing metadata must not construct an execution host, register
+      // inputs or require a working Gateway/resource writer.
+      const taskId = found.task.taskId, authorization = composePersistedTaskAuthorization(input);
+      const before = await observe(() => authorization.tasks.resolveAccess(taskId, 'read_metadata'));
+      const metadata = await observe(() => authorization.tasks.readMetadata(taskId));
+      if ((await observe(() => authorization.tasks.resolveAccess(taskId, 'read_metadata'))).bindingKey !== before.bindingKey) throw denied();
       return metadata;
     },
     async startOriginal(value: unknown, signal?: AbortSignal) {

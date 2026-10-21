@@ -2377,6 +2377,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['readTask', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReadTaskResponseDraft'],
     ['configureTaskAction', 'AiTextCapabilityConfigureActionDraft', 'AiTextCapabilityConfigureActionResponseDraft'],
     ['readTaskAction', 'AiTextCapabilityActionRequestDraft', 'AiTextCapabilityReadActionResponseDraft'],
+    ['readTaskActionReceipt', 'AiTextCapabilityConfigureActionDraft', 'AiTextCapabilityActionReceiptResponseDraft'],
     ['start', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityRunResponseDraft'],
     ['inspect', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityInspectResponseDraft'],
     ['cancel', 'AiTextCapabilityCancelRequestDraft', 'AiTextCapabilityCancelResponseDraft'],
@@ -2391,7 +2392,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_TEXT_CAPABILITY_HTTP_DRAFT.basePath}/${AI_TEXT_CAPABILITY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalProbeAccounting_${action}`, authRequired: true,
     permissions: ['system:params:manage'], requestSchema, responseSchema,
-    summary: 'Standard capability workflow, unavailable without separate trusted server probe configuration. Human configuration of persisted scene and same-owner task policies is required; never seeded on task creation. Immutable original input, measured runner, unique Gateway dispatch and the original single ledger remain mandatory. Probe completion is not capability evidence: read its persisted receipt. Historical observations/accounting do not dispatch; unknown uses the same original key, never automatic retry or caller usage. Calls quotas do not prove supplier token/money pricing.' })),
+    summary: action === 'readTaskActionReceipt'
+      ? 'Read the immutable same-owner action-policy CAS save receipt under current management authority. Policy and receipt commit atomically; original task, operation, prior revision, actor and scope must match. Does not resolve a live model or require the saved policy to remain unexpired. Missing/legacy receipt is not proof of rollback; observing a receipt grants no current policy, lease, dispatch or retry. Trusted probe host configuration is still required.'
+      : 'Standard capability workflow, unavailable without separate trusted server probe configuration. Human configuration of persisted scene and same-owner task policies is required; never seeded on task creation. Immutable original input, measured runner, unique Gateway dispatch and the original single ledger remain mandatory. Probe completion is not capability evidence: read its persisted receipt. Historical observations/accounting do not dispatch; unknown uses the same original key, never automatic retry or caller usage. Calls quotas do not prove supplier token/money pricing.' })),
   ...(['read', 'releaseUnsent', 'reconcile'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
