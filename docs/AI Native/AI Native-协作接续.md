@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新功能`667c4b98`：预算政策CAS与原保存收据在原Prisma事务提交，后台丢应答/重载可按原键及请求指纹核对，确认后须重读现状才可编辑；未知、错指纹、撤权仍锁住，不重发。shared/Guard/OpenAPI/标准默认关闭provider同步，无新增账本或迁移。实际编辑会话→Auth/Guard/Controller/BudgetService/Prisma离线冒烟1 pass/0 fail/skip/todo/退出0；Admin233 roots/0诊断/退出0，API686 roots仅继承支付两项/退出1，diff及UI静态检查退出0。复核AIN-11/ENTRY-05未跨G4，原28项64.3%、增量52.8%、验收0/28不变；真库/HTTP/浏览器未验。
+> 更新时间：2026-10-21。最新功能`003589b2`：平台配置页接原正式费率审阅/收据接口，已读取Profile修订、明确人类确认、版本/有效期、精确费率与缓存维度；unknown只留原引用/hash、重载核对，不换版本重发。实际前端会话→Auth/Guard/Controller/Prisma费率服务离线冒烟1 pass/0 fail/skip/todo/退出0；Admin235 roots/0诊断/退出0，API686 roots仅继承支付两项/退出1，diff/UI静态检查退出0。未改后端协议/账本、无新测试脚本/生成/外联；TSX仅类型/静态，真库/HTTP/浏览器未验。AIN-11/ENTRY-05仍G3/75%，原28项64.3%、增量52.8%、验收0/28不变。
 > **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
@@ -23,6 +23,8 @@
 **阶段收口必须同步进度：** 本次已纠正“记录了功能但任务百分比复核滞后”的问题。接手者每个完整功能/阶段收口时，核对受影响任务的原G1～G4证据，达到下一档就及时更新开发任务表及整体汇总；未跨档在开发记录简短说明已复核及缺口。开发记录留关键提交/已做/剩余，本文覆盖最新现场与下一步，三者同片同步；不逐方法写流水，不把进度提醒写入需求或任务正文，不为涨分改门槛或把未验说成已验。
 
 ## 当前核心接点及下一步
+
+平台`/platform/ai`的原ProfileHost现挂载`PlatformPriceReview`，新审阅仅取原服务已读取的profileId/revision，配置保存进行中或unknown时禁止新费率；字段/修订变化清人类确认，默认零计价读取或发布。复用`budget-settings/platform/pricing/{review|review/receipt}`、现有shared及SaaS view/manage；服务器仍只接受正式管理配置指定的Profile，不能由页面选中自授权。金额/缓存费率按六位字符串，不猜供应商价格/缓存折扣/汇率；也可明确Token原量计量，不代替可信计数。原键/场景/内容hash留sessionStorage，unknown锁重提；原Profile变化、无当前配置或只剩view权限时仍可核对原收据，撤权清旧结果。结果是原版本，不证明当前配置、租户采用、预算、能力或执行可用。**后续仍缺后台BYOK费率、租户采用平台原费率、平台预算及能力消费者**；可信输入计数生产者仍按下文拒绝，不能因本页可保存费率就开启模型。
 
 后台`/settings/ai`的`TenantBudgetSettings`复用原`budget-settings/{read|change|initialize|refresh-configuration}`，明确选择当前tenant/workspace与scene；入口仍需当前`system:params:manage`及服务端Auth/Guard/Scope复核。not_configured/zero/limited分开，六位金额字符串、不重算；白名单只读，平台模型细节不外泄，首次停用、重绑定保留旧债务。新保存携带原operationKey，政策CAS和`OperationLog`收据在同事务提交，绑定原actor/workspace/scene、动作、请求指纹及原修订。`POST /ai-native/budget-settings/operation`沿当前读权限和原归属观察，不依赖活跃Profile，不授执行；重复原键只核对，不再写。后台仅存原引用/指纹，unknown锁重提；核对匹配后清锁但清空政策，必须再读当前修订。缺收据、错指纹和旧版无原键记录保持unknown/人工核对，不按TTL或当前值解锁。原调用的结算/占用账本不变；平台预算/价格/能力后台、可信计数和完整模型执行仍未齐。
 
