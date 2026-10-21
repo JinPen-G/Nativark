@@ -22,6 +22,8 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const maxRevision = 4294967294, maxFence = 99999999999999999999n, maxCursor = 18446744073709551615n;
+export const taskInputReceiptReferenceSchema = z.object({ taskId: id.max(36), requestId: id.max(36),
+  expectedRevision: z.number().int().min(1).max(maxRevision), submissionKey: id }).strict();
 const continuableModel = (tool: string) => tool === AI_TEXT_MODEL_STEP_CODE || tool === AI_IMAGE_MODEL_STEP_CODE || tool === AI_AUDIO_MODEL_STEP_CODE;
 
 function requestDigest(row: Omit<AiTaskInputRequest, 'requestHash' | 'createdAt' | 'status' | 'revision'>) {
@@ -162,7 +164,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
    * permission substitute is supplied. All mutations remain fail closed. */
   static receiptReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
     const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, true);
-    return Object.freeze({ readSubmission: repository.readSubmission.bind(repository) });
+    return Object.freeze({ readSubmission: repository.readSubmission.bind(repository),
+      readSubmissionReference: repository.readSubmissionReference.bind(repository) });
   }
 
   /** Current questions still require their original source revalidation. This
@@ -539,25 +542,37 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
 
   /** Exact original answer receipt, never submit/retry or latest-run selection. */
   async readSubmission(value: unknown) {
+    return this.observeSubmission(value, false);
+  }
+  /** Reference-only recovery never returns answers or grants continuation.
+   * The persisted payload/digest is still independently verified below. */
+  async readSubmissionReference(value: unknown) {
+    return this.observeSubmission(value, true);
+  }
+  private async observeSubmission(value: unknown, referenceOnly: boolean) {
     const submission = structuredClone(value);
-    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = await this.access(submission.taskId, 'read_metadata');
+    const ref = taskInputReceiptReferenceSchema.safeParse(referenceOnly ? submission : isAiTaskInputSubmissionDraft(submission)
+      ? { taskId: submission.taskId, requestId: submission.requestId, expectedRevision: submission.expectedRevision, submissionKey: submission.submissionKey } : null);
+    if (!ref.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const reference = ref.data;
+    const before = await this.access(reference.taskId, 'read_metadata');
     return this.transaction(async tx => {
-      const task = await this.task(tx, submission.taskId, before);
+      const task = await this.task(tx, reference.taskId, before);
       const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
-        scopeId: task.scopeId, taskId: task.id, id: submission.requestId } } });
-      if (!request || request.id !== submission.requestId) throw unavailable();
+        scopeId: task.scopeId, taskId: task.id, id: reference.requestId } } });
+      if (!request || request.id !== reference.requestId) throw unavailable();
       const parent = await this.run(tx, task.id, task.scopeId, request.runId, before, true);
       const facts = await this.facts(tx, task.scopeId, task.id, parent.id, request.stepId);
       this.validateRequest(request, facts.binding, before);
       await verifyQuestionHistory(tx, request);
       const stored = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_submissionKey: {
-        scopeId: task.scopeId, taskId: task.id, submissionKey: submission.submissionKey } } });
+        scopeId: task.scopeId, taskId: task.id, submissionKey: reference.submissionKey } } });
       if (!stored) {
         await this.access(task.id, 'read_metadata', before);
         return { state: 'not_observed' as const, retryable: false as const };
       }
-      const receipt = this.receipt(request, stored, before, submission);
+      if (reference.expectedRevision !== request.revision - 1 || stored.submissionKey !== reference.submissionKey) throw conflict();
+      const receipt = this.receipt(request, stored, before, referenceOnly ? undefined : submission as AiTaskInputSubmissionDraft);
       const successor = await tx.aiRun.findUnique({ where: { scopeId_taskId_inputReceiptId: {
         scopeId: task.scopeId, taskId: task.id, inputReceiptId: receipt.id } } });
       if (successor && (successor.scopeId !== task.scopeId || successor.taskId !== task.id

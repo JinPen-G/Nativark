@@ -26,7 +26,7 @@ import { readTaskCenterBusiness, type TaskCenterBusinessDependencies } from './t
 import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterContinuationDependencies } from './task-center-continuation.composition';
 import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
-import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, type TaskCenterInputDependencies } from './task-center-input.composition';
+import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -52,7 +52,7 @@ const schemas = {
   confirmation: z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict(),
   review: taskCenterReviewSchema, business: taskCenterReviewSchema, decision: taskCenterDecisionSchema, decisionReceipt: taskCenterDecisionSchema,
   continue: taskCenterContinueSchema,
-  input: taskCenterInputQuery, resumeInput: taskCenterInputAnswer, inputReceipt: taskCenterInputAnswer, continueInput: taskCenterInputAnswer,
+  input: taskCenterInputQuery, resumeInput: taskCenterInputAnswer, inputReceipt: taskCenterInputReceipt, continueInput: taskCenterInputAnswer,
   stop: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   stopReceipt: z.object({ taskId: id, expectedRevision: z.number().int().min(1).max(4294967294) }).strict(),
   usage: z.object({ taskId: id.max(36), limit: z.number().int().min(1).max(20), after: id.max(36).optional() }).strict()

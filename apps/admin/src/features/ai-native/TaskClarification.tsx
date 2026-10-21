@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft,
   validateAiTaskInputAnswersDraft, type AiTaskClarificationObservationDraft,
-  type AiTaskClarificationProgressDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
+  type AiTaskClarificationProgressDraft, type AiTaskInputSubmissionDraft, type AiTaskClarificationReceiptQueryDraft } from '@rental-os/shared';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { useLocale } from '@/app/locale';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
@@ -11,7 +11,18 @@ import { safeDisplayText } from './safe-display';
 import { formatTimestamp } from './formatters';
 
 type Question = NonNullable<AiTaskClarificationObservationDraft['input']>;
+type ReceiptReference = AiTaskClarificationReceiptQueryDraft['reference'];
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(value);
+function savedReference(key: string, taskId: string): ReceiptReference | 'invalid' | null {
+  try {
+    const raw = sessionStorage.getItem(key); if (!raw) return null;
+    if (raw.length > 512) return 'invalid';
+    const value = JSON.parse(raw);
+    return value && Object.keys(value).length === 3 && id(value.requestId) && Number.isInteger(value.expectedRevision)
+      && value.expectedRevision >= 1 && value.expectedRevision <= 4294967294 && typeof value.submissionKey === 'string'
+      && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value.submissionKey) ? { taskId, ...value } : 'invalid';
+  } catch { return 'invalid'; }
+}
 export function prepareTaskClarificationAnswer(taskId: string, input: Question, draft: Record<string, string>, submissionKey: string): AiTaskInputSubmissionDraft {
   if (!id(taskId) || !isAiTaskInputContractDraft(input.contract) || !Number.isFinite(Date.parse(input.expiresAt))
     || Date.parse(input.expiresAt) <= Date.now()) throw Error('AI_INVALID_INPUT');
@@ -33,7 +44,7 @@ function question(value: AiTaskClarificationObservationDraft, taskId: string): Q
     || !Number.isFinite(Date.parse(input.expiresAt)) || !isAiTaskInputContractDraft(input.contract)) throw Error('AI_RESOURCE_UNAVAILABLE');
   return structuredClone(input);
 }
-export function validateTaskClarificationProgress(value: AiTaskClarificationProgressDraft, original: AiTaskInputSubmissionDraft) {
+export function validateTaskClarificationProgress(value: AiTaskClarificationProgressDraft, original: Pick<AiTaskInputSubmissionDraft, 'taskId' | 'requestId'>) {
   if (value?.taskId !== original.taskId || value.requestId !== original.requestId || value.automaticRetry !== false
     || value.businessExecution !== 'not_inferred_from_input' || !value.receipt || !value.continuation) throw Error('AI_RESULT_UNKNOWN');
   const receipt = value.receipt;
@@ -53,6 +64,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
   const [input, setInput] = useState<Question | null>(null), [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [original, setOriginal] = useState<AiTaskInputSubmissionDraft | null>(null);
+  const [saved, setSaved] = useState(() => savedReference(key, taskId));
   const [locked, setLocked] = useState(() => { try { return sessionStorage.getItem(key) !== null; } catch { return true; } });
   const [receipt, setReceipt] = useState<AiTaskClarificationProgressDraft | null>(null);
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
@@ -76,7 +88,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
         try { const raw = sessionStorage.getItem(key); if (raw) saved = raw.length <= 512 ? JSON.parse(raw) : {}; }
         catch { saved = {}; }
         if (value && (!saved || id(saved.requestId) && saved.requestId !== value.requestId)) {
-          sessionStorage.removeItem(key); setOriginal(null); setReceipt(null); setLocked(false);
+          sessionStorage.removeItem(key); setOriginal(null); setSaved(null); setReceipt(null); setLocked(false);
         }
         setInput(value); setLoaded(true); return;
       }
@@ -87,13 +99,15 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
         const marker = JSON.stringify({ requestId: submission.requestId, expectedRevision: submission.expectedRevision, submissionKey: submission.submissionKey });
         sessionStorage.setItem(key, marker);
         if (sessionStorage.getItem(key) !== marker) throw Error('AI_RESOURCE_UNAVAILABLE');
-        setOriginal(submission); setLocked(true); setDraft({}); setInput(null);
+        setOriginal(submission); setSaved({ taskId, requestId: submission.requestId, expectedRevision: submission.expectedRevision,
+          submissionKey: submission.submissionKey }); setLocked(true); setDraft({}); setInput(null);
       }
-      if (!submission) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const reference = submission ?? (saved !== 'invalid' ? saved : null);
+      if (!reference || operation !== 'receipt' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
       dispatched = true;
-      const result = validateTaskClarificationProgress(await aiTaskCenterApi[
-        operation === 'submit' ? 'resumeInput' : operation === 'receipt' ? 'inputReceipt' : 'continueInput'
-      ]({ submission: structuredClone(submission) }, controller.signal), submission);
+      const result = validateTaskClarificationProgress(await (operation === 'receipt'
+        ? aiTaskCenterApi.inputReceipt(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)
+        : aiTaskCenterApi[operation === 'submit' ? 'resumeInput' : 'continueInput']({ submission: structuredClone(submission!) }, controller.signal)), reference);
       if (same(controller.signal)) setReceipt(result);
       if (operation === 'submit' && result.receipt.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
     } catch (failure) {
@@ -113,7 +127,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
     <p id={`${label}-help`}>{t('仅回答服务器登记的问题。提交会尝试继续原任务，可能产生模型用量；不代表批准建单、支付或业务已执行。')}</p>
     <div className="panel-toolbar">
       <ActionButton label={t('读取当前问题')} pendingLabel={t('读取中…')} disabled={busy} onAction={() => run('read')} />
-      {original && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}
+      {(original || saved && saved !== 'invalid') && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}
       {original && receipt?.receipt.state === 'observed' && <ConfirmAction label={t('明确继续原任务')}
         prompt={t('按这份已保存的回答继续？仍须当前权限、原计划和累计限额；不会自动批准业务。')}
         doneLabel={t('已获得继续结果')} disabled={busy} onConfirm={() => run('continue')} />}
@@ -140,7 +154,9 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
         doneLabel={t('原回答已记录')} disabled={busy || locked || expired} onConfirm={() => run('submit')} />
     </fieldset>}
     {expired && <Alert type="warning" title={t('问题已过期，请重新读取；不能沿用旧问题提交。')} />}
-    {locked && !original && <Alert type="warning" title={t('存在原回答操作引用，已禁止重新提交。回答内容未保存在浏览器；请通过原任务或人工流程核对。')} />}
+    {locked && !original && <Alert type="warning" title={t(saved === 'invalid'
+      ? '原回答引用不可读取，已禁止重新提交；请通过原任务和人工流程核对。'
+      : '已恢复原回答操作引用，可只读核对收据。回答内容未保存在浏览器，不会重发或自动继续。')} />}
     {error && <p id={`${label}-error`} role="alert">{t('本次未获得可靠结果。请核对必填项、数值范围、明确UTC时间、权限或原回答收据；不会自动重发。')}</p>}
     {receipt && <p role="status" aria-live="polite">{t(receipt.receipt.state !== 'observed'
       ? '尚未观察到原回答收据，不代表未提交；请勿另建操作重发。'

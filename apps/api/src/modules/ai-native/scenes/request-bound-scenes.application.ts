@@ -45,7 +45,7 @@ import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-polic
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { AI_TASK_RECOVERY_READ_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION,
   isAiTaskInputSubmissionDraft, type AiSceneModelRecoverySnapshotReadResponse, type AiOriginalTaskAccountingResponseDraft } from '@rental-os/shared';
-import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { PrismaTaskInputRepository, readTaskModelRunOrigin, taskInputReceiptReferenceSchema } from '../task-input/prisma-task-input.repository';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
@@ -766,16 +766,20 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readInput: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
     readAnswer(request: AiSceneHttpRequest, value: unknown) {
-      const parsed = answerSchema.safeParse(structuredClone(value));
-      if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const receiptQuery = z.union([answerSchema.extend({ submission: z.custom<import('@rental-os/shared').AiTaskInputSubmissionDraft>(isAiTaskInputSubmissionDraft) }), z.object({ original: originalRequestReferenceSchema,
+        reference: taskInputReceiptReferenceSchema }).strict()]);
+      const parsed = receiptQuery.safeParse(structuredClone(value));
+      if (!parsed.success || 'submission' in parsed.data && !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, parsed.data, async (root, command) => {
-        const input = answerSchema.parse(command);
-        if (!isAiTaskInputSubmissionDraft(input.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const input = receiptQuery.parse(command);
+        if ('submission' in input && !isAiTaskInputSubmissionDraft(input.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reference = 'submission' in input ? input.submission : input.reference;
         const before = await root.scenes.requests.readHistorical(input.original);
         const task = await root.scenes.readTaskReceipt(input.original.inputRef);
         if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        if (input.submission.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const receipt = await root.answers().readSubmission(input.submission);
+        if (reference.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const receipt = 'submission' in input ? await root.answers().readSubmission(input.submission)
+          : await root.answers().readSubmissionReference(input.reference);
         if (receipt.state === 'observed') {
           const access = await root.tasks.resolveAccess(task.taskId, 'read_metadata');
           await root.db.$transaction(async tx => {

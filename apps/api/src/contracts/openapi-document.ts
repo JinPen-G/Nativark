@@ -2174,7 +2174,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...(['input', 'resumeInput', 'inputReceipt', 'continueInput'] as const).map(action => ({
     method: 'post' as const, path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `aiTaskCenterOriginalClarification_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
-    requestSchema: action === 'input' ? 'AiTaskClarificationQueryDraft' : 'AiTaskClarificationAnswerDraft',
+    requestSchema: action === 'input' ? 'AiTaskClarificationQueryDraft' : action === 'inputReceipt'
+      ? 'AiTaskClarificationReceiptRequestDraft' : 'AiTaskClarificationAnswerDraft',
     responseSchema: action === 'input' ? 'AiTaskClarificationObservationDraft' : 'AiTaskClarificationProgressDraft',
     summary: action === 'input' || action === 'inputReceipt'
       ? 'Read same-owner original question or exact answer receipt under current task/source authority. No start, model call, approval or automatic retry.'

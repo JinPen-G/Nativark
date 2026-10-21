@@ -8,7 +8,7 @@ import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMet
   type AiTaskBusinessObservationDraft, type AiTaskHumanContinueDraft, type AiTaskHumanContinuationDraft,
   type AiTaskModelSourceQueryDraft, type AiTaskModelSourceObservationDraft,
   type AiTaskStopQueryDraft, type AiTaskStopObservationDraft, type AiTaskClarificationAnswerDraft,
-  type AiTaskClarificationObservationDraft, type AiTaskClarificationProgressDraft } from "@rental-os/shared";
+  type AiTaskClarificationObservationDraft, type AiTaskClarificationProgressDraft, type AiTaskClarificationReceiptQueryDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
@@ -20,7 +20,7 @@ async function read<T>(action: Exclude<keyof typeof AI_TASK_CENTER_HTTP_DRAFT, '
 export const aiTaskCenterApi = Object.freeze({
   input: (taskId: string, signal: AbortSignal) => read<AiTaskClarificationObservationDraft>('input', { taskId }, signal),
   resumeInput: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('resumeInput', input, signal),
-  inputReceipt: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('inputReceipt', input, signal),
+  inputReceipt: (input: AiTaskClarificationAnswerDraft | AiTaskClarificationReceiptQueryDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('inputReceipt', input, signal),
   continueInput: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('continueInput', input, signal),
   list: (input: AiTaskMetadataQueryDraft, signal: AbortSignal) => read<AiTaskMetadataPageDraft>("list", input, signal),
   snapshot: (taskId: string, signal: AbortSignal) => read<AiTaskSnapshotDraft>("snapshot", { taskId }, signal),

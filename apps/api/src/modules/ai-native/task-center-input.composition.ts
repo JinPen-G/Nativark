@@ -11,6 +11,7 @@ import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { readOriginalTaskModelProvenance } from './task-request/prisma-original-request.repository';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
+import { taskInputReceiptReferenceSchema } from './task-input/prisma-task-input.repository';
 
 type Request = { headers: { authorization?: unknown } };
 export interface TaskCenterInputDependencies {
@@ -22,6 +23,7 @@ export interface TaskCenterInputDependencies {
 }
 export const taskCenterInputQuery = z.object({ taskId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 export const taskCenterInputAnswer = z.object({ submission: z.custom<AiTaskInputSubmissionDraft>(isAiTaskInputSubmissionDraft) }).strict();
+export const taskCenterInputReceipt = z.union([taskCenterInputAnswer, z.object({ reference: taskInputReceiptReferenceSchema }).strict()]);
 const id = taskCenterInputQuery.shape.taskId, revision = z.number().int().min(1).max(4294967294);
 const pending = z.object({ requestId: id, revision, expiresAt: z.string().datetime({ offset: true }),
   contract: z.custom<AiTaskInputContractDraft>(isAiTaskInputContractDraft) }).strict();
@@ -43,7 +45,10 @@ export async function callTaskCenterInput(d: { db: Pick<PrismaClient, 'aiTask' |
   original: TaskCenterInputDependencies; tasks: Pick<AiTaskRepository, 'resolveAccess'>;
   credentials: AiTaskCredentialSource }, request: Request, value: unknown, action: Action, signal?: AbortSignal):
   Promise<AiTaskClarificationObservationDraft | AiTaskClarificationProgressDraft> {
-  const command = structuredClone(value), submission = action === 'input' ? undefined : taskCenterInputAnswer.parse(command).submission;
+  const command = structuredClone(value);
+  const receiptQuery = action === 'inputReceipt' ? taskCenterInputReceipt.parse(command) : undefined;
+  const submission = action === 'input' ? undefined : receiptQuery && 'reference' in receiptQuery
+    ? receiptQuery.reference : taskCenterInputAnswer.parse(command).submission;
   const readInput = d.original.readInput.bind(d.original), readAnswer = d.original.readAnswer.bind(d.original);
   const resume = d.original.resume?.bind(d.original), continueAnswer = d.original.continueAnswer?.bind(d.original);
   const resolveExecution = d.original.execution?.bind(d.original);
@@ -93,7 +98,8 @@ export async function callTaskCenterInput(d: { db: Pick<PrismaClient, 'aiTask' |
   const mutated = action !== 'inputReceipt' && !observeOnly;
   let returned = false;
   try {
-    const raw = structuredClone(await method(request, { original, submission }, signal));
+    const originalQuery = receiptQuery && 'reference' in receiptQuery ? { original, reference: receiptQuery.reference } : { original, submission };
+    const raw = structuredClone(await method(request, originalQuery, signal));
     returned = true;
     await verify();
     const envelope = action === 'inputReceipt' || observeOnly ? { receipt: raw } : z.object({ receipt: z.unknown() }).passthrough().parse(raw);

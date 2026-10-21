@@ -26,6 +26,9 @@ const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCurs
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AiTaskClarificationQueryDraft: closed({ taskId: { ...id(), maxLength: 36 } }),
   AiTaskClarificationAnswerDraft: closed({ submission: ref('AiTaskInputSubmissionDraft') }),
+  AiTaskClarificationReceiptQueryDraft: closed({ reference: closed({ taskId: { ...id(), maxLength: 36 }, requestId: { ...id(), maxLength: 36 },
+    expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967294 }, submissionKey: id() }) }),
+  AiTaskClarificationReceiptRequestDraft: { oneOf: [ref('AiTaskClarificationAnswerDraft'), ref('AiTaskClarificationReceiptQueryDraft')] },
   AiTaskClarificationObservationDraft: closed({ taskId: { ...id(), maxLength: 36 }, input: { oneOf: [{ type: 'null' },
     closed({ requestId: { ...id(), maxLength: 36 }, revision, expiresAt: time, contract: ref('AiTaskInputContractDraft') })] },
     execution: choice('read_only_no_start_no_reconnect_side_effect') }),
