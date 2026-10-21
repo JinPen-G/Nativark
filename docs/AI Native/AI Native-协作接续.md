@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新核心配置链：`80711a6e`补上原Gateway/能力probe底层Profile发现上限，沿原Router的100项门槛执行Prisma take101，超量拒绝而非截断选路；同scope重复/串行拒绝，输入scope先快照。实际Prisma适配+Router定向stdin1 pass/0 fail/skip/todo/退出0，API685 roots仅原支付两项/退出1，diff退出0；DB/能力证据为替身，不是MySQL/供应商验收。`783cead7`平台目录及后台选择保持，前片Admin230 roots/0诊断/退出0，不冒称本片重跑；无新测试脚本/外联。原28项64.3%、ENTRY48.6%、验收0/28不变。
+> 更新时间：2026-10-21。最新收口`bfdce443`：后台重载后按原回答引用核对，再明确继续原任务；服务端核验持久回答/历史/主体/原run后交回既有执行宿主，不返回回答正文、不重交输入、不新建run或额度。实际TSX→原请求/仓储/运行器的stdin组合1 pass/0 fail/skip/todo/退出0（DB/传输/财务为替身）；Admin230 roots/0诊断/退出0，API685 roots仅继承支付960/1049两项TS2322/退出1，diff/定向antd检查退出0。未新增测试脚本，未验真实HTTP/MySQL/供应商/浏览器。平台配置目录及有界选路保持；可信输入计数生产者仍缺，原28项64.3%、ENTRY48.6%、验收0/28不变。
 > **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
@@ -22,7 +22,7 @@
 
 ## 当前核心接点及下一步
 
-任务中心澄清现有标准`POST /ai-native/task-center/{input|input/resume|input/receipt|input/continue}`及shared命名类型/OpenAPI。仅从当前owner任务与持久原请求派生原输入引用；只读问题/收据使用独立恢复根，明确提交/继续才惰性解析正式持久模型宿主，缺依赖拒绝。完整原submission同键核对；终态continue仅观察原收据，不claim/派发。后台`TaskClarification`点击后读取，动态受权选项不默认选择，字段复用原合同校验；提交说明可能继续模型用量但不授业务批准。unknown锁重提、只读原收据，切任务/空间/隐藏卸载清当前内容并丢弃迟到响应；浏览器仅保留原操作引用，不保留回答。刷新后`input/receipt`支持`AiTaskClarificationReceiptQueryDraft.reference`，原仓储验证持久回答digest、原问题/历史修订、actor/scope与后继run；只返回原收据摘要，不返回正文、不授继续，缺收据不证明未提交。原完整提交和新引用两种合同保持隔离，新引用不能传给resume/continue；仅有引用时仍不能显式继续。只验证正式报价澄清来源，其他场景的全部追问变体未齐。后台UI沿原UIArc/主题，无视觉改版，未启动浏览器。
+任务中心澄清现有标准`POST /ai-native/task-center/{input|input/resume|input/receipt|input/continue}`及shared命名类型/OpenAPI。当前owner/原请求绑定后，只读问题/收据不构造执行宿主；明确提交/继续才惰性解析正式宿主。后台零初始读、选项不默认选，unknown锁重提，浏览器仅留原操作引用。刷新后先核对原收据，再明确点击继续；`AiTaskClarificationContinueQueryDraft`允许原完整submission或原引用，resume仍必须完整回答。内部`resolveAnswerContinuation`复用原仓储核验持久answerHash、问题历史、actor/scope和后继run，再复验当前任务修订，交既有continueAnswer复核计划/租约/累计资源；没有新增公开正文读取接口。非RUNNING任务只读原收据，不解析回答或claim。缺收据不证明未提交、不能重发；回答和继续均不授业务批准。已离线驱动真实报价澄清的保存后中断→刷新→明确继续；其他场景全部追问、完整单账/真实供应商及浏览器仍待验。沿原UIArc/主题，无视觉改版。
 
 后台配置现沿原API实际装配：租户“服务与渠道→AI服务设置”（`/settings/ai`）复用C07与原Auth/Guard/CAS/Profile，平台模式无需供应商输入，BYOK支持三种已有原生协议；切换保留原加密配置，清密钥同时停用。旧系统配置单独审阅来源版本，只有明确新密钥+disabled替换才保存，不自动导入。平台“平台AI配置”（`/platform/ai`）沿原GET/PUT `/platform/ai/providers/{profileId}`和原operation接口；严格按当前SaaS view/manage分别显示和保存，不给所有SaaS账号自动权限。现有`GET /platform/ai/providers?limit=20&after=...`目录，默认20、最多50项，Prisma平台scope/serviceMode条件、ID排序与limit+1游标探测；当前读权前后复核，仅元数据，无URL/凭据/能力证据。后台明确读取并选择，不默认选首条，不自动读配置/测试或启用；仍支持人工编号首次配置。首次配置是明确CAS修订0且停用，不把读取失败当不存在。两端仅sessionStorage保存原操作引用/修订，绝不保存密钥；未知锁住新保存、只核对原收据，收据确认后重新读当前配置。配置保存不会开放预算、能力验证或执行。能力验证/价格/预算及正式后台审批、场景完整消费仍待补，不重复这些设置宿主。
 

@@ -12,6 +12,11 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：重载后的原回答继续（2026-10-21）
+
+- `bfdce443`：任务中心按原引用在服务器核验并解析持久回答，再交原continueAnswer；标准provider/shared/OpenAPI和后台明确继续已接通。浏览器不存正文，引用不授执行；非RUNNING仅观察，缺依赖/篡改/撤权拒绝，原run及累计预算不新增。
+- 双offline preload、固定无效DB、本树audit/TEMP的`node -`：实际TSX重载→核对→明确继续，原报价源/仓储/运行器保存后中断、同两run/一预算、缺依赖、回答篡改、错键、终态与撤权，1 pass/0 fail/skip/todo/退出0。首次快检修正只读根夹具选项、终态错键应返回not_observed的错误验证预期、Admin ESM内联加载；未放宽产品规则。新增两项类型诊断修后API685 roots仅继承支付960/1049两项/退出1，Admin230 roots/0诊断/退出0，diff/antd lint/机械UI检测退出0。无新测试脚本/生成/外联；DB、财务、传输与UI hooks为替身，非真库/HTTP/供应商/浏览器验收。可信计数及完整标准模型执行仍缺，不调百分比。
+
 ## 近期核心：平台配置目录与正式选择（2026-10-21）
 
 - 后续`80711a6e`补原路由/能力probe共用Prisma Profile发现的实际查询上限：take101与原Router max100统一，超量拒绝不截断；list/get校验scope/原键、scope入参快照，避免仅在全量加载后才拒绝。双offline preload下stdin实际仓储+Router正常、超量零preflight、串scope/重复拒绝及await迟改1 pass/0 fail/skip/todo/退出0；API685 roots仍仅原支付两项/退出1，diff退出0。DB查询及能力证据为替身，非MySQL性能/供应商验收；无新测试脚本、非新路由/框架或计数证书。
