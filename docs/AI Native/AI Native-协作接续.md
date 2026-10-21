@@ -1,7 +1,7 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新功能`0338012b`：租户后台AI设置接原受权预算API，当前租户/空间及场景政策可明确读取、CAS保存额度/并发/单run上限、停用初始化与当前配置重绑定；不改白名单、计价/账本或授模型执行。编辑会话→实际Auth/Guard/Controller/预算仓储的离线冒烟1 pass/0 fail/skip/todo/退出0（DB/Core配置为替身），Admin233 roots/0诊断/退出0，API685 roots仍仅继承支付两项/退出1；diff/定向antd检查退出0。没有独立预算保存收据，丢应答后只读同政策且持久锁重提，不拿当前值冒充原保存成功。原回答引用继续保持。复核AIN-11/ENTRY-05已在G3，本片未跨G4，原28项64.3%、增量52.8%、验收0/28保持。无新测试脚本/共享生成/服务或外联，未验初始化/重绑定全部正向、HTTP/MySQL/浏览器。
+> 更新时间：2026-10-21。最新功能`667c4b98`：预算政策CAS与原保存收据在原Prisma事务提交，后台丢应答/重载可按原键及请求指纹核对，确认后须重读现状才可编辑；未知、错指纹、撤权仍锁住，不重发。shared/Guard/OpenAPI/标准默认关闭provider同步，无新增账本或迁移。实际编辑会话→Auth/Guard/Controller/BudgetService/Prisma离线冒烟1 pass/0 fail/skip/todo/退出0；Admin233 roots/0诊断/退出0，API686 roots仅继承支付两项/退出1，diff及UI静态检查退出0。复核AIN-11/ENTRY-05未跨G4，原28项64.3%、增量52.8%、验收0/28不变；真库/HTTP/浏览器未验。
 > **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
 
 ## 权威依据
@@ -24,7 +24,7 @@
 
 ## 当前核心接点及下一步
 
-后台`/settings/ai`新增`TenantBudgetSettings`，明确选择原sceneCode后读取当前tenant/workspace政策，入口仍需当前`system:params:manage`，服务器沿原Auth/Guard/Scope复核。复用原`budget-settings/{read|change|initialize|refresh-configuration}`，shared仅补齐已有JSON schema的TS投影类型，不新建协议/HTTP/业务写入口。not_configured/zero/limited明确分开，金额只传六位字符串，不换汇/重算；模型/场景白名单只读，平台模式不泄露模型细节。首次初始化固定停用，重绑定明确确认且保留旧债务。服务端未配置管理依赖仍unavailable，不自动开放。编辑会话单飞、响应范围/修订核验、切身份/卸载丢弃迟到；未知只存同政策/预期修订引用并锁新保存，重新读当前政策不解锁。**仍缺独立原保存收据及可验证解锁出口**，需沿原预算仓储补，不能用当前值相同推定原操作成功；平台预算/价格/能力后台消费与完整可信计数仍未齐。
+后台`/settings/ai`的`TenantBudgetSettings`复用原`budget-settings/{read|change|initialize|refresh-configuration}`，明确选择当前tenant/workspace与scene；入口仍需当前`system:params:manage`及服务端Auth/Guard/Scope复核。not_configured/zero/limited分开，六位金额字符串、不重算；白名单只读，平台模型细节不外泄，首次停用、重绑定保留旧债务。新保存携带原operationKey，政策CAS和`OperationLog`收据在同事务提交，绑定原actor/workspace/scene、动作、请求指纹及原修订。`POST /ai-native/budget-settings/operation`沿当前读权限和原归属观察，不依赖活跃Profile，不授执行；重复原键只核对，不再写。后台仅存原引用/指纹，unknown锁重提；核对匹配后清锁但清空政策，必须再读当前修订。缺收据、错指纹和旧版无原键记录保持unknown/人工核对，不按TTL或当前值解锁。原调用的结算/占用账本不变；平台预算/价格/能力后台、可信计数和完整模型执行仍未齐。
 
 任务中心澄清现有标准`POST /ai-native/task-center/{input|input/resume|input/receipt|input/continue}`及shared命名类型/OpenAPI。当前owner/原请求绑定后，只读问题/收据不构造执行宿主；明确提交/继续才惰性解析正式宿主。后台零初始读、选项不默认选，unknown锁重提，浏览器仅留原操作引用。刷新后先核对原收据，再明确点击继续；`AiTaskClarificationContinueQueryDraft`允许原完整submission或原引用，resume仍必须完整回答。内部`resolveAnswerContinuation`复用原仓储核验持久answerHash、问题历史、actor/scope和后继run，再复验当前任务修订，交既有continueAnswer复核计划/租约/累计资源；没有新增公开正文读取接口。非RUNNING任务只读原收据，不解析回答或claim。缺收据不证明未提交、不能重发；回答和继续均不授业务批准。已离线驱动真实报价澄清的保存后中断→刷新→明确继续；其他场景全部追问、完整单账/真实供应商及浏览器仍待验。沿原UIArc/主题，无视觉改版。
 
