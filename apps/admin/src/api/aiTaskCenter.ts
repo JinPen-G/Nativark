@@ -7,16 +7,21 @@ import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMet
   type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft,
   type AiTaskBusinessObservationDraft, type AiTaskHumanContinueDraft, type AiTaskHumanContinuationDraft,
   type AiTaskModelSourceQueryDraft, type AiTaskModelSourceObservationDraft,
-  type AiTaskStopQueryDraft, type AiTaskStopObservationDraft } from "@rental-os/shared";
+  type AiTaskStopQueryDraft, type AiTaskStopObservationDraft, type AiTaskClarificationAnswerDraft,
+  type AiTaskClarificationObservationDraft, type AiTaskClarificationProgressDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
 
-async function read<T>(action: "list" | "snapshot" | "events" | "result" | "source" | "usage" | "confirmation" | "review" | "decision" | "decisionReceipt" | "business" | "continue" | "stop" | "stopReceipt", data: unknown, signal: AbortSignal): Promise<T> {
+async function read<T>(action: Exclude<keyof typeof AI_TASK_CENTER_HTTP_DRAFT, 'basePath'>, data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
   return result.data.data;
 }
 export const aiTaskCenterApi = Object.freeze({
+  input: (taskId: string, signal: AbortSignal) => read<AiTaskClarificationObservationDraft>('input', { taskId }, signal),
+  resumeInput: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('resumeInput', input, signal),
+  inputReceipt: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('inputReceipt', input, signal),
+  continueInput: (input: AiTaskClarificationAnswerDraft, signal: AbortSignal) => read<AiTaskClarificationProgressDraft>('continueInput', input, signal),
   list: (input: AiTaskMetadataQueryDraft, signal: AbortSignal) => read<AiTaskMetadataPageDraft>("list", input, signal),
   snapshot: (taskId: string, signal: AbortSignal) => read<AiTaskSnapshotDraft>("snapshot", { taskId }, signal),
   events: (taskId: string, after: string, signal: AbortSignal) => read<AiTaskEventPageDraft | AiTaskEventResetDraft>("events", { taskId, after, limit: 50 }, signal),

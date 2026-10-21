@@ -16,6 +16,7 @@ import { readTaskCenterDetail, validateTaskCenterSnapshot } from "./task-center-
 import { TaskUsageObservation } from "./TaskUsageObservation";
 import { TaskHumanApproval } from "./TaskHumanApproval";
 import { TaskCancellation } from "./TaskCancellation";
+import { TaskClarification } from "./TaskClarification";
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -182,6 +183,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
         stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} />}
+    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
+      && <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
+        onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} />}
     {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
       && <TaskCancellation key={`stop:${selected}`} taskId={selected} identity={identity} current={current}
         onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} />}
