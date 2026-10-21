@@ -11,7 +11,7 @@ const rev = (v: unknown): v is number => typeof v === 'number' && Number.isInteg
 const amount = (v: unknown): v is string => typeof v === 'string' && /^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(v);
 const time = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(v) && Number.isFinite(Date.parse(v));
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
-function billing(v: unknown): AiGatewayReviewedPriceBillingDraft {
+export function reviewedPriceBilling(v: unknown): AiGatewayReviewedPriceBillingDraft {
   if (!row(v)) return invalid();
   if (v.unit === 'tokens' && v.metric === 'input_plus_output' && v.scale === 0 && v.rounding === 'exact')
     return { unit: 'tokens', metric: 'input_plus_output', scale: 0, rounding: 'exact' };
@@ -30,7 +30,7 @@ export function preparePlatformPrice(v: PlatformPriceForm): Pick<AiGatewayPriceR
     || Date.parse(v.expiresAt) <= Date.parse(v.validFrom) || v.confirmReviewedRate !== true
     || typeof v.includeCache !== 'boolean' || !['tokens', 'money'].includes(v.unit)) return invalid();
   return { sceneCode: v.sceneCode, priceVersion: v.priceVersion, validFrom: v.validFrom, expiresAt: v.expiresAt,
-    confirmReviewedRate: true, billing: billing(v.unit === 'tokens'
+    confirmReviewedRate: true, billing: reviewedPriceBilling(v.unit === 'tokens'
       ? { unit: 'tokens', metric: 'input_plus_output', scale: 0, rounding: 'exact' }
       : { unit: 'money', currency: v.currency, scale: 6, inputPerMillion: v.inputPerMillion, outputPerMillion: v.outputPerMillion,
           rounding: 'ceil_total_micro_units', ...(v.includeCache ? { inputCache: { readPerMillion: v.readPerMillion, writePerMillion: v.writePerMillion } } : {}) }) };
@@ -43,7 +43,7 @@ function receipt(v: unknown, key: string, profileId: string): AiGatewayPriceRevi
     || v.inputCounting !== 'not_certified_by_rate_review' || v.executionPermission !== false) return invalid();
   return { state: 'recorded', operationKey: key, id: v.id, evidenceHash: v.evidenceHash, configurationHash: v.configurationHash,
     configId: profileId, configRevision: v.configRevision, priceVersion: v.priceVersion, validFrom: v.validFrom, expiresAt: v.expiresAt,
-    billing: billing(v.billing), rateAuthority: v.rateAuthority, inputCounting: v.inputCounting, executionPermission: false };
+    billing: reviewedPriceBilling(v.billing), rateAuthority: v.rateAuthority, inputCounting: v.inputCounting, executionPermission: false };
 }
 const content = (v: AiGatewayPriceReviewResponseDraft | AiGatewayPriceReviewDraft) => ({ configId: v.configId,
   revision: 'configRevision' in v ? v.configRevision : v.expectedConfigRevision, priceVersion: v.priceVersion,

@@ -158,8 +158,9 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       read: new AiScopeRepository(platform.db, { resolve: () => authority.resolveRead() }, clock),
       write: new AiScopeRepository(platform.db, authority, clock) }, platform.profileId, credentials.current.bind(credentials), clock);
   };
-  const adoptPlatformPrice = (request: BudgetManagementRequest, value: unknown, write: boolean, signal?: AbortSignal) => call(request, value,
+  const adoptPlatformPrice = (request: BudgetManagementRequest, value: unknown, mode: 'preview' | 'adopt' | 'receipt', signal?: AbortSignal) => call(request, value,
     async (credentials, value) => {
+      const write = mode === 'adopt';
       const selector = z.object({ sceneCode: code, priceId: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
       const parsed = (write ? selector.extend({ confirmPlatformRate: z.literal(true) }).strict() : selector).safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
@@ -169,10 +170,18 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
       const producer = new PrismaPlatformReviewedPriceSource(tenant.db, profileId, parsed.data.sceneCode, credentials.current.bind(credentials));
       const management = new GatewayPricingRecordManagement(tenant.db, source.scopes, source,
-        write ? producer : undefined, undefined, parsed.data.sceneCode, tenant.clock);
+        mode !== 'receipt' ? producer : undefined, undefined, parsed.data.sceneCode, tenant.clock);
       const reference = `platform-rate:${parsed.data.priceId}`;
       let publicationReturned = false;
       try {
+        if (mode === 'preview') {
+          const evidence = await management.previewPrice({ reference });
+          return { state: 'available_for_review' as const, priceId: parsed.data.priceId, sceneCode: parsed.data.sceneCode,
+            evidenceHash: requestFingerprint(evidence), priceVersion: evidence.priceVersion,
+            validFrom: evidence.validFrom, expiresAt: evidence.expiresAt, billing: structuredClone(evidence.billing),
+            rateAuthority: 'platform_reviewed_budget_rate_not_provider_invoice' as const,
+            inputCounting: 'not_certified_by_rate_review' as const, executionPermission: false as const, persisted: false as const };
+        }
         if (write) { await management.publishPrice({ reference }); publicationReturned = true; }
         // Read original adoption independently of profile, rate expiry or a new
         // adoption producer. No global reviewer identity reaches tenant output.
@@ -192,7 +201,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
           rateAuthority: 'platform_reviewed_budget_rate_not_provider_invoice' as const,
           inputCounting: 'not_certified_by_rate_review' as const, executionPermission: false as const };
       } catch (error) { if (publicationReturned) throw new BudgetError('PENDING_RECONCILIATION'); throw error; }
-    }, write, signal);
+    }, mode === 'adopt', signal);
   // First provisioning and explicit re-binding use the same actual config
   // producer. Re-binding never resets allocations or opens a gate by itself.
   const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
@@ -310,8 +319,9 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       (credentials, command) => platformPrices(credentials).review(command), true, signal),
     platformPriceReviewReceipt: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (credentials, command) => platformPrices(credentials).receipt(command), false, signal),
-    adoptPlatformPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, true, signal),
-    readPlatformPriceAdoption: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, false, signal),
+    previewPlatformPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, 'preview', signal),
+    adoptPlatformPrice: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, 'adopt', signal),
+    readPlatformPriceAdoption: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => adoptPlatformPrice(request, value, 'receipt', signal),
     platformRead: (request: BudgetManagementRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (credentials, value) => {
       const parsed = platformRead.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');

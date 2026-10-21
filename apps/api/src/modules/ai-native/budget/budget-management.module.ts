@@ -91,6 +91,15 @@ export class AiBudgetManagementController {
   adoptPlatformPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, true, async signal => this.priceReviewResult(await this.application.adoptPlatformPrice(request, body, signal), true), false);
   }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.previewPlatformPrice) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  previewPlatformPrice(@Req() request: SettingsRequest, @Body() body: unknown) {
+    return this.respond(request, false, async signal => {
+      const result = await this.application.previewPlatformPrice(request, body, signal);
+      const validate = ajv.getSchema('urn:rental:budget-management:AiGatewayPlatformPricePreviewDraft');
+      if (!validate?.(result) || Buffer.byteLength(JSON.stringify(result), 'utf8') > 8192) throw new BudgetError('UNAVAILABLE');
+      return structuredClone(result);
+    }, false);
+  }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.readPlatformPriceAdoption) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readPlatformPriceAdoption(@Req() request: SettingsRequest, @Body() body: unknown) {
     return this.respond(request, false, async signal => this.priceReviewResult(await this.application.readPlatformPriceAdoption(request, body, signal), false), false);

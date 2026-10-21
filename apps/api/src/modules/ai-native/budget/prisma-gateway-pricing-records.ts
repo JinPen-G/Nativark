@@ -137,6 +137,21 @@ export class GatewayPricingRecordManagement {
       || !row.enabled || row.disabledAt || row.configRevision !== c.configRevision || row.provider !== c.provider
       || row.protocol !== c.protocol || row.model !== c.model || row.credentialRef !== c.credentialRef || row.serviceMode !== c.serviceMode) throw new BudgetError('FORBIDDEN');
   }
+  /** Current authorized review only; reuses publication's trusted source and
+   * configuration checks, but does not append an adoption or admit usage. */
+  async previewPrice(value: unknown) {
+    const source = this.source;
+    if (!source) throw new BudgetError('UNAVAILABLE');
+    const command = parse(reference, value), current = await this.authorize('settings_read');
+    const evidence = parse(gatewayPriceEvidenceSchema, await source.readPrice(command.reference, structuredClone(current.context)));
+    if (evidence.provenance.reference !== command.reference) throw new BudgetError('FORBIDDEN');
+    this.active(evidence); await this.profile(evidence, current.principal.tenantId);
+    const confirmed = parse(gatewayPriceEvidenceSchema, await source.readPrice(command.reference, structuredClone(current.context)));
+    if (hash(confirmed) !== hash(evidence)) throw new BudgetError('REVISION_CONFLICT');
+    await this.profile(confirmed, current.principal.tenantId); await this.recheck(current, 'settings_read');
+    this.active(confirmed);
+    return structuredClone(confirmed);
+  }
   async publishPrice(value: unknown) {
     const source = this.source;
     if (!source) throw new BudgetError('UNAVAILABLE');

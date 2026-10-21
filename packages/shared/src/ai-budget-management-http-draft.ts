@@ -9,7 +9,7 @@ export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   priceRead: 'pricing/price', pricePublicationRead: 'pricing/publication', inputBoundRead: 'pricing/input-bound',
   reviewPrice: 'pricing/review', readPriceReview: 'pricing/review/receipt',
   platformReviewPrice: 'platform/pricing/review', platformPriceReviewReceipt: 'platform/pricing/review/receipt',
-  adoptPlatformPrice: 'pricing/platform/adopt', readPlatformPriceAdoption: 'pricing/platform/receipt'
+  previewPlatformPrice: 'pricing/platform/preview', adoptPlatformPrice: 'pricing/platform/adopt', readPlatformPriceAdoption: 'pricing/platform/receipt'
 });
 export type AiGatewayReviewedPriceBillingDraft = { unit: 'tokens'; metric: 'input_plus_output'; scale: 0; rounding: 'exact' }
   | { unit: 'money'; currency: string; scale: 6; inputPerMillion: string; outputPerMillion: string; rounding: 'ceil_total_micro_units';
@@ -20,6 +20,12 @@ export type AiGatewayPriceReviewDraft = { sceneCode: string; operationKey: strin
 export type AiGatewayPriceReviewReadDraft = { sceneCode: string; operationKey: string };
 export type AiGatewayPlatformPriceAdoptionReadDraft = { sceneCode: string; priceId: string };
 export type AiGatewayPlatformPriceAdoptionDraft = AiGatewayPlatformPriceAdoptionReadDraft & { confirmPlatformRate: true };
+/** Current tenant-authorized offer, not an adoption receipt or supplier fact. */
+export type AiGatewayPlatformPricePreviewDraft = AiGatewayPlatformPriceAdoptionReadDraft & {
+  state: 'available_for_review'; evidenceHash: string; priceVersion: string; validFrom: string; expiresAt: string;
+  billing: AiGatewayReviewedPriceBillingDraft; rateAuthority: 'platform_reviewed_budget_rate_not_provider_invoice';
+  inputCounting: 'not_certified_by_rate_review'; executionPermission: false; persisted: false;
+};
 export type AiGatewayPriceReviewResponseDraft = { state: 'recorded'; operationKey: string; id: string; evidenceHash: string;
   priceVersion: string; configurationHash: string; configId: string; configRevision: number; validFrom: string; expiresAt: string;
   billing: AiGatewayReviewedPriceBillingDraft; rateAuthority: 'tenant_reviewed_budget_rate_not_provider_invoice' | 'platform_reviewed_budget_rate_not_provider_invoice';
@@ -107,6 +113,10 @@ export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
     billing: reviewedBilling, confirmReviewedRate: { type: 'boolean', const: true } }),
   AiGatewayPriceReviewReadDraft: obj({ sceneCode: scene, operationKey: { ...pricingKey, maxLength: 128 } }),
   AiGatewayPlatformPriceAdoptionReadDraft: obj({ sceneCode: scene, priceId: pricingHash }),
+  AiGatewayPlatformPricePreviewDraft: obj({ sceneCode: scene, priceId: pricingHash, state: choice('available_for_review'),
+    evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 }, validFrom: time, expiresAt: time, billing: reviewedBilling,
+    rateAuthority: choice('platform_reviewed_budget_rate_not_provider_invoice'), inputCounting: choice('not_certified_by_rate_review'),
+    executionPermission: { type: 'boolean', const: false }, persisted: { type: 'boolean', const: false } }),
   AiGatewayPlatformPriceAdoptionDraft: obj({ sceneCode: scene, priceId: pricingHash, confirmPlatformRate: { type: 'boolean', const: true } }),
   AiGatewayPriceReviewResponseDraft: obj({ state: choice('recorded'), operationKey: { ...pricingKey, maxLength: 128 },
     id: pricingHash, evidenceHash: pricingHash, priceVersion: { ...pricingKey, maxLength: 64 }, configurationHash: pricingHash,

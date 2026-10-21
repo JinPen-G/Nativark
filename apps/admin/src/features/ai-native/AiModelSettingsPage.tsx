@@ -11,6 +11,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { AiServiceSettingsCard } from "./AiServiceSettingsCard";
 import { ModelSettingsSession, type SettingsFeedback } from "./model-settings-session";
 import { TenantBudgetSettings } from "./TenantBudgetSettings";
+import { TenantPlatformRate } from './TenantPlatformRate';
 
 const labels: Record<SettingsFeedback, string> = {
   idle: "配置保存、真实能力验证与执行准入分别管理。",
@@ -34,7 +35,8 @@ export function AiModelSettingsPage() {
   return <>
     <PageHeader title={t("AI 服务设置")} description={t("平台统一服务或自定义 BYOK，预算和执行权限独立管理。")} />
     {allowed ? <><TenantSettingsEditor key={contextKey()} tenantId={auth.tenant!.tenantId} identity={contextKey()} />
-      <TenantBudgetSettings key={`budget:${contextKey()}`} identity={contextKey()} /></>
+      <TenantBudgetSettings key={`budget:${contextKey()}`} identity={contextKey()} />
+      <TenantPlatformRate key={`rate:${contextKey()}`} identity={contextKey()} /></>
       : <Alert type="warning" title={t("需要当前经营空间及 AI 配置管理权限。")}/>}
   </>;
 }

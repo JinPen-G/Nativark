@@ -545,7 +545,7 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
       return Object.freeze({ read: unavailable, readOperation: unavailable, change: unavailable, initialize: unavailable,
         refreshConfiguration: unavailable, reviewPrice: unavailable, readPriceReview: unavailable,
         platformReviewPrice: unavailable, platformPriceReviewReceipt: unavailable,
-        adoptPlatformPrice: unavailable, readPlatformPriceAdoption: unavailable,
+        previewPlatformPrice: unavailable, adoptPlatformPrice: unavailable, readPlatformPriceAdoption: unavailable,
         platformRead: unavailable, platformSave: unavailable });
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') throw new BudgetError('UNAVAILABLE');
