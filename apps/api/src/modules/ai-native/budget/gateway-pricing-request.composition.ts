@@ -18,12 +18,13 @@ type ServerDependencies = Omit<ConstructorParameters<typeof PrismaTaskBudgetAuth
   & Partial<Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'pricingEvidence'>> & {
     /** Explicit counting-operation dependency (input-counting composition);
      * absent keeps countTokens fail-closed with no external call. */
-    inputCounting?: { count(command: unknown, signal?: AbortSignal): Promise<unknown> };
+    inputCounting?: { count(command: unknown, signal?: AbortSignal): Promise<unknown>;
+      readCountReceipt(command: unknown): Promise<unknown> };
   };
-export type GatewayPricingRequestAction = 'publishPrice' | 'publishInputBound' | 'countTokens' | 'readPublication' | 'readPrice' | 'readInputBound' | 'readPricing' | 'readPricingCall';
+export type GatewayPricingRequestAction = 'publishPrice' | 'publishInputBound' | 'countTokens' | 'countTokensRead' | 'readPublication' | 'readPrice' | 'readInputBound' | 'readPricing' | 'readPricingCall';
 export type GatewayPricingHttpRequest = { headers: { authorization?: unknown } } & AiRequestAbortSource;
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
-const actions = ['publishPrice', 'publishInputBound', 'countTokens', 'readPublication', 'readPrice', 'readInputBound', 'readPricing', 'readPricingCall'];
+const actions = ['publishPrice', 'publishInputBound', 'countTokens', 'countTokensRead', 'readPublication', 'readPrice', 'readInputBound', 'readPricing', 'readPricingCall'];
 const denied = () => new BudgetError('FORBIDDEN');
 const priceSummary = (record: Awaited<ReturnType<GatewayPricingRecordManagement['readPrice']>>) => {
   const price = record.evidence, billing = price.billing;
@@ -58,7 +59,8 @@ export class GatewayPricingRequestFactory {
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiScope?.findFirst !== 'function'
       || input.pricingEvidence !== undefined && (typeof input.pricingEvidence?.readPrice !== 'function'
         || typeof input.pricingEvidence.readInputBound !== 'function')
-      || input.inputCounting !== undefined && typeof input.inputCounting?.count !== 'function'
+      || input.inputCounting !== undefined && (typeof input.inputCounting?.count !== 'function'
+        || typeof input.inputCounting.readCountReceipt !== 'function')
       || typeof input.subscriptions?.readCategoryCommercialContext !== 'function'
       || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).safeParse(input.sceneCode).success
       || input.clock !== undefined && typeof input.clock !== 'function') throw new BudgetError('UNAVAILABLE');
@@ -66,7 +68,8 @@ export class GatewayPricingRequestFactory {
       readPrice: input.pricingEvidence.readPrice.bind(input.pricingEvidence),
       readInputBound: input.pricingEvidence.readInputBound.bind(input.pricingEvidence) }) } : {}),
       ...(input.inputCounting ? { inputCounting: Object.freeze({
-        count: input.inputCounting.count.bind(input.inputCounting) }) } : {}) };
+        count: input.inputCounting.count.bind(input.inputCounting),
+        readCountReceipt: input.inputCounting.readCountReceipt.bind(input.inputCounting) }) } : {}) };
   }
   async call(request: GatewayPricingHttpRequest, action: GatewayPricingRequestAction, value: unknown, signal?: AbortSignal) {
     const header = bearer.safeParse(request?.headers?.authorization);
@@ -127,6 +130,14 @@ export class GatewayPricingRequestFactory {
           const receipt = await server.inputCounting.count(command, signal);
           const replay = await server.inputCounting.count(command, signal);
           if (hash(receipt) !== hash(replay)) throw new BudgetError('PENDING_RECONCILIATION');
+          result = receipt;
+        } else if (action === 'countTokensRead') {
+          // Read-only historical observation; it cannot start a count, publish
+          // a bound or settle an admission.
+          if (!server.inputCounting) throw new BudgetError('UNAVAILABLE');
+          const receipt = await server.inputCounting.readCountReceipt(command);
+          if (hash(receipt) !== hash(await server.inputCounting.readCountReceipt(command)))
+            throw new BudgetError('PENDING_RECONCILIATION');
           result = receipt;
         } else {
           // Reopening immutable history needs current management authority,

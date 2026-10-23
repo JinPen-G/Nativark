@@ -12,6 +12,7 @@ import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiGatewayIntent
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { isGatewayConfig } from '../gateway-contract-validation';
 import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport } from '../chat-completions.adapter';
 import { ModelAdapterError, ModelGatewayError } from '../model-gateway.ports';
 import { MODEL_RESPONSE_BYTES } from '../model-response-limits';
@@ -232,6 +233,38 @@ export class InputCountTokensService {
       return this.summary(receipt, admission);
     } finally { life.close(); }
   }
+  /** Historical observation of one counting receipt under current read
+   * authority: the original bound inputs only, never a fresh count, a text
+   * dispatch or an admission refund. Missing receipts report unavailable;
+   * execution shutdown does not erase a legitimately recorded fact. */
+  async readCountReceipt(value: unknown): Promise<CountTokensResult> {
+    const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const current = await this.current();
+    const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId });
+    const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
+    if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
+    const receipt = await this.receipts.read(countTokensOperationId({ tenantId: current.tenantId,
+      workspaceId: current.workspaceId, actorId: current.actorId, callId: parsed.data.callId }));
+    const invocation = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } });
+    if (!invocation || invocation.scopeId !== scope.id || invocation.actorId !== current.actorId
+      || receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
+      || receipt.intentHash !== invocation.intentHash || receipt.configurationHash !== invocation.configurationHash
+      || receipt.priceVersion !== invocation.priceVersion
+      || receipt.countCallId !== countTokensCallId(invocation.callId)
+      || !isGatewayConfig(invocation.configuration)
+      || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
+    const association: AiUsageAssociationDraft = { requestId: receipt.countCallId, runId: invocation.runId,
+      stepId: invocation.stepId, actionId: invocation.actionId, idempotencyKey: receipt.countCallId,
+      scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
+      config: invocation.configuration, priceVersion: this.dependencies.countingPriceVersion };
+    const admission = await this.accountAdmission(receipt, association);
+    const after = await this.current();
+    if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    return this.summary(receipt, admission);
+  }
+
   private async readReplay(frozen: CountTokensFrozenInvocation) {
     const scope = frozen.context.scope as { tenantId: string; workspaceId: string };
     const receiptId = countTokensOperationId({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
