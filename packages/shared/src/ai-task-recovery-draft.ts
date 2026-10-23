@@ -1,6 +1,8 @@
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   type AiTaskEventDraft, type AiTaskStatusDraft, type AiStepStatusDraft } from './ai-task-draft';
 import type { AiSceneRequestReadDraft, AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
+import { AI_ERROR_CODES, type AiErrorCode } from './ai-native';
+import type { AiTaskInputContractDraft, AiTaskInputSavedReceiptDraft, AiTaskInputReceiptObservationDraft } from './ai-task-input-draft';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafTime, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -68,6 +70,24 @@ export interface AiSceneModelCancelResponseDraft {
   settlement: AiModelCancellationTransitionReceiptDraft | null;
 }
 
+export type AiSceneModelPendingInputDraft = null | {
+  requestId: string; revision: number; expiresAt: string; contract: AiTaskInputContractDraft;
+};
+export interface AiSceneModelSubmitAnswerResponseDraft {
+  receipt: AiTaskInputSavedReceiptDraft;
+  continuation: { kind: 'not_started'; reason: 'answer_saved_without_execution' };
+  orderApproval: 'not_granted';
+}
+export interface AiSceneModelResumeResponseDraft {
+  receipt: AiTaskInputSavedReceiptDraft;
+  continuation: AiSceneModelExecutionDraft | { kind: 'not_started'; reason: 'receipt_replayed' }
+    | { kind: 'unavailable'; errorCode: AiErrorCode | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT' | 'AI_STORAGE_UNAVAILABLE' | 'AI_RUN_LIMIT' };
+}
+export type AiSceneModelContinueAnswerResponseDraft =
+  | { receipt: Extract<AiTaskInputReceiptObservationDraft, { state: 'not_observed' }>; continuation: 'unavailable' }
+  | { receipt: Extract<AiTaskInputReceiptObservationDraft, { state: 'observed' }>;
+      execution: AiSceneModelExecutionDraft; businessExecution: 'not_inferred_from_model_result' };
+
 // Decimal strings deliberately stay strings: no Number conversion or totals
 // inferred from a partial run. Limits mirror the existing bounded repository.
 const uint64: AiLeafSchemaDraft = { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' };
@@ -75,6 +95,7 @@ const nullable = (schema: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [sc
 const revision = integer(1, 4294967295);
 const hash: AiLeafSchemaDraft = { type: 'string', pattern: '^[a-f0-9]{64}$' };
 const ref = (name: string): AiLeafSchemaDraft => ({ $ref: `#/components/schemas/${name}` });
+const inputId: AiLeafSchemaDraft = { ...id(), maxLength: 36 };
 const counters = object({ limit: uint64, reserved: uint64, consumed: uint64 });
 const outcomeBase = { completedSteps: integer(0, 4294967295), cleanupFailed: integer(0, 4294967295) };
 const cancellationReceipt = (to: 'cancel_requested' | 'cancelled', reason: 'cancel_requested' | 'cancel_settled') => object({
@@ -85,6 +106,21 @@ const cancellationReceipt = (to: 'cancel_requested' | 'cancelled', reason: 'canc
 });
 
 export const AI_TASK_RECOVERY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneModelPendingInputDraft: nullable(object({ requestId: inputId, revision: integer(1, 4294967294),
+    expiresAt: leafTime, contract: ref('AiTaskInputContractDraft') })),
+  AiSceneModelSubmitAnswerResponseDraft: object({ receipt: ref('AiTaskInputSavedReceiptDraft'),
+    continuation: object({ kind: choice('not_started'), reason: choice('answer_saved_without_execution') }),
+    orderApproval: choice('not_granted') }),
+  AiSceneModelResumeResponseDraft: object({ receipt: ref('AiTaskInputSavedReceiptDraft'), continuation: { oneOf: [
+    ref('AiSceneModelExecutionDraft'), object({ kind: choice('not_started'), reason: choice('receipt_replayed') }),
+    object({ kind: choice('unavailable'), errorCode: choice(...AI_ERROR_CODES,
+      'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RUN_LIMIT') })] } }),
+  AiSceneModelContinueAnswerResponseDraft: { oneOf: [
+    object({ receipt: object({ state: choice('not_observed'), retryable: { type: 'boolean', const: false } }), continuation: choice('unavailable') }),
+    object({ receipt: object({ state: choice('observed'), retryable: { type: 'boolean', const: false },
+      taskId: inputId, requestId: inputId, receiptId: inputId, taskRevision: integer(1, 4294967294), runId: inputId,
+      execution: choice('not_inferred_from_receipt') }), execution: ref('AiSceneModelExecutionDraft'),
+      businessExecution: choice('not_inferred_from_model_result') })] },
   AiTaskRecoverySnapshot: object({
     task: object({ taskId: id(), revision, status: choice(...AI_TASK_STATUSES_DRAFT),
       cancelRequestedAt: nullable(leafTime), eventCursor: uint64 }),

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, AI_ERROR_CODES, isAiTaskInputSubmissionDraft, type AiErrorCode } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, AI_ERROR_CODES, isAiTaskInputSubmissionDraft, isAiTaskInputSavedReceiptDraft,
+  type AiErrorCode, type AiTaskInputSavedReceiptDraft } from '@rental-os/shared';
 import type { AiTaskEventRepository } from '../ai-task-event.repository';
 import type { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import type { AiTaskRecoverySnapshotSource } from './task-recovery-snapshot.ports';
@@ -23,6 +24,15 @@ export type AiTaskApplicationStartResult =
   | { kind: 'run_outcome'; outcome: AiTaskRunnerOutcome };
 type ContinuationErrorCode = AiErrorCode | AiTaskRepositoryError['code'] | AiTaskRunnerError['code'];
 const continuationErrorCodes: readonly ContinuationErrorCode[] = [...AI_ERROR_CODES, 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RUN_LIMIT'];
+/** A committed answer reply must name the exact submitted task/question. Take
+ * an owned snapshot before any later authorization await can mutate it. */
+export function snapshotAiTaskInputSavedReceipt(value: unknown, expected: { taskId: string; requestId: string }): AiTaskInputSavedReceiptDraft {
+  try {
+    const receipt = structuredClone(value);
+    if (isAiTaskInputSavedReceiptDraft(receipt) && receipt.taskId === expected.taskId && receipt.requestId === expected.requestId) return receipt;
+  } catch { /* A reply failure does not prove that the answer was not saved. */ }
+  throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+}
 export type AiTaskApplicationResumeResult = {
   receipt: Awaited<ReturnType<PrismaTaskInputRepository['submit']>>;
   continuation: AiTaskApplicationStartResult | { kind: 'not_started'; reason: 'receipt_replayed' } | { kind: 'unavailable'; errorCode: ContinuationErrorCode };
@@ -153,7 +163,9 @@ export class PrismaTaskApplication {
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const before = structuredClone(await this.wait(() => this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata')));
-    const receipt = await this.wait(() => this.deps.inputs.submit(submission), true);
+    const receipt = snapshotAiTaskInputSavedReceipt(await this.wait(() => this.deps.inputs.submit(submission), true), submission);
+    // The answer may already be committed. An invalid/cross-task reply cannot
+    // authorize continuation or be treated as an unsubmitted answer to retry.
     const verifyReader = async () => {
       const current = await this.wait(() => this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata'), true);
       if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');

@@ -2486,6 +2486,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
     operationId: `executeOriginalAiQuote_${action.replace(/\//gu, '_')}`, requestSchema,
     responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.start ? 'AiSceneModelStartResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer ? 'AiSceneModelSubmitAnswerResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.resume ? 'AiSceneModelResumeResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer ? 'AiSceneModelContinueAnswerResponseDraft'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readExecution ? 'AiTaskRecoverySnapshot'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reconcile ? 'AiSceneModelReconcileResponseDraft'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.requestCancel ? 'AiSceneModelCancelResponseDraft'
@@ -2517,7 +2520,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
     responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
-      : action === AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot ? 'AiSceneModelRecoverySnapshotReadResponse' : undefined,
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot ? 'AiSceneModelRecoverySnapshotReadResponse'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readInput ? 'AiSceneModelPendingInputDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readAnswer ? 'AiTaskInputReceiptObservationDraft' : undefined,
     permissions: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene
       ? ['rental-os:order:view', 'rental-os:order:create', 'rental-os:price:manage'] : ['rental-os:order:view'], authRequired: true, requestSchema,
     summary: 'Current owner, scope, original resource and action policy are rechecked. Financial observations include exact integer-atom amounts for the visible page only: reserved, pending, settled, released reservation and settled excess, separated by unit and currency. Missing records are not zero consumption, and page amounts are neither whole-task totals nor supplier invoices. Performance observations include original recorded budget-gate rejections in a bounded invocation window: absence is not admission success and rejection is not release evidence. Fixed scene aggregation can consume original selected-quote approval/Core receipts or notification-settings preparation and waiting/receipt readers even while new execution is closed. Read-only observation without a model, runner start, execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),

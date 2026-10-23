@@ -10,7 +10,7 @@ import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalScen
   composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
-  AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, type AiOriginalOpeningReadSourceDraft } from '@rental-os/shared';
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, type AiOriginalOpeningReadSourceDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
@@ -52,14 +52,16 @@ const validOpeningSource = openingSourceAjv.compile<AiOriginalOpeningReadSourceD
   $ref: '#/$defs/AiOriginalOpeningReadSourceDraft', $defs: openingSourceDefinitions
 });
 const validOrderExtensionPreview = openingSourceAjv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneOrderExtensionPreviewDraft);
-const recoveryDefinitions = JSON.parse(JSON.stringify({ ...AI_TASK_RECOVERY_HTTP_SCHEMAS,
+const recoveryDefinitions = JSON.parse(JSON.stringify({ ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_INPUT_DRAFT_SCHEMAS,
   AiSceneRequestReadDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft,
   AiSceneRequestReceiptDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReceiptDraft
 }).replaceAll('#/components/schemas/', '#/$defs/'));
 type RecoveryResponse = 'AiTaskRecoverySnapshot' | 'AiSceneModelExecutionDraft'
   | 'AiSceneModelStartResponseDraft' | 'AiSceneModelRecoverySnapshotReadResponse'
-  | 'AiSceneModelReconcileResponseDraft' | 'AiSceneModelCancelResponseDraft';
-const recoveryValidators = Object.fromEntries(Object.keys(AI_TASK_RECOVERY_HTTP_SCHEMAS).map(name => [name,
+  | 'AiSceneModelReconcileResponseDraft' | 'AiSceneModelCancelResponseDraft' | 'AiSceneModelPendingInputDraft'
+  | 'AiSceneModelSubmitAnswerResponseDraft' | 'AiSceneModelResumeResponseDraft'
+  | 'AiSceneModelContinueAnswerResponseDraft' | 'AiTaskInputReceiptObservationDraft';
+const recoveryValidators = Object.fromEntries([...Object.keys(AI_TASK_RECOVERY_HTTP_SCHEMAS), 'AiTaskInputReceiptObservationDraft'].map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: recoveryDefinitions })]));
 /** Validate only the owned wire projection. An invalid post-execution reply is
  * unknown, never a retry/rollback claim; never serialize internal error details. */
@@ -257,7 +259,8 @@ export class AiOriginalSceneObservationController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readInput(request, body));
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelPendingInputDraft',
+      await this.observations.readInput(request, body)));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readRecoverySnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -278,7 +281,8 @@ export class AiOriginalSceneObservationController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readAnswer(request, body), 'read_answer');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiTaskInputReceiptObservationDraft',
+      await this.observations.readAnswer(request, body)), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readModelResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readModelResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -331,15 +335,18 @@ export class AiOriginalQuoteModelExecutionController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.submitAnswer(request, body), 'read_answer');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelSubmitAnswerResponseDraft',
+      await this.model.submitAnswer(request, body), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume) @HttpCode(200) @Header('Cache-Control', 'no-store')
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal)), 'read_answer');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelResumeResponseDraft',
+      await withRequestAbort(request, signal => this.model.resume(request, body, signal)), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continueAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), 'read_answer');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelContinueAnswerResponseDraft',
+      await withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

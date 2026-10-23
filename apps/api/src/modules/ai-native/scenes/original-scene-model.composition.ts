@@ -19,7 +19,7 @@ import { AiOriginalSceneResultService, quoteFactsFingerprint } from './original-
 import type { PrismaClient } from '@prisma/client';
 import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
-import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract } from './original-quote-input';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
@@ -324,7 +324,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (submission.taskId !== before.task.taskId || before.original.request.sceneCode !== 'quote_clarification') throw denied();
         // Save human parameters and their original successor, deliberately without
         // starting it. The caller can now confirm/select a quote for the order host.
-        const receipt = await waitForTaskApplicationDependency(() => root.inputs.submit(submission), true, undefined, run.clock);
+        const receipt = snapshotAiTaskInputSavedReceipt(
+          await waitForTaskApplicationDependency(() => root.inputs.submit(submission), true, undefined, run.clock), submission);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput({ receipt, continuation: { kind: 'not_started' as const,
           reason: 'answer_saved_without_execution' as const }, orderApproval: 'not_granted' as const });

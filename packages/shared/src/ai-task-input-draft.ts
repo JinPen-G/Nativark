@@ -34,6 +34,20 @@ export interface AiTaskInputSubmissionDraft {
 export type AiTaskInputReceiptReferenceDraft = Pick<AiTaskInputSubmissionDraft,
   "taskId" | "requestId" | "expectedRevision" | "submissionKey">;
 
+/** A saved human answer, not evidence that its successor ran or was approved. */
+export interface AiTaskInputSavedReceiptDraft {
+  status: "input_received";
+  taskId: string;
+  requestId: string;
+  receiptId: string;
+  taskRevision: number;
+  replayed: boolean;
+}
+export type AiTaskInputReceiptObservationDraft =
+  | { state: "not_observed"; retryable: false }
+  | { state: "observed"; retryable: false; taskId: string; requestId: string;
+      receiptId: string; taskRevision: number; runId: string; execution: "not_inferred_from_receipt" };
+
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const closed = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
 const text = (value: unknown, max: number): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(value);
@@ -68,6 +82,12 @@ export function isAiTaskInputSubmissionDraft(value: unknown): value is AiTaskInp
     && value.answers.every(answer => object(answer) && closed(answer, ["fieldId", "value"]) && fieldId(answer.fieldId)
       && (text(answer.value, 2048) || int(answer.value, 1, 1000000)))
     && new Set(value.answers.map(answer => answer.fieldId)).size === value.answers.length;
+}
+
+export function isAiTaskInputSavedReceiptDraft(value: unknown): value is AiTaskInputSavedReceiptDraft {
+  return object(value) && closed(value, ["status", "taskId", "requestId", "receiptId", "taskRevision", "replayed"])
+    && value.status === "input_received" && id(value.taskId, 36) && id(value.requestId, 36)
+    && id(value.receiptId, 36) && int(value.taskRevision, 1, 4294967294) && typeof value.replayed === "boolean";
 }
 
 /** Canonical input for Core's existing numeric usage DTO, never money. Reject
