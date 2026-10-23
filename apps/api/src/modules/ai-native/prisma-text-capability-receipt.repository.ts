@@ -11,7 +11,7 @@ import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts'
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { matchesProbeProfile, probeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
-  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, TEXT_PROBE_TTL_MS,
+  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, isPlatformProbeContext, TEXT_PROBE_TTL_MS,
   type TextProbeDescriptor, type TextProbeObservation, type TextProbeReceipt } from './text-capability-probe';
 
 export type TextProbeReceiptDb = Pick<PrismaClient, '$transaction' | '$queryRaw' | '$executeRaw' | 'aiGatewayInvocation'
@@ -62,6 +62,12 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   }
   private async original(db: Reader, row: TextProbeReceipt, observation: TextProbeObservation, terminal: boolean) {
     const d = row.descriptor, o = observation;
+    // Platform receipts assert platform-scoped accounting rows only. Until the
+    // platform admission/accounting storage lands, this lookup legitimately
+    // fails closed instead of borrowing a tenant attribution.
+    const expectTenantId = isPlatformProbeContext(d.context) ? null : d.context.tenantId;
+    const expectWorkspaceId = isPlatformProbeContext(d.context) ? null : d.context.workspaceId;
+    const expectScopeKind = isPlatformProbeContext(d.context) ? 'PLATFORM' : 'WORKSPACE';
     const [admission, accounting, reservation] = await Promise.all([
       db.aiInvocationAdmission.findUnique({ where: { id: o.admissionId } }),
       db.aiGatewayAccountingReceipt.findUnique({ where: { reservationId: o.reservationId } }),
@@ -69,19 +75,19 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
     ]);
     if (!admission || !accounting || !reservation) return null;
     const invocation = await db.aiGatewayInvocation.findUnique({ where: { id: accounting.invocationId } });
-    if (!invocation || admission.tenantId !== d.context.tenantId || admission.workspaceId !== d.context.workspaceId
+    if (!invocation || admission.tenantId !== expectTenantId || admission.workspaceId !== expectWorkspaceId
       || admission.actorId !== d.context.actorId || admission.callId !== d.callId || admission.profileId !== d.profileId
       || admission.requestHash !== o.requestHash || admission.dispatchId !== o.dispatchId || admission.revokedAt
-      || accounting.admissionId !== admission.id || accounting.scopeId !== d.scopeId || accounting.scopeKind !== 'WORKSPACE'
-      || accounting.tenantId !== d.context.tenantId || accounting.workspaceId !== d.context.workspaceId
+      || accounting.admissionId !== admission.id || accounting.scopeId !== d.scopeId || accounting.scopeKind !== expectScopeKind
+      || accounting.tenantId !== expectTenantId || accounting.workspaceId !== expectWorkspaceId
       || accounting.dispatchToken !== o.dispatchId || accounting.requestHash !== o.requestHash || accounting.state !== 'dispatched'
       || invocation.scopeId !== d.scopeId || invocation.taskId !== accounting.taskId || invocation.actorId !== d.context.actorId
       || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash || invocation.stepFingerprint !== requestFingerprint(d.command)
       || invocation.runId !== d.runId || invocation.stepId !== d.stepId || invocation.mode !== textProbeMode(d.command)
       || invocation.sceneCode !== 'ai.capability.text' || invocation.maxOutputTokens !== 32
       || invocation.configurationHash !== d.configurationHash || requestFingerprint(invocation.configuration) !== d.configurationHash
-      || reservation.scopeId !== d.scopeId || reservation.scopeKind !== 'WORKSPACE'
-      || reservation.tenantId !== d.context.tenantId || reservation.workspaceId !== d.context.workspaceId
+      || reservation.scopeId !== d.scopeId || reservation.scopeKind !== expectScopeKind
+      || reservation.tenantId !== expectTenantId || reservation.workspaceId !== expectWorkspaceId
       || reservation.actorId !== d.context.actorId || reservation.callId !== d.callId || reservation.requestId !== d.callId
       || reservation.idempotencyKey !== d.callId || reservation.runId !== d.runId || reservation.stepId !== d.stepId
       || reservation.actionId !== invocation.actionId || reservation.sceneCode !== invocation.sceneCode
@@ -97,7 +103,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
         reservationId: reservation.id, dispatchToken: o.dispatchId, requestHash: o.requestHash, usage });
       if (accounting.usageHash !== usageHash) return null;
       const entries = await db.aiBudgetLedgerEntry.findMany({ where: { reservationId: reservation.id, scopeId: d.scopeId,
-        scopeKind: 'WORKSPACE', kind: { in: ['settle', 'reconcile'] } }, take: 2 });
+        scopeKind: expectScopeKind, kind: { in: ['settle', 'reconcile'] } }, take: 2 });
       if (entries.length !== 1) return null;
       const quantity = reservation.unitKind === 'tokens' && reservation.actualTokens === accounting.inputTokens! + accounting.outputTokens!
         ? { unit: 'tokens', value: Number(reservation.actualTokens) }

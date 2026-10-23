@@ -9,11 +9,11 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget.ports';
-import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from './gateway-budget-principal';
 import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from '../text-capability-probe';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { PrismaProviderProfileRepository } from '../provider-profile.repository';
-import type { BudgetGatewayBindingSource, BudgetGatewayInvocationBinding, GatewayBudgetReserveRequest } from './budget-gateway-adapter';
+import { isPlatformGatewayContext, type BudgetGatewayContext, type BudgetGatewayBindingSource, type BudgetGatewayInvocationBinding, type GatewayBudgetReserveRequest } from './budget-gateway-adapter';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>
   & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>;
@@ -39,14 +39,25 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new BudgetError('UNAVAILABLE');
     return now;
   }
-  private async current(context?: Readonly<GatewayContext>) {
+  private async current(context?: Readonly<BudgetGatewayContext>) {
     const resolved = structuredClone(await this.scopes.resolveCurrent());
     const { scope, context: principal } = resolved;
+    if (scope.kind === 'PLATFORM') {
+      // Platform rows never carry tenant/workspace attribution; the explicit
+      // SaaS principal keeps them out of every tenant ledger query above.
+      const subject = gatewayPlatformBudgetPrincipal(principal);
+      if (!isPlatformGatewayContext(context ?? { actorId: subject.actorId }) || (context && context.actorId !== subject.actorId)) throw new BudgetError('FORBIDDEN');
+      const { requestId: _, authorizedAt: __, ...identity } = principal;
+      return { scope, context: principal, actorId: subject.actorId, actorKind: subject.actorKind, identityHash: requestFingerprint({ identity, scope }) };
+    }
     const subject = gatewayBudgetPrincipal(principal);
+    const workspaceContext = context as GatewayContext | undefined;
     if (scope.kind !== 'WORKSPACE' || scope.tenantId !== subject.tenantId || scope.workspaceId !== subject.workspaceId
-      || (context && (context.actorId !== subject.actorId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
+      || (workspaceContext && (!('tenantId' in workspaceContext) || !('workspaceId' in workspaceContext)
+        || workspaceContext.actorId !== subject.actorId
+        || workspaceContext.tenantId !== scope.tenantId || workspaceContext.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
     const { requestId: _, authorizedAt: __, ...identity } = principal;
-    return { scope, context: principal, actorId: subject.actorId, identityHash: requestFingerprint({ identity, scope }) };
+    return { scope, context: principal, actorId: subject.actorId, actorKind: subject.actorKind, identityHash: requestFingerprint({ identity, scope }) };
   }
   private async revalidate(initial: Awaited<ReturnType<PrismaGatewayInvocationBindings['current']>>) {
     if ((await this.current()).identityHash !== initial.identityHash) throw new BudgetError('FORBIDDEN');
@@ -55,20 +66,30 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     if (!isGatewayConfig(row.configuration) || requestFingerprint(row.configuration) !== row.configurationHash) throw new BudgetError('UNAVAILABLE');
     return structuredClone(row.configuration);
   }
-  private async profile(db: Reader, configuration: AiGatewayConfigReferenceDraft, tenantId: string) {
-    if (!('tenantId' in configuration) || configuration.tenantId !== tenantId) throw new BudgetError('FORBIDDEN');
-    const owner = await db.aiScope.findFirst({ where: aiPersistenceScopeColumns(configuration.configurationScope) });
+  private async profile(db: Reader, configuration: AiGatewayConfigReferenceDraft, owner: 'platform' | { tenantId: string }) {
+    if ('consumerScope' in configuration && configuration.consumerScope?.kind === 'platform') {
+      // Explicit SaaS/platform consumer config; no tenant attribution exists to borrow.
+      if (configuration.serviceMode !== 'platform_managed' || configuration.configurationScope.kind !== 'platform') throw new BudgetError('FORBIDDEN');
+      const scopeRow = await db.aiScope.findFirst({ where: aiPersistenceScopeColumns({ kind: 'platform' }) });
+      const profile = await db.aiProviderProfile.findFirst({ where: { id: configuration.configId, enabled: true, disabledAt: null } });
+      if (!scopeRow || !profile || profile.scopeId !== scopeRow.id || profile.scopeKind !== scopeRow.kind
+        || profile.configRevision !== configuration.configRevision || profile.credentialRef !== configuration.credentialRef
+        || profile.protocol !== configuration.protocol || profile.provider !== configuration.provider || profile.model !== configuration.model
+        || profile.serviceMode !== 'platform_managed') throw new BudgetError('FORBIDDEN');
+      return profile;
+    }
+    if (!('tenantId' in configuration) || typeof owner === 'string' || configuration.tenantId !== owner.tenantId) throw new BudgetError('FORBIDDEN');
+    const scopeRow = await db.aiScope.findFirst({ where: aiPersistenceScopeColumns(configuration.configurationScope) });
     const profile = await db.aiProviderProfile.findFirst({ where: { id: configuration.configId, enabled: true, disabledAt: null } });
-    if (!owner || !profile || profile.scopeId !== owner.id || profile.scopeKind !== owner.kind
+    if (!scopeRow || !profile || profile.scopeId !== scopeRow.id || profile.scopeKind !== scopeRow.kind
       || profile.configRevision !== configuration.configRevision || profile.credentialRef !== configuration.credentialRef
       || profile.protocol !== configuration.protocol || profile.provider !== configuration.provider || profile.model !== configuration.model
       || profile.serviceMode !== configuration.serviceMode
-      || (profile.serviceMode === 'platform_managed' ? owner.kind !== 'PLATFORM'
-        : owner.kind !== 'TENANT' || owner.tenantId !== tenantId)) throw new BudgetError('FORBIDDEN');
+      || (profile.serviceMode === 'platform_managed' ? scopeRow.kind !== 'PLATFORM'
+        : scopeRow.kind !== 'TENANT' || scopeRow.tenantId !== owner.tenantId)) throw new BudgetError('FORBIDDEN');
     return profile;
   }
-  private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string) {
-    const ownerKind = audience === 'client' ? 'CUSTOMER' : 'USER';
+  private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN') {
     const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind } });
     if (!task || task.audience.toLowerCase() !== audience || task.archivedAt) throw new BudgetError('FORBIDDEN');
     return task;
@@ -86,8 +107,8 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
     return { command: command.data, prepared: textProbeIntent(command.data.operationId, step.scopeId, textProbeCapability(command.data)) };
   }
-  private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string) {
-    const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience);
+  private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN') {
+    const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience, ownerKind);
     const run = await db.aiRun.findFirst({ where: { id: row.runId, scopeId: row.scopeId, taskId: row.taskId } });
     const step = await db.aiStep.findFirst({ where: { id: row.stepId, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId } });
     const now = this.now();
@@ -107,7 +128,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
   async register(value: RegisterGatewayInvocation): Promise<{ id: string; replayed: boolean }> {
     const parsed = registration.safeParse(structuredClone(value));
     if (!parsed.success || !isGatewayIntent(parsed.data.intent) || !isGatewayConfig(parsed.data.configuration)
-      || !('tenantId' in parsed.data.configuration)) throw new BudgetError('INVALID');
+      || !('tenantId' in parsed.data.configuration || 'consumerScope' in parsed.data.configuration)) throw new BudgetError('INVALID');
     const input = { ...parsed.data, intent: parsed.data.intent, configuration: parsed.data.configuration };
     if (input.expiresAt <= this.now() || BigInt(input.lease.fencingToken) > 18446744073709551615n) throw new BudgetError('INVALID');
     const hasMedia = input.intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
@@ -160,7 +181,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         const candidate = { scopeId: principal.scope.id, taskId: step.taskId, runId: step.runId, stepId: step.id, actionId: step.actionId,
           actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash, sceneCode: input.intent.sceneCode,
           leaseOwnerId: input.lease.holderId, fencingToken: new Prisma.Decimal(input.lease.fencingToken), expiresAt: input.expiresAt };
-        const active = await this.active(tx, candidate, principal.context.audience);
+        const active = await this.active(tx, candidate, principal.context.audience, principal.actorKind);
         if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
           const frozen = await this.probeInput(tx, step);
           if (input.mode !== textProbeMode(frozen.command)) throw new BudgetError('FORBIDDEN');
@@ -172,7 +193,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
           leaseOwnerId: candidate.leaseOwnerId, fencingToken: candidate.fencingToken, status: 'RUNNING', leaseExpiresAt: { gt: this.now() } }, data: { revision: active.run.revision } });
         const stepLock = await tx.aiStep.updateMany({ where: { id: step.id, scopeId: candidate.scopeId, revision: step.revision, status: 'RUNNING', requestFingerprint: candidate.stepFingerprint }, data: { revision: step.revision } });
         if (taskLock.count !== 1 || runLock.count !== 1 || stepLock.count !== 1) throw new BudgetError('FORBIDDEN');
-        const profile = await this.profile(tx, input.configuration, principal.scope.tenantId!);
+        const profile = await this.profile(tx, input.configuration, principal.scope.kind === 'PLATFORM' ? 'platform' : { tenantId: principal.scope.tenantId! });
         if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
           const frozen = await this.probeInput(tx, step);
           const originalProfile = await new PrismaProviderProfileRepository(tx).get({ id: profile.scopeId,
@@ -193,7 +214,9 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
           return { id: existing.id, replayed: true };
         }
         const created = await tx.aiGatewayInvocation.create({ data: { ...candidate, callId: input.intent.requestId, mode: input.mode, registrationHash,
-          configuration: { ...input.configuration, configurationScope: { ...input.configuration.configurationScope } }, configurationHash, priceVersion: input.priceVersion, maxOutputTokens: input.intent.maxOutputTokens } });
+          configuration: { ...input.configuration, configurationScope: { ...input.configuration.configurationScope },
+            ...('consumerScope' in input.configuration && input.configuration.consumerScope
+              ? { consumerScope: { ...input.configuration.consumerScope } } : {}) } as unknown as Prisma.InputJsonValue, configurationHash, priceVersion: input.priceVersion, maxOutputTokens: input.intent.maxOutputTokens } });
         await this.revalidate(principal);
         if (candidate.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
         return { id: created.id, replayed: false };
@@ -211,32 +234,35 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       scope: structuredClone(principal.context.scope), config: this.configuration(row), priceVersion: row.priceVersion
     } };
   }
-  async resolveForReserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
+  async resolveForReserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
     context = structuredClone(context); request = structuredClone(request);
     const principal = await this.current(context);
     const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: principal.scope.id, callId: request.callId } } });
     if (!row || row.intentHash !== request.intentHash || row.maxOutputTokens !== request.maxOutputTokens) throw new BudgetError('FORBIDDEN');
     const binding = this.binding(row, principal);
     if (binding.association.config.model !== request.model) throw new BudgetError('FORBIDDEN');
-    await this.active(this.db, row, principal.context.audience);
-    await this.profile(this.db, binding.association.config, principal.scope.tenantId!);
+    await this.active(this.db, row, principal.context.audience, principal.actorKind);
+    await this.profile(this.db, binding.association.config, principal.scope.kind === 'PLATFORM' ? 'platform' : { tenantId: principal.scope.tenantId! });
     await this.revalidate(principal);
     if (row.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
     return binding;
   }
-  async resolveForReservation(context: Readonly<GatewayContext>, reservationId: string) {
+  async resolveForReservation(context: Readonly<BudgetGatewayContext>, reservationId: string) {
     context = structuredClone(context);
     const principal = await this.current(context);
-    const reservation = await this.db.aiBudgetReservation.findFirst({ where: { id: reservationId, scopeId: principal.scope.id, scopeKind: 'WORKSPACE', actorId: principal.actorId } });
+    const platform = principal.scope.kind === 'PLATFORM';
+    const reservation = await this.db.aiBudgetReservation.findFirst({ where: { id: reservationId, scopeId: principal.scope.id,
+      scopeKind: platform ? 'PLATFORM' : 'WORKSPACE', actorId: principal.actorId } });
     if (!reservation) throw new BudgetError('FORBIDDEN');
     const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: principal.scope.id, callId: reservation.callId } } });
     if (!row || reservation.configurationHash !== row.configurationHash || reservation.requestId !== row.callId
       || reservation.runId !== row.runId || reservation.stepId !== row.stepId || reservation.actionId !== row.actionId
       || reservation.idempotencyKey !== row.callId || reservation.sceneCode !== row.sceneCode || reservation.priceVersion !== row.priceVersion
-      || reservation.tenantId !== principal.scope.tenantId || reservation.workspaceId !== principal.scope.workspaceId) throw new BudgetError('FORBIDDEN');
+      || (platform ? reservation.tenantId !== null || reservation.workspaceId !== null
+        : reservation.tenantId !== principal.scope.tenantId || reservation.workspaceId !== principal.scope.workspaceId)) throw new BudgetError('FORBIDDEN');
     const binding = this.binding(row, principal);
     if (reservation.configRevision !== binding.association.config.configRevision) throw new BudgetError('FORBIDDEN');
-    await this.task(this.db, row.scopeId, row.taskId, row.actorId, principal.context.audience);
+    await this.task(this.db, row.scopeId, row.taskId, row.actorId, principal.context.audience, principal.actorKind);
     await this.revalidate(principal);
     return binding;
   }

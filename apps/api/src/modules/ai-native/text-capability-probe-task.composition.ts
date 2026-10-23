@@ -4,7 +4,8 @@ import { AI_TOOL_DRAFT_VERSION, type AiTextCapabilityAccountingResponseDraft,
 import { z } from 'zod';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
-import { composeAuthorizedPersistentTaskInputRunner } from './runner/authorized-persistent-task-input.composition';
+import { composeAuthorizedPersistentTaskInputRunner, composeCurrentAuthorizedPersistentTaskInputRunner,
+  type CurrentPersistentTaskAuthorization } from './runner/authorized-persistent-task-input.composition';
 import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.source';
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
@@ -50,6 +51,12 @@ export type TextCapabilityProbeTaskComposition = Omit<PersistedTaskAuthorization
   task: TextProbeTask;
   probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'runHeldCurrent' | 'prepareHeldInvocationCurrent'>;
   financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
+  /** Optional pre-bound authorization for the explicit SaaS platform principal.
+   * Absent keeps the workspace operator/staff assembly and its subscription
+   * gates; a present port replaces identity/task authority only. */
+  authorization?: CurrentPersistentTaskAuthorization;
+  /** Task ledger scope: the SaaS platform composition passes 'PLATFORM'. */
+  taskScopeKind?: 'WORKSPACE' | 'PLATFORM';
   clock?: () => Date;
   monotonic?: () => number;
   runnerClock?: AiTaskRunnerClock;
@@ -88,6 +95,7 @@ export function composeTextCapabilityProbeTask(input: TextCapabilityProbeTaskCom
 }
 
 function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTask, clock: () => Date) {
+  const platform = input.taskScopeKind === 'PLATFORM';
   const authorization = requireAuthorization(input, clock);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock, TEXT_CAPABILITY_PROBE_TOOL);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
@@ -101,9 +109,15 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
       const stored = await source.readForExecution({ taskId: lease.taskId, runId: lease.runId, stepId: row.id,
         actionId: row.actionId, inputRef: row.inputRef, fingerprint: row.requestFingerprint, lease });
       const context = stored.context;
-      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw denied();
-      const prepared = await input.probe.prepare({ tenantId: context.scope.tenantId,
-        workspaceId: context.scope.workspaceId, actorId: context.actor.userId },
+      // Platform tasks bind the SaaS principal; workspace tasks their operator
+      // or staff member. Neither accepts the other's identity shape.
+      const probeContext = platform
+        ? (context.actor.kind === 'saas_admin' && context.scope.kind === 'platform'
+          ? { actorId: context.actor.userId, scopeKind: 'platform' as const } : null)
+        : context.scope.kind === 'workspace' && context.actor.kind === 'user'
+          ? { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId } : null;
+      if (!probeContext) throw denied();
+      const prepared = await input.probe.prepare(probeContext,
         textProbeCommandSchema.parse(stored.input));
       return { stepId: row.id, mode: textProbeMode(textProbeCommandSchema.parse(stored.input)), lease: { runId: lease.runId, holderId: lease.holderId, fencingToken: lease.fencingToken },
         intent: prepared.intent, configuration: prepared.configuration, priceVersion: task.priceVersion,
@@ -161,16 +175,20 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
     }
   };
   const inputSource: AiTaskInputSource = { async resolve() { return { kind: 'not_required' as const }; }, async validateAnswers() { throw unavailable(); } };
-  const composed = composeAuthorizedPersistentTaskInputRunner({ db: input.db,
-    authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions }, registrationAuthority: source,
+  const runnerInput = { db: input.db, registrationAuthority: source,
     transitionAuthority: transition, planAuthority: source, inputSource, commands, executors,
-    invocations, financialEvidence: input.financialEvidence, toolCatalog: { resolve: async (code, version) =>
+    invocations, financialEvidence: input.financialEvidence, toolCatalog: { resolve: async (code: string, version: string) =>
       code === TEXT_CAPABILITY_PROBE_TOOL && version === AI_TOOL_DRAFT_VERSION ? { modelCall: true } : null },
-    wall: clock, monotonic: input.monotonic, clock: input.runnerClock });
+    wall: clock, monotonic: input.monotonic, clock: input.runnerClock };
+  const composed = input.authorization
+    ? composeCurrentAuthorizedPersistentTaskInputRunner(runnerInput, input.authorization)
+    : composeAuthorizedPersistentTaskInputRunner({ ...runnerInput,
+      authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions } });
   return Object.freeze({ ...composed, authorization, source, plans, invocations, commands, transition, executors, inputSource });
 }
 
 function requireAuthorization(input: TextCapabilityProbeTaskComposition, clock: () => Date) {
+  if (input.authorization) return input.authorization;
   return composePersistedTaskAuthorization({ db: input.db, auth: input.auth, credentials: input.credentials,
     subscriptions: input.subscriptions, clock });
 }
@@ -178,20 +196,34 @@ function requireAuthorization(input: TextCapabilityProbeTaskComposition, clock: 
 /** Server workflow from immutable original request to the existing runner.
  * Starting/reconciling NEVER creates a replacement task or operation. Publish,
  * create, start and receipt read remain separately observable commit points.
- * This is not an HTTP registration or permission to bypass task action policy. */
+ * This is not an HTTP registration or permission to bypass task action policy.
+ * taskScopeKind 'PLATFORM' binds the same lifecycle to SaaS platform rows. */
 export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProbeTaskComposition, 'task' | 'probe'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'prepareCurrent' | 'runHeldCurrent' | 'reconcileCurrent' | 'preflightCurrent' | 'prepareHeldInvocationCurrent'>;
   sceneVersion: string; priceVersion: string;
+  /** Optional composition-owned producer/policy hosts. The platform probe
+   * supplies its SaaS principal ports; absent keeps the workspace assembly. */
+  producer?: {
+    originals: ReturnType<typeof composeAuthorizedTextProbeTaskProducer>['originals'];
+    create: ReturnType<typeof composeAuthorizedTextProbeTaskProducer>['create'];
+    readCreation: ReturnType<typeof composeAuthorizedTextProbeTaskProducer>['readCreation'];
+  };
+  taskPolicies?: ReturnType<typeof composeTaskActionPolicyManagement>;
 }) {
+  const platform = input.taskScopeKind === 'PLATFORM';
+  const taskScopeKind = platform ? 'PLATFORM' as const : 'WORKSPACE' as const;
+  const expectOriginalActor = (context: { actor: { kind: string }; scope: { kind: string } }) =>
+    platform ? context.actor.kind === 'saas_admin' && context.scope.kind === 'platform'
+      : context.actor.kind === 'user' && context.scope.kind === 'workspace';
   const host = z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(input.host));
   const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
     waitForTaskApplicationDependency(operation, afterMutation, signal, input.runnerClock);
-  const producer = composeAuthorizedTextProbeTaskProducer(input.db, {
+  const producer = input.producer ?? composeAuthorizedTextProbeTaskProducer(input.db, {
     auth: input.auth, credentials: input.credentials, guard: input.guard, probe: input.probe,
     sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, clock: input.clock,
   });
-  const taskPolicies = composeTaskActionPolicyManagement({ db: input.db, auth: input.auth,
+  const taskPolicies = input.taskPolicies ?? composeTaskActionPolicyManagement({ db: input.db, auth: input.auth,
     credentials: input.credentials, guard: input.guard, clock: input.clock });
   const originalTask = async (value: unknown) => {
     const found = await producer.readCreation(structuredClone(value));
@@ -217,7 +249,12 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     const history = await workflow.readHistoricalOriginal(requestKey);
     if (!original || history.state !== 'historical' || !history.task || !history.run) throw unavailable();
     const context = original.context;
-    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
+    if (!expectOriginalActor(context)) throw denied();
+    const actorId = context.actor.kind === 'saas_admin' || context.actor.kind === 'user' ? context.actor.userId : null;
+    if (!actorId) throw denied();
+    const scopeFields = platform
+      ? { scopeKind: 'platform' as const }
+      : { tenantId: (context.scope as { tenantId: string }).tenantId, workspaceId: (context.scope as { workspaceId: string }).workspaceId };
     const taskId = history.task.taskId, runId = history.run.runId;
     const callId = textProbeIntent(original.command.operationId, original.owner.scopeId, textProbeCapability(original.command)).intent.requestId;
     const invocation = structuredClone(await observe(() => input.db.aiGatewayInvocation.findUnique({ where: {
@@ -229,26 +266,26 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     if (!invocation || !receipt) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
     const d = receipt.descriptor;
     if (invocation.scopeId !== original.owner.scopeId || invocation.taskId !== taskId || invocation.runId !== runId
-      || invocation.actorId !== context.actor.userId || invocation.sceneCode !== TEXT_PROBE_SCENE
+      || invocation.actorId !== actorId || invocation.sceneCode !== TEXT_PROBE_SCENE
       || invocation.callId !== callId || invocation.priceVersion !== original.priceVersion
       || invocation.stepId !== d.stepId || invocation.runId !== d.runId || d.callId !== callId || d.scopeId !== original.owner.scopeId
       || requestFingerprint(d.command) !== requestFingerprint(original.command)
-      || requestFingerprint(d.context) !== requestFingerprint({ actorId: context.actor.userId,
-        tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId })
+      || requestFingerprint(d.context) !== requestFingerprint({ actorId, ...scopeFields })
       || requestFingerprint({ ...textProbeIntent(original.command.operationId, original.owner.scopeId, textProbeCapability(original.command)),
         configuration: d.configuration }) !== original.preparationHash
       || invocation.intentHash !== d.intentHash || invocation.configurationHash !== d.configurationHash
       || requestFingerprint(invocation.configuration) !== d.configurationHash
       || invocation.stepFingerprint !== requestFingerprint(original.command)) throw denied();
     const reservation = structuredClone(await observe(() => input.db.aiBudgetReservation.findUnique({ where: {
-      scopeId_scopeKind_callId: { scopeId: original.owner.scopeId, scopeKind: 'WORKSPACE', callId } }, select: {
+      scopeId_scopeKind_callId: { scopeId: original.owner.scopeId, scopeKind: taskScopeKind, callId } }, select: {
         id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true,
         callId: true, priceVersion: true, unitKind: true } })));
     // Missing reserve/link acknowledgement is not proof of no consumption.
     if (!reservation) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-    if (reservation.scopeId !== original.owner.scopeId || reservation.scopeKind !== 'WORKSPACE'
-      || reservation.tenantId !== context.scope.tenantId || reservation.workspaceId !== context.scope.workspaceId
-      || reservation.actorId !== context.actor.userId || reservation.callId !== callId
+    if (reservation.scopeId !== original.owner.scopeId || reservation.scopeKind !== taskScopeKind
+      || (platform ? reservation.tenantId !== null || reservation.workspaceId !== null
+        : reservation.tenantId !== scopeFields.tenantId || reservation.workspaceId !== scopeFields.workspaceId)
+      || reservation.actorId !== actorId || reservation.callId !== callId
       || reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind)) throw denied();
     const verify = async () => {
       const again = await producer.originals.readHistoricalOriginal(requestKey);
@@ -296,7 +333,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     async readTaskPolicyMutation(requestKey: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null) {
       const original = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
       if (!original) throw unavailable();
-      const where = { ...original.owner, scopeKind: 'WORKSPACE' as const, sceneCode: TEXT_PROBE_SCENE,
+      const where = { ...original.owner, scopeKind: taskScopeKind, sceneCode: TEXT_PROBE_SCENE,
         sceneVersion: original.sceneVersion, creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
         inputRevision: original.inputRevision, inputHash: original.inputHash };
       const rows = structuredClone(await observe(() => input.db.aiTask.findMany({ where, take: 2,
@@ -329,7 +366,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
         original: original ? { expiresAt: original.expiresAt, validity: validity(original.expiresAt) } : null };
       const absent = { ...header, state: 'not_observed' as const, task: null, run: null, resultObserved: false, configurationRevision: null, observation: null };
       if (!original) return absent;
-      const where = { ...original.owner, scopeKind: 'WORKSPACE' as const, sceneCode: TEXT_PROBE_SCENE,
+      const where = { ...original.owner, scopeKind: taskScopeKind, sceneCode: TEXT_PROBE_SCENE,
         sceneVersion: original.sceneVersion, creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
         inputRevision: original.inputRevision, inputHash: original.inputHash };
       const rows = await observe(() => input.db.aiTask.findMany({ where, take: 2, select: { id: true, scopeId: true, scopeKind: true,
@@ -362,11 +399,13 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
         reportedUsage: { inputTokens: number; outputTokens: number } | null } | null = null;
       if (receipt) {
         const d = receipt.descriptor, context = original.context;
-        if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+        if (!expectOriginalActor(context)
           || d.scopeId !== stored.scopeId || d.runId !== runs[0].id || !snapshot.steps.some(step => step.stepId === d.stepId)
           || requestFingerprint(d.command) !== requestFingerprint(original.command)
-          || requestFingerprint(d.context) !== requestFingerprint({ tenantId: context.scope.tenantId,
-            workspaceId: context.scope.workspaceId, actorId: context.actor.userId })
+          || requestFingerprint(d.context) !== requestFingerprint(platform
+            ? { actorId: context.actor.kind === 'saas_admin' ? context.actor.userId : '', scopeKind: 'platform' }
+            : { actorId: context.actor.kind === 'user' ? context.actor.userId : '',
+              tenantId: (context.scope as { tenantId: string }).tenantId, workspaceId: (context.scope as { workspaceId: string }).workspaceId })
           || requestFingerprint({ ...textProbeIntent(original.command.operationId, stored.scopeId, textProbeCapability(original.command)), configuration: d.configuration }) !== original.preparationHash) throw unavailable();
         configurationRevision = z.number().int().min(1).max(4294967295).parse(d.configuration.configRevision);
         const o = receipt.observation;

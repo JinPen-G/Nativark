@@ -17,21 +17,31 @@ export interface BudgetGatewayInvocationBinding {
   expiresAt: Date;
 }
 
+/** Explicit SaaS/platform gateway principal, never an absent tenantId silently
+ * interpreted as platform work. Discriminated by the missing tenantId field. */
+export interface PlatformGatewayContext {
+  actorId: string;
+}
+export type BudgetGatewayContext = GatewayContext | PlatformGatewayContext;
+export function isPlatformGatewayContext(value: Readonly<BudgetGatewayContext>): value is PlatformGatewayContext {
+  return !('tenantId' in value) && !('workspaceId' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
+}
+
 export interface GatewayBudgetReserveRequest {
   callId: string; model: string; maxOutputTokens: number; intentHash: string;
 }
 export interface BudgetGatewayBindingSource {
-  resolveForReserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
-  resolveForReservation(context: Readonly<GatewayContext>, reservationId: string): Promise<BudgetGatewayInvocationBinding>;
+  resolveForReserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
+  resolveForReservation(context: Readonly<BudgetGatewayContext>, reservationId: string): Promise<BudgetGatewayInvocationBinding>;
 }
 
 export interface BudgetGatewayLifecycle {
-  reserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<string>;
-  dispatch(context: Readonly<GatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
-  settle(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, evidenceRef: string): Promise<BudgetRecord>;
-  release(context: Readonly<GatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
-  markUnknown(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, reason: string): Promise<BudgetRecord>;
-  reconcile(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, evidenceRef: string): Promise<BudgetRecord>;
+  reserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<string>;
+  dispatch(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
+  settle(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, evidenceRef: string): Promise<BudgetRecord>;
+  release(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
+  markUnknown(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, reason: string): Promise<BudgetRecord>;
+  reconcile(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, evidenceRef: string): Promise<BudgetRecord>;
 }
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -45,15 +55,20 @@ function assertReserveRequest(request: Readonly<GatewayBudgetReserveRequest>) {
   }
 }
 
-function assertBinding(context: Readonly<GatewayContext>, binding: Readonly<BudgetGatewayInvocationBinding>) {
+function assertBinding(contextValue: Readonly<BudgetGatewayContext>, binding: Readonly<BudgetGatewayInvocationBinding>) {
+  // Unwrap the readonly view: discriminating the union by field presence.
+  const context = contextValue as BudgetGatewayContext;
   if (!binding || binding.actorId !== context.actorId || !(binding.expiresAt instanceof Date)
     || !Number.isFinite(binding.expiresAt.getTime()) || !binding.association || !binding.association.scope) throw new BudgetError('FORBIDDEN');
   const scope = binding.association.scope;
-  // This internal GatewayContext describes a workspace consumer, not the
-  // owner of its provider profile. Platform-managed AI must still charge the
-  // workspace consumer; platform/tenant jobs need a separately typed port.
-  const validScope = scope.kind === 'workspace'
-    && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId;
+  // Discriminate by field presence: PlatformGatewayContext is structurally
+  // wider than GatewayContext, so a type predicate cannot narrow negatively.
+  // The workspace consumer context keeps charging its own workspace ledger;
+  // the platform context is reserved for explicit SaaS/platform work.
+  const validScope = !('tenantId' in context) && !('workspaceId' in context)
+    ? scope.kind === 'platform'
+    : 'tenantId' in context && 'workspaceId' in context && scope.kind === 'workspace'
+      && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId;
   if (!validScope || !binding.sceneCode || binding.association.idempotencyKey === '') throw new BudgetError('FORBIDDEN');
 }
 
@@ -69,7 +84,7 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
     if (!budget || !source?.resolveForReserve || !source.resolveForReservation) throw new BudgetError('UNAVAILABLE');
   }
 
-  async reserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
+  async reserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
     context = structuredClone(context);
     request = structuredClone(request);
     assertReserveRequest(request);
@@ -86,34 +101,34 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
     return record.id;
   }
 
-  private async binding(context: Readonly<GatewayContext>, reservationId: string) {
+  private async binding(context: Readonly<BudgetGatewayContext>, reservationId: string) {
     context = structuredClone(context);
     const binding = structuredClone(await this.source.resolveForReservation(structuredClone(context), reservationId));
     assertBinding(context, binding);
     return binding;
   }
 
-  async dispatch(context: Readonly<GatewayContext>, reservationId: string, eventKey: string) {
+  async dispatch(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string) {
     const binding = await this.binding(context, reservationId);
     return this.budget.dispatch(reservationId, binding.association, eventKey);
   }
 
-  async settle(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, evidenceRef: string) {
+  async settle(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, evidenceRef: string) {
     const binding = await this.binding(context, reservationId);
     return this.budget.settle(reservationId, binding.association, eventKey, evidenceRef);
   }
 
-  async release(context: Readonly<GatewayContext>, reservationId: string, eventKey: string) {
+  async release(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string) {
     const binding = await this.binding(context, reservationId);
     return this.budget.release(reservationId, binding.association, eventKey);
   }
 
-  async markUnknown(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, reason: string) {
+  async markUnknown(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, reason: string) {
     const binding = await this.binding(context, reservationId);
     return this.budget.markUnknown(reservationId, binding.association, eventKey, reason);
   }
 
-  async reconcile(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, evidenceRef: string) {
+  async reconcile(context: Readonly<BudgetGatewayContext>, reservationId: string, eventKey: string, evidenceRef: string) {
     const binding = await this.binding(context, reservationId);
     return this.budget.reconcile(reservationId, binding.association, eventKey, evidenceRef);
   }

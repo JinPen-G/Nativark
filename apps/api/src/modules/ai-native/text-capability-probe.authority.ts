@@ -11,7 +11,8 @@ import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttachmentResolver } from './gateway-intent';
 import { visionCapabilityChallenge } from './vision-capability-challenge';
 import { audioCapabilityChallenge } from './audio-capability-challenge';
-import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
+import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements,
+  isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 export interface TextProbeAuthorityDependencies {
@@ -21,12 +22,15 @@ export interface TextProbeAuthorityDependencies {
   profiles: Pick<ProviderProfileRepository, 'get'>;
   bindings: Pick<PrismaGatewayInvocationBindings, 'resolveForReserve'>;
 }
+/** Workspace operator/staff probe authority. Platform SaaS principals use the
+ * dedicated platform authority composition; this class never accepts one. */
 export class TextCapabilityProbeAuthority {
   private readonly command: TextProbeCommand;
-  private readonly context: GatewayContext;
-  constructor(private readonly dependencies: TextProbeAuthorityDependencies, context: GatewayContext, command: TextProbeCommand) {
+  private readonly context: TextProbeContext;
+  constructor(private readonly dependencies: TextProbeAuthorityDependencies, context: TextProbeContext, command: TextProbeCommand) {
     this.context = probeContextSchema.parse(structuredClone(context));
     this.command = textProbeCommandSchema.parse(structuredClone(command));
+    if (isPlatformProbeContext(this.context)) throw new ModelGatewayError('FORBIDDEN');
   }
   /** Only this server-created immutable challenge, never an uploaded file ACL
    * bypass. Business attachment references are not accepted by this resolver. */
@@ -53,6 +57,7 @@ export class TextCapabilityProbeAuthority {
   }
   private async current(): Promise<GatewayRoutingResolution> {
     const d = this.dependencies, context = structuredClone(this.context);
+    if (isPlatformProbeContext(context)) throw new ModelGatewayError('FORBIDDEN');
     await d.management.authorize(context, 'manage');
     await d.management.authorize(context, 'invoke');
     const selection = await d.configuration.selectionForInvocation(context);
@@ -82,7 +87,7 @@ export class TextCapabilityProbeAuthority {
         probe: { purpose: 'capability_text_probe', operationId: this.command.operationId,
           profileFingerprint: this.command.profileFingerprint, intentHash: prepared.intentHash } } };
   }
-  async resolve(value: GatewayContext, required: readonly AiProfileCapability[]) {
+  async resolve(value: TextProbeContext, required: readonly AiProfileCapability[]) {
     if (requestFingerprint(value) !== requestFingerprint(this.context)
       || requestFingerprint(required) !== requestFingerprint(textProbeRequirements(this.command))) {
       throw new ModelGatewayError('FORBIDDEN');
@@ -91,7 +96,7 @@ export class TextCapabilityProbeAuthority {
     if (gatewayRoutingBinding(initial) !== gatewayRoutingBinding(current)) throw new ModelGatewayError('CONFIG_INVALID');
     return structuredClone(current);
   }
-  async assertCurrent(context: GatewayContext, resolution: GatewayRoutingResolution) {
+  async assertCurrent(context: TextProbeContext, resolution: GatewayRoutingResolution) {
     if (gatewayRoutingBinding(await this.resolve(context, textProbeRequirements(this.command))) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
   }
   async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {

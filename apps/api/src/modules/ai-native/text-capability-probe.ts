@@ -5,6 +5,7 @@ import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/sha
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent } from './gateway-intent';
+import { ModelGatewayError } from './model-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { visionCapabilityChallenge, VISION_PROBE_METHOD } from './vision-capability-challenge';
 import { audioCapabilityChallenge, AUDIO_PROBE_METHOD } from './audio-capability-challenge';
@@ -32,7 +33,16 @@ export const textProbeRequirements = (command: TextProbeCommand): Array<'text' |
   ? ['text', 'tools'] : textProbeCapability(command) === 'structured_output'
   ? ['text', 'structured_output'] : textProbeCapability(command) === 'vision'
   ? ['text', 'vision'] : textProbeMode(command) === 'stream' ? ['text', 'streaming'] : ['text'];
-export const probeContextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
+/** Workspace probe consumers carry their real tenant/workspace attribution.
+ * The platform shape is the explicit SaaS principal only: no tenant or
+ * workspace field exists to fabricate, and old rows keep parsing unchanged. */
+export const probeContextSchema = z.union([
+  z.object({ tenantId: id, workspaceId: id, actorId: id }).strict(),
+  z.object({ actorId: id, scopeKind: z.literal('platform') }).strict()
+]);
+export type TextProbeContext = z.infer<typeof probeContextSchema>;
+export const isPlatformProbeContext = (value: TextProbeContext): value is { actorId: string; scopeKind: 'platform' } =>
+  'scopeKind' in value && value.scopeKind === 'platform';
 export const probeUsageSchema = z.object({ inputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   outputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 export const textProbeDescriptorSchema = z.object({
@@ -110,21 +120,30 @@ export function textProbeIntent(operationId: string, scopeId: string, capability
   const prepared = prepareGatewayTextIntent(intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, capability === 'streaming' ? 'stream' : 'invoke');
   return { intent, expected, intentHash: prepared.intentHash, challengeHash: requestFingerprint(intent.messages) };
 }
-export function textProbeConfiguration(profile: AiProviderProfileRecord, tenantId: string): AiGatewayConfigReferenceDraft {
+export function textProbeConfiguration(profile: AiProviderProfileRecord, consumer: { kind: 'workspace'; tenantId: string } | { kind: 'platform' }): AiGatewayConfigReferenceDraft {
+  if (consumer.kind === 'platform') {
+    // Explicit SaaS/platform consumer reference (shared third branch). The
+    // profile must itself be platform-owned; no tenant attribution is invented.
+    if (profile.serviceMode !== 'platform_managed' || profile.scopeKind !== 'PLATFORM') throw new ModelGatewayError('CONFIG_INVALID');
+    return { configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
+      protocol: profile.protocol, provider: profile.provider, model: profile.model,
+      consumerScope: { kind: 'platform' }, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
+  }
   const base = { configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
-    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId };
+    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId: consumer.tenantId };
   return profile.serviceMode === 'platform_managed'
     ? { ...base, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } }
-    : { ...base, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId } };
+    : { ...base, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: consumer.tenantId } };
 }
 export function matchesProbeProfile(descriptor: TextProbeDescriptor, profile: AiProviderProfileRecord) {
   const expectedScopeKind = profile.serviceMode === 'platform_managed' ? 'PLATFORM' : 'TENANT';
+  const consumer = isPlatformProbeContext(descriptor.context) ? { kind: 'platform' as const } : { kind: 'workspace' as const, tenantId: descriptor.context.tenantId };
   return profile.scopeKind === expectedScopeKind
     && profile.enabled && !profile.disabledAt && textProbeRequirements(descriptor.command).every(value => profile.allowedCapabilities.includes(value))
     && descriptor.methodVersion === textProbeMethod(descriptor.command)
     && descriptor.profileId === profile.id && descriptor.profileFingerprint === capabilityProfileFingerprint(profile)
     && descriptor.command.profileFingerprint === descriptor.profileFingerprint
-    && descriptor.configurationHash === requestFingerprint(textProbeConfiguration(profile, descriptor.context.tenantId));
+    && descriptor.configurationHash === requestFingerprint(textProbeConfiguration(profile, consumer));
 }
 export function textProbeEvidenceHash(receipt: TextProbeReceipt) {
   return requestFingerprint({ receiptId: receipt.id, descriptorHash: receipt.descriptorHash, observationHash: receipt.observationHash });

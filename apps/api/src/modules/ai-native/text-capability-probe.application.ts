@@ -21,7 +21,7 @@ import { TextCapabilityProbeAuthority } from './text-capability-probe.authority'
 import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
   textProbeEvidenceHash, textProbeIntent, textProbeCapability, textProbeMethod, textProbeMode, textProbeRequirements,
-  TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeCapability } from './text-capability-probe';
+  isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeCapability, type TextProbeContext } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
@@ -39,7 +39,25 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
   /** Existing authorized platform Vault connection, never a tenant fallback.
    * E.g. createAuthorizedPlatformModelConfiguration(...).invocation. */
   platformConnection?: GatewayConnectionResolver;
+  /** Optional server-bound identity/authority port for the explicit SaaS
+   * platform principal. Absent keeps the workspace operator/staff behaviour;
+   * a present port replaces ONLY current-identity resolution and route
+   * authority, never the Gateway, ledger, receipts or task engine. */
+  identity?: TextCapabilityProbeIdentityPort;
 };
+
+/** Structural authority contract shared by the workspace and platform hosts. */
+export interface TextCapabilityProbeAuthorityPort {
+  resolve(value: TextProbeContext, required: readonly import('./provider-profile.ports').AiProfileCapability[]): Promise<import('./gateway-routing.service').GatewayRoutingResolution>;
+  assertCurrent(context: TextProbeContext, resolution: import('./gateway-routing.service').GatewayRoutingResolution): Promise<void>;
+  authorizeDispatch(context: import('./model-gateway.ports').GatewayContext, request: import('./model-gateway.ports').ModelProtocolRequest,
+    route: import('./provider-router.ports').ProviderRouteDecision, mode?: 'invoke' | 'stream', signal?: AbortSignal): Promise<void>;
+  readonly media?: import('./gateway-intent').GatewayMediaAttachmentResolver | undefined;
+}
+export interface TextCapabilityProbeIdentityPort {
+  currentRequest(): Promise<{ context: TextProbeContext; binding: string }>;
+  authority(context: TextProbeContext, command: TextProbeCommand): TextCapabilityProbeAuthorityPort;
+}
 export class TextCapabilityProbeApplication {
   private readonly profiles;
   private readonly receipts;
@@ -84,7 +102,8 @@ export class TextCapabilityProbeApplication {
     if (!modelAdapterSupportsCapabilities(adapter, textProbeRequirements(command))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     return adapter;
   }
-  private authority(context: GatewayContext, command: TextProbeCommand) {
+  private authority(context: TextProbeContext, command: TextProbeCommand): TextCapabilityProbeAuthorityPort {
+    if (this.input.identity) return this.input.identity.authority(context, command);
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
       configuration: this.input.configuration, profiles: this.profiles, bindings: this.accounting.bindings }, context, command);
   }
@@ -94,8 +113,15 @@ export class TextCapabilityProbeApplication {
     }
   }
   /** Request hosts do not supply actor/tenant/workspace fields. The same real
-   * scope authority used by budget resolves them afresh for every operation. */
-  private async currentRequest() {
+   * scope authority used by budget resolves them afresh for every operation;
+   * the injected platform identity port resolves the SaaS principal instead. */
+  private async currentRequest(): Promise<{ context: TextProbeContext; binding: string }> {
+    if (this.input.identity) {
+      const resolved = structuredClone(await this.input.identity.currentRequest());
+      probeContextSchema.parse(resolved.context);
+      if (typeof resolved.binding !== 'string' || !resolved.binding) throw new ModelGatewayError('FORBIDDEN');
+      return resolved;
+    }
     const resolved = structuredClone(await this.input.scopes.resolveCurrent());
     const { context, scope } = resolved;
     if (context.actor.kind !== 'user' || !['operator', 'staff'].includes(context.audience)
@@ -107,7 +133,7 @@ export class TextCapabilityProbeApplication {
     return { context: probeContextSchema.parse({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
       actorId: context.actor.userId }), binding: requestFingerprint({ identity, scope }) };
   }
-  private async forCurrentRequest<T>(operation: (context: GatewayContext) => Promise<T>): Promise<T> {
+  private async forCurrentRequest<T>(operation: (context: TextProbeContext) => Promise<T>): Promise<T> {
     const before = await this.currentRequest();
     const result = await operation(before.context);
     if ((await this.currentRequest()).binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
@@ -121,6 +147,9 @@ export class TextCapabilityProbeApplication {
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
+      // Workspace-only preparation flow: it selects the tenant configuration.
+      // The platform principal prepares through its own composition instead.
+      if (isPlatformProbeContext(context)) throw new ModelGatewayError('FORBIDDEN');
       await this.input.management.authorize(context, 'manage');
       const selection = await this.input.configuration.selectionForInvocation(context);
       const resolved = await this.input.scopes.resolveRoutingScopes(selection.mode);
@@ -184,15 +213,16 @@ export class TextCapabilityProbeApplication {
       return result;
     } });
   }
-  async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
+  async prepare(value: TextProbeContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
     this.adapter(resolution.route.profile.protocol, command, resolution.consumerScope.id);
     this.requirePlatformConnection(resolution.route.profile.serviceMode);
     const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command));
-    return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile, context.tenantId) };
+    return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile,
+      isPlatformProbeContext(context) ? { kind: 'platform' } : { kind: 'workspace', tenantId: context.tenantId }) };
   }
-  private async collect(context: GatewayContext, command: TextProbeCommand) {
+  private async collect(context: TextProbeContext, command: TextProbeCommand) {
     const capability = textProbeCapability(command);
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
     const row = await this.receipts.find(resolution.consumerScope.id, command.operationId);
@@ -229,11 +259,11 @@ export class TextCapabilityProbeApplication {
     await authority.assertCurrent(context, resolution);
     return { capability, status: saved.status, receiptId: row.id, evidenceHash: saved.evidenceHash, observation: observed };
   }
-  async run(value: GatewayContext, commandValue: TextProbeCommand,
+  async run(value: TextProbeContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>, signal?: AbortSignal) {
     return this.#runRegistered(value, commandValue, execution, signal);
   }
-  async #runRegistered(value: GatewayContext, commandValue: TextProbeCommand,
+  async #runRegistered(value: TextProbeContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>,
     signal?: AbortSignal, ownedInvocationId?: string, observedResult?: (result: AiGatewayResultDraft) => void) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
@@ -244,7 +274,7 @@ export class TextCapabilityProbeApplication {
     // Refuse an absent local protocol capability before registration, receipt
     // creation or a budget/dispatch attempt; remote proof cannot add audio.
     const adapter = this.adapter(profile.protocol, command, resolution.consumerScope.id);
-    const configuration = textProbeConfiguration(profile, context.tenantId);
+    const configuration = textProbeConfiguration(profile, isPlatformProbeContext(context) ? { kind: 'platform' } : { kind: 'workspace', tenantId: context.tenantId });
     const descriptor = textProbeDescriptorSchema.parse({ command, context, scopeId: resolution.consumerScope.id, profileId: profile.id,
       profileFingerprint: command.profileFingerprint, methodVersion: textProbeMethod(command), callId: prepared.intent.requestId,
       intentHash: prepared.intentHash, challengeHash: prepared.challengeHash, configuration,
@@ -274,7 +304,10 @@ export class TextCapabilityProbeApplication {
     await authority.assertCurrent(context, resolution);
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
-    const transport = new RoutedModelTransport({ tenant, platform }, [adapter], authority);
+    // The transport consumes authorizeDispatch/media only; the injected
+    // platform authority implements exactly that structural surface.
+    const transport = new RoutedModelTransport({ tenant, platform }, [adapter],
+      authority as unknown as TextCapabilityProbeAuthority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit
         // Task ownership comes from the persisted charge, not a caller's lease.
@@ -309,10 +342,10 @@ export class TextCapabilityProbeApplication {
     }
     return this.collect(context, command);
   }
-  async reconcile(context: GatewayContext, command: TextProbeCommand) {
+  async reconcile(context: TextProbeContext, command: TextProbeCommand) {
     return this.collect(probeContextSchema.parse(structuredClone(context)), textProbeCommandSchema.parse(structuredClone(command)));
   }
-  async preflight(context: GatewayContext, command: TextProbeCommand) {
+  async preflight(context: TextProbeContext, command: TextProbeCommand) {
     context = probeContextSchema.parse(structuredClone(context));
     command = textProbeCommandSchema.parse(structuredClone(command));
     const authority = this.authority(context, command), current = await authority.resolve(context, textProbeRequirements(command));
