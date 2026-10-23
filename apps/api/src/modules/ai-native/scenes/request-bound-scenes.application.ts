@@ -158,8 +158,9 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
         if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return consume(app, command);
       });
-      // Accounting bounds the entire request; execution bounds its preflight
-      // here and keeps the runner's own limits after that. An abandoned wait
+      // Short observations/mutations, including accounting, bound the whole
+      // request. Execution bounds only preflight here and retains the runner's
+      // own limits after that. An abandoned wait
       // revokes these credentials, never proves an original write rolled back.
       return lifetime && !lifetime.preflightOnly
         ? await waitForTaskApplicationDependency(operation, lifetime.write, lifetime.signal) : await operation();
@@ -1144,7 +1145,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readPreparation: orderApplication?.readPreparation ?? unsupported,
       resumePrepared: orderApplication?.resumePrepared ?? unsupported,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
-  });
+  }, { write: false });
   return Object.freeze({
     readOriginalAccounting: accounting.read,
     releaseOriginalUnsentAccounting: accounting.releaseUnsent,
@@ -1204,7 +1205,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.takeover(command, signal),
         { write: true, signal, preflightOnly: true }),
-    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.requestCancel(command))
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      async (app, command) => await app.requestCancel(command), { write: true })
   });
 }
 
@@ -1272,7 +1274,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       input: { read: value => modelApplication().readInput(value) } });
     return { model, get application() { return modelApplication(); }, center,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(model.scenes, persisted.events, value) };
-  });
+  }, { write: false });
   return Object.freeze({
     readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
@@ -1321,27 +1323,30 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.readQuoteReceipt(command)),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.start(command, signal)),
+      call(request, value, (app, command) => app.application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readInput(command)),
-    refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.refreshInput(command)),
+    refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.refreshInput(command), { write: true }),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.resume(command, signal)),
+      call(request, value, (app, command) => app.application.resume(command, signal), { write: true, signal, preflightOnly: true }),
     readAnswer: recoveryReaders.readAnswer,
     submitAnswer: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.application.submitAnswer(command), { write: true }),
     readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readQuotePreparation(command)),
-    confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.confirmClarifiedQuote(command)),
+    confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.confirmClarifiedQuote(command), { write: true }),
     readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readClarifiedQuoteReceipt(command)),
     continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.continueAnswer(command, signal)),
+      call(request, value, (app, command) => app.application.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.reconcile(command, signal)),
+      call(request, value, (app, command) => app.application.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.recover(command, signal)),
+      call(request, value, (app, command) => app.application.recover(command, signal), { write: true, signal, preflightOnly: true }),
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readExecution(command)),
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.takeover(command, signal)),
-    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
+      call(request, value, (app, command) => app.application.takeover(command, signal), { write: true, signal, preflightOnly: true }),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.application.requestCancel(command), { write: true }),
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
