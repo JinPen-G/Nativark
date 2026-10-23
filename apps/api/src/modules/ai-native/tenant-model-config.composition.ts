@@ -31,21 +31,26 @@ export function createScopeBoundTenantModelConnection(configuration: TenantModel
   scopes: Pick<AiScopeRepository, 'resolveRoutingScopes'>): GatewayConnectionResolver {
   if (typeof scopes?.resolveRoutingScopes !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const resolver = new TenantModelConnectionResolver(configuration);
-  return { async resolve(value, selected) {
+  const assertScope = async (value: import('./model-gateway.ports').GatewayContext, selected: import('./provider-profile.ports').AiProviderProfileRecord) => {
+    const context = structuredClone(value), profile = structuredClone(selected);
+    const resolved = structuredClone(await scopes.resolveRoutingScopes('tenant_managed'));
+    let principal: ReturnType<typeof gatewayBudgetPrincipal>;
+    try { principal = gatewayBudgetPrincipal(resolved.context); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    if (principal.actorId !== context.actorId || principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId
+      || resolved.configurationScope.kind !== 'TENANT' || resolved.configurationScope.id !== profile.scopeId
+      || resolved.configurationScope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
+    const { authorizedAt: _, requestId: __, ...identity } = resolved.context;
+    return requestFingerprint({ identity, owner: resolved.configurationScope });
+  };
+  return { async assertCurrent(value, selected) {
+    const context = structuredClone(value), profile = structuredClone(selected);
+    const before = await assertScope(context, profile);
+    await resolver.assertCurrent(context, profile);
+    if (await assertScope(context, profile) !== before) throw new ModelGatewayError('FORBIDDEN');
+  }, async resolve(value, selected) {
     const context = structuredClone(value), profile = structuredClone(selected);
     if (!profile?.enabled || profile.disabledAt) throw new ModelGatewayError('CONFIG_INVALID');
-    const current = async () => {
-      const resolved = structuredClone(await scopes.resolveRoutingScopes('tenant_managed'));
-      let principal: ReturnType<typeof gatewayBudgetPrincipal>;
-      try { principal = gatewayBudgetPrincipal(resolved.context); }
-      catch { throw new ModelGatewayError('FORBIDDEN'); }
-      if (principal.actorId !== context.actorId
-        || principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId
-        || resolved.configurationScope.kind !== 'TENANT' || resolved.configurationScope.id !== profile.scopeId
-        || resolved.configurationScope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
-      const { authorizedAt: _, requestId: __, ...identity } = resolved.context;
-      return requestFingerprint({ identity, owner: resolved.configurationScope });
-    };
+    const current = () => assertScope(context, profile);
     const before = await current(), connection = await resolver.resolve(context, profile);
     if (await current() !== before) throw new ModelGatewayError('FORBIDDEN');
     // Canonical scope resolution is asynchronous; a mode/key change during it

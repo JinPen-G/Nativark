@@ -5,6 +5,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./agent-desktop": {
+      "types": "./dist-agent-desktop/agent-desktop.d.ts",
+      "import": "./dist-agent-desktop/agent-desktop.js",
+      "require": "./dist-agent-desktop/agent-desktop.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -12,7 +17,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:agent-desktop",
+    "build:agent-desktop": "tsc -p tsconfig.agent-desktop.json",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {}

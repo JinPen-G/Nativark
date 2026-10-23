@@ -291,7 +291,70 @@ export class AiOriginalSceneRecoveryController extends AiOriginalSceneObservatio
   }
 }
 
-/** No root-module registration. The server must provide the actual authorized
+/** Standard quote execution actions only. Existing observation routes remain
+ * on their independent read host; no duplicate route or legacy driver is mounted.
+ * The server provider selects one quote runner/Gateway, never caller settings. */
+@Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
+export class AiOriginalQuoteModelExecutionController {
+  constructor(@Inject(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS)
+    private readonly model: Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>,
+      'start' | 'refreshInput' | 'submitAnswer' | 'resume' | 'continueAnswer' | 'reconcile' | 'recover' | 'takeover' |
+      'requestCancel' | 'readQuotePreparation' | 'confirmClarifiedQuote' | 'readClarifiedQuoteReceipt' | 'readExecution'>) {}
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.refreshInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  refreshInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.refreshInput(request, body), 'read_input');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  submitAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.submitAnswer(request, body), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal)), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  continueAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcile(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.recover) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.recover(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.takeover) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal)), 'read_takeover_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.requestCancel(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readQuotePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readQuotePreparation(request, body), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  confirmClarifiedQuote(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.confirmClarifiedQuote(request, body), 'read_clarified_quote_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readClarifiedQuoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readClarifiedQuoteReceipt(request, body), 'read_clarified_quote_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readExecution) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readExecution(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readExecution(request, body));
+  }
+}
+
+/** Explicit full module only. The server must provide the actual authorized
  * runner/Gateway/financial evidence assembly; request bodies cannot do so. */
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
 export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecoveryController {

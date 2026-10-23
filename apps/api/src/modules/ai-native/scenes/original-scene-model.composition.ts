@@ -305,6 +305,18 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const receipt = await application(before.reference).resume(submission, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
+      }, async submitAnswer(value: unknown) {
+        const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict()
+          .safeParse(structuredClone(value));
+        if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await observe(() => bound(parsed.data.original)), submission = parsed.data.submission;
+        if (submission.taskId !== before.task.taskId || before.original.request.sceneCode !== 'quote_clarification') throw denied();
+        // Save human parameters and their original successor, deliberately without
+        // starting it. The caller can now confirm/select a quote for the order host.
+        const receipt = await waitForTaskApplicationDependency(() => root.inputs.submit(submission), true, undefined, run.clock);
+        await observe(() => verify(before), undefined, true);
+        return freezeOriginalInput({ receipt, continuation: { kind: 'not_started' as const,
+          reason: 'answer_saved_without_execution' as const }, orderApproval: 'not_granted' as const });
       }, async readAnswer(value: unknown) {
         const { receipt } = await answer(value);
         return freezeOriginalInput(receipt);
@@ -314,12 +326,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, preparation: 'unavailable' as const });
         const basis = await current(before.reference, before.task.taskId, receipt.runId);
         const candidate = applyOriginalQuoteAnswers(before.original.request.input.candidate, basis.provenance.history);
-        const preparation = await scenes.tools.quote.businessPreparation.prepareUnified(candidate);
-        const sources = await scenes.tools.quote.businessPreparation.inputSources(candidate);
-        const first = preparation as unknown as Record<string, unknown>, second = sources as unknown as Record<string, unknown>;
-        if (first.selectionRevision !== second.selectionRevision
-          || (first.request !== undefined && (second.status !== 'prepared_input_sources'
-            || requestFingerprint(first.request) !== requestFingerprint(second.request)))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const { preparation, sources } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate);
+        const first = preparation as unknown as Record<string, unknown>;
         same(basis, await current(before.reference, before.task.taskId, receipt.runId));
         await verify(before);
         return freezeOriginalInput({ original: before.original.receipt, receipt, candidate, preparation, sources,
@@ -337,19 +345,18 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const basis = await current(before.reference, before.task.taskId, receipt.runId);
         const candidate = applyOriginalQuoteAnswers(before.original.request.input.candidate, basis.provenance.history);
-        const preparation = await scenes.tools.quote.businessPreparation.prepareUnified(candidate);
+        const { preparation } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate);
         if (preparation.status !== 'ready') return freezeOriginalInput({ receipt, preparation, quotation: 'not_attempted' as const });
-        const selected = await scenes.tools.quote.candidates.prepare(candidate, before.original.context);
-        if (selected.status !== 'needs_confirmation') throw unavailable();
-        if (selected.selectionRevision !== parsed.data.selectionRevision || preparation.selectionRevision !== selected.selectionRevision
-          || requestFingerprint(selected.request) !== parsed.data.inputFingerprint
+        // The command confirms the final, freshly reviewed request, not the old
+        // candidates offered before these human answers changed its fingerprint.
+        if (preparation.selectionRevision !== parsed.data.selectionRevision
           || requestFingerprint(preparation.request) !== parsed.data.inputFingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         same(basis, await current(before.reference, before.task.taskId, receipt.runId));
         await verify(before);
-        const result = await scenes.tools.quote.preview.previewOriginal(selected.request, {
+        const result = await scenes.tools.quote.preview.previewOriginal(preparation.request, {
           reference: `scene-answer:${before.reference.inputRef}:${receipt.receiptId}`,
           expectedIdentityHash: originalIdentityHash(before.original.context)
-        }, selected.configurationFingerprint, false, selected.addressFingerprint);
+        }, preparation.configurationFingerprint, false, preparation.addressFingerprint);
         await verify(before);
         return freezeOriginalInput({ original: before.original.receipt, receipt, result,
           observation: 'explicit_clarified_quote_request' as const, inventoryReservation: 'not_attempted' as const,

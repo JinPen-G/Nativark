@@ -8,6 +8,8 @@ import { useLocale } from "./locale";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
 import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
+import { DesktopSessionBridge } from "@/features/agent-desktop/DesktopSessionBridge";
+import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
@@ -93,7 +95,7 @@ function DefaultRoute() {
 }
 
 function ProtectedRoutes() {
-  const workspaceScopeKey = useAuthStore((state) => `${state.tenant?.tenantId ?? "platform"}:${state.currentWorkspaceId ?? "none"}`);
+  const workspaceScopeKey = useAuthStore((state) => `${state.user?.id ?? "anonymous"}:${state.tenant?.tenantId ?? "platform"}:${state.currentWorkspaceId ?? "none"}`);
 
   return (
     <RequireAuth>
@@ -188,6 +190,7 @@ function ProtectedRoutes() {
 export function AppRouter() {
   return (
     <Suspense fallback={<PageLoader />}>
+      {rentalDesktopHost() && <DesktopSessionBridge />}
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         {/* 租户专属登录链接：/login/:tenantCode 直接显示该租户品牌，隐藏租户编码输入。 */}

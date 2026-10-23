@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReadDraft } from '@rental-os/shared';
+import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReadDraft,
+  type AiClarifiedQuoteSelectionRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from './original-request.validation';
 
@@ -10,6 +11,11 @@ addFormats(ajv);
 const create = ajv.compile<AiQuoteSelectionCreateDraft>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiQuoteSelectionCreateDraft);
 const read = ajv.compile<AiQuoteSelectionReadDraft>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiQuoteSelectionReadDraft);
 const proof = ajv.compile<AiQuoteSelectionProofRequest>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiQuoteSelectionProofRequest);
+const clarified = ajv.compile<AiClarifiedQuoteSelectionRequestDraft>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiClarifiedQuoteSelectionRequestDraft);
+export function parseClarifiedQuoteSelection(value: unknown) {
+  if (!clarified(value) || Buffer.byteLength(JSON.stringify(value), 'utf8') > 65536) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  return freezeOriginalInput(structuredClone(value));
+}
 export function parseQuoteSelection(value: unknown) {
   if (!create(value) || Buffer.byteLength(JSON.stringify(value), 'utf8') > 32768
     || Date.parse(value.order.endAt) <= Date.parse(value.order.startAt)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

@@ -1,13 +1,22 @@
 /** Human-operated consumer of the original persistent probe workflow, not a
  * second runner. A durable request locator survives uncertainty; start is never
- * retried. History is read-only, while receipt reconciliation can record evidence. */
-import type { AiTextCapabilityPrepareRequestDraft, AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
+ * retried. Cancellation receipts are read-only task-center observations; probe
+ * receipt reconciliation can record capability evidence or settle the original
+ * ledger. Only an exact original operation receipt clears its unknown marker;
+ * current financial balances never grant execution or permit replay. */
+import type { AiTextCapabilityPrepareRequestDraft, AiTextCapabilityHttpResponsesDraft,
+  AiTaskStopQueryDraft, AiTaskStopObservationDraft, AiTextCapabilityAccountingResponseDraft,
+  AiTextCapabilityAccountingOperationResponseDraft } from '@rental-os/shared';
 import type { CapabilityProbeAction, aiCapabilityProbeApi } from '@/api/aiCapabilityProbe';
+import { isUsageQuantity } from './usage-quantity';
 
 type Capability = NonNullable<AiTextCapabilityPrepareRequestDraft['capability']>;
-type Write = 'publish' | 'createTask' | 'start' | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'configureTaskAction';
+type Write = 'publish' | 'createTask' | 'start' | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'configureTaskAction'
+  | 'releaseUnsent' | 'reconcileAccounting';
 type PolicyWrite = { taskId: string; operation: string; expectedRevision: number | null };
-type Journal = { requestKey: string; capability: Capability; started: boolean; uncertain: Write | null; policyWrite?: PolicyWrite };
+type Journal = { requestKey: string; capability: Capability; started: boolean; uncertain: Write | null;
+  policyWrite?: PolicyWrite; cancellationWrite?: AiTaskStopQueryDraft;
+  accountingWrite?: { taskId: string; callId: string; reservationId: string; operation: 'releaseUnsent' | 'reconcileAccounting' } };
 type Task = { taskId: string; runId?: string; revision: number; status: string };
 type Observation = { status: 'supported' | 'unsupported' | 'unverified'; capability: Capability; mode: 'mock' | 'live' | null;
   checkedAt: string | null; expiresAt: string | null; configurationRevision: number | null };
@@ -15,6 +24,9 @@ type State = Readonly<{ busy: boolean; journal: Journal | null; locked: boolean;
   prepared: { configurationRevision: number; methodVersion: string } | null; published: boolean; task: Task | null;
   policy: { operation: string; revision: number | null } | null; receipt: Observation | null;
   policyReceipt: { revision: number; expiresAt: string } | null;
+  cancellationReceipt: AiTaskStopObservationDraft | null;
+  accounting: AiTextCapabilityAccountingResponseDraft | null;
+  accountingOperation: AiTextCapabilityAccountingOperationResponseDraft | null;
   preflight: { allowed: boolean; missing: boolean; stale: boolean } | null;
   history: { state: 'historical' | 'not_observed'; originalValidity: string; taskStatus: string; resultObserved: boolean } | null;
   feedback: 'idle' | 'observed' | 'unknown' | 'denied' | 'invalid' | 'unavailable' }>;
@@ -23,7 +35,7 @@ const code = (v: unknown, max = 128): v is string => typeof v === 'string' && v.
 const revision = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 4294967295;
 const time = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 && Number.isFinite(Date.parse(v));
 export const PROBE_CAPABILITIES = ['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'] as const;
-const writes: readonly Write[] = ['publish', 'createTask', 'start', 'cancel', 'reconcile', 'readCapabilityReceipt', 'configureTaskAction'];
+const writes: readonly Write[] = ['publish', 'createTask', 'start', 'cancel', 'reconcile', 'readCapabilityReceipt', 'configureTaskAction', 'releaseUnsent', 'reconcileAccounting'];
 const invalid = (): never => { throw Error('AI_INVALID_INPUT'); };
 const task = (v: unknown): Task => {
   if (!object(v) || !code(v.taskId) || !revision(v.revision) || !code(v.status, 64)
@@ -33,22 +45,31 @@ const task = (v: unknown): Task => {
 export class CapabilityProbeSession {
   private state: State; private active = true; private generation = 0; private flight: AbortController | null = null;
   private listeners = new Set<() => void>();
-  constructor(private readonly ports: Pick<typeof aiCapabilityProbeApi, 'call'>, private readonly current: () => boolean,
+  constructor(private readonly ports: Pick<typeof aiCapabilityProbeApi, 'call' | 'readCancellationReceipt'>, private readonly current: () => boolean,
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, private readonly storageKey: string,
     private readonly newKey = () => globalThis.crypto.randomUUID()) {
     let journal: Journal | null = null, locked = true;
     try { const raw = storage?.getItem(storageKey); locked = !storage || raw !== null;
-      const v: unknown = raw && raw.length <= 1024 ? JSON.parse(raw) : null;
+      const v: unknown = raw && raw.length <= 2048 ? JSON.parse(raw) : null;
       if (object(v) && code(v.requestKey) && PROBE_CAPABILITIES.includes(v.capability as Capability) && typeof v.started === 'boolean'
         && (v.uncertain === null || writes.includes(v.uncertain as Write)) && (v.policyWrite === undefined || object(v.policyWrite)
           && code(v.policyWrite.taskId) && code(v.policyWrite.operation, 64) && (v.policyWrite.expectedRevision === null
-            || revision(v.policyWrite.expectedRevision) && v.policyWrite.expectedRevision <= 4294967293))) {
+            || revision(v.policyWrite.expectedRevision) && v.policyWrite.expectedRevision <= 4294967293))
+        && (v.cancellationWrite === undefined || object(v.cancellationWrite) && Object.keys(v.cancellationWrite).length === 2
+          && code(v.cancellationWrite.taskId) && revision(v.cancellationWrite.expectedRevision)
+          && v.cancellationWrite.expectedRevision <= 4294967294)
+        && (v.accountingWrite === undefined || object(v.accountingWrite) && Object.keys(v.accountingWrite).length === 4
+          && code(v.accountingWrite.taskId) && code(v.accountingWrite.callId) && code(v.accountingWrite.reservationId)
+          && ['releaseUnsent', 'reconcileAccounting'].includes(String(v.accountingWrite.operation)))) {
         journal = { requestKey: v.requestKey, capability: v.capability as Capability, started: v.started, uncertain: v.uncertain as Write | null,
-          ...(v.policyWrite === undefined ? {} : { policyWrite: v.policyWrite as PolicyWrite }) }; locked = false;
+          ...(v.policyWrite === undefined ? {} : { policyWrite: v.policyWrite as PolicyWrite }),
+          ...(v.cancellationWrite === undefined ? {} : { cancellationWrite: v.cancellationWrite as unknown as AiTaskStopQueryDraft }),
+          ...(v.accountingWrite === undefined ? {} : { accountingWrite: v.accountingWrite as Journal['accountingWrite'] }) }; locked = false;
       }
     } catch { /* Corrupt/absent original reference storage cannot authorize a fresh request. */ }
     this.state = { busy: false, journal, locked, prepared: null, published: false, task: null, policy: null,
-      receipt: null, policyReceipt: null, preflight: null, history: null, feedback: locked || journal?.uncertain ? 'unknown' : 'idle' };
+      receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null,
+      feedback: locked || journal?.uncertain ? 'unknown' : 'idle' };
   }
   snapshot = () => this.state;
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
@@ -66,13 +87,15 @@ export class CapabilityProbeSession {
    * challenge from this screen; further fresh probes require explicit lifecycle support. */
   prepare = (capability: Capability) => this.run('prepare', capability);
   act = (action: Exclude<CapabilityProbeAction, 'prepare'>, operation?: string) => this.run(action, undefined, operation);
-  private async run(action: CapabilityProbeAction, capability?: Capability, operation?: string) {
+  readCancellationReceipt = () => this.run('readCancellationReceipt');
+  private async run(action: CapabilityProbeAction | 'readCancellationReceipt', capability?: Capability, operation?: string) {
     if (this.flight) throw Error('AI_BUSY');
     const c = new AbortController(), g = this.generation; this.flight = c;
     let attempted = false;
     try {
       this.check(c, g);
-      this.update({ busy: true, receipt: null, policyReceipt: null, preflight: null, history: null });
+      const observedAccounting = structuredClone(this.state.accounting);
+      this.update({ busy: true, receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null });
       if (this.state.locked) throw Error('AI_RESOURCE_UNAVAILABLE');
       let journal = structuredClone(this.state.journal);
       if (!journal) {
@@ -87,25 +110,102 @@ export class CapabilityProbeSession {
       if (write && journal.uncertain && !(action === 'reconcile' && ['start', 'reconcile'].includes(journal.uncertain))
         && !(action === 'readCapabilityReceipt' && journal.uncertain === 'readCapabilityReceipt')) throw Error('AI_RESULT_UNKNOWN');
       if (action === 'publish' && !this.state.prepared || action === 'createTask' && !this.state.published
-        || action === 'start' && (!this.state.task || journal.started) || action === 'cancel' && !this.state.task) return invalid();
+        || action === 'start' && (!this.state.task || journal.started || !!journal.cancellationWrite)
+        || action === 'cancel' && (!this.state.task || !!journal.cancellationWrite)) return invalid();
+      if (action === 'readCancellationReceipt' && !journal.cancellationWrite) return invalid();
+      const accountingMutation = action === 'releaseUnsent' || action === 'reconcileAccounting';
+      if (accountingMutation && (!observedAccounting || observedAccounting.accounting !== 'observed' || journal.accountingWrite
+        || action === 'releaseUnsent' && (observedAccounting.record.budgetDispatchMarked || observedAccounting.record.status !== 'reserved')
+        || action === 'reconcileAccounting' && observedAccounting.record.status !== 'pending_reconciliation')) return invalid();
       if (['readTaskAction', 'configureTaskAction'].includes(action) && (!code(operation, 64) || !this.state.task)) return invalid();
       if (action === 'configureTaskAction' && this.state.policy?.operation !== operation) return invalid();
       if (action === 'readTaskActionReceipt' && !journal.policyWrite) return invalid();
+      if (action === 'readAccountingOperation' && !journal.accountingWrite) return invalid();
       const value = { requestKey: journal.requestKey,
         ...(['prepare', 'publish'].includes(action) ? { capability: journal.capability } : {}),
         ...(action === 'cancel' ? { expectedRevision: this.state.task!.revision } : {}),
         ...(['readTaskAction', 'configureTaskAction'].includes(action) ? { operation: operation! } : {}),
         ...(action === 'configureTaskAction' ? { expectedRevision: this.state.policy!.revision } : {}),
-        ...(action === 'readTaskActionReceipt' ? { operation: journal.policyWrite!.operation, expectedRevision: journal.policyWrite!.expectedRevision } : {}) };
+        ...(action === 'readTaskActionReceipt' ? { operation: journal.policyWrite!.operation, expectedRevision: journal.policyWrite!.expectedRevision } : {}),
+        ...(action === 'readAccountingOperation' ? { operation: journal.accountingWrite!.operation } : {}) };
       if (action === 'configureTaskAction') journal = { ...journal, policyWrite: { taskId: this.state.task!.taskId,
         operation: operation!, expectedRevision: this.state.policy!.revision } };
+      // Freeze the original CAS lookup before sending. Later task snapshots cannot
+      // reconstruct this reference, and observing it never permits another cancel.
+      if (action === 'cancel') {
+        if (this.state.task!.revision > 4294967294) return invalid();
+        journal = { ...journal, cancellationWrite: { taskId: this.state.task!.taskId, expectedRevision: this.state.task!.revision } };
+      }
+      if (accountingMutation) journal = { ...journal, accountingWrite: { taskId: observedAccounting!.taskId,
+        callId: observedAccounting!.record.callId, reservationId: observedAccounting!.record.reservationId, operation: action } };
       if (write) { journal = { ...journal, uncertain: action as Write, started: journal.started || action === 'start' || action === 'reconcile' }; this.persist(journal); }
       this.check(c, g); attempted = write;
-      const raw: unknown = structuredClone(await this.ports.call(action, value, c.signal)); this.check(c, g);
+      const raw: unknown = structuredClone(await (action === 'readCancellationReceipt'
+        ? this.ports.readCancellationReceipt(structuredClone(journal.cancellationWrite!), c.signal)
+        : this.ports.call(action, value, c.signal))); this.check(c, g);
       if (JSON.stringify(journal) !== this.storage?.getItem(this.storageKey)) throw Error('AI_RESULT_UNKNOWN');
-      if (!object(raw) || raw.requestKey !== journal.requestKey || JSON.stringify(raw).length > 32768) throw Error('AI_RESULT_UNKNOWN');
+      if (!object(raw) || (action !== 'readCancellationReceipt' && raw.requestKey !== journal.requestKey)
+        || JSON.stringify(raw).length > 32768) throw Error('AI_RESULT_UNKNOWN');
       let cleared = false;
-      if (action === 'prepare') {
+      if (action === 'readCancellationReceipt') {
+        const original = journal.cancellationWrite!;
+        if (raw.taskId !== original.taskId || raw.expectedRevision !== original.expectedRevision
+          || !['observed', 'not_observed'].includes(String(raw.status)) || raw.cancellation !== 'request_not_rollback'
+          || raw.automaticRetry !== false || raw.remoteCancellation !== 'not_attested' || raw.budgetRelease !== 'not_attempted') return invalid();
+        this.update({ cancellationReceipt: { ...original, status: raw.status as AiTaskStopObservationDraft['status'],
+          cancellation: 'request_not_rollback', automaticRetry: false, remoteCancellation: 'not_attested', budgetRelease: 'not_attempted' } });
+        cleared = raw.status === 'observed' && journal.uncertain === 'cancel';
+      } else if (action === 'readAccountingOperation') {
+        const original = journal.accountingWrite!;
+        if (raw.operation !== original.operation || raw.taskId !== original.taskId || raw.callId !== original.callId
+          || raw.reservationId !== original.reservationId || !['observed', 'not_observed'].includes(String(raw.status))
+          || raw.execution !== 'read_only_no_dispatch_or_release' || raw.automaticRetry !== false
+          || raw.semantics !== 'original_accounting_operation_not_current_balance') return invalid();
+        this.update({ accountingOperation: { requestKey: journal.requestKey, ...original,
+          status: raw.status as AiTextCapabilityAccountingOperationResponseDraft['status'],
+          execution: 'read_only_no_dispatch_or_release', automaticRetry: false,
+          semantics: 'original_accounting_operation_not_current_balance' } });
+        cleared = raw.status === 'observed' && journal.uncertain === original.operation;
+      } else if (['readAccounting', 'releaseUnsent', 'reconcileAccounting'].includes(action)) {
+        const record = raw.record;
+        if (!code(raw.taskId) || this.state.task && raw.taskId !== this.state.task.taskId
+          || record && this.state.task?.runId && object(record) && record.runId !== this.state.task.runId
+          || journal.policyWrite && raw.taskId !== journal.policyWrite.taskId
+          || journal.cancellationWrite && raw.taskId !== journal.cancellationWrite.taskId
+          || raw.accounting !== (action === 'readAccounting' ? 'observed' : 'original_operation_only')
+          || raw.execution !== 'not_invoked' || raw.automaticRetry !== false
+          || raw.businessExecution !== 'not_inferred_from_usage' || raw.admission !== 'not_granted'
+          || !object(record) || record.accounting !== 'recorded' || !code(record.invocationId) || !code(record.callId)
+          || !code(record.reservationId) || !code(record.sceneCode) || !code(record.runId) || !code(record.stepId)
+          || !revision(record.revision) || !time(record.observedVersionAt) || typeof record.budgetDispatchMarked !== 'boolean'
+          || !['reserved', 'settled', 'released', 'pending_reconciliation'].includes(String(record.status))
+          || !isUsageQuantity(record.reserved) || record.actual !== null && !isUsageQuantity(record.actual)
+          || record.status === 'settled' && record.actual === null
+          || isUsageQuantity(record.actual) && (record.actual.unit !== record.reserved.unit
+            || record.actual.unit === 'money' && record.reserved.unit === 'money' && record.actual.currency !== record.reserved.currency)
+          || !object(record.modelPolicy)
+          || !(record.modelPolicy.mode === 'platform_managed' && record.modelPolicy.serviceName === 'Rental OS AI'
+            || record.modelPolicy.mode === 'tenant_managed' && typeof record.modelPolicy.model === 'string'
+              && record.modelPolicy.model.length > 0 && record.modelPolicy.model.length <= 256)) return invalid();
+        const original = journal.accountingWrite;
+        if (original && (raw.taskId !== original.taskId || record.callId !== original.callId || record.reservationId !== original.reservationId)) return invalid();
+        if (accountingMutation && (record.invocationId !== observedAccounting!.record.invocationId
+          || record.runId !== observedAccounting!.record.runId || record.stepId !== observedAccounting!.record.stepId
+          || record.status !== (action === 'releaseUnsent' ? 'released' : 'settled'))) throw Error('AI_RESULT_UNKNOWN');
+        // Construct the public projection, never retain raw provider/dispatch details
+        // even if an upstream response accidentally carries extra fields.
+        this.update({ accounting: { requestKey: journal.requestKey, taskId: raw.taskId,
+          accounting: raw.accounting as AiTextCapabilityAccountingResponseDraft['accounting'], execution: 'not_invoked', automaticRetry: false,
+          businessExecution: 'not_inferred_from_usage', admission: 'not_granted', record: {
+            invocationId: record.invocationId, callId: record.callId, reservationId: record.reservationId, accounting: 'recorded',
+            sceneCode: record.sceneCode, runId: record.runId, stepId: record.stepId, revision: record.revision,
+            observedVersionAt: record.observedVersionAt, status: record.status as AiTextCapabilityAccountingResponseDraft['record']['status'],
+            reserved: record.reserved, actual: record.actual, budgetDispatchMarked: record.budgetDispatchMarked,
+            modelPolicy: record.modelPolicy.mode === 'platform_managed' ? { mode: 'platform_managed', serviceName: 'Rental OS AI' }
+              : { mode: 'tenant_managed', model: record.modelPolicy.model as string } } } });
+        // A current ledger state is not this mutation's exact commit receipt.
+        // Read it for financial observation, but keep a lost write reply locked.
+      } else if (action === 'prepare') {
         if (raw.state !== 'prepared' || raw.capability !== journal.capability || raw.execution !== 'not_started'
           || !revision(raw.configurationRevision) || !code(raw.methodVersion, 64)) return invalid();
         this.update({ prepared: { configurationRevision: raw.configurationRevision, methodVersion: raw.methodVersion } });
@@ -159,18 +259,20 @@ export class CapabilityProbeSession {
           && ['expired', 'historical_only'].includes(String(raw.original.validity)) ? String(raw.original.validity) : 'not_observed',
           taskStatus: object(raw.task) ? String(raw.task.status) : 'not_observed', resultObserved: raw.resultObserved } });
       } else if (action === 'cancel') {
-        if (raw.status !== 'cancel_requested' || !revision(raw.revision) || raw.retryable !== false) return invalid();
+        if (raw.status !== 'cancel_requested' || raw.revision !== journal.cancellationWrite!.expectedRevision + 1 || raw.retryable !== false) return invalid();
         this.update({ task: { ...this.state.task!, revision: raw.revision, status: 'cancel_requested' } });
       } else if (raw.semantics !== 'task_outcome_not_capability_evidence' || raw.retryable !== false
         || (raw.kind !== 'not_started' && (raw.kind !== 'run_outcome' || !object(raw.outcome) || !code(raw.outcome.status, 64)))) return invalid();
       if (write || cleared) this.persist({ ...journal, uncertain: null });
       this.update({ feedback: this.state.journal?.uncertain ? 'unknown' : 'observed' });
-      return raw as AiTextCapabilityHttpResponsesDraft[CapabilityProbeAction];
+      if (action === 'readAccountingOperation') return this.state.accountingOperation!;
+      return (['readAccounting', 'releaseUnsent', 'reconcileAccounting'].includes(action) ? this.state.accounting : raw) as
+        AiTextCapabilityHttpResponsesDraft[CapabilityProbeAction] | AiTaskStopObservationDraft;
     } catch (error) {
       if (this.active && !c.signal.aborted && g === this.generation) {
         const e = error as { message?: string; response?: { status?: number; data?: { code?: string } } };
         const denied = !this.current() || [401, 403].includes(e.response?.status ?? 0) || e.message === 'AI_SCOPE_CHANGED';
-        this.update({ prepared: null, published: false, task: null, policy: null, receipt: null, policyReceipt: null, preflight: null, history: null,
+        this.update({ prepared: null, published: false, task: null, policy: null, receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null,
           feedback: denied ? 'denied' : attempted || this.state.journal?.uncertain ? 'unknown'
             : e.message === 'AI_INVALID_INPUT' || e.response?.data?.code === 'AI_INVALID_INPUT' ? 'invalid' : 'unavailable' });
       }

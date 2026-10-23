@@ -1487,7 +1487,8 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
-        const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
+        await this.service.lockOrderForUpdate(tenantId, id, tx);
+        const usesCredit = await this.corporateSettlement?.freezeOrderSettlement(tenantId, id, tx) ?? false;
         await this.funding.assertReadyForConfirmation(
           tenantId,
           this.service.resolveWorkspaceId(tenantId),
@@ -1784,42 +1785,18 @@ export class RentalCoreController {
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
-  /**
-   * 续租的结算方式：个人与企业预付都要客户补款，企业月结不需要补款动作。
-   *
-   * 月结资格读**客户主档的企业授信**（`customer_corporate_credits`）：它以
-   * `CustomerProfile.id` 为键，与订单快照里的 `corporateCustomerId` 同一套 id。
-   * 不能读旧车辆域的 `Corporate` 表——那张表有自己独立的 uuid 主键，与订单上的
-   * `customerId` 没有任何关联，按它查永远查不到，月结分支会静默变成死代码。
-   *
-   * 两道前提都必须成立：
-   *
-   * 1. **企业既是签约方也是付款方**（`enterpriseContractAndPayer`）。企业员工用个人
-   *    身份付款的订单虽然也带企业信息，但钱是个人出的，仍然要补款。
-   * 2. **授信记录仍然有效**且账期不是按单结。`suspended` / `revoked` 的企业不允许
-   *    继续挂账——续租会让欠款接着涨。
-   *
-   * 查不到资格时一律回落到"要补款"——宁可多问客户一次，也不要把不该挂账的单
-   * 挂进月结。已经逾期时按规则可强制先付：逾期说明履约已经出问题，这时继续挂账
-   * 只会让欠款接着累积。
-   */
+  /** 续租沿本单已确认结算方式；新增挂账另查当前资格，拒绝时不自动转换旧单。 */
   private async resolveExtensionSettlement(
     tenantId: string,
-    order: { customerType: string; membershipSnapshot?: RentalMembershipSnapshot; endAt: string; effectiveEndAt?: string },
-    forceImmediateWhenOverdue: boolean
+    order: { id: string; customerType: string; membershipSnapshot?: RentalMembershipSnapshot; endAt: string; effectiveEndAt?: string },
+    forceImmediateWhenOverdue: boolean,
+    tx?: Prisma.TransactionClient
   ): Promise<"immediate" | "monthly"> {
     const overdue = new Date(order.effectiveEndAt ?? order.endAt).getTime() < Date.now();
     if (overdue && forceImmediateWhenOverdue) return "immediate";
-    const corporateCustomerId = order.membershipSnapshot?.enterpriseContractAndPayer
-      ? order.membershipSnapshot.corporateCustomerId
-      : undefined;
-    if (!corporateCustomerId) return "immediate";
-    const credit = await this.prisma.customerCorporateCredit.findFirst({
-      where: { tenantId, customerId: corporateCustomerId, status: "active" },
-      select: { billingCycle: true }
-    });
-    if (!credit || credit.billingCycle === "per_order") return "immediate";
-    return "monthly";
+    if (!order.membershipSnapshot?.enterpriseContractAndPayer) return "immediate";
+    if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪，不能判断续租付款方式");
+    return await this.corporateSettlement.allowsExtensionCredit(tenantId, order.id, tx) ? "monthly" : "immediate";
   }
 
   private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto, tx?: Prisma.TransactionClient) {
@@ -1841,7 +1818,7 @@ export class RentalCoreController {
     await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt, tx);
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
     const rule = effectiveExtensionRule(order.ruleSnapshot);
-    const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue);
+    const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue, tx);
     return {
       order,
       priced: await this.business.quoteOrderExtension(tenantId, context, {

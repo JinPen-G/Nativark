@@ -5,15 +5,17 @@ import { KnowledgeCommitUnknownError, KnowledgeError } from '../knowledge/knowle
 import { authorize, fingerprint, mutationInput, operationFingerprint, parse } from '../knowledge/knowledge-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AI_RETENTION_POLICY, retentionDeadline } from './retention-policy';
+import { inspectRetentionSource } from './retention-model-sources';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiStep' | 'aiBudgetReservation'
+  | 'aiTaskExecutionCharge' | 'aiInvocationAdmission' | 'aiUsageReservation' | 'aiRun' | 'aiGatewayInvocation' | 'aiTaskActionInput'
   | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
 
 /** Physical relational-body erasure of an ALREADY authorized explicit delete.
  * The original delete command/receipt is mandatory; IDs, scope and a deadline
  * alone grant nothing. No scheduler, arbitrary table selector or storage call.
- * Conservative workspace holds protect unknown effects, even when a legacy
- * input has no sufficiently precise knowledge-reference relationship.
+ * Only actual unresolved source references hold the document. Legacy/unknown
+ * bindings refuse erasure rather than inventing an unrelated workspace hold.
  */
 export class HumanKnowledgeContentErasure {
   constructor(private readonly human: HumanKnowledgeService, private readonly db: Db) {}
@@ -52,14 +54,11 @@ export class HumanKnowledgeContentErasure {
             if (receipt.fingerprint !== jobHash) throw new KnowledgeError('conflict');
             return { state: 'erased' as const, originalOperation: input.operationId, operationId: jobId, replayed: true };
           }
-          const task = await tx.aiTask.findFirst({ where: { scopeId: owner.id,
-            status: { notIn: ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] } }, select: { id: true } });
-          const step = await tx.aiStep.findFirst({ where: { scopeId: owner.id,
-            status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } });
-          const accounting = await tx.aiBudgetReservation.findFirst({ where: { scopeId: owner.id,
-            status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } });
-          if (task || step || accounting) return { state: 'held' as const,
-            reason: 'retention_evidence_unavailable' as const, operationId: jobId, retryable: false as const };
+          const source = await inspectRetentionSource(tx, owner.id, 'knowledge', input.documentId,
+            { tenantId: scope.tenantId, workspaceId: scope.workspaceId });
+          if (source === 'unavailable') throw new KnowledgeError('unavailable');
+          if (source === 'held') return { state: 'held' as const,
+            reason: 'referenced_by_unresolved_task' as const, operationId: jobId, retryable: false as const };
           const row = await tx.aiKnowledgeDocument.findFirst({ where: { id: input.documentId,
             tenantId: scope.tenantId, workspaceId: scope.workspaceId } });
           const deletion = await tx.aiKnowledgeOperation.findFirst({ where: { ...operationWhere, operationId: input.operationId } });

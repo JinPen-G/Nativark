@@ -16,6 +16,7 @@ import {
 } from "./customer-operations-request.dto";
 import {
   RecordCustomerCorporateCreditPaymentDto,
+  RecordCustomerCorporateCreditMaturityDto,
   SaveCustomerContractDto,
   SaveCustomerCreditDto,
   SaveCustomerInvoiceProfileDto
@@ -369,6 +370,17 @@ export class PlatformController {
   @Get("customers/:customerId/credit/ledger")
   customerCreditLedger(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.listCustomerCreditLedger(customerId, req.user);
+  }
+
+  @Post("customers/:customerId/credit/maturities")
+  recordCustomerCreditMaturity(@Param("customerId") customerId: string, @Body() body: RecordCustomerCorporateCreditMaturityDto,
+    @Req() req: RequestWithUser) {
+    return this.platformService.recordCustomerCreditMaturity(customerId, body, req.user);
+  }
+
+  @Get("customers/:customerId/credit/maturities/:ledgerId")
+  customerCreditMaturity(@Param("customerId") customerId: string, @Param("ledgerId") ledgerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.readCustomerCreditMaturity(customerId, ledgerId, req.user);
   }
 
   @Post("customers/:customerId/credit/payments")

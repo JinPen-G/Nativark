@@ -18,6 +18,7 @@ import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AccountMenu } from "./AccountMenu";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 
 const { Sider, Content } = Layout;
@@ -60,6 +61,7 @@ const DESKTOP_MIN_WIDTH = "(min-width: 768px)";
 const WIDE_DESKTOP_MIN_WIDTH = "(min-width: 1200px)";
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const embedded = Boolean(rentalDesktopHost());
   const [collapsed, setCollapsed] = useState(() => !window.matchMedia(WIDE_DESKTOP_MIN_WIDTH).matches);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
@@ -214,6 +216,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
+
+  if (embedded) {
+    return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
+      <main className="content-canvas">{children}</main>
+      <SubscriptionExpiryFloatingCard />
+    </div>;
+  }
 
   return (
     <div className="app-frame-stage">

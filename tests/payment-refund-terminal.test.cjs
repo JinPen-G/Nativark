@@ -28,8 +28,10 @@ function refundHarness(initial = {}) {
     rentalPaymentRefund: {
       findFirst: async () => refund,
       updateMany: async ({ where, data }) => {
-        if (where.status && !where.status.in.includes(refund.status)) return { count: 0 };
-        Object.assign(refund, data);
+        if (where.status && (typeof where.status === "string" ? where.status !== refund.status : !where.status.in.includes(refund.status))) return { count: 0 };
+        const { revision, ...fields } = data;
+        Object.assign(refund, fields);
+        if (revision?.increment) refund.revision = (refund.revision ?? 0) + revision.increment;
         return { count: 1 };
       }
     }
@@ -97,6 +99,73 @@ async function testRefundNotFoundOverdue() {
   delete global.fetch;
 }
 
+async function testStripeRefundWithoutReceipt() {
+  const config = { provider: "stripe", capability: "payment", settings: {}, credentials: {} };
+  for (const ageHours of [1, 25, 720]) {
+    const { service, refund } = refundHarness({ provider: "stripe", method: "stripe", currency: "USD",
+      revision: 1, createdAt: new Date(Date.now() - ageHours * 60 * 60 * 1000) });
+    let queries = 0;
+    service.stripeRequest = async () => { queries++; throw new Error("不得凭空查询或重新派发"); };
+    let unknown;
+    await assert.rejects(() => service.queryStripeRefund(config, refund), error => {
+      unknown = error;
+      return error instanceof PaymentProviderUnknownError;
+    });
+    assert.equal(refundFailureDisposition(unknown).definitive, false);
+    const result = await service.markRefundProviderCallPending("tenant-1", "workspace-1", "order-1", "refund-1", unknown);
+    assert.equal(result.status, "pending", "任何等待时长都不能释放原退款占用");
+    assert.equal(refund.externalRefundId, null);
+    assert.equal(refund.externalStatus, null);
+    assert.equal(queries, 0);
+  }
+  const { service, refund } = refundHarness({ provider: "stripe", currency: "USD", externalRefundId: "re_original" });
+  service.stripeRequest = async (_config, method, route) => {
+    assert.equal(method, "GET");
+    assert.equal(route, "/v1/refunds/re_original");
+    return { id: "re_original", status: "succeeded", amount: 1000, payment_intent: "pi_original", currency: "usd" };
+  };
+  assert.equal((await service.queryStripeRefund(config, refund, "pi_original")).status, "succeeded", "已有原退款号仍可按原回执查询");
+}
+
+async function testLateRefundFundingFailure() {
+  const { service, refund } = refundHarness({ revision: 1, status: "accepted", updatedAt: new Date() });
+  let patches = 0;
+  const outcome = { status: "succeeded", externalRefundId: "original-refund", responseJson: { status: "SUCCESS" } };
+  const mutate = service.prisma.rentalPaymentRefund.updateMany;
+  service.prisma.rentalPaymentRefund.updateMany = async (args) => {
+    if (args.where.revision !== refund.revision || args.where.status !== refund.status
+      || (args.where.fundedAt === null && refund.fundedAt)) return { count: 0 };
+    patches++;
+    return mutate(args);
+  };
+  service.prisma.$transaction = async () => {
+    Object.assign(refund, { revision: 3, status: "succeeded", externalRefundId: "original-refund", fundedAt: new Date(), failureReason: null });
+    throw new Error("late transaction response failure");
+  };
+  assert.equal((await service.applyProviderRefundOutcome("tenant-1", "workspace-1", "order-1", "refund-1", outcome)).status, "succeeded");
+  assert.equal(patches, 0, "已入账退款不能被迟到异常改回 funding_pending");
+  refund.fundedAt = null;
+  refund.status = "accepted";
+  service.prisma.$transaction = async () => { throw new Error("funding write unavailable"); };
+  const find = service.prisma.rentalPaymentRefund.findFirst;
+  service.prisma.rentalPaymentRefund.findFirst = async () => ({ ...await find() });
+  const pending = service.prisma.rentalPaymentRefund.updateMany;
+  service.prisma.rentalPaymentRefund.updateMany = async (args) => {
+    refund.revision++;
+    refund.status = "succeeded";
+    refund.fundedAt = new Date();
+    return pending(args);
+  };
+  assert.equal((await service.applyProviderRefundOutcome("tenant-1", "workspace-1", "order-1", "refund-1", outcome)).status, "succeeded");
+  assert.equal(patches, 0, "异常补记前并发入账也必须受原revision及fundedAt保护");
+  refund.fundedAt = null;
+  refund.status = "accepted";
+  service.prisma.rentalPaymentRefund.updateMany = pending;
+  assert.equal((await service.applyProviderRefundOutcome("tenant-1", "workspace-1", "order-1", "refund-1", outcome)).status, "funding_pending");
+  assert.equal(patches, 1, "未入账且版本未变时仍保存原成功收据供恢复");
+  assert.equal(refund.externalRefundId, "original-refund");
+}
+
 async function testRefundTxLocksProviderConfig() {
   const calls = [];
   const intent = { id: "intent-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1", method: "alipay", provider: "alipay", status: "paid", externalTransactionId: "t1", amount: 100, currency: "CNY", merchantOrderNo: "RO-1" };
@@ -137,7 +206,15 @@ async function testExpiredPendingAutoClosedOnCreate() {
   const providerCalls = [];
   const prisma = {
     ...noopLog,
-    rentalPaymentIntent: { findUnique: async () => null, update: async ({ data }) => ({ ...created, ...data }) },
+    rentalPaymentIntent: {
+      findUnique: async () => null,
+      findFirst: async () => created,
+      updateMany: async ({ where, data }) => {
+        if (where.status !== created.status) return { count: 0 };
+        Object.assign(created, data);
+        return { count: 1 };
+      }
+    },
     $transaction: async (callback) => callback(tx)
   };
   const integrations = {
@@ -372,6 +449,8 @@ async function main() {
   testFormatting();
   await testDefinitiveMapping();
   await testRefundNotFoundOverdue();
+  await testStripeRefundWithoutReceipt();
+  await testLateRefundFundingFailure();
   await testRefundTxLocksProviderConfig();
   await testExpiredPendingAutoClosedOnCreate();
   await testExpireStaleJob();

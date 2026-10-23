@@ -115,6 +115,26 @@ export class BudgetService {
     return { record, session };
   }
   async read(id: string, association: AiUsageAssociationDraft) { return (await this.load('read', id, association)).record; }
+  async readMutation(id: string, association: AiUsageAssociationDraft, input: {
+    action: 'release' | 'reconcile'; eventKey: string; evidenceRef?: string;
+  }) {
+    input = structuredClone(input);
+    if (!identifier(input.eventKey, 128) || !['release', 'reconcile'].includes(input.action)
+      || input.action === 'reconcile' && !identifier(input.evidenceRef) || input.action === 'release' && input.evidenceRef !== undefined)
+      throw new BudgetError('INVALID');
+    const { record, session } = await this.load('read', id, association);
+    if (!this.repository.readMutation) throw new BudgetError('UNAVAILABLE');
+    const usage = input.action === 'reconcile'
+      ? structuredClone(await this.evidence.usage(record, input.evidenceRef!, true)) : undefined;
+    if (usage) {
+      quantityAtoms(usage.quantity);
+      if (!/^[a-f0-9]{64}$/u.test(usage.evidenceHash)) throw new BudgetError('UNAVAILABLE');
+    }
+    await session.revalidate();
+    const observed = await this.repository.readMutation(record, { action: input.action, eventKey: input.eventKey, usage }, session.revalidate);
+    await session.revalidate();
+    return observed;
+  }
   async dispatch(id: string, association: AiUsageAssociationDraft, eventKey: string) {
     const { record, session } = await this.load('dispatch', id, association);
     if (record.status !== 'reserved' || record.expiresAt <= this.now()) throw new BudgetError('UNAVAILABLE');

@@ -1,7 +1,7 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-21；最近收口：平台预算读写/同事务原收据、BYOK计价配置/费率审阅、租户平台费率采用、租户预算原保存收据、平台配置目录与任务原澄清；正式持久宿主原财务恢复保持。原28项64.3%、ENTRY52.8%、验收0/28；可信计数、完整标准模型执行、能力后台及主动异常目标闭环/SLO仍缺。小程序/官网仅后端与接口，页面延后；当前现场看协作接续，不把各批证据相加称全量通过。
+> 归纳日期：2026-10-24；最新未提交功能为报价澄清参数改变后的最终审阅与明确报价确认闭环；原任务精确账务操作收据、员工/客户原账有限等待和开业诊断独立模型执行标准宿主保留。继承报价确认→明确选择→人类审批→原Core建单、平台能力与取消/账务恢复WIP全部保留。原28项64.3%、ENTRY52.8%、正式验收0/28；可信计数生产、平台独立付费验证及标准live完整执行等仍待补/待验。小程序/官网暂只后端和接口；本地Harness独立专项不并入。当前现场见协作接续，不把不同阶段证据相加称最新全量通过。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
@@ -11,6 +11,64 @@
 - “代码实现”“消费者装配”“离线验证”“真实环境验收”“生产开放”分别记录，不用其中一层替代另一层。
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
+
+## 近期核心：报价澄清最终参数确认（2026-10-24）
+
+- 本树未提交（AIN-06/09/15、ENTRY-07/08）：上一片实际全链覆盖参数已齐后重新确认；人类回答更改商品/计价单位/地点/租期会使完整candidate修订改变，旧回答候选修订不能直接确认最终request。`AiQuoteBusinessPreparationService.reviewAnsweredParameters`仅在阻碍只剩selectionRevision且无业务缺项/歧义时，用本次局部快照重读当前获准候选、配置、费率及availability，提供待人类新确认的request/指纹/修订及字段来源。原candidate、持久回答、input/plan不覆写；普通prepare仍拒绝旧修订，审阅不标人类已确认、不存报价/预占或批准。
+- 原`readQuotePreparation`与`confirmClarifiedQuote`消费同一审阅接点；确认时重新解析持久回答及当前事实，要求命令selectionRevision和inputFingerprint精确对应最终request，再走原previewOriginal/Core报价及同原键收据。缺计价单位/其他业务字段、歧义、资格、费率和当前权限保持拒绝；报价仍不等于订单批准，明确选择未规划后继和原审批Core链保留。不新建HTTP/schema、运行器、账本或计价逻辑。
+- 原双offline preload、固定无效DATABASE_URL、本树绝对audit/writeRoot/TEMP/cache且禁compile cache，复用现有`quote-to-order-smoke.cjs`：`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/quote-to-order-smoke.cjs quote-final-parameters-smoke-final.log`退出0。真实人类回答改变计价单位/地点→最终新修订审阅→明确quote-confirm→原选择/人类审批→Core建单，仍一调用一订单、四类COMMIT丢应答原记录核对、原input/plan/resourceOrigin和累计资源不变。旧回答修订仍在candidate；普通prepare旧修订拒绝，缺pricingUnit/无确认/错hash/配置变化/读中撤权零报价，来源confirmed=false。数据库事实/锁/Gateway财务生命周期与routing/admission/transport为明确替身，非真实MySQL/供应商/多端或正式验收。
+- 首轮额外断言误用夹具h.app（实际为PrismaTaskApplication）已改为实际h.model.scenes，不改生产或删断言。本轮期间本树TypeScript安装已变为7.0.2，原ts-node缺Compiler API导致一次退出1；未安装/覆盖依赖，只在隔离进程显式解析现有ts-node依赖的已安装兼容编译器。相同命令加`--types`→`quote-final-parameters-types-final.log`：API/shared688 roots/0诊断/noEmit/退出0；先前原类型入口本轮首检也为688/0，安装变化后不冒称原默认入口仍兼容。定向diff/本地文档链接检查退出0。全部WIP/output和失败保留，无服务、外联、生成、迁移、提交或生产开放。
+- 原任务均已有G3，未跨G4，64.3%/ENTRY52.8%/正式0/28保持。下一缺口仍是可信计数/recorded生产依赖、平台主体独立付费验证、标准live完整单账与全部业务变体/故障窗；本片解决参数改变的实际场景接点，不代表这些余项已齐。未修改正式需求/任务正文或客户端范围。
+
+## 近期核心：原账恢复与开业模型标准执行（2026-10-23）
+
+- 本树未提交（AIN-04/05/06/11/14）：`scene-requests/accounting/operation`复用原Gateway recovery/BudgetService/Prisma精确事件读取，绑定original、call、reservation及固定操作，shared闭合合同、Guard、OpenAPI与既有标准Controller/provider已接。缺事件仍not_observed，终态余额不冒充该原操作收据；读取不重放结算/释放。
+- 员工/客户原账应用入口补5秒有限等待、读取后快照与关闭检查；read超限不可用，可能写入超限unknown，迟到依赖不再推进业务读取/变更。原HTTP边界、当前Auth/Guard与同主体原账权限保留。
+- `AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION`及标准provider/Controller接回原opening_diagnosis材料、持久输入/计划、runner/Gateway单账；独立六个`opening-model`动作和场景化人类CAS政策模板，不播种授权、不开放settings批准/写入。结果及来源沿既有只读观察服务；未配置零依赖访问，仍默认关闭。请求复用原合同；多态执行响应仍GenericObject草案，不能称全部协议冻结。
+- 双offline preload、固定无效DATABASE_URL及本树绝对audit/writeRoot/TEMP/cache的`node -`三组最终各1 pass/0 fail/skip/todo/退出0：实际场景Controller/Auth/Guard及单账的reconcile COMMIT丢应答→重建精确读取（一派发、无读取变更）；实际开业原请求→持久模型输入/计划/runner→单账→受权结果，终态reconcile不重发（一预留/三allocation/一结算）；员工/客户实际应用的不合作身份依赖约5秒结束，read unavailable/write unknown，迟到不触发业务访问。数据库事务/锁、模型路由/admission/transport及超时依赖为明确替身，非真实供应商/MySQL/HTTP/宿主验收。复用既有output夹具在stdin组合，无新增测试脚本；首轮字面量类型、旧夹具路由数和结果查询形状问题已局部纠正，未放宽生产门。
+- 既有离线wrapper执行`output/typecheck-ai-native.cjs`→`output/review-p1-678-20261022.GB4pqh/core-recovery-opening-types-closeout.log`：API/shared688 roots、0诊断/noEmit/退出0；定向diff退出0。原任务及ENTRY已G3，未跨G4，64.3%/52.8%/正式0/28保持；需求/任务安排和百分比不改。本轮未安装、生成、迁移、外联、启动、提交或发布，继承源码/WIP/output保留。
+- 余项明确分开：可信冻结输入计数生产仍缺实现，现有价格readInputBound不足以认证；需要同一协议输入/工具schema/配置、可计量计数操作和持久原收据，不能用字符数、calls或用户填写替代。平台独立主体付费能力验证、Embedding/Reasoning客观验证及完整标准live模型单账仍有装配/可信依赖缺口；真库锁/故障、模型、存储及浏览器属另外未验项。新宿主不改变未来Runtime/Provider替换边界或原unknown语义。
+
+## 近期核心：报价确认到人类审批建单（2026-10-23）
+
+- 本树未提交功能片（AIN-06/09/11/15、ENTRY-07/08）：新增原报价模型`input/submit`，复用持久输入仓储保存人类回答及原后继但不启动；旧resume/continue语义保留。确认原报价后，`quote-selections/clarified/{select|operation}`复用已配置的原模型收据宿主与原选择仓储，严格绑定original/task/回答收据/后继run/quote；命名shared闭合请求schema、Guard/OpenAPI及标准AppModule同片注册，不改shared总出口。选择不是批准或建单；后继已有input/plan仍拒绝换选择，模型publication与选择共用原task锁，选后不能再派发模型。批准和执行仍走原selected-order runner、当前人类decision、lease/fencing、单一累计资源及Core审批消费/业务幂等事务。
+- 正向发现并修复两处实接断点：selected task和人类审批的正常原请求读取误用了缺费率/地址读取的reprepare候选authority，现复用原`composeAiOriginalScenes`权威来源，reprepare服务保持独立；原报价COMMIT丢应答未发布进程缓存，审批建单从缓存取报价报不存在，现仅approved执行从原businessFacts读同一持久报价，并复查期限/消费状态，事务内原快照、库存、审批消费与幂等门保持。未重建报价、计价或库存算法，未放宽企业独立付款主体门。
+- 原双offline preload、固定无效DATABASE_URL、本树绝对audit/writeRoot/TEMP/cache且禁compile cache：`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/quote-to-order-smoke.cjs quote-to-order-smoke-composition-final.log`退出0。实际报价算法/availability/订单聚合准备、Controller/Auth/Guard、输入/选择/审批仓储、原运行器及RentalOrderConfirmationService贯通保存回答→quote-confirm→原收据→选择→WAITING_CONFIRMATION→人类批准→明确Core执行→原committed收据；报价/选择/批准/Core四种COMMIT丢应答按原记录恢复，错quote/run、额外批准字段、未批准/撤权及冻结后换选择拒绝。最终一模型调用、一订单、一审批消费、一幂等记录，原模型input/plan和resourceOrigin/累计预算保留，reconcile不重发或再锁库存，付款/履约不从建单推断。
+- 首轮参数未齐与后续报价安全投影不含request的隔离验证预期已纠正，未改产品门；正常宿主权威来源和原报价缓存断点先复现后修复，失败日志均保留。最终`python -I .../run-offline.py output/typecheck-ai-native.cjs quote-to-order-api-types-composition-final.log`：API/shared687 roots/0诊断/noEmit/退出0，diff检查退出0。DB事实/事务/锁、Gateway routing/admission/transport和该例财务生命周期仍为明确离线替身，上一片真实BudgetService单账证据不冒称本例重新完整验证；非真实MySQL/供应商、监听HTTP、多端或生产验收。没有正式测试删除/放宽、浏览器、安装、生成、迁移、提交或启用。
+- 负责人要求快速收尾，至此停止扩范围。原G3未跨G4，64.3%/ENTRY52.8%/正式0/28保持；剩余可信输入计数/recorded、标准live能力与单账全链、全部报价变体/拒绝及故障窗、真实环境验收仍待补。当前闭环不代表AI Native整项完成，客户端/继承WIP全部保留。
+
+## 近期核心：报价澄清标准执行装配（2026-10-23）
+
+- 本树未提交功能片（AIN-05/06/09/11/15、ENTRY-05/07/08）：标准AppModule原先仅注册场景观察与独立建单链，任务中心虽按`AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS`委托回答/继续，标准根没有该执行provider。现`AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER`接回既有`composeRequestBoundPersistedOriginalSceneModel`→原澄清输入仓储/运行器→`composePersistedTaskGateway`→原唯一预算账；独立服务器`AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION`沿原配置schema选择Profile、输出上限、calls或recorded、host/knowledge，不接受请求提供模型/连接/lease，默认仍关闭。报价模型门与订单解释、能力probe、真人批准建单门分别配置。当前人类CAS计划生产者仅在该门明确配置后允许`ai.model.text`，动作政策生产者补原request/submit/resume输入操作；模型门本身不开放`decide_approval`或`rental.order.commit`。不播种授权或建立新运行器。
+- `AiOriginalQuoteModelExecutionController`只装配既有12个动作，原问题/结果观察仍由独立Controller提供，未重复注册读取或模型驱动；shared原请求/回答/取消/接管schema复用，实际Guard精确POST及OpenAPI同片接通，入口需order:create且内部原owner/场景/当前权限/政策继续核验。resume/continue/reconcile的组装预检与请求取消现绑定原有界等待，进入实际runner后保持原工作窗，不能把5秒读上限套到完整模型执行；quote确认仍走原Core操作且非订单批准。原unknown、冻结输入/计划、后继run与累计资源不改，不热迁移旧任务。
+- 原双offline preload、固定无效DATABASE_URL、本树绝对audit/writeRoot/TEMP/cache且禁compile cache：`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/quote-execution-smoke.cjs quote-execution-smoke-final.log`退出0。实际新provider在缺配置时零依赖访问；配置后从标准计划/动作政策与原请求生产者进入实际Gateway能力preflight，缺live证据保持拒绝，零新invocation/reservation。正向用实际Controller/TaskCenter provider/Auth/Guard、原澄清runner及PersistentGatewayBudget/BudgetService/Prisma单账跑“启动→持久问题→回答COMMIT丢应答→明确原后继执行”：两次调用、两预留/六allocation/两settle、一累计预算，旧输入保留，重复旧继续/撤权拒绝；后继仍有未确认参数则WAITING_INPUT，不伪造目标成功。12路由与OpenAPI唯一、非法配置/请求拒绝。DB、业务目录查询、routing/admission/transport为明确离线替身，正向并未通过生产live认证门，不是完整标准真实供应商或报价到建单全链验收。
+- 首轮TS2352通过明确的闭合拒绝方法对象修正，未cast放宽；旧目录夹具缺分页字段、历史创建规则/时钟与标准不符及缺OperationLog依赖只修隔离验证入口。旧验证把继续后仍待确认误当成功、把usage收据state误当财务settled的预期均按实际职责纠正，保留失败；一次验证110秒超时且未生成日志，后续复验退出0，output wrapper新增超时输出保全，不提高超时或放宽生产门。`python -I .../run-offline.py output/typecheck-ai-native.cjs quote-execution-api-types-final.log`：API/shared687 roots/0诊断/noEmit/退出0，定向diff/记录链接检查退出0。没有浏览器/真库/外联、构建/生成/迁移、安装、提交或启用，客户端及继承WIP全部保留。
+- 原任务均已有G3，当前未跨G4，64.3%/52.8%/正式0/28不涨分。这次补的是实际标准执行缺口而非读取入口；尚需可信计数/recorded准入生产者、标准live能力下完整执行、显式quote-confirm→原真人选择/审批→Core建单全链及全部故障窗。三种原协议继续只在适配层；Runtime与Provider替换不改变权限/预算/收据事实，未接SDK/新引擎。
+
+## 近期功能：平台能力原证据只读消费（2026-10-23）
+
+- 本树未提交功能片（AIN-05/11、ENTRY-05）：原平台 ProfileHost 增加明确的能力读取，`GET /api/platform/ai/providers/{profileId}/capabilities`复用实际 SaaS view/Guard/ALS、canonical platform scope、原Profile和能力仓储。八类白名单、原记录支持/不支持/未验证、mock/live/未认证、原配置修订及时间，与当前核验分别显示；仅既有可信live原收据验证器可认可支持。缺记录、手工/声明/mock、旧修订、过期或缺原receipt保持未验证，停用时仅历史观察，不借用租户执行身份。读取前后复验当前身份、Profile指纹/状态与证据快照；不解密、创建任务、探测、派发或改账。命名shared闭合schema、OpenAPI、现有provider/API/后台消费者同片接通；首次零请求，配置变化重挂，隐藏/卸载迟到不回填，结束读取不遗留busy锁。当前观察不授后续执行权。
+- 原双offline preload、固定无效DB、本树绝对audit/writeRoot/TEMP/cache与禁compile cache下，`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/platform-capability-smoke.cjs platform-capability-smoke-final.log`退出0。实际Auth/Guard/Controller/scope/Prisma证据服务核对八类、缺原live收据确实查询且不认证、manual/declared/mock/缺记录/过期/旧修订/停用、跨scope/Profile、无view/非SaaS/失效会话、读中撤权/配置/证据变化及abort；零凭据与数据库写入。实际TSX在隔离hooks下验证明确读取、畸形/未来证据拒绝、并发和隐藏/卸载迟到；DB/原证据与hooks为替身，不是MySQL、真实平台探测或浏览器验收。首轮撤权拒绝被Controller误报503，已复用既有错误映射修成403，非法输入400，资源缺失仍503；失败日志保留。
+- 相同守卫的原`output/typecheck-ai-native.cjs`→`platform-capability-api-types-final.log`：API/shared687 roots/0诊断/noEmit/退出0；原`probe-cancellation-smoke.cjs ... platform-capability-admin-types-final.log types`：Admin248 roots/0诊断/noEmit/退出0。中断前一项TS2367已局部修正；恢复首轮Admin的客户端WIP TS2339曾退出1，交原作者后本次全量源码检查0诊断，未替其改文件。定向diff/文档本地链接检查退出0。没有新增正式测试文件、生成、迁移、真实访问或生产开放，全部WIP/output和旧失败保留，未提交。
+- AIN-05/11及ENTRY-05原G3/75%未跨G4，64.3%/52.8%/正式0/28保持。平台主体独立付费验证尚缺真实任务/预算/invocation装配；当前live原receipt核验仍沿原WORKSPACE探测事实，不改成平台旁路。Embedding/Reasoning缺客观方法、可信冻结输入计数生产及完整标准模型单账仍为实现/可信依赖缺口，不能仅写成待环境验收。本片不切Runtime/Provider或客户端路线，不删除旧服务端Agent。
+
+## 近期功能：原账务恢复操作精确收据（2026-10-22）
+
+- 本树未提交功能片（AIN-03/05/06/11、ENTRY-05/08）：原`PrismaBudgetRepository.readMutation`只在RepeatableRead有界读事务核对既有`AiBudgetLedgerEntry`的原reservation/eventKey、scope、kind及完整可信用量指纹，不写或重放mutation。`BudgetService.readMutation`使用当前read授权与原证据复验；旧adapter无此方法保持unavailable。原Gateway recovery新增`readOperation`，沿既有固定release/reconcile事件键算法，不接受客户端eventKey/usage。probe原请求确定同一task/call/reservation，`POST /ai-native/text-capability/accounting/operation`只收requestKey和固定operation，shared闭合schema/OpenAPI/Controller/原Guard映射及后台核对已接。只有精确匹配observed解除对应unknown，原动作引用保留，不重提、不授执行；普通settle或当前终态没有该原事件仍not_observed，不证明回滚。其他场景内部可复用恢复读端口，本片未新增其HTTP消费者；既有写路径与账本不改。
+- 原双offline preload、固定无效DB、本树绝对audit/writeRoot/TEMP/cache及禁compile cache：`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/probe-accounting-smoke.cjs probe-accounting-operation-smoke-final.log`退出0，实际原workflow/Auth/Guard/Controller/Prisma单账一次调用，reconcile COMMIT丢应答→重载→当前账不解锁→精确原事件解除本次unknown，零重放/解密/新派发；缺事件、篡改用量hash、撤权拒绝，release只读使用历史合成事件，closed shared schema拒绝额外字段。DB/协议/时钟为替身，历史release事件与仅UI部分回执合成，非MySQL/供应商或真实释放验收。原`output/typecheck-ai-native.cjs`API/shared686 roots、Admin源码244 roots均0诊断/noEmit/退出0，定向diff退出0；原失败记录保留，没有新增正式测试文件/迁移/生成/外联或启用。
+- 门槛复核仍未跨G4，64.3%/52.8%/正式0/28保持，WIP不涨分。精确核对不把财务收敛当任务完成；未观察旧settle/release其他事件不自动补原恢复事件。平台独立能力/Embedding/Reasoning、可信计数生产者、完整标准模型单账和全部恢复故障窗仍待补/待验；继续复用当前Runtime与Provider各自独立的预算/证据边界，不引入第二账本。
+
+## 近期功能：租户能力验证原账务消费者（2026-10-22）
+
+- 本树未提交功能片（AIN-05/06/11/12、ENTRY-05/08）：原`CapabilityProbePanel`接既有`accounting/{read|release-unsent|reconcile}`，仅传原requestKey，服务器沿不可变请求/任务/调用/能力描述收据/预算关联确定原账，浏览器不提供金额、reservationId、计价或usage。默认零读取/动作，读后展示原六位金额或整数tokens/calls、预留/实耗和状态，复用从任务用量组件抽出的`usage-quantity`，不换汇或混算。释放与核对须人类明确确认且服务端原证据成立；页面只保留task/call/reservation/动作引用，不留正文或凭据，返回和状态仅构造公共投影。新执行关闭、当前Profile移除不消除合法原账，当前撤权仍清旧观察。正常动作回执必须是相同原调用与对应终态；丢应答后可读取当前账务，但当前值不是精确操作收据，unknown不清、不再次办理，原取消unknown也不因账务状态解除。
+- 双offline preload、固定无效DB、本树绝对audit/writeRoot/TEMP/cache与禁compile cache下，`python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/probe-accounting-smoke.cjs probe-accounting-smoke-final.log`退出0：复用既有probe初始化，实际workflow/Controller/Auth/Guard/Prisma单账的一次执行与历史读取，移除Profile/配置后零解密/派发/账务新写，撤权清观察；UI合成回执核对精确单位、额外秘密字段不保留、释放一次不重提、账务丢应答重载仍锁及取消独立。协议、DB聚合/事务为替身，UI释放/核对回执合成，非真实金融操作验收。原取消组合复验退出0；Admin Compiler API244 roots/0诊断/noEmit退出0。首轮隔离ESM加载退出1，修output loader后通过；最终返回投影的`as`换行产生5项类型诊断，局部修后0，失败日志保留。未新增正式测试文件、修改原断言、生成、迁移、外联或启用。
+- 复核上述原任务及ENTRY门槛未跨G4，64.3%/52.8%/正式0/28保持；未提交不加分。完整精确账务操作收据解锁、本页全部恢复窗口、平台独立能力/Embedding/Reasoning、可信计数生产与标准模型正向全链仍分别待补，不能以当前记录读取代替供应商账单或生产认证。继续自研且Runtime/Provider各自可替换，原账及当前善后授权留在正式域，不迁入客户端或新引擎。
+
+## 近期功能：能力验证取消原收据消费（2026-10-22）
+
+- 本树未提交功能片（AIN-05/06/12、ENTRY-08）：`CapabilityProbeSession`取消发送前保存原taskId/expectedRevision，租户`/settings/ai`明确点击核对时由`aiCapabilityProbeApi.readCancellationReceipt`委托既有`aiTaskCenterApi.stopReceipt`；沿原任务中心当前Auth/Guard、owner/动作政策和取消事件收据，不新增协议、仓储、运行器或账本。匹配且observed才解除取消unknown，原请求/启动标记/取消引用仍保留，不能再次start/cancel；明确reconcile仍交原运行器复核，不由收据自动继续。旧journal无原CAS引用、not_observed、错收据、撤权或旧代次迟到保持未知，不拿当前任务修订补造历史。
+- `python -I output/review-p1-678-20261022.GB4pqh/run-offline.py output/review-p1-678-20261022.GB4pqh/probe-cancellation-smoke.cjs probe-cancellation-smoke-closeout.log`退出0：实际会话→真实Auth/Guard→TaskCenter应用/原仓储，取消已提交但丢应答→重载核对、后续修订、缺事件、错回执、撤权/跨空间、旧journal及卸载迟到，无重复取消或模型/预算写。DB与取消应答丢失为离线事务替身；显式reconcile委托仅用哨兵核对，不宣称运行器善后全链复验。相同守卫命令加`types`：Admin243 roots/0诊断/noEmit/退出0；原`audit-admin-components.cjs --json`只读清单123条/263文件/0坏hash/退出0，定向diff与两份记录本地链接检查退出0。首轮ts-node缺ES2022 lib退出1，仅修隔离验证入口后通过，原失败保留。固定无效DB、双preload、本树绝对audit/writeRoot/TEMP/cache、禁编译缓存；一次性组合留output，没有新增正式测试文件或修改原断言。无真实HTTP/MySQL/模型/浏览器验证、构建、生成、迁移或启用。
+- 复核AIN-05/06/12、ENTRY-08原G3/75%均未跨G4；原28项64.3%、ENTRY52.8%、正式验收0/28保持，不以本片WIP或验证数加分。可信输入计数生产者、完整标准模型单账正向、平台独立能力宿主及Embedding/Reasoning仍是独立余项；本片不重做已接租户入口。Runtime/Provider边界不变，客户端只消费本系统原取消契约，未来替换不得把观测当执行、换键重发或释放未知预算。
 
 ## 近期功能：动作政策原CAS收据与只读装配（2026-10-21）
 

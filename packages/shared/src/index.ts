@@ -6,6 +6,7 @@
  * 本包同时导出类型、schema、常量与运行时工具，并非纯类型包；只需类型时用 import type。
  * 新增或调整导出须核对生产者、DTO/OpenAPI、各端消费者和构建边界，不把源码与 dist 一致视为当然。
  */
+export * from "./agent-desktop";
 export * from "./common";
 export * from "./core";
 export * from "./platform";

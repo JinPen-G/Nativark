@@ -1,0 +1,102 @@
+{
+  "repository": "https://github.com/deepseek-ai/deepseek-harness",
+  "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "retrieved_on": "2026-10-22",
+  "archive_url": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/687f282e8625c6b8d11ff58211a90524be2e4317",
+  "archive_sha256": "157903b22c2881d3678d846755afe957a48df834e747deda805a1195ce25a146",
+  "source_file_count": 16283,
+  "source_bytes": 133199860,
+  "source_manifest_sha256": "1ad4cf6d79447a62444b5d3cfb38c0a50738af599686a68c6e97eb15898965a0",
+  "source_directory": "harness",
+  "license_file": "harness/LICENSE",
+  "regular_file_contents_modified": true,
+  "local_changes_since": "2026-10-23",
+  "local_changes_owner": "docs/Agent接入改造/Agent接入改造-开发记录.md",
+  "baseline_manifest": "output/harness-source-download-20261022-kwz_wa0j/source-manifest.json",
+  "symlinks": [
+    {
+      "path": ".agents/notes/implemented/CLAUDE.md",
+      "link_target": "AGENTS.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": ".agents/skills/agent-experience/SKILL.md",
+      "link_target": "../../../packages/preset/agent-preset/skills/agent-experience/SKILL.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": ".claude/skills",
+      "link_target": "../.agents/skills",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "CLAUDE.md",
+      "link_target": "AGENTS.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "apps/cli/tests/profiles/acp/cordis.yml",
+      "link_target": "../../../../../snapshots/acp/escalation-approved/cordis.yml",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "packages/CLAUDE.md",
+      "link_target": "AGENTS.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/acp/escalation-approved/system-prompt.expected.md",
+      "link_target": "../../session/text-turn/system-prompt.expected.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/acp/escalation-approved/tool-schemas.expected.json",
+      "link_target": "../../session/text-turn/tool-schemas.expected.json",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/acp/image-compaction/system-prompt.expected.md",
+      "link_target": "../../session/read-image/system-prompt.expected.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/sdk/account-provider-signout/system-prompt.expected.md",
+      "link_target": "../text-turn/system-prompt.expected.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/sdk/account-provider-signout/tool-schemas.expected.json",
+      "link_target": "../text-turn/tool-schemas.expected.json",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/session/agent-instructions/workspace/AGENTS.md",
+      "link_target": "AGENTS.canonical.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "snapshots/session/agent-instructions/workspace/nested/AGENTS.md",
+      "link_target": "AGENTS.canonical.md",
+      "representation": "materialized_copy"
+    },
+    {
+      "path": "vendor/CLAUDE.md",
+      "link_target": "AGENTS.md",
+      "representation": "materialized_copy"
+    }
+  ],
+  "symlink_policy": "Internal links materialized as copies for Windows; original links preserved in archive.",
+  "dependencies_installed": true,
+  "upstream_scripts_executed": true,
+  "installation": {
+    "prepared_on": "2026-10-23",
+    "package_manager": "pnpm@11.28.5",
+    "automatic_lifecycle_scripts": "skipped",
+    "git_hooks_installed": false,
+    "evidence_directory": "output/agent-desktop-install-20261023-q16gtnf6",
+    "electron": "44.7.0",
+    "node_runtime": "24.21.0",
+    "python_runtime": "3.12.14",
+    "primary_runtime_directory": "output/agent-runtime-q16gtnf6/primary-runtime"
+  }
+}

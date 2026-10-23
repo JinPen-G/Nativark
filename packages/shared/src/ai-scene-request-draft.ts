@@ -57,6 +57,15 @@ export interface AiOriginalTaskAccountingRequestDraft {
   original: AiSceneRequestReadDraft;
   callId: string;
 }
+/** Observe the exact recovery event, independently of current balance. */
+export interface AiOriginalTaskAccountingOperationRequestDraft extends AiOriginalTaskAccountingRequestDraft {
+  operation: 'releaseUnsent' | 'reconcile';
+}
+export interface AiOriginalTaskAccountingOperationResponseDraft extends AiOriginalTaskAccountingOperationRequestDraft {
+  taskId: string; reservationId: string; status: 'observed' | 'not_observed';
+  execution: 'read_only_no_dispatch_or_release'; automaticRetry: false;
+  semantics: 'original_accounting_operation_not_current_balance';
+}
 export interface AiTaskBudgetUsageRecordDraft {
   invocationId: string; callId: string; accounting: 'recorded'; reservationId: string;
   sceneCode: string; runId: string; stepId: string; revision: number; observedVersionAt: string;
@@ -220,7 +229,7 @@ export const AI_SCENE_PLAN_POLICY_HTTP_DRAFT = Object.freeze({
  * submission contract; callers never supply leases, prompts or model settings. */
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
-  start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
+  start: 'start', readInput: 'input', refreshInput: 'input/refresh', submitAnswer: 'input/submit', resume: 'resume', reconcile: 'reconcile',
   readExecution: 'execution', readRecoverySnapshot: 'execution/snapshot', recover: 'recover', takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt',
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
@@ -251,7 +260,15 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
  * and no transport action may select a tenant, actor or current model price. */
 export const AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/accounting`, method: 'POST',
-  read: 'read', releaseUnsent: 'release-unsent', reconcile: 'reconcile'
+  read: 'read', releaseUnsent: 'release-unsent', reconcile: 'reconcile', readOperation: 'operation'
+} as const);
+
+/** Opening diagnosis model actions reuse original-reference/run contracts.
+ * Configuration writes and approvals remain on their existing independent host. */
+export const AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/opening-model`, method: 'POST',
+  start: 'start', recover: 'recover', reconcile: 'reconcile', takeover: 'takeover',
+  requestCancel: 'cancel', readExecution: 'execution'
 } as const);
 
 /** Explicit original opening READ host, not model execution or production

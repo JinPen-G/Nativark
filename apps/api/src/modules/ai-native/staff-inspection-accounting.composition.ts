@@ -13,6 +13,7 @@ import { composePersistedTaskAccountingRecovery } from './task-model-gateway.com
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { BudgetError } from './budget/budget.ports';
 import { freezeOriginalInput } from './task-request/original-request.validation';
+import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 
 export const AI_STAFF_INSPECTION_ACCOUNTING = Symbol('AI_STAFF_INSPECTION_ACCOUNTING');
 type Dependencies = Omit<PersistedTaskAuthorizationDependencies, 'credentials'> & { db: PrismaClient; guard: Pick<ApiAuthGuard, 'canActivate'> };
@@ -29,42 +30,50 @@ export function composeStaffInspectionAccounting(input: Dependencies, scenes: re
     if (!header.success) throw denied();
     let active = true;
     const close = () => { active = false; }, requestId = randomUUID();
+    const assertActive = () => { if (!active || signal?.aborted) throw denied(); };
     const credentials = { current: async () => {
-      if (!active || signal?.aborted) throw denied();
+      assertActive();
       return { authorization: header.data, requestId, audience: 'staff' as const };
     } };
     signal?.addEventListener('abort', close, { once: true });
     try {
-      return await runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         const dependencies = { ...input, credentials, clock }, authorization = composePersistedTaskAuthorization(dependencies);
         const current = async () => {
+          assertActive();
           const context = await authorization.authority.resolve(command.taskId, 'read_step_terminal');
+          assertActive();
           if (context.audience !== 'staff' || context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
           const access = aiTaskAccessFromContext(context, command.taskId, clock());
-          const task = await input.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true,
-            sceneCode: true, sceneVersion: true, inputRef: true, inputRevision: true, inputHash: true, archivedAt: true } });
+          const task = structuredClone(await input.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true,
+            sceneCode: true, sceneVersion: true, inputRef: true, inputRevision: true, inputHash: true, archivedAt: true } }));
+          assertActive();
           const scope = await authorization.scopes.resolveCurrent();
+          assertActive();
           if (!task || task.id !== command.taskId || task.scopeId !== scope.scope.id || task.archivedAt !== null || !task.inputRef
             || !selected.some(scene => scene.code === task.sceneCode && scene.version === task.sceneVersion)) throw denied();
           const { authorizedAt: _at, requestId: _request, ...identity } = context;
           return { task, scope, actorId: context.actor.userId, binding: requestFingerprint({ task, identity }) };
         };
         const before = await current();
-        const invocation = await input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
+        const invocation = structuredClone(await input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
           scopeId: before.scope.scope.id, callId: command.callId } }, select: {
-          id: true, taskId: true, scopeId: true, actorId: true, sceneCode: true, priceVersion: true } });
+          id: true, taskId: true, scopeId: true, actorId: true, sceneCode: true, priceVersion: true } }));
+        assertActive();
         if (invocation && (invocation.taskId !== command.taskId || invocation.scopeId !== before.scope.scope.id
           || invocation.actorId !== before.actorId || invocation.sceneCode !== before.task.sceneCode)) throw denied();
         let account = null;
         try {
           if (invocation) {
-            const reservation = await input.db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
-              scopeId: before.scope.scope.id, scopeKind: 'WORKSPACE', callId: command.callId } }, select: { id: true, unitKind: true, priceVersion: true } });
+            const reservation = structuredClone(await input.db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
+              scopeId: before.scope.scope.id, scopeKind: 'WORKSPACE', callId: command.callId } }, select: { id: true, unitKind: true, priceVersion: true } }));
+            assertActive();
             if (reservation) {
               if (reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind)) throw denied();
               const recovery = composePersistedTaskAccountingRecovery({ ...dependencies, taskId: command.taskId,
                 pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: reservation.priceVersion } });
-              const record = reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId: command.callId });
+              const record = structuredClone(reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId: command.callId }));
+              assertActive();
               account = { status: record.status, usageRecorded: record.actual !== null, dispatched: record.dispatched };
             }
           }
@@ -79,7 +88,7 @@ export function composeStaffInspectionAccounting(input: Dependencies, scenes: re
         return freezeOriginalInput(aiTaskAccountingObservationSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION,
           callId: command.callId, state: account ? 'observed' : 'unknown', account, meaning: 'ai_invocation_not_business_payment',
           observedAt: clock().toISOString(), execution: 'not_authorized_by_accounting', retryable: false, nextAction: 'read_original_accounting' }));
-      });
+      }), reconcile, signal);
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
   return Object.freeze({

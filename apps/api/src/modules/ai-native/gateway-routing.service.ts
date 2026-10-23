@@ -36,7 +36,7 @@ export class AiGatewayRoutingService {
   constructor(
     private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>,
     private readonly configuration: Pick<TenantModelConfigService, 'selectionForInvocation'>,
-    private readonly router: Pick<ProviderRouterService, 'resolve'>,
+    private readonly router: Pick<ProviderRouterService, 'resolve'> & Partial<Pick<ProviderRouterService, 'assertCurrent'>>,
     private readonly scene: AiRouteScene
   ) {
     if (!scopes || typeof scopes.resolveCurrent !== 'function' || typeof scopes.resolveRoutingScopes !== 'function'
@@ -91,7 +91,23 @@ export class AiGatewayRoutingService {
   }
 
   async assertCurrent(context: GatewayContext, resolution: GatewayRoutingResolution): Promise<void> {
-    const current = await this.resolve(context, resolution.requiredCapabilities);
-    if (gatewayRoutingBinding(current) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
+    if (!this.router.assertCurrent) {
+      const current = await this.resolve(context, resolution.requiredCapabilities);
+      if (gatewayRoutingBinding(current) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
+      return;
+    }
+    const expected = contextSchema.parse(structuredClone(context)), original = structuredClone(resolution);
+    const check = async () => {
+      const selected = await this.selection(expected);
+      const current = structuredClone(await this.scopes.resolveRoutingScopes(selected.mode));
+      this.match(expected, current.context);
+      if (requestFingerprint(identity(current.context)) !== requestFingerprint(identity(original.context))
+        || requestFingerprint(current.consumerScope) !== requestFingerprint(original.consumerScope)) throw new ModelGatewayError('FORBIDDEN');
+      if (requestFingerprint(selected) !== requestFingerprint(original.selection)
+        || requestFingerprint(current.configurationScope) !== requestFingerprint(original.route.scope)) throw new ModelGatewayError('CONFIG_INVALID');
+    };
+    await check();
+    await this.router.assertCurrent(structuredClone(original.route), [...original.requiredCapabilities]);
+    await check();
   }
 }

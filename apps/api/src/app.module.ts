@@ -101,7 +101,7 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
-import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
+import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalQuoteModelExecutionController, AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
 import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER, AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER, AI_NATIVE_CAPABILITY_PROBE_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/original-order-read.controller";
 import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/original-task-accounting-http.module";
@@ -110,7 +110,9 @@ import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
 import { AiTaskCenterController } from './modules/ai-native/task-center.application';
-import { AI_NATIVE_TASK_CENTER_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
   AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
@@ -118,8 +120,8 @@ import { HumanMemoryManagementController } from './modules/ai-native/knowledge/h
 import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
 import { HumanKnowledgeManagementController } from './modules/ai-native/knowledge/human-knowledge-management.controller';
 import { HumanKnowledgeConsumptionController } from './modules/ai-native/knowledge/human-knowledge-consumption.controller';
-import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS, AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS, AI_NATIVE_QUOTE_ORDER_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
-import { AiHumanQuoteSelectionController, AiHumanQuoteOrderController, AiSelectedQuoteTaskController } from './modules/ai-native/task-request/human-quote-selection.controller';
+import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS, AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS, AI_NATIVE_QUOTE_ORDER_PROVIDERS, AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiHumanQuoteSelectionController, AiHumanQuoteOrderController, AiSelectedQuoteTaskController, AiClarifiedQuoteSelectionController } from './modules/ai-native/task-request/human-quote-selection.controller';
 import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController,
   AiSettingsTaskController, AiSettingsTaskReadController } from './modules/ai-native/scenes/settings-task.controller';
 import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
@@ -171,6 +173,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     AiSettingsTaskController,
     AiSettingsTaskReadController,
     AiHumanQuoteSelectionController,
+    AiClarifiedQuoteSelectionController,
     AiHumanQuoteOrderController,
     AiSelectedQuoteTaskController,
     AiScenePlanPolicyController,
@@ -179,6 +182,8 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     WechatClientEntryController,
     AiRetentionController,
     AiOriginalSceneObservationController,
+    AiOriginalQuoteModelExecutionController,
+    AiOriginalOpeningModelExecutionController,
     AiOriginalTaskActionPolicyController,
     HealthController,
     OpenApiController,
@@ -233,8 +238,11 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     ...AI_NATIVE_BUSINESS_FAILURE_PROVIDERS,
     ...AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS,
     ...AI_NATIVE_QUOTE_ORDER_PROVIDERS,
+    AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER,
     AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
+    AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
+    AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,

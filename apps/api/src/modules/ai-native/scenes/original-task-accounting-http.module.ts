@@ -31,6 +31,11 @@ export class AiOriginalTaskAccountingController {
   reconcile(@Req() request: Request, @Body() body: unknown) {
     return respondAiScene(() => withRequestAbort(request, signal => this.requests.reconcile(request, body, signal)), 'read_original_accounting');
   }
+  @Post(routes.readOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOperation(@Req() request: Request, @Body() body: unknown) {
+    if (typeof this.requests.readOperation !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return respondAiScene(() => withRequestAbort(request, signal => this.requests.readOperation(request, body, signal)), 'read_original_accounting');
+  }
 }
 
 @Module({})

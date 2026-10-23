@@ -941,21 +941,21 @@ export function RentalOrderDetailPage() {
           {canViewWorkOrders && <Button type="link" style={{ marginTop: 8, padding: 0 }} onClick={() => navigate("/rental/work-orders")}>{t("前往养护工单管理")}</Button>}
         </Card>
       ) : null}
-      {canViewFunding && <Card title={<Space><DollarOutlined />{t("收付款、押金与预授权")} <Tag color="orange">{t("模拟资金")}</Tag></Space>}>
+      {canViewFunding && <Card title={<Space><DollarOutlined />{t("收付款、押金与预授权")} {funding.data && <Tag color={funding.data.balanceBasis === "simulated" ? "orange" : "blue"}>{t(funding.data.balanceBasis === "simulated" ? "模拟资金（演练）" : "实际资金")}</Tag>}</Space>}>
         {funding.data?.rental && <Space orientation="vertical" style={{ marginBottom: 16 }}>
           <span>{t("最终应收")} {money(funding.data.rental.payable)} · {t("已收")} {money(funding.data.rental.collected)} · {t("已退")} {money(funding.data.rental.refunded)} · {t("保证金抵扣")} {money(funding.data.rental.securityCaptured)}</span>
           <span>{funding.data.rental.balance < 0 ? t("待退") : t("待收")} {money(Math.abs(funding.data.rental.balance))} · {t("续租待补")} {money(funding.data.rental.pendingExtensionAmount)}</span>
-          {canSettleFunding && <Space>
+          {canSettleFunding && funding.data.simulationAllowed === true && <Space>
             {funding.data.rental.balance + funding.data.rental.pendingExtensionAmount > 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "append" })}>{t("登记模拟收款／补款")}</Button>}
             {funding.data.rental.balance < 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "refund" })}>{t("办理模拟退款")}</Button>}
           </Space>}
         </Space>}
-        <Alert type="warning" showIcon title={t("当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。")} style={{ marginBottom: 16 }} />
+        <Alert type="warning" showIcon title={t(funding.data?.balanceBasis === "simulated" ? "以下余额及操作仅用于演练，不代表真实收款、冻结或退款。" : "余额只计实际资金。模拟历史不冲抵实款；线下收款须走原登记确认，线上收退款须走原支付流程。未接通的真实保证金动作不能用模拟代替。历史事件后余额不作为当前余额。")} style={{ marginBottom: 16 }} />
         <Descriptions column={{ xs: 1, md: 2 }} items={[
           { key: "deposit", label: `${t("应收押金")} ${money(depositRequirement)}`, children: funding.data ? `${t("已收")} ${money(funding.data.deposit.collected)} / ${t("已抵扣")} ${money(funding.data.deposit.captured)} / ${t("已退")} ${money(funding.data.deposit.refunded)} / ${t("余额")} ${money(funding.data.deposit.balance)}${pendingDepositAmount > 0 ? ` / ${t("续租待补")} ${money(pendingDepositAmount)}` : ""}` : t("加载中") },
           { key: "preauth", label: `${t("应冻结预授权")} ${money(preauthorizationRequirement)}`, children: funding.data ? `${t("已冻结")} ${money(funding.data.preauthorization.frozen)} / ${t("已转扣")} ${money(funding.data.preauthorization.captured)} / ${t("已释放")} ${money(funding.data.preauthorization.released)} / ${t("余额")} ${money(funding.data.preauthorization.balance)}${pendingPreauthorizationAmount > 0 ? ` / ${t("续租待补")} ${money(pendingPreauthorizationAmount)}` : ""}` : t("加载中") }
         ]} />
-        {canSettleFunding && <Space wrap style={{ margin: "12px 0" }}>
+        {canSettleFunding && funding.data?.simulationAllowed === true && <Space wrap style={{ margin: "12px 0" }}>
           {depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>{t("模拟收取押金")}</Button>}
           {(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>{t("追加押金")}</Button>}
           {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>{t("押金抵扣")}</Button>}
@@ -975,7 +975,8 @@ export function RentalOrderDetailPage() {
           { title: t("金额"), dataIndex: "amount", render: (value) => money(Number(value)) },
           { title: t("事件后余额"), dataIndex: "balanceAfter", render: (value) => money(Number(value)) },
           { title: t("原因"), dataIndex: "reason" },
-          { title: t("状态"), render: (_, row) => <Tag color={row.action === "fail" ? "red" : "orange"}>{row.action === "fail" ? `${t("失败 · ")}${row.failureCode}` : t("模拟成功")}</Tag> }
+          { title: t("来源"), dataIndex: "provider", render: (value) => t(({ mock: "模拟", offline: "线下确认", alipay: "支付宝", wechat_pay: "微信支付", stripe: "Stripe" } as Record<string, string>)[String(value)] ?? "待核对") },
+          { title: t("状态"), render: (_, row) => <Tag color={row.action === "fail" ? "red" : row.provider === "mock" ? "orange" : "blue"}>{row.action === "fail" ? `${t("失败 · ")}${row.failureCode}` : t(row.provider === "mock" ? "模拟记录" : "已记录")}</Tag> }
         ]} />
       </Card>}
       {Boolean(extensions.data?.length) && <Card className="data-panel" title={<span className="panel-title">{t("续租记录")} <span className="panel-count">{extensions.data?.length}</span></span>}>

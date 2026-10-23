@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
-import { AI_TOOL_DRAFT_VERSION, type AiTextCapabilityAccountingResponseDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, type AiTextCapabilityAccountingResponseDraft,
+  type AiTextCapabilityAccountingOperationResponseDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
@@ -207,8 +208,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   // Original financial recovery never resolves today's probe configuration or
   // claims a runner lease. The immutable request determines the one call; the
   // ordinary budget service still verifies current authority and usage facts.
-  const originalAccounting = async (requestKeyValue: string, operation: 'read' | 'releaseUnsent' | 'reconcile'):
-    Promise<AiTextCapabilityAccountingResponseDraft> => {
+  const originalAccounting = async (requestKeyValue: string, operation: 'read' | 'releaseUnsent' | 'reconcile', receiptOnly = false):
+    Promise<AiTextCapabilityAccountingResponseDraft | AiTextCapabilityAccountingOperationResponseDraft> => {
     const parsed = id.max(128).safeParse(requestKeyValue);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const requestKey = parsed.data;
@@ -261,6 +262,15 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
         credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard, taskId, clock: input.clock,
         pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+      if (receiptOnly) {
+        if (operation === 'read') throw unavailable();
+        const observed = await observe(() => recovery.readOperation({ reservationId: reservation.id, operation }));
+        await observe(verify);
+        return { requestKey, taskId, callId, reservationId: reservation.id,
+          operation: operation === 'releaseUnsent' ? 'releaseUnsent' : 'reconcileAccounting', status: observed.status,
+          execution: 'read_only_no_dispatch_or_release', automaticRetry: false,
+          semantics: 'original_accounting_operation_not_current_balance' };
+      }
       const record = await observe(() => operation === 'read' ? recovery.readCall({ callId })
         : recovery[operation]({ reservationId: reservation.id }), undefined, operation !== 'read');
       returnedMutation = operation !== 'read';
@@ -303,9 +313,11 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
     readOriginalCapability: (requestKey: string) => producer.originals.readOriginalCapability(requestKey),
     readOriginalPolicyExpiry: (requestKey: string) => producer.originals.readPolicyExpiry(requestKey),
-    readOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'read'),
-    releaseOriginalUnsent: (requestKey: string) => originalAccounting(requestKey, 'releaseUnsent'),
-    reconcileOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'reconcile'),
+    readOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'read') as Promise<AiTextCapabilityAccountingResponseDraft>,
+    releaseOriginalUnsent: (requestKey: string) => originalAccounting(requestKey, 'releaseUnsent') as Promise<AiTextCapabilityAccountingResponseDraft>,
+    reconcileOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'reconcile') as Promise<AiTextCapabilityAccountingResponseDraft>,
+    readOriginalAccountingOperation: (requestKey: string, operation: 'releaseUnsent' | 'reconcileAccounting') =>
+      originalAccounting(requestKey, operation === 'releaseUnsent' ? 'releaseUnsent' : 'reconcile', true) as Promise<AiTextCapabilityAccountingOperationResponseDraft>,
     createTask: (value: unknown) => producer.create(value),
     readCreation: (value: unknown) => producer.readCreation(value),
     async readHistoricalOriginal(requestKey: string) {

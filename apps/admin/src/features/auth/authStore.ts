@@ -1,7 +1,8 @@
 import type { AuthUser, BusinessWorkspace, LoginResponse, RentalCapability, TenantContext } from "@rental-os/shared";
 import { create } from "zustand";
 import { api } from "@/api/platform";
-import { clearSessionQueryCache } from "@/app/queryClient";
+import { onSessionRefreshed } from "@/api/http";
+import { clearSessionQueryCache, currentSessionEpoch } from "@/app/queryClient";
 
 const keys = {
   token: "rental_access_token",
@@ -33,6 +34,8 @@ function persistSession(
 
 interface AuthState {
   ready: boolean;
+  /** Only original server responses establish desktop admission; storage synchronization never does. */
+  sessionVerified: boolean;
   token?: string;
   tenant?: TenantContext;
   user?: AuthUser;
@@ -53,50 +56,64 @@ interface AuthState {
   hasCapability: (capability?: RentalCapability) => boolean;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set, get) => {
+  let verification: { epoch: number; promise: Promise<void> } | undefined;
+  return {
   ready: false,
+  sessionVerified: false,
   token: window.localStorage.getItem(keys.token) ?? undefined,
   tenant: read<TenantContext>(keys.tenant),
   user: read<AuthUser>(keys.user),
   workspaces: read<BusinessWorkspace[]>(keys.workspaces) ?? [],
   currentWorkspaceId: window.localStorage.getItem(keys.currentWorkspaceId) ?? undefined,
-  async bootstrap() {
+  bootstrap() {
     const token = window.localStorage.getItem(keys.token);
-    if (!token) { set({ ready: true }); return; }
-    try {
-      const context = await api.sessionContext();
-      // 空间变了也要清缓存：同一租户内切换空间后，业务数据整套都不一样。
-      // 只比 tenantId 会让「刷新前在 A 空间、服务端会话已是 B 空间」的情况
-      // 保留 A 空间的查询缓存。
-      const previousWorkspaceId = get().currentWorkspaceId;
-      if (
-        (get().tenant?.tenantId && get().tenant?.tenantId !== context.tenant.tenantId) ||
-        (previousWorkspaceId && previousWorkspaceId !== context.currentWorkspaceId)
-      ) {
-        clearSessionQueryCache();
-      }
-      persistSession(context.tenant, context.user, context.workspaces, context.currentWorkspaceId);
-      set({
-        ready: true,
-        token,
-        tenant: context.tenant,
-        user: context.user,
-        workspaces: context.workspaces ?? [],
-        currentWorkspaceId: context.currentWorkspaceId
-      });
-    } catch {
-      get().logout();
-      set({ ready: true });
+    const epoch = currentSessionEpoch();
+    if (!token) {
+      set({ ready: true, sessionVerified: false, token: undefined, user: undefined, tenant: undefined, workspaces: [], currentWorkspaceId: undefined });
+      return Promise.resolve();
     }
+    if (verification?.epoch === epoch) return verification.promise;
+    const attempt = { epoch, promise: Promise.resolve() };
+    attempt.promise = (async () => {
+      try {
+        const context = await api.sessionContext();
+        // A refresh can rotate the token within this generation; a logout or identity/space switch cannot.
+        if (currentSessionEpoch() !== epoch || !window.localStorage.getItem(keys.token)) return;
+        if (get().sessionVerified && token !== window.localStorage.getItem(keys.token)) return;
+        const previous = get();
+        if (previous.user?.id !== context.user.id || previous.tenant?.tenantId !== context.tenant.tenantId
+          || previous.currentWorkspaceId !== context.currentWorkspaceId) clearSessionQueryCache();
+        persistSession(context.tenant, context.user, context.workspaces, context.currentWorkspaceId);
+        set({
+          ready: true,
+          sessionVerified: true,
+          token: window.localStorage.getItem(keys.token) ?? undefined,
+          tenant: context.tenant,
+          user: context.user,
+          workspaces: context.workspaces ?? [],
+          currentWorkspaceId: context.currentWorkspaceId
+        });
+      } catch {
+        if (currentSessionEpoch() !== epoch || (get().sessionVerified && token !== window.localStorage.getItem(keys.token))) return;
+        get().logout();
+        set({ ready: true });
+      }
+    })().finally(() => { if (verification === attempt) verification = undefined; });
+    verification = attempt;
+    return attempt.promise;
   },
   async login(tenantCode, account, password) {
+    const epoch = currentSessionEpoch();
     const result = await api.login({ tenantCode, account, password });
+    if (currentSessionEpoch() !== epoch) throw new Error("会话已变化，请重新登录");
     clearSessionQueryCache();
     window.localStorage.setItem(keys.token, result.accessToken);
     window.localStorage.setItem(keys.refreshToken, result.refreshToken);
     persistSession(result.tenant, result.user, result.workspaces, result.currentWorkspaceId);
     set({
       ready: true,
+      sessionVerified: true,
       token: result.accessToken,
       tenant: result.tenant,
       user: result.user,
@@ -117,13 +134,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * 这里不吞异常，交给调用方提示，避免界面显示已切换而服务端其实拒绝了。
    */
   async switchWorkspace(workspaceId) {
+    const epoch = currentSessionEpoch();
     const result = await api.switchWorkspace({ workspaceId });
+    if (currentSessionEpoch() !== epoch || !window.localStorage.getItem(keys.token)) throw new Error("会话已变化，请重新核对经营空间");
     clearSessionQueryCache();
     window.localStorage.setItem(keys.token, result.accessToken);
     // 切换复用同一会话，refreshToken 不变，因此响应里为空串——不能覆盖已存的那个。
     if (result.refreshToken) window.localStorage.setItem(keys.refreshToken, result.refreshToken);
     persistSession(result.tenant, result.user, result.workspaces ?? get().workspaces, result.currentWorkspaceId);
     set({
+      sessionVerified: true,
       token: result.accessToken,
       tenant: result.tenant,
       user: result.user,
@@ -132,13 +152,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
   async changePassword(currentPassword, newPassword) {
+    const epoch = currentSessionEpoch();
     const result = await api.changePassword({ currentPassword, newPassword });
+    if (currentSessionEpoch() !== epoch || !window.localStorage.getItem(keys.token)) throw new Error("会话已变化，请重新核对密码修改结果");
     clearSessionQueryCache();
     window.localStorage.setItem(keys.token, result.accessToken);
     window.localStorage.setItem(keys.refreshToken, result.refreshToken);
     persistSession(result.tenant, result.user, result.workspaces, result.currentWorkspaceId);
     set({
       ready: true,
+      sessionVerified: true,
       token: result.accessToken,
       tenant: result.tenant,
       user: result.user,
@@ -185,7 +208,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (refreshToken) void api.logout({ refreshToken }).catch(() => undefined);
     clearSessionQueryCache();
     Object.values(keys).forEach((key) => window.localStorage.removeItem(key));
-    set({ token: undefined, tenant: undefined, user: undefined, workspaces: [], currentWorkspaceId: undefined });
+    set({ sessionVerified: false, token: undefined, tenant: undefined, user: undefined, workspaces: [], currentWorkspaceId: undefined });
   },
   hasPermission(permission) {
     if (!permission) return true;
@@ -215,17 +238,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!capabilities) return false;
     return capabilities.includes(capability);
   }
-}));
+};
+});
 
 function syncSessionFromStorage() {
   const nextWorkspaceId = window.localStorage.getItem(keys.currentWorkspaceId) ?? undefined;
-  const previousWorkspaceId = useAuthStore.getState().currentWorkspaceId;
-  if (previousWorkspaceId !== nextWorkspaceId) clearSessionQueryCache();
+  const previous = useAuthStore.getState();
+  const nextUser = read<AuthUser>(keys.user);
+  const nextTenant = read<TenantContext>(keys.tenant);
+  const token = window.localStorage.getItem(keys.token) ?? undefined;
+  if (previous.currentWorkspaceId !== nextWorkspaceId || previous.user?.id !== nextUser?.id
+    || previous.tenant?.tenantId !== nextTenant?.tenantId || Boolean(previous.token) !== Boolean(token)) clearSessionQueryCache();
   setAuthStateFromStorage(useAuthStore, nextWorkspaceId);
 }
 
 function setAuthStateFromStorage(store: typeof useAuthStore, currentWorkspaceId?: string) {
+  const previous = store.getState();
+  const user = read<AuthUser>(keys.user);
+  const tenant = read<TenantContext>(keys.tenant);
+  // Branding events can retain an already verified identity; stored authorization changes require a new server read.
+  const unchangedAuthorization = previous.token === (window.localStorage.getItem(keys.token) ?? undefined)
+    && previous.currentWorkspaceId === currentWorkspaceId
+    && JSON.stringify(previous.workspaces) === JSON.stringify(read<BusinessWorkspace[]>(keys.workspaces) ?? [])
+    && previous.tenant?.tenantId === tenant?.tenantId
+    && previous.tenant?.categoryCode === tenant?.categoryCode
+    && JSON.stringify(previous.tenant?.capabilities) === JSON.stringify(tenant?.capabilities)
+    && previous.user?.id === user?.id && previous.user?.tenantId === user?.tenantId
+    && previous.user?.scope === user?.scope && previous.user?.dataScope === user?.dataScope
+    && previous.user?.organizationId === user?.organizationId
+    && JSON.stringify(previous.user?.locationScope) === JSON.stringify(user?.locationScope)
+    && previous.user?.mustChangePassword === user?.mustChangePassword
+    && previous.user?.isSaasAdmin === user?.isSaasAdmin && previous.user?.isPlatformAdmin === user?.isPlatformAdmin
+    && JSON.stringify(previous.user?.permissions) === JSON.stringify(user?.permissions)
+    && JSON.stringify(previous.user?.tenantMembership) === JSON.stringify(user?.tenantMembership);
   store.setState({
+    sessionVerified: previous.sessionVerified && unchangedAuthorization,
     token: window.localStorage.getItem(keys.token) ?? undefined,
     tenant: read<TenantContext>(keys.tenant),
     user: read<AuthUser>(keys.user),
@@ -236,7 +283,21 @@ function setAuthStateFromStorage(store: typeof useAuthStore, currentWorkspaceId?
 
 // refresh 可能由任一请求触发；storage 事件覆盖多标签页，CustomEvent 覆盖
 // 同一标签页内由 axios 拦截器触发的静默刷新。
+const unsubscribeRefresh = onSessionRefreshed((receipt) => {
+  if (!receipt || receipt.accessToken !== window.localStorage.getItem(keys.token)) return;
+  const previous = useAuthStore.getState();
+  if (previous.user?.id !== receipt.user.id || previous.tenant?.tenantId !== receipt.tenant.tenantId
+    || previous.currentWorkspaceId !== receipt.currentWorkspaceId) clearSessionQueryCache();
+  useAuthStore.setState({ ready: true, sessionVerified: true, token: receipt.accessToken, user: receipt.user, tenant: receipt.tenant,
+    workspaces: receipt.workspaces ?? [], currentWorkspaceId: receipt.currentWorkspaceId });
+});
 window.addEventListener("rental-session-updated", syncSessionFromStorage);
-window.addEventListener("storage", (event) => {
-  if (Object.values(keys).includes(event.key as string)) syncSessionFromStorage();
+const onStorage = (event: StorageEvent) => {
+  if (event.key === null || Object.values(keys).includes(event.key)) syncSessionFromStorage();
+};
+window.addEventListener("storage", onStorage);
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  unsubscribeRefresh();
+  window.removeEventListener("rental-session-updated", syncSessionFromStorage);
+  window.removeEventListener("storage", onStorage);
 });

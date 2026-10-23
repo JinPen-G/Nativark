@@ -48,7 +48,7 @@ export class StaffOfflinePaymentService {
         return this.toResponse(existing);
       }
       await this.assertEvidence(tx, tenantId, orderId, input.evidenceFileAssetId);
-      const balance = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
+      const balance = await this.funding.listEvents(tenantId, workspaceId, orderId, tx, { realOnly: true });
       const pending = await tx.rentalOfflinePaymentRegistration.findMany({ where: { tenantId, workspaceId, orderId, instrument: input.instrument, status: "pending" }, select: { amount: true } });
       const outstanding = input.instrument === "rental" ? balance.rental.due : balance.deposit.due;
       const reserved = roundMoney(pending.reduce((sum, row) => sum + Number(row.amount), 0));
@@ -77,7 +77,7 @@ export class StaffOfflinePaymentService {
       const order = await this.assertOrder(tenantId, workspaceId, registration.orderId, scope, tx);
       if (["completed", "cancelled"].includes(String(order.status).toLowerCase())) throw new ConflictException("已完成或已取消订单不能确认新增收款");
       if (registration.status !== "pending") throw new ConflictException("该收款登记已处理");
-      const balance = await this.funding.listEvents(tenantId, workspaceId, registration.orderId, tx);
+      const balance = await this.funding.listEvents(tenantId, workspaceId, registration.orderId, tx, { realOnly: true });
       const amount = Number(registration.amount);
       const originated = registration.instrument === "rental" ? balance.rental.collected > 0 : balance.deposit.collected > 0;
       const outstanding = registration.instrument === "rental" ? balance.rental.due : balance.deposit.due;
@@ -86,6 +86,8 @@ export class StaffOfflinePaymentService {
         instrument: registration.instrument as "rental" | "deposit",
         action: originated ? "append" : "initiate",
         amount,
+        provider: "offline",
+        offlineRegistrationId: registration.id,
         allowPartialInitiate: !originated,
         idempotencyKey: `staff-offline:${registration.id}`,
         reason: `线下收款确认：${registration.reason}`,

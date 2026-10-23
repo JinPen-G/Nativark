@@ -224,6 +224,27 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     }
   }
 
+  async assertCurrent(value: GatewayContext, selected: AiProviderProfileRecord) {
+    const context = structuredClone(value), profile = structuredClone(selected);
+    if (!profile.enabled || profile.disabledAt || profile.scopeKind !== 'PLATFORM' || profile.serviceMode !== 'platform_managed') throw new ModelGatewayError('CONFIG_INVALID');
+    const current = async () => {
+      try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+      const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
+      const actorId = actor.kind === 'user' ? actor.userId
+        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context) ? actor.customerId : null;
+      if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace' || scope.tenantId !== context.tenantId
+        || scope.workspaceId !== context.workspaceId || owner.configurationScope.kind !== 'PLATFORM'
+        || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
+      const { authorizedAt: _, requestId: __, ...identity } = owner.context;
+      return requestFingerprint(identity);
+    };
+    const before = await current();
+    const row = await this.db.aiProviderProfile.findFirst({ where: { id: profile.id, scopeId: profile.scopeId, scopeKind: 'PLATFORM',
+      serviceMode: 'platform_managed', enabled: true, disabledAt: null, configRevision: profile.configRevision } });
+    if (!row || capabilityProfileFingerprint(parseAiProviderProfileRecord(row)) !== capabilityProfileFingerprint(profile)) throw new ModelGatewayError('CONFIG_INVALID');
+    if (await current() !== before) throw new ModelGatewayError('FORBIDDEN');
+  }
+
   async resolve(value: GatewayContext, selected: AiProviderProfileRecord) {
     const context = structuredClone(value), profile = structuredClone(selected);
     if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== 'string' || !/^[\w.:-]{1,128}$/u.test(v))) throw new ModelGatewayError('INVALID_REQUEST');

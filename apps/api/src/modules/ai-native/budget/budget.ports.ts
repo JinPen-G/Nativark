@@ -66,6 +66,9 @@ export interface BudgetTransactionRepository {
   saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>, operation?: BudgetSettingsOperation): Promise<BudgetPolicy>;
   reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>): Promise<BudgetRecord>;
   get(id: string, association: AiUsageAssociationDraft): Promise<BudgetRecord | null>;
+  /** Exact original ledger event only. Optional for legacy adapters; absence
+   * cannot be inferred from a current balance or by replaying mutate. */
+  readMutation?(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: () => Promise<void>): Promise<BudgetRecord | null>;
   /** All mutations and ledger events are one DB transaction. No blind retry. */
   mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>): Promise<BudgetRecord>;
 }

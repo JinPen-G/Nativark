@@ -16,7 +16,6 @@ export async function assertCategoryAdoptionAllowed(
   if (operation === "create" && !categoryScopeAllows(category.openingScope, category.openingTenantIds, tenantId)) {
     throw new ForbiddenException("该品类当前不允许本租户新开通空间");
   }
-  if (operation === "create" && category.recommendedVersionId !== versionId) throw new ConflictException("品类推荐版本已变化，请重新创建空间");
   const policies = await db.$queryRaw<Array<{ createScope: string; createTenantIds: unknown; upgradeScope: string; upgradeTenantIds: unknown; restoreScope: string; restoreTenantIds: unknown }>>(Prisma.sql`SELECT createScope, createTenantIds, upgradeScope, upgradeTenantIds, restoreScope, restoreTenantIds FROM rental_category_version_policies WHERE versionId = ${versionId} FOR UPDATE`);
   const version = await db.rentalCategoryVersion.findUnique({ where: { id: versionId } });
   if (!version || version.categoryCode !== categoryCode || !["published", "legacy_baseline"].includes(version.status)) {

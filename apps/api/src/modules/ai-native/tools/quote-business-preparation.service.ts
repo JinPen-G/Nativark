@@ -5,7 +5,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 import { z } from 'zod';
-import { AI_QUOTE_CANDIDATE_LIMITS } from './quote-candidate-preparation.service';
+import { AI_QUOTE_CANDIDATE_LIMITS, aiQuoteCandidateInputSchema } from './quote-candidate-preparation.service';
 import type { AiQuoteCoreContextSource } from '../quote-preview.service';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 
@@ -116,6 +116,32 @@ export class AiQuoteBusinessPreparationService {
     return { ...result, next, authority: 'current_guarded_business_context' as const,
       sideEffects: { quoteSaved: false as const, inventoryReserved: false as const,
         orderCreated: false as const, approvalGranted: false as const } };
+  }
+
+  /** Internal persisted-answer consumer. Answering a question may change the
+   * candidate fingerprint, so its old choice revision cannot confirm the final
+   * request. Only a revision-only block may be presented for a NEW explicit
+   * review; missing business fields/ambiguity remain blocked. Nothing is saved
+   * and the original answer/candidate is never rewritten with this revision. */
+  async reviewAnsweredParameters(value: unknown) {
+    const snapshot = aiQuoteCandidateInputSchema.parse(structuredClone(value));
+    const observed = await this.candidates.prepare(snapshot);
+    const revisionOnly = observed.status === 'missing_input' && observed.missingFields?.length === 1
+      && observed.missingFields[0] === 'selectionRevision' && !observed.ambiguousFields?.length
+      && /^[a-f0-9]{64}$/u.test(observed.selectionRevision ?? '');
+    const reviewCandidate = revisionOnly ? { ...snapshot, selectionRevision: observed.selectionRevision } : snapshot;
+    const preparation = await this.prepareUnified(reviewCandidate);
+    const sources = await this.inputSources(reviewCandidate);
+    const first = preparation as unknown as Record<string, unknown>, second = sources as unknown as Record<string, unknown>;
+    if (first.selectionRevision !== second.selectionRevision
+      || (first.request !== undefined && (second.status !== 'prepared_input_sources'
+        || requestFingerprint(first.request) !== requestFingerprint(second.request)))) throw new ModelGatewayError('CONFIG_INVALID');
+    if (first.request === undefined) {
+      const basis = (row: Record<string, unknown>) => ({ status: row.status, selectionRevision: row.selectionRevision,
+        missingFields: row.missingFields, ambiguousFields: row.ambiguousFields });
+      if (requestFingerprint(basis(first)) !== requestFingerprint(basis(second))) throw new ModelGatewayError('CONFIG_INVALID');
+    }
+    return { preparation, sources, humanConfirmation: 'required_before_preview' as const };
   }
 
   /** Field provenance for the formal request. No inferred/model value is

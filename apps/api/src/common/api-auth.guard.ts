@@ -7,8 +7,9 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_MODEL_SETTINGS_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_MODEL_SETTINGS_HTTP_DRAFT,
+  AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
@@ -196,11 +197,18 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
 const originalQuoteReadRoutes = new Set([AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview, AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt,
   AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes].map(action => `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${action}`));
-// Fixed original notification lifecycle only; every consumer still verifies
-// current scope/owner, task policy and (for writes) real human approval/Core.
+// Fixed quote model execution; the original scene, owner and task policies
+// are checked again by the host. No arbitrary model route or tool is accepted.
+const originalQuoteModelRoutes = new Set([AI_SCENE_MODEL_HTTP_DRAFT.start, AI_SCENE_MODEL_HTTP_DRAFT.refreshInput, AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer,
+  AI_SCENE_MODEL_HTTP_DRAFT.resume, AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer, AI_SCENE_MODEL_HTTP_DRAFT.reconcile,
+  AI_SCENE_MODEL_HTTP_DRAFT.recover, AI_SCENE_MODEL_HTTP_DRAFT.takeover, AI_SCENE_MODEL_HTTP_DRAFT.requestCancel,
+  AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation, AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote,
+  AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt, AI_SCENE_MODEL_HTTP_DRAFT.readExecution]
+  .map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
+// Fixed original notification lifecycle still has its independent permission.
 const originalSettingsRoutes = new Set(Object.entries(AI_SCENE_MODEL_HTTP_DRAFT)
   .filter(([name]) => /Settings/u.test(name)).map(([, action]) => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
-const selectedQuoteRoutes = new Map<string, string>([AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT]
+const selectedQuoteRoutes = new Map<string, string>([AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT]
   .flatMap(contract => Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) =>
     [`POST /${contract.basePath}${action ? `/${action}` : ''}`, name] as const)));
 const originalTaskObservationRoutes = new Set([
@@ -218,8 +226,13 @@ const originalTaskObservationRoutes = new Set([
 // original resource, current task action and persisted dispatch/usage evidence.
 const originalTaskAccountingRoutes = new Set([
   AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.read, AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.releaseUnsent,
-  AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.reconcile
+  AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.reconcile, AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.readOperation
 ].map(action => `POST /${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${action}`));
+const originalOpeningModelRoutes = new Set([
+  AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.start, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.recover,
+  AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.reconcile, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.takeover,
+  AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.requestCancel, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.readExecution
+].map(action => `POST /${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.basePath}/${action}`));
 
 // Only the registered closed order-chain entrypoints. This route permission
 // is not a task policy, lease, approval or dispatch grant; the original host
@@ -251,6 +264,7 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-os:order:extend', 'rental-os:order:operate'];
   if (originalOrderExecutionRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (originalTaskAccountingRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
+  if (originalOpeningModelRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   if (originalSettingsRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   const selectedQuoteAction = selectedQuoteRoutes.get(`${method.toUpperCase()} ${path}`);
   if (selectedQuoteAction) return ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(selectedQuoteAction)
@@ -260,6 +274,7 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-os:order:create'];
   if (originalOrderReadRoutes.has(`${method.toUpperCase()} ${path}`) || originalQuoteReadRoutes.has(`${method.toUpperCase()} ${path}`))
     return ['rental-os:order:view', 'rental-os:order:create'];
+  if (originalQuoteModelRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:create'];
   if (originalTaskObservationRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method === 'POST' && [AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read, AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change]
     .some(action => path === `/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
@@ -429,7 +444,8 @@ export function requiredPermissions(method: string, path: string) {
     }
     // CUSTOMER-01C：企业开票、合同、授信账期属**企业客户**权限，与个人会员权限分开。
     // 同样必须放在通用分支之前，否则「会员管理」就能改企业授信与账期。
-    if (/\/(invoice-profiles|contracts|credit)$/u.test(path)) {
+    if (/\/(invoice-profiles|contracts|credit)$/u.test(path)
+      || /^\/platform\/customers\/[^/]+\/credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?)$/u.test(path)) {
       return method === "GET"
         ? ["rental-os:corporate:view", "rental-os:corporate:manage"]
         : ["rental-os:corporate:manage"];

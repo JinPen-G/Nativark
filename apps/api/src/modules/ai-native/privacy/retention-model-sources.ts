@@ -3,7 +3,7 @@
  * Unknown formats fail closed rather than treating an unparsed input as empty.
  */
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import type { AiTaskActionInput } from '@prisma/client';
+import type { AiTaskActionInput, Prisma } from '@prisma/client';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { parseTaskModelInput, taskModelFingerprint, TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL } from '../model-input/task-model-input';
 import { readOriginalSceneEnvelope } from '../scenes/original-scene-knowledge';
@@ -52,4 +52,55 @@ export function readRetentionModelSources(row: AiTaskActionInput, task: {
   }
   if (material.preferences.status === 'ready') for (const item of material.preferences.items) result.memories.add(item.memoryId);
   return { ...result, knowledgeComplete: true };
+}
+
+/** Shared by scheduled-candidate and explicit original-delete consumers.
+ * Only actual unresolved source references hold a body; unknown/truncated
+ * bindings stay unavailable, never clear. Callers retain the canonical scope lock.
+ */
+export async function inspectRetentionSource(tx: Prisma.TransactionClient, scopeId: string,
+  kind: 'knowledge' | 'memory' | 'attachment', resourceId: string,
+  owner: { tenantId: string; workspaceId: string }): Promise<'clear' | 'held' | 'unavailable'> {
+  const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
+  const active = await tx.aiTask.findMany({ where: { scopeId, status: { notIn: [...terminal] } }, select: { id: true }, orderBy: { id: 'asc' }, take: 51 });
+  const steps = await tx.aiStep.findMany({ where: { scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { taskId: true }, orderBy: { id: 'asc' }, take: 51 });
+  const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { taskId: true }, orderBy: { chargeId: 'asc' }, take: 51 });
+  const reservations = await tx.aiBudgetReservation.findMany({ where: { scopeId, scopeKind: 'WORKSPACE', status: { in: ['reserved', 'pending_reconciliation'] } }, select: { runId: true }, orderBy: { id: 'asc' }, take: 51 });
+  const admissions = await tx.aiInvocationAdmission.findMany({ where: { ...owner, status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
+  const legacy = await tx.aiUsageReservation.findMany({ where: { ...owner, status: { in: ['reserved', 'pending_reconciliation'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
+  if ([active, steps, charges, reservations, admissions, legacy].some(rows => rows.length > 50)) return 'unavailable';
+  const tasks = new Set([...active.map(row => row.id), ...steps.map(row => row.taskId), ...charges.map(row => row.taskId)]);
+  for (const row of reservations) {
+    const run = await tx.aiRun.findFirst({ where: { id: row.runId, scopeId }, select: { taskId: true } });
+    if (!run) return 'unavailable';
+    tasks.add(run.taskId);
+  }
+  for (const callId of new Set([...admissions, ...legacy].map(row => row.callId))) {
+    const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId, callId } }, select: { taskId: true } });
+    if (!invocation) return 'unavailable';
+    tasks.add(invocation.taskId);
+  }
+  if (tasks.size > 50) return 'unavailable';
+  let attachmentDocument: string | null = null;
+  if (kind === 'attachment') {
+    const asset = await tx.fileAsset.findFirst({ where: { id: resourceId, tenantId: owner.tenantId,
+      businessModule: 'ai-native', businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: owner.workspaceId } }, select: { businessId: true } });
+    attachmentDocument = asset?.businessId ?? null;
+  }
+  for (const taskId of tasks) {
+    const task = await tx.aiTask.findFirst({ where: { id: taskId, scopeId }, select: { id: true, scopeId: true, sceneCode: true, inputRef: true } });
+    if (!task) return 'unavailable';
+    const inputs = await tx.aiTaskActionInput.findMany({ where: { scopeId, taskId, toolCode: { in: [...retentionModelTools] } },
+      orderBy: [{ runId: 'asc' }, { registrationRef: 'asc' }], take: 51 });
+    if (inputs.length > 50) return 'unavailable';
+    for (const input of inputs) {
+      try {
+        const refs = readRetentionModelSources(input, task, owner);
+        if (kind === 'knowledge' && refs.documents.has(resourceId) || kind === 'memory' && refs.memories.has(resourceId)
+          || kind === 'attachment' && (refs.attachments.has(resourceId) || attachmentDocument && refs.documents.has(attachmentDocument))) return 'held';
+        if (!refs.knowledgeComplete) return 'unavailable';
+      } catch { return 'unavailable'; }
+    }
+  }
+  return 'clear';
 }

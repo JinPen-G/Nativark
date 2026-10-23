@@ -416,6 +416,36 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     return this.readRecord(this.db, id, structuredClone(association));
   }
 
+  /** Read the exact original event and payload under current read authority.
+   * No policy locks, mutation replay or new ledger event. Missing is not rollback. */
+  async readMutation(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: () => Promise<void>) {
+    record = structuredClone(record); input = structuredClone(input);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(input.eventKey)
+      || !['release', 'reconcile'].includes(input.action) || input.action === 'reconcile' && !input.usage
+      || input.action === 'release' && input.usage || input.usage && !sameUnit(record.reserved, input.usage.quantity)) throw new BudgetError('INVALID');
+    try {
+      return await this.db.$transaction(async tx => {
+        await revalidate();
+        const current = await this.readRecord(tx, record.id, record.association);
+        if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind
+          || current.actorId !== record.actorId || current.callId !== record.callId) throw new BudgetError('FORBIDDEN');
+        const event = await tx.aiBudgetLedgerEntry.findUnique({ where: { reservationId_eventKey: {
+          reservationId: record.id, eventKey: input.eventKey } }, select: { scopeId: true, scopeKind: true, tenantId: true,
+          kind: true, evidenceHash: true, reason: true, inputTokens: true, calls: true, moneyAmount: true, moneyCurrency: true } });
+        if (event && (event.scopeId !== record.scopeId || event.scopeKind !== record.scopeKind
+          || event.tenantId !== (record.association.scope.kind === 'platform' ? null : record.association.scope.tenantId)
+          || !sameLedgerPayload(event, input) || current.status !== (input.action === 'release' ? 'released' : 'settled')
+          || input.action === 'release' && current.dispatched
+          || input.usage && requestFingerprint(current.actual) !== requestFingerprint(input.usage.quantity))) throw new BudgetError('PENDING_RECONCILIATION');
+        await revalidate();
+        return event ? structuredClone(current) : null;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof BudgetError) throw error;
+      throw new BudgetError('UNAVAILABLE');
+    }
+  }
+
   async mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>) {
     record = structuredClone(record);
     input = structuredClone(input);

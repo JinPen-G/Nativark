@@ -25,10 +25,12 @@ function makeHarness(providerError, existingMethod = null) {
   const prisma = {
     rentalPaymentIntent: {
       findUnique: async () => existingMethod ? { ...intent, method: existingMethod } : null,
-      update: async ({ data }) => {
+      findFirst: async () => intent,
+      updateMany: async ({ where, data }) => {
+        if (where.status !== intent.status) return { count: 0 };
         updates.push(data);
         Object.assign(intent, data);
-        return intent;
+        return { count: 1 };
       }
     },
     externalAdapterLog: { create: async () => undefined },
@@ -83,6 +85,30 @@ async function main() {
     (error) => error?.response?.message === "支付幂等键已用于其他支付方式，请更换幂等键",
     "幂等重放不能把支付宝请求静默回放成微信支付单"
   );
+
+  const request = { instrument: "rental", method: "alipay", idempotencyKey: "payment-unknown-1" };
+  for (const status of ["paid", "closed", "verified_pending_funding", "funding_failed"]) {
+    const late = makeHarness(new PaymentProviderUnknownError());
+    late.service.createAlipayIntent = async () => {
+      late.intent.status = status;
+      late.intent.responseJson = { stripeLiveVerified: true, sessionId: "original" };
+      throw new PaymentProviderUnknownError();
+    };
+    await assert.rejects(() => late.service.createPaymentIntent("tenant-1", "workspace-1", "order-1", request));
+    assert.equal(late.intent.status, status, "迟到异常不能降级已推进的支付事实");
+    assert.equal(late.updates.length, 0);
+  }
+  const lateSuccess = makeHarness(null);
+  lateSuccess.service.createAlipayIntent = async () => {
+    lateSuccess.intent.status = "paid";
+    lateSuccess.intent.responseJson = { stripeLiveVerified: true, sessionId: "original" };
+    return { checkoutUrl: "https://example.invalid", responseJson: { sessionId: "late" }, responseCode: "ok" };
+  };
+  assert.equal((await lateSuccess.service.createPaymentIntent("tenant-1", "workspace-1", "order-1", request)).status, "paid");
+  assert.deepEqual(lateSuccess.intent.responseJson, { stripeLiveVerified: true, sessionId: "original" });
+  lateSuccess.service.log = async () => { throw new Error("log write failed"); };
+  await assert.rejects(() => lateSuccess.service.createPaymentIntent("tenant-1", "workspace-1", "order-1", request));
+  assert.equal(lateSuccess.intent.status, "paid", "日志失败不能否定已提交的付款");
 
   console.log("payment provider unknown-result tests passed");
 }

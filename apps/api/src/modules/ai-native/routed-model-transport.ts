@@ -17,6 +17,8 @@ export interface GatewayConnection {
 export interface GatewayConnectionResolver {
   /** Reauthorize current caller and load current encrypted config/vault binding. Never accept model-provided URLs or secrets. */
   resolve(context: GatewayContext, profile: AiProviderProfileRecord): Promise<GatewayConnection>;
+  /** Current authorization/config revision only; must not decrypt a key or authorize dispatch. */
+  assertCurrent?(context: GatewayContext, profile: AiProviderProfileRecord): Promise<void>;
 }
 const connectionSchema = z.object({ profileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u), baseUrl: z.string().min(1).max(2048),
   credential: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/u), maxOutputTokens: z.number().int().min(1).max(32768) }).strict();
@@ -26,6 +28,12 @@ const contextSchema = z.object({ tenantId: z.string().min(1).max(128), workspace
 export class TenantModelConnectionResolver implements GatewayConnectionResolver {
   constructor(private readonly config: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>) {
     if ([config?.selectionForInvocation, config?.profile, config?.credential].some(value => typeof value !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
+  }
+  async assertCurrent(value: GatewayContext, selected: AiProviderProfileRecord) {
+    const context = contextSchema.parse(value), profile = structuredClone(selected);
+    if (profile.serviceMode !== 'tenant_managed' || profile.scopeKind !== 'TENANT') throw new ModelGatewayError('CONFIG_INVALID');
+    const selection = await this.config.selectionForInvocation(context);
+    if (selection.mode !== 'tenant_managed' || selection.revision !== profile.configRevision) throw new ModelGatewayError('CONFIG_INVALID');
   }
   async resolve(value: GatewayContext, selected: AiProviderProfileRecord): Promise<GatewayConnection> {
     const context = contextSchema.parse(value), profile = structuredClone(selected);
@@ -89,7 +97,11 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     const connection = await resolve(), binding = requestFingerprint(connection);
     const recheck = async () => {
       assertSchema();
-      if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID');
+      if (resolver.assertCurrent) {
+        this.cancelled(signal);
+        await resolver.assertCurrent(structuredClone(context), structuredClone(profile));
+        this.cancelled(signal);
+      } else if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID');
       if (route.probe) await this.probe!.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke', signal);
     };
     await recheck();

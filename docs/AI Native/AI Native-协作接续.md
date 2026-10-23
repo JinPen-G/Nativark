@@ -1,32 +1,48 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-21。最新功能`323acfa0`：验证任务动作政策与原CAS收据同事务，后台重建后可核对unknown；原元数据读取不再构造执行宿主。实际会话→Auth/路由Guard/Controller/Prisma仓储离线冒烟1 pass/0 fail/skip/todo/退出0；Admin243 roots/0诊断/退出0，API686 roots仍有继承支付两项/退出1。无新增测试脚本、迁移、外联或启用；浏览器/真库/供应商未验，原任务进度未跨门槛、不变。
-> **负责人已确认全部停写，本会话接回主线。最新优先级：先补核心底座和管理后台，小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 保留接手WIP，不启动A/B、辅助施工或真实服务；按完整功能收口维护本接续/开发记录，正式需求/任务正文WIP不夹带提交，不为目标百分比加分。
+> 更新时间：2026-10-24。原服务端本轮接续完成报价澄清参数改变后的最终审阅与明确确认：只在旧候选修订是唯一阻碍时提供新的待审阅request/指纹，确认再次匹配当前修订与完整输入后沿原报价/选择/人类审批/Core执行。定向离线一调用一订单、原冻结材料与累计资源保留，缺字段/旧修订/配置变化/读中撤权不写报价；API/shared688 roots/0诊断/noEmit。Codex前片原账操作收据/员工客户等待和开业模型宿主全部保留，不重做。HEAD仍`9ea479c4`，未提交、未启用，64.3%/ENTRY52.8%/正式0/28未跨G4。可信计数生产、平台独立付费验证、标准live单账及全部变体仍待补/待验；真库/模型/浏览器未验。现有ts-node默认入口因本树TypeScript7安装不兼容，本片仅在离线进程使用其已安装兼容编译器，未改依赖，详见开发记录。
+> **本会话仅继续原服务端核心底座和管理后台；小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 另一客户端会话已在本树形成独立WIP，不能再以旧“全部停写/单线”推断独占，公共文件先核对准确归属，不接管或夹带其成果。本轮不启动A/B或新辅助施工，不恢复心跳、提交或推送；正式需求/任务正文WIP和未来方案均保留。
 
 ## 权威依据
 
 - 产品范围、任务依赖与阶段放行：[正式需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。新补的目标驱动和场景闭环原则适用，不改原28项及 ENTRY 的分母；百分比按原门槛及时复核更新，不冻结旧值或凭提交数加分。
 - 已做/剩余、固定功能提交及验证边界只维护在[开发记录](<AI Native-开发记录.md>)。
 - 未来设计分别查[Runtime/Provider SDK替换](<未来规划/AI Native-Runtime替换方案.md>)与[通用SaaS底座](<未来规划/AI Native-通用SaaS底座方案.md>)；均不授权当前拆库、拆服务、开源或另造通用平台。
-- 原总册、旧派工和历史接任提示词已归档，只供追溯，不能覆盖负责人本轮单线授权。
+- 原总册、旧派工和历史接任提示词已归档，只供追溯，不能覆盖负责人本轮原服务端继续授权；独立客户端专项不改变原服务端需求或预算规则。
 
 ## 工作树与写入归属
 
-唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
-分支：`ai/ai-native-contracts-s01-20261002`。主线认领公共Gateway/预算、运行器及审批接点；本轮不向辅助树写入或派工，不与其他线双写公共文件。
+本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
+分支：`ai/ai-native-contracts-s01-20261002`。服务端会话认领原Gateway/预算、运行器及审批接点；本轮不向辅助树写入或派工，不与其他线双写公共文件。
+
+本轮原服务端由会话`local_fe6f7128-004a-466c-b40a-2f18a7ef98a2`接续；此前Codex普通账务/开业模型成果保留。客户端会话`local_5d9c6dbd-3526-4634-aace-ecd5d8c810f0`在同树，后续接手须复核其实际状态；不据进程列表推断停写。用户要求普通文件改动不反复跨会话发消息，按已核对范围直接施工。本轮只改`tools/quote-business-preparation.service.ts`最终审阅、`scenes/original-scene-model.composition.ts`原报价prepare/confirm hunk与本接续/开发记录；前片原场景accounting/application、员工accounting、开业模型Controller/provider/政策、AppModule、Guard/OpenAPI及shared叶子合同全部保留。继承报价、平台能力、预算、隐私与支付/Core等WIP保留。客户端`clients/`、后台agent-desktop及Auth/HTTP/Router/Shell、shared总出口/包配置、Agent接入改造文档及未来Runtime方案均不接管、不暂存；公共文件仅改本轮已明确的服务端hunk。
 
 四条辅助树仍保留在同级目录：`codex-ai-native-lane-a`、`codex-ai-native-lane-b`、`claude-ai-native-lane-a`、`claude-ai-native-lane-b`。负责人确认四线停写，Codex A/B另已确认无在途操作；本次核对均无独有提交、源码WIP或合并状态，按固定主线仅快进同步并保持暂停，不再派工、不删除工作树/output、不复制私有生成物。主线后续提交不会自动同步；恢复辅助线前重新核对实际差异。本次没有合main或推送授权。
 
-开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。本次只提交本轮进度复核变更，正式依据中继承的基线/正文WIP另保留，不顺带提交。AI Native源码按完整功能提交；接手仍须以实际status为准，不能把其他线WIP视为已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
+开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。前期进度复核提交与当前未提交功能片分别保留；本轮没有新增提交授权，正式依据中继承的基线/正文WIP不夹带。接手仍须以实际status为准，不能把其他线WIP视为本片成果、已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
 
 **阶段收口必须同步进度：** 本次已纠正“记录了功能但任务百分比复核滞后”的问题。接手者每个完整功能/阶段收口时，核对受影响任务的原G1～G4证据，达到下一档就及时更新开发任务表及整体汇总；未跨档在开发记录简短说明已复核及缺口。开发记录留关键提交/已做/剩余，本文覆盖最新现场与下一步，三者同片同步；不逐方法写流水，不把进度提醒写入需求或任务正文，不为涨分改门槛或把未验说成已验。
 
 ## 当前核心接点及下一步
 
-原动作政策收据：`PrismaTaskActionPolicyRepository.put`可明确选择将原CAS转换和`OperationLog`收据放入同一事务，当前验证配置入口已启用；其他旧调用不自动改行为。`readMutation`按scope/task/operation/原expectedRevision及当前actor观察，不用当前政策值推断原提交。`POST /ai-native/text-capability/task/action/receipt`复用当前管理权、不可变原请求和同owner任务，原模型移除、材料/政策过期不阻断合法历史核对；仍需可信探测宿主配置。shared/OpenAPI/现有Guard路由映射及后台会话已接；浏览器只留原任务/动作/CAS引用，收据匹配后清unknown、清当前政策，必须重读当前政策，不授执行。缺收据、旧journal无CAS引用及旧保存仍保持未知；取消原收据待补。原任务元数据沿真实read_metadata读前/后复验，不构造runner或写端口，但原创建材料的有效性约束未放宽。
+当前收口与下一队列（覆盖下方历史接点中的旧待办）：
 
-租户`/settings/ai`的`CapabilityProbePanel`消费原`POST /ai-native/text-capability/*`及共享协议，不另建运行器。当前params管理权和服务器能力白名单必需；首次挂载零读取/轮询/动作。`CapabilityProbeSession`按tenant/workspace/actor保留一个原请求引用及不明操作阶段，保存丢应答后只按原键读取；启动尝试后不再启动，恢复走原runner规则，绝不凭task完成授能力。动作政策仅提交服务器模板代码和CAS，权限/期限不能由浏览器指定；证据登记明确可能写入，但不派发。读前/读后失权清除旧结果，页面卸载/旧代次不回填。会话不提供清锁换ID；取消/动作政策写应答不明不因当前状态擅自清锁。Embedding、Reasoning、平台独立主体验证及进一步原账务宿主仍未接此页；完整真实挑战与标准执行尚未验，不能称能力管理整项完成。下一核心缺口仍是下述可信输入计数生产、完整标准Gateway/单账执行及合法恢复，不重复已接的租户操作入口。
+- 原`scene-requests/accounting/operation`只收original/callId及releaseUnsent或reconcile，观察既有同载荷账本事件；当前已settled/released但缺该事件仍not_observed。当前owner/资源/任务读权限必需，不依赖新模型启用；无新派发、变更或自动退款。
+- 员工/客户原账直接应用入口共用5秒依赖等待，读取超限不可用，可能写入超限unknown；关闭当前凭据/绑定、读取等待后再检查，迟到依赖不能推进新的业务读取或变更。原Controller的外层期限与原账核对继续保留。
+- `AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION`显式提供后，标准`opening-model/{start|recover|reconcile|takeover|cancel|execution}`复用原opening_diagnosis模型材料、持久计划/输入、runner和Gateway单账。原任务模型/result/source观察继续复用已有只读宿主；模型门不开放settings批准/写入。原人类CAS计划/动作政策管理按场景提供模型工具与执行操作，仍不自动播种政策。
+- 报价澄清最终参数已可明确审阅/确认：持久回答改变完整candidate时，旧候选修订仍原样保存；仅修订是唯一阻碍才局部重读当前事实提供待确认request。原普通prepare不放宽，confirm再次比对当前最终修订/hash，报价不批准订单；同后继/审批/Core/原收据链已定向离线验证，全部业务变体与真库仍未验。
+- 验证环境注意：本树现有TypeScript7不提供旧ts-node所需Compiler API，未安装/覆盖或复制生成物；本片隔离验证显式用ts-node解析到的已安装兼容编译器，原默认类型命令的兼容性未认证。不得删除/降级依赖来消除现场。
+- 优先余项：可信冻结输入计数与可计量计数调用/持久收据生产者（仍缺实际实现，现有readInputBound不能补造）；平台独立主体的付费能力验证；标准live准入下完整模型单账及中断窗口。后两类所需真实连接/凭据/验收另授权，明确区分代码缺口与未验环境。不重复已有报价/诊断/账务宿主，不以calls计数当token上界；小程序/官网暂只后端接口，不扩页面。
+
+
+当前报价模型执行已由标准`AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER`消费既有持久澄清链，独立`AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION`选择Profile/输出上限/pricing/host/knowledge，默认关闭；不顺带开放订单解释、能力probe或建单。原计划CAS生产者只在模型门存在时加入`ai.model.text`，动作政策加入request/submit/resume输入权，建单批准仍必须原独立quote-order门和真实人类决策。标准独立Controller只挂既有执行动作，观察Controller继续单独保留，任务中心ModuleRef现在可取原执行provider。resume/continue/reconcile前置等待与断线绑定，实际运行维持原工作窗和累计资源；unknown只核对原任务/回答/调用，不重发。已离线贯通TaskCenter回答丢COMMIT应答→明确同后继两次调用/六allocation/两settle；标准provider缺live原收据拒绝，未冒用合成能力。本轮新增`input/submit`只保存回答不启动后继，再由标准`quote-selections/clarified/{select|operation}`明确交接原已确认报价；同一后继交原订单宿主，模型publication/选择沿原task锁互斥，已冻结input/plan不换选择。正常task/人类审批复用原场景authority，reprepare独立；approved Core执行按原持久报价读取，丢应答不依赖缓存或重建。该完整定向离线链已通过四类COMMIT丢应答核对和原订单收据，仍未认证真实MySQL/标准live单账/全部变体。本轮已恢复服务端开发；后续优先可信输入计数/recorded、标准live能力与单账全链及剩余故障窗，不用calls/字符替代，真实环境须另授权。
+
+平台`/platform/ai`的`PlatformCapabilityObservation`只读原Profile能力证据，`GET /platform/ai/providers/{profileId}/capabilities`复用当前SaaS view、canonical platform scope及原live收据验证器；白名单、原支持声明与当前verified/unverified/disabled分开。原记录的模式/修订/检测/期限可观察，不暴露证据详情或密钥；缺原live收据、mock/manual/declared、过期及旧修订不认证。八类有界读取，读后身份/Profile/证据变化拒绝；首次零请求，配置变化重挂，隐藏/卸载迟到不回填且不锁住下一次明确读取。该端口无probe、任务创建、dispatch、预算或Vault写读，观察不授执行；原平台付费probe仍缺平台主体任务/预算/invocation装配，Embedding/Reasoning缺客观方法，不借租户身份补成功。下一步仍按原服务端依赖推进可做核心功能，可信计数缺生产依赖时保持unavailable，不重做已接的设置/收据观察。
+
+原动作政策收据：`PrismaTaskActionPolicyRepository.put`可明确选择将原CAS转换和`OperationLog`收据放入同一事务，当前验证配置入口已启用；其他旧调用不自动改行为。`readMutation`按scope/task/operation/原expectedRevision及当前actor观察，不用当前政策值推断原提交。`POST /ai-native/text-capability/task/action/receipt`复用当前管理权、不可变原请求和同owner任务，原模型移除、材料/政策过期不阻断合法历史核对；仍需可信探测宿主配置。shared/OpenAPI/现有Guard路由映射及后台会话已接；浏览器只留原任务/动作/CAS引用，收据匹配后清unknown、清当前政策，必须重读当前政策，不授执行。缺收据、旧journal无CAS引用及旧保存仍保持未知。取消原收据现由后台独立复用任务中心`stop-receipt`：发送前持久保存taskId/expectedRevision，刷新后只读原事件及同主体当前权限；匹配observed才解除取消unknown，保留原取消引用、不再start/cancel。not_observed不证明未提交，旧journal缺引用不从当前修订倒推；合法明确reconcile仍走原运行器善后，不由观察自动触发。原任务元数据沿真实read_metadata读前/后复验，不构造runner或写端口，但原创建材料的有效性约束未放宽。
+
+租户`/settings/ai`的`CapabilityProbePanel`消费原`POST /ai-native/text-capability/*`及共享协议，不另建运行器。当前params管理权和服务器能力白名单必需；首次挂载零读取/轮询/动作。`CapabilityProbeSession`按tenant/workspace/actor保留一个原请求引用及不明操作阶段，保存丢应答后只按原键读取；启动尝试后不再启动，恢复走原runner规则，绝不凭task完成授能力。动作政策仅提交服务器模板代码和CAS，权限/期限不能由浏览器指定；证据登记明确可能写入，但不派发。读前/读后失权清除旧结果，页面卸载/旧代次不回填。会话不提供清锁换ID；取消/动作政策写应答不明只按各自原CAS收据核对，不因当前状态擅自清锁。取消收据复用既有任务中心只读端口，无独立probe新路由；取消意图记录不证明任务取消、远端停止或费用释放。本页原账务宿主现消费既有`accounting/{read|release-unsent|reconcile}`，仅按原requestKey由服务器绑定同一调用；读取原预留/实耗精确单位，不当能力证明或供应商账单。释放/核对是明确可能写原账的确认动作，发送前保存最少原task/call/reservation/动作引用，不由页面提供金额或证据；同调用/终态回执才返回成功，丢应答后读取当前账保持unknown；新增`accounting/operation`只读既有原恢复事件，严格核对同一request/task/call/reservation/operation才解除对应不明标记，引用保留、本页不重复办理。该入口复用原Gateway recovery.readOperation→BudgetService当前read授权→Prisma原账本eventKey/payload核验，不重放release/reconcile、不改账；旧adapter无读端口或缺原事件仍不可用/not_observed，不能由终态猜原提交。原Profile移除不单独阻断合法历史，撤权/旧代次仍拒绝；账务观察不解除原取消unknown。Embedding、Reasoning、平台独立主体验证及其他宿主的精确账务收据消费者仍未接此页；完整真实挑战与标准执行尚未验，不能称能力管理整项完成。下一核心缺口仍是下述可信输入计数生产、完整标准Gateway/单账执行及合法恢复，不重复已接的租户操作入口。
 
 平台`/platform/ai`的原ProfileHost挂载`PlatformPriceReview`，新审阅仅取原服务已读取的profileId/revision，配置保存进行中或unknown时禁止新费率；字段/修订变化清人类确认，默认零计价读取或发布。复用`budget-settings/platform/pricing/{review|review/receipt}`、现有shared及SaaS view/manage；服务器只接受正式管理配置指定的Profile，不能由页面选中自授权。金额/缓存费率按六位字符串，不猜供应商价格/缓存折扣/汇率；也可明确Token原量计量，不代替可信计数。原键/场景/内容hash留sessionStorage，unknown锁重提；原Profile变化、无当前配置或只剩view权限时仍可核对原收据，撤权清旧结果。结果是原版本，不证明当前配置、预算、能力或执行可用。
 
@@ -106,7 +122,7 @@ Profile发现不是只有页面有界：原`PrismaProviderProfileRepository.list
 
 **当前可接入口：** 员工`AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION`显式选择image及可选audio的profile/calls版本、host/limits；原文件ObjectReader、inspection-tasks、inspection-task-policies和结果保存桥均已接AppModule，人工检查门不随之自动开放。客户`AI_NATIVE_CLIENT_MODEL_CONFIGURATION`明确提供pricing/prompt/output/limits/host，web/微信共用原文本Gateway；`AI_NATIVE_CLIENT_POLICY_CONFIGURATION`另行开放`/api/ai-native/client-task-policies`的原政策read/change/operation及model-plan CAS，固定quote_clarification场景，不播种政策。两种管理/执行开关不互相授权。原结果读取不需要模型开放；客户original_client输入源只接受同一冻结输入、单步骤计划及已完整计量的原文本结果，拒绝未知结果、工具动作和自造答案。当前范围/字段及GenericObject合同缺口见源码与开发记录，不另建Runtime/SDK协议。 客户web/微信另接`orders/material/{prepare|receipt}`、`tasks/{create|creation/read}`及`tasks/accounting/{read|reconcile}`；原账按当前本人/原调用及可信用量收敛，不要求模型仍开启，不暴露内部计价/配置，不授新派发。
 
-**本批证据：** 失效草稿元数据/取消、两轮澄清及原回答收据、从未启动取消、释放的输入等待取消，四组stdin各1/1、0 fail/skip/todo、退出0，不与前序批次相加称全量。API669 roots/0诊断、diff退出0；无新测试文件、构建、迁移或服务。沿原双offline preload、固定无效DATABASE_URL和本树绝对审计/TEMP运行；`output/core-staff-original-lifecycle-20261019/`保留旧实现阻塞复现及夹具修正。Auth/Guard/订阅、runner/Gateway/Prisma仓储与Controller为实际实现；DB、能力历史、协议和对象流为替身，不是HTTP/真库锁、真实计价/存储/供应商/设备验收。原28项62.5%、整项验收0/28不变。
+**历史阶段证据（2026-10-19，非当前汇总）：** 失效草稿元数据/取消、两轮澄清及原回答收据、从未启动取消、释放的输入等待取消，四组stdin各1/1、0 fail/skip/todo、退出0，不与前序批次相加称全量。API669 roots/0诊断、diff退出0；无新测试文件、构建、迁移或服务。沿原双offline preload、固定无效DATABASE_URL和本树绝对审计/TEMP运行；`output/core-staff-original-lifecycle-20261019/`保留旧实现阻塞复现及夹具修正。Auth/Guard/订阅、runner/Gateway/Prisma仓储与Controller为实际实现；DB、能力历史、协议和对象流为替身，不是HTTP/真库锁、真实计价/存储/供应商/设备验收。原28项62.5%、整项验收0/28不变。
 
 **员工善后入口：** `inspection-tasks/accounting/{read|reconcile}`继续按当前同员工任务政策及原invocation/dispatch/usage收敛，不依赖新识别配置/文件/profile/lease。`c5dfe92c`让`creation/read`、取消和原收据只核对当前订单读权、原草稿关联及原任务输入，不因草稿过期/修改/附件移除消失；原草稿关联缺失仍拒绝，不读附件或表单正文。`0279dfe5`让`input/receipt`精确核对原问题、回答键/内容指纹、计划及原run，停用后可读但不继续执行。`53df5cec`/`91ec248c`提供`cancel/settle-unstarted`、`cancel/settle-released-input`和`cancel/settlement/receipt`：只有原事务证明无执行证据，或原模型结果及四种资源全部计量且执行槽已释放时才关闭任务；重复复用原事件，未知/运行中/未计量拒绝，不退额、不回滚业务。候选正文的`inspection-assist/result-read`及保存/采用仍需有效原附件/草稿绑定；这些历史载荷、其他恢复窗口及全端失效处理尚未齐，不能说只剩环境。新启动/恢复、保存和人工提交保持各自原门。
 

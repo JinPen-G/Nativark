@@ -8,6 +8,8 @@ require("ts-node").register({
 
 const {
   verifyStripeSignature,
+  isStripeLiveKey,
+  hasStripeLiveReceipt,
   parseStripeSignatureHeader,
   toStripeMinorUnits,
   mapStripeCheckoutStatus,
@@ -19,6 +21,11 @@ const payload = JSON.stringify({ id: "evt_1", type: "checkout.session.completed"
 const nowMs = 1_700_000_000_000;
 const nowSec = Math.floor(nowMs / 1000);
 const sign = (ts, body, key = secret) => createHmac("sha256", key).update(`${ts}.${body}`).digest("hex");
+
+for (const key of ["sk_live_test123", "rk_live_test123"]) assert.equal(isStripeLiveKey(key), true);
+for (const key of ["sk_test_test123", "rk_test_test123", "sk_live_", "", null, 1]) assert.equal(isStripeLiveKey(key), false);
+assert.equal(hasStripeLiveReceipt({ stripeLiveVerified: true }), true);
+for (const receipt of [{ livemode: true }, { stripeLiveVerified: "true" }, {}, null, []]) assert.equal(hasStripeLiveReceipt(receipt), false);
 
 // 合法签名通过
 assert.equal(

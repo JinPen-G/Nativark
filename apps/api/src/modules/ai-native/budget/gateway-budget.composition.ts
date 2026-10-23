@@ -211,6 +211,22 @@ export function createPersistedGatewayBudget(input: {
       if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
       return structuredClone(record);
     },
+    /** Exact existing recovery event; read never delegates to release/reconcile.
+     * Terminal current state alone cannot attest which original operation committed. */
+    readOperation: async (value: unknown) => {
+      const parsed = recoveryCommand.extend({ operation: z.enum(['releaseUnsent', 'reconcile']) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const { before, binding, record: current, reservationId } = await originalReservation({ reservationId: parsed.data.reservationId });
+      const evidenceRef = parsed.data.operation === 'reconcile' ? await facts.originalUsageReference(reservationId) : undefined;
+      const eventKey = requestFingerprint(parsed.data.operation === 'releaseUnsent'
+        ? { method: 'persisted-original-unsent-release-1', reservationId, association: binding.association }
+        : { method: 'persisted-original-usage-reconcile-1', reservationId, evidenceRef, association: binding.association });
+      const record = await service.readMutation(reservationId, binding.association, {
+        action: parsed.data.operation === 'releaseUnsent' ? 'release' : 'reconcile', eventKey, evidenceRef });
+      if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
+      if (record && (record.id !== current.id || record.callId !== current.callId)) throw new BudgetError('FORBIDDEN');
+      return { operation: parsed.data.operation, status: record ? 'observed' as const : 'not_observed' as const, record };
+    },
     /** Complete only a previously persisted NOT-SENT cancellation. Neither
      * expiry nor a failed provider request is evidence permitting a refund. */
     releaseUnsent: async (value: unknown) => {

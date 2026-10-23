@@ -12,6 +12,7 @@ import { PLATFORM_MODEL_CAPABILITIES, PlatformModelSettingsSession } from "./pla
 import { safeDisplayText } from './safe-display';
 import { PlatformPriceReview } from './PlatformPriceReview';
 import { PlatformBudgetSettings } from './PlatformBudgetSettings';
+import { PlatformCapabilityObservation } from './PlatformCapabilityObservation';
 
 const identityKey = () => JSON.stringify([useAuthStore.getState().user, currentSessionEpoch()]);
 const feedback = { idle: "配置、能力验证、费率及预算分别管理，不会因保存而开放调用。", saved: "平台配置已保存，请重新读取当前配置。",
@@ -119,6 +120,7 @@ function ProfileHost({ profileId, identity }: { profileId: string; identity: str
       disabled={state.busy || !!state.pending || !canManage} />}
     {!canManage && <p role="status">{t("仅可读取，当前没有平台 AI 配置管理权限。")}</p>}
     <PlatformPriceReview profileId={profileId} identity={identity} profile={state.summary} blocked={state.busy || !!state.pending} />
+    <PlatformCapabilityObservation key={JSON.stringify([identity, profileId, state.summary, state.pending])} profileId={profileId} identity={identity} />
   </section>;
 }
 function ProfileEditor({ session, disabled }: { session: PlatformModelSettingsSession; disabled: boolean }) {

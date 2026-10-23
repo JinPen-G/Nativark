@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { retentionKinds, requireRestorePermit, signRetentionManifest, retentionPublicKeyHash, type AiRestorePermit } from './retention-restore';
 import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
-import { readRetentionModelSources, retentionModelTools } from './retention-model-sources';
+import { inspectRetentionSource } from './retention-model-sources';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -73,53 +73,6 @@ export class AiRetentionService {
         status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
       || await tx.aiUsageReservation.findFirst({ where: { ...owner, callId: { in: calls },
         status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })));
-  }
-  /** Complete, bounded original-reference inspection for this workspace only.
-   * No source body is reopened, and truncated/legacy evidence never means empty.
-   */
-  private async sourceRetention(tx: Prisma.TransactionClient, scopeId: string, kind: RetentionKind,
-    resourceId: string, owner: { tenantId: string; workspaceId: string }): Promise<'clear' | 'held' | 'unavailable'> {
-    const active = await tx.aiTask.findMany({ where: { scopeId, status: { notIn: [...terminal] } }, select: { id: true }, orderBy: { id: 'asc' }, take: 51 });
-    const steps = await tx.aiStep.findMany({ where: { scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { taskId: true }, orderBy: { id: 'asc' }, take: 51 });
-    const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { taskId: true }, orderBy: { chargeId: 'asc' }, take: 51 });
-    const reservations = await tx.aiBudgetReservation.findMany({ where: { scopeId, scopeKind: 'WORKSPACE', status: { in: ['reserved', 'pending_reconciliation'] } }, select: { runId: true }, orderBy: { id: 'asc' }, take: 51 });
-    const admissions = await tx.aiInvocationAdmission.findMany({ where: { ...owner, status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
-    const legacy = await tx.aiUsageReservation.findMany({ where: { ...owner, status: { in: ['reserved', 'pending_reconciliation'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
-    if ([active, steps, charges, reservations, admissions, legacy].some(rows => rows.length > 50)) return 'unavailable';
-    const tasks = new Set([...active.map(row => row.id), ...steps.map(row => row.taskId), ...charges.map(row => row.taskId)]);
-    for (const row of reservations) {
-      const run = await tx.aiRun.findFirst({ where: { id: row.runId, scopeId }, select: { taskId: true } });
-      if (!run) return 'unavailable';
-      tasks.add(run.taskId);
-    }
-    for (const callId of new Set([...admissions, ...legacy].map(row => row.callId))) {
-      const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId, callId } }, select: { taskId: true } });
-      if (!invocation) return 'unavailable';
-      tasks.add(invocation.taskId);
-    }
-    if (tasks.size > 50) return 'unavailable';
-    let attachmentDocument: string | null = null;
-    if (kind === 'attachment') {
-      const asset = await tx.fileAsset.findFirst({ where: { id: resourceId, tenantId: owner.tenantId,
-        businessModule: 'ai-native', businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: owner.workspaceId } }, select: { businessId: true } });
-      attachmentDocument = asset?.businessId ?? null;
-    }
-    for (const taskId of tasks) {
-      const task = await tx.aiTask.findFirst({ where: { id: taskId, scopeId }, select: { id: true, scopeId: true, sceneCode: true, inputRef: true } });
-      if (!task) return 'unavailable';
-      const inputs = await tx.aiTaskActionInput.findMany({ where: { scopeId, taskId, toolCode: { in: [...retentionModelTools] } },
-        orderBy: [{ runId: 'asc' }, { registrationRef: 'asc' }], take: 51 });
-      if (inputs.length > 50) return 'unavailable';
-      for (const input of inputs) {
-        try {
-          const refs = readRetentionModelSources(input, task, owner);
-          if (kind === 'knowledge' && refs.documents.has(resourceId) || kind === 'memory' && refs.memories.has(resourceId)
-            || kind === 'attachment' && (refs.attachments.has(resourceId) || attachmentDocument && refs.documents.has(attachmentDocument))) return 'held';
-          if (!refs.knowledgeComplete) return 'unavailable';
-        } catch { return 'unavailable'; }
-      }
-    }
-    return 'clear';
   }
   async receipt(value: unknown) {
     const command = aiRetentionReceiptSchema.parse(value), current = await this.current();
@@ -240,7 +193,7 @@ export class AiRetentionService {
           || expectedHash && receipt.targetHash !== expectedHash)) throw refused();
         if (receipt?.state === 'erased' && !expectedHash) return { id: key, state: 'erased', replayed: true };
         if (['knowledge', 'memory', 'attachment'].includes(kind)) {
-          const source = await this.sourceRetention(tx, scope.id, kind, resourceId, owner);
+          const source = await inspectRetentionSource(tx, scope.id, kind as 'knowledge' | 'memory' | 'attachment', resourceId, owner);
           if (source !== 'clear') return { id: key, state: source,
             reason: source === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable' };
         }

@@ -227,7 +227,15 @@ export class RentalOrderConfirmationService {
       if (!customerGate.allowed) throw new ConflictException(customerGate.message);
     }
 
-    const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
+    // An original quote COMMIT can succeed without publishing the cache when
+    // its acknowledgement is lost. Approved execution reads the persisted quote,
+    // never recreates it or relies on that process-local cache being populated.
+    const quote = approval ? await this.businessFacts.findQuote(tenantId, input.quoteId)
+      : this.business.consumeQuote(tenantId, context, input.quoteId);
+    if (!quote) throw new ConflictException("报价事实不存在，请核对原报价");
+    if (new Date(quote.expiresAt).getTime() < Date.now() || quote.consumedAt || quote.consumedOrderId) {
+      throw new ConflictException("报价已过期或被使用，请核对原报价");
+    }
     this.assertOrderMatchesQuote(input, quote);
     // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
     // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。

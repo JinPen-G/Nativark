@@ -35,14 +35,16 @@ import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
-  composeRequestBoundScenePlanPolicies,
+  composeRequestBoundScenePlanPolicies, composeClarifiedQuoteSelectionRequests,
   composeRequestBoundOriginalTaskAccounting,
-  composeRequestBoundPersistedOriginalOrderRead, type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
+  composeRequestBoundPersistedOriginalOrderRead, composeRequestBoundPersistedOriginalSceneModel,
+  type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
 import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-accounting-http.module';
+import { AI_ORIGINAL_OPENING_MODEL_REQUESTS, type OpeningModelRequests } from './scenes/opening-model-execution.controller';
 import { AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY } from './budget/budget-management.module';
 import { GatewayPricingRequestFactory } from './budget/gateway-pricing-request.composition';
 import { composeRequestBoundBudgetManagement } from './budget/budget-management.application';
@@ -76,7 +78,7 @@ import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
 import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
   AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS } from './scenes/settings-task.controller';
 import { AiHumanQuoteSelectionModule } from './task-request/human-quote-selection.module';
-import { AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS, AI_SELECTED_QUOTE_TASK_REQUESTS } from './task-request/human-quote-selection.controller';
+import { AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS, AI_SELECTED_QUOTE_TASK_REQUESTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS } from './task-request/human-quote-selection.controller';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
@@ -222,7 +224,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox) =>
-    composeRequestBoundPlatformModelSettings({ db, guard, secrets })
+    composeRequestBoundPlatformModelSettings({ db, capabilityDb: db, guard, secrets })
 };
 export const AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION');
 export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
@@ -457,6 +459,76 @@ function readOrderExecutionConfiguration(value: unknown) {
   } catch { /* Non-data DI values cannot become configuration. */ }
   throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 }
+/** Quote model execution is independent of order creation and capability probes. */
+export const AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION');
+export const AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION');
+
+const quoteModelRequestMethods = ['start', 'refreshInput', 'submitAnswer', 'resume', 'continueAnswer', 'reconcile', 'recover',
+  'takeover', 'requestCancel', 'readQuotePreparation', 'confirmClarifiedQuote', 'readClarifiedQuoteReceipt', 'readExecution'] as const;
+type QuoteModelRequests = Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>, typeof quoteModelRequestMethods[number]>;
+
+/** Quote clarification uses the original input runner and one persisted Gateway.
+ * Separate from order creation: model output/answered questions never approve an
+ * order. Omitted server configuration creates no host, policy or paid call. */
+export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteModelRequests> = {
+  provide: AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
+  inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, secrets: SecretBox,
+    files: FileStorageRuntimeService, serverValue?: unknown) => {
+    const configuration = readOrderExecutionConfiguration(serverValue);
+    if (!configuration.enabled) {
+      const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+      return Object.freeze({ start: unavailable, refreshInput: unavailable, submitAnswer: unavailable, resume: unavailable, continueAnswer: unavailable,
+        reconcile: unavailable, recover: unavailable, takeover: unavailable, requestCancel: unavailable,
+        readQuotePreparation: unavailable, confirmClarifiedQuote: unavailable, readClarifiedQuoteReceipt: unavailable, readExecution: unavailable });
+    }
+    if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
+      || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return composeRequestBoundPersistedOriginalSceneModel({
+      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      scene: { code: 'quote_clarification', version: '1' },
+      gatewayScene: { sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
+      gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
+      ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
+    }, { enabled: true, audience: 'operator', host: configuration.host });
+  }
+};
+
+/** Same persistent model/runner as quote clarification, with a closed opening
+ * scene and an independent server gate. Diagnosis never approves settings. */
+export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<OpeningModelRequests> = {
+  provide: AI_ORIGINAL_OPENING_MODEL_REQUESTS,
+  inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, secrets: SecretBox,
+    files: FileStorageRuntimeService, serverValue?: unknown) => {
+    const configuration = readOrderExecutionConfiguration(serverValue);
+    if (!configuration.enabled) {
+      const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+      return Object.freeze({ start: unavailable, recover: unavailable, reconcile: unavailable,
+        takeover: unavailable, requestCancel: unavailable, readExecution: unavailable });
+    }
+    if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
+      || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const requests = composeRequestBoundPersistedOriginalSceneModel({
+      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments),
+      scene: { code: 'opening_diagnosis', version: '1' },
+      gatewayScene: { sceneCode: 'opening_diagnosis', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
+      gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
+      ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
+    }, { enabled: true, audience: 'operator', host: configuration.host });
+    return Object.freeze({ start: requests.start, recover: requests.recover, reconcile: requests.reconcile,
+      takeover: requests.takeover, requestCancel: requests.requestCancel, readExecution: requests.readExecution });
+  }
+};
+
 /** Separate server-owned probe configuration: enabling an order workflow must
  * not implicitly permit billable capability challenges (or vice versa). The
  * root installs neither token and never seeds policies or runs a probe. */
@@ -615,25 +687,46 @@ export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOT
   }
 }));
 
+/** Handoff consumes the single configured model and selection request hosts;
+ * no factory here opens a second execution path or grants approval. */
+export const AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER: FactoryProvider<ReturnType<typeof composeClarifiedQuoteSelectionRequests>> = {
+  provide: AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS,
+  inject: [AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_HUMAN_QUOTE_SELECTION_REQUESTS,
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (model: QuoteModelRequests, selections: Parameters<typeof composeClarifiedQuoteSelectionRequests>[1], value?: unknown) => {
+    const requests = composeClarifiedQuoteSelectionRequests(model, selections);
+    if (readQuoteOrderConfiguration(value).enabled) return requests;
+    return Object.freeze({ ...requests, select: async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } });
+  }
+};
+
 /** Explicit same-owner manager CAS, never policy seeding during task creation.
  * Without server execution configuration, only the original read policies are
  * exposed. The closed order chain adds no approval or free-input permission. */
 export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_TASK_ACTION_POLICIES,
   inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, quoteValue?: unknown) => {
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, quoteValue?: unknown, quoteModelValue?: unknown, openingModelValue?: unknown) => {
     const configuration = readOrderExecutionConfiguration(serverValue), quote = readQuoteOrderConfiguration(quoteValue);
+    const quoteModel = readOrderExecutionConfiguration(quoteModelValue);
+    const openingModel = readOrderExecutionConfiguration(openingModelValue);
     const operations = [...originalReadOperations, ...(configuration.enabled ? originalOrderExecutionOperations : [])];
     return composeRequestBoundOriginalTaskActionPolicies(
       originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), {
         enabled: true, audience: 'operator', ttlMs: 120000,
         templates: [...operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'],
           ...((originalReadOperations as readonly string[]).includes(operation) ? {} : { sceneCode: 'order_explanation' }) })),
-          ...(quote.enabled ? [...originalOrderExecutionOperations, 'decide_approval' as const].map(operation => ({
-            operation, sceneCode: 'quote_clarification', requiredPermissions: ['rental-os:order:create'] })) : [])]
+          ...(quote.enabled || quoteModel.enabled ? [...originalOrderExecutionOperations,
+            ...(quoteModel.enabled ? ['request_input', 'submit_input', 'resume_input'] as const : []),
+            ...(quote.enabled ? ['decide_approval'] as const : [])].map(operation => ({
+            operation, sceneCode: 'quote_clarification', requiredPermissions: ['rental-os:order:create'] })) : []),
+          ...(openingModel.enabled ? [...originalReadOperations, ...originalOrderExecutionOperations].map(operation => ({
+            operation, sceneCode: 'opening_diagnosis', requiredPermissions: ['rental-os:price:manage'] })) : [])]
       });
   }
 };
@@ -645,21 +738,26 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
   provide: AI_SCENE_PLAN_POLICIES,
   inject: [...originalSceneInjection, { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown, quoteValue?: unknown, recognitionValue?: unknown) => {
+    memberships: MembershipService, payments: PaymentRuntimeService, serverValue?: unknown, probeValue?: unknown, settingsValue?: unknown, quoteValue?: unknown, recognitionValue?: unknown, quoteModelValue?: unknown, openingModelValue?: unknown) => {
     const execution = readOrderExecutionConfiguration(serverValue), probe = readProbeConfiguration(probeValue), settings = readSettingsExecutionConfiguration(settingsValue);
-    const quote = readQuoteOrderConfiguration(quoteValue);
+    const quote = readQuoteOrderConfiguration(quoteValue), quoteModel = readOrderExecutionConfiguration(quoteModelValue);
     const recognition = readStaffRecognitionConfiguration(recognitionValue);
+    const openingModel = readOrderExecutionConfiguration(openingModelValue);
     const scenes = [
       // A server option only makes its original tool eligible for a human
       // CAS policy. It grants no task action, approval, lease or dispatch.
-      { scene: { code: 'quote_clarification', version: '1' }, tools: quote.enabled
-        ? ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve', 'rental.order.commit'] as const
-        : ['rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve'] as const },
-      { scene: { code: 'opening_diagnosis', version: '1' }, tools: settings.enabled
-        ? ['tenant.opening.diagnose', AI_APPROVED_SETTINGS_TOOL_CODE] as const : ['tenant.opening.diagnose'] as const },
+      { scene: { code: 'quote_clarification', version: '1' }, tools: [
+        'rental.catalog.search', 'rental.availability.check', 'membership.customer.resolve',
+        ...(quote.enabled ? ['rental.order.commit'] as const : []),
+        ...(quoteModel.enabled ? ['ai.model.text'] as const : [])] as const },
+      { scene: { code: 'opening_diagnosis', version: '1' }, tools: [
+        'tenant.opening.diagnose', ...(settings.enabled ? [AI_APPROVED_SETTINGS_TOOL_CODE] as const : []),
+        ...(openingModel.enabled ? ['ai.model.text'] as const : [])] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
       ...(probe.enabled ? [{ scene: { code: TEXT_PROBE_SCENE, version: probe.sceneVersion },

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
@@ -144,16 +145,18 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   type Published = Awaited<ReturnType<typeof publication>>;
   type Bound = { published: Published; identity: ClientRequestContext | null; bindingHash: string;
     scenes: ReturnType<typeof composeAiClientScenes>; assertCurrent(): Promise<void> };
-  const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+  const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>, signal?: AbortSignal,
+    accountingWrite?: boolean): Promise<T> => {
     const header = member ? bearerSchema.safeParse(request?.headers?.authorization) : undefined;
     if (member && !header?.success) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
     const credential = Object.freeze({ authorization: header?.success ? header.data : '', ip: request?.ip });
     let active = true;
     const close = () => { active = false; };
+    const assertActive = () => { if (!active || signal?.aborted) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE'); };
     signal?.addEventListener('abort', close, { once: true });
     try {
       if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'request_interrupted');
-      return await runWithRequestIdentity({}, async () => {
+      const work = () => runWithRequestIdentity({}, async () => {
         if (!member) {
           const path = `/api/client/v1/${kind === 'catalog' ? 'public/catalog' : 'public/documents/help'}`;
           const publicRequest = { method: 'GET', url: path, originalUrl: path, headers: {}, ip: credential.ip,
@@ -164,21 +167,31 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           if (!active) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
           return { ...credential };
         } }) : undefined;
-        const identity = source ? await source.current() : null, before = await publication();
+        const identity = source ? await source.current() : null;
+        assertActive();
+        const before = await publication();
+        assertActive();
         if (identity && (identity.tenantId !== before.scope.tenantId || identity.workspaceId !== before.scope.workspaceId
           || identity.tenantCode !== server.tenantCode || identity.workspaceCode !== server.serviceCode
           || identity.categoryCode !== before.value.service.categoryCode)) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         const bindingHash = requestFingerprint({ publication: before, identity, appId: server.appId ?? null });
         const scenes = composeAiClientScenes({ client: dependencies.client, addresses: dependencies.addresses, ...(source ? { session: source } : {}) });
         const assertCurrent = async () => {
-          if (!active) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
-          const after = await publication(), current = source ? await source.current() : null;
+          assertActive();
+          const after = await publication();
+          assertActive();
+          const current = source ? await source.current() : null;
+          assertActive();
           if (bindingHash !== requestFingerprint({ publication: after, identity: current, appId: server.appId ?? null })) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         };
         const result = await consume({ published: before, identity, bindingHash, scenes, assertCurrent });
         await assertCurrent();
         return result;
       });
+      // Direct API consumers share the HTTP host's bounded wait. Closing this
+      // binding stops late reads from continuing into a financial mutation;
+      // a write timeout remains unknown and never starts another invocation.
+      return await (accountingWrite === undefined ? work() : waitForTaskApplicationDependency(work, accountingWrite, signal));
     } finally { signal?.removeEventListener('abort', close); close(); }
   };
   const scopeOf = (bound: Bound): AiClientMaterialScope => {
@@ -466,15 +479,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const taskId = original.task.taskId, before = await authorization.execution.readGrant(taskId, 'read');
       const current = await authorization.scopes.resolveCurrent();
-      const invocation = await db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } },
-        select: { id: true, taskId: true, scopeId: true, actorId: true, sceneCode: true, priceVersion: true } });
+      const invocation = structuredClone(await db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } },
+        select: { id: true, taskId: true, scopeId: true, actorId: true, sceneCode: true, priceVersion: true } }));
       if (invocation && (invocation.taskId !== taskId || invocation.scopeId !== current.scope.id
         || invocation.actorId !== bound.identity?.customerId || invocation.sceneCode !== taskDependencies.sceneCode)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       let account = null;
       try {
         if (invocation) {
-          const reservation = await db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
-            scopeId: current.scope.id, scopeKind: 'WORKSPACE', callId } }, select: { id: true, unitKind: true, priceVersion: true } });
+          const reservation = structuredClone(await db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
+            scopeId: current.scope.id, scopeKind: 'WORKSPACE', callId } }, select: { id: true, unitKind: true, priceVersion: true } }));
           if (reservation) {
             if (reservation.priceVersion !== invocation.priceVersion || !['calls', 'tokens', 'money'].includes(reservation.unitKind)) throw new BudgetError('FORBIDDEN');
             // Select ONLY the original persisted counting basis. The existing
@@ -482,7 +495,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             // no current rate, provider, execute gate or replacement ID is used.
             const recovery = composeClientTaskAccountingRecovery({ ...taskDependencies, db, loadMaterial, clock,
               pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: reservation.priceVersion } }, command);
-            const record = reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId });
+            const record = structuredClone(reconcile ? await recovery.reconcile({ reservationId: reservation.id }) : await recovery.readCall({ callId }));
             // Customer status observation must not disclose internal provider
             // rates/quantities or masquerade as an order payment/refund receipt.
             account = { status: record.status, usageRecorded: record.actual !== null, dispatched: record.dispatched };
@@ -501,7 +514,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       return freezeOriginalInput(aiClientTaskAccountingResponseSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION, callId,
         state: account ? 'observed' : 'unknown', account, meaning: 'ai_invocation_not_business_payment', observedAt: clock().toISOString(),
         execution: 'not_authorized_by_accounting', retryable: false, nextAction: 'read_original_accounting' }));
-    }, signal);
+    }, signal, reconcile);
   };
   const runOriginalTaskModel = async (request: AiClientApplicationRequest, value: unknown,
     model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelGatewayError } from './model-gateway.ports';
-import type { AiProviderProfileRole } from './provider-profile.ports';
+import type { AiProfileCapability, AiProviderProfileRole } from './provider-profile.ports';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { MAX_AI_PROVIDER_PROFILES } from './provider-profile.ports';
 import type { ProviderRouteDecision, ProviderRouteRequest, ProviderRouterPorts, AiRouteScene } from './provider-router.ports';
 
@@ -35,6 +36,19 @@ export class ProviderRouterService {
   constructor(private readonly ports: ProviderRouterPorts) {
     if (!ports || typeof ports.profiles?.list !== 'function' || typeof ports.capabilities?.preflight !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
+  /** Revalidate this selected call, not a fresh winner; new routing candidates do not redispatch it. */
+  async assertCurrent(value: ProviderRouteDecision, required: readonly AiProfileCapability[]) {
+    const decision = structuredClone(value), profile = profileSchema.parse(decision.profile);
+    const current = await this.ports.profiles.get(structuredClone(decision.scope), profile.profileKey);
+    if (!current || requestFingerprint(profileSchema.parse(current)) !== requestFingerprint(profile)
+      || !current.enabled || current.disabledAt || required.some(capability => !current.allowedCapabilities.includes(capability))) {
+      throw new ModelGatewayError('CONFIG_INVALID');
+    }
+    const check = preflightSchema.parse(await this.ports.capabilities.preflight(structuredClone(current), [...required]));
+    if (!check.allowed || check.missing.length || check.stale.length || check.required.length !== required.length
+      || check.required.some(capability => !required.includes(capability))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  }
+
   async resolve(value: ProviderRouteRequest): Promise<ProviderRouteDecision> {
     const parsed = inputSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');

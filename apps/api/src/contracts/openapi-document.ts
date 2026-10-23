@@ -2,12 +2,12 @@ import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
-import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
@@ -208,6 +208,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_LEAF_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  RecordCustomerCorporateCreditMaturityRequest: objectOf({ ledgerId: { type: "string", minLength: 1, maxLength: 191 },
+    dueAt: { type: "string", format: "date-time" }, basisRef: { type: "string", minLength: 1, maxLength: 191 },
+    reason: { type: "string", minLength: 1, maxLength: 500 }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["ledgerId", "dueAt", "basisRef", "reason", "idempotencyKey"], false),
+  CustomerCorporateCreditMaturityReceipt: objectOf({ ledgerId: stringSchema, orderId: stringSchema, currency: stringSchema,
+    dueAt: { type: "string", format: "date-time" }, basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema,
+    recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
+    ["ledgerId", "orderId", "currency", "dueAt", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
   RentalOperationLockRequest: {
     oneOf: [
       { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
@@ -1950,6 +1958,8 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/account", "Platform", "getCustomerCreditAccount", "Read the current corporate credit reserve and receivable summary", ["rental-os:corporate:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/ledger", "Platform", "listCustomerCreditLedger", "Read the append-only corporate credit ledger", ["rental-os:corporate:view"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments", "Platform", "recordCustomerCreditPayment", "Record an idempotent corporate credit payment", ["rental-os:corporate:manage"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/credit/maturities", "Platform", "recordCustomerCreditMaturity", "Record the original debt maturity date explicitly determined by finance", ["rental-os:corporate:manage"], true, "RecordCustomerCorporateCreditMaturityRequest", "CustomerCorporateCreditMaturityReceipt"),
+  { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/maturities/{ledgerId}", "Platform", "readCustomerCreditMaturity", "Read the immutable original debt maturity receipt", ["rental-os:corporate:view"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditMaturityReceipt"), { type: "null" }] } },
   // CUSTOMER-01D：重复识别、人工合并与注销。需求 4.8.14 要求合并与注销**分别授权**——
   // 两者都不可逆且影响面不同（合并改身份归属、注销终止业务资格），共用「会员管理」
   // 等于让任何能改会员等级的人都能合并或注销客户。
@@ -2169,6 +2179,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: 'readPlatformAiModelConfiguration', permissions: ['system:ai-provider:view'],
     summary: 'Current explicitly authorized SaaS platform viewer. Masked current configuration, not an original save receipt, write permission or connection/capability proof.',
     responseSchema: 'AiPlatformModelSettingsSummaryDraft' },
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}/capabilities`, tag: 'AI Native',
+    operationId: 'readPlatformAiCapabilityEvidence', permissions: ['system:ai-provider:view'],
+    summary: 'Current SaaS viewer and platform-owned Profile only. Eight bounded capability observations: configured whitelist, original evidence metadata and current verified readiness are distinct. Uses original receipt verifier, no credentials, connection test, task start, budget mutation or dispatch grant. Missing/mocked/expired evidence never certifies support; inactive configuration retains historical metadata only. Identity, configuration and evidence are revalidated before delivery.',
+    responseSchema: 'AiPlatformModelCapabilityObservationDraft' },
   { method: 'put', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
     operationId: 'savePlatformAiModelConfiguration', permissions: ['system:ai-provider:manage'],
     summary: 'SaaS platform manager CAS + encrypted Vault/Profile transaction. Revision zero provisions only the first DEFAULT profile; no policy, capability evidence or budget is granted. Lost acknowledgement requires observing current configuration, never automatic retry.',
@@ -2277,6 +2291,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `originalNotificationSettings_${name}`, permissions: ['rental-os:price:manage'],
     summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Unknown requires original change/task/decision/operation observation; draft-polymorphic response.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject' })),
+  ...Object.entries(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
+    method: 'post' as const, path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
+    permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Lost replies read the same original selection key/payload only.',
+    requestSchema: 'AiClarifiedQuoteSelectionRequestDraft', responseSchema: 'GenericObject' })),
   ...[AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT].flatMap(contract =>
     Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
       method: 'post' as const, path: `/api/${contract.basePath}${action ? `/${action}` : ''}`, tag: 'AI Native',
@@ -2387,20 +2407,34 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ['readHistory', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityHistoryResponseDraft'],
     ['readAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
     ['releaseUnsent', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
-    ['reconcileAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft']
+    ['reconcileAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
+    ['readAccountingOperation', 'AiTextCapabilityAccountingOperationRequestDraft', 'AiTextCapabilityAccountingOperationResponseDraft']
   ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_TEXT_CAPABILITY_HTTP_DRAFT.basePath}/${AI_TEXT_CAPABILITY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalProbeAccounting_${action}`, authRequired: true,
     permissions: ['system:params:manage'], requestSchema, responseSchema,
-    summary: action === 'readTaskActionReceipt'
+    summary: action === 'readAccountingOperation'
+      ? 'Read the exact existing original release/reconcile ledger event and its trusted payload under current same-owner read authority. Original request selects the call and event key; caller amounts, usage, dispatch evidence and event keys are forbidden. No mutation replay, model dispatch, secret read or budget release. Current terminal balance without this event returns not_observed, never proof of rollback or permission to resend. Trusted probe host remains required.'
+      : action === 'readTaskActionReceipt'
       ? 'Read the immutable same-owner action-policy CAS save receipt under current management authority. Policy and receipt commit atomically; original task, operation, prior revision, actor and scope must match. Does not resolve a live model or require the saved policy to remain unexpired. Missing/legacy receipt is not proof of rollback; observing a receipt grants no current policy, lease, dispatch or retry. Trusted probe host configuration is still required.'
       : 'Standard capability workflow, unavailable without separate trusted server probe configuration. Human configuration of persisted scene and same-owner task policies is required; never seeded on task creation. Immutable original input, measured runner, unique Gateway dispatch and the original single ledger remain mandatory. Probe completion is not capability evidence: read its persisted receipt. Historical observations/accounting do not dispatch; unknown uses the same original key, never automatic retry or caller usage. Calls quotas do not prove supplier token/money pricing.' })),
-  ...(['read', 'releaseUnsent', 'reconcile'] as const).map(action => ({ method: 'post' as const,
+  ...(['start', 'recover', 'reconcile', 'takeover', 'requestCancel', 'readExecution'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.basePath}/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalOpeningModel_${action}`, authRequired: true,
+    permissions: ['rental-os:price:manage'],
+    requestSchema: action === 'requestCancel' ? 'AiSceneOrderReadCancelDraft'
+      : action === 'takeover' ? 'AiSceneOrderReadTakeoverDraft' : 'AiSceneRequestReadDraft',
+    responseSchema: 'GenericObject',
+    summary: 'Independent opt-in opening diagnosis model host; omitted configuration performs no reads or execution. Reuses the original request, current same-owner scene/action policies, immutable input/plan, measured runner and single Gateway ledger. Current opening business authority is mandatory. Existing model/result/source observations remain on their read host. No settings approval, publication, capability attestation or automatic retry of unknown work. GenericObject response remains an unfrozen polymorphic contract.' })),
+  ...(['read', 'releaseUnsent', 'reconcile', 'readOperation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
-    permissions: ['rental-os:order:view'], requestSchema: 'AiOriginalTaskAccountingRequestDraft',
-    responseSchema: 'AiOriginalTaskAccountingResponseDraft',
-    summary: 'Standard original order recovery host, independent of new-execution configuration. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the original read, never retry dispatch. Other scenes still require their own explicit trusted composition.' })),
+    permissions: ['rental-os:order:view'],
+    requestSchema: action === 'readOperation' ? 'AiOriginalTaskAccountingOperationRequestDraft' : 'AiOriginalTaskAccountingRequestDraft',
+    responseSchema: action === 'readOperation' ? 'AiOriginalTaskAccountingOperationResponseDraft' : 'AiOriginalTaskAccountingResponseDraft',
+    summary: action === 'readOperation'
+      ? 'Read the exact original release/reconcile ledger event and trusted payload under current same-owner task/resource authority, independent of new execution. Caller supplies only the original request, call and fixed operation; never event keys, usage or amounts. Missing event is not proof of rollback; current settled/released balance alone does not attest this operation. No mutation, reservation, dispatch or business execution.'
+      : 'Standard original order recovery host, independent of new-execution configuration. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the exact original operation receipt, never retry dispatch. Other scenes still require their own explicit trusted composition.' })),
   ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,
@@ -2428,6 +2462,25 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
           ['maxSteps', 'maxCalls', 'maxConcurrent', 'maxTotalMs', 'maxStepMs', 'maxOutputBytes'], false) },
         ['expectedRevision', 'enabled', 'limits', 'expiresAt'], false) }) },
       action === 'read' ? ['sceneCode'] : ['sceneCode', 'change'], false) })),
+  ...([
+    [AI_SCENE_MODEL_HTTP_DRAFT.start, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.refreshInput, 'AiSceneModelInputRefreshDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.resume, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.reconcile, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.recover, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.takeover, 'AiSceneModelTakeoverDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.requestCancel, 'AiSceneModelCancelDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote, 'AiSceneModelQuoteConfirmDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readExecution, 'AiSceneRequestReadDraft']
+  ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `executeOriginalAiQuote_${action.replace(/\//gu, '_')}`, requestSchema, responseSchema: 'GenericObject',
+    permissions: ['rental-os:order:create'], authRequired: true,
+    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. Recovery never redispatches unknown calls. GenericObject response remains an unfrozen polymorphic contract.' })),
   ...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
       cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },

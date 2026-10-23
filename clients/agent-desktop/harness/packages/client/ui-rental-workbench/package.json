@@ -1,0 +1,31 @@
+{
+  "name": "@rental-os/dsh-client-ui-rental-workbench",
+  "version": "0.2.1-rc.2",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./client": { "types": "./lib/types/client/index.d.ts", "default": "./lib/client.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": { "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-sidebar"] } },
+  "scripts": { "bundle": "tsdown" },
+  "peerDependencies": { "@deepseek-ai/cordis": "workspace:~" },
+  "devDependencies": {
+    "@rental-os/shared": "file:../../../../../../packages/shared",
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-client-store": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-slots": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-primitives": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-renderer": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-layout": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-sidebar": "workspace:*",
+    "@deepseek-ai/dsh-client-locale": "workspace:*",
+    "react": "^18.2.0"
+  },
+  "files": ["lib/index.js", "lib/client.js", "lib/types/**/*.d.ts"]
+}

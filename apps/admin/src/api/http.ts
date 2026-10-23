@@ -5,7 +5,7 @@
 import axios from "axios";
 import type { ApiResult, LoginResponse } from "@rental-os/shared";
 import type { InternalAxiosRequestConfig } from "axios";
-import { clearSessionQueryCache, currentSessionSignal } from "@/app/queryClient";
+import { clearSessionQueryCache, currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -15,6 +15,13 @@ export const http = axios.create({ baseURL, timeout: 12_000 });
 export const apiAssetOrigin = /^https?:\/\//.test(baseURL) ? new URL(baseURL).origin : "";
 
 let refreshPromise: Promise<LoginResponse | undefined> | undefined;
+const refreshListeners = new Set<(session: LoginResponse) => void>();
+
+/** Subscribe to original refresh responses in this application realm; DOM/storage events cannot supply this receipt. */
+export function onSessionRefreshed(listener: (session: LoginResponse) => void) {
+  refreshListeners.add(listener);
+  return () => { refreshListeners.delete(listener); };
+}
 
 function storeRefreshedSession(session: LoginResponse) {
   const previousWorkspaceId = window.localStorage.getItem("rental_current_workspace");
@@ -26,6 +33,8 @@ function storeRefreshedSession(session: LoginResponse) {
   if (session.currentWorkspaceId) window.localStorage.setItem("rental_current_workspace", session.currentWorkspaceId);
   else window.localStorage.removeItem("rental_current_workspace");
   if (previousWorkspaceId !== (session.currentWorkspaceId ?? null)) clearSessionQueryCache();
+  // Same-document consumers commit the original server receipt, not a cache-derived authorization claim.
+  for (const listener of refreshListeners) listener(session);
   window.dispatchEvent(new CustomEvent("rental-session-updated"));
 }
 
@@ -35,8 +44,11 @@ function refreshSession(refreshToken: string): Promise<LoginResponse | undefined
       // 等到跨标签锁后再次检查：若 token 已变化，说明另一个标签已经完成轮换，
       // 本页直接采用其会话，不再用已撤销的旧 token 发第二次请求。
       if (window.localStorage.getItem("rental_refresh_token") !== refreshToken) return undefined;
+      const epoch = currentSessionEpoch();
       const response = await axios.post<ApiResult<LoginResponse>>(`${baseURL}/auth/refresh`, { refreshToken });
       const session = response.data.data;
+      // Logout or a completed space/account switch owns newer credentials even while this locked request is in flight.
+      if (currentSessionEpoch() !== epoch || window.localStorage.getItem("rental_refresh_token") !== refreshToken) return undefined;
       // 写 storage 必须在锁内完成；否则锁一释放，下一标签仍可能读到旧 token。
       storeRefreshedSession(session);
       return session;
@@ -68,6 +80,7 @@ http.interceptors.request.use((config) => {
   //
   // 调用方已显式传 signal 时不覆盖：那是更精细的控制，不该被这里夺走。
   if (!config.signal) config.signal = currentSessionSignal();
+  (config as InternalAxiosRequestConfig & { _sessionEpoch?: number })._sessionEpoch = currentSessionEpoch();
   if (tenantRaw) {
     try {
       const tenant = JSON.parse(tenantRaw) as { tenantId?: string; tenantCode?: string };
@@ -83,7 +96,8 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error?.config as (InternalAxiosRequestConfig & { _authRetry?: boolean; _authRefreshToken?: string }) | undefined;
+    const original = error?.config as (InternalAxiosRequestConfig & { _authRetry?: boolean; _authRefreshToken?: string; _sessionEpoch?: number }) | undefined;
+    if (original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
     const isAuthEndpoint = original?.url?.includes("/auth/login") || original?.url?.includes("/auth/refresh");
     if (error?.response?.status === 401 && original && !original._authRetry && !isAuthEndpoint) {
       const refreshToken = window.localStorage.getItem("rental_refresh_token");
@@ -92,6 +106,7 @@ http.interceptors.response.use(
         original._authRefreshToken = refreshToken;
         try {
           const session = await refreshSession(refreshToken);
+          if (original._sessionEpoch !== currentSessionEpoch()) throw error;
           const accessToken = session?.accessToken ?? window.localStorage.getItem("rental_access_token");
           if (!accessToken) throw error;
           // 会话可能由本页或另一个标签更新；重试一律挂当前代 signal。
@@ -104,6 +119,7 @@ http.interceptors.response.use(
         }
       }
     }
+    if (original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
     if (error?.response?.status === 401) {
       // 仅当失败时使用的 refresh token 仍是当前 token 才能清理。另一个标签页
       // 可能已先完成轮换并写入新会话，盲删会把成功标签页一起登出。
@@ -111,6 +127,8 @@ http.interceptors.response.use(
       if (!failedRefreshToken || failedRefreshToken === window.localStorage.getItem("rental_refresh_token")) {
         ["rental_access_token", "rental_refresh_token", "rental_tenant", "rental_user", "rental_workspaces", "rental_current_workspace"]
         .forEach((key) => window.localStorage.removeItem(key));
+        clearSessionQueryCache();
+        window.dispatchEvent(new CustomEvent("rental-session-updated"));
         if (window.location.pathname !== "/login") window.location.assign("/login");
       }
     }

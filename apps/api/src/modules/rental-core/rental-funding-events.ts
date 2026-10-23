@@ -6,7 +6,7 @@ import type {
 } from "@rental-os/shared";
 
 /**
- * RULE-01B：模拟资金事件的余额推导与动作合法性（需求 4.4.7 line 527、4.6.3）。
+ * 资金事件的余额推导与动作合法性；调用方必须先按证据口径选取事件，不能混账。
  *
  * 抽成纯函数的理由：押金进的是**实收**、预授权是**冻结额度**，余额算错、或允许了不该允许的
  * 动作（把已释放的预授权又转扣一次）都直接影响客户资金。这类判定必须能脱离数据库逐条回放。
@@ -18,6 +18,31 @@ import type {
  */
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+/** 仅归一化有原确认关系的历史 mock；方式、备注或幂等键本身不是实款证据。 */
+export function resolveOfflineFundingEvents(
+  events: readonly RentalFundingEvent[],
+  registrations: readonly {
+    id: string; tenantId: string; workspaceId: string; orderId: string;
+    status: string; fundingEventId: string | null; instrument: string; amount: unknown;
+    paymentMethod: string; confirmedAt: Date | null; confirmedBy: string | null;
+  }[]
+): RentalFundingEvent[] {
+  const confirmed = new Map(registrations.filter(row => row.status === "confirmed" && row.confirmedAt && row.confirmedBy && row.fundingEventId)
+    .map(row => [row.fundingEventId, row]));
+  return events.map(event => {
+    const row = confirmed.get(event.id);
+    if (event.provider !== "mock" || !row || row.tenantId !== event.tenantId || row.workspaceId !== event.workspaceId
+      || row.orderId !== event.orderId || row.instrument !== event.instrument || Number(row.amount) !== event.amount
+      || row.paymentMethod !== event.paymentMethod || event.idempotencyKey !== `staff-offline:${row.id}`
+      || !["rental", "deposit"].includes(event.instrument) || !["initiate", "append"].includes(event.action)) return event;
+    return { ...event, provider: "offline" };
+  });
+}
+
+export function isRealFundingEvent(event: RentalFundingEvent): boolean {
+  return ["offline", "alipay", "wechat_pay", "stripe"].includes(event.provider);
+}
 
 export interface DepositLedger {
   collected: number;

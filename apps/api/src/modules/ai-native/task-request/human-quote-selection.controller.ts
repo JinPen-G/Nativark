@@ -1,12 +1,37 @@
 import type { IncomingMessage } from 'node:http';
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
-import type { composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT,
+  AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
+import { parseClarifiedQuoteSelection } from './quote-selection.validation';
+import type { composeClarifiedQuoteSelectionRequests, composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
 export const AI_HUMAN_QUOTE_SELECTION_REQUESTS = Symbol('AI_HUMAN_QUOTE_SELECTION_REQUESTS');
 export const AI_HUMAN_QUOTE_ORDER_REQUESTS = Symbol('AI_HUMAN_QUOTE_ORDER_REQUESTS');
 export const AI_SELECTED_QUOTE_TASK_REQUESTS = Symbol('AI_SELECTED_QUOTE_TASK_REQUESTS');
+export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS');
+
+/** Explicit human handoff, not an approval or order execution endpoint. The
+ * exact original quote receipt and unplanned successor are checked server-side. */
+@Controller(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath)
+export class AiClarifiedQuoteSelectionController {
+  constructor(@Inject(AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS)
+    private readonly selections: ReturnType<typeof composeClarifiedQuoteSelectionRequests>) {}
+  @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.select) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => {
+      const command = parseClarifiedQuoteSelection(body);
+      return this.selections.select(request, command.selection, command.clarification);
+    }, 'read_clarified_selection_operation');
+  }
+  @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.readOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOperation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => {
+      const command = parseClarifiedQuoteSelection(body);
+      return this.selections.readOperation(request, command.selection, command.clarification);
+    });
+  }
+}
 
 type QuoteTaskHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 async function runQuoteTask<T>(request: QuoteTaskHttpRequest, work: (signal: AbortSignal) => Promise<T>) {

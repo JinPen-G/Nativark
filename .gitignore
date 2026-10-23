@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 apps/admin/dist-ai-offline/
+packages/shared/dist-agent-desktop/
 build/
 .vite/
 *.tsbuildinfo

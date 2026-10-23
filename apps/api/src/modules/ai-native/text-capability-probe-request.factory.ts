@@ -30,6 +30,7 @@ export type TextCapabilityRequest = {
 } & { close(): void };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const requestSchema = z.object({ requestKey: textProbeCommandSchema.shape.operationId }).strict();
+const accountingOperationSchema = requestSchema.extend({ operation: z.enum(['releaseUnsent', 'reconcileAccounting']) }).strict();
 const prepareSchema = requestSchema.extend({ capability: textProbeCommandSchema.shape.capability }).strict();
 const cancelSchema = requestSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
 const actionReadSchema = requestSchema.extend({ operation: z.string().min(1).max(64) }).strict();
@@ -145,6 +146,7 @@ export class TextCapabilityProbeRequestFactory {
       return { taskId: found.task.taskId, template };
     };
     return Object.freeze({
+      readAccountingOperation: value => run(accountingOperationSchema, value, ({ requestKey, operation }) => root.workflow.readOriginalAccountingOperation(requestKey, operation)),
       readAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.readOriginalAccounting(requestKey)),
       releaseUnsent: value => run(requestSchema, value, ({ requestKey }) => root.workflow.releaseOriginalUnsent(requestKey), true),
       reconcileAccounting: value => run(requestSchema, value, ({ requestKey }) => root.workflow.reconcileOriginalAccounting(requestKey), true),

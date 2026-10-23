@@ -8,6 +8,7 @@ import { snapshotInspectionTemplate } from "./rental-inspection-template-snapsho
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { buildCapabilityEquipment } from "./capability-equipment";
 import {
@@ -470,7 +471,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     /** EXT-02A：真实业务短信投递；单测未装配时保留原有模拟通知语义。 */
     @Optional() private readonly notificationRuntime?: TenantIntegrationRuntimeService,
     @Optional() private readonly secretBox?: SecretBox,
-    private readonly categoryResolver?: RentalCategoryResolver
+    private readonly categoryResolver?: RentalCategoryResolver,
+    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService
   ) {}
 
   /**
@@ -5037,6 +5039,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 会员身份与方案由会员域服务端解析；这里在真正计算权益之前等待结果，
     // 不能让前端传进来的企业 id 或权益金额参与报价。
     const resolvedMembership = membershipSnapshot ? await membershipSnapshot : undefined;
+    if (resolvedMembership?.enterpriseContractAndPayer) {
+      if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪，无法核对该币种的账期准入");
+      await this.corporateSettlement.assertQuoteCreditCurrency(tenantId, resolvedMembership, context.settings.pricing.currency);
+    }
 
     // MKT-01A：自动优惠方案的资格、互斥与叠加交给纯函数收口（需求 4.4.10）。
     //

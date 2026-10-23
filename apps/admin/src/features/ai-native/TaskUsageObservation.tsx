@@ -1,20 +1,14 @@
 /** Manual original-ledger observation; this component has no reserve, release,
  * reconcile or model port. A page is never presented as a whole-task total. */
 import { useEffect, useRef, useState } from "react";
-import { type AiTaskBudgetUsagePageDraft, type AiUsageQuantityDraft } from "@rental-os/shared";
+import { type AiTaskBudgetUsagePageDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { ActionButton, Alert } from "@/components/ui";
 import { useLocale } from "@/app/locale";
 import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
 
-function quantity(value: AiUsageQuantityDraft | null) {
-  if (!value) return "尚未核实";
-  if (value.unit === "money") return value.scale === 6 && /^[A-Z]{3}$/u.test(value.currency)
-    && /^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/u.test(value.amount) ? `${value.amount} ${value.currency}` : "不可用";
-  return (value.unit === "tokens" || value.unit === "calls") && Number.isSafeInteger(value.value) && value.value >= 0
-    ? `${value.value} ${value.unit}` : "不可用";
-}
+import { formatUsageQuantity as quantity } from './usage-quantity';
 export function TaskUsageObservation({ taskId, current, onAccessDenied }: { taskId: string; current: () => boolean; onAccessDenied: () => void }) {
   const { t } = useLocale();
   const [page, setPage] = useState<AiTaskBudgetUsagePageDraft | null>(null);

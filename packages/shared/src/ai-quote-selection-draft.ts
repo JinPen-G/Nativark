@@ -1,10 +1,21 @@
 import type { CreateRentalOrderRequest } from './core';
+import type { AiSceneRequestReadDraft } from './ai-scene-request-draft';
+import type { AiTaskInputSubmissionDraft } from './ai-task-input-draft';
 
 export const AI_QUOTE_SELECTION_DRAFT_VERSION = 'ain-quote-selection-draft-1' as const;
 /** Opt-in only; registration does not grant identity, approval or execution. */
 export const AI_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/quote-selections', select: '', read: 'read', reconcile: 'reconcile'
 } as const);
+/** Explicit handoff of the exact clarified quote to its unplanned successor.
+ * Selection still does not start the order runner or grant human approval. */
+export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/clarified`, select: 'select', readOperation: 'operation'
+} as const);
+export interface AiClarifiedQuoteSelectionRequestDraft {
+  selection: AiQuoteSelectionCreateDraft;
+  clarification: { original: AiSceneRequestReadDraft; submission: AiTaskInputSubmissionDraft };
+}
 /** Human review/decision transport only. Core execution remains runner-owned. */
 export const AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/approval`,

@@ -40,7 +40,7 @@ import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from ".
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { rentalPaymentBalance } from "../rental-core/rental-funding-events";
 import { roundMoney, toCents } from "./payment-money";
-import { fromStripeMinorUnits, mapStripeCheckoutStatus, toStripeMinorUnits, verifyStripeSignature } from "./stripe-payment";
+import { fromStripeMinorUnits, hasStripeLiveReceipt, isStripeLiveKey, mapStripeCheckoutStatus, toStripeMinorUnits, verifyStripeSignature } from "./stripe-payment";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -70,6 +70,15 @@ interface PaymentIntentRow {
 }
 
 type PaymentRefundRow = Prisma.RentalPaymentRefundGetPayload<object>;
+
+interface ProviderPaymentResult {
+  state: string;
+  paid: boolean;
+  closed: boolean;
+  amount: number;
+  externalTransactionId: string;
+  stripeReceipt?: { livemode: true; sessionId: string };
+}
 
 interface ProviderRefundResult {
   status: "succeeded" | "accepted" | "failed";
@@ -356,8 +365,9 @@ export class PaymentRuntimeService {
       // 只读余额,校验 Secret Key 与网关连通性;不创建 Checkout、不扣款、不退款。
       // 同时本地确认 Webhook 签名密钥已填,否则回调将静默验签失败、无人可见。
       requiredText(config.credentials.webhookSecret, "Webhook 签名密钥");
-      await this.stripeRequest(config, "GET", "/v1/balance");
-      return "已验证 Stripe 连接（仅读取账户余额，未创建或扣款）。";
+      const balance = await this.stripeRequest(config, "GET", "/v1/balance");
+      if (balance.livemode !== true) throw new ServiceUnavailableException("Stripe 未证明真实资金模式，不能将测试账户认证为真实收单");
+      return "已验证 Stripe 真实模式连接（仅读取账户余额，未创建或扣款）。";
     }
     throw new ServiceUnavailableException("未实现的支付平台适配器");
   }
@@ -517,7 +527,7 @@ export class PaymentRuntimeService {
           return { intent: existingInside, orderNo: order.orderNo, amount: Number(existingInside.amount), replayed: true };
         }
 
-        const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
+        const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx, { realOnly: true });
         const amount = money(funding.rental.balance + funding.rental.pendingExtensionAmount);
         if (amount <= 0.005) throw new ConflictException("当前订单没有待支付的租金或费用");
         // 币种门禁改为"按该收单平台声明的结算币种"判定,取代原先的全局 CNY 硬阻断:
@@ -589,10 +599,13 @@ export class PaymentRuntimeService {
           : jsapi
             ? await this.createWechatJsapiIntent(config, intent, orderNo, jsapi.openId)
             : await this.createWechatIntent(config, intent, orderNo);
-      const updated = await this.prisma.rentalPaymentIntent.update({
-        where: { id: intent.id },
+      // 迟到的创建响应不能覆盖回调已保存的原收据或终态。
+      await this.prisma.rentalPaymentIntent.updateMany({
+        where: { id: intent.id, tenantId, workspaceId, orderId, status: "pending" },
         data: { checkoutUrl: result.checkoutUrl, responseJson: result.responseJson as Prisma.InputJsonValue, failureReason: null }
       });
+      const updated = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intent.id, tenantId, workspaceId, orderId } });
+      if (!updated) throw new NotFoundException("支付单不存在");
       await this.log(tenantId, config, "create_payment_intent", "success", {
         orderId,
         intentId: intent.id,
@@ -605,7 +618,10 @@ export class PaymentRuntimeService {
       const message = error instanceof Error ? error.message : "支付平台调用失败";
       const unknown = isProviderCallUnknown(error);
       const failureReason = unknown ? "支付请求结果未知，请查询支付状态后再重试" : message.slice(0, 500);
-      await this.prisma.rentalPaymentIntent.update({ where: { id: intent.id }, data: { status: unknown ? "pending" : "failed", failureReason } });
+      await this.prisma.rentalPaymentIntent.updateMany({
+        where: { id: intent.id, tenantId, workspaceId, orderId, status: "pending" },
+        data: { status: unknown ? "pending" : "failed", failureReason }
+      });
       await this.log(tenantId, config, "create_payment_intent", unknown ? "pending" : "failed", { orderId, intentId: intent.id, merchantOrderNo: intent.merchantOrderNo, amount }, undefined, failureReason);
       if (unknown && !(error instanceof PaymentProviderUnknownError)) throw new PaymentProviderUnknownError();
       throw error instanceof ServiceUnavailableException || error instanceof BadRequestException ? error : new ServiceUnavailableException(`支付平台调用失败：${message.slice(0, 180)}`);
@@ -728,7 +744,7 @@ export class PaymentRuntimeService {
         return { replay: true as const, refund: duplicate, intent: locked, confirmedTotal: 0 };
       }
 
-      const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
+      const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx, { realOnly: true });
       const refundReservations = await tx.rentalPaymentRefund.findMany({
         where: { tenantId, workspaceId, orderId, status: { in: ["pending", "accepted", "funding_pending", "succeeded"] } },
         select: { amount: true, status: true, paymentIntentId: true }
@@ -939,7 +955,7 @@ export class PaymentRuntimeService {
   async refreshPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string, jsapiOpenId?: string) {
     const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!intent) throw new NotFoundException("支付单不存在");
-    if (["paid", "closed"].includes(intent.status)) return this.toResponse(intent);
+    if (intent.status === "closed" || (intent.status === "paid" && (intent.provider !== "stripe" || hasStripeLiveReceipt(intent.responseJson)))) return this.toResponse(intent);
     const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法查询支付状态");
     const result = intent.method === "alipay"
@@ -956,6 +972,7 @@ export class PaymentRuntimeService {
         externalTransactionId: result.externalTransactionId,
         intentId: intent.id,
         amount: result.amount,
+        stripeReceipt: result.stripeReceipt,
         payloadHash: sha256(JSON.stringify({ source: "query", merchantOrderNo: intent.merchantOrderNo, state: result.state }))
       });
     } else if (result.closed) {
@@ -1044,6 +1061,7 @@ export class PaymentRuntimeService {
             externalTransactionId: result.externalTransactionId,
             intentId: intent.id,
             amount: result.amount,
+            stripeReceipt: result.stripeReceipt,
             payloadHash: sha256(JSON.stringify({ source: "expire", merchantOrderNo: intent.merchantOrderNo, state: result.state }))
           });
           summary.paid += 1;
@@ -1385,7 +1403,7 @@ export class PaymentRuntimeService {
     return intent.method === "alipay"
       ? this.queryAlipayRefund(config, intent, refund, confirmedTotal)
       : intent.method === "stripe"
-        ? this.queryStripeRefund(config, refund)
+        ? this.queryStripeRefund(config, refund, intent.externalTransactionId)
         : this.queryWechatRefund(config, refund);
   }
 
@@ -1573,7 +1591,8 @@ export class PaymentRuntimeService {
             amount: Number(row.amount),
             idempotencyKey: `payment-refund:${row.id}`,
             reason: `真实支付退款：${row.reason}`,
-            provider: row.provider as "alipay" | "wechat_pay"
+            provider: row.provider as "alipay" | "wechat_pay" | "stripe",
+            verifiedExternalReceipt: true
           }, operator ?? "provider", tx);
           return tx.rentalPaymentRefund.update({ where: { id: row.id }, data: { fundedAt: new Date(), failureReason: null, revision: { increment: 1 } } });
         });
@@ -1581,15 +1600,21 @@ export class PaymentRuntimeService {
       } catch (error) {
         if (error instanceof ConflictException || error instanceof NotFoundException) throw error;
         const failureReason = error instanceof Error ? error.message : "第三方退款成功，但内部资金入账待恢复";
+        const current = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+        if (!current) throw new NotFoundException("退款单不存在");
+        if (current.externalRefundId && outcome.externalRefundId && current.externalRefundId !== outcome.externalRefundId) {
+          throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
+        }
+        if (current.fundedAt) return { status: current.status, response: this.toRefundResponse(current) };
         await this.prisma.rentalPaymentRefund.updateMany({
-          where: { id: refundId, tenantId, workspaceId, orderId },
+          where: { id: refundId, tenantId, workspaceId, orderId, revision: current.revision, status: current.status, fundedAt: null },
           data: {
             revision: { increment: 1 },
             status: "funding_pending",
-            externalRefundId: outcome.externalRefundId,
+            externalRefundId: outcome.externalRefundId ?? current.externalRefundId,
             externalStatus: outcome.externalStatus ?? "SUCCESS",
             responseJson: outcome.responseJson as Prisma.InputJsonValue,
-            succeededAt: new Date(),
+            succeededAt: current.succeededAt ?? new Date(),
             failureReason: failureReason.slice(0, 500)
           }
         });
@@ -1755,7 +1780,7 @@ export class PaymentRuntimeService {
     return { checkoutUrl, responseCode: valueOf(result.code), responseJson: { code: valueOf(result.code), qrCode: checkoutUrl } };
   }
 
-  private async queryAlipayIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+  private async queryAlipayIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string): Promise<ProviderPaymentResult> {
     const params: Record<string, string> = {
       app_id: requiredText(config.settings.appId, "应用 ID"),
       method: "alipay.trade.query",
@@ -1804,7 +1829,7 @@ export class PaymentRuntimeService {
     if (valueOf(result.code) !== "10000" && valueOf(result.code) !== "40004") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝关闭支付单失败"));
   }
 
-  private async queryWechatIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+  private async queryWechatIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string): Promise<ProviderPaymentResult> {
     const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(merchantOrderNo)}?mchid=${encodeURIComponent(requiredText(config.settings.mchid, "商户号"))}`;
     try {
       const response = await this.wechatRequest(config, "GET", path, "");
@@ -1901,6 +1926,7 @@ export class PaymentRuntimeService {
     idempotencyKey?: string
   ): Promise<JsonRecord> {
     const secret = requiredText(config.credentials.secretKey, "Stripe 密钥");
+    if (!isStripeLiveKey(secret)) throw new ServiceUnavailableException("当前 Stripe 收单链只接受 live 密钥，测试或未识别模式不能进入实际资金流程");
     const headers: Record<string, string> = { Authorization: `Bearer ${secret}`, "Content-Type": "application/x-www-form-urlencoded" };
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     const body = method === "POST" && form ? new URLSearchParams(form).toString() : undefined;
@@ -1926,17 +1952,18 @@ export class PaymentRuntimeService {
     const descriptor = String(config.settings.statementDescriptor ?? "").trim();
     if (descriptor) form["payment_intent_data[statement_descriptor]"] = descriptor.slice(0, 22);
     const response = await this.stripeRequest(config, "POST", "/v1/checkout/sessions", form, `session:${intent.merchantOrderNo}`);
+    if (response.livemode !== true) throw new PaymentProviderUnknownError("Stripe Checkout 缺少真实模式证据，保留原支付单待核对");
     const checkoutUrl = valueOf(response.url);
     if (!checkoutUrl) throw new PaymentProviderUnknownError("Stripe 未返回收银台地址,请查询支付状态后再重试");
     return {
       checkoutUrl,
       responseCode: valueOf(response.status) || "open",
-      responseJson: { sessionId: valueOf(response.id), paymentIntentId: valueOf(response.payment_intent) }
+      responseJson: { sessionId: valueOf(response.id), paymentIntentId: valueOf(response.payment_intent), livemode: true }
     };
   }
 
   /** 查询 Checkout Session 状态,与查单/对账/过期收口共用;金额从最小单位换回并交由上层核对。 */
-  private async queryStripeIntent(config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow & { responseJson?: unknown }) {
+  private async queryStripeIntent(config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow & { responseJson?: unknown }): Promise<ProviderPaymentResult> {
     const sessionId = valueOf((intent.responseJson as JsonRecord | undefined)?.sessionId);
     if (!sessionId) return { state: "NOTPAY", paid: false, closed: false, amount: 0, externalTransactionId: "" };
     let response: JsonRecord;
@@ -1946,6 +1973,11 @@ export class PaymentRuntimeService {
       if (error instanceof PaymentProviderHttpError && error.status === 404) return { state: "NOTPAY", paid: false, closed: false, amount: 0, externalTransactionId: "" };
       throw error;
     }
+    if (response.livemode !== true || valueOf(response.id) !== sessionId
+      || valueOf(response.currency).toUpperCase() !== intent.currency.toUpperCase()
+      || (valueOf(response.client_reference_id) || valueOf((response.metadata as JsonRecord | undefined)?.merchantOrderNo)) !== intent.merchantOrderNo) {
+      throw new PaymentProviderUnknownError("Stripe 原支付查询的模式、编号、币种或商户订单不匹配");
+    }
     const mapped = mapStripeCheckoutStatus({ status: valueOf(response.status), payment_status: valueOf(response.payment_status) });
     const amountTotal = Number((response as JsonRecord).amount_total);
     return {
@@ -1953,7 +1985,8 @@ export class PaymentRuntimeService {
       paid: mapped.paid,
       closed: mapped.closed,
       amount: Number.isFinite(amountTotal) ? fromStripeMinorUnits(amountTotal, intent.currency) : 0,
-      externalTransactionId: valueOf(response.payment_intent)
+      externalTransactionId: valueOf(response.payment_intent),
+      stripeReceipt: { livemode: true as const, sessionId }
     };
   }
 
@@ -1980,32 +2013,36 @@ export class PaymentRuntimeService {
       "metadata[merchantRefundNo]": refund.merchantRefundNo
     };
     const response = await this.stripeRequest(config, "POST", "/v1/refunds", form, `refund:${refund.merchantRefundNo}`);
-    return this.stripeRefundOutcome(response, refund);
+    return this.stripeRefundOutcome(response, refund, intent.externalTransactionId);
   }
 
-  /** 查询 Stripe 退款;无退款号时视创建结果未知,超 24h 判未受理释放额度,否则保持 pending。 */
-  private async queryStripeRefund(config: TenantIntegrationRuntimeConfig, refund: PaymentRefundRow): Promise<ProviderRefundResult> {
+  /** 缺少本地退款号不能证明 Stripe 未退款；保留原操作和额度，等待原回执核对。 */
+  private async queryStripeRefund(config: TenantIntegrationRuntimeConfig, refund: PaymentRefundRow, originalPaymentIntentId: string | null): Promise<ProviderRefundResult> {
     if (!refund.externalRefundId) {
-      if (Date.now() - refund.createdAt.getTime() > REFUND_NOT_FOUND_TERMINAL_MS) {
-        throw new PaymentProviderDefinitiveError("REFUND_NOT_FOUND", "Stripe 超过 24 小时仍无退款编号,判定退款未受理");
-      }
-      throw new PaymentProviderUnknownError("Stripe 退款尚未返回退款编号,请稍后再查询");
+      throw new PaymentProviderUnknownError("Stripe 原退款结果未知，须核对原支付及商户退款号，不能重新发起退款");
     }
     const response = await this.stripeRequest(config, "GET", `/v1/refunds/${encodeURIComponent(refund.externalRefundId)}`);
-    return this.stripeRefundOutcome(response, refund);
+    return this.stripeRefundOutcome(response, refund, originalPaymentIntentId);
   }
 
-  /** 统一映射 Stripe 退款对象为 ProviderRefundResult,并校验退款金额足额:不足额或状态非 succeeded 都不判成功。 */
-  private stripeRefundOutcome(refundObject: JsonRecord, refund: PaymentRefundRow): ProviderRefundResult {
+  /** Refund 本身不保证携带 livemode；只从 live-key 的 REST 或已验签 live 事件调用，并核对原支付。 */
+  private stripeRefundOutcome(refundObject: JsonRecord, refund: PaymentRefundRow, originalPaymentIntentId: string | null): ProviderRefundResult {
+    if (("livemode" in refundObject && refundObject.livemode !== true) || !originalPaymentIntentId
+      || valueOf(refundObject.payment_intent) !== originalPaymentIntentId
+      || valueOf(refundObject.currency).toUpperCase() !== refund.currency.toUpperCase()
+      || !valueOf(refundObject.id) || (refund.externalRefundId && refundObject.id !== refund.externalRefundId)) {
+      throw new PaymentProviderUnknownError("Stripe 退款模式、币种或原支付关联不匹配");
+    }
     const state = valueOf(refundObject.status).toLowerCase();
     const refunded = fromStripeMinorUnits(Number(refundObject.amount), refund.currency);
-    const amountOk = Number.isFinite(refunded) && refunded + 0.005 >= Number(refund.amount);
-    const succeeded = state === "succeeded" && amountOk;
+    const amountOk = Number.isFinite(refunded) && Math.abs(refunded - Number(refund.amount)) <= 0.005;
+    if (!amountOk) throw new PaymentProviderUnknownError("Stripe 原退款金额不匹配，不能推进资金状态");
+    const succeeded = state === "succeeded";
     return {
       status: succeeded ? "succeeded" : state === "failed" || state === "canceled" ? "failed" : "accepted",
       externalRefundId: valueOf(refundObject.id) || (refund.externalRefundId ?? undefined),
-      externalStatus: state === "succeeded" && !amountOk ? "SUCCEEDED_AMOUNT_MISMATCH" : (state || "pending"),
-      responseJson: { refundId: valueOf(refundObject.id), status: state, outRefundNo: refund.merchantRefundNo, refundedAmount: Number.isFinite(refunded) ? refunded : undefined }
+      externalStatus: state || "pending",
+      responseJson: { refundId: valueOf(refundObject.id), status: state, outRefundNo: refund.merchantRefundNo, refundedAmount: refunded, stripeLiveVerified: true }
     };
   }
 
@@ -2038,15 +2075,18 @@ export class PaymentRuntimeService {
     } catch {
       throw new BadRequestException("Stripe 回调格式无效");
     }
+    if (event.livemode !== true) throw new UnauthorizedException("Stripe 测试或未知模式回调不能进入实际资金账");
     const eventId = valueOf(event.id);
     const eventType = valueOf(event.type);
     if (!eventId || !eventType) throw new BadRequestException("Stripe 回调缺少事件编号或类型");
     const object = ((event.data as JsonRecord | undefined)?.object ?? {}) as JsonRecord;
+    if (eventType.startsWith("checkout.session.") && object.livemode !== true) throw new UnauthorizedException("Stripe Checkout 模式与原事件不一致");
     const orderNoOf = (source: JsonRecord) => valueOf(source.client_reference_id) || valueOf((source.metadata as JsonRecord | undefined)?.merchantOrderNo);
 
     if (eventType === "checkout.session.completed" || eventType === "checkout.session.async_payment_succeeded") {
       const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { tenantId: config.tenantId, provider: "stripe", merchantOrderNo: orderNoOf(object) } });
       if (!intent) throw new NotFoundException("Stripe 回调对应的支付单不存在");
+      if (!valueOf(object.id) || valueOf(object.currency).toUpperCase() !== intent.currency.toUpperCase()) throw new ConflictException("Stripe 回调编号或币种与原支付单不匹配");
       if (mapStripeCheckoutStatus({ status: valueOf(object.status), payment_status: valueOf(object.payment_status) }).paid) {
         const paidAmount = fromStripeMinorUnits(Number(object.amount_total), intent.currency);
         this.assertPaidAmount(paidAmount, Number(intent.amount));
@@ -2057,6 +2097,7 @@ export class PaymentRuntimeService {
           externalTransactionId: valueOf(object.payment_intent),
           intentId: intent.id,
           amount: paidAmount,
+          stripeReceipt: { livemode: true, sessionId: valueOf(object.id) },
           payloadHash: sha256(rawBody)
         });
       }
@@ -2079,6 +2120,10 @@ export class PaymentRuntimeService {
         if (!merchantRefundNo) continue;
         const refund = await this.prisma.rentalPaymentRefund.findFirst({ where: { tenantId: config.tenantId, provider: "stripe", merchantRefundNo } });
         if (!refund) continue;
+        const payment = await this.prisma.rentalPaymentIntent.findFirst({ where: {
+          id: refund.paymentIntentId, tenantId: refund.tenantId, workspaceId: refund.workspaceId, orderId: refund.orderId, provider: "stripe"
+        } });
+        if (!payment) throw new NotFoundException("Stripe 退款缺少原支付关联");
         await this.applyRefundWebhookOutcome({
           tenantId: refund.tenantId,
           workspaceId: refund.workspaceId,
@@ -2087,7 +2132,7 @@ export class PaymentRuntimeService {
           provider: "stripe",
           eventId: `${eventId}:${valueOf(refundObject.id)}`,
           payloadHash: sha256(rawBody),
-          outcome: this.stripeRefundOutcome(refundObject, refund)
+          outcome: this.stripeRefundOutcome(refundObject, refund, payment.externalTransactionId)
         });
       }
       return { received: true };
@@ -2104,7 +2149,11 @@ export class PaymentRuntimeService {
     amount: number;
     payloadHash: string;
     decryptedSummary?: JsonRecord;
+    stripeReceipt?: { livemode: true; sessionId: string };
   }) {
+    if (input.provider === "stripe" && (input.stripeReceipt?.livemode !== true || !input.stripeReceipt.sessionId)) {
+      throw new ConflictException("Stripe 入账缺少原收据的真实模式证据");
+    }
     if (!input.eventId || !input.externalTransactionId) throw new BadRequestException("支付回调缺少事件或第三方交易编号");
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -2119,6 +2168,14 @@ export class PaymentRuntimeService {
         this.assertPaidAmount(input.amount, Number(intent.amount));
         if (intent.externalTransactionId && intent.externalTransactionId !== input.externalTransactionId) {
           throw new ConflictException("支付单已绑定其他第三方交易编号，不能接受新的成功交易");
+        }
+        if (input.provider === "stripe" && input.stripeReceipt) {
+          const response = intent.responseJson && typeof intent.responseJson === "object" && !Array.isArray(intent.responseJson) ? intent.responseJson as JsonRecord : {};
+          if (response.sessionId && response.sessionId !== input.stripeReceipt.sessionId) throw new ConflictException("Stripe 收据不属于原 Checkout");
+          // 先记录已核验模式，同事务回放旧 paid 事件也能补齐原证据，不重新收款或重记资金。
+          await tx.rentalPaymentIntent.update({ where: { id: intent.id }, data: {
+            responseJson: { ...response, sessionId: input.stripeReceipt.sessionId, stripeLiveVerified: true } as Prisma.InputJsonValue
+          } });
         }
         if (duplicate?.status === "processed") {
           if (intent.status !== "paid") throw new ConflictException("支付回调已处理但支付单尚未完成入账，请进入待核对处理");

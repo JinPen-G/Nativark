@@ -55,6 +55,16 @@ export interface AiPlatformModelDirectoryDraft {
   nextCursor: string | null;
   observation: 'configuration_catalog_not_capability_evidence';
 }
+/** Stored evidence and current verified readiness, never a probe or dispatch grant. */
+export interface AiPlatformModelCapabilityObservationDraft {
+  profileId: string; configurationRevision: number; enabled: boolean; observedAt: string;
+  items: { capability: 'text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning';
+    allowed: boolean; readiness: 'verified_supported' | 'unverified' | 'configuration_disabled';
+    recorded: null | { status: 'supported' | 'unsupported' | 'unverified'; source: 'connection_test' | 'declared' | 'manual';
+      observedRevision: number; checkedAt: string; expiresAt: string | null; mode: 'mock' | 'live' | 'not_attested';
+      applicability: 'current_configuration' | 'historical_configuration' } }[];
+  execution: 'read_only_no_probe_or_dispatch'; admission: 'not_granted';
+}
 export type AiPlatformModelSettingsInputDraft = {
   expectedRevision: number; protocol: 'openai_chat_completions' | 'openai_responses' | 'anthropic_messages'; model: string; baseUrl: string;
   operationKey?: string;
