@@ -69,6 +69,10 @@ export type CountTokensResult = {
   admission: CountTokensAdmissionState;
   observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_started';
 };
+/** Read-path only diagnostics: applicability of the recorded basis for a new
+ * publication, and the already-published bound from the original store. */
+export type CountTokensDiagnostics = { applicable: boolean;
+  bound: { published: boolean; id?: string; maxInputTokens?: number } };
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
@@ -217,7 +221,9 @@ export class InputCountTokensService {
       if (!reserved) throw new BudgetError('PENDING_RECONCILIATION');
       if (reserved.dispatched) {
         // A previous attempt already sent this count; its outcome stays unknown.
-        const receipt = await this.persistReceipt(frozen, association, reservation.id, 'unknown', {});
+        // No serialized material from this attempt exists to bind.
+        const receipt = await this.persistReceipt(frozen, association, reservation.id, 'unknown', {},
+          requestFingerprint({ requestId: association.requestId, intentHash: frozen.invocation.intentHash }));
         const admission = await this.accountAdmission(receipt, association);
         await gate.recheck();
         return this.summary(receipt, admission);
@@ -227,7 +233,7 @@ export class InputCountTokensService {
       const outcome = await this.performCount(frozen, gate, life);
       const receipt = await this.persistReceipt(frozen, association, reservation.id, outcome.state,
         outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
-          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {});
+          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash);
       const admission = await this.accountAdmission(receipt, association);
       await gate.recheck();
       return this.summary(receipt, admission);
@@ -237,7 +243,7 @@ export class InputCountTokensService {
    * authority: the original bound inputs only, never a fresh count, a text
    * dispatch or an admission refund. Missing receipts report unavailable;
    * execution shutdown does not erase a legitimately recorded fact. */
-  async readCountReceipt(value: unknown): Promise<CountTokensResult> {
+  async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics }> {
     const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
     const current = await this.current();
@@ -260,9 +266,21 @@ export class InputCountTokensService {
       scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
       config: invocation.configuration, priceVersion: this.dependencies.countingPriceVersion };
     const admission = await this.accountAdmission(receipt, association);
+    // Applicability is advisory: the recorded basis can still ground a new
+    // bound publication only while observed and unexpired. The published-bound
+    // state is read from the original bound store, never asserted from memory.
+    let bound: { published: boolean; id?: string; maxInputTokens?: number } = { published: false };
+    try {
+      const published = await this.records.bound(scope.id, invocation.id);
+      bound = { published: true, id: published.id, maxInputTokens: published.evidence.maxInputTokens };
+    } catch (error) {
+      if (!(error instanceof BudgetError && error.code === 'UNAVAILABLE')) throw error;
+    }
+    const diagnostics: CountTokensDiagnostics = { applicable: receipt.state === 'observed'
+      && Date.parse(receipt.expiresAt) > this.clock().getTime(), bound };
     const after = await this.current();
     if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
-    return this.summary(receipt, admission);
+    return { ...this.summary(receipt, admission), diagnostics };
   }
 
   private async readReplay(frozen: CountTokensFrozenInvocation) {
@@ -285,7 +303,7 @@ export class InputCountTokensService {
     return { receipt, admission };
   }
   private async performCount(frozen: CountTokensFrozenInvocation, gate: Awaited<ReturnType<InputCountTokensService['commandGate']>>,
-    life: GatewayDeadline): Promise<{ state: 'observed'; inputTokens: number } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED' } | { state: 'unknown' }> {
+    life: GatewayDeadline): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
     const configuration = frozen.configuration;
     const profile = await this.profile(configuration, gate.tenantId);
     const resolver = configuration.serviceMode === 'platform_managed'
@@ -309,15 +327,15 @@ export class InputCountTokensService {
     try {
       const response = await life.wait(() => postCountTokens(this.dependencies.transport, request,
         connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES));
-      if (response.status === 401 || response.status === 403) return { state: 'failed', failureCode: 'AUTHENTICATION_FAILED' };
+      if (response.status === 401 || response.status === 403) return { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash };
       if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
-        return { state: 'failed', failureCode: 'PROVIDER_REJECTED' };
-      if (response.status !== 200) return { state: 'unknown' };
-      return { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential) };
+        return { state: 'failed', failureCode: 'PROVIDER_REJECTED', requestHash: request.requestHash };
+      if (response.status !== 200) return { state: 'unknown', requestHash: request.requestHash };
+      return { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential), requestHash: request.requestHash };
     } catch (error) {
       if (error instanceof ModelGatewayError && ['TIMEOUT', 'CANCELLED', 'PROVIDER_FAILED', 'INVALID_RESPONSE'].includes(error.code))
-        return { state: 'unknown' };
-      if (error instanceof ModelAdapterError) return { state: 'failed', failureCode: error.code === 'AUTHENTICATION_FAILED' ? 'AUTHENTICATION_FAILED' : 'PROVIDER_REJECTED' };
+        return { state: 'unknown', requestHash: request.requestHash };
+      if (error instanceof ModelAdapterError) return { state: 'failed', failureCode: error.code === 'AUTHENTICATION_FAILED' ? 'AUTHENTICATION_FAILED' : 'PROVIDER_REJECTED', requestHash: request.requestHash };
       throw error;
     } finally {
       if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
@@ -326,7 +344,8 @@ export class InputCountTokensService {
   }
   private async persistReceipt(frozen: CountTokensFrozenInvocation, association: AiUsageAssociationDraft,
     reservationId: string, state: CountTokensReceipt['state'],
-    outcome: { inputTokens?: number; failureCode?: CountTokensReceipt['failureCode'] }): Promise<CountTokensReceipt> {
+    outcome: { inputTokens?: number; failureCode?: CountTokensReceipt['failureCode'] },
+    requestHash: string): Promise<CountTokensReceipt> {
     const scope = frozen.context.scope as { tenantId: string; workspaceId: string };
     const receipt: CountTokensReceipt = {
       version: 'ai-count-tokens-receipt-1', state,
@@ -337,7 +356,10 @@ export class InputCountTokensService {
       registrationHash: frozen.invocation.registrationHash, intentHash: frozen.invocation.intentHash,
       configurationHash: frozen.invocation.configurationHash, priceVersion: frozen.invocation.priceVersion,
       maxOutputTokens: frozen.invocation.maxOutputTokens, method: 'provider_count_tokens_receipt',
-      countRequestHash: requestFingerprint({ requestId: association.requestId, intentHash: frozen.invocation.intentHash }),
+      // The serialized count material actually sent: endpoint path plus body
+      // (model, system, messages, tools, tool_choice). A different frozen input
+      // or tool schema can never reuse this receipt.
+      countRequestHash: requestHash,
       admission: { reservationId, sceneCode: countTokensSceneCode(frozen.invocation.sceneCode), unit: 'calls' },
       observedAt: this.clock().toISOString(),
       expiresAt: new Date(Math.min(frozen.invocation.expiresAt.getTime(), this.clock().getTime() + 900000)).toISOString(),

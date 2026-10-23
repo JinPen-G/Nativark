@@ -10,6 +10,8 @@ import { BudgetError } from '../budget/budget.ports';
 import { createPersistedBudgetSubsystem } from '../budget/budget.module';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import type { GatewayPricingEvidenceSource } from '../budget/prisma-gateway-pricing-records';
+import { GatewayPricingRecordManagement } from '../budget/prisma-gateway-pricing-records';
+import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import { gatewayInputBoundEvidenceSchema, type GatewayInputBoundEvidence } from '../budget/gateway-pricing-evidence';
 import { createNativeModelEgressTransport } from '../model-egress.transport';
 import type { ChatProtocolOptions, ModelJsonTransport } from '../chat-completions.adapter';
@@ -102,3 +104,26 @@ function countTokensAdmissionScene(sceneCode: string) {
   return `${sceneCode}:count-tokens`;
 }
 export { countTokensSupport as inputCountTokensSupport };
+
+/** One explicit server entry for the whole counting-to-recorded-pricing chain:
+ * count the frozen input of a registered invocation, observe the receipt by
+ * its original keys, publish the input bound through the existing trusted
+ * publication path, and hand the bound to the original recorded pricing. The
+ * mainline mounts this beside the pricing publication surface; it creates no
+ * route, timer or second ledger, and the settings-manage authority for
+ * publication stays with the original budget authorization chain. */
+export function composeInputCountingPricing(input: InputCountTokensCompositionDependencies) {
+  const counting = composeInputCountTokensService(input);
+  const clock = input.clock ?? (() => new Date());
+  const bindings = new PrismaGatewayInvocationBindings(input.db, counting.authorization.scopes, clock);
+  const management = new GatewayPricingRecordManagement(input.db, counting.authorization.scopes,
+    counting.authorization, counting.pricingEvidence, bindings, input.sceneCode, clock);
+  return Object.freeze({ ...counting, management,
+    pricingRequest: Object.freeze({
+      countTokens: (command: unknown, signal?: AbortSignal) => counting.service.count(command, signal),
+      readCountReceipt: (command: unknown) => counting.service.readCountReceipt(command),
+      publishInputBound: (command: unknown) => management.publishInputBound(command),
+      readInputBound: (command: unknown) => management.readInputBound(command),
+      readPrice: (command: unknown) => management.readPrice(command)
+    }) });
+}
