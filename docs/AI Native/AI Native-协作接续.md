@@ -2,7 +2,7 @@
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
 > 更新时间：2026-10-24。本次按负责人授权保全五线现场并统一同步，功能保全提交为 `05e71b1ff3afcd7df4187115795f0a41e496ee58`，包含原服务端、支付/Core、后台及本地 Harness 既有成果，不代表这些成果已整体验收。报价最终参数确认、原账操作收据、员工/客户有界等待和开业模型宿主均保留；API/shared 离线 noEmit 为688 roots/0诊断。原28项64.3%、ENTRY52.8%、正式0/28不变。可信输入计数生产、平台独立付费验证及标准live单账仍待补/待验，真库/模型/浏览器未验。
-> **当前五线均已由负责人确认停写、心跳停止，正在交付同一同步基线，尚未派发新任务。** 服务端与本地客户端继续独立并行规划；小程序/官网暂只服务端接口，不据同步启动页面。接手以各树实际HEAD和当前认领为准，不把旧会话的停写或WIP说明当作永久授权。本次不合main、不推送、不安装或复制生成物。
+> **五线已同步到`73b11477`，负责人随后授权仅向Claude A/B分发服务端长批次。** 本轮准备的是下方任务和文件认领，工具没有可直达的Claude会话，须由负责人转发后由接收方确认开工；不宣称已送达或已启动。Codex A/B继续暂停，主线保留公共整合，不自动恢复其他线。服务端与本地客户端仍独立并行，本批不派Harness或任何前端页面；不合main、不推送、不安装或复制生成物。
 
 ## 权威依据
 
@@ -25,6 +25,14 @@
 **阶段收口必须同步进度：** 本次已纠正“记录了功能但任务百分比复核滞后”的问题。接手者每个完整功能/阶段收口时，核对受影响任务的原G1～G4证据，达到下一档就及时更新开发任务表及整体汇总；未跨档在开发记录简短说明已复核及缺口。开发记录留关键提交/已做/剩余，本文覆盖最新现场与下一步，三者同片同步；不逐方法写流水，不把进度提醒写入需求或任务正文，不为涨分改门槛或把未验说成已验。
 
 ## 当前核心接点及下一步
+
+### 本轮Claude双线认领（仅服务端，待接收确认）
+
+- **Claude A**：`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`。沿AIN-03/04/05/11完成可信冻结输入→受控计数→持久原收据→正式输入上界→原recorded计价消费。独占新增`input-counting/**`，现有`budget/platform-reviewed-gateway-price.service.ts`、`gateway-pricing-evidence.ts`、`prisma-gateway-pricing-records.ts`、`prisma-gateway-recorded-pricing.ts`、`gateway-pricing-request.composition.ts`，以及`model-input/task-model-gateway-input.source.ts`中的计数绑定；仅确需时改原`model-egress.transport.ts`及计数专用协议适配。不得修改B的probe、预算主服务/事务仓储、runner或审批。
+- **Claude B**：`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。沿AIN-03/04/05/06/11完成平台独立主体→原任务/授权/平台单账→真实挑战→usage/能力原收据→恢复/取消/核对。独占新增`platform-capability-probe/**`、既有`text-capability-probe*`、`provider-capability*`、`prisma-text-capability-receipt.repository.ts`、`capability-verification.ts`和图片/语音挑战；如平台主体确需扩展，认领`budget.ports.ts`、`budget.service.ts`、`prisma-budget.repository.ts`、`budget-dependency-adapters.ts`、`gateway-budget-principal.ts`、`budget-gateway-adapter.ts`、`gateway-budget.composition.ts`及`prisma-gateway-invocation-bindings.ts`的相关平台分支。保留租户/员工/客户原链，禁止伪造workspace或借租户额度。不得修改A计数/计价、协议传输或原生协议实现。
+- **主线唯一整合区**：shared公共契约/出口、schema/迁移排序、Auth/Guard内核、OpenAPI、AppModule、`ai-native-application.providers.ts`、公共Unified/Routed Gateway、runner和审批。两线需这些文件时报告精确类型/方法/生产者/消费者与最小补丁，不跨树代写；如底层确需变化先认领再施工，不用私有同名协议或假成功绕过。调用A的计数材料对B不是启用前置的替代品；B可先闭环明确配置的原calls计量，不能用calls证明token上界，金额/token链待A正式材料后另验。
+- 每线接收后先核对基线包含`73b11477`、实际HEAD/status/合并状态和唯一写入者。连续完成实际功能包，阻塞仅隔离受影响项；不新增测试脚本，仅已有入口/临时命令的定向冒烟与必要类型检查。固定SHA交付后等待主线按依赖整合，不自动合main或互摘活动HEAD；本次不启动定时器，也不承诺应用退出后持续运行。
+- 四册中央文档仍由主线维护；两线向交付消息简短报告实际入口、当前WIP/下一步、阶段SHA和未验边界；如本树已有未归档本线接续则更新，不能改历史归档或另建文档群。完整阶段达到原门槛才由主线以5%档更新任务百分比，无整体验收就不标完成。
 
 当前收口与下一队列（覆盖下方历史接点中的旧待办）：
 
