@@ -160,8 +160,11 @@ export class PlatformTaskPlanPolicyReader {
   private async access() {
     const current = await this.identity.resolve();
     const resolved = await new AiScopeRepository(this.db, this.identity, this.clock).resolveCurrent();
+    // Compare the stable principal only: authorizedAt/requestId are freshly
+    // generated per resolution and must not fail cross-millisecond reads.
     if (resolved.scope.kind !== 'PLATFORM' || resolved.context.scope.kind !== 'platform'
-      || requestFingerprint(resolved.context) !== requestFingerprint(current)) throw denied();
+      || identityHash(resolved.context) !== identityHash(current)
+      || Date.parse(resolved.context.authorizedAt) > this.clock().getTime()) throw denied();
     return { key: { scopeId: resolved.scope.id, sceneCode: this.scene.code, sceneVersion: this.scene.version },
       binding: requestFingerprint({ scope: resolved.scope.id, identity: identityHash(resolved.context) }),
       scopeId: resolved.scope.id };

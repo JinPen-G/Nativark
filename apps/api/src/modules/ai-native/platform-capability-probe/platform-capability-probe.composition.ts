@@ -136,6 +136,17 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
 
   const taskAuthorization = composePlatformTaskAuthorization({ db: input.db, guard: input.guard,
     credentials: input.credentials, profileId: input.platformProfileId, clock });
+  // Stable principal fingerprint: authorizedAt/requestId are regenerated on
+  // every resolution, so comparing whole contexts would fail a normal
+  // cross-millisecond authorization. Revocation, actor/scope/permission and
+  // policy changes still alter this hash; freshness is checked separately.
+  const stableIdentity = (context: import('@rental-os/shared').AiExecutionContext) => {
+    const { requestId: _id, authorizedAt: _at, ...identity } = context;
+    return requestFingerprint(identity);
+  };
+  // The SaaS platform context carries its permission list at the top level.
+  const heldPermissions = (context: import('@rental-os/shared').AiExecutionContext): readonly string[] =>
+    'permissions' in context && Array.isArray(context.permissions) ? context.permissions : [];
   const policyAuthority = (permissions: readonly string[]): AiTaskActionPolicyMutationAuthority => ({
     async resolve(taskId, operation) {
       if (operation !== 'configure_action_policy') throw denied();
@@ -144,16 +155,15 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
       await platformAuthority.manage(input.platformProfileId);
       const before = structuredClone(await scopes.resolveCurrent());
       const access = aiTaskAccessFromContext(before.context, taskId, clock());
-      const held = 'permissions' in before.context ? before.context.permissions : [];
       if (access.actorKind !== 'SAAS_ADMIN' || access.audience !== 'OPERATOR' || access.scope.kind !== 'PLATFORM'
         || before.scope.kind !== 'PLATFORM' || before.context.actor.kind !== 'saas_admin'
-        || permissions.some(permission => typeof permission !== 'string' || !held.includes(permission))) throw denied();
+        || permissions.some(permission => typeof permission !== 'string' || !heldPermissions(before.context).includes(permission))) throw denied();
       const row = await input.db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: before.scope.id }] },
         select: { id: true, scopeId: true, archivedAt: true } });
       if (!row || row.id !== taskId || row.scopeId !== before.scope.id || row.archivedAt !== null) throw denied();
       const after = structuredClone(await scopes.resolveCurrent());
-      if (after.scope.id !== before.scope.id
-        || requestFingerprint(after.context) !== requestFingerprint(before.context)) throw denied();
+      if (after.scope.id !== before.scope.id || stableIdentity(after.context) !== stableIdentity(before.context)
+        || Date.parse(after.context.authorizedAt) > clock().getTime()) throw denied();
       return after.context;
     },
   });
