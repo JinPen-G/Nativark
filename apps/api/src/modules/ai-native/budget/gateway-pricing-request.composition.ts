@@ -15,11 +15,15 @@ import { ModelGatewayError } from '../model-gateway.ports';
 
 type ServerDependencies = Omit<ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0], 'credentials' | 'taskId'>
   & Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'db' | 'sceneCode'>
-  & Partial<Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'pricingEvidence'>>;
-export type GatewayPricingRequestAction = 'publishPrice' | 'publishInputBound' | 'readPublication' | 'readPrice' | 'readInputBound' | 'readPricing' | 'readPricingCall';
+  & Partial<Pick<Parameters<typeof createRecordedPricingGatewayBudget>[0], 'pricingEvidence'>> & {
+    /** Explicit counting-operation dependency (input-counting composition);
+     * absent keeps countTokens fail-closed with no external call. */
+    inputCounting?: { count(command: unknown, signal?: AbortSignal): Promise<unknown> };
+  };
+export type GatewayPricingRequestAction = 'publishPrice' | 'publishInputBound' | 'countTokens' | 'readPublication' | 'readPrice' | 'readInputBound' | 'readPricing' | 'readPricingCall';
 export type GatewayPricingHttpRequest = { headers: { authorization?: unknown } } & AiRequestAbortSource;
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
-const actions = ['publishPrice', 'publishInputBound', 'readPublication', 'readPrice', 'readInputBound', 'readPricing', 'readPricingCall'];
+const actions = ['publishPrice', 'publishInputBound', 'countTokens', 'readPublication', 'readPrice', 'readInputBound', 'readPricing', 'readPricingCall'];
 const denied = () => new BudgetError('FORBIDDEN');
 const priceSummary = (record: Awaited<ReturnType<GatewayPricingRecordManagement['readPrice']>>) => {
   const price = record.evidence, billing = price.billing;
@@ -49,17 +53,20 @@ export class GatewayPricingRequestFactory {
     return new GatewayPricingRequestFactory({ ...input, sceneCode: 'ai.pricing.history' }, true);
   }
   constructor(input: ServerDependencies, private readonly historyOnly = false) {
-    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'subscriptions', 'clock', 'pricingEvidence', 'sceneCode'].includes(key))
+    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'subscriptions', 'clock', 'pricingEvidence', 'inputCounting', 'sceneCode'].includes(key))
       || typeof input.auth?.resolveAccessContext !== 'function' || typeof input.guard?.canActivate !== 'function'
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiScope?.findFirst !== 'function'
       || input.pricingEvidence !== undefined && (typeof input.pricingEvidence?.readPrice !== 'function'
         || typeof input.pricingEvidence.readInputBound !== 'function')
+      || input.inputCounting !== undefined && typeof input.inputCounting?.count !== 'function'
       || typeof input.subscriptions?.readCategoryCommercialContext !== 'function'
       || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).safeParse(input.sceneCode).success
       || input.clock !== undefined && typeof input.clock !== 'function') throw new BudgetError('UNAVAILABLE');
     this.server = { ...input, ...(input.pricingEvidence ? { pricingEvidence: Object.freeze({
       readPrice: input.pricingEvidence.readPrice.bind(input.pricingEvidence),
-      readInputBound: input.pricingEvidence.readInputBound.bind(input.pricingEvidence) }) } : {}) };
+      readInputBound: input.pricingEvidence.readInputBound.bind(input.pricingEvidence) }) } : {}),
+      ...(input.inputCounting ? { inputCounting: Object.freeze({
+        count: input.inputCounting.count.bind(input.inputCounting) }) } : {}) };
   }
   async call(request: GatewayPricingHttpRequest, action: GatewayPricingRequestAction, value: unknown, signal?: AbortSignal) {
     const header = bearer.safeParse(request?.headers?.authorization);
@@ -112,6 +119,15 @@ export class GatewayPricingRequestFactory {
         if (action === 'readPricing' || action === 'readPricingCall') {
           const recovery = createRecordedPricingGatewayAccountingRecovery(accounting);
           result = await recovery[action](command);
+        } else if (action === 'countTokens') {
+          // The trusted counting dependency performs the admitted provider count
+          // and persists its receipt; the immediate replay only re-reads the
+          // original keys, so a mismatch means an unresolved original outcome.
+          if (!server.inputCounting) throw new BudgetError('UNAVAILABLE');
+          const receipt = await server.inputCounting.count(command, signal);
+          const replay = await server.inputCounting.count(command, signal);
+          if (hash(receipt) !== hash(replay)) throw new BudgetError('PENDING_RECONCILIATION');
+          result = receipt;
         } else {
           // Reopening immutable history needs current management authority,
           // not a live producer, current profile or dispatch-capable adapter.
@@ -162,7 +178,7 @@ export class GatewayPricingRequestFactory {
         }
         await identity.resolve();
         return result;
-      }), action === 'publishPrice' || action === 'publishInputBound', signal);
+      }), action === 'publishPrice' || action === 'publishInputBound' || action === 'countTokens', signal);
     } catch (error) {
       if (mutationReturned) throw new BudgetError('PENDING_RECONCILIATION');
       if (error instanceof BudgetError) throw error;

@@ -175,5 +175,13 @@ export class PrismaPlatformReviewedPriceSource implements GatewayPricingEvidence
       provenance: { reference, revision: source.evidence.provenance.revision,
         documentHash: hash({ originalPriceId: source.id, originalPriceHash: source.hash }) } };
   }
-  async readInputBound(): Promise<never> { throw new BudgetError('UNAVAILABLE'); }
+  /** Rate review projects prices only; it never certifies input tokens. Input
+   * bounds are produced by the trusted counting source composed beside this
+   * source (input-counting/**) — this method stays fail-closed so a rate-only
+   * assembly can never publish a bound it did not count. */
+  async readInputBound(_reference: string, _context: Readonly<AiExecutionContext>,
+    _binding: Readonly<{ invocationId: string; scopeId: string; registrationHash: string; intentHash: string;
+      configurationHash: string; priceVersion: string; priceHash: string; maxOutputTokens: number }>): Promise<never> {
+    throw new BudgetError('UNAVAILABLE');
+  }
 }
