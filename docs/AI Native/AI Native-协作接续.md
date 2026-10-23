@@ -26,7 +26,15 @@
 
 ## 当前核心接点及下一步
 
-### 本轮Claude双线认领（仅服务端，待接收确认）
+### 本轮Claude双线认领（仅服务端，原批收口后接下一长批）
+
+已只读核对：Claude A仍在原计数生产批WIP（新增`input-counting/**`及原计价接点），Claude B已提交`bbbcc303`的平台主体/预算/probe组合，不能据提交标题认定整体验收。下一批追加到原对话，不中断在途工作；当前无Claude客户端直发工具，由负责人转发，不能冒称已发送。主线当前固定功能点`77f1da02`已补报价回答引用消费，两线先保全提交自己的原批，再安全merge这个固定提交、不reset或追移动HEAD，然后继续下列认领。不合入对方活动HEAD，不动主线树或客户端。
+
+**下一长批A：可信计数到真实计价消费（AIN-03/04/05/11/25）。** 沿原文件继续三阶段，不重做已实现计数器：①冻结输入/配置/工具schema/协议请求一致性及计数原键恢复，计数调用自身使用原账；②把可信计数收据接到原上界发布、recorded计价、实际Gateway请求生产者，扩展现有正式身份能支撑的operator/staff/customer/platform来源；③原usage/取消/结算/unknown的成本与最少诊断事实消费。文本先真实接通，再做正式有依据的工具/结构化/媒体分支；协议未提供的计数、非token维度和缓存费率缺依据就明确拒绝，不以文本估值补。不得越过B的平台身份与预算主服务，交主线精确组合参数/调用序列和最小公共补丁。完整阶段一次定向冒烟/必要类型，不新增脚本；不是只交新的空端口或材料包。
+
+**下一长批B：平台及两轨完整能力运行与恢复（AIN-03/04/05/06/11/19/25）。** 沿原文件继续三阶段：①先复核平台当前主体/动作政策的稳定绑定（`platform-capability-probe.composition.ts`中`policyAuthority`读后比较整个context，须排除每次生成的authorizedAt/requestId误伤，但保留独立时效/撤权检查）；②在原平台Task/单账与真实挑战上接Streaming/Tool/Structured及已有合法Vision/Audio挑战，Embedding/Reasoning仅在原协议与正式工具具备时实现，不虚构功能；③把原request/task/run/invocation/dispatch/capability与账务收据、取消/恢复/换配置/撤权的合法只读观察连成实际消费，并复核平台与租户/BYOK不串主体或账。复用原runner/媒体ACL/出网与唯一Gateway，不写runner、A计数/计价、协议传输及中央Auth/Guard。没有可信媒体源则仅隔离相应变体，继续文本/流/工具/结构化与恢复；向主线交真实显式装配而非平台对象壳。
+
+两批均不新增HTTP/worker/AppModule启用，确需公共入口由主线整合；不注册默认成功adapter，不把calls当token上界。每阶段提交固定SHA和真实入口后直接下一阶段，无新增测试脚本/递归review/全量回归。阶段性文档只简报实际已做/未接，不写三份中央依据或调百分比；原G1-G4与离线边界不变。未来Runtime/Provider SDK各自可替换，当前不安装、不迁移，两套驱动不能同发，unknown只核对原证据。全部原队列已做则直接复用，确实阻塞则精确列缺口并做后续无依赖阶段，不为持续工作造新平台。
 
 - **Claude A**：`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`。沿AIN-03/04/05/11完成可信冻结输入→受控计数→持久原收据→正式输入上界→原recorded计价消费。独占新增`input-counting/**`，现有`budget/platform-reviewed-gateway-price.service.ts`、`gateway-pricing-evidence.ts`、`prisma-gateway-pricing-records.ts`、`prisma-gateway-recorded-pricing.ts`、`gateway-pricing-request.composition.ts`，以及`model-input/task-model-gateway-input.source.ts`中的计数绑定；仅确需时改原`model-egress.transport.ts`及计数专用协议适配。不得修改B的probe、预算主服务/事务仓储、runner或审批。
 - **Claude B**：`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。沿AIN-03/04/05/06/11完成平台独立主体→原任务/授权/平台单账→真实挑战→usage/能力原收据→恢复/取消/核对。独占新增`platform-capability-probe/**`、既有`text-capability-probe*`、`provider-capability*`、`prisma-text-capability-receipt.repository.ts`、`capability-verification.ts`和图片/语音挑战；如平台主体确需扩展，认领`budget.ports.ts`、`budget.service.ts`、`prisma-budget.repository.ts`、`budget-dependency-adapters.ts`、`gateway-budget-principal.ts`、`budget-gateway-adapter.ts`、`gateway-budget.composition.ts`及`prisma-gateway-invocation-bindings.ts`的相关平台分支。保留租户/员工/客户原链，禁止伪造workspace或借租户额度。不得修改A计数/计价、协议传输或原生协议实现。
