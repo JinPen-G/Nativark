@@ -17,7 +17,14 @@ export class AiTaskCurrentIdentityAuthority {
       const credential = structuredClone(await this.credentials.current());
       if (!credential || !['operator', 'staff'].includes(credential.audience) || typeof credential.authorization !== 'string'
         || credential.authorization.length < 1 || credential.authorization.length > 8192 || typeof credential.requestId !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      const access = await this.auth.resolveAccessContext(credential.authorization, { audience: credential.audience });
+      const access = structuredClone(await this.auth.resolveAccessContext(credential.authorization, { audience: credential.audience }));
+      // A slow Auth response cannot revive request-local credentials closed by
+      // timeout/abort, or continue under a token/audience changed during await.
+      // requestId is correlation only and is not an authorization comparison.
+      const current = structuredClone(await this.credentials.current());
+      if (current.authorization !== credential.authorization || current.audience !== credential.audience) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
       const now = this.clock();
       if (!access?.user.isActive || access.user.isSaasAdmin || !access.workspaceValid || !access.workspaceId
         || access.user.id !== access.tenantUser.id || access.user.tenantId !== access.tenantUser.tenantId
