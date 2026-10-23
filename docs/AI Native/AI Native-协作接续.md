@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-24。原服务端本轮接续完成报价澄清参数改变后的最终审阅与明确确认：只在旧候选修订是唯一阻碍时提供新的待审阅request/指纹，确认再次匹配当前修订与完整输入后沿原报价/选择/人类审批/Core执行。定向离线一调用一订单、原冻结材料与累计资源保留，缺字段/旧修订/配置变化/读中撤权不写报价；API/shared688 roots/0诊断/noEmit。Codex前片原账操作收据/员工客户等待和开业模型宿主全部保留，不重做。HEAD仍`9ea479c4`，未提交、未启用，64.3%/ENTRY52.8%/正式0/28未跨G4。可信计数生产、平台独立付费验证、标准live单账及全部变体仍待补/待验；真库/模型/浏览器未验。现有ts-node默认入口因本树TypeScript7安装不兼容，本片仅在离线进程使用其已安装兼容编译器，未改依赖，详见开发记录。
-> **本会话仅继续原服务端核心底座和管理后台；小程序/官网只推进服务端能力与接口预留，暂不开发页面。** 另一客户端会话已在本树形成独立WIP，不能再以旧“全部停写/单线”推断独占，公共文件先核对准确归属，不接管或夹带其成果。本轮不启动A/B或新辅助施工，不恢复心跳、提交或推送；正式需求/任务正文WIP和未来方案均保留。
+> 更新时间：2026-10-24。本次按负责人授权保全五线现场并统一同步，功能保全提交为 `05e71b1ff3afcd7df4187115795f0a41e496ee58`，包含原服务端、支付/Core、后台及本地 Harness 既有成果，不代表这些成果已整体验收。报价最终参数确认、原账操作收据、员工/客户有界等待和开业模型宿主均保留；API/shared 离线 noEmit 为688 roots/0诊断。原28项64.3%、ENTRY52.8%、正式0/28不变。可信输入计数生产、平台独立付费验证及标准live单账仍待补/待验，真库/模型/浏览器未验。
+> **当前五线均已由负责人确认停写、心跳停止，正在交付同一同步基线，尚未派发新任务。** 服务端与本地客户端继续独立并行规划；小程序/官网暂只服务端接口，不据同步启动页面。接手以各树实际HEAD和当前认领为准，不把旧会话的停写或WIP说明当作永久授权。本次不合main、不推送、不安装或复制生成物。
 
 ## 权威依据
 
@@ -16,11 +16,11 @@
 本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
 分支：`ai/ai-native-contracts-s01-20261002`。服务端会话认领原Gateway/预算、运行器及审批接点；本轮不向辅助树写入或派工，不与其他线双写公共文件。
 
-本轮原服务端由会话`local_fe6f7128-004a-466c-b40a-2f18a7ef98a2`接续；此前Codex普通账务/开业模型成果保留。客户端会话`local_5d9c6dbd-3526-4634-aace-ecd5d8c810f0`在同树，后续接手须复核其实际状态；不据进程列表推断停写。用户要求普通文件改动不反复跨会话发消息，按已核对范围直接施工。本轮只改`tools/quote-business-preparation.service.ts`最终审阅、`scenes/original-scene-model.composition.ts`原报价prepare/confirm hunk与本接续/开发记录；前片原场景accounting/application、员工accounting、开业模型Controller/provider/政策、AppModule、Guard/OpenAPI及shared叶子合同全部保留。继承报价、平台能力、预算、隐私与支付/Core等WIP保留。客户端`clients/`、后台agent-desktop及Auth/HTTP/Router/Shell、shared总出口/包配置、Agent接入改造文档及未来Runtime方案均不接管、不暂存；公共文件仅改本轮已明确的服务端hunk。
+原服务端与客户端作者的代码和归属分别保留；本次仅统一保全和同步，不把继承成果改称本轮功能实现，也不续接旧会话的执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
 
-四条辅助树仍保留在同级目录：`codex-ai-native-lane-a`、`codex-ai-native-lane-b`、`claude-ai-native-lane-a`、`claude-ai-native-lane-b`。负责人确认四线停写，Codex A/B另已确认无在途操作；本次核对均无独有提交、源码WIP或合并状态，按固定主线仅快进同步并保持暂停，不再派工、不删除工作树/output、不复制私有生成物。主线后续提交不会自动同步；恢复辅助线前重新核对实际差异。本次没有合main或推送授权。
+四条辅助树位于同级目录，分别为 `codex-ai-native-lane-a` / `ai/codex-ai-native-lane-a-20261007`、`codex-ai-native-lane-b` / `ai/codex-ai-native-lane-b-20261007`、`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`、`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。同步前均无独有提交、未提交源码或合并状态，原落后主线85个提交；本次仅快进到功能保全及本接续更新后的固定主线，保留各树与全部output。源码同步不包括依赖安装、私有client生成或运行验收。派工前逐树重核HEAD/status和唯一文件作者，主线后续提交不会自动同步。
 
-开工核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本轮接续时已有10份文档WIP（AI需求/任务、Rental Core任务、界面规范、品类三文档、导航及平台需求/记录）；之后接手支付/Core/客户端/后台/shared及两个支付测试的WIP，负责人确认旧作者停写，全部保留、不夹带。前期进度复核提交与当前未提交功能片分别保留；本轮没有新增提交授权，正式依据中继承的基线/正文WIP不夹带。接手仍须以实际status为准，不能把其他线WIP视为本片成果、已提交或已验证。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交。
+开工仍须核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本次负责人明确授权在全部停写后提交保全并同步，既有正式依据内容原样保留，未重排任务或上调进度。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交；后续新WIP必须重新核对，不能据本次清洁现场覆盖。
 
 **阶段收口必须同步进度：** 本次已纠正“记录了功能但任务百分比复核滞后”的问题。接手者每个完整功能/阶段收口时，核对受影响任务的原G1～G4证据，达到下一档就及时更新开发任务表及整体汇总；未跨档在开发记录简短说明已复核及缺口。开发记录留关键提交/已做/剩余，本文覆盖最新现场与下一步，三者同片同步；不逐方法写流水，不把进度提醒写入需求或任务正文，不为涨分改门槛或把未验说成已验。
 
