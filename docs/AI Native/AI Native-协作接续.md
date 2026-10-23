@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-24。本次按负责人授权保全五线现场并统一同步，功能保全提交为 `05e71b1ff3afcd7df4187115795f0a41e496ee58`，包含原服务端、支付/Core、后台及本地 Harness 既有成果，不代表这些成果已整体验收。报价最终参数确认、原账操作收据、员工/客户有界等待和开业模型宿主均保留；API/shared 离线 noEmit 为688 roots/0诊断。原28项64.3%、ENTRY52.8%、正式0/28不变。可信输入计数生产、平台独立付费验证及标准live单账仍待补/待验，真库/模型/浏览器未验。
-> **五线已同步到`73b11477`，负责人随后授权仅向Claude A/B分发服务端长批次。** 本轮准备的是下方任务和文件认领，工具没有可直达的Claude会话，须由负责人转发后由接收方确认开工；不宣称已送达或已启动。Codex A/B继续暂停，主线保留公共整合，不自动恢复其他线。服务端与本地客户端仍独立并行，本批不派Harness或任何前端页面；不合main、不推送、不安装或复制生成物。
+> 更新时间：2026-10-24。功能保全为`05e71b1f`，后续`a17d4444`补13路执行/恢复响应合同，`ec9f7c53`补模型请求期限及迟到Auth隔离。本片接通报价澄清的原回答引用→重新准备/明确报价/原报价收据/明确继续，无须重传回答；旧载荷入口保留。保存不明只读原操作，未把报价当建单批准；下一轮澄清仍占原任务累计资源。API/shared离线noEmit为694 roots/0诊断。原28项64.3%、ENTRY52.8%、正式0/28不变。可信计数、平台独立付费验证、其他剩余实现及适用G4仍待补/待验，不称全部仅待测试；本地客户端成果独立保留，不夹带其OpenAPI修改。
+> **五线功能基线已同步到`73b11477`，Claude A/B还同步了分工提交`8ede5906`；主线现恢复原75%任务的功能与契约收口，持续目标已设定。** 下方Claude任务须由负责人转发并由接收方确认，不宣称工具已送达或会话已启动；Codex A/B继续暂停。原任务达到全文实现、适用验证及独立验收后才100%，不以目标改变G4。本树客户端文件已出现新修改，主线只保留不暂存；仍只做服务端，不自动恢复其他线或改客户端。没有合main、推送、安装、真实环境连接或生产启用授权。
 
 ## 权威依据
 
@@ -26,7 +26,15 @@
 
 ## 当前核心接点及下一步
 
-### 本轮Claude双线认领（仅服务端，待接收确认）
+### 本轮Claude双线认领（仅服务端，原批收口后接下一长批）
+
+已只读核对：Claude A仍在原计数生产批WIP（新增`input-counting/**`及原计价接点），Claude B已提交`bbbcc303`的平台主体/预算/probe组合，不能据提交标题认定整体验收。下一批追加到原对话，不中断在途工作；当前无Claude客户端直发工具，由负责人转发，不能冒称已发送。主线当前固定功能点`77f1da02`已补报价回答引用消费，两线先保全提交自己的原批，再安全merge这个固定提交、不reset或追移动HEAD，然后继续下列认领。不合入对方活动HEAD，不动主线树或客户端。
+
+**下一长批A：可信计数到真实计价消费（AIN-03/04/05/11/25）。** 沿原文件继续三阶段，不重做已实现计数器：①冻结输入/配置/工具schema/协议请求一致性及计数原键恢复，计数调用自身使用原账；②把可信计数收据接到原上界发布、recorded计价、实际Gateway请求生产者，扩展现有正式身份能支撑的operator/staff/customer/platform来源；③原usage/取消/结算/unknown的成本与最少诊断事实消费。文本先真实接通，再做正式有依据的工具/结构化/媒体分支；协议未提供的计数、非token维度和缓存费率缺依据就明确拒绝，不以文本估值补。不得越过B的平台身份与预算主服务，交主线精确组合参数/调用序列和最小公共补丁。完整阶段一次定向冒烟/必要类型，不新增脚本；不是只交新的空端口或材料包。
+
+**下一长批B：平台及两轨完整能力运行与恢复（AIN-03/04/05/06/11/19/25）。** 沿原文件继续三阶段：①先复核平台当前主体/动作政策的稳定绑定（`platform-capability-probe.composition.ts`中`policyAuthority`读后比较整个context，须排除每次生成的authorizedAt/requestId误伤，但保留独立时效/撤权检查）；②在原平台Task/单账与真实挑战上接Streaming/Tool/Structured及已有合法Vision/Audio挑战，Embedding/Reasoning仅在原协议与正式工具具备时实现，不虚构功能；③把原request/task/run/invocation/dispatch/capability与账务收据、取消/恢复/换配置/撤权的合法只读观察连成实际消费，并复核平台与租户/BYOK不串主体或账。复用原runner/媒体ACL/出网与唯一Gateway，不写runner、A计数/计价、协议传输及中央Auth/Guard。没有可信媒体源则仅隔离相应变体，继续文本/流/工具/结构化与恢复；向主线交真实显式装配而非平台对象壳。
+
+两批均不新增HTTP/worker/AppModule启用，确需公共入口由主线整合；不注册默认成功adapter，不把calls当token上界。每阶段提交固定SHA和真实入口后直接下一阶段，无新增测试脚本/递归review/全量回归。阶段性文档只简报实际已做/未接，不写三份中央依据或调百分比；原G1-G4与离线边界不变。未来Runtime/Provider SDK各自可替换，当前不安装、不迁移，两套驱动不能同发，unknown只核对原证据。全部原队列已做则直接复用，确实阻塞则精确列缺口并做后续无依赖阶段，不为持续工作造新平台。
 
 - **Claude A**：`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`。沿AIN-03/04/05/11完成可信冻结输入→受控计数→持久原收据→正式输入上界→原recorded计价消费。独占新增`input-counting/**`，现有`budget/platform-reviewed-gateway-price.service.ts`、`gateway-pricing-evidence.ts`、`prisma-gateway-pricing-records.ts`、`prisma-gateway-recorded-pricing.ts`、`gateway-pricing-request.composition.ts`，以及`model-input/task-model-gateway-input.source.ts`中的计数绑定；仅确需时改原`model-egress.transport.ts`及计数专用协议适配。不得修改B的probe、预算主服务/事务仓储、runner或审批。
 - **Claude B**：`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。沿AIN-03/04/05/06/11完成平台独立主体→原任务/授权/平台单账→真实挑战→usage/能力原收据→恢复/取消/核对。独占新增`platform-capability-probe/**`、既有`text-capability-probe*`、`provider-capability*`、`prisma-text-capability-receipt.repository.ts`、`capability-verification.ts`和图片/语音挑战；如平台主体确需扩展，认领`budget.ports.ts`、`budget.service.ts`、`prisma-budget.repository.ts`、`budget-dependency-adapters.ts`、`gateway-budget-principal.ts`、`budget-gateway-adapter.ts`、`gateway-budget.composition.ts`及`prisma-gateway-invocation-bindings.ts`的相关平台分支。保留租户/员工/客户原链，禁止伪造workspace或借租户额度。不得修改A计数/计价、协议传输或原生协议实现。
@@ -35,6 +43,10 @@
 - 四册中央文档仍由主线维护；两线向交付消息简短报告实际入口、当前WIP/下一步、阶段SHA和未验边界；如本树已有未归档本线接续则更新，不能改历史归档或另建文档群。完整阶段达到原门槛才由主线以5%档更新任务百分比，无整体验收就不标完成。
 
 当前收口与下一队列（覆盖下方历史接点中的旧待办）：
+
+- **本片公共契约收口（AIN-02/06/14）：** 原恢复快照及runner结果共用shared类型/封闭schema；开业六个模型接口、报价六个执行接口、原快照观察共13路公布命名响应，默认开业/报价Controller与快照读取实际校验。可能已执行的坏响应保留unknown并指向原观察，纯读异常不返回内部字段；取消意图/输入等待取消落库/原账释放不混淆。其余多态动作尚未全部冻结，原任务仍75%，不得称AIN-02全部通过。
+- **模型请求生命周期（AIN-04/06/14/15）：** 两种原模型请求组合的短观察默认整体5秒，刷新问题/确认报价/保存回答/取消按可能写入处理，超时unknown；start/resume/continue/recover/reconcile/takeover只给装配预检加界，运行仍按原runner工作窗。请求超时/abort后关闭本地凭据，真实Auth返回后再次核对凭据是否仍有效及token/audience未替换，旧授权不能再推进scope读取或写入，requestId不作授权比较。已用真实Auth/应用/runner的离线组合验证超时、迟到和正常长于短期限的运行；DB/路由/财务/传输为替身，非真实单账/供应商验收。
+- **75%逐项收口顺序：** AIN-01完整人工参考基线与目标版本仍未核实，不能只把盘点表改成100%；AIN-02剩余多态合同与全端兼容由主线补。AIN-05/11的计数和平台独立验证由Claude A/B按认领推进；主线继续其余公开装配、运行恢复、审批/场景缺项，再按任务适用性申请真实环境/独立验收。不把所有余项归为“只差测试”，也不让不依赖真实模型的盘点/合同无条件等最终试点。
 
 - 原`scene-requests/accounting/operation`只收original/callId及releaseUnsent或reconcile，观察既有同载荷账本事件；当前已settled/released但缺该事件仍not_observed。当前owner/资源/任务读权限必需，不依赖新模型启用；无新派发、变更或自动退款。
 - 员工/客户原账直接应用入口共用5秒依赖等待，读取超限不可用，可能写入超限unknown；关闭当前凭据/绑定、读取等待后再检查，迟到依赖不能推进新的业务读取或变更。原Controller的外层期限与原账核对继续保留。

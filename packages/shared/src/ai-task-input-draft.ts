@@ -30,6 +30,10 @@ export interface AiTaskInputSubmissionDraft {
   answers: AiTaskInputAnswerDraft[];
 }
 
+/** Exact saved-answer lookup. It is not a new answer, approval or execution grant. */
+export type AiTaskInputReceiptReferenceDraft = Pick<AiTaskInputSubmissionDraft,
+  "taskId" | "requestId" | "expectedRevision" | "submissionKey">;
+
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const closed = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
 const text = (value: unknown, max: number): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(value);

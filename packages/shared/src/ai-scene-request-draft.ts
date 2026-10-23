@@ -3,6 +3,13 @@ import type { AiTaskStatusDraft, AiStepStateDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
 import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import type { AiTaskInputSubmissionDraft, AiTaskInputReceiptReferenceDraft } from './ai-task-input-draft';
+
+/** Reopen an existing answer by payload or exact receipt key, never both.
+ * Reference recovery reads the stored binding; it cannot submit a new answer. */
+export type AiSceneModelAnswerQueryDraft = { original: { draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION; inputRef: string } } & (
+  { submission: AiTaskInputSubmissionDraft; reference?: never } |
+  { reference: AiTaskInputReceiptReferenceDraft; submission?: never });
 
 export const AI_SCENE_REQUEST_DRAFT_VERSION = 'ain-scene-request-draft-1' as const;
 export const AI_SCENE_REQUEST_MAX_BYTES = 32768;

@@ -1,4 +1,4 @@
-import type { AiTaskStatusDraft, AiStepStatusDraft } from "@rental-os/shared";
+import type { AiTaskStatusDraft, AiStepStatusDraft, AiTaskRunnerOutcomeDraft } from "@rental-os/shared";
 import type { Prisma } from '@prisma/client';
 
 export type AiTaskRunnerObservedResult =
@@ -217,8 +217,4 @@ export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
   recovery?: boolean;
 }
 
-export type AiTaskRunnerOutcome =
-  | { status: "succeeded" | "partially_succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown"; completedSteps: number; cleanupFailed: number }
-  | { status: 'unavailable'; completedSteps: number; cleanupFailed: number;
-      stopReason?: 'input_limit_reached'; nextAction?: 'manual_handoff' }
-  | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };
+export type AiTaskRunnerOutcome = AiTaskRunnerOutcomeDraft;
