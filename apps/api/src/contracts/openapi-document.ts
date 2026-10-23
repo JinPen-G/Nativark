@@ -2424,8 +2424,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ['rental-os:price:manage'],
     requestSchema: action === 'requestCancel' ? 'AiSceneOrderReadCancelDraft'
       : action === 'takeover' ? 'AiSceneOrderReadTakeoverDraft' : 'AiSceneRequestReadDraft',
-    responseSchema: 'GenericObject',
-    summary: 'Independent opt-in opening diagnosis model host; omitted configuration performs no reads or execution. Reuses the original request, current same-owner scene/action policies, immutable input/plan, measured runner and single Gateway ledger. Current opening business authority is mandatory. Existing model/result/source observations remain on their read host. No settings approval, publication, capability attestation or automatic retry of unknown work. GenericObject response remains an unfrozen polymorphic contract.' })),
+    responseSchema: action === 'start' ? 'AiSceneModelStartResponseDraft'
+      : action === 'readExecution' ? 'AiTaskRecoverySnapshot'
+      : action === 'requestCancel' ? 'AiSceneModelCancelResponseDraft'
+      : action === 'reconcile' ? 'AiSceneModelReconcileResponseDraft' : 'AiSceneModelExecutionDraft',
+    summary: 'Independent opt-in opening diagnosis model host; omitted configuration performs no reads or execution. Reuses the original request, current same-owner scene/action policies, immutable input/plan, measured runner and single Gateway ledger. Current opening business authority is mandatory. Existing model/result/source observations remain on their read host. All six responses use shared closed contracts; malformed post-execution replies remain unknown. Cancellation intent and its later persisted settlement remain distinct, never remote rollback or budget release. No settings approval, publication, capability attestation or automatic retry of unknown work.' })),
   ...(['read', 'releaseUnsent', 'reconcile', 'readOperation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
@@ -2478,9 +2481,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.readExecution, 'AiSceneRequestReadDraft']
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
-    operationId: `executeOriginalAiQuote_${action.replace(/\//gu, '_')}`, requestSchema, responseSchema: 'GenericObject',
+    operationId: `executeOriginalAiQuote_${action.replace(/\//gu, '_')}`, requestSchema,
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.start ? 'AiSceneModelStartResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readExecution ? 'AiTaskRecoverySnapshot'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.reconcile ? 'AiSceneModelReconcileResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.requestCancel ? 'AiSceneModelCancelResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.recover || action === AI_SCENE_MODEL_HTTP_DRAFT.takeover
+        ? 'AiSceneModelExecutionDraft' : 'GenericObject',
     permissions: ['rental-os:order:create'], authRequired: true,
-    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. Recovery never redispatches unknown calls. GenericObject response remains an unfrozen polymorphic contract.' })),
+    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. Start/recover/reconcile/takeover/cancel/execution have named closed response contracts; other polymorphic actions remain GenericObject. Recovery never redispatches unknown calls.' })),
   ...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
       cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
@@ -2504,7 +2513,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, 'AiSceneOpeningModelSourceReadDraft'],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
-    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft' : undefined,
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot ? 'AiSceneModelRecoverySnapshotReadResponse' : undefined,
     permissions: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene
       ? ['rental-os:order:view', 'rental-os:order:create', 'rental-os:price:manage'] : ['rental-os:order:view'], authRequired: true, requestSchema,
     summary: 'Current owner, scope, original resource and action policy are rechecked. Financial observations include exact integer-atom amounts for the visible page only: reserved, pending, settled, released reservation and settled excess, separated by unit and currency. Missing records are not zero consumption, and page amounts are neither whole-task totals nor supplier invoices. Performance observations include original recorded budget-gate rejections in a bounded invocation window: absence is not admission success and rejection is not release evidence. Fixed scene aggregation can consume original selected-quote approval/Core receipts or notification-settings preparation and waiting/receipt readers even while new execution is closed. Read-only observation without a model, runner start, execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),
