@@ -116,8 +116,14 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
     ['taskId', 'items', 'nextAfter', 'observedAt', 'coverage', 'totals', 'consistency', 'absenceSemantics', 'businessExecution', 'admission']),
   AiSceneModelInputRefreshDraft: object({ original: originalReference, requestId: id(), expectedRevision: integer(1, 4294967293) }),
   AiSceneModelResumeDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
-  AiSceneModelQuoteConfirmDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,
-    selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
+  AiSceneModelAnswerQueryDraft: { oneOf: [
+    object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
+    object({ original: originalReference, reference: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputReceiptReferenceDraft })] },
+  AiSceneModelQuoteConfirmDraft: { oneOf: [
+    object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,
+      selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
+    object({ original: originalReference, reference: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputReceiptReferenceDraft,
+      selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } })] },
   AiSceneModelCancelDraft: object({ original: originalReference, expectedRevision: integer(1, 4294967294) }),
   AiSceneModelTakeoverDraft: object({ original: originalReference, expectedTaskRevision: integer(1, 4294967294),
     expectedRunRevision: integer(1, 4294967294), expectedFencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }),

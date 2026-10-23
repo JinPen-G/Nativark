@@ -16,6 +16,8 @@ export const AI_TASK_INPUT_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiTaskInputContractDraft: obj({ draftVersion: choice(AI_TASK_INPUT_DRAFT_VERSION), code: id(64), version: id(64),
     fields: { type: "array", minItems: 1, maxItems: 8, uniqueItems: true, items: field } }),
   AiTaskInputAnswerDraft: answer,
+  AiTaskInputReceiptReferenceDraft: obj({ taskId: id(36), requestId: id(36),
+    expectedRevision: int(1, 4294967294), submissionKey: id() }),
   AiTaskInputSubmissionDraft: obj({ draftVersion: choice(AI_TASK_INPUT_DRAFT_VERSION), taskId: id(36), requestId: id(36),
     expectedRevision: int(1, 4294967294), submissionKey: id(), answers: { type: "array", minItems: 1, maxItems: 8, uniqueItems: true, items: answer } })
 };

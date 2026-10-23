@@ -1,12 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
 import { composeOriginalSceneKnowledge, continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
-import { readTaskModelRunOrigin, type PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
+import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, type PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
@@ -42,6 +42,13 @@ const heldSchema = z.object({ original: originalRequestReferenceSchema,
     revision, fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().datetime({ offset: true }) }).strict() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const answerPayload = z.object({ original: originalRequestReferenceSchema,
+  submission: z.custom<AiTaskInputSubmissionDraft>(isAiTaskInputSubmissionDraft) }).strict();
+const answerReference = z.object({ original: originalRequestReferenceSchema, reference: taskInputReceiptReferenceSchema }).strict();
+const answerQuery = z.union([answerPayload, answerReference]);
+const quoteConfirmationFields = { selectionRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+  inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), confirmQuote: z.literal(true) };
+const quoteConfirmation = z.union([answerPayload.extend(quoteConfirmationFields), answerReference.extend(quoteConfirmationFields)]);
 
 /** Consumes mainline's fixed model publisher, original plan and Gateway. This
  * does not claim/start a run: AIN06 must call prepareHeldRun under its own held
@@ -256,12 +263,16 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         return runId;
       };
       const answer = async (value: unknown) => {
-        const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict()
-          .safeParse(structuredClone(value));
-        if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const parsed = answerQuery.safeParse(structuredClone(value));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const before = await bound(parsed.data.original);
-        if (parsed.data.submission.taskId !== before.task.taskId) throw denied();
-        const receipt = await root.inputs.readSubmission(parsed.data.submission);
+        const reference = 'submission' in parsed.data ? parsed.data.submission : parsed.data.reference;
+        if (reference.taskId !== before.task.taskId) throw denied();
+        // The original repository verifies the stored answer, question history,
+        // actor and successor binding. A receipt key never becomes a resubmit,
+        // and only this read result (not the stored answer payload) escapes.
+        const receipt = 'submission' in parsed.data ? await root.inputs.readSubmission(parsed.data.submission)
+          : await root.inputs.readSubmissionReference(parsed.data.reference);
         if (receipt.state === 'observed') await current(before.reference, before.task.taskId, receipt.runId);
         await verify(before);
         return { before, receipt };
@@ -336,11 +347,11 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           inventoryReservation: 'not_attempted' as const, orderApproval: 'not_granted' as const,
           nextAction: 'review_current_parameters_before_formal_quote' as const });
       }, async confirmClarifiedQuote(value: unknown) {
-        const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown(),
-          selectionRevision: z.string().regex(/^[a-f0-9]{64}$/u), inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
-          confirmQuote: z.literal(true) }).strict().safeParse(structuredClone(value));
+        const parsed = quoteConfirmation.safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        const { before, receipt } = await answer({ original: parsed.data.original, submission: parsed.data.submission });
+        const query = 'submission' in parsed.data ? { original: parsed.data.original, submission: parsed.data.submission }
+          : { original: parsed.data.original, reference: parsed.data.reference };
+        const { before, receipt } = await answer(query);
         if (receipt.state !== 'observed') throw unavailable();
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const basis = await current(before.reference, before.task.taskId, receipt.runId);
