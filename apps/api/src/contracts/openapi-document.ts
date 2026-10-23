@@ -1,6 +1,7 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
+import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
@@ -206,6 +207,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_NATIVE_COMPONENT_SCHEMAS,
   ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
   ...AI_LEAF_COMPONENT_SCHEMAS,
+  ...DESKTOP_BUSINESS_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
   RecordCustomerCorporateCreditMaturityRequest: objectOf({ ledgerId: { type: "string", minLength: 1, maxLength: 191 },
@@ -2006,6 +2008,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...DESKTOP_BUSINESS_OPERATIONS,
   { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
     permissions: ['system:params:manage'], authRequired: true,
     summary: 'Explicit bounded retention cleanup. Requires current full-workspace operator scope; unknown effects and original business receipts are held. No timer or automatic retry.',

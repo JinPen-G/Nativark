@@ -12,6 +12,8 @@ const desktop = "clients/agent-desktop/harness/apps/desktop/src/";
 
 function load(relative, bindings = {}, replacements = []) {
   let source = fs.readFileSync(path.join(root, relative), "utf8");
+  source = source.replace(/^export \* from ['"]([^'"]+)['"];?$/gm, (_, name) =>
+    `Object.assign(module.exports, loadDependency(${JSON.stringify(name)}));`);
   for (const [pattern, replacement] of replacements) source = source.replace(pattern, replacement);
   const exported = [];
   source = source.replace(/export (const|function|class) (\w+)/g, (_, kind, name) => {
@@ -19,8 +21,9 @@ function load(relative, bindings = {}, replacements = []) {
     return `${kind} ${name}`;
   });
   source = stripTypeScriptTypes(source, { mode: "transform" });
-  const scope = { module: { exports: {} }, require, URL, TextEncoder, Event, console, process, ...bindings };
-  vm.runInNewContext(`${source}\nmodule.exports = {${exported.join(",")}};`, scope, { filename: relative });
+  const scope = { module: { exports: {} }, require, URL, TextEncoder, Event, console, process,
+    loadDependency: name => load(path.join(path.dirname(relative), `${name}.ts`)), ...bindings };
+  vm.runInNewContext(`${source}\nmodule.exports = {...module.exports, ${exported.join(",")}};`, scope, { filename: relative });
   return scope.module.exports;
 }
 function deferred() {
@@ -169,7 +172,7 @@ function nativeFixture() {
     [/^import \{[^}]*\} from 'node:crypto'$/m, "const { createHash, randomUUID } = require('node:crypto')"],
     [/^import \{ basename \} from 'node:path'$/m, "const { basename } = require('node:path')"],
     [/^import \{[^}]*\} from 'electron'$/m, "const { WebContentsView, session, ipcMain, dialog } = fake"],
-    [/^import \{[^}]*\} from '@rental-os\/shared\/agent-desktop'$/m, "const { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCommand, parseRentalDesktopBounds } = shared"],
+    [/^import \{[^}]*\} from '@rental-os\/shared\/agent-desktop'$/m, "const { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCommand, parseRentalDesktopBounds, parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult } = shared"],
     ["import { RENTAL_IPC } from './rental-desktop-protocol.ts'", "const RENTAL_IPC = ipcs"],
     ["import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'", "const WINDOWS_TITLEBAR_HEIGHT = 40"]
   ]);

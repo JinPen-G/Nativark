@@ -28,7 +28,7 @@ Harness 自有 pnpm workspace 与 lockfile，Rental OS 根工程使用 npm works
 
 ## 接入实现与部署配置
 
-[桌面业务视图](harness/apps/desktop/src/rental-business-view.ts)承载原后台登录、强制改密与受控内容。[后台接入](../../apps/admin/src/features/agent-desktop/DesktopSessionBridge.tsx)只报告无凭据状态和原受权菜单；[工作台插件](harness/packages/client/ui-rental-workbench/README.zh.md)提供经营空间、AI / 传统、菜单和操作反馈。普通浏览器不具备原生 preload 标记，继续使用完整 Web 外壳。
+[桌面业务视图](harness/apps/desktop/src/rental-business-view.ts)承载原后台登录、强制改密与受控内容。[后台接入](../../apps/admin/src/features/agent-desktop/DesktopSessionBridge.tsx)报告无凭据状态、原受权菜单，并承接封闭目录读取；[工作台插件](harness/packages/client/ui-rental-workbench/README.zh.md)提供经营空间、AI / 传统、菜单、操作反馈和人工目录预览。普通浏览器不具备原生 preload 标记，继续使用完整 Web 外壳。
 
 打包态读取 Harness 桌面 `package.json` 的 `rentalDesktop` 配置；开发态可用 `RENTAL_DESKTOP_ADMIN_URL` 指定获准地址。不设配置保持上游行为，配置非法则拒绝启动；生产地址必须 HTTPS，开发态仅环回地址可 HTTP。当前没有写入真实部署地址。
 
@@ -42,6 +42,25 @@ Harness 自有 pnpm workspace 与 lockfile，Rental OS 根工程使用 npm works
 ```
 
 这是字段格式示例，不是已运行配置。`downloadOrigins` 省略时仅同源文件和本地 Blob 可下载；使用外部对象存储签名地址的部署须明确列出 HTTPS origin。后台凭据不注入文件 origin，下载跳转链也须在允许范围内。业务更新由同一 Web部署供给，显式重连请求不使用缓存副本；原草稿保护会拒绝未保存页面的刷新，不自动重发业务。
+
+菜单跳转只有在原页面路由实际切换且当前身份 / 权限仍匹配时才回报完成；原草稿阻止跳转时保留编辑状态。切换经营空间会撤回旧本地 Host 准入，沿原停止 / 恢复流程重新进入，原会话与模型配置仍保留。页面加载及桥握手最多等待 20 秒，停滞后显示重连提示；导航应答不明时，须由新业务文档重新报告当前服务端会话后才解锁。重连不重发上一命令，也不证明任何业务写入已回滚。
+
+## 受控目录预览与政策接口
+
+当前首条通路为工作台侧栏“受控目录预览” → 受限原生桥 → 原后台 HTTP → [显式服务模块](../../apps/api/src/modules/ai-native/desktop-business/desktop-business.module.ts) → 原 Auth / Guard / ALS 与有界商品 reader。它只返回目录引用、注册品类和启停状态，不返回名称、编码、库存、价格或个人资料，不产生模型请求、库存预占或业务写入。结果不写聊天历史，最长展示60秒；身份 / 空间 / 页面失效或目的地输入变化即清除。
+
+以下 POST 接口统一在 `/api/ai-native/desktop-business/` 下；字段从 [shared 合同](../../packages/shared/src/agent-desktop-business.ts) 和 [OpenAPI](../../apps/api/src/contracts/ai-desktop-business-schemas.ts)读取。身份由服务器当前会话确定，body 中 binding 只用于核对，不授权。
+
+| 后缀 | 作用与边界 |
+| --- | --- |
+| `catalog` | 严格请求 ID / binding / limit / destination；原商品读权、当前政策及审计必须通过。最多50条，当前人工入口固定10条。 |
+| `policy` | 当前配置管理者读取本空间政策；无记录为 `not_configured`，不自动启用。 |
+| `policy/change` | 人类管理者用原 `operationKey`、预期修订和完整政策做 CAS；政策限定工具、目的地、数量及期限，不是模型配置或企业订阅。 |
+| `policy/operation` | 当前管理权限下读取本人原保存收据；`not_observed` 不证明回滚，`AI_RESULT_UNKNOWN` 不换键重做。 |
+
+政策沿原系统配置管理权限，商品查询沿原业务权限，两者不能互相替代。SQL仓储和原业务审计使用当前空间；读取后复核身份和政策，审计未持久化则不返回投影。新增迁移仅定义政策 / 原保存收据，不安装默认许可；本轮未迁移数据库，缺表时拒绝。政策编辑页面尚未接入。
+
+这里填写的 Provider / Base URL 只核对政策允许值，不证明 Harness 当前模型目的地。尚未接模型业务工具、输入隐私解析和历史绑定；不得把预览结果直接注入普通聊天、Shell、插件或模型。模型接入仍需按专项后续任务完成，不以本接口代替该条件。
 
 ## 工程验证前置与运行限制
 

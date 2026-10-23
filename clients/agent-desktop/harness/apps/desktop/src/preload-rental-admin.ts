@@ -15,6 +15,16 @@ if (process.isMainFrame && approved === location.origin) {
     protocolVersion: RENTAL_DESKTOP_PROTOCOL_VERSION,
     report: session => send(RENTAL_IPC.report, session),
     complete: result => send(RENTAL_IPC.complete, result),
+    completeCatalog: result => send(RENTAL_IPC.catalogComplete, result),
+    onCatalog: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, envelope: { document: string; value: Parameters<typeof listener>[0] }) => {
+        void connected.then(document => { if (envelope.document === document) listener(envelope.value) }).catch((_error: unknown) => {
+          console.error('Rental OS business read unavailable')
+        })
+      }
+      ipcRenderer.on(RENTAL_IPC.catalogRequest, receive)
+      return () => { ipcRenderer.off(RENTAL_IPC.catalogRequest, receive) }
+    },
     onCommand: listener => {
       const receive = (_event: Electron.IpcRendererEvent, envelope: { document: string; value: RentalDesktopCommandRequest }) => {
         void connected.then(document => { if (envelope.document === document) listener(envelope.value) }).catch((_error: unknown) => {

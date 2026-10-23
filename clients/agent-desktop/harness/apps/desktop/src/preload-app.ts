@@ -92,6 +92,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     protocolVersion: RENTAL_DESKTOP_PROTOCOL_VERSION,
     read: () => ipcRenderer.invoke(RENTAL_IPC.read),
     request: command => ipcRenderer.invoke(RENTAL_IPC.request, command),
+    catalog: query => ipcRenderer.invoke(RENTAL_IPC.catalog, query),
     present: input => ipcRenderer.invoke(RENTAL_IPC.present, input),
     retry: () => ipcRenderer.invoke(RENTAL_IPC.retry),
     subscribe: listener => {

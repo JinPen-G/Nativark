@@ -4,6 +4,8 @@ import { basename } from 'node:path'
 import { WebContentsView, session, ipcMain, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCommand, parseRentalDesktopBounds,
+  parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult,
+  type RentalDesktopCatalogResult, type RentalDesktopCatalogRequest,
   type RentalDesktopSnapshot, type RentalDesktopSession, type RentalDesktopBounds, type RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
 import { RENTAL_IPC } from './rental-desktop-protocol.ts'
 import type { RentalDesktopConfig } from './rental-desktop-config.ts'
@@ -19,9 +21,11 @@ export class RentalBusinessView {
   private snapshot: RentalDesktopSnapshot = { protocolVersion: RENTAL_DESKTOP_PROTOCOL_VERSION, revision: 0, session: { status: 'unavailable' } }
   private mode: 'ai' | 'traditional' = 'ai'
   private bounds: RentalDesktopBounds | null = null
-  private pending: { id: string; command: RentalDesktopCommand; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
+  private pending: { id: string; document: string; command: RentalDesktopCommand; session: RentalDesktopSession; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
   private lostAcknowledgement: string | undefined
+  private lostDocument: string | undefined
   private heartbeat: ReturnType<typeof setTimeout> | undefined
+  private documentDeadline: ReturnType<typeof setTimeout> | undefined
   private unknownCommand = false
   private disposed = false
   private document: string | undefined
@@ -30,6 +34,8 @@ export class RentalBusinessView {
   private failurePrompt: Promise<void> | undefined
   private readonly origin: string
   private readonly waiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>()
+  private readonly catalogReads = new Map<string, { document: string; request: RentalDesktopCatalogRequest;
+    resolve: (result: RentalDesktopCatalogResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 
   /** Current UI admission; every API request still keeps the original business authorization. */
   get ready(): boolean { return this.snapshot.session.status === 'ready' }
@@ -50,10 +56,41 @@ export class RentalBusinessView {
 
   /** Bind IPC before loading either application document. */
   install(): void {
+    ipcMain.handle(RENTAL_IPC.catalog, (event, value: unknown) => { this.assertApplication(event); return this.readCatalog(value) })
+    ipcMain.handle(RENTAL_IPC.catalogComplete, (event, envelope: unknown) => {
+      const value = this.adminMessage(event, envelope)
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !('id' in value) || typeof value.id !== 'string'
+        || !('ok' in value) || typeof value.ok !== 'boolean') throw new Error('Invalid business read response')
+      const pending = this.catalogReads.get(value.id)
+      if (!pending) return
+      this.catalogReads.delete(value.id); clearTimeout(pending.timer)
+      try {
+        if (Object.keys(value).some(key => !(value.ok ? ['id', 'ok', 'result'] : ['id', 'ok', 'code']).includes(key))) throw Error()
+        if (!value.ok) {
+          const code = 'code' in value && typeof value.code === 'string'
+            && ['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_INVALID_INPUT', 'AI_RESOURCE_UNAVAILABLE'].includes(value.code)
+            ? value.code : 'AI_RESOURCE_UNAVAILABLE'
+          pending.reject(new Error(code)); return
+        }
+        const result = parseRentalDesktopCatalogResult('result' in value ? value.result : undefined)
+        const current = this.snapshot.session
+        if (pending.document !== this.document || this.disposed || this.pending || this.unknownCommand || current.status !== 'ready' || current.audience !== 'tenant'
+          || current.actorId !== pending.request.binding.actorId || current.tenantId !== pending.request.binding.tenantId
+          || current.currentWorkspaceId !== pending.request.binding.workspaceId || result.requestId !== pending.request.id
+          || JSON.stringify(result.binding) !== JSON.stringify(pending.request.binding)
+          || JSON.stringify(result.destination) !== JSON.stringify(pending.request.query.destination)
+          || result.items.length > pending.request.query.limit || Date.parse(result.expiresAt) <= Date.now()) throw Error()
+        pending.resolve(result)
+      } catch { pending.reject(new Error('AI_RESOURCE_UNAVAILABLE')) }
+    })
     ipcMain.handle(RENTAL_IPC.read, event => { this.assertApplication(event); return this.snapshot })
     ipcMain.handle(RENTAL_IPC.connect, (event, version: unknown) => {
       this.assertAdmin(event)
-      if (version !== RENTAL_DESKTOP_PROTOCOL_VERSION) throw new Error('Unsupported business protocol')
+      if (version !== RENTAL_DESKTOP_PROTOCOL_VERSION) {
+        this.accept({ status: 'unavailable' })
+        this.showFailure()
+        throw new Error('Unsupported business protocol')
+      }
       // A document connects once from its isolated preload. Its nonce is never exposed to page JavaScript.
       this.unloadingDocument = undefined
       this.document ??= randomUUID()
@@ -75,12 +112,13 @@ export class RentalBusinessView {
       const pending = this.pending
       if (pending === undefined && value.id === this.lostAcknowledgement) {
         this.lostAcknowledgement = undefined
+        this.lostDocument = undefined
         this.unknownCommand = false
         return
       }
       if (pending === undefined || value.id !== pending.id) return
       this.pending = undefined; clearTimeout(pending.timer)
-      if (value.ok) pending.resolve()
+      if (value.ok && this.commandObserved(pending.command, pending.session)) pending.resolve()
       else pending.reject(new Error('Business action refused'))
     })
     ipcMain.handle(RENTAL_IPC.request, (event, value: unknown) => { this.assertApplication(event); return this.request(parseRentalDesktopCommand(value)) })
@@ -157,7 +195,19 @@ export class RentalBusinessView {
     view.webContents.on('will-redirect', (event, url) => { if (!allowed(url)) event.preventDefault() })
     view.webContents.on('will-attach-webview', event => { event.preventDefault() })
     view.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
-      if (mainFrame && !inPlace && this.view === view) { this.unloadingDocument = this.document; this.document = undefined; this.accept({ status: 'unavailable' }) }
+      if (mainFrame && !inPlace && this.view === view) {
+        this.unloadingDocument = this.document
+        this.document = undefined
+        this.accept({ status: 'unavailable' })
+        clearTimeout(this.documentDeadline)
+        // A loaded HTML document is not a verified login or a functioning page bridge.
+        this.documentDeadline = setTimeout(() => {
+          if (this.view !== view || this.disposed) return
+          if (this.loading && !view.webContents.isDestroyed()) view.webContents.stop()
+          this.accept({ status: 'unavailable' })
+          this.showFailure()
+        }, 20_000)
+      }
     })
     view.webContents.on('will-prevent-unload', () => {
       // Do not preventDefault: Electron then keeps the original document and its unsaved fields.
@@ -221,18 +271,29 @@ export class RentalBusinessView {
     const changed = JSON.stringify(previous) !== JSON.stringify(next)
     this.snapshot = { protocolVersion: RENTAL_DESKTOP_PROTOCOL_VERSION, revision: this.snapshot.revision + (changed ? 1 : 0), session: next }
     clearTimeout(this.heartbeat)
+    if (next.status !== 'unavailable') {
+      clearTimeout(this.documentDeadline)
+      if (this.document && this.document !== this.lostDocument && !this.pending) {
+        // Reconnection unlocks only after a new owned document reports its current server-verified state.
+        this.lostAcknowledgement = undefined
+        this.lostDocument = undefined
+        this.unknownCommand = false
+      }
+    }
     if (next.status === 'ready') this.heartbeat = setTimeout(() => {
       this.accept({ status: 'unavailable' })
       this.showFailure()
     }, 60_000)
     const boundary = next.status !== 'ready' || previous.status !== 'ready' || next.actorId !== previous.actorId
-      || next.tenantId !== previous.tenantId || next.currentWorkspaceId !== previous.currentWorkspaceId
+      || next.tenantId !== previous.tenantId || next.audience !== previous.audience || next.currentWorkspaceId !== previous.currentWorkspaceId
     const expectedSwitch = previous.status === 'ready' && next.status === 'ready'
       && previous.actorId === next.actorId && previous.tenantId === next.tenantId
+      && previous.audience === next.audience
       && this.pending?.command.kind === 'switch-workspace' && this.pending.command.workspaceId === next.currentWorkspaceId
     const expectedLogout = this.pending?.command.kind === 'logout' && next.status === 'signed-out'
     if (boundary && this.pending !== undefined && !expectedSwitch && !expectedLogout) this.failPending()
     if (boundary) {
+      this.stopCatalogReads()
       for (const popup of this.previews) if (!popup.isDestroyed()) popup.destroy()
       this.previews.clear()
       for (const item of this.downloads) item.cancel()
@@ -241,10 +302,44 @@ export class RentalBusinessView {
     if (this.owner && !this.owner.webContents.isDestroyed()) this.owner.webContents.send(RENTAL_IPC.changed, this.snapshot)
     this.present()
     if (next.status === 'ready') { for (const waiter of this.waiters) waiter.resolve(); this.waiters.clear() }
-    if (previous.status === 'ready' && next.status === 'ready' && (previous.actorId !== next.actorId || previous.tenantId !== next.tenantId)) {
+    if (previous.status === 'ready' && next.status === 'ready' && (previous.actorId !== next.actorId || previous.tenantId !== next.tenantId
+      || previous.audience !== next.audience || previous.currentWorkspaceId !== next.currentWorkspaceId)) {
       this.admission(false)
       this.admission(true)
     } else if ((previous.status === 'ready') !== (next.status === 'ready')) this.admission(next.status === 'ready')
+  }
+  private readCatalog(value: unknown): Promise<RentalDesktopCatalogResult> {
+    const query = parseRentalDesktopCatalogQuery(value), current = this.snapshot.session
+    const document = this.document, view = this.view
+    if (!document || !view || view.webContents.isDestroyed() || this.disposed || this.pending || this.unknownCommand
+      || current.status !== 'ready' || current.audience !== 'tenant' || !current.currentWorkspaceId || this.catalogReads.size >= 2)
+      return Promise.reject(new Error('AI_RESOURCE_UNAVAILABLE'))
+    const request: RentalDesktopCatalogRequest = { id: randomUUID(), query,
+      binding: { actorId: current.actorId, tenantId: current.tenantId, workspaceId: current.currentWorkspaceId } }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!this.catalogReads.delete(request.id)) return
+        reject(new Error('AI_RESOURCE_UNAVAILABLE'))
+      }, 15_000)
+      this.catalogReads.set(request.id, { document, request, resolve, reject, timer })
+      try { view.webContents.send(RENTAL_IPC.catalogRequest, { document, value: request }) }
+      catch { this.catalogReads.delete(request.id); clearTimeout(timer); reject(new Error('AI_RESOURCE_UNAVAILABLE')) }
+    })
+  }
+  private stopCatalogReads(): void {
+    for (const pending of this.catalogReads.values()) { clearTimeout(pending.timer); pending.reject(new Error('AI_SCOPE_CHANGED')) }
+    this.catalogReads.clear()
+  }
+  private commandObserved(command: RentalDesktopCommand, before: RentalDesktopSession): boolean {
+    const current = this.snapshot.session
+    if (command.kind === 'revalidate') return current.status !== 'unavailable'
+    if (command.kind === 'logout') return current.status === 'signed-out'
+    if (before.status !== 'ready' || current.status !== 'ready' || current.actorId !== before.actorId
+      || current.tenantId !== before.tenantId || current.audience !== before.audience) return false
+    if (command.kind === 'switch-workspace') return current.currentWorkspaceId === command.workspaceId
+    if (command.kind !== 'navigate' || current.currentWorkspaceId !== before.currentWorkspaceId) return false
+    const route = current.sections.flatMap(section => section.items).find(item => item.id === command.routeId)
+    return route !== undefined && current.pathname === route.path
   }
   private request(command: RentalDesktopCommand): Promise<void> {
     if (command.revision !== this.snapshot.revision || this.pending || this.unknownCommand || !this.view || !this.document) return Promise.reject(new Error('Stale, unknown or pending business request'))
@@ -259,10 +354,11 @@ export class RentalBusinessView {
       if (!current.workspaces.some(workspace => workspace.id === workspaceId)) return Promise.reject(new Error('Unknown business workspace'))
     }
     const id = randomUUID()
+    const document = this.document
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { if (this.pending?.id === id) { this.pending = undefined; this.lostAcknowledgement = id; this.unknownCommand = true; reject(new Error('Business result unknown; reconnect to revalidate')) } }, 20_000)
-      this.pending = { id, command, resolve, reject, timer }
-      this.view!.webContents.send(RENTAL_IPC.command, { document: this.document, value: { id, command,
+      const timer = setTimeout(() => { if (this.pending?.id === id) { this.pending = undefined; this.lostAcknowledgement = id; this.lostDocument = document; this.unknownCommand = true; reject(new Error('Business result unknown; reconnect to revalidate')) } }, 20_000)
+      this.pending = { id, document, command, session: current, resolve, reject, timer }
+      this.view!.webContents.send(RENTAL_IPC.command, { document, value: { id, command,
         session: current.status === 'ready' ? { actorId: current.actorId, tenantId: current.tenantId, workspaceId: current.currentWorkspaceId } : null } })
     })
   }
@@ -294,9 +390,7 @@ export class RentalBusinessView {
     const view = this.view
     if (!view || view.webContents.isDestroyed()) return Promise.reject(new Error('Business view unavailable'))
     // loadURL uses the original beforeunload guard. Admission is revoked only when navigation actually begins.
-    const loading = view.webContents.loadURL(this.config.adminUrl, { extraHeaders: 'Cache-Control: no-cache\n' }).then(() => {
-      if (this.view === view) { this.unknownCommand = false; this.lostAcknowledgement = undefined }
-    }).catch((_error: unknown) => {
+    const loading = view.webContents.loadURL(this.config.adminUrl, { extraHeaders: 'Cache-Control: no-cache\n' }).catch((_error: unknown) => {
       if (this.view === view && !this.ready) this.showFailure()
       throw new Error('Rental OS Web unavailable or reload declined')
     }).finally(() => { if (this.loading === loading) this.loading = undefined })
@@ -329,12 +423,14 @@ export class RentalBusinessView {
     if (pending) {
       this.pending = undefined
       this.lostAcknowledgement = pending.id
+      this.lostDocument = pending.document
       this.unknownCommand = true
       clearTimeout(pending.timer)
       pending.reject(new Error('Business session changed; result must be checked'))
     }
   }
   private close(): void {
+    this.stopCatalogReads()
     this.document = undefined
     this.unloadingDocument = undefined
     this.loading = undefined
@@ -342,7 +438,7 @@ export class RentalBusinessView {
     this.stopDownloads?.(); this.stopDownloads = undefined
     for (const item of this.downloads) item.cancel()
     this.downloads.clear()
-    this.failPending(); clearTimeout(this.heartbeat)
+    this.failPending(); clearTimeout(this.heartbeat); clearTimeout(this.documentDeadline)
     for (const popup of this.previews) if (!popup.isDestroyed()) popup.destroy()
     this.previews.clear()
     this.owner?.off('resize', this.onResize); this.owner?.off('closed', this.onClosed)
@@ -359,6 +455,7 @@ export class RentalBusinessView {
   dispose(): void {
     this.disposed = true; this.close()
     for (const waiter of this.waiters) waiter.reject(new Error('Business view disposed')); this.waiters.clear()
-    for (const channel of [RENTAL_IPC.connect, RENTAL_IPC.read, RENTAL_IPC.report, RENTAL_IPC.complete, RENTAL_IPC.request, RENTAL_IPC.present, RENTAL_IPC.retry]) ipcMain.removeHandler(channel)
+    for (const channel of [RENTAL_IPC.connect, RENTAL_IPC.read, RENTAL_IPC.report, RENTAL_IPC.complete, RENTAL_IPC.request, RENTAL_IPC.present, RENTAL_IPC.retry,
+      RENTAL_IPC.catalog, RENTAL_IPC.catalogComplete]) ipcMain.removeHandler(channel)
   }
 }

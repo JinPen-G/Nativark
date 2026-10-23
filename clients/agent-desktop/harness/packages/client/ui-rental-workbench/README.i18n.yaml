@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/client/ui-rental-workbench/README.md
+/:
+  en: 3734e4e4b760618b
+  zh: dc1923e2ec7db14b
+/rental-os-dsh-client-ui-rental-workbench:
+  en: 2cd90ddca3758687
+  zh: 762affbb4407e008
+/rental-os-dsh-client-ui-rental-workbench/summary:
+  en: 827a34b5b208559e
+  zh: 7ca034823fefc8cb
+/rental-os-dsh-client-ui-rental-workbench/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: c72b311df185caf1
+/rental-os-dsh-client-ui-rental-workbench/use-this-package:
+  en: 3a59e061308a13a5
+  zh: fad82e328bddd0cc
+/rental-os-dsh-client-ui-rental-workbench/understand-the-implementation:
+  en: 10ea375f6cff3d67
+  zh: 3dc9beb9babcfe10
+/rental-os-dsh-client-ui-rental-workbench/further-exploration:
+  en: 42c8e5afd235eb8a
+  zh: 6cc4ea6883d394ef
+/rental-os-dsh-client-ui-rental-workbench/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/rental-os-dsh-client-ui-rental-workbench/model-experience/desktop-presentation:
+  en: ce17bb26211a1877
+  zh: 2a0b32cfe5129924
+/rental-os-dsh-client-ui-rental-workbench/model-experience/desktop-presentation/what-the-model-sees:
+  en: 8bde27767f003fd1
+  zh: 600a76c894c54363
+/rental-os-dsh-client-ui-rental-workbench/model-experience/desktop-presentation/token-effect:
+  en: f6c6455dcbb07b90
+  zh: 10d07f1eb6f6ae62
+/rental-os-dsh-client-ui-rental-workbench/model-experience/desktop-presentation/kv-cache-effect:
+  en: 9d3386848dab6970
+  zh: c96927cee8fd59c5
+/rental-os-dsh-client-ui-rental-workbench/known-limitations-and-deferred-work:
+  en: 33206fac0fddccf3
+  zh: 83e22b9ce84b0556
+/rental-os-dsh-client-ui-rental-workbench/known-limitations-and-deferred-work/dev-note:
+  en: b83e5da9070eb4bc
+  zh: 5b72c720bf4b41d7

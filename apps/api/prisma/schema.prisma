@@ -7,6 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Explicit local-model business permission; independent from hosted model configuration and money budgets.
+model AiDesktopBusinessPolicy {
+  tenantId      String   @db.VarChar(36)
+  workspaceId   String   @db.VarChar(36)
+  revision      Int      @db.UnsignedInt
+  policyJson    Json
+  updatedBy     String   @db.VarChar(36)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+
+  @@id([tenantId, workspaceId])
+  @@map("ai_desktop_business_policies")
+}
+
+model AiDesktopBusinessPolicyOperation {
+  tenantId       String   @db.VarChar(36)
+  workspaceId    String   @db.VarChar(36)
+  operationKey   String   @db.VarChar(128)
+  actorId        String   @db.VarChar(36)
+  payloadHash    String   @db.Char(64)
+  resultJson     Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+
+  @@id([tenantId, workspaceId, operationKey])
+  @@index([tenantId, workspaceId, createdAt], map: "ai_desktop_business_operations_created_idx")
+  @@map("ai_desktop_business_policy_operations")
+}
+
 /// 官网演示预约是平台级线索，不挂租户/经营空间，不自动建立客户或会员。
 model DemoRequest {
   id           String   @id @db.VarChar(36)

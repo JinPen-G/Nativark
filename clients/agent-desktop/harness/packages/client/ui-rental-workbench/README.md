@@ -21,20 +21,24 @@ Choose an authorized business workspace and switch between the local AI workbenc
 
 -----
 
+<a id="use-this-package"></a>
 ## Use this package
 
 The Web application bundle declares this presentation plugin. It registers controls only when the configured Electron main window exposes the owned Rental OS bridge; an ordinary Harness Web client keeps its existing interface.
 
 The desktop deployment selects the original administration application. Credentials remain in that isolated document. Save or finish protected drafts before changing accounts or business workspaces. Reconnection loads the approved document and does not repeat the last command. Configuration and build prerequisites belong to the [Rental OS integration entry](../../../../README.md).
 
+The expanded sidebar also offers a human-only catalog preview. Enter a provider identifier and HTTPS base URL already allowed by the workspace policy, then read up to ten deidentified catalog references. This neither configures nor contacts a model. Missing, disabled or expired policy, denied access and audit failure prevent disclosure; workspace changes and expiry remove the preview. Names, codes, inventory and prices are omitted. This is not Agent business mode or an authorization to forward the result to a model or chat history.
+
 -----
 
+<a id="understand-the-implementation"></a>
 ## Understand the implementation
 
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The plugin contributes controls to the existing sidebar slots, a keyed business panel, and a shell-owned notice. Electron owns the native business view. The plugin only projects view bounds and requests registered navigation or workspace changes. The administration application executes those requests through its original authentication, router, and API. The existing layout retains the previous AI panel while the business view is displayed.
+The plugin contributes controls to the existing sidebar slots, a keyed business panel, and a shell-owned notice. Electron owns the native business view. The plugin projects view bounds and requests registered navigation, workspace changes or the closed catalog preview. The administration application executes those requests through its original authentication, router, and API. The existing layout retains the previous AI panel while the business view is displayed.
 
 The [client entry](src/client/index.ts) owns subscriptions and reversible registrations. The [presentation](src/client/Workbench.tsx) consumes injected data and callbacks. The [shared protocol](../../../../../../packages/shared/src/agent-desktop.ts) excludes model keys and business credentials.
 
@@ -42,6 +46,7 @@ The [client entry](src/client/index.ts) owns subscriptions and reversible regist
 
 -----
 
+<a id="further-exploration"></a>
 ## Further Exploration
 
 - [Rental OS client integration](../../../../README.md)
@@ -51,6 +56,7 @@ The [client entry](src/client/index.ts) owns subscriptions and reversible regist
 
 -----
 
+<a id="model-experience"></a>
 ## Model Experience
 
 ### Desktop presentation
@@ -67,6 +73,7 @@ Zero direct model tokens or model calls. Business login and navigation do not us
 
 This package does not alter model request prefixes. Harness and the configured model provider continue to own request construction and cache availability.
 
+<a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work
 
 The integration keeps native-host and business-service verification separate from isolated source tests.
@@ -75,6 +82,7 @@ The integration keeps native-host and business-service verification separate fro
 - Public protocol artifacts must be built before Harness type checking or bundling. The projects retain independent dependencies; an installed local environment does not replace native login and page acceptance.
 - The package does not grant Agent access to business APIs or page DOM and does not add platform model accounting or server collaboration.
 
+<a id="dev-note"></a>
 ### Dev Note
 
 <details>

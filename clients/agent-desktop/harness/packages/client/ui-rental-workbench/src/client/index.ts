@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RentalDesktopBridge, RentalDesktopSnapshot, RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
-import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession } from '@rental-os/shared/agent-desktop'
+import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult } from '@rental-os/shared/agent-desktop'
 import { WorkbenchContext, WorkbenchNavigation, WorkbenchMain, WorkbenchToast } from './Workbench.tsx'
 import type { WorkbenchInjected, WorkbenchState } from './contract.ts'
 import { zh, en } from './locales.ts'
@@ -16,7 +16,14 @@ export const inject = ['slots', 'layout', 'locale']
 export function apply(ctx: Context): void {
   const bridge = (globalThis as typeof globalThis & { rentalDesktop?: RentalDesktopBridge }).rentalDesktop
   if (bridge?.protocolVersion !== RENTAL_DESKTOP_PROTOCOL_VERSION) return
-  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null })
+  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null } })
+  let catalogGeneration = 0
+  let catalogExpiry: ReturnType<typeof setTimeout> | undefined
+  const clearCatalog = () => {
+    catalogGeneration++
+    clearTimeout(catalogExpiry)
+    state.update(value => { value.catalog = { busy: false, failed: false, result: null } })
+  }
   let noticeSequence = 0
   const panel = 'rental-business' as MainPanelId
   const workMode = {
@@ -26,7 +33,7 @@ export function apply(ctx: Context): void {
   let disposed = false
   let aiPanel: MainPanelId | null = ctx.layout.panelInfo.getSnapshot().activePanelId
   let bounds: { x: number; y: number; width: number; height: number } | null = null
-  const fail = () => { if (!disposed) state.update(value => { value.failed = true; value.busy = false }) }
+  const fail = () => { if (!disposed) { clearCatalog(); state.update(value => { value.failed = true; value.busy = false }) } }
   const present = () => {
     const overlay = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [role="alert"], [data-shell-overlay] > *')]
       .some(node => node.getClientRects().length > 0)
@@ -39,8 +46,10 @@ export function apply(ctx: Context): void {
       const session = parseRentalDesktopSession(value.session)
       const previous = state.getSnapshot().snapshot
       if (previous && value.revision < previous.revision) return
+      if (JSON.stringify(previous?.session) !== JSON.stringify(session)) clearCatalog()
       state.update(draft => { draft.snapshot = { protocolVersion: value.protocolVersion, revision: value.revision, session } })
     } catch (_error) {
+      clearCatalog()
       // Invalid native data cannot leave the previous menu usable.
       state.update(draft => { draft.snapshot = null; draft.failed = true; draft.busy = false })
       void bridge.present({ mode: 'ai', bounds: null }).catch(fail)
@@ -70,6 +79,32 @@ export function apply(ctx: Context): void {
     logout: () => { request({ kind: 'logout', revision: revision() }) },
     retry: () => { void bridge.retry().catch(fail) },
     dismissNotice: () => { state.update(value => { value.notice = null }) },
+    discardCatalog: clearCatalog,
+    readCatalog: query => {
+      const before = state.getSnapshot()
+      if (disposed || before.busy || before.catalog.busy || before.snapshot?.session.status !== 'ready') return
+      clearCatalog()
+      const generation = catalogGeneration
+      let input
+      try { input = parseRentalDesktopCatalogQuery(query) }
+      catch { state.update(value => { value.catalog.failed = true }); return }
+      state.update(value => { value.catalog.busy = true })
+      // Human-only preview. It neither inserts facts into a conversation nor attests a model destination.
+      void Promise.resolve().then(() => {
+        if (!bridge.catalog) throw new Error('AI_RESOURCE_UNAVAILABLE')
+        return bridge.catalog(input)
+      }).then(value => {
+        if (disposed || generation !== catalogGeneration) return
+        const result = parseRentalDesktopCatalogResult(value)
+        const session = state.getSnapshot().snapshot?.session
+        if (session?.status !== 'ready' || result.binding.actorId !== session.actorId || result.binding.tenantId !== session.tenantId
+          || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()) throw new Error('AI_SCOPE_CHANGED')
+        state.update(draft => { draft.catalog = { busy: false, failed: false, result } })
+        catalogExpiry = setTimeout(clearCatalog, Math.max(0, Date.parse(result.expiresAt) - Date.now()))
+      }).catch(() => {
+        if (!disposed && generation === catalogGeneration) state.update(value => { value.catalog = { busy: false, failed: true, result: null } })
+      })
+    },
     measure: element => {
       const update = () => {
         const rect = element.getBoundingClientRect()
@@ -87,6 +122,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => bridge.subscribe(accept), 'rental: session projection')
   ctx.effect(() => () => {
     disposed = true
+    catalogGeneration++; clearTimeout(catalogExpiry)
     if (workMode.getSnapshot() === 'traditional') ctx.layout.selectPanel(null)
     void bridge.present({ mode: 'ai', bounds: null }).catch(() => undefined)
   }, 'rental: native presentation')

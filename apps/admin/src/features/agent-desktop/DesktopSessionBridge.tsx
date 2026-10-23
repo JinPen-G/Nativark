@@ -1,10 +1,12 @@
-/** Projects the original authenticated navigation to Electron. No credentials, model access, or business commands cross this bridge. */
+/** Projects original navigation and closed, policy-checked read results. Credentials stay in the Web request client. */
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { readDesktopBusinessCatalog } from '@/api/desktopBusiness';
 import type { RentalCategoryTerminology } from "@rental-os/shared";
 import { useLocation, useNavigate } from "react-router-dom";
 import { parseRentalDesktopCommand, type RentalDesktopCommandRequest, type RentalDesktopSession } from "@rental-os/shared";
+import { parseRentalDesktopCatalogRequest, type RentalDesktopCatalogRequest, type RentalDesktopBusinessFailureCode } from '@rental-os/shared';
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -37,14 +39,16 @@ export function DesktopSessionBridge() {
   useEffect(() => {
     if (!host) return;
     let live = true;
-    const report = () => Promise.resolve().then(() => host.report(projection(latest.current.pathname, latest.current.t, latest.current.terminology)));
+    const report = () => Promise.resolve().then(() => {
+      if (live) return host.report(projection(latest.current.pathname, latest.current.t, latest.current.terminology));
+    });
     const completed = new Set<string>();
-    const unavailable = () => host.report({ status: "unavailable" }).catch(() => undefined);
-    const verify = () => useAuthStore.getState().bootstrap().then(() => {
+    const unavailable = () => live ? host.report({ status: "unavailable" }).catch(() => undefined) : Promise.resolve();
+    const verify = () => useAuthStore.getState().bootstrap().then(async () => {
       if (!live) return;
       const current = projection(latest.current.pathname, latest.current.t, latest.current.terminology);
-      if (current.status === "ready" && /^\/login(?:\/|$)/u.test(latest.current.pathname)) navigate(current.defaultPath ?? "/", { replace: true });
-      setHeartbeat(value => value + 1);
+      if (current.status === "ready" && /^\/login(?:\/|$)/u.test(latest.current.pathname)) await navigate(current.defaultPath ?? "/", { replace: true, flushSync: true });
+      if (live) setHeartbeat(value => value + 1);
     }).catch(unavailable);
     const unsubscribeState = useAuthStore.subscribe((next, previous) => {
       if (previous.sessionVerified && !next.sessionVerified) {
@@ -61,45 +65,105 @@ export function DesktopSessionBridge() {
       try {
         const command = parseRentalDesktopCommand(request.command);
         const before = useAuthStore.getState();
+        const current = (workspaceId: string | null) => {
+          const next = useAuthStore.getState();
+          if (!live || !next.ready || !next.sessionVerified || !next.token || !next.user || next.user.mustChangePassword
+            || !request.session || next.user.id !== request.session.actorId || next.tenant?.tenantId !== request.session.tenantId
+            || Boolean(next.user.isSaasAdmin) !== Boolean(before.user?.isSaasAdmin)
+            || (next.currentWorkspaceId ?? null) !== workspaceId) throw new Error("Business session changed");
+          return projection(latest.current.pathname, latest.current.t, latest.current.terminology);
+        };
         if (command.kind === "revalidate") {
           await before.bootstrap();
-          ok = true;
+          ok = live && projection(latest.current.pathname, latest.current.t, latest.current.terminology).status !== "unavailable";
         } else if (before.ready && before.sessionVerified && before.token && before.user && !before.user.mustChangePassword) {
           if (!request.session || request.session.actorId !== before.user.id || request.session.tenantId !== before.tenant?.tenantId
             || request.session.workspaceId !== (before.currentWorkspaceId ?? null)) throw new Error("Business session changed");
           if (command.kind === "logout") {
             if (!window.dispatchEvent(new Event("rental-desktop-before-session-change", { cancelable: true }))) throw new Error("Finish editing before logout");
-            before.logout(); navigate("/login", { replace: true }); ok = true;
+            before.logout();
+            await navigate("/login", { replace: true, flushSync: true });
+            ok = live && projection(latest.current.pathname, latest.current.t, latest.current.terminology).status === "signed-out";
           } else if (command.kind === "switch-workspace") {
-            if (command.workspaceId === before.currentWorkspaceId) { ok = true; return; }
-            if (!window.dispatchEvent(new Event("rental-desktop-before-session-change", { cancelable: true }))) throw new Error("Finish editing before switching workspace");
-            if (!before.workspaces.some(row => row.id === command.workspaceId)) throw new Error("Workspace unavailable");
-            await before.switchWorkspace(command.workspaceId);
-            const next = projection(latest.current.pathname, latest.current.t, latest.current.terminology);
-            if (next.status === "ready") navigate(next.defaultPath ?? "/", { replace: true });
-            ok = true;
+            if (command.workspaceId !== before.currentWorkspaceId) {
+              if (!window.dispatchEvent(new Event("rental-desktop-before-session-change", { cancelable: true }))) throw new Error("Finish editing before switching workspace");
+              if (!before.workspaces.some(row => row.id === command.workspaceId)) throw new Error("Workspace unavailable");
+              await before.switchWorkspace(command.workspaceId);
+              const next = current(command.workspaceId);
+              if (next.status !== "ready") throw new Error("Workspace unavailable");
+              await navigate(next.defaultPath ?? "/", { replace: true, flushSync: true });
+            }
+            ok = current(command.workspaceId).status === "ready";
           } else if (command.kind === "navigate") {
             const routeId = command.routeId;
-            const current = projection(latest.current.pathname, latest.current.t, latest.current.terminology);
-            const target = current.status === "ready" ? current.sections.flatMap(section => section.items).find(item => item.id === routeId) : undefined;
+            const projected = projection(latest.current.pathname, latest.current.t, latest.current.terminology);
+            const target = projected.status === "ready" ? projected.sections.flatMap(section => section.items).find(item => item.id === routeId) : undefined;
             if (!target) throw new Error("Route unavailable");
-            navigate(target.path); ok = true;
+            await navigate(target.path, { flushSync: true });
+            const after = current(request.session.workspaceId);
+            ok = after.status === "ready" && after.pathname === target.path
+              && after.sections.some(section => section.items.some(item => item.id === routeId && item.path === target.path));
           }
         }
-        await report();
       } catch {
         // The original login/page surfaces own detailed diagnostics; IPC never echoes raw errors or credentials.
         ok = false;
       } finally {
         busy.current = false;
-        if (live) await host.complete({ id: request.id, ok });
+        if (live) {
+          try { await report(); }
+          catch { ok = false; }
+          if (live) await host.complete({ id: request.id, ok });
+        }
       }
     };
     const unsubscribe = host.onCommand(request => { void handle(request).catch(unavailable); });
+    const catalogReads = new Map<string, AbortController>();
+    const catalogContext = (request: RentalDesktopCatalogRequest) => {
+      const current = useAuthStore.getState();
+      if (!live || !current.ready || !current.sessionVerified || !current.token || current.user?.mustChangePassword || current.user?.isSaasAdmin
+        || current.user?.id !== request.binding.actorId || current.tenant?.tenantId !== request.binding.tenantId
+        || current.currentWorkspaceId !== request.binding.workspaceId) throw new Error('AI_SCOPE_CHANGED');
+    };
+    const handleCatalog = async (value: RentalDesktopCatalogRequest) => {
+      if (!host.completeCatalog) return;
+      const request = parseRentalDesktopCatalogRequest(value);
+      const controller = new AbortController();
+      let timer: number | undefined;
+      try {
+        if (busy.current || catalogReads.size >= 2 || completed.has(request.id)) throw new Error('AI_RESOURCE_UNAVAILABLE');
+        catalogContext(request);
+        completed.add(request.id);
+        if (completed.size > 256) completed.delete(completed.values().next().value!);
+        catalogReads.set(request.id, controller);
+        timer = window.setTimeout(() => controller.abort(), 12_000);
+        const result = await readDesktopBusinessCatalog(request, controller.signal);
+        catalogContext(request);
+        if (controller.signal.aborted) throw new Error('AI_RESOURCE_UNAVAILABLE');
+        await host.completeCatalog({ id: request.id, ok: true, result });
+      } catch (error) {
+        const codes: RentalDesktopBusinessFailureCode[] = ['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_INVALID_INPUT', 'AI_RESOURCE_UNAVAILABLE'];
+        const raw = error instanceof Error ? error.message : undefined;
+        const code = codes.find(code => code === raw) ?? 'AI_RESOURCE_UNAVAILABLE';
+        if (live) await host.completeCatalog({ id: request.id, ok: false, code });
+      } finally {
+        if (timer !== undefined) window.clearTimeout(timer);
+        if (catalogReads.get(request.id) === controller) catalogReads.delete(request.id);
+      }
+    };
+    const unsubscribeCatalog = host.onCatalog?.(value => { void handleCatalog(value).catch(unavailable); });
+    const unsubscribeCatalogIdentity = useAuthStore.subscribe((next, previous) => {
+      if (!next.sessionVerified || next.user?.id !== previous.user?.id || next.tenant?.tenantId !== previous.tenant?.tenantId
+        || next.currentWorkspaceId !== previous.currentWorkspaceId) for (const controller of catalogReads.values()) controller.abort();
+    });
     void verify();
     // The Host revokes admission if this owned page stops responding, including while hidden behind AI mode.
     const timer = window.setInterval(() => { if (!busy.current) void verify(); }, 20_000);
-    return () => { live = false; unsubscribe(); unsubscribeState(); window.clearInterval(timer); };
+    return () => {
+      live = false; unsubscribe(); unsubscribeState(); unsubscribeCatalog?.(); unsubscribeCatalogIdentity(); window.clearInterval(timer);
+      for (const controller of catalogReads.values()) controller.abort();
+      catalogReads.clear();
+    };
   }, [host, navigate]);
   useEffect(() => {
     if (host) void Promise.resolve().then(() => host.report(projection(pathname, t, categoryProfile.data?.terminology))).catch(() => {

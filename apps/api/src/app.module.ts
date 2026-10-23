@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ApiAuthGuard } from "./common/api-auth.guard";
 import { ConfigModule } from "@nestjs/config";
@@ -139,6 +140,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
 
 @Module({
   imports: [
+    AiDesktopBusinessModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env", "../../.env"]

@@ -1,13 +1,15 @@
 /** Pure workbench presentation over native-owned session/navigation data. Original AI panels remain mounted separately. */
 import { useEffect, useRef, useState } from 'react'
-import { Button, Menu, SegmentedControl, IconChevronDownOutlineRegular, Tooltip, Toast, IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Menu, SegmentedControl, IconChevronDownOutlineRegular, Tooltip, Toast, IconWarningOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ContextProps, NavigationProps, MainProps, ToastProps } from './contract.ts'
 import css from './Workbench.module.css'
 
-export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, t }: ContextProps) {
+export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, t }: ContextProps) {
   const state = useBusiness(value => value)
   const mode = useWorkMode(value => value)
   const [open, setOpen] = useState(false)
+  const [provider, setProvider] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const session = state.snapshot?.session
   if (!session || session.status !== 'ready') return <Button onClick={retry}>{t('retry')}</Button>
   const current = session.workspaces.find(row => row.id === session.currentWorkspaceId)
@@ -25,6 +27,23 @@ export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, s
     <div className={css.account}><span className={css.title}>{session.displayName}</span>
       <Button variant="ghost" disabled={state.busy} onClick={logout}>{t('logout')}</Button></div>
     {state.failed && <span className={css.failure} role="status">{t('unavailable')}</span>}
+    {wide && session.audience === 'tenant' && session.currentWorkspaceId && <details className={css.catalog}>
+      <summary>{t('catalogPreview')}</summary>
+      <p>{t('catalogBoundary')}</p>
+      <form onSubmit={event => { event.preventDefault(); readCatalog({ limit: 10, destination: { provider, baseUrl } }) }}>
+        <label>{t('provider')}<Input value={provider} maxLength={128} required disabled={state.catalog.busy} onChange={event => { setProvider(event.target.value); discardCatalog() }} /></label>
+        <label>{t('destination')}<Input type="url" value={baseUrl} maxLength={2048} required disabled={state.catalog.busy} onChange={event => { setBaseUrl(event.target.value); discardCatalog() }} /></label>
+        <Button type="submit" variant="outline" disabled={state.busy || state.catalog.busy}>{t(state.catalog.busy ? 'catalogLoading' : 'catalogRead')}</Button>
+      </form>
+      <div role="status" aria-live="polite">
+        {state.catalog.failed && <p>{t('catalogDenied')}</p>}
+        {state.catalog.result && <>
+          <p>{t('catalogObserved')} <time dateTime={state.catalog.result.observedAt}>{state.catalog.result.observedAt}</time></p>
+          <p>{t(state.catalog.result.truncated ? 'catalogPartial' : state.catalog.result.items.length ? 'catalogReady' : 'catalogEmpty')}</p>
+          <ul>{state.catalog.result.items.map(item => <li key={item.reference}><span>{item.reference}</span><span>{item.categoryCode} · {t(item.status)}</span></li>)}</ul>
+        </>}
+      </div>
+    </details>}
   </div>
 }
 

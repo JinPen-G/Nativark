@@ -12,29 +12,33 @@ kind: "package-reference"
 
 ## 目录
 
-- [使用本包](#使用本包)
-- [理解实现](#理解实现)
-- [进一步阅读](#进一步阅读)
-- [模型体验](#模型体验)
-- [已知限制与待办](#已知限制与待办)
-- [开发备注](#开发备注)
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [进一步阅读](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与待办](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
 -----
 
+<a id="use-this-package"></a>
 ## 使用本包
 
 Web 应用组合声明此展示插件。只有配置了业务后台的 Electron 主窗口提供受控 Rental OS bridge 时，它才注册控件；普通 Harness Web 客户端保持原界面。
 
 桌面部署选择原管理后台应用，凭据留在隔离业务文档。切换账号或经营空间前先保存或完成受保护草稿。重连仅加载获准文档，不重做上一条命令。配置和构建前置由 [Rental OS 接入入口](../../../../README.md)维护。
 
+展开的侧栏还提供仅供人查看的目录预览。填写当前空间政策已允许的 Provider 标识和 HTTPS Base URL，读取最多十条去标识目录引用；这里不会配置或联系模型。缺政策、停用、过期、无权或审计失败时不返回事实；切空间或到期后清除预览。名称、编码、库存和价格不返回。此功能不是 Agent 业务模式，也不授权将整个结果送给模型或聊天历史。
+
 -----
 
+<a id="understand-the-implementation"></a>
 ## 理解实现
 
 <details>
 <summary>实现说明 — 点击展开</summary>
 
-插件向已有侧栏插槽、业务主面板和外壳通知层提供控件。Electron 负责原生业务视图；插件仅报告视图尺寸，并请求已注册导航或空间切换。管理后台沿原认证、路由和 API 执行请求。已有布局在业务视图显示期间保留之前的 AI 主面板。
+插件向已有侧栏插槽、业务主面板和外壳通知层提供控件。Electron 负责原生业务视图；插件报告视图尺寸，并请求已注册导航、空间切换或封闭的目录预览。管理后台沿原认证、路由和 API 执行请求。已有布局在业务视图显示期间保留之前的 AI 主面板。
 
 [客户端入口](src/client/index.ts)负责订阅和可撤销注册。[展示组件](src/client/Workbench.tsx)消费注入数据与回调。[共用协议](../../../../../../packages/shared/src/agent-desktop.ts)不含模型 Key 和业务凭据。
 
@@ -42,15 +46,17 @@ Web 应用组合声明此展示插件。只有配置了业务后台的 Electron 
 
 -----
 
+<a id="further-exploration"></a>
 ## 进一步阅读
 
 - [Rental OS 客户端接入](../../../../README.md)
-- [Harness 客户端架构](../../../docs/subsystems/web-client.md)
-- [插槽](../../../docs/subsystems/slots.md)
-- [桌面端](../../../apps/desktop/README.md)
+- [Harness 客户端架构](../../../docs/subsystems/web-client.zh.md)
+- [插槽](../../../docs/subsystems/slots.zh.md)
+- [桌面端](../../../apps/desktop/README.zh.md)
 
 -----
 
+<a id="model-experience"></a>
 ## 模型体验
 
 ### 桌面展示
@@ -67,6 +73,7 @@ Web 应用组合声明此展示插件。只有配置了业务后台的 Electron 
 
 本包不修改模型请求前缀。Harness 和已配置模型供应商继续负责请求构建及缓存可用性。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与待办
 
 接入将真实宿主、业务服务验证与隔离源码测试明确区分。
@@ -75,6 +82,7 @@ Web 应用组合声明此展示插件。只有配置了业务后台的 Electron 
 - Harness 类型检查和打包前须先构建公开协议产物；两套工程保持独立依赖，本地已安装环境不能替代原生登录和页面验收。
 - 本包不授予 Agent 访问业务 API 或页面 DOM 的能力，不增加平台模型账或服务端协作。
 
+<a id="dev-note"></a>
 ### 开发备注
 
 <details>
