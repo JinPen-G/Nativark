@@ -242,20 +242,33 @@ export class InputCountTokensService {
   /** Historical observation of one counting receipt under current read
    * authority: the original bound inputs only, never a fresh count, a text
    * dispatch or an admission refund. Missing receipts report unavailable;
-   * execution shutdown does not erase a legitimately recorded fact. */
+   * execution shutdown does not erase a legitimately recorded fact. Accepts
+   * either the original call id or the original invocation id. */
   async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics }> {
-    const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
+    const parsed = z.object({ callId: callIdSchema.optional(), invocationId: z.string().min(1).max(36)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict().refine(item =>
+      (item.callId !== undefined) !== (item.invocationId !== undefined)).safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
     const current = await this.current();
     const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId });
     const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
     if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
+    // Receipt first: absence is "no counting record" (unavailable), while a
+    // receipt whose invocation is missing or owned by someone else is refused.
+    const referenced = parsed.data.invocationId !== undefined
+      ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId } }) : null;
+    if (parsed.data.invocationId !== undefined && (!referenced || referenced.id !== parsed.data.invocationId))
+      throw new BudgetError('FORBIDDEN');
     const receipt = await this.receipts.read(countTokensOperationId({ tenantId: current.tenantId,
-      workspaceId: current.workspaceId, actorId: current.actorId, callId: parsed.data.callId }));
-    const invocation = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } });
+      workspaceId: current.workspaceId, actorId: current.actorId,
+      callId: referenced !== null ? referenced.callId : parsed.data.callId as string }));
+    const invocation = referenced ?? (parsed.data.callId !== undefined
+      ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+        scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } })
+      : null);
     if (!invocation || invocation.scopeId !== scope.id || invocation.actorId !== current.actorId
-      || receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
+      || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
+    if (receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
       || receipt.intentHash !== invocation.intentHash || receipt.configurationHash !== invocation.configurationHash
       || receipt.priceVersion !== invocation.priceVersion
       || receipt.countCallId !== countTokensCallId(invocation.callId)

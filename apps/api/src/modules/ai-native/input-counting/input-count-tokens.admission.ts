@@ -7,7 +7,6 @@
  * original task's read authority. No token bound is required to admit a count
  * — that would be circular — and calls are never converted into tokens. */
 import type { PrismaClient } from '@prisma/client';
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiExecutionContext, AiUsageAssociationDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
@@ -22,21 +21,16 @@ import { BudgetError, type BudgetAction, type BudgetEvidencePort,
   type BudgetGrant, type BudgetQuote, type BudgetQuotePort, type BudgetRecord,
   type BudgetReserveCommand, type BudgetUsageEvidence } from '../budget/budget.ports';
 import type { BudgetAuthorizationSource } from '../budget/budget-dependency-adapters';
-import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, type CountTokensReceiptDb } from './input-count-tokens.receipt';
+import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, countTokensCallId, countTokensSceneCode,
+  type CountTokensReceiptDb } from './input-count-tokens.receipt';
+
+export { countTokensCallId, countTokensSceneCode };
 
 const code = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
 const hash64 = z.string().regex(/^[a-f0-9]{64}$/u);
 
 export type CountTokensAdmissionDb = Pick<PrismaClient, 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTaskActionPolicy'>
   & CountTokensReceiptDb;
-export function countTokensCallId(callId: string) {
-  return `count-${createHash('sha256').update(JSON.stringify(['ai-count-tokens-call-1', callId])).digest('hex')}`;
-}
-export function countTokensSceneCode(sceneCode: string) {
-  const derived = `${sceneCode}:count-tokens`;
-  if (!code.safeParse(derived).success) throw new BudgetError('UNAVAILABLE');
-  return derived;
-}
 const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
   return requestFingerprint(value);

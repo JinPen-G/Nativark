@@ -11,6 +11,18 @@ import { z } from 'zod';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
+/** Server-derived request id for a counting admission: one deterministic id
+ * per original call, never caller-chosen. Leaf location so read-side
+ * consumers can derive it without importing the admission stack. */
+export function countTokensCallId(callId: string) {
+  return `count-${createHash('sha256').update(JSON.stringify(['ai-count-tokens-call-1', callId])).digest('hex')}`;
+}
+export function countTokensSceneCode(sceneCode: string) {
+  const derived = `${sceneCode}:count-tokens`;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(derived)) throw new BudgetError('UNAVAILABLE');
+  return derived;
+}
+
 const hash64 = z.string().regex(/^[a-f0-9]{64}$/u);
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
 const isoTime = z.string().datetime({ offset: true });
