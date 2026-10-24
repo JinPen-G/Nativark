@@ -23,7 +23,7 @@
 | 唯一工作树 | `D:\工作文件\rental-OS\.claude\worktrees\claude-ai-native-foundation` |
 | 分支 | `ai/ai-native-contracts-s01-20261002` |
 | 核对基线 | 功能提交 `256a67d3` → 范围修正 `f79d78b2e4f5a08a2cf19fa1c22b96539501123f`；保留两者之间的服务端提交。仅作成果定位，不是 reset / 同步目标 |
-| 暂存区 | 功能提交后为空；本次仅任务百分比 / 接续 / 记录待收口，后续须重核，不夹带其他作者 WIP |
+| 暂存区 | 客户端归属源码、任务百分比和接续已提交；暂存区与其他作者WIP以开工实际 `git status` / cached diff为准，不夹带提交 |
 | Git 操作 | 开工无 MERGE_HEAD / CHERRY_PICK_HEAD；未合并、同步其他树、合 main 或推送 |
 | 本轮修改范围 | 原导航 / 恢复、原生与Web封闭目录桥、人工预览、持久空间政策 / CAS / 原保存收据、最少字段投影、原审计与接口合同；需求未改 |
 | 代码归属 | 客户端源码已提交。服务端作者此前OpenAPI / shared输入 / 恢复合同已独立提交；当前可见runner / settings-task-host WIP不暂存、不夹带。实际状态仍须重读 |
