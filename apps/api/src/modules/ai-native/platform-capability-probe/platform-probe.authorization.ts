@@ -69,9 +69,13 @@ export class PlatformTaskActionAuthority implements AiTaskRepositoryAuthority {
       const current = await this.current();
       const rechecked = structuredClone(await this.policies.resolve(taskId, operation, structuredClone(current.context)));
       const final = await this.current();
+      // The SaaS platform context carries its permission list at the top
+      // level (no `access` member); an absent or non-array list fails closed.
+      const heldPermissions = 'permissions' in final.context && Array.isArray(final.context.permissions)
+        ? final.context.permissions : null;
       if (current.fingerprint !== initial.fingerprint || final.fingerprint !== initial.fingerprint || requestFingerprint(rechecked) !== requestFingerprint(policy)
-        || Date.parse(policy.expiresAt) <= this.clock().getTime() || !('access' in final.context)
-        || policy.requiredPermissions.some(permission => !('access' in final.context) || !final.context.access.permissions.includes(permission))) throw denied();
+        || Date.parse(policy.expiresAt) <= this.clock().getTime() || heldPermissions === null
+        || policy.requiredPermissions.some(permission => !heldPermissions.includes(permission))) throw denied();
       return structuredClone(final.context);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
@@ -103,7 +107,8 @@ export function composePlatformTaskAuthorization(input: {
   const management = new PlatformModelConfigurationAuthority(input.guard, input.credentials, input.profileId,
     { resolve: () => identity.resolve() }, clock);
   identity = new PlatformTaskIdentityAuthority(management, clock);
-  const scopes = new AiScopeRepository(input.db, identity, clock);  const policies = new PrismaTaskActionPolicySource(input.db, scopes, clock);
+  const scopes = new AiScopeRepository(input.db, identity, clock);
+  const policies = new PrismaTaskActionPolicySource(input.db, scopes, clock);
   const actions = new PlatformTaskActionAuthority(identity, policies, clock);
   const gates = async (context: AiExecutionContext, taskScopeId: string, sceneCode: string) => {
     if (context.scope.kind !== 'platform' || context.actor.kind !== 'saas_admin' || context.audience !== 'operator') throw denied();

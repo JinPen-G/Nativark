@@ -6,6 +6,7 @@ import { isGatewayConfig } from '../gateway-contract-validation';
 import { modelRequestSchema, type ModelUsage } from '../model-gateway.ports';
 import { gatewayPlatformBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { BudgetError, type BudgetAction, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from '../budget/budget.ports';
+import { validateBudgetSettings } from '../budget/budget-settings';
 import type { BudgetAuthorizationSource, BudgetEntitlementSource } from '../budget/budget-dependency-adapters';
 import type { GatewayActualUsagePricing } from '../budget/prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
@@ -70,8 +71,11 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
         || !Number.isSafeInteger(policyRow.revision) || policyRow.revision < 1 || !(policyRow.expiresAt instanceof Date)
         || !Number.isFinite(policyRow.expiresAt.getTime()) || policyRow.expiresAt <= clock()
         || !Array.isArray(policyRow.requiredPermissions) || policyRow.requiredPermissions.length === 0
-        || !('access' in context) || policyRow.requiredPermissions.some(permission => typeof permission !== 'string'
-          || !context.access.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
+        // The SaaS platform context carries its permission list at the top
+        // level (no `access` member); an absent or non-array list fails closed.
+        || !('permissions' in context) || !Array.isArray(context.permissions)
+        || policyRow.requiredPermissions.some(permission => typeof permission !== 'string'
+          || !context.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
       proof = { invocationId: row.id, registrationHash: row.registrationHash, configurationHash: row.configurationHash,
         association: binding.association, reservationId: resource.reservationId ?? null,
         policy: { revision: policyRow.revision, permissions: policyRow.requiredPermissions, expiresAt: policyRow.expiresAt.toISOString() } };
@@ -102,14 +106,15 @@ export class PlatformPolicyEntitlementSource implements BudgetEntitlementSource 
       scopeId: await this.#platformScopeId(), scopeKind: 'PLATFORM', sceneCode: this.sceneCode } },
       select: { configRevision: true, enabled: true, settingsJson: true } });
     if (!row || !Number.isSafeInteger(row.configRevision) || row.configRevision < 1) throw new BudgetError('UNAVAILABLE');
-    const settings = structuredClone(row.settingsJson) as { gates?: Record<string, { enabled?: unknown }>; budget?: { state?: unknown };
-      allowedScenes?: unknown; maxConcurrent?: unknown; maxCallsPerRun?: unknown };
+    // Same canonical validation as the persisted-settings writers, so this
+    // read-side admission can never be looser than the write-side schema.
+    const settings = structuredClone(row.settingsJson) as unknown as import('@rental-os/shared').AiUsageSettingsDraft;
+    validateBudgetSettings(settings);
     const admitted = row.enabled === true
       && Object.values(settings.gates ?? {}).every(gate => gate?.enabled === true)
       && settings.budget?.state === 'limited'
       && Array.isArray(settings.allowedScenes) && settings.allowedScenes.includes(this.sceneCode)
-      && Number.isSafeInteger(settings.maxConcurrent) && (settings.maxConcurrent as number) > 0
-      && Number.isSafeInteger(settings.maxCallsPerRun) && (settings.maxCallsPerRun as number) > 0;
+      && settings.maxConcurrent > 0 && settings.maxCallsPerRun > 0;
     return { available: admitted === true, revision: row.configRevision };
   }
 }
@@ -146,6 +151,9 @@ export class PlatformGatewayCallPricing implements BudgetQuotePort, GatewayActua
     const key: BudgetPolicyKey = { scopeKind: 'PLATFORM', scopeId: before.scope.id, sceneCode: row.sceneCode };
     const policy = await this.db.aiBudgetPolicy.findFirst({ where: key });
     if (!policy || policy.scopeKind !== key.scopeKind || policy.scopeId !== key.scopeId || policy.sceneCode !== key.sceneCode) throw new BudgetError('UNAVAILABLE');
+    // Only an explicitly stored priceVersion mismatch rejects here: the
+    // policy column is nullable and the trusted price version travels on the
+    // association, which the caller checks against this.priceVersion above.
     if (policy.unitKind !== 'calls' || policy.priceVersion && policy.priceVersion !== this.priceVersion) throw new BudgetError('UNAVAILABLE');
     const after = await this.current();
     if (before.scope.id !== after.scope.id || identity(before.context) !== identity(after.context)) throw new BudgetError('FORBIDDEN');
