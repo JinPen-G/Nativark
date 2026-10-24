@@ -8,10 +8,12 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { validateBudgetSettings, presentBudgetSettingsFields } from './budget-settings';
-import type { BudgetAuthorizationSource } from './budget-dependency-adapters';
-import { PersistedBudgetEvidenceAdapter } from './budget-dependency-adapters';
+import type { BudgetAuthorizationSource, BudgetEntitlementSource } from './budget-dependency-adapters';
+import { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter } from './budget-dependency-adapters';
 import { BudgetGatewayAdapter } from './budget-gateway-adapter';
 import { createPersistedBudgetSubsystem } from './budget.module';
+import { BudgetService } from './budget.service';
+import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { PersistentGatewayBudget } from './persistent-gateway-budget';
 import { PrismaGatewayAccountingFacts, type GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
@@ -28,13 +30,22 @@ export function createPersistedGatewayBudget(input: {
   scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
   authorization: BudgetAuthorizationSource;
+  /** Optional composition-owned entitlement source. The SaaS platform passes
+   * its own policy gate; absent keeps the tenant subscription adapter. */
+  entitlements?: BudgetEntitlementSource;
+  /** Feature code handed to the entitlement source above. */
+  entitlementFeatureCode?: string;
   pricing: BudgetQuotePort & GatewayActualUsagePricing;
   clock?: () => Date;
 }) {
   const bindings = new PrismaGatewayInvocationBindings(input.db, input.scopes, input.clock);
   const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, input.pricing, input.clock);
-  const service = createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
-    quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
+  const service = input.entitlements
+    ? new BudgetService(new PrismaBudgetRepository(input.db, input.clock),
+      new ServerBudgetAuthorityAdapter(input.authorization, input.entitlements, input.entitlementFeatureCode),
+      input.pricing, new PersistedBudgetEvidenceAdapter(facts), input.clock)
+    : createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
+      quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
   const selector = z.object({ scope: z.enum(['tenant', 'workspace']),
     sceneCode: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown(),

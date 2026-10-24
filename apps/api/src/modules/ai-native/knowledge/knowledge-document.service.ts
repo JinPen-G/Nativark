@@ -10,6 +10,11 @@ export class KnowledgeDocumentService {
     requiredPort(ports?.files, ['read']); requiredPort(ports?.parser, ['parse']);
   }
 
+  /** Supplied file service => the binding check is mandatory, not optional. */
+  private bindingCheckMandatory(): boolean {
+    return this.ports.attachmentBindingRequired === true;
+  }
+
   async read(context: AiExecutionContext, documentId: string): Promise<KnowledgeRecord> {
     return this.load(context, documentId, 'read_metadata');
   }
@@ -70,10 +75,11 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId, creation: input });
-    // A missing byte/file source must not disable lawful metadata creation.
-    // When an attachment authority is supplied, direct create still enforces
-    // the same binding as prepareCreate; parsing remains unavailable without it.
-    if (typeof this.ports.files?.assertBound === 'function') {
+    // An absent byte/file source must not disable lawful metadata creation,
+    // but a SUPPLIED file service without its binding check may not admit an
+    // unverifiable attachment reference: create then enforces the same
+    // binding as prepareCreate and fails closed while the check is missing.
+    if (this.bindingCheckMandatory() || typeof this.ports.files?.assertBound === 'function') {
       await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     }
     const hash = operationFingerprint(context, ['create', input]);
@@ -85,7 +91,7 @@ export class KnowledgeDocumentService {
     }
     const document = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId, owner: grant.actor, scope: grant.scope, aclRevision: 1, title: input.title, publication: 'draft' as const, parsing: 'pending' as const, indexing: 'not_indexed' as const, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}) };
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
-    if (typeof this.ports.files?.assertBound === 'function') {
+    if (this.bindingCheckMandatory() || typeof this.ports.files?.assertBound === 'function') {
       await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     }
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });

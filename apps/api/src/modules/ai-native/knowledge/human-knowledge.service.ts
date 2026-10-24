@@ -53,7 +53,8 @@ export class HumanKnowledgeService {
     this.repository = new PrismaKnowledgeRepository(ports.db, () => new Date(ports.clock.now()));
     if (ports.files !== undefined) requiredPort(ports.files, ['read']);
     this.documents = new KnowledgeDocumentService({ repository: this.repository, authorization: this.authorization,
-      clock: ports.clock, files: ports.files ?? { read: async () => unavailable() }, parser: new KnowledgeTextParser() });
+      clock: ports.clock, files: ports.files ?? { read: async () => unavailable() }, parser: new KnowledgeTextParser(),
+      attachmentBindingRequired: ports.files !== undefined });
     this.publication = new KnowledgePublicationService(this.documents);
   }
   private invoke(callback: (context: AiExecutionContext) => Promise<KnowledgeRecord>) {

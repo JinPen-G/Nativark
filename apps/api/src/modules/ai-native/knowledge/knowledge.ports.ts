@@ -115,4 +115,9 @@ export interface KnowledgeDocumentPorts {
   clock: KnowledgeClock;
   files: KnowledgeFilePort;
   parser: KnowledgeParserPort;
+  /** True when the composition actually wired a file service: attachment
+   * references must then be business-bound even if the check port is missing
+   * (fail closed). Absent keeps the metadata-only tolerance for hosts that
+   * legitimately run without a byte source. */
+  attachmentBindingRequired?: boolean;
 }

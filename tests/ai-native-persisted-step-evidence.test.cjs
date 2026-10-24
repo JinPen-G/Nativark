@@ -100,7 +100,7 @@ test('probe crash marker converges to unknown without inventing a Gateway result
     gatewayInvocationId: 'invocation', status: 'UNKNOWN', amount: 1n });
   const scope = h.control.context.scope;
   const configuration = textProbeConfiguration({ id: 'profile', scopeId: 'platform', scopeKind: 'PLATFORM',
-    serviceMode: 'platform_managed', configRevision: 1, credentialRef: 'vault:profile', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model' }, scope.tenantId);
+    serviceMode: 'platform_managed', configRevision: 1, credentialRef: 'vault:profile', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model' }, { kind: 'workspace', tenantId: scope.tenantId });
   const input = { id: step.inputRef, scopeId: step.scopeId, taskId: step.taskId, runId: step.runId,
     toolCode: step.toolCode, toolVersion: step.toolVersion, payload: command, fingerprint: step.requestFingerprint,
     expiresAt: new Date(h.control.now.getTime() + 10000) };
