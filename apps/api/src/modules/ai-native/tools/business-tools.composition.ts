@@ -30,6 +30,7 @@ import { composeAiSettingsBusinessConsumer, type AiSettingsBusinessDependencies 
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
 import { AiOrderExtensionPreviewService } from './order-extension-preview.service';
 import { AiOrderCandidatesService } from './order-candidates.service';
+import { z } from 'zod';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -89,13 +90,15 @@ export function composeAiAuthorizedBusinessTools(input: {
   const orderPreparation = (serverOrderId: string) => new AiOrderExplanationPreparationService(
     new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
     explanation(serverOrderId), nextSteps(serverOrderId));
+  const orderActions = composeAiBusinessOrderApplication(input.approvedOrder ? {
+    ...input.approvedOrder, guard: input.guard, credentials: input.credentials
+  } : undefined);
+  const orderActionsAvailable = orderActions.availability === 'available_for_persisted_approved_action';
   return Object.freeze({
     settingsActions: composeAiSettingsBusinessConsumer(input.approvedSettings ? {
       ...input.approvedSettings, guard: input.guard, credentials: input.credentials
     } : undefined),
-    orderActions: composeAiBusinessOrderApplication(input.approvedOrder ? {
-      ...input.approvedOrder, guard: input.guard, credentials: input.credentials
-    } : undefined),
+    orderActions,
     scenes: new AiBusinessScenePreparationService({
       orderAuthority: orderId => new AiOrderRouteContextAuthority(input.guard, input.credentials, orderId, input.clock),
       orderMaterial: orderPreparation, openingAuthority: diagnostics, opening: openingActions,
@@ -128,7 +131,60 @@ export function composeAiAuthorizedBusinessTools(input: {
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
       bookingIdentityOptions: (value: unknown) => reads.membershipCandidates.readBookingOptions(value),
-      reconciliationAvailability: () => quotePreparation.reconciliationAvailability(),
+      reconciliationAvailability: () => {
+        // Exact original-reference recovery is real when the Core port exists;
+        // a missing observed row stays unknown and never becomes a retry.
+        const available = typeof input.business.readQuoteForOriginalReference === 'function'
+          && typeof input.business.readQuoteForOriginalOperation === 'function';
+        return { status: available ? 'available_original_reference_only' as const : 'unavailable' as const,
+          nextAction: 'reconcile' as const, retryable: false as const,
+          ...(available ? { entry: 'quote.recoverOriginal(reference, expectedIdentityHash)',
+            semantics: 'exact_original_operation_key_only_missing_row_stays_unknown' as const }
+            : { missingDependency: 'business.readQuoteForOriginalReference/readQuoteForOriginalOperation' }) };
+      },
+      /** Stage-labeled handoff material for the mainline order flow. It only
+       * observes one exact original quote operation under the current guard;
+       * proposal/approval/order stages belong to the persisted AIN-07 flow. */
+      commitHandoff: async (value: unknown) => {
+        const parsed = z.object({ reference: z.string().min(1).max(512),
+          selectionRevision: z.string().regex(/^[a-f0-9]{64}$/u).optional() }).strict()
+          .safeParse(structuredClone(value));
+        if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+        if (typeof input.business.readQuoteForOriginalReference !== 'function') {
+          return { status: 'prepared_not_submitted' as const, stages: { quoteSaved: 'unknown_port_unavailable' as const },
+            orderApproval: 'not_granted' as const, execution: 'not_attempted' as const,
+            formalInterface: { existing: orderActionsAvailable ? 'orderActions.submit/reconcile' : 'unavailable_no_approved_order_dependencies',
+              missing: 'business.readQuoteForOriginalReference' } };
+        }
+        return routes.withRead('quote_context', {}, async context => {
+          const { requestId: _request, authorizedAt: _at, ...identity } = context;
+          const result = await quote.recoverOriginal(parsed.data.reference, requestFingerprint(identity));
+          const quoted = result.status === 'quoted' && result.quote;          return { status: 'prepared_not_submitted' as const,
+            stages: {
+              preparation: 'completed_before_quote_reobservable_via_businessPreparation' as const,
+              quoteSaved: result.quotePersistence === 'saved' && quoted ? 'saved' as const : result.quotePersistence ?? 'unknown' as const,
+              ...(quoted ? { quoteContent: { quoteId: result.quote!.id, quoteNo: result.quote!.quoteNo,
+                expiresAt: result.quote!.expiresAt, currency: result.quote!.currency ?? null,
+                payableAmount: result.quote!.payableAmount, receivableAmount: result.quote!.receivableAmount,
+                versions: { pricingPlanVersion: result.quote!.pricingPlanVersion,
+                  ...(result.quote!.priceVersion ? { priceVersion: result.quote!.priceVersion } : {}),
+                  ruleVersion: result.quote!.ruleVersion },
+                reservation: result.quote!.reservation } } : {}),
+              userConfirmedQuote: 'not_attested_by_this_lane_host_selection_evidence_required' as const,
+              proposalProduced: 'owned_by_persisted_approval_flow' as const,
+              humanApproval: 'owned_by_persisted_approval_flow' as const,
+              coreOrderCreated: 'not_queried_use_orderActions_or_order_read' as const,
+              resultUnknown: result.quotePersistence === 'unknown'
+                ? { state: 'unknown' as const, nextAction: 'reconcile' as const, retryable: false as const }
+                : 'not_applicable' as const
+            },
+            ...(parsed.data.selectionRevision ? { selectionRevision: parsed.data.selectionRevision } : {}),
+            orderApproval: 'not_granted' as const, inventoryReservation: quoted ? result.quote!.reservation : 'not_attempted' as const,
+            execution: 'not_attempted' as const,
+            formalInterface: { existing: orderActionsAvailable ? 'orderActions.submit/reconcile' : 'unavailable_no_approved_order_dependencies',
+              required: orderActionsAvailable ? [] : ['persisted approved-order dependencies (approvedOrder input)'] } };
+        });
+      },
       /** Explicit R1 entry; the host owns the human-selection evidence. Core
        * quote success is not order approval, payment, or stock reservation. */
       previewBusinessSelection: async (value: unknown) => {

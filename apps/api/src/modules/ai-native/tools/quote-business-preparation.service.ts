@@ -200,10 +200,12 @@ export class AiQuoteBusinessPreparationService {
       validity: { previous: a.expiresAt, current: b.expiresAt }, approvalReuse: 'forbidden_new_quote_requires_new_confirmation' as const };
   }
 
-  /** No formal order-creation handoff is owned by this lane. */
+  /** No formal order-creation handoff is owned by this lane. The stage-aware
+   * material is composed where the original-reference recovery port is
+   * actually visible; see composeAiAuthorizedBusinessTools.commitHandoff. */
   async commitHandoff() {
-    return { status: 'unavailable' as const, reason: 'formal_order_commit_input_port_not_exposed' as const,
-      required: ['original_request_reference', 'quote_id', 'selection_revision', 'source_versions'],
+    return { status: 'prepared_not_submitted' as const, reason: 'composed_stage_material_owned_by_business_tools_composition' as const,
+      required: ['original_quote_reference', 'selection_revision', 'source_versions'],
       sideEffects: 'not_attempted' as const, orderApproval: 'not_granted' as const };
   }
 
@@ -217,11 +219,12 @@ export class AiQuoteBusinessPreparationService {
       execution: 'not_attempted' as const });
   }
 
-  /** There is no original-operation key on Core.createQuote/getQuote. Never
-   * use a latest-quote lookup or retry a create to manufacture reconciliation. */
+  /** The stale "Core quote lookup missing" claim is gone: exact-key original
+   * reference recovery exists when the Core ports are provided. Availability
+   * itself is composed in business-tools where the ports are visible. */
   async reconciliationAvailability() {
-    return this.authority.withRead('quote_context', {}, async () => ({ status: 'unavailable' as const,
+    return this.authority.withRead('quote_context', {}, async () => ({ status: 'composed_availability' as const,
       nextAction: 'reconcile' as const, retryable: false as const,
-      missingDependency: 'Core quote lookup by original operation key + request fingerprint + owner/scope' as const }));
+      semantics: 'exact_original_operation_key_only_missing_row_stays_unknown' as const }));
   }
 }
