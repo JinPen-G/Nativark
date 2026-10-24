@@ -175,6 +175,7 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
       || typeof input.media.assertCurrent !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     const resolve = input.media.resolve.bind(input.media), assertCurrent = input.media.assertCurrent.bind(input.media);
     const currentMediaIdentity = async (context: Parameters<GatewayMediaAttachmentResolver['resolve']>[0]) => {
+      if (!('tenantId' in context && 'workspaceId' in context)) throw new ModelGatewayError('FORBIDDEN');
       const current = await scopes.resolveCurrent(), principal = gatewayBudgetPrincipal(current.context);
       if (principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId
         || principal.actorId !== context.actorId) throw new ModelGatewayError('FORBIDDEN');

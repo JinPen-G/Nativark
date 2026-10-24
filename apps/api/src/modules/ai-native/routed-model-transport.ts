@@ -6,7 +6,6 @@ import type { ProviderRouteDecision } from './provider-router.ports';
 import type { GatewayUsageRecorder, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
-import type { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 
 export interface GatewayConnection {
   profileFingerprint: string;
@@ -20,9 +19,14 @@ export interface GatewayConnectionResolver {
   /** Current authorization/config revision only; must not decrypt a key or authorize dispatch. */
   assertCurrent?(context: GatewayContext, profile: AiProviderProfileRecord): Promise<void>;
 }
+export interface GatewayProbeDispatchAuthority {
+  authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision,
+    mode?: 'invoke' | 'stream', signal?: AbortSignal): Promise<void>;
+}
 const connectionSchema = z.object({ profileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u), baseUrl: z.string().min(1).max(2048),
   credential: z.string().min(1).max(8192).regex(/^[\x21-\x7e]+$/u), maxOutputTokens: z.number().int().min(1).max(32768) }).strict();
 const contextSchema = z.object({ tenantId: z.string().min(1).max(128), workspaceId: z.string().min(1).max(128), actorId: z.string().min(1).max(128) }).strict();
+const routedContextSchema = z.union([contextSchema, z.object({ actorId: z.string().min(1).max(128) }).strict()]);
 
 /** Existing encrypted BYOK config adapter. Platform secrets require a distinct server resolver. */
 export class TenantModelConnectionResolver implements GatewayConnectionResolver {
@@ -54,7 +58,7 @@ export class TenantModelConnectionResolver implements GatewayConnectionResolver 
 export class RoutedModelTransport implements UnifiedGatewayTransport {
   private readonly adapters = new Map<string, ModelAdapter>();
   constructor(private readonly resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver }, adapters: readonly ModelAdapter[],
-    private readonly probe?: TextCapabilityProbeAuthority) {
+    private readonly probe?: GatewayProbeDispatchAuthority) {
     if (typeof resolvers?.platform?.resolve !== 'function' || typeof resolvers?.tenant?.resolve !== 'function' || !Array.isArray(adapters) || !adapters.length) throw new ModelGatewayError('CONFIG_INVALID');
     for (const adapter of adapters) {
       if (!adapter || typeof adapter.provider !== 'string' || !adapter.provider || this.adapters.has(adapter.provider)
@@ -64,7 +68,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   }
   private cancelled(signal: AbortSignal) { if (signal.aborted) throw new ModelGatewayError('CANCELLED'); }
   private async prepare(value: GatewayContext, requestValue: ModelProtocolRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean) {
-    const parsedContext = contextSchema.safeParse(value), parsedRequest = modelProtocolRequestSchema.safeParse(requestValue);
+    const parsedContext = routedContextSchema.safeParse(value), parsedRequest = modelProtocolRequestSchema.safeParse(requestValue);
     if (!parsedContext.success || !parsedRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
     const context = parsedContext.data, request = parsedRequest.data, route = structuredClone(routeValue), profile = route.profile;
     this.cancelled(signal);
@@ -75,7 +79,8 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       await this.probe.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke', signal);
     } else if (!route.preflight?.allowed) throw new ModelGatewayError('CONFIG_INVALID');
     if (profile.serviceMode === 'platform_managed' ? route.scope.kind !== 'PLATFORM'
-      : profile.serviceMode !== 'tenant_managed' || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
+      : profile.serviceMode !== 'tenant_managed' || !('tenantId' in context)
+        || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
     const adapter = this.adapters.get(profile.protocol);
     if (!adapter) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     const assertSchema = () => {

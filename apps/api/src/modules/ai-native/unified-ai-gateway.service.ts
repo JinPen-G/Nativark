@@ -97,6 +97,12 @@ export class UnifiedAiGatewayService {
       firstValidatedTextMs: firstText === null ? null : Math.floor(firstText) };
   }
 
+  /** Platform calls carry no tenant/workspace attribution; the audit port
+   * records null and the platform audit implementation owns its journal. */
+  private attribution(context: Readonly<GatewayContext>): { tenantId: string | null; workspaceId: string | null } {
+    return 'tenantId' in context && 'workspaceId' in context
+      ? { tenantId: context.tenantId, workspaceId: context.workspaceId } : { tenantId: null, workspaceId: null };
+  }
   private async assertMediaCurrent(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal: AbortSignal) {
     const references = request.messages.flatMap(message => typeof message.content === 'string' ? []
       : message.content.filter(part => part.kind !== 'text').map(part => ({ kind: part.kind,
@@ -230,7 +236,7 @@ export class UnifiedAiGatewayService {
         else reservationId = record.id;
         return record;
       })); reservationId = usage.id;
-      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context), event: 'ai.invoke.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
@@ -329,7 +335,7 @@ export class UnifiedAiGatewayService {
         else reservationId = record.id;
         return record;
       })); reservationId = usage.id;
-      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context), event: 'ai.stream.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));

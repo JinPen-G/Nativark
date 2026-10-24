@@ -57,7 +57,7 @@ for (const recoverAfterRotation of [false, true]) test(`real task budget authori
     binding: { id: 'admission-a', actorId: 'user-a', callId: 'call', requestHash: 'a'.repeat(64), profileId: 'profile',
       dispatchId: 'dispatch-a', scope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' } },
     request: { callId: 'call', model: configuration.model, maxOutputTokens: 32, intentHash: 'b'.repeat(64) }, expiresAt: invocation.expiresAt };
-  h.state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context,
+  h.state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context, scopeKind: 'WORKSPACE',
     status: 'admitted', revokedAt: null, completedAt: null, expiresAt: invocation.expiresAt });
   const reserved = await root.budget.reserve(accountingCall);
   assert.equal(h.state.aiBudgetReservation.length, 1);
@@ -225,7 +225,7 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
     binding: { ...call.binding, id: 'client-admission', actorId: identity.customerId, callId: invocation.callId,
       scope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: identity.tenantId, workspaceId: identity.workspaceId } },
     request: { ...call.request, callId: invocation.callId }, expiresAt };
-  state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context,
+  state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context, scopeKind: 'WORKSPACE',
     status: 'admitted', revokedAt: null, completedAt: null, expiresAt });
   const { PrismaClientTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-client-task-budget-authorization.source');
   const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
@@ -294,8 +294,8 @@ for (const unit of ['calls', 'tokens', 'money']) test(`customer persisted ${unit
 function harness() {
   const state = { revoked: false, writes: 0, fail: null, onRead: null, pricing: null, rows: {
     aiGatewayInvocation: { id: 'invocation', scopeId: 'scope', taskId: 'task', actorId: 'actor', callId: 'call', runId: 'run', stepId: 'step', actionId: 'action', sceneCode: 'scene', priceVersion: 'price', configuration: config, configurationHash: requestFingerprint(config), intentHash: call.request.intentHash, maxOutputTokens: 32 },
-    aiBudgetReservation: { id: 'reservation', scopeId: 'scope', scopeKind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace', actorId: 'actor', callId: 'call', requestId: 'call', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', sceneCode: 'scene', priceVersion: 'price', configRevision: 1, configurationHash: requestFingerprint(config), status: 'reserved', dispatchState: 'dispatched', reservedTokens: 32n, reservedCalls: null, reservedMoney: null, actualTokens: null, actualCalls: null, actualMoney: null, moneyCurrency: null, unknownReason: null, expiresAt: call.expiresAt, updatedAt: time },
-    aiInvocationAdmission: { id: 'admission', tenantId: 'tenant', workspaceId: 'workspace', actorId: 'actor', callId: 'call', requestHash: call.binding.requestHash, profileId: 'profile', dispatchId: 'dispatch' },
+    aiBudgetReservation: { id: 'reservation', scopeId: 'scope', scopeKind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace', actorId: 'actor', callId: 'call', requestId: 'call', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', sceneCode: 'scene', priceVersion: 'price', configRevision: 1, configurationHash: requestFingerprint(config), unitKind: 'tokens', status: 'reserved', dispatchState: 'dispatched', reservedTokens: 32n, reservedCalls: null, reservedMoney: null, actualTokens: null, actualCalls: null, actualMoney: null, moneyCurrency: null, unknownReason: null, expiresAt: call.expiresAt, updatedAt: time },
+    aiInvocationAdmission: { id: 'admission', scopeKind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace', actorId: 'actor', callId: 'call', requestHash: call.binding.requestHash, profileId: 'profile', dispatchId: 'dispatch' },
     aiGatewayAccountingReceipt: { id: 'receipt', invocationId: 'invocation', admissionId: 'admission', reservationId: 'reservation', taskId: 'task', scopeId: 'scope', scopeKind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace', dispatchToken: 'dispatch', requestHash: call.binding.requestHash, state: 'dispatched', usageHash: null, inputTokens: null, outputTokens: null }
   } };
   const matches = (row, where) => Object.entries(where).every(([k, v]) => row[k] === v);

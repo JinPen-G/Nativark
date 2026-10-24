@@ -1,5 +1,8 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { composeAuthorizedPlatformCapabilityProbe } from './platform-capability-probe.composition';
+import { PlatformCapabilityProbeRequestFactory, type PlatformCapabilityProbeRequestDependencies } from './platform-capability-probe-request.factory';
+
+export const PLATFORM_CAPABILITY_PROBE_REQUESTS = Symbol('PLATFORM_CAPABILITY_PROBE_REQUESTS');
 
 export const PLATFORM_CAPABILITY_PROBE = Symbol('PLATFORM_CAPABILITY_PROBE');
 export type PlatformCapabilityProbeComposition = ReturnType<typeof composeAuthorizedPlatformCapabilityProbe>;
@@ -14,7 +17,9 @@ export class PlatformCapabilityProbeModule {
     if (!dependencies) return { module: PlatformCapabilityProbeModule, providers: [], exports: [] };
     const composition = composeAuthorizedPlatformCapabilityProbe(dependencies);
     return { module: PlatformCapabilityProbeModule,
-      providers: [{ provide: PLATFORM_CAPABILITY_PROBE, useValue: composition }],
-      exports: [PLATFORM_CAPABILITY_PROBE] };
+      providers: [{ provide: PLATFORM_CAPABILITY_PROBE, useValue: composition },
+        { provide: PlatformCapabilityProbeRequestFactory,
+          useValue: new PlatformCapabilityProbeRequestFactory(dependencies as PlatformCapabilityProbeRequestDependencies) }],
+      exports: [PLATFORM_CAPABILITY_PROBE, PlatformCapabilityProbeRequestFactory] };
   }
 }

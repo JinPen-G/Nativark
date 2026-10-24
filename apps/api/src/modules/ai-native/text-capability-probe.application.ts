@@ -302,6 +302,11 @@ export class TextCapabilityProbeApplication {
     const started = await this.receipts.begin(descriptor);
     if (!started.created) return this.collect(context, command);
     await authority.assertCurrent(context, resolution);
+    // Platform principals require a host-provided platform audit: the
+    // workspace OperationLog journal cannot carry null attribution and would
+    // only reject after admission+reserve. Fail closed before any budget work.
+    const platformAuditRequired = isPlatformProbeContext(context) && this.input.audit === undefined;
+    if (platformAuditRequired) throw new ModelGatewayError('CONFIG_INVALID');
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
     // The transport consumes authorizeDispatch/media only; the injected

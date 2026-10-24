@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiUsageQuantityDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
-import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from './gateway-budget-principal';
 import type { GatewayAccountingCall } from '../gateway-accounting.ports';
 import { dispatchBindingSchema } from '../invocation-dispatch.service';
 import { isGatewayConfig } from '../gateway-contract-validation';
@@ -17,7 +17,9 @@ import { quantityAtoms, sameUnit } from './budget-quantity';
 type Db = ConstructorParameters<typeof PrismaBudgetRepository>[0] & Pick<PrismaClient, 'aiGatewayAccountingReceipt' | 'aiGatewayInvocation' | 'aiInvocationAdmission' | 'aiTask' | 'aiRun'>;
 type Reader = Omit<Db, '$transaction'>;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-const callSchema = z.object({ context: z.object({ tenantId: id, workspaceId: id, actorId: id }).strict(), binding: dispatchBindingSchema,
+const workspaceContextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
+const platformContextSchema = z.object({ actorId: id }).strict();
+const callSchema = z.object({ context: z.union([workspaceContextSchema, platformContextSchema]), binding: dispatchBindingSchema,
   request: z.object({ callId: id.max(128), model: z.string().min(1).max(256), maxOutputTokens: z.number().int().min(1).max(32768), intentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), expiresAt: z.date() }).strict();
 const usageSchema = modelUsageSchema;
 export interface GatewayActualUsagePricing {
@@ -34,8 +36,11 @@ export function checkedAccountingCall(value: GatewayAccountingCall): GatewayAcco
   const parsed = callSchema.safeParse(structuredClone(value));
   if (!parsed.success) throw new BudgetError('INVALID');
   const call = parsed.data, binding = call.binding;
-  if (binding.scope.kind !== 'WORKSPACE' || call.context.actorId !== binding.actorId || call.context.tenantId !== binding.scope.tenantId
-    || call.context.workspaceId !== binding.scope.workspaceId || call.request.callId !== binding.callId || !binding.profileId) throw new BudgetError('FORBIDDEN');
+  if (call.request.callId !== binding.callId || !binding.profileId || call.context.actorId !== binding.actorId) throw new BudgetError('FORBIDDEN');
+  if ('tenantId' in call.context) {
+    if (binding.scope.kind !== 'WORKSPACE'
+      || call.context.tenantId !== binding.scope.tenantId || call.context.workspaceId !== binding.scope.workspaceId) throw new BudgetError('FORBIDDEN');
+  } else if ((binding.scope as { kind?: string }).kind !== 'PLATFORM') throw new BudgetError('FORBIDDEN');
   return call;
 }
 
@@ -48,14 +53,21 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   }
   private async current(reservationId: string) {
     const resolved = structuredClone(await this.scopes.resolveCurrent());
-    const { actorKind: _, ...context } = gatewayBudgetPrincipal(resolved.context);
+    const principal = resolved.scope.kind === 'PLATFORM'
+      ? gatewayPlatformBudgetPrincipal(resolved.context) : gatewayBudgetPrincipal(resolved.context);
+    const { actorKind: _, ...context } = principal;
     return { context, binding: structuredClone(await this.bindings.resolveForReservation(structuredClone(context), reservationId)) };
   }
   private async admission(db: Reader, call: GatewayAccountingCall, active: boolean) {
     const b = call.binding;
-    const row = await db.aiInvocationAdmission.findFirst({ where: { id: b.id, actorId: b.actorId, tenantId: call.context.tenantId, workspaceId: call.context.workspaceId,
+    const attribution = 'tenantId' in call.context
+      ? { scopeKind: 'WORKSPACE' as const, tenantId: call.context.tenantId, workspaceId: call.context.workspaceId }
+      : { scopeKind: 'PLATFORM' as const, tenantId: null, workspaceId: null };
+    const row = await db.aiInvocationAdmission.findFirst({ where: { id: b.id, actorId: b.actorId, ...attribution,
       callId: b.callId, requestHash: b.requestHash, profileId: b.profileId, dispatchId: b.dispatchId } });
-    if (!row || (active && (row.status !== 'admitted' || row.revokedAt || row.completedAt || row.expiresAt <= this.clock()))) throw new BudgetError('PENDING_RECONCILIATION');
+    if (!row || row.scopeKind !== attribution.scopeKind || row.tenantId !== attribution.tenantId
+      || row.workspaceId !== attribution.workspaceId
+      || (active && (row.status !== 'admitted' || row.revokedAt || row.completedAt || row.expiresAt <= this.clock()))) throw new BudgetError('PENDING_RECONCILIATION');
     return row;
   }
   async assertClaim(value: GatewayAccountingCall) {
@@ -72,11 +84,16 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       db.aiBudgetReservation.findUnique({ where: { id: reservationId } }),
       db.aiInvocationAdmission.findUnique({ where: { id: receipt.admissionId } })
     ]);
-    if (!invocation || !reservation || !admission || !isGatewayConfig(invocation.configuration)
-      || !['reserved', 'dispatched', 'cancelled'].includes(receipt.state) || receipt.scopeKind !== 'WORKSPACE'
+    if (!invocation || !reservation || !admission) throw new BudgetError('PENDING_RECONCILIATION');
+    const platform = reservation.scopeKind === 'PLATFORM';
+    const attribution = platform ? { tenantId: null, workspaceId: null } : { tenantId: admission.tenantId, workspaceId: admission.workspaceId };
+    if (!isGatewayConfig(invocation.configuration) || admission.scopeKind !== reservation.scopeKind
+      || !['PLATFORM', 'WORKSPACE'].includes(reservation.scopeKind)
+      || admission.tenantId !== attribution.tenantId || admission.workspaceId !== attribution.workspaceId
+      || !['reserved', 'dispatched', 'cancelled'].includes(receipt.state) || receipt.scopeKind !== (platform ? 'PLATFORM' : 'WORKSPACE')
       || receipt.scopeId !== invocation.scopeId || receipt.scopeId !== reservation.scopeId || receipt.scopeKind !== reservation.scopeKind
       || receipt.taskId !== invocation.taskId || receipt.tenantId !== reservation.tenantId || receipt.workspaceId !== reservation.workspaceId
-      || receipt.tenantId !== admission.tenantId || receipt.workspaceId !== admission.workspaceId
+      || receipt.tenantId !== attribution.tenantId || receipt.workspaceId !== attribution.workspaceId
       || receipt.dispatchToken !== admission.dispatchId || receipt.requestHash !== admission.requestHash
       || admission.profileId !== invocation.configuration.configId || admission.actorId !== invocation.actorId || admission.actorId !== reservation.actorId
       || admission.callId !== invocation.callId || invocation.callId !== reservation.callId || invocation.callId !== reservation.requestId
@@ -88,8 +105,10 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   }
   private matchCall(rows: Awaited<ReturnType<PrismaGatewayAccountingFacts['rows']>>, call: GatewayAccountingCall) {
     const { receipt, invocation, admission } = rows;
+    const expectTenant = 'tenantId' in call.context ? call.context.tenantId : null;
+    const expectWorkspace = 'tenantId' in call.context ? call.context.workspaceId : null;
     if (receipt.admissionId !== call.binding.id || receipt.dispatchToken !== call.binding.dispatchId || receipt.requestHash !== call.binding.requestHash
-      || receipt.scopeId !== call.binding.scope.id || receipt.tenantId !== call.context.tenantId || receipt.workspaceId !== call.context.workspaceId
+      || receipt.scopeId !== call.binding.scope.id || receipt.tenantId !== expectTenant || receipt.workspaceId !== expectWorkspace
       || admission.actorId !== call.context.actorId || admission.profileId !== call.binding.profileId || invocation.callId !== call.request.callId
       || invocation.intentHash !== call.request.intentHash || invocation.maxOutputTokens !== call.request.maxOutputTokens
       || !isGatewayConfig(invocation.configuration) || invocation.configuration.model !== call.request.model) throw new BudgetError('FORBIDDEN');
@@ -102,8 +121,10 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: call.binding.scope.id, callId: call.request.callId } } });
       if (!invocation || invocation.intentHash !== call.request.intentHash) throw new BudgetError('FORBIDDEN');
       const existing = await tx.aiGatewayAccountingReceipt.findUnique({ where: { reservationId } });
-      if (!existing) await tx.aiGatewayAccountingReceipt.create({ data: { scopeId: invocation.scopeId, scopeKind: 'WORKSPACE', taskId: invocation.taskId,
-        tenantId: call.context.tenantId, workspaceId: call.context.workspaceId, invocationId: invocation.id, reservationId,
+      if (!existing) await tx.aiGatewayAccountingReceipt.create({ data: { scopeId: invocation.scopeId,
+        scopeKind: 'tenantId' in call.context ? 'WORKSPACE' as const : 'PLATFORM' as const, taskId: invocation.taskId,
+        tenantId: 'tenantId' in call.context ? call.context.tenantId : undefined,
+        workspaceId: 'tenantId' in call.context ? call.context.workspaceId : undefined, invocationId: invocation.id, reservationId,
         admissionId: call.binding.id, dispatchToken: call.binding.dispatchId, requestHash: call.binding.requestHash, state: 'reserved' } });
       const rows = await this.rows(tx, reservationId); this.matchCall(rows, call);
       if (rows.receipt.state !== 'reserved') throw new BudgetError('PENDING_RECONCILIATION');
@@ -112,14 +133,26 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   async dispatch(value: GatewayAccountingCall, reservationId: string) {
     const call = checkedAccountingCall(value);
     await this.assertClaim(call);
-    const principal = gatewayBudgetPrincipal((await this.scopes.resolveCurrent()).context);
-    if (principal.actorId !== call.context.actorId || principal.tenantId !== call.context.tenantId
-      || principal.workspaceId !== call.context.workspaceId) throw new BudgetError('FORBIDDEN');
+    const resolved = (await this.scopes.resolveCurrent()).context;
+    // No synthetic principal: the platform arm resolves the SaaS principal and
+    // derives ownerKind directly, so no caller can ever read fake attribution.
+    let ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN';
+    if ('tenantId' in call.context) {
+      const principal = gatewayBudgetPrincipal(resolved);
+      if (principal.actorId !== call.context.actorId || principal.tenantId !== call.context.tenantId
+        || principal.workspaceId !== call.context.workspaceId) throw new BudgetError('FORBIDDEN');
+      ownerKind = principal.actorKind;
+    } else {
+      const platformPrincipal = gatewayPlatformBudgetPrincipal(resolved);
+      if (platformPrincipal.actorId !== call.context.actorId) throw new BudgetError('FORBIDDEN');
+      ownerKind = 'SAAS_ADMIN';
+    }
     await this.db.$transaction(async tx => {
       const rows = await this.rows(tx, reservationId); this.matchCall(rows, call);
-      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind: principal.actorKind, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
+      const effectiveOwnerKind = rows.reservation.scopeKind === 'PLATFORM' ? 'SAAS_ADMIN' : ownerKind;
+      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind: effectiveOwnerKind, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
       const run = await tx.aiRun.findFirst({ where: { id: rows.invocation.runId, taskId: rows.invocation.taskId, scopeId: rows.invocation.scopeId,
-        status: 'RUNNING', actorId: call.context.actorId, actorKind: principal.actorKind, leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
+        status: 'RUNNING', actorId: call.context.actorId, actorKind: effectiveOwnerKind, leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
       if (!task || !run || rows.invocation.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
       await this.admission(tx, call, true);
       if (rows.reservation.status !== 'reserved' || rows.reservation.dispatchState !== 'dispatched') throw new BudgetError('PENDING_RECONCILIATION');

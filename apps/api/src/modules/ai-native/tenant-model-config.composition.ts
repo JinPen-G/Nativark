@@ -31,7 +31,7 @@ export function createScopeBoundTenantModelConnection(configuration: TenantModel
   scopes: Pick<AiScopeRepository, 'resolveRoutingScopes'>): GatewayConnectionResolver {
   if (typeof scopes?.resolveRoutingScopes !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const resolver = new TenantModelConnectionResolver(configuration);
-  const assertScope = async (value: import('./model-gateway.ports').GatewayContext, selected: import('./provider-profile.ports').AiProviderProfileRecord) => {
+  const assertScope = async (value: import('./model-gateway.ports').WorkspaceGatewayContext, selected: import('./provider-profile.ports').AiProviderProfileRecord) => {
     const context = structuredClone(value), profile = structuredClone(selected);
     const resolved = structuredClone(await scopes.resolveRoutingScopes('tenant_managed'));
     let principal: ReturnType<typeof gatewayBudgetPrincipal>;
@@ -42,13 +42,17 @@ export function createScopeBoundTenantModelConnection(configuration: TenantModel
     const { authorizedAt: _, requestId: __, ...identity } = resolved.context;
     return requestFingerprint({ identity, owner: resolved.configurationScope });
   };
+  const asWorkspace = (value: unknown) => {
+    if (!value || typeof value !== 'object' || !('tenantId' in value) || !('workspaceId' in value)) throw new ModelGatewayError('FORBIDDEN');
+    return structuredClone(value as import('./model-gateway.ports').WorkspaceGatewayContext);
+  };
   return { async assertCurrent(value, selected) {
-    const context = structuredClone(value), profile = structuredClone(selected);
+    const context = asWorkspace(value), profile = structuredClone(selected);
     const before = await assertScope(context, profile);
     await resolver.assertCurrent(context, profile);
     if (await assertScope(context, profile) !== before) throw new ModelGatewayError('FORBIDDEN');
   }, async resolve(value, selected) {
-    const context = structuredClone(value), profile = structuredClone(selected);
+    const context = asWorkspace(value), profile = structuredClone(selected);
     if (!profile?.enabled || profile.disabledAt) throw new ModelGatewayError('CONFIG_INVALID');
     const current = () => assertScope(context, profile);
     const before = await current(), connection = await resolver.resolve(context, profile);

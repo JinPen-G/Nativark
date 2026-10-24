@@ -62,9 +62,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   }
   private async original(db: Reader, row: TextProbeReceipt, observation: TextProbeObservation, terminal: boolean) {
     const d = row.descriptor, o = observation;
-    // Platform receipts assert platform-scoped accounting rows only. Until the
-    // platform admission/accounting storage lands, this lookup legitimately
-    // fails closed instead of borrowing a tenant attribution.
+    // Platform receipts require platform attribution on every original row;
+    // nullable tenant columns alone cannot prove the row belongs to a platform call.
     const expectTenantId = isPlatformProbeContext(d.context) ? null : d.context.tenantId;
     const expectWorkspaceId = isPlatformProbeContext(d.context) ? null : d.context.workspaceId;
     const expectScopeKind = isPlatformProbeContext(d.context) ? 'PLATFORM' : 'WORKSPACE';
@@ -75,7 +74,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
     ]);
     if (!admission || !accounting || !reservation) return null;
     const invocation = await db.aiGatewayInvocation.findUnique({ where: { id: accounting.invocationId } });
-    if (!invocation || admission.tenantId !== expectTenantId || admission.workspaceId !== expectWorkspaceId
+    if (!invocation || admission.scopeKind !== expectScopeKind
+      || admission.tenantId !== expectTenantId || admission.workspaceId !== expectWorkspaceId
       || admission.actorId !== d.context.actorId || admission.callId !== d.callId || admission.profileId !== d.profileId
       || admission.requestHash !== o.requestHash || admission.dispatchId !== o.dispatchId || admission.revokedAt
       || accounting.admissionId !== admission.id || accounting.scopeId !== d.scopeId || accounting.scopeKind !== expectScopeKind
@@ -122,7 +122,10 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
     // never upgrade the original text-echo-1 receipt or another invocation.
     if (!row || (textProbeMode(row.descriptor.command) === 'stream' ? input.delivery?.mode !== 'stream' : input.delivery?.mode === 'stream')
       || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
-      || requestFingerprint(call.context) !== requestFingerprint(row.descriptor.context)
+      || (isPlatformProbeContext(row.descriptor.context)
+        ? call.binding.scope.kind !== 'PLATFORM' || 'tenantId' in call.context || 'workspaceId' in call.context
+          || call.context.actorId !== row.descriptor.context.actorId
+        : requestFingerprint(call.context) !== requestFingerprint(row.descriptor.context))
       || call.request.callId !== row.descriptor.callId || call.request.intentHash !== row.descriptor.intentHash
       || call.request.model !== row.descriptor.configuration.model || call.request.maxOutputTokens !== 32
       || capabilityProfileFingerprint(input.route.profile) !== row.descriptor.profileFingerprint

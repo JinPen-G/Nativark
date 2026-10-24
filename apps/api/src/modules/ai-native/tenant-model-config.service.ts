@@ -6,7 +6,7 @@ import { AI_USAGE_DRAFT_SCHEMAS, AI_USAGE_DRAFT_VERSION,
   type AiTenantModelSettingsInputDraft, type AiTenantModelSettingsSummaryDraft } from '@rental-os/shared';
 import { SecretBox } from "../../common/secret-box";
 import { isPrivateOrLocalHost, parseOutboundUrl } from "../../common/outbound-url";
-import { ModelGatewayError, type GatewayContext, type GatewayProfile } from "./model-gateway.ports";
+import { ModelGatewayError, type WorkspaceGatewayContext, type GatewayProfile } from "./model-gateway.ports";
 import { tenantModelMode, tenantModelServiceEnabled, AiModelConfigurationResultUnknownError,
   AiModelConfigurationRevisionConflictError } from "./model-config-compatibility";
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -39,15 +39,15 @@ addFormats(settingsAjv);
 const validPublicSettings = settingsAjv.compile<AiTenantModelSettingsInputDraft>(AI_USAGE_DRAFT_SCHEMAS.AiTenantModelSettingsInputDraft);
 export interface TenantModelConfigPorts {
   /** Must validate fresh server identity, tenant membership, space access and action permission. */
-  authorize(context: GatewayContext, action: "read" | "manage" | "invoke"): Promise<void>;
+  authorize(context: WorkspaceGatewayContext, action: "read" | "manage" | "invoke"): Promise<void>;
   repository: {
     read(tenantId: string, legacy?: LegacyModelConfigurationBasis): Promise<TenantModelRecord | null>;
     readLegacyState?(tenantId: string): Promise<{ configured: boolean; source: LegacyModelConfigurationSource | null }>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
-    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext,
+    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: WorkspaceGatewayContext,
       operation?: ModelConfigurationOperationWrite, legacy?: LegacyModelConfigurationBasis): Promise<boolean>;
-    readOperation?(context: GatewayContext, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
-    setAllowedCapabilities?(context: GatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
+    readOperation?(context: WorkspaceGatewayContext, operationKey: string, commandHash?: string): Promise<AiModelConfigurationOperationDraft>;
+    setAllowedCapabilities?(context: WorkspaceGatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
   };
 }
 
@@ -77,7 +77,7 @@ export class TenantModelConfigService {
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  private async authorize(context: GatewayContext, action: "read" | "manage" | "invoke") {
+  private async authorize(context: WorkspaceGatewayContext, action: "read" | "manage" | "invoke") {
     if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== "string" || !/^[\w.:-]{1,128}$/u.test(v))) {
       throw new ModelGatewayError("INVALID_REQUEST");
     }
@@ -121,7 +121,7 @@ export class TenantModelConfigService {
       mode: "tenant_managed" as const, revision: record.revision, keyConfigured: Boolean(record.credentialsEncrypted) };
   }
 
-  async get(context: GatewayContext) {
+  async get(context: WorkspaceGatewayContext) {
     context = await this.authorize(context, "read");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'read');
@@ -130,7 +130,7 @@ export class TenantModelConfigService {
     return this.summary(record);
   }
 
-  async save(context: GatewayContext, value: unknown) {
+  async save(context: WorkspaceGatewayContext, value: unknown) {
     const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
     const parsed = settingsSchema.safeParse(request);
@@ -181,7 +181,7 @@ export class TenantModelConfigService {
 
   /** Existing C07 management projection; identity comes from the actual request
    * authority. A configuration read does not attest capability or connection. */
-  async readSettings(context: GatewayContext): Promise<AiTenantModelSettingsSummaryDraft> {
+  async readSettings(context: WorkspaceGatewayContext): Promise<AiTenantModelSettingsSummaryDraft> {
     context = await this.authorize(context, 'read');
     const before = await this.readRecord(context.tenantId);
     await this.authorize(context, 'read');
@@ -193,7 +193,7 @@ export class TenantModelConfigService {
 
   /** Mode + independent service gate + retained/replaced/cleared credential
    * commit once with the existing Profile CAS. Never two sequential saves. */
-  async saveSettings(context: GatewayContext, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
+  async saveSettings(context: WorkspaceGatewayContext, value: unknown): Promise<AiTenantModelSettingsSummaryDraft> {
     const request = this.snapshot(value);
     if (!validPublicSettings(request)) throw new ModelGatewayError('INVALID_REQUEST');
     const input = request;
@@ -246,7 +246,7 @@ export class TenantModelConfigService {
     } catch { throw new AiModelConfigurationResultUnknownError(); }
   }
 
-  async readSettingsOperation(context: GatewayContext, key: unknown): Promise<AiModelConfigurationOperationDraft> {
+  async readSettingsOperation(context: WorkspaceGatewayContext, key: unknown): Promise<AiModelConfigurationOperationDraft> {
     if (!modelConfigurationOperationKey.safeParse(key).success) throw new ModelGatewayError('INVALID_REQUEST');
     context = await this.authorize(context, 'read');
     if (!this.ports.repository.readOperation) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
@@ -257,7 +257,7 @@ export class TenantModelConfigService {
 
   /** Review only: preserve the old object, expose no key/mask/log/prompt, and
    * never turn a historical connection success into current capability proof. */
-  async readLegacySettings(context: GatewayContext): Promise<AiLegacyModelConfigurationDraft> {
+  async readLegacySettings(context: WorkspaceGatewayContext): Promise<AiLegacyModelConfigurationDraft> {
     context = await this.authorize(context, 'read');
     if (!this.ports.repository.readLegacyState) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
     const before = structuredClone(await this.ports.repository.readLegacyState(context.tenantId));
@@ -275,7 +275,7 @@ export class TenantModelConfigService {
       credential: 'replacement_required', conversion: 'explicit_disabled_replacement_only' };
   }
 
-  async profile(context: GatewayContext): Promise<GatewayProfile> {
+  async profile(context: WorkspaceGatewayContext): Promise<GatewayProfile> {
     context = await this.authorize(context, "invoke");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'invoke');
@@ -287,7 +287,7 @@ export class TenantModelConfigService {
       maxConcurrent: record.settings.maxConcurrent, maxOutputTokens: record.settings.maxOutputTokens };
   }
 
-  async credential(reference: string, context: GatewayContext) {
+  async credential(reference: string, context: WorkspaceGatewayContext) {
     context = await this.authorize(context, "invoke");
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, 'invoke');
@@ -295,7 +295,7 @@ export class TenantModelConfigService {
     return this.decrypt(record);
   }
 
-  private async select(context: GatewayContext, action: 'read' | 'invoke') {
+  private async select(context: WorkspaceGatewayContext, action: 'read' | 'invoke') {
     context = await this.authorize(context, action);
     const record = await this.readRecord(context.tenantId);
     await this.authorize(context, action);
@@ -303,12 +303,12 @@ export class TenantModelConfigService {
     return { mode: tenantModelMode(record), revision: record?.revision ?? 0 };
   }
 
-  async selection(context: GatewayContext) { return this.select(context, 'read'); }
-  async selectionForInvocation(context: GatewayContext) { return this.select(context, 'invoke'); }
+  async selection(context: WorkspaceGatewayContext) { return this.select(context, 'read'); }
+  async selectionForInvocation(context: WorkspaceGatewayContext) { return this.select(context, 'invoke'); }
 
   /** Server application policy entry, not a model capability claim or public DTO.
    * Only the atomic config/Profile adapter can implement this operation. */
-  async setAllowedCapabilities(context: GatewayContext, value: unknown) {
+  async setAllowedCapabilities(context: WorkspaceGatewayContext, value: unknown) {
     const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294),
       allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(items => new Set(items).size === items.length)
     }).strict().safeParse(this.snapshot(value));
@@ -319,7 +319,7 @@ export class TenantModelConfigService {
   }
 
   /** Mode selection is not a credential deletion operation. */
-  async changeMode(context: GatewayContext, value: unknown) {
+  async changeMode(context: WorkspaceGatewayContext, value: unknown) {
     const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
     const input = z.object({ mode: z.enum(["platform_managed", "tenant_managed"]), expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 2) }).strict().safeParse(request);

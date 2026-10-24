@@ -6,7 +6,7 @@ import { GatewayDeadline } from './gateway-deadline';
 import { isGatewayConfig, isGatewayEvent, isGatewayIntent, isGatewayResult, isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { gatewayTextIntentBindingSchema, type GatewayTextIntentBinding } from './gateway-intent';
 import { type GatewayRoutingResolution } from './gateway-routing.service';
-import { ModelGatewayError, type GatewayContext, type ModelAdapter } from './model-gateway.ports';
+import { ModelGatewayError, isPlatformGatewayContext, type GatewayContext, type ModelAdapter } from './model-gateway.ports';
 import { RoutedModelTransport, type GatewayConnectionResolver } from './routed-model-transport';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
@@ -61,15 +61,21 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
 
   private call(value: AiExecutionContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
     if (!isGatewayIntent(intent)) throw new ModelGatewayError('INVALID_REQUEST');
-    if (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace'
+    const platformCall = isAiStepExecutionContext(value) && value.scope.kind === 'platform'
+      && value.audience === 'operator' && value.actor.kind === 'saas_admin';
+    if (!platformCall && (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace'
       || (value.audience === 'client' ? value.actor.kind !== 'customer' : value.actor.kind !== 'user')
-      || !['operator', 'staff', 'client'].includes(value.audience)) throw new ModelGatewayError('FORBIDDEN');
+      || !['operator', 'staff', 'client'].includes(value.audience))) throw new ModelGatewayError('FORBIDDEN');
     const context = structuredClone(value), binding = this.scenes.get(intent?.sceneCode);
     if (!binding) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const expected = identity(context);
     const actorId = value.actor.kind === 'customer' ? value.actor.customerId
       : 'userId' in value.actor ? value.actor.userId : (() => { throw new ModelGatewayError('FORBIDDEN'); })();
-    const narrow: GatewayContext = { tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId, actorId };
+    // Explicit SaaS platform principal: actorId only, no tenant attribution.
+    const workspaceScope = value.scope as { tenantId: string; workspaceId: string };
+    const narrow: GatewayContext = platformCall
+      ? { actorId }
+      : { tenantId: workspaceScope.tenantId, workspaceId: workspaceScope.workspaceId, actorId };
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let resolution: GatewayRoutingResolution | undefined, actual: AiGatewayConfigReferenceDraft | undefined, dispatched = false;
     const ports = this.runtime.ports;
@@ -87,18 +93,26 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
         const route = structuredClone(await ports.routing.resolve(caller, required));
         await verify(route);
         const profile = route.route.profile, owner = route.route.scope;
-        if (profile.serviceMode !== route.selection.mode || profile.scopeId !== owner.id || profile.scopeKind !== owner.kind
-          || route.consumerScope.kind !== 'WORKSPACE' || route.consumerScope.tenantId !== narrow.tenantId
-          || route.consumerScope.workspaceId !== narrow.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
+        if (profile.serviceMode !== route.selection.mode || profile.scopeId !== owner.id || profile.scopeKind !== owner.kind) throw new ModelGatewayError('CONFIG_INVALID');
         const parsed = referenceSchema.safeParse({ configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
           protocol: profile.protocol, provider: profile.provider, model: profile.model });
         if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
-        if (route.selection.mode === 'platform_managed') {
-          if (owner.kind !== 'PLATFORM') throw new ModelGatewayError('CONFIG_INVALID');
-          actual = { ...parsed.data, tenantId: narrow.tenantId, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
+        if (isPlatformGatewayContext(narrow)) {
+          if (route.selection.mode !== 'platform_managed' || owner.kind !== 'PLATFORM'
+            || route.consumerScope.kind !== 'PLATFORM') throw new ModelGatewayError('CONFIG_INVALID');
+          actual = { ...parsed.data, consumerScope: { kind: 'platform' }, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
         } else {
-          if (owner.kind !== 'TENANT' || owner.tenantId !== narrow.tenantId) throw new ModelGatewayError('CONFIG_INVALID');
-          actual = { ...parsed.data, tenantId: narrow.tenantId, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: narrow.tenantId } };
+          const workspaceNarrow: { tenantId: string; workspaceId: string; actorId: string } = narrow;
+          if (route.selection.mode === 'platform_managed') {
+            if (owner.kind !== 'PLATFORM' || route.consumerScope.kind !== 'WORKSPACE'
+              || route.consumerScope.tenantId !== workspaceNarrow.tenantId || route.consumerScope.workspaceId !== workspaceNarrow.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
+            actual = { ...parsed.data, tenantId: workspaceNarrow.tenantId, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
+          } else {
+            if (owner.kind !== 'TENANT' || owner.tenantId !== workspaceNarrow.tenantId
+              || route.consumerScope.kind !== 'WORKSPACE' || route.consumerScope.tenantId !== workspaceNarrow.tenantId
+              || route.consumerScope.workspaceId !== workspaceNarrow.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
+            actual = { ...parsed.data, tenantId: workspaceNarrow.tenantId, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: workspaceNarrow.tenantId } };
+          }
         }
         if (!isGatewayConfig(actual)) { actual = undefined; throw new ModelGatewayError('CONFIG_INVALID'); }
         resolution = route;

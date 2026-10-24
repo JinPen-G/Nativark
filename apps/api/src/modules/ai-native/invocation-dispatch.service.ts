@@ -37,7 +37,8 @@ export class InvocationDispatchService {
     if (row.id !== binding.id || row.actorId !== binding.actorId || row.callId !== binding.callId
       || row.requestHash !== binding.requestHash || row.profileId !== binding.profileId || row.dispatchId !== binding.dispatchId
       || row.scope.id !== binding.scope.id || row.scope.kind !== binding.scope.kind
-      || row.scope.tenantId !== binding.scope.tenantId || row.scope.workspaceId !== binding.scope.workspaceId || row.status !== status
+      || ((row.scope as { tenantId?: string | null }).tenantId ?? null) !== ((binding.scope as { tenantId?: string | null }).tenantId ?? null)
+      || ((row.scope as { workspaceId?: string | null }).workspaceId ?? null) !== ((binding.scope as { workspaceId?: string | null }).workspaceId ?? null) || row.status !== status
       || (status === 'admitted' && (row.revokedAt !== null || row.completedAt !== null))) throw new ModelGatewayError('ACCOUNTING_PENDING');
     return structuredClone(row);
   }

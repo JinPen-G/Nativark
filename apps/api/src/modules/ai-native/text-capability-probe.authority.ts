@@ -6,7 +6,7 @@ import type { ProviderRouteDecision } from './provider-router.ports';
 import type { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';
 import type { GatewayRoutingResolution } from './gateway-routing.service';
 import { gatewayRoutingBinding } from './gateway-routing.service';
-import { ModelGatewayError, type GatewayContext, type ModelProtocolRequest } from './model-gateway.ports';
+import { ModelGatewayError, type WorkspaceGatewayContext, type ModelProtocolRequest } from './model-gateway.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttachmentResolver } from './gateway-intent';
 import { visionCapabilityChallenge } from './vision-capability-challenge';
@@ -37,14 +37,18 @@ export class TextCapabilityProbeAuthority {
   get media(): GatewayMediaAttachmentResolver | undefined {
     const capability = textProbeCapability(this.command);
     if (capability !== 'vision' && capability !== 'audio') return undefined;
+    const asOwn = (context: Parameters<GatewayMediaAttachmentResolver['resolve']>[0]) => {
+      if (!('tenantId' in context && 'workspaceId' in context)) throw new ModelGatewayError('FORBIDDEN');
+      return { tenantId: context.tenantId, workspaceId: context.workspaceId, actorId: context.actorId };
+    };
     const resolve: GatewayMediaAttachmentResolver['resolve'] = async (context, reference, signal) => {
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
-      const current = await this.resolve(context, textProbeRequirements(this.command));
+      const current = await this.resolve(asOwn(context), textProbeRequirements(this.command));
       const image = capability === 'audio' ? audioCapabilityChallenge(this.command.operationId, current.consumerScope.id)
         : visionCapabilityChallenge(this.command.operationId, current.consumerScope.id);
       if (reference.kind !== (capability === 'audio' ? 'audio' : 'image') || reference.attachmentId !== image.attachmentId
         || reference.attachmentRevision !== image.attachmentRevision) throw new ModelGatewayError('FORBIDDEN');
-      await this.assertCurrent(context, current);
+      await this.assertCurrent(asOwn(context), current);
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
       const { expected: _, ...result } = image;
       return result;
@@ -99,7 +103,7 @@ export class TextCapabilityProbeAuthority {
   async assertCurrent(context: TextProbeContext, resolution: GatewayRoutingResolution) {
     if (gatewayRoutingBinding(await this.resolve(context, textProbeRequirements(this.command))) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
+  async authorizeDispatch(context: WorkspaceGatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
     if (mode !== textProbeMode(this.command)) throw new ModelGatewayError('FORBIDDEN');
     const current = await this.resolve(context, textProbeRequirements(this.command));
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));

@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-24。Claude A固定`68a43441`、Claude B固定`ddf00ca0`已由主线复核并整合，B整合提交`e78196a5`；A并发计数/撤权读取/双账务记录分页/普通文本误拒及B旧调用签名遗漏已修正。主线原`5da55aa3`及客户端独立成果保留。当前缺口是正式生产装配与适用真实验收，不重复开发已交付类；原28项64.3%、ENTRY52.8%、正式0/28保持。
-> **负责人已授权Claude A/B同步并接下一服务端长批。** 原四批固定成果已消费，两树无源码WIP或独有提交，已快进功能基线`01ceba7a`；本分工提交后再同步一次，以开工实际HEAD为准。Codex A/B继续暂停，客户端/Harness不在本批范围；不自动启动旧心跳，不合main、推送或启用生产。
+> 更新时间：2026-10-24。本轮固定接收Claude A `8c628101`、Claude B `1e677bec`，主线另行复查后修复计数观察授权/响应契约/提交后unknown、平台请求隔离/Routed传输/原账务及能力收据归属。A整合提交`87bf9ff3`；B交付及主线修复随本记录整合。原主线`29c846e2`及客户端独立成果保留。原28项64.3%、ENTRY52.8%、正式0/28保持；仍有失败用例及正式装配缺口，不能称只待真实环境验收。
+> **本轮仅主线核验和整合固定成果，未续派或同步辅助树。** Claude A/B分别保留上述固定HEAD；Codex A/B继续暂停。现有排队任务不是已交付事实；客户端/Harness不在本轮范围。不自动启动旧心跳，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -14,11 +14,11 @@
 ## 工作树与写入归属
 
 本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
-分支：`ai/ai-native-contracts-s01-20261002`。主线保留AppModule/ai-native-application.providers.ts、shared中央出口/OpenAPI、Auth/Guard内核、公共runner/审批及最终整合；下述Gateway平台适配及相关持久化本批转由Claude B单作者，计数/计价/成本请求由Claude A单作者，主线不同时修改其认领文件。同步辅助树仅快进固定提交，不直接代写辅助源码。
+分支：`ai/ai-native-contracts-s01-20261002`。本轮主线接收已停止写入的固定A/B交付，负责整合修复及公共接点。后续恢复辅助开发前重新确认身份、归属和固定同步依赖；不与辅助树双写。主线保留AppModule/ai-native-application.providers.ts、shared中央出口/OpenAPI、Auth/Guard内核、公共runner/审批及最终整合，不直接代写辅助源码。
 
 原服务端与客户端作者的代码和归属分别保留；本次仅统一保全和同步，不把继承成果改称本轮功能实现，也不续接旧会话的执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
 
-辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。本次两树从已整合固定交付快进到本轮主线，保留全部output、依赖、缓存和私有client；源码同步不代表生成物、数据库或运行环境同步。Codex A/B两树继续暂停，本轮未同步或派工。主线后续提交不会自动同步，交付只报固定SHA，不追活动HEAD。
+辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。两树原源码、output、依赖、缓存和私有client保留，本轮没有反向同步或派工。源码合入不代表生成物、数据库或运行环境同步；主线后续修复不会自动同步，下一次开工先约定固定依赖，不追活动HEAD。
 
 开工仍须核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本次负责人明确授权在全部停写后提交保全并同步，既有正式依据内容原样保留，未重排任务或上调进度。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交；后续新WIP必须重新核对，不能据本次清洁现场覆盖。
 
@@ -28,13 +28,14 @@
 
 ### 本轮固定交付与下一装配缺口（仅服务端）
 
-- Claude A固定`68a43441`：冻结输入计数、同账本calls占用/结算、原收据只读、上界发布及成本观察组合、报价原键核对/分阶段交接材料。主线加固OperationLog原键唯一派发领取；只有INSERT应答明确成功的赢家可继续，重复/丢应答/重启不得重发或抢写unknown收据。历史读取必须通过当前任务读权，包含读取过程中撤权；公共用量契约按每20 invocation最多40条账务记录、汇总50 invocation最多100条记录有界输出。
-- Claude B固定`ddf00ca0`：平台独立主体/政策/预算及probe显式组合、稳定授权指纹、知识附件强绑定与单实例缓存语义。旧workspace配置调用方已迁移为显式consumer；没有借租户workspace或假授权填平台缺口。第四批automation无新增生产源码，原事件链仍复用主线。
-- 下一步A装配：`composeInputCountingPricing`、`composeTaskCostObservation`及pricing factory的请求级可信依赖尚未接入标准应用。当前计数codec仅实现Messages文本/获准工具；其他协议、媒体、未登记schema、客户计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种、把calls当token上界或把审核费率当供应商账单。
-- 下一步B装配：公共GatewayContext/Public Gateway平台分支、admission/accounting平台归属字段与必要追加迁移、accounting平台断言及默认关闭的模块注册仍缺。平台probe对象可装配不等于平台已可真实派发；缺项继续拒绝。知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍按原任务补齐。
+- Claude A固定`8c628101`已接：请求级计数/可信上界/recorded pricing/成本观察工厂和默认关闭模块。主线复核补齐无收据观察的当前原任务读权、闭合shared/Controller响应及提交后撤权unknown；计数schema已从shared中央导出。原唯一INSERT领取、原键恢复和20 invocation/40条账务记录边界保留，不把全部旧业务场景算成本批新实现。
+- Claude B固定`1e677bec`已接：平台GatewayContext/Public/Unified、admission/dispatch/accounting归属及追加迁移、平台请求工厂。主线修正实际Routed的actor-only接点、原账务平台principal、scopeKind交叉核对、能力收据上下文，以及每次open独立关闭/迟到Guard凭据复核。知识/automation/员工多数为既有成果和验证，不能把报告的四批标题当新增功能数。
+- 下一步A装配：`AiInputCountingModule.registerHttp`及请求级可信计数/计价/成本依赖仍需接入标准应用，计数OpenAPI路径尚未挂接。当前codec只支持实际已实现变体；其他协议、媒体、未登记schema、客户计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种或把calls当token上界。
+- 下一步B装配：平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。`PlatformCapabilityProbeModule`仅导出组合/请求工厂，尚无HTTP Controller，不能称已挂载平台HTTP。迁移仅隔离validate/diff和client生成，尚未执行。知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。
+- 尚有红测：本轮实际复跑human-quote-selection为6/9、original-scene-host为14/19、inspection-media-submission为14/17；保留全部失败断言。媒体失败涉及原步骤事务递增run revision后再用旧lease复核，相关仓储/输入来源未被A/B固定提交修改；需按真实事务视图修正，不能仅豁免同fence的revision。其余报价/场景夹具与正式依赖仍须收敛，不能宣称全链完成。
 - 本片验证为主线源码、实际服务/仓储与串行DB/外部端口替身；两线原有两轮审查报告不能替代本次复核，也不能代替MySQL锁/供应商/浏览器/微信或原G4。两线工作树和全部output保留，未经新授权不追活动HEAD、不直接写辅助树；正式百分比未跨档不调整。
 
-### 下一长批认领：完整纵向功能包，不逐片等待继续
+### 本轮已接收的认领范围：后续先核对实际源码，不重复派工
 
 - **Claude A：可信计数/计价发布与成本观察正式请求闭环（AIN-04/05/11/25）。** 连续完成请求级身份与可信依赖工厂、冻结输入读取去循环依赖、当前计数与原键只读核对、可信上界发布和真实recorded pricing消费、计数/生成原账收敛、调用/任务成本受权查询、命名响应与显式默认关闭HTTP模块。至少交付可直接装配的实际请求入口及其消费者，不以新增接口或材料包收尾。保留本轮唯一INSERT派发领取、读前/中撤权拒绝与20 invocation/40记录契约。客户资格/精确计数等缺正式来源的变体单独不可用，不能伪造或推断协议一定有/无计数端点。
 - **A文件：** `input-counting/**`、`budget/gateway-pricing-request.composition.ts`、原计价证据/记录/审阅相关文件、`budget/task-budget-usage.reader.ts`、`observability/task-cost-observation*`及必要新增专用请求/模块/Controller；原`budget-management.module.ts`仅计价入口；`model-input/task-model-gateway-input.source.ts`仅冻结输入计数读取。公共契约优先复用；确需新增只交专用shared源文件和中央出口/OpenAPI精确接线建议，由主线单作者处理，不私有复制公共DTO。

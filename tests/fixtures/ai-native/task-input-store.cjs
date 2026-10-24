@@ -60,6 +60,7 @@ function createTaskInputStore(initial, constraints = {}) {
     }
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
     if (name === 'aiBudgetAllocation') out.reservation = clone(data.aiBudgetReservation.find(reservation => reservation.id === row.reservationId) ?? null);
+    if (name === 'aiBudgetReservation') out.allocations = clone((data.aiBudgetAllocation ?? []).filter(allocation => allocation.reservationId === row.id));
     if (name === 'aiProposal') out.currentVersion = (data.aiProposalVersion ?? []).find(version =>
       version.scopeId === row.scopeId && version.taskId === row.taskId && version.proposalId === row.id && version.revision === row.currentRevision) ?? null;
     if (name === 'aiProposalAction') out.step = data.aiStep.find(step =>
@@ -94,6 +95,8 @@ function createTaskInputStore(initial, constraints = {}) {
         if (name === 'aiTask') { row.archivedAt ??= null; row.cancelRequestedAt ??= null; row.updatedAt ??= row.createdAt; }
         if (name === 'aiGatewayInvocation') row.id ??= require('node:crypto').randomUUID();
         if (name === 'aiInvocationAdmission') {
+          row.scopeKind ??= 'WORKSPACE'; // Real schema default for existing workspace admissions.
+          row.platformDedupKey ??= null;
           row.admittedAt ??= row.createdAt; row.updatedAt ??= row.createdAt;
           for (const field of ['dispatchId', 'unknownReason', 'revokedAt', 'completedAt']) row[field] ??= null;
         }
@@ -110,6 +113,28 @@ function createTaskInputStore(initial, constraints = {}) {
         rows().push(row); return hydrate(row);
       };
       all[name] = {
+        // Prisma-shaped aggregate support for the real budget repository; no quota decisions here.
+        count: async args => { trace.push(`${name}.count`); if (control.beforeRead) await control.beforeRead(name, args, data); return selected(args.where ?? {}).length; },
+        groupBy: async args => {
+          trace.push(`${name}.groupBy`); if (control.beforeRead) await control.beforeRead(name, args, data);
+          const groups = new Map();
+          for (const row of selected(args.where ?? {})) {
+            const key = JSON.stringify(args.by.map(field => row[field]));
+            let group = groups.get(key);
+            if (!group) { group = { ...Object.fromEntries(args.by.map(field => [field, clone(row[field])])), _count: {}, _sum: {} }; groups.set(key, group); }
+            for (const field of Object.keys(args._count ?? {})) group._count[field] = (group._count[field] ?? 0) + Number(field === '_all' || row[field] != null);
+            for (const field of Object.keys(args._sum ?? {})) {
+              const value = row[field], sum = group._sum[field];
+              group._sum[field] = value == null ? sum ?? null : sum == null ? clone(value) : sum instanceof Prisma.Decimal ? sum.add(value) : sum + value;
+            }
+          }
+          let result = [...groups.values()];
+          for (const order of [...(args.orderBy ?? [])].reverse()) {
+            const [field, direction] = Object.entries(order)[0];
+            result.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
+          }
+          return result.slice(0, args.take);
+        },
         findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
           const row=selected(args.where ?? {})[0]; return hydrate(row && (args.select || args.include) ? related(row,name,data) : row, args.select); },
         findUnique: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);

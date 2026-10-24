@@ -7,7 +7,7 @@ import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
 import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
 import type { PrismaGatewayAccountingFacts } from './budget/prisma-gateway-accounting-facts';
 import { isGatewayConfig } from './gateway-contract-validation';
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import type { GatewayBudgetDenialObservation, GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -55,10 +55,20 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
   /** Original budget-gate rejection only. No reservation, financial event,
    * provider error details or proof that an external effect did not happen. */
   async budgetDenied(value: GatewayBudgetDenialObservation, signal?: AbortSignal) {
-    const input = structuredClone(value), call = checkedAccountingCall(input.call);
+    const input = structuredClone(value);
+    // checkedAccountingCall speaks BudgetError; this port owes ModelGatewayError.
+    let call;
+    try { call = checkedAccountingCall(input.call); }
+    catch { throw new ModelGatewayError('FORBIDDEN'); }
+    if (!('tenantId' in call.context && 'workspaceId' in call.context)) throw new ModelGatewayError('FORBIDDEN');
     if (input.code !== 'BUDGET_UNAVAILABLE') throw new ModelGatewayError('INVALID_REQUEST');
     const open = () => { if (signal?.aborted) throw new ModelGatewayError('CANCELLED'); };
     open();
+    // OperationLog attribution is workspace-scoped; platform callers must
+    // supply their own audit implementation instead of this one.
+    const workspaceContext: WorkspaceGatewayContext | undefined = call.context && 'tenantId' in call.context && 'workspaceId' in call.context
+      ? call.context : undefined;
+    if (!workspaceContext) throw denied();
     let attemptedWrite = false;
     try {
       const current = async () => {
@@ -66,8 +76,8 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
         const resolved = structuredClone(await this.resolve()), subject = gatewayBudgetPrincipal(resolved.context);
         if (resolved.scope.kind !== 'WORKSPACE' || resolved.scope.id !== call.binding.scope.id
           || resolved.scope.tenantId !== subject.tenantId || resolved.scope.workspaceId !== subject.workspaceId
-          || subject.actorId !== call.context.actorId || subject.tenantId !== call.context.tenantId
-          || subject.workspaceId !== call.context.workspaceId) throw denied();
+          || subject.actorId !== workspaceContext.actorId || subject.tenantId !== workspaceContext.tenantId
+          || subject.workspaceId !== workspaceContext.workspaceId) throw denied();
         const { authorizedAt: _at, requestId: _request, ...identity } = resolved.context;
         return { resolved, subject, hash: requestFingerprint({ identity, scope: resolved.scope }) };
       };
@@ -93,7 +103,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
           || invocation.maxOutputTokens !== call.request.maxOutputTokens || !['invoke', 'stream'].includes(invocation.mode)
           || !isGatewayConfig(invocation.configuration) || requestFingerprint(invocation.configuration) !== invocation.configurationHash
           || invocation.configuration.configId !== call.binding.profileId || invocation.configuration.model !== call.request.model
-          || !admission || admission.id !== call.binding.id || admission.tenantId !== call.context.tenantId || admission.workspaceId !== call.context.workspaceId
+          || !admission || admission.id !== call.binding.id || admission.tenantId !== workspaceContext.tenantId || admission.workspaceId !== workspaceContext.workspaceId
           || admission.actorId !== call.context.actorId || admission.callId !== call.request.callId
           || admission.profileId !== call.binding.profileId || admission.dispatchId !== call.binding.dispatchId
           || admission.requestHash !== call.binding.requestHash || admission.status !== 'admitted' || admission.revokedAt || admission.completedAt
@@ -110,7 +120,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       const options = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
       const source = await this.db.$transaction(load, options), { invocation } = source;
       const auditId = gatewayBudgetDenialLogId(invocation.scopeId, invocation.id);
-      const data = { id: auditId, tenantId: call.context.tenantId, workspaceId: call.context.workspaceId,
+      const data = { id: auditId, tenantId: workspaceContext.tenantId, workspaceId: workspaceContext.workspaceId,
         userId: before.subject.actorKind === 'USER' ? before.subject.actorId : null, action: 'ai.gateway.budget_denied',
         detail: { operator: 'AI Native Gateway', targetType: 'ai_gateway_invocation', targetId: invocation.id,
           metadata: { version: 'ai-gateway-budget-denial-1', code: input.code, taskId: invocation.taskId,
@@ -153,6 +163,7 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       || observation.delivery.mode === 'stream' && parsed.data.firstValidatedTextMs !== null && observation.delivery.deltaBytes < 1) {
       throw new ModelGatewayError('INVALID_RESPONSE');
     }
+    if (!('tenantId' in observation.call.context && 'workspaceId' in observation.call.context)) throw new ModelGatewayError('FORBIDDEN');
     return this.persist({ tenantId: observation.call.context.tenantId, workspaceId: observation.call.context.workspaceId,
       callId: observation.call.request.callId,
       event: `ai.${observation.delivery.mode}.admitted`, status: 'accepted' }, observation);

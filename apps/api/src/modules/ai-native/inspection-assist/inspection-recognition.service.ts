@@ -67,7 +67,8 @@ export class InspectionRecognitionService {
       context = structuredClone(context); references = structuredClone(references);
       const current = await load();
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
-      if (context.tenantId !== current.scope.tenantId || context.workspaceId !== current.scope.workspaceId
+      if (!('tenantId' in context && 'workspaceId' in context)
+        || context.tenantId !== current.scope.tenantId || context.workspaceId !== current.scope.workspaceId
         || context.actorId !== current.scope.ownerId || requestFingerprint(current.scope) !== requestFingerprint(initial.scope)
         || current.frozen.inputFingerprint !== initial.frozen.inputFingerprint) throw new InspectionAssistError('ACCESS_DENIED');
       if (references.length < 1 || references.length > 8) throw new InspectionAssistError('INVALID_INPUT');
@@ -83,7 +84,8 @@ export class InspectionRecognitionService {
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
       const before = await load();
       const scope = before.scope;
-      if (context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId || context.actorId !== scope.ownerId
+      if (!('tenantId' in context && 'workspaceId' in context)
+        || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId || context.actorId !== scope.ownerId
         || requestFingerprint(scope) !== requestFingerprint(initial.scope)) throw new InspectionAssistError('ACCESS_DENIED');
       if (before.frozen.inputFingerprint !== initial.frozen.inputFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
       const selected = before.frozen.media.filter(item => item.attachmentId === reference.attachmentId
