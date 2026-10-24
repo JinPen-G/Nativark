@@ -55,7 +55,11 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
   /** Original budget-gate rejection only. No reservation, financial event,
    * provider error details or proof that an external effect did not happen. */
   async budgetDenied(value: GatewayBudgetDenialObservation, signal?: AbortSignal) {
-    const input = structuredClone(value), call = checkedAccountingCall(input.call);
+    const input = structuredClone(value);
+    // checkedAccountingCall speaks BudgetError; this port owes ModelGatewayError.
+    let call;
+    try { call = checkedAccountingCall(input.call); }
+    catch { throw new ModelGatewayError('FORBIDDEN'); }
     if (!('tenantId' in call.context && 'workspaceId' in call.context)) throw new ModelGatewayError('FORBIDDEN');
     if (input.code !== 'BUDGET_UNAVAILABLE') throw new ModelGatewayError('INVALID_REQUEST');
     const open = () => { if (signal?.aborted) throw new ModelGatewayError('CANCELLED'); };

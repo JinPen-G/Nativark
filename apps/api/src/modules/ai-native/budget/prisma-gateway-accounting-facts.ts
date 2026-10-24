@@ -128,22 +128,25 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
     const call = checkedAccountingCall(value);
     await this.assertClaim(call);
     const resolved = (await this.scopes.resolveCurrent()).context;
-    let principal: ReturnType<typeof gatewayBudgetPrincipal>;
+    // No synthetic principal: the platform arm resolves the SaaS principal and
+    // derives ownerKind directly, so no caller can ever read fake attribution.
+    let ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN';
     if ('tenantId' in call.context) {
-      principal = gatewayBudgetPrincipal(resolved);
+      const principal = gatewayBudgetPrincipal(resolved);
       if (principal.actorId !== call.context.actorId || principal.tenantId !== call.context.tenantId
         || principal.workspaceId !== call.context.workspaceId) throw new BudgetError('FORBIDDEN');
+      ownerKind = principal.actorKind;
     } else {
       const platformPrincipal = gatewayPlatformBudgetPrincipal(resolved);
       if (platformPrincipal.actorId !== call.context.actorId) throw new BudgetError('FORBIDDEN');
-      principal = { actorKind: 'USER', actorId: platformPrincipal.actorId, tenantId: '', workspaceId: '' };
+      ownerKind = 'SAAS_ADMIN';
     }
     await this.db.$transaction(async tx => {
       const rows = await this.rows(tx, reservationId); this.matchCall(rows, call);
-      const ownerKind = rows.reservation.scopeKind === 'PLATFORM' ? 'SAAS_ADMIN' : principal.actorKind;
-      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
+      const effectiveOwnerKind = rows.reservation.scopeKind === 'PLATFORM' ? 'SAAS_ADMIN' : ownerKind;
+      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind: effectiveOwnerKind, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
       const run = await tx.aiRun.findFirst({ where: { id: rows.invocation.runId, taskId: rows.invocation.taskId, scopeId: rows.invocation.scopeId,
-        status: 'RUNNING', actorId: call.context.actorId, actorKind: ownerKind, leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
+        status: 'RUNNING', actorId: call.context.actorId, actorKind: effectiveOwnerKind, leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
       if (!task || !run || rows.invocation.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
       await this.admission(tx, call, true);
       if (rows.reservation.status !== 'reserved' || rows.reservation.dispatchState !== 'dispatched') throw new BudgetError('PENDING_RECONCILIATION');

@@ -22,7 +22,7 @@ const filter = (scope: Scope, callId: string): Prisma.AiInvocationAdmissionWhere
 function attributionMatches(scope: Scope, row: { scopeKind?: string | null; tenantId?: string | null; workspaceId?: string | null }): boolean {
   return scope.kind === 'PLATFORM'
     ? row.scopeKind === 'PLATFORM' && row.tenantId == null && row.workspaceId == null
-    : row.scopeKind !== 'PLATFORM' && row.tenantId === scope.tenantId && row.workspaceId === scope.workspaceId;
+    : row.scopeKind === 'WORKSPACE' && row.tenantId === scope.tenantId && row.workspaceId === scope.workspaceId;
 }
 
 function record(row: Row, scope: Scope, callId: string): AiInvocationAdmissionRecord {

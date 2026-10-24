@@ -293,7 +293,7 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       if (!latest || profileFields.some(field => latest[field] !== stored[field])
         || requestFingerprint(latest.allowedCapabilities) !== requestFingerprint(stored.allowedCapabilities)
         || requestFingerprint(latest.platformConnection) !== requestFingerprint(stored.platformConnection)) throw new ModelGatewayError('CONFIG_INVALID');
-      return { profileFingerprint: capabilityProfileFingerprint(profile), baseUrl: parsed.data.baseUrl,
+      return { profileFingerprint: capabilityProfileFingerprint(profile), baseUrl: normalizeTenantModelBaseUrl(parsed.data.baseUrl),
         credential, maxOutputTokens: parsed.data.maxOutputTokens };
     }
     if (!context || [context.tenantId, context.workspaceId, context.actorId].some(v => typeof v !== 'string' || !/^[\w.:-]{1,128}$/u.test(v))) throw new ModelGatewayError('INVALID_REQUEST');
