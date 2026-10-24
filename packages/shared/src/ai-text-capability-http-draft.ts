@@ -111,6 +111,12 @@ const run = { oneOf: [
     retryable: no, semantics: choice('task_outcome_not_capability_evidence') }),
 ] } satisfies AiLeafSchemaDraft;
 export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  // Platform publication still requires a server-prepared, currently verified
+  // probe command. Other public operations accept the original request key only.
+  AiPlatformCapabilityPublishRequestDraft: obj({ ...key, command: obj({ operationId: text(128),
+    profileKey: text(64), profileFingerprint: hash,
+    capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') },
+  ['operationId', 'profileKey', 'profileFingerprint']) }),
   AiTextCapabilityAccountingOperationRequestDraft: obj({ ...key, operation: choice('releaseUnsent', 'reconcileAccounting') }),
   AiTextCapabilityAccountingOperationResponseDraft: obj({ ...key, operation: choice('releaseUnsent', 'reconcileAccounting'),
     taskId: id, callId: id, reservationId: id, status: choice('observed', 'not_observed'),
@@ -168,3 +174,22 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,
     nextAction: choice('readOriginal', 'readTask', 'readTaskAction', 'readTaskActionReceipt', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory', 'readAccounting', 'readAccountingOperation') }, ['code', 'retryable']),
 };
+
+/** Shared registration metadata; HTTP, Guard and OpenAPI consume one exact
+ * operation set. Publishing this contract does not enable the host. */
+export const AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS = [
+  ['publish', 'AiPlatformCapabilityPublishRequestDraft', 'AiTextCapabilityPublishResponseDraft', 'manage'],
+  ['readOriginal', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReadOriginalResponseDraft', 'view'],
+  ['createTask', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityCreateTaskResponseDraft', 'manage'],
+  ['readTask', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReadTaskResponseDraft', 'view'],
+  ['start', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityRunResponseDraft', 'manage'],
+  ['inspect', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityInspectResponseDraft', 'view'],
+  ['cancel', 'AiTextCapabilityCancelRequestDraft', 'AiTextCapabilityCancelResponseDraft', 'manage'],
+  ['reconcile', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityRunResponseDraft', 'manage'],
+  ['readCapabilityReceipt', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReceiptResponseDraft', 'manage'],
+  ['readHistory', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityHistoryResponseDraft', 'view'],
+  ['readAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft', 'view'],
+  ['readAccountingOperation', 'AiTextCapabilityAccountingOperationRequestDraft', 'AiTextCapabilityAccountingOperationResponseDraft', 'view'],
+  ['releaseUnsent', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft', 'manage'],
+  ['reconcileAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft', 'manage']
+] as const;

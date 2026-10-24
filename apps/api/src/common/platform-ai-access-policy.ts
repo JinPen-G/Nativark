@@ -1,6 +1,6 @@
 /** Exact permission boundary shared by platform configuration HTTP and its
  * internal current-identity checks. Never grants tenant or invocation access. */
-import { AI_PLATFORM_CAPABILITY_HTTP_DRAFT as probe } from '@rental-os/shared';
+import { AI_PLATFORM_CAPABILITY_HTTP_DRAFT as probe, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from '@rental-os/shared';
 export const PLATFORM_AI_PROVIDER_PERMISSIONS = {
   view: 'system:ai-provider:view', manage: 'system:ai-provider:manage'
 } as const;
@@ -15,9 +15,6 @@ export function platformAiProviderPermission(method: string, path: string): stri
 }
 export function platformCapabilityProbePermission(method: string, path: string): string | undefined {
   if (method.toUpperCase() !== probe.method) return undefined;
-  const read = ['readOriginal', 'readTask', 'inspect', 'readHistory', 'readAccounting', 'readAccountingOperation'] as const;
-  const write = ['publish', 'createTask', 'start', 'cancel', 'reconcile', 'readCapabilityReceipt', 'releaseUnsent', 'reconcileAccounting'] as const;
-  if (read.some(action => path === `/${probe.basePath}/${probe[action]}`)) return PLATFORM_AI_PROVIDER_PERMISSIONS.view;
-  if (write.some(action => path === `/${probe.basePath}/${probe[action]}`)) return PLATFORM_AI_PROVIDER_PERMISSIONS.manage;
-  return undefined;
+  const matched = AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS.find(([action]) => path === `/${probe.basePath}/${probe[action]}`);
+  return matched ? PLATFORM_AI_PROVIDER_PERMISSIONS[matched[3]] : undefined;
 }
