@@ -175,12 +175,28 @@ async function approvedOrderHarness() {
     }
   };
   const business = { consumeQuote: (_tenant, _context, id) => structuredClone(state.records.quote.find(row => row.id === id)), assertOrderDaysOpenForConfirmation: () => {},
-    validateCouponForOrder: () => null, applyOrderConfirmationToCache: () => {} };
+    validateCouponForOrder: () => null, applyOrderConfirmationToCache: () => {},
+    // Declared historical-quote read port for scene assemblies that reach
+    // business tools through this harness. Reads the harness's own seeded
+    // quote snapshot only — never a re-quote, price rebuild or mutation.
+    getQuote: async (tenantId, _context, quoteId) =>
+      structuredClone(state.records.quote.find(row => row.id === quoteId && row.tenantId === tenantId)) ?? null,
+    // Declared opening-readiness projection for the scene assembly's
+    // diagnostic reader. Sections absent: a read projection, never a write.
+    tenantReadiness: async () => ({ sections: [] }) };
   const coreFacts = { findOrder: async (tenantId, id) => structuredClone(state.records.rentalOrder.find(o => o.tenantId === tenantId && o.id === id)),
     saveOrderAggregate: async (order, _lines, tx) => { await tx.rentalOrder.create({ data: order }); } };
   const confirmation = new RentalOrderConfirmationService(db, core, business, coreFacts, quoteFacts, new RentalIdempotencyRepository(db));
   const snapshots = { read: async () => structuredClone(state.snapshots) };
-  const dependencies = { db, core, confirmation, quoteFacts, snapshots, policy, guard: new ApiAuthGuard(auth, undefined, undefined, undefined, {}),
+  // Declared bounded-report port for composeAiAuthorizedBusinessTools's
+  // composition check: scene assemblies reached through this harness (human
+  // quote selection) require the risk tool's original-operation report read.
+  // Reads from the same absorbing fact store and stays within its
+  // no-query-semantics stance.
+  const reports = { getBoundedOperationReport: async () => ({ coverage: 'page_not_total', window: { from: null, to: null },
+    totals: 'not_computed', items: [], source: 'synthetic_bounded_report' }) };
+
+  const dependencies = { db, core, business, confirmation, quoteFacts, snapshots, policy, reports, guard: new ApiAuthGuard(auth, undefined, undefined, undefined, {}),
     credentials, toolVersion: '1', clock: () => new Date(Math.max(Date.now(), state.clock.getTime())) };
   state.trace.length = 0;
   return { dependencies, state, command, context, body, payload, action, auth, client };

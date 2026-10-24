@@ -18,6 +18,20 @@ async function setup(audience = 'operator', tenantId = 'tenant-a') {
   const authority = new AiOrderRouteContextAuthority(guard, credentials, 'order-a');
   const config = stores.createAbsorbingConfigStore(); config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId, categoryCode: 'camera', isDefault: true }];
   const facts = stores.createAbsorbingFactStore();
+  // Declared synthetic pagination port for the formal listInspectionsPage
+  // contract, backed by the same per-test listInspections stub the cases
+  // patch (deterministic single page <=50, page_not_total). Not a Prisma
+  // integrity simulation.
+  facts.listInspectionsPage = async (tenant, orderId, query) => {
+    // No tenant/orderId filtering here: foreign or malformed rows flow through
+    // so the Core's own page validation rejects them, exactly as production.
+    const all = (await facts.listInspections(tenant, orderId, query))
+      .filter(row => !query.cursor || row.id > query.cursor)
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const items = all.slice(0, query.limit);
+    return { items, nextCursor: all.length > query.limit ? items[items.length - 1].id : null,
+      coverage: 'page_not_total' };
+  };
   facts.findOrder = async (tenant, orderId) => {
     const identity = structuredClone(getRequestIdentity()); state.reads.push({ tenant, orderId, identity });
     if (identity?.tenantId !== tenant || identity?.workspaceId !== 'workspace-a') return null;
