@@ -3,6 +3,15 @@ import type { KnowledgeClock, KnowledgeGrant } from './knowledge.ports';
 import { KnowledgeError, requiredPort } from './knowledge-errors';
 import { fingerprint, scopeKey } from './knowledge-validation';
 
+/**
+ * Process-local bounded chunk cache. Invalidation is per instance: there is
+ * NO distributed propagation, so another instance may briefly serve a cached
+ * chunk after a withdrawal. That is an explicit gap, not a completed
+ * broadcast: every consumer must still re-verify the persisted document
+ * state (publication, validity window, version/aclRevision) and the current
+ * grant on each read — the retrieval and preparation paths already do — so a
+ * stale entry never bypasses those checks.
+ */
 export class KnowledgeCache {
   private readonly entries = new Map<string, { chunk: AiKnowledgeChunkDraft; expires: number; bytes: number; documentKey: string }>();
   private bytes = 0;
