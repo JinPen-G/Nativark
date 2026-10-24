@@ -1,4 +1,5 @@
 import type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDraft, AiApprovalRecordDraft } from './ai-proposal-draft';
+import type { AiTaskEventDraft, AiTaskStatusDraft } from './ai-task-draft';
 
 export const AI_APPROVED_SETTINGS_DRAFT_VERSION = 'ain-approved-settings-draft-1' as const;
 export const AI_APPROVED_SETTINGS_TOOL_CODE = 'tenant.notifications.commit' as const;
@@ -26,6 +27,31 @@ export type AiApprovedSettingsChangeReceiptDraft =
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
+/** Metadata acknowledgement only. Neither creation nor history grants execution. */
+export interface AiApprovedSettingsCreatedTaskDraft {
+  taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean;
+}
+type SettingsCreationBase = {
+  original: { changeId: string; changeHash: string }; execution: 'not_attested'; approval: 'not_granted';
+};
+export type AiApprovedSettingsTaskCreatedDraft = SettingsCreationBase & { receipt: AiApprovedSettingsCreatedTaskDraft };
+export type AiApprovedSettingsTaskCreationReadDraft = SettingsCreationBase & { receipt:
+  | { state: 'observed'; creationKey: string; retryable: false; nextAction: 'read_original_task'; task: AiApprovedSettingsCreatedTaskDraft }
+  | { state: 'unknown' | 'not_observed'; creationKey: string; retryable: false; nextAction: 'reconcile'; task: null } };
+/** Cancellation intent/task settlement is never a business rollback or refund. */
+type SettingsCancellationBase = {
+  cancellation: 'not_business_rollback'; automaticRetry: false; financialRelease: 'not_performed';
+};
+type SettingsCancellationEvent = Extract<AiTaskEventDraft, { type: 'task.transition' }>;
+export type AiApprovedSettingsTaskCancellationResultDraft = SettingsCancellationBase & {
+  receipt: { event: SettingsCancellationEvent; runRevision?: number | null };
+};
+export type AiApprovedSettingsTaskCancellationReadDraft = SettingsCancellationBase & { receipt: {
+  taskId: string; expectedRevision: number; status: 'observed' | 'not_observed'; event: SettingsCancellationEvent | null;
+  snapshot: { revision: number; cursor: string; status: AiTaskStatusDraft };
+  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
+  automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
+} };
 /** Task-local cursor stays a string; a reset requires a new formal snapshot. */
 export interface AiApprovedSettingsTaskEventsReadDraft extends AiApprovedSettingsTaskCreationDraft {
   after: string; limit: number;

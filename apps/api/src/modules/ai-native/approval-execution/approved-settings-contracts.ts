@@ -10,10 +10,15 @@ import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, typ
   type AiApprovedSettingsChangeReviewDraft, type AiApprovedSettingsOperationReceiptDraft, type AiApprovedSettingsOperationResultDraft,
   type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '@rental-os/shared';
 import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsChangeReceiptDraft,
-  AiApprovedSettingsChangePreparationResultDraft } from '@rental-os/shared';
+  AiApprovedSettingsChangePreparationResultDraft, AiApprovedSettingsTaskCreatedDraft, AiApprovedSettingsTaskCreationReadDraft,
+  AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiApprovedSettingsTaskCreatedDraft: AiApprovedSettingsTaskCreatedDraft;
+  AiApprovedSettingsTaskCreationReadDraft: AiApprovedSettingsTaskCreationReadDraft;
+  AiApprovedSettingsTaskCancellationResultDraft: AiApprovedSettingsTaskCancellationResultDraft;
+  AiApprovedSettingsTaskCancellationReadDraft: AiApprovedSettingsTaskCancellationReadDraft;
   AiApprovedSettingsCurrentDraft: AiApprovedSettingsCurrentDraft;
   AiApprovedSettingsChangeReceiptDraft: AiApprovedSettingsChangeReceiptDraft;
   AiApprovedSettingsChangePreparationResultDraft: AiApprovedSettingsChangePreparationResultDraft;

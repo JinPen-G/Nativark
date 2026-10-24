@@ -7,6 +7,42 @@ import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 import { settingsContract } from '../approval-execution/approved-settings-contracts';
 import type { composeRequestBoundSettingsTaskReads } from './settings-task-read.composition';
 
+/** Keep internal acknowledgements behind the existing shared contract. A bad
+ * post-write reply may already be committed; it can only be observed, not retried. */
+function invalidSettingsResponse(writing: boolean): never {
+  throw Object.assign(new Error(writing ? 'AI_RESULT_UNKNOWN' : 'AI_STORAGE_UNAVAILABLE'), {
+    code: writing ? 'AI_RESULT_UNKNOWN' : 'AI_STORAGE_UNAVAILABLE', retryable: false
+  });
+}
+async function settingsCreationResponse(work: () => Promise<unknown>, body: unknown, writing: boolean) {
+  const command = structuredClone(body) as { creationKey?: string };
+  const reply = await work();
+  try {
+    if (writing) return settingsContract('AiApprovedSettingsTaskCreatedDraft', reply, true);
+    const result = settingsContract('AiApprovedSettingsTaskCreationReadDraft', reply, true);
+    if (result.receipt.creationKey !== command.creationKey) return invalidSettingsResponse(false);
+    return result;
+  } catch { return invalidSettingsResponse(writing); }
+}
+async function settingsCancellationResponse(work: () => Promise<unknown>, body: unknown,
+  writing: boolean, target: 'cancel_requested' | 'cancelled') {
+  const command = structuredClone(body) as { expectedRevision?: number };
+  const reply = await work();
+  try {
+    const result = writing ? settingsContract('AiApprovedSettingsTaskCancellationResultDraft', reply, true)
+      : settingsContract('AiApprovedSettingsTaskCancellationReadDraft', reply, true);
+    const receipt = result.receipt, event = receipt.event;
+    if ('expectedRevision' in receipt && (receipt.expectedRevision !== command.expectedRevision
+      || receipt.cancellation !== (target === 'cancel_requested' ? 'request_not_rollback' : 'task_cancelled_not_business_rollback')))
+      return invalidSettingsResponse(writing);
+    if (event && (event.taskRevision !== Number(command.expectedRevision) + 1 || event.data.to !== target
+      || event.data.reason !== (target === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled')
+      || ('taskId' in receipt && (event.taskId !== receipt.taskId || event.taskRevision > receipt.snapshot.revision
+        || BigInt(event.cursor) > BigInt(receipt.snapshot.cursor))))) return invalidSettingsResponse(writing);
+    return result;
+  } catch { return invalidSettingsResponse(writing); }
+}
+
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
 export const AI_SETTINGS_TASK_CONTROL_REQUESTS = Symbol('AI_SETTINGS_TASK_CONTROL_REQUESTS');
@@ -73,19 +109,19 @@ export class AiSettingsTaskControlController {
   constructor(@Inject(AI_SETTINGS_TASK_CONTROL_REQUESTS) private readonly controls: ReturnType<typeof composeRequestBoundSettingsTaskControls>) {}
   @Post(routes.requestOriginalSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.requestCancellation(request, body), 'read_original_settings_cancellation');
+    return respondAiScene(() => settingsCancellationResponse(() => this.controls.requestCancellation(request, body), body, true, 'cancel_requested'), 'read_original_settings_cancellation');
   }
   @Post(routes.readOriginalSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.readCancellation(request, body));
+    return respondAiScene(() => settingsCancellationResponse(() => this.controls.readCancellation(request, body), body, false, 'cancel_requested'));
   }
   @Post(routes.settleUnstartedSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.settleUnstartedCancellation(request, body), 'read_original_settings_cancellation_settlement');
+    return respondAiScene(() => settingsCancellationResponse(() => this.controls.settleUnstartedCancellation(request, body), body, true, 'cancelled'), 'read_original_settings_cancellation_settlement');
   }
   @Post(routes.readOriginalSettingsCancellationSettlement) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCancellationSettlement(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.readCancellationSettlement(request, body));
+    return respondAiScene(() => settingsCancellationResponse(() => this.controls.readCancellationSettlement(request, body), body, false, 'cancelled'));
   }
   @Post(routes.readSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -110,11 +146,11 @@ export class AiSettingsTaskCreationController {
   constructor(@Inject(AI_SETTINGS_TASK_CREATION_REQUESTS) private readonly creation: ReturnType<typeof composeRequestBoundSettingsTaskCreation>) {}
   @Post(routes.createSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.creation.create(request, body), 'read_settings_task_creation');
+    return respondAiScene(() => settingsCreationResponse(() => this.creation.create(request, body), body, true), 'read_settings_task_creation');
   }
   @Post(routes.readSettingsTaskCreation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.creation.read(request, body), 'read_settings_task_creation');
+    return respondAiScene(() => settingsCreationResponse(() => this.creation.read(request, body), body, false), 'read_settings_task_creation');
   }
 }
 export const settingsTaskHttpMethods = Object.freeze(['startSettingsTask', 'readSettingsConfirmation',
