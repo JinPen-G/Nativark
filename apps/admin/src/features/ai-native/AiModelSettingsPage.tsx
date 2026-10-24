@@ -14,6 +14,7 @@ import { TenantBudgetSettings } from "./TenantBudgetSettings";
 import { TenantPlatformRate } from './TenantPlatformRate';
 import { TenantByokRate } from './TenantByokRate';
 import { CapabilityProbePanel } from './CapabilityProbePanel';
+import { DesktopBusinessPolicySettings } from '../agent-desktop/DesktopBusinessPolicySettings';
 
 const labels: Record<SettingsFeedback, string> = {
   idle: "配置保存、真实能力验证与执行准入分别管理。",
@@ -40,7 +41,8 @@ export function AiModelSettingsPage() {
       <TenantBudgetSettings key={`budget:${contextKey()}`} identity={contextKey()} />
       <TenantPlatformRate key={`rate:${contextKey()}`} identity={contextKey()} />
       <TenantByokRate key={`byok-rate:${contextKey()}`} tenantId={auth.tenant!.tenantId} identity={contextKey()} />
-      <CapabilityProbePanel key={`capability:${contextKey()}`} identity={contextKey()} /></>
+      <CapabilityProbePanel key={`capability:${contextKey()}`} identity={contextKey()} />
+      <DesktopBusinessPolicySettings key={`desktop-policy:${contextKey()}`} identity={contextKey()} /></>
       : <Alert type="warning" title={t("需要当前经营空间及 AI 配置管理权限。")}/>}
   </>;
 }

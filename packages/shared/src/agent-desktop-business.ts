@@ -41,10 +41,45 @@ export interface RentalDesktopBusinessPolicy {
 export type RentalDesktopBusinessPolicyRead = { state: 'not_configured' } | {
   state: 'configured'; revision: number; policy: RentalDesktopBusinessPolicy;
 };
+export interface RentalDesktopPolicySave {
+  operationKey: string;
+  expectedRevision: number;
+  policy: RentalDesktopBusinessPolicy;
+}
+export interface RentalDesktopPolicySaved {
+  state: 'saved'; operationKey: string; result: Extract<RentalDesktopBusinessPolicyRead, { state: 'configured' }>;
+}
+export type RentalDesktopPolicyObservation = { state: 'not_observed' } | {
+  state: 'observed'; operationKey: string; result: Extract<RentalDesktopBusinessPolicyRead, { state: 'configured' }>;
+};
 export type RentalDesktopBusinessFailureCode = 'AI_ACCESS_DENIED' | 'AI_SCOPE_CHANGED' | 'AI_INVALID_INPUT'
   | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT' | 'AI_RESULT_UNKNOWN';
 export type RentalDesktopCatalogReply = { id: string; ok: true; result: RentalDesktopCatalogResult }
   | { id: string; ok: false; code: RentalDesktopBusinessFailureCode };
+export type RentalDesktopCatalogPreparation = {
+  state: 'prepared'; toolCode: 'rental.catalog.search'; input: { limit: number };
+  sources: { intent: 'explicit_request'; limit: 'explicit_request' | 'preview_default' };
+  modelRequest: 'not_sent';
+} | { state: 'clarification_required'; reason: 'empty' | 'unsupported_expression' | 'limit_out_of_range' | 'invalid_input'; modelRequest: 'not_sent' };
+
+/** Parse an entire supported catalog request locally. No partial extraction, PII heuristics, raw-text echo or model fallback.
+ * @param value Human text; only the fixed catalog grammar is accepted, with an optional explicit 1..50 result bound.
+ * @returns Detached structured conditions, or a non-sensitive clarification reason. Neither is authorization or model admission.
+ */
+export function prepareRentalDesktopCatalogInput(value: unknown): RentalDesktopCatalogPreparation {
+  const clarify = (reason: Extract<RentalDesktopCatalogPreparation, { state: 'clarification_required' }>['reason']): RentalDesktopCatalogPreparation =>
+    ({ state: 'clarification_required', reason, modelRequest: 'not_sent' });
+  if (typeof value !== 'string' || value.length > 256 || /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(value)) return clarify('invalid_input');
+  const text = value.trim();
+  if (!text) return clarify('empty');
+  const parsed = /^(?:请)?(?:查看|查询|显示|列出)?(?:前([1-9]\d?)条)?(?:商品目录|商品列表|目录)[。！!？?]?$/u.exec(text)
+    ?? /^(?:please\s+)?(?:show|list|read)\s+(?:the\s+)?(?:first\s+([1-9]\d?)\s+)?(?:catalog|products)[.!?]?$/iu.exec(text);
+  if (!parsed) return clarify('unsupported_expression');
+  const limit = parsed[1] === undefined ? 10 : Number(parsed[1]);
+  if (limit < 1 || limit > 50) return clarify('limit_out_of_range');
+  return { state: 'prepared', toolCode: 'rental.catalog.search', input: { limit },
+    sources: { intent: 'explicit_request', limit: parsed[1] === undefined ? 'preview_default' : 'explicit_request' }, modelRequest: 'not_sent' };
+}
 
 function record(value: unknown, allowed: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -98,6 +133,34 @@ export function parseRentalDesktopBusinessPolicy(value: unknown): RentalDesktopB
   if (new Set(destinations.map(item => JSON.stringify(item))).size !== destinations.length
     || (row.enabled && (!row.toolCodes.length || !destinations.length))) throw new Error('Invalid local business policy');
   return { enabled: row.enabled, toolCodes: [...row.toolCodes], destinations, maxRows: positive(row.maxRows, 50), expiresAt: timestamp(row.expiresAt) };
+}
+/** Current policy only; a historical save receipt must never be substituted for this read. */
+export function parseRentalDesktopBusinessPolicyRead(value: unknown): RentalDesktopBusinessPolicyRead {
+  const row = record(value, ['state', 'revision', 'policy']);
+  if (row.state === 'not_configured' && Object.keys(row).length === 1) return { state: 'not_configured' };
+  if (row.state !== 'configured') throw new Error('Invalid local business policy read');
+  return { state: 'configured', revision: positive(row.revision, 2147483647), policy: parseRentalDesktopBusinessPolicy(row.policy) };
+}
+/** Validate a human policy change before any write; zero means no previous policy, never unrestricted access. */
+export function parseRentalDesktopPolicySave(value: unknown): RentalDesktopPolicySave {
+  const row = record(value, ['operationKey', 'expectedRevision', 'policy']);
+  if (typeof row.expectedRevision !== 'number' || !Number.isInteger(row.expectedRevision) || row.expectedRevision < 0
+    || row.expectedRevision > 2147483646) throw new Error('Invalid local business policy revision');
+  const result = { operationKey: word(row.operationKey, 128), expectedRevision: row.expectedRevision, policy: parseRentalDesktopBusinessPolicy(row.policy) };
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 16384) throw new Error('Local business policy too large');
+  return result;
+}
+export function parseRentalDesktopPolicySaved(value: unknown): RentalDesktopPolicySaved {
+  const row = record(value, ['state', 'operationKey', 'result']), result = parseRentalDesktopBusinessPolicyRead(row.result);
+  if (row.state !== 'saved' || result.state !== 'configured') throw new Error('Invalid local business policy receipt');
+  return { state: 'saved', operationKey: word(row.operationKey, 128), result };
+}
+export function parseRentalDesktopPolicyObservation(value: unknown): RentalDesktopPolicyObservation {
+  const row = record(value, ['state', 'operationKey', 'result']);
+  if (row.state === 'not_observed' && Object.keys(row).length === 1) return { state: 'not_observed' };
+  const result = parseRentalDesktopBusinessPolicyRead(row.result);
+  if (row.state !== 'observed' || result.state !== 'configured') throw new Error('Invalid local business policy observation');
+  return { state: 'observed', operationKey: word(row.operationKey, 128), result };
 }
 /** Only identifiers, registered categories and deterministic facts leave the business page; free text stays there. */
 export function parseRentalDesktopCatalogResult(value: unknown): RentalDesktopCatalogResult {
