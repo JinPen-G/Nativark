@@ -33,7 +33,9 @@ export interface AiCountingCountResultDraft {
   method: 'provider_count_tokens_receipt'; protocol: string; sceneCode: string;
   admission: { reservationId: string; sceneCode: string; unit: 'calls';
     status: 'settled' | 'reserved' | 'released' | 'pending_reconciliation' };
-  observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_started';
+  /** New producers do not attest the original generation state. The older
+   * not_started value remains parseable for draft compatibility, not retry permission. */
+  observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_attested' | 'not_started';
 }
 
 export interface AiCountingLifecycleObservationDraft {
@@ -87,7 +89,7 @@ const countResultSchema = {
       observedAt: { type: 'string', format: 'date-time' },
       expiresAt: { type: 'string', format: 'date-time' },
       executionPermission: { type: 'boolean', const: false },
-      textDispatch: { type: 'string', const: 'not_started' }
+      textDispatch: { type: 'string', enum: ['not_attested', 'not_started'] }
     }
   } as const;
 

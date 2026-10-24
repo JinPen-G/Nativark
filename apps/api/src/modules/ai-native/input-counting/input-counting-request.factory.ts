@@ -22,6 +22,7 @@ import { ModelGatewayError } from '../model-gateway.ports';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { createPersistedBudgetSubsystem } from '../budget/budget.module';
 import { GatewayPricingRecordManagement } from '../budget/prisma-gateway-pricing-records';
+import { presentGatewayInputBoundSummary, presentGatewayPriceSummary } from '../budget/gateway-pricing-request.composition';
 import type { GatewayPricingEvidenceSource } from '../budget/prisma-gateway-pricing-records';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
@@ -198,15 +199,18 @@ export class InputCountingRequestFactory {
           result = receipt;
         } else if (action === 'publishInputBound') {
           const receipt = await management.publishInputBound(command);
-          mutationReturned = true; result = receipt;
+          mutationReturned = true;
+          const original = await management.readInputBound({ callId: receipt.callId });
+          if (original.id !== receipt.id || original.hash !== receipt.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
+          result = receipt;
         } else if (action === 'readInputBound') {
           const original = await management.readInputBound(command);
           if (hash(original) !== hash(await management.readInputBound(command))) throw new BudgetError('PENDING_RECONCILIATION');
-          result = original;
+          result = presentGatewayInputBoundSummary(original);
         } else if (action === 'readPublication') {
           const original = await management.readPublication(command);
           if (hash(original) !== hash(await management.readPublication(command))) throw new BudgetError('PENDING_RECONCILIATION');
-          result = original;
+          result = presentGatewayPriceSummary(original);
         } else if (action === 'usagePage') result = await usage.read(command);
         else if (action === 'usageSummary') result = await usage.summary(command);
         else if (action === 'usagePricingBases') result = await usage.pricingBases(command);

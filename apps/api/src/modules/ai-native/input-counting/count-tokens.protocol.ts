@@ -1,12 +1,11 @@
 /** Provider count-tokens codec for the frozen original model input.
- * Only protocols whose provider exposes a real counting endpoint are
- * supported; OpenAI-compatible endpoints have none and no certified
- * tokenizer dependency exists in this lockfile, so those configurations
- * fail closed with a precise reason instead of a text-length guess.
+ * This codec currently implements only the registered Messages counting
+ * endpoint; other configured protocols lack an implemented counting source
+ * here. That is a local support boundary, not a claim about every supplier.
  * The request encoding mirrors AnthropicMessagesAdapter's input-determining
- * fields (model, system, messages, tools, tool_choice); max_tokens/stream and
- * output-format constraints change no input token and are deliberately absent
- * from the count request. Replacing the adapter later only touches this codec. */
+ * fields (model, system, messages, tools, tool_choice). Structured-output
+ * serialization is not certified here and is refused rather than silently
+ * omitting the schema sent by the generation adapter. */
 import { z } from 'zod';
 import { ChatProtocolPolicy, type ModelJsonTransport } from '../chat-completions.adapter';
 import { normalizeTenantModelBaseUrl } from '../tenant-model-config.service';
@@ -60,16 +59,13 @@ export function prepareCountTokensMaterial(input: Readonly<ModelProtocolRequest>
   if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
   const request = parsed.data;
   const features = request.features ?? [];
-  if (features.some(feature => feature !== 'tools' && feature !== 'structuredOutput'))
+  if (features.some(feature => feature !== 'tools'))
     throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   if (request.structuredSchemaHash !== undefined && !features.includes('structuredOutput'))
     throw new ModelGatewayError('CONFIG_INVALID');
-  // ChatProtocolPolicy.body() throws when a feature lacks a registered server
-  // policy; an unregistered structured-output schema stays uncountable.
+  // ChatProtocolPolicy.body() enforces the registered tool schema.
   const supplied = policy.body(features);
   const tool = (supplied.tools as Array<{ function: { name: string; parameters: unknown } }> | undefined)?.[0]?.function;
-  if (features.includes('structuredOutput') && features.includes('tools'))
-    throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   // System instructions belong before the conversation, exactly like the
   // messages adapter; reordering would count a different input.
   let conversation = false;

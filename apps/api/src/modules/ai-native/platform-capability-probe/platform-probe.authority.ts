@@ -10,7 +10,7 @@ import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttach
 import { visionCapabilityChallenge } from '../vision-capability-challenge';
 import { audioCapabilityChallenge } from '../audio-capability-challenge';
 import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements,
-  isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
+  isPlatformProbeContext, probeContextSchema, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 export interface PlatformProbeAuthorityDependencies {
@@ -62,8 +62,13 @@ export class PlatformCapabilityProbeAuthority {
     } };
   }
   private platformContext(context: GatewayContext | TextProbeContext) {
+    // The public Gateway carries actorId only; stored probe descriptors also
+    // carry scopeKind. Normalize these two exact shapes, never tenant contexts.
+    if (!context || 'scopeKind' in context && context.scopeKind !== 'platform') throw new ModelGatewayError('FORBIDDEN');
+    const parsed = probeContextSchema.safeParse({ ...context, scopeKind: 'platform' });
     const actorId = this.context.actorId;
-    if (context.actorId !== actorId) throw new ModelGatewayError('FORBIDDEN');
+    if (!parsed.success || !isPlatformProbeContext(parsed.data) || parsed.data.actorId !== actorId)
+      throw new ModelGatewayError('FORBIDDEN');
     return { actorId, scopeKind: 'platform' as const };
   }
   private async current(): Promise<GatewayRoutingResolution> {
@@ -93,8 +98,8 @@ export class PlatformCapabilityProbeAuthority {
         probe: { purpose: 'capability_text_probe', operationId: this.command.operationId,
           profileFingerprint: this.command.profileFingerprint, intentHash: prepared.intentHash } } };
   }
-  async resolve(value: TextProbeContext, required: readonly AiProfileCapability[]) {
-    if (requestFingerprint(value) !== requestFingerprint(this.context)
+  async resolve(value: TextProbeContext | GatewayContext, required: readonly AiProfileCapability[]) {
+    if (requestFingerprint(this.platformContext(value)) !== requestFingerprint(this.context)
       || requestFingerprint(required) !== requestFingerprint(textProbeRequirements(this.command))) {
       throw new ModelGatewayError('FORBIDDEN');
     }
@@ -102,7 +107,7 @@ export class PlatformCapabilityProbeAuthority {
     if (gatewayRoutingBinding(initial) !== gatewayRoutingBinding(current)) throw new ModelGatewayError('CONFIG_INVALID');
     return structuredClone(current);
   }
-  async assertCurrent(context: TextProbeContext, resolution: GatewayRoutingResolution) {
+  async assertCurrent(context: TextProbeContext | GatewayContext, resolution: GatewayRoutingResolution) {
     if (gatewayRoutingBinding(await this.resolve(context, textProbeRequirements(this.command))) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
   }
   async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
@@ -111,9 +116,7 @@ export class PlatformCapabilityProbeAuthority {
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
     const expected = ['vision', 'audio'].includes(textProbeCapability(this.command))
       ? (await prepareGatewayIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode,
-        // The intent preparer only forwards this context to the media resolver,
-        // which is this class's own platform-shaped resolver above.
-        current.context as unknown as GatewayContext, this.media, signal)).request
+        { actorId: this.context.actorId }, this.media, signal)).request
       : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32,
         ...(textProbeCapability(this.command) === 'structured_output' ? { structuredOutput: true } : {}),
         ...(textProbeCapability(this.command) === 'tools' ? { orderExplainTool: true } : {}) }, mode).request;

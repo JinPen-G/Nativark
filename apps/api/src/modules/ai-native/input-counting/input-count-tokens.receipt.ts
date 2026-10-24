@@ -10,6 +10,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { modelRequestSchema } from '../model-gateway.ports';
 
 /** Server-derived request id for a counting admission: one deterministic id
  * per original call, never caller-chosen. Leaf location so read-side
@@ -31,12 +32,12 @@ export const COUNT_TOKENS_RECEIPT_ACTION = 'ai.model.count_tokens';
  * attests a validated count; 'failed' is a definite provider rejection with no
  * count; 'unknown' preserves an interrupted operation for original-key
  * recovery. None of these grant a retry, a refund or a text dispatch. */
-export const countTokensReceiptSchema = z.object({
+const countTokensReceiptFields = z.object({
   version: z.literal('ai-count-tokens-receipt-1'),
   state: z.enum(['observed', 'failed', 'unknown']),
   tenantId: identifier.max(191), workspaceId: identifier.max(191), actorId: identifier,
   callId: identifier, countCallId: identifier, invocationId: identifier, scopeId: identifier,
-  sceneCode: identifier, protocol: identifier, model: identifier,
+  sceneCode: identifier, protocol: identifier, model: modelRequestSchema.shape.model,
   registrationHash: hash64, intentHash: hash64, configurationHash: hash64,
   priceVersion: identifier.max(64), maxOutputTokens: z.number().int().min(1).max(32768),
   method: z.literal('provider_count_tokens_receipt'),
@@ -45,10 +46,16 @@ export const countTokensReceiptSchema = z.object({
   countRequestHash: hash64,
   admission: z.object({ reservationId: identifier.max(36), sceneCode: identifier, unit: z.literal('calls') }).strict(),
   observedAt: isoTime, expiresAt: isoTime
-}).strict().refine(value => (value.state === 'observed') === (value.inputTokens !== undefined)
+}).strict();
+export const countTokensReceiptSchema = countTokensReceiptFields.refine(value => (value.state === 'observed') === (value.inputTokens !== undefined)
   && (value.state === 'failed') === (value.failureCode !== undefined));
 export type CountTokensReceipt = z.infer<typeof countTokensReceiptSchema>;
 export type CountTokensReceiptDb = Pick<PrismaClient, 'operationLog'>;
+/** Only a successful original-key lookup returning no row proves absence.
+ * Storage/authorization errors must never be treated as a missing receipt. */
+export class CountTokensReceiptNotFoundError extends BudgetError {
+  constructor() { super('UNAVAILABLE'); }
+}
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
 export function countTokensOperationId(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>) {
@@ -93,20 +100,26 @@ export class PrismaCountTokensReceipts {
     const id = createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1',
       countTokensOperationId(binding)])).digest('hex');
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
-    return Boolean(row && row.id === id && row.action === 'ai.model.count_tokens.dispatch'
-      && row.tenantId === binding.tenantId && row.workspaceId === binding.workspaceId
-      && row.userId === binding.actorId);
+    if (!row) return false;
+    const detail = countTokensReceiptFields.pick({ tenantId: true, workspaceId: true, actorId: true,
+      callId: true, registrationHash: true, intentHash: true, configurationHash: true, countRequestHash: true })
+      .extend({ reservationId: identifier.max(36) }).strict().safeParse(row.detail);
+    if (row.id !== id || row.action !== 'ai.model.count_tokens.dispatch' || !detail.success
+      || row.tenantId !== binding.tenantId || row.workspaceId !== binding.workspaceId || row.userId !== binding.actorId
+      || Object.entries(binding).some(([key, value]) => detail.data[key as keyof typeof detail.data] !== value))
+      throw new BudgetError('PENDING_RECONCILIATION');
+    return true;
   }
   async read(id: string): Promise<CountTokensReceipt> {
     if (!hash64.safeParse(id).success) throw new BudgetError('INVALID');
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
-    if (!row) throw new BudgetError('UNAVAILABLE');
+    if (!row) throw new CountTokensReceiptNotFoundError();
     const parsed = countTokensReceiptSchema.safeParse(row.detail);
     // A present-but-unreadable audit row is NOT absence: surface it as an
     // unreadable original outcome instead of a silent "no receipt".
     if (row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !parsed.success)
       throw new BudgetError('PENDING_RECONCILIATION');
-    if (row.tenantId !== parsed.data.tenantId || row.workspaceId !== parsed.data.workspaceId
+    if (countTokensOperationId(parsed.data) !== id || row.tenantId !== parsed.data.tenantId || row.workspaceId !== parsed.data.workspaceId
       || row.userId !== parsed.data.actorId) throw new BudgetError('PENDING_RECONCILIATION');
     return parsed.data;
   }
@@ -126,7 +139,9 @@ export class PrismaCountTokensReceipts {
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
     const stored = countTokensReceiptSchema.safeParse(row?.detail);
     if (!row || row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !stored.success
-      || requestFingerprint(stored.data) !== requestFingerprint(value)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+      || row.tenantId !== value.tenantId || row.workspaceId !== value.workspaceId || row.userId !== value.actorId)
+      throw new BudgetError('PENDING_RECONCILIATION');
+    if (requestFingerprint(stored.data) !== requestFingerprint(value)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
     return stored.data;
   }
 }

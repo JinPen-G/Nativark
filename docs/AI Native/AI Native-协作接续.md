@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-24。本轮固定接收Claude A `8c628101`、Claude B `1e677bec`，主线另行复查后修复计数观察授权/响应契约/提交后unknown、平台请求隔离/Routed传输/原账务及能力收据归属。A整合提交`87bf9ff3`；B交付及主线修复随本记录整合。原主线`29c846e2`及客户端独立成果保留。原28项64.3%、ENTRY52.8%、正式0/28保持；仍有失败用例及正式装配缺口，不能称只待真实环境验收。
-> **本轮仅主线核验和整合固定成果，未续派或同步辅助树。** Claude A/B分别保留上述固定HEAD；Codex A/B继续暂停。现有排队任务不是已交付事实；客户端/Harness不在本轮范围。不自动启动旧心跳，不合main、推送或启用生产。
+> 更新时间：2026-10-24。Claude A `8c628101`、Claude B `1e677bec`已合入，整合提交为`87bf9ff3`和`de9b89b0`。负责人再次要求深查，主线补计数历史原价、unknown/缺失分类、原审计归属、冻结正文重读、HTTP安全投影与实际平台探测授权接点；修复随本记录提交。原28项64.3%、ENTRY52.8%、正式0/28保持，仍有失败用例及正式装配缺口。
+> **两棵Claude辅助树已按授权快进到`de9b89b0`并开始下一服务端长批。** A负责原runner/步骤事务、多轮输入、审批及订单/设置场景，B负责平台HTTP/恢复消费者、知识隐私与事件人工办理；后继成果未自动接收。主线本片只修已合入版本，未移动活动辅助HEAD；Codex A/B继续暂停。不启动旧心跳，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -14,11 +14,11 @@
 ## 工作树与写入归属
 
 本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
-分支：`ai/ai-native-contracts-s01-20261002`。本轮主线接收已停止写入的固定A/B交付，负责整合修复及公共接点。后续恢复辅助开发前重新确认身份、归属和固定同步依赖；不与辅助树双写。主线保留AppModule/ai-native-application.providers.ts、shared中央出口/OpenAPI、Auth/Guard内核、公共runner/审批及最终整合，不直接代写辅助源码。
+分支：`ai/ai-native-contracts-s01-20261002`。主线负责既有交付复查、计数/计价投影及公共接点，保留AppModule、中央provider/shared出口/OpenAPI、Auth/Guard和最终整合。A当前认领runner/步骤事务/输入/审批及相关场景，不与主线重复修旧租约红测；B认领平台请求/知识/隐私/事件消费者。主线本片对`platform-probe.authority.ts`的窄修复需在下次B固定整合时保留，不能被旧上下文适配覆盖。主线另有后台/Harness作者独立WIP，不夹带提交。
 
 原服务端与客户端作者的代码和归属分别保留；本次仅统一保全和同步，不把继承成果改称本轮功能实现，也不续接旧会话的执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
 
-辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。两树原源码、output、依赖、缓存和私有client保留，本轮没有反向同步或派工。源码合入不代表生成物、数据库或运行环境同步；主线后续修复不会自动同步，下一次开工先约定固定依赖，不追活动HEAD。
+辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。本次同步仅快进源码到`de9b89b0`，原output、stash、依赖、缓存和私有client保留，不代表生成物或数据库已同步。两线已在各自树续作，主线后续修复不自动同步，不追活动HEAD；以新固定交付核对等价依赖再整合。
 
 开工仍须核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本次负责人明确授权在全部停写后提交保全并同步，既有正式依据内容原样保留，未重排任务或上调进度。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交；后续新WIP必须重新核对，不能据本次清洁现场覆盖。
 
@@ -32,6 +32,7 @@
 - Claude B固定`1e677bec`已接：平台GatewayContext/Public/Unified、admission/dispatch/accounting归属及追加迁移、平台请求工厂。主线修正实际Routed的actor-only接点、原账务平台principal、scopeKind交叉核对、能力收据上下文，以及每次open独立关闭/迟到Guard凭据复核。知识/automation/员工多数为既有成果和验证，不能把报告的四批标题当新增功能数。
 - 下一步A装配：`AiInputCountingModule.registerHttp`及请求级可信计数/计价/成本依赖仍需接入标准应用，计数OpenAPI路径尚未挂接。当前codec只支持实际已实现变体；其他协议、媒体、未登记schema、客户计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种或把calls当token上界。
 - 下一步B装配：平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。`PlatformCapabilityProbeModule`仅导出组合/请求工厂，尚无HTTP Controller，不能称已挂载平台HTTP。迁移仅隔离validate/diff和client生成，尚未执行。知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。
+- 再审修复的消费注意：计数HTTP的原价格/上界读取现复用既有安全摘要及共享schema，不再返回含配置引用的内部证据；`textDispatch`新输出为`not_attested`，旧`not_started`仅兼容解析，不授重试。历史计数从原reservation取计价版本；真正缺行与存储失败分开。未验证的结构化输出计数在准入前拒绝，不静默丢schema。平台实际authority接受actor-only公共上下文并拒绝租户混入；文本/视觉协议链及音频授权绑定已离线核验，音频本片未做传输验收。
 - 尚有红测：本轮实际复跑human-quote-selection为6/9、original-scene-host为14/19、inspection-media-submission为14/17；保留全部失败断言。媒体失败涉及原步骤事务递增run revision后再用旧lease复核，相关仓储/输入来源未被A/B固定提交修改；需按真实事务视图修正，不能仅豁免同fence的revision。其余报价/场景夹具与正式依赖仍须收敛，不能宣称全链完成。
 - 本片验证为主线源码、实际服务/仓储与串行DB/外部端口替身；两线原有两轮审查报告不能替代本次复核，也不能代替MySQL锁/供应商/浏览器/微信或原G4。两线工作树和全部output保留，未经新授权不追活动HEAD、不直接写辅助树；正式百分比未跨档不调整。
 

@@ -40,6 +40,9 @@ const boundSummary = (record: Awaited<ReturnType<GatewayPricingRecordManagement[
   method: record.evidence.method, validFrom: record.evidence.validFrom, expiresAt: record.evidence.expiresAt,
   price: priceSummary(record.price), executionPermission: false as const
 });
+// Shared by the original pricing and counting HTTP entries: raw evidence
+// contains internal provider/configuration references and is not an HTTP DTO.
+export { priceSummary as presentGatewayPriceSummary, boundSummary as presentGatewayInputBoundSummary };
 
 /** Current Auth/ALS request boundary. Historical reservation pricing reads
  * need only stored evidence; publishing still requires the trusted producer.

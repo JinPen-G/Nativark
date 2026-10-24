@@ -50,6 +50,9 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return parsed.data;
 };
 
+export class GatewayInputBoundNotFoundError extends BudgetError {
+  constructor() { super('UNAVAILABLE'); }
+}
 export class PrismaGatewayPricingRecords {
   constructor(private readonly db: GatewayPricingRecordDb) {
     if (typeof db?.aiGatewayPriceRecord?.findUnique !== 'function' || typeof db.aiGatewayPriceRecord.create !== 'function'
@@ -79,8 +82,9 @@ export class PrismaGatewayPricingRecords {
   async bound(scopeId: string, invocationId: string) {
     const id = this.boundId(scopeId, invocationId);
     const row = structuredClone(await this.db.aiGatewayInputBoundRecord.findUnique({ where: { id } }));
-    if (!row || row.id !== id || row.scopeId !== scopeId || row.invocationId !== invocationId
-      || hash(row.payload) !== row.payloadHash) throw new BudgetError('UNAVAILABLE');
+    if (!row) throw new GatewayInputBoundNotFoundError();
+    if (row.id !== id || row.scopeId !== scopeId || row.invocationId !== invocationId
+      || hash(row.payload) !== row.payloadHash) throw new BudgetError('PENDING_RECONCILIATION');
     const evidence = parse(gatewayInputBoundEvidenceSchema, row.payload);
     const price = await this.price(scopeId, evidence.configurationHash, evidence.priceVersion);
     if (evidence.scopeId !== scopeId || evidence.invocationId !== invocationId || evidence.priceHash !== price.hash

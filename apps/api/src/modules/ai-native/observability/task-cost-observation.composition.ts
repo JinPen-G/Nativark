@@ -9,6 +9,7 @@ import type { AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { TaskBudgetUsageReader, type TaskBudgetUsageDb } from '../budget/task-budget-usage.reader';
 import { TaskPerformanceReader } from './task-performance.reader';
 import { BudgetError } from '../budget/budget.ports';
+import { CountTokensReceiptNotFoundError } from '../input-counting/input-count-tokens.receipt';
 
 export interface CountingReceiptObservationSource {
   readCountReceipt(command: unknown): Promise<Record<string, unknown>>;
@@ -55,7 +56,7 @@ export function composeTaskCostObservation(input: TaskCostObservationDependencie
         counting.push({ invocationId: item.invocationId, receipt });
       } catch (error) {
         // No counting receipt for this invocation is a valid state.
-        if (!(error instanceof BudgetError && error.code === 'UNAVAILABLE')) throw error;
+        if (!(error instanceof CountTokensReceiptNotFoundError)) throw error;
       }
     }
     const summary = await usage.summary({ taskId: page.taskId });

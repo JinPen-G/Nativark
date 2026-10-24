@@ -5,13 +5,15 @@
  * Auth/Guard/ALS chain inside the request factory. Counting-owned responses
  * (count / observe / receipt / pricing bases) are structurally validated
  * against the dedicated shared draft shapes before responding; usage page,
- * summary and publication reads are already closed-schema validated inside
- * their own readers/management and are passed through with the bounded
- * transport envelope only. */
+ * summary are validated by their original readers. Pricing reads reuse the
+ * existing safe summaries and closed shared schemas; raw evidence is never
+ * an HTTP response. Every response also has a bounded transport envelope. */
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Module, Post, Req, type DynamicModule } from '@nestjs/common';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_COUNTING_HTTP_SCHEMAS, type AiCountingCountResultDraft, type AiCountingLifecycleObservationDraft,
+import { AI_COUNTING_HTTP_SCHEMAS, AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS,
+  type AiGatewayPriceSummaryDraft, type AiGatewayInputBoundSummaryDraft,
+  type AiCountingCountResultDraft, type AiCountingLifecycleObservationDraft,
   type AiCountingReceiptReadDraft, type AiCountingUsagePricingBasesDraft } from '@rental-os/shared';
 import { BudgetError } from '../budget/budget.ports';
 import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from '../scenes/request-abort';
@@ -45,6 +47,14 @@ const checkedCount = countingAjv.getSchema<AiCountingCountResultDraft>('urn:rent
 const checkedObserve = countingAjv.getSchema<AiCountingLifecycleObservationDraft>('urn:rental:counting:AiCountingLifecycleObservationDraft')!;
 const checkedReceipt = countingAjv.getSchema<AiCountingReceiptReadDraft>('urn:rental:counting:AiCountingReceiptReadDraft')!;
 const checkedBases = countingAjv.getSchema<AiCountingUsagePricingBasesDraft>('urn:rental:counting:AiCountingUsagePricingBasesDraft')!;
+const pricingRefs = (value: unknown): unknown => Array.isArray(value) ? value.map(pricingRefs)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) =>
+    [key, key === '$ref' && typeof child === 'string' ? child.replace(/^#\/components\/schemas\//u, 'urn:rental:counting:') : pricingRefs(child)])) : value;
+for (const name of ['AiGatewayPriceSummaryDraft', 'AiGatewayInputBoundSummaryDraft'] as const) {
+  countingAjv.addSchema(pricingRefs(AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS[name]) as object, `urn:rental:counting:${name}`);
+}
+const checkedPrice = countingAjv.getSchema<AiGatewayPriceSummaryDraft>('urn:rental:counting:AiGatewayPriceSummaryDraft')!;
+const checkedBound = countingAjv.getSchema<AiGatewayInputBoundSummaryDraft>('urn:rental:counting:AiGatewayInputBoundSummaryDraft')!;
 
 @Controller('ai-native/counting')
 export class AiInputCountingController {
@@ -91,13 +101,11 @@ export class AiInputCountingController {
   }
   @Post('input-bound/read') @HttpCode(200) @Header('Cache-Control', 'no-store')
   readInputBound(@Req() request: CountingRequest, @Body() body: unknown) {
-    return this.respond(request, 'readInputBound', body,
-      ((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object')));
+    return this.respond(request, 'readInputBound', body, checkedBound);
   }
   @Post('publication/read') @HttpCode(200) @Header('Cache-Control', 'no-store')
   readPublication(@Req() request: CountingRequest, @Body() body: unknown) {
-    return this.respond(request, 'readPublication', body,
-      ((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object')));
+    return this.respond(request, 'readPublication', body, checkedPrice);
   }
   @Post('usage/page') @HttpCode(200) @Header('Cache-Control', 'no-store')
   usagePage(@Req() request: CountingRequest, @Body() body: unknown) {

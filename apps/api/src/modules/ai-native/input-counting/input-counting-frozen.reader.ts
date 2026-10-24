@@ -7,7 +7,7 @@
  * the request. It never publishes input, registers a call, holds a lease or
  * trusts caller-supplied bodies, token counts or configuration evidence. */
 import { z } from 'zod';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -34,6 +34,13 @@ export interface InputCountingFrozenReaderDependencies {
 }
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+const invocationSelect = { id: true, scopeId: true, actorId: true, taskId: true, runId: true,
+  stepId: true, actionId: true, callId: true, mode: true, sceneCode: true, registrationHash: true,
+  intentHash: true, stepFingerprint: true, configuration: true, configurationHash: true,
+  priceVersion: true, maxOutputTokens: true, expiresAt: true } satisfies Prisma.AiGatewayInvocationSelect;
+const stepSelect = { id: true, scopeId: true, taskId: true, runId: true, actionId: true,
+  toolCode: true, toolVersion: true, inputRef: true, requestFingerprint: true,
+  revision: true, status: true } satisfies Prisma.AiStepSelect;
 
 export class InputCountingFrozenInputReader {
   private readonly policy: TaskModelPolicy;
@@ -54,8 +61,8 @@ export class InputCountingFrozenInputReader {
   async readFrozenCountingInput(value: unknown): Promise<CountTokensFrozenInvocation> {
     const parsed = command.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const invocation = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId } } });
+    const invocation = structuredClone(await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId } }, select: invocationSelect }));
     if (!invocation || invocation.callId !== parsed.data.callId || invocation.scopeId !== parsed.data.scopeId
       || invocation.mode !== 'invoke' || invocation.stepFingerprint !== invocation.intentHash) throw denied();
     const context = this.context(await this.dependencies.execution.authorize(invocation.taskId));
@@ -64,13 +71,14 @@ export class InputCountingFrozenInputReader {
     const access = aiTaskAccessFromContext(context as never, invocation.taskId, this.clock());
     const task = await this.dependencies.db.aiTask.findFirst({ where: access.where });
     if (!task || task.scopeId !== invocation.scopeId) throw denied();
-    const step = await this.dependencies.db.aiStep.findFirst({ where: { scopeId: task.scopeId,
-      taskId: invocation.taskId, runId: invocation.runId, id: invocation.stepId } });
+    const stepWhere = { scopeId: task.scopeId, taskId: invocation.taskId, runId: invocation.runId, id: invocation.stepId };
+    const step = structuredClone(await this.dependencies.db.aiStep.findFirst({ where: stepWhere, select: stepSelect }));
     if (!step || step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !step.inputRef || step.requestFingerprint !== invocation.stepFingerprint) throw denied();
-    const saved = await this.dependencies.db.aiTaskActionInput!.findFirst({ where: { id: step.inputRef,
+    const savedWhere = { id: step.inputRef,
       scopeId: task.scopeId, taskId: invocation.taskId, runId: invocation.runId, toolCode: TASK_TEXT_MODEL_TOOL,
-      toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint: step.requestFingerprint } });
+      toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint: step.requestFingerprint };
+    const saved = structuredClone(await this.dependencies.db.aiTaskActionInput!.findFirst({ where: savedWhere }));
     if (!saved || saved.id !== step.inputRef || saved.fingerprint !== step.requestFingerprint
       || !(saved.expiresAt instanceof Date) || saved.expiresAt <= this.clock()) throw unavailable();
     const frozen = parseTaskModelInput(saved.payload, this.policy);
@@ -81,14 +89,22 @@ export class InputCountingFrozenInputReader {
       || frozen.intent.requestId !== invocation.callId
       || frozen.intent.maxOutputTokens !== invocation.maxOutputTokens
       || frozen.intent.sceneCode !== invocation.sceneCode) throw denied();
-    // Cross-await revalidation: identity, invocation binding and stored
-    // material must be unchanged after every authorization-visible await.
-    const latest = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: task.scopeId, callId: parsed.data.callId } } });
+    // Re-read the actual input and step after the authorization wait, not just
+    // the two invocation hashes. A stable hash column cannot certify a changed payload.
     const reauthorized = this.context(await this.dependencies.execution.authorize(invocation.taskId));
-    if (!latest || latest.registrationHash !== invocation.registrationHash || latest.intentHash !== invocation.intentHash
-      || taskModelIdentity(reauthorized) !== taskModelIdentity(context)
+    if (taskModelIdentity(reauthorized) !== taskModelIdentity(context)
       || (reauthorized as { actor: { userId: string } }).actor.userId !== actorId) throw denied();
+    const [latest, latestStep, latestSaved] = await Promise.all([
+      this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+        scopeId_callId: { scopeId: task.scopeId, callId: parsed.data.callId } }, select: invocationSelect }),
+      this.dependencies.db.aiStep.findFirst({ where: stepWhere, select: stepSelect }),
+      this.dependencies.db.aiTaskActionInput!.findFirst({ where: savedWhere })
+    ]);
+    if (!latest || !latestStep || !latestSaved || requestFingerprint(latest) !== requestFingerprint(invocation)
+      || requestFingerprint(latestStep) !== requestFingerprint(step) || requestFingerprint(latestSaved) !== requestFingerprint(saved)
+      || !(latestSaved.expiresAt instanceof Date) || latestSaved.expiresAt <= this.clock()) throw denied();
+    if (taskModelIdentity(this.context(await this.dependencies.execution.authorize(invocation.taskId)))
+      !== taskModelIdentity(context)) throw denied();
     return { scopeId: task.scopeId, actorId, context,
       invocation: { id: invocation.id, taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId,
         actionId: invocation.actionId, callId: invocation.callId, registrationHash: invocation.registrationHash,

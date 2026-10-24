@@ -21,11 +21,12 @@ import type { GatewayConnection, GatewayConnectionResolver } from '../routed-mod
 import type { AiProviderProfileRecord } from '../provider-profile.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { BudgetError, type BudgetAuthorizationSource, type BudgetServiceLike } from './input-count-tokens.ports';
-import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from '../budget/prisma-gateway-pricing-records';
+import { PrismaGatewayPricingRecords, GatewayInputBoundNotFoundError, type GatewayPricingRecordDb } from '../budget/prisma-gateway-pricing-records';
 import { countTokensSupport, prepareCountTokensMaterial, countTokensMaterialHash, anthropicCountTokensRequest,
   parseCountTokensResponse, postCountTokens, type CountTokensMaterial } from './count-tokens.protocol';
 import { countTokensCallId, countTokensSceneCode } from './input-count-tokens.admission';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensReference,
+  CountTokensReceiptNotFoundError,
   type CountTokensReceipt, type CountTokensReceiptDb } from './input-count-tokens.receipt';
 
 const callIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -69,7 +70,7 @@ export type CountTokensResult = {
   inputTokens?: number; failureCode?: CountTokensReceipt['failureCode'];
   method: 'provider_count_tokens_receipt'; protocol: string; sceneCode: string;
   admission: CountTokensAdmissionState;
-  observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_started';
+  observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_attested';
 };
 /** Read-path lifecycle evidence: which durable stage the ORIGINAL count key
  * has actually reached. 'claimed_dispatched' means the unique INSERT-won
@@ -168,7 +169,9 @@ export class InputCountTokensService {
       ...(receipt.failureCode !== undefined ? { failureCode: receipt.failureCode } : {}),
       method: receipt.method, protocol: receipt.protocol, sceneCode: receipt.sceneCode,
       admission, observedAt: receipt.observedAt, expiresAt: receipt.expiresAt,
-      executionPermission: false as const, textDispatch: 'not_started' as const };
+      // Counting attests only its own operation, including on historical reads.
+      // It cannot prove that the original generation has never been dispatched.
+      executionPermission: false as const, textDispatch: 'not_attested' as const };
   }
   /** Settle (or mark unknown) the admission by original keys; a failed
    * accounting write keeps the receipt and reports a pending admission instead
@@ -306,10 +309,29 @@ export class InputCountTokensService {
       || receipt.countCallId !== countTokensCallId(invocation.callId)
       || !isGatewayConfig(invocation.configuration)
       || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
+    if (typeof this.dependencies.db.aiBudgetReservation?.findUnique !== 'function') throw new BudgetError('UNAVAILABLE');
+    const originalReservation = structuredClone(await this.dependencies.db.aiBudgetReservation.findUnique({
+      where: { id: receipt.admission.reservationId }, select: { id: true, scopeId: true, scopeKind: true,
+        tenantId: true, workspaceId: true, actorId: true, callId: true, requestId: true, idempotencyKey: true,
+        runId: true, stepId: true, actionId: true, sceneCode: true, priceVersion: true, unitKind: true,
+        configurationHash: true, configRevision: true } }));
+    if (!originalReservation || originalReservation.id !== receipt.admission.reservationId
+      || originalReservation.scopeId !== scope.id || originalReservation.scopeKind !== 'WORKSPACE'
+      || originalReservation.tenantId !== current.tenantId || originalReservation.workspaceId !== current.workspaceId
+      || originalReservation.actorId !== current.actorId || originalReservation.callId !== receipt.countCallId
+      || originalReservation.requestId !== receipt.countCallId || originalReservation.idempotencyKey !== receipt.countCallId
+      || originalReservation.runId !== invocation.runId || originalReservation.stepId !== invocation.stepId
+      || originalReservation.actionId !== invocation.actionId || originalReservation.unitKind !== 'calls'
+      || originalReservation.sceneCode !== countTokensSceneCode(invocation.sceneCode)
+      || receipt.admission.sceneCode !== originalReservation.sceneCode
+      || originalReservation.configurationHash !== invocation.configurationHash
+      || originalReservation.configRevision !== invocation.configuration.configRevision
+      || typeof originalReservation.priceVersion !== 'string'
+      || !callIdSchema.max(64).safeParse(originalReservation.priceVersion).success) throw new BudgetError('FORBIDDEN');
     const association: AiUsageAssociationDraft = { requestId: receipt.countCallId, runId: invocation.runId,
       stepId: invocation.stepId, actionId: invocation.actionId, idempotencyKey: receipt.countCallId,
       scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
-      config: invocation.configuration, priceVersion: this.dependencies.countingPriceVersion };
+      config: invocation.configuration, priceVersion: originalReservation.priceVersion };
     // Read-only admission observation: this entry never settles, marks unknown
     // or releases. Convergence of a lost acknowledgement stays with count()'s
     // original-key replay; here the ledger state is reported exactly as-is.
@@ -329,7 +351,7 @@ export class InputCountTokensService {
       const published = await this.records.bound(scope.id, invocation.id);
       bound = { published: true, id: published.id, maxInputTokens: published.evidence.maxInputTokens };
     } catch (error) {
-      if (!(error instanceof BudgetError && error.code === 'UNAVAILABLE')) throw error;
+      if (!(error instanceof GatewayInputBoundNotFoundError)) throw error;
     }
     const diagnostics: CountTokensDiagnostics = { applicable: receipt.state === 'observed'
       && Date.parse(receipt.expiresAt) > this.clock().getTime(), bound };
@@ -367,7 +389,7 @@ export class InputCountTokensService {
       actorId: current.actorId, callId: invocation.callId });
     let receipt: CountTokensReceipt | null = null;
     try { receipt = await this.receipts.read(receiptId); } catch (error) {
-      if (!(error instanceof BudgetError && error.code === 'UNAVAILABLE')) throw error; }
+      if (!(error instanceof CountTokensReceiptNotFoundError)) throw error; }
     if (receipt && (receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
       || receipt.countCallId !== countTokensCallId(invocation.callId))) throw new BudgetError('FORBIDDEN');
     if (receipt) {
@@ -411,7 +433,7 @@ export class InputCountTokensService {
       actorId: frozen.actorId, callId: frozen.invocation.callId });
     let receipt: CountTokensReceipt;
     try { receipt = await this.receipts.read(receiptId); } catch (error) {
-      if (error instanceof BudgetError && error.code === 'UNAVAILABLE') return null;
+      if (error instanceof CountTokensReceiptNotFoundError) return null;
       throw error;
     }
     if (receipt.tenantId !== scope.tenantId || receipt.workspaceId !== scope.workspaceId
@@ -465,7 +487,9 @@ export class InputCountTokensService {
     } catch (error) {
       if (error instanceof ModelGatewayError && ['TIMEOUT', 'CANCELLED', 'PROVIDER_FAILED', 'INVALID_RESPONSE'].includes(error.code))
         return { state: 'unknown', requestHash: request.requestHash };
-      if (error instanceof ModelAdapterError) return { state: 'failed', failureCode: error.code === 'AUTHENTICATION_FAILED' ? 'AUTHENTICATION_FAILED' : 'PROVIDER_REJECTED', requestHash: request.requestHash };
+      if (error instanceof ModelAdapterError) return error.code === 'AUTHENTICATION_FAILED'
+        ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
+        : { state: 'unknown', requestHash: request.requestHash };
       throw error;
     } finally {
       if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
