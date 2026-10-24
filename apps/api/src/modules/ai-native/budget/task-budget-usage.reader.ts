@@ -2,10 +2,12 @@ import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { isGatewayConfig } from '../gateway-contract-validation';
+import { countTokensCallId, countTokensSceneCode } from '../input-counting/input-count-tokens.receipt';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { BudgetError, type BudgetRecord } from './budget.ports';
-import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft, type AiTaskBudgetUsageSummaryDraft } from '@rental-os/shared';
+import { AI_USAGE_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiExecutionContext, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageRecordDraft, type AiTaskBudgetUsageSummaryDraft, type AiUsageAssociationDraft } from '@rental-os/shared';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { isDeepStrictEqual } from 'node:util';
@@ -37,10 +39,15 @@ const identity = (context: AiExecutionContext) => {
 };
 
 /** Safe shared projection of an already-authorized original record. Never
- * return the raw association, credential reference, hashes or dispatch token. */
+ * return the raw association, credential reference, hashes or dispatch token.
+ * A counting admission is presented with its own reservation id and derived
+ * count call id under the invocation's counting scene, so the count request
+ * and the generation request stay separately positioned and never merge into
+ * one charge. */
 export function presentTaskBudgetUsageRecord(invocation: Readonly<{ id: string; callId: string }>,
-  record: Readonly<BudgetRecord>): AiTaskBudgetUsageRecordDraft {
-  if (record.callId !== invocation.callId || !(record.storageVersion instanceof Date)
+  record: Readonly<BudgetRecord>, kind: 'generation' | 'count_request' = 'generation'): AiTaskBudgetUsageRecordDraft {
+  const expectedCallId = kind === 'generation' ? invocation.callId : countTokensCallId(invocation.callId);
+  if (record.callId !== expectedCallId || !(record.storageVersion instanceof Date)
     || !Number.isFinite(record.storageVersion.getTime()) || record.status === 'settled' && record.actual === null)
     throw new BudgetError('UNAVAILABLE');
   const projected = { invocationId: invocation.id, callId: record.callId, reservationId: record.id, accounting: 'recorded' as const,
@@ -84,6 +91,8 @@ export class TaskBudgetUsageReader {
     if (!parsed.success) throw new BudgetError('INVALID');
     const { taskId } = parsed.data, before = await this.current(taskId);
     const access = aiTaskAccessFromContext(before.context, taskId, this.clock());
+    const owned = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: { id: true } }));
+    if (!owned || owned.id !== taskId) throw new BudgetError('FORBIDDEN');
     const window = async () => structuredClone(await this.db.aiGatewayInvocation.findMany({
       where: { scopeId: before.scopeId, taskId, run: { is: { scopeId: before.scopeId, taskId,
         task: { is: access.where } } } }, orderBy: { id: 'asc' }, take: 51,
@@ -102,8 +111,11 @@ export class TaskBudgetUsageReader {
       for (let offset = 0; offset < rows.length; offset += 20) {
         const command = { taskId, limit: 20, ...(after ? { after } : {}) }, page = await this.read(command);
         const expected = rows.slice(offset, offset + 20);
-        if (page.taskId !== taskId || !page.pageAmounts || page.items.length !== expected.length
-          || page.items.some((item, index) => item.invocationId !== expected[index].id || item.callId !== expected[index].callId)
+        // One invocation may carry up to two records (counting admission plus
+        // generation); compare the distinct invocation sequence, not item count.
+        const sequence = [...new Set(page.items.map(item => item.invocationId))];
+        if (page.taskId !== taskId || !page.pageAmounts || sequence.length !== expected.length
+          || sequence.some((invocationId, index) => invocationId !== expected[index].id)
           || page.nextAfter !== (offset + 20 < rows.length ? expected.at(-1)!.id : null)) throw new BudgetError('PENDING_RECONCILIATION');
         pages.push({ command, page });
         after = page.nextAfter ?? undefined;
@@ -140,13 +152,20 @@ export class TaskBudgetUsageReader {
     const summary = { ...base, state: 'observed' as const, coverage: 'all_registered_invocations' as const,
       invocationCount: rows.length, recordedCount, notRecordedCount, accountingComplete: notRecordedCount === 0 && !unresolved,
       groups: [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, group]) => group) };
-    if (!checkedSummary(summary) || recordedCount + notRecordedCount !== rows.length) throw new BudgetError('UNAVAILABLE');
+    if (!checkedSummary(summary) || notRecordedCount > rows.length
+      || recordedCount + notRecordedCount < rows.length || recordedCount > 2 * rows.length)
+      throw new BudgetError('UNAVAILABLE');
     return summary;
   }
   async read(value: unknown): Promise<AiTaskBudgetUsagePageDraft> {
     const parsed = request.safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
     const command = parsed.data, before = await this.current(command.taskId);
+    // A foreign or missing task is refused outright: an empty page must never
+    // become an existence oracle or a misleading "no consumption" answer.
+    const owned = structuredClone(await this.db.aiTask.findFirst({ where: aiTaskAccessFromContext(
+      before.context, command.taskId, this.clock()).where, select: { id: true } }));
+    if (!owned || owned.id !== command.taskId) throw new BudgetError('FORBIDDEN');
     const where = { scopeId: before.scopeId, taskId: command.taskId, actorId: before.actorId };
     if (command.after) {
       const cursor = await this.db.aiGatewayInvocation.findFirst({ where: { ...where, id: command.after }, select: { id: true } });
@@ -163,28 +182,7 @@ export class TaskBudgetUsageReader {
     const absentCalls: string[] = [];
     const amounts = new Map<string, { unit: 'money' | 'tokens' | 'calls'; currency: string | null; scale: 0 | 6;
       reservedAtoms: bigint; pendingAtoms: bigint; settledAtoms: bigint; releasedReservationAtoms: bigint; settledExcessAtoms: bigint }>();
-    for (const row of rows.slice(0, command.limit)) {
-      const reservation = structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
-        scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: row.callId } },
-        select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true } }));
-      if (!reservation) {
-        absentCalls.push(row.callId);
-        items.push({ invocationId: row.id, callId: row.callId, accounting: 'not_recorded' as const });
-        continue;
-      }
-      if (reservation.scopeId !== before.scopeId || reservation.scopeKind !== 'WORKSPACE'
-        || reservation.actorId !== before.actorId || reservation.callId !== row.callId) throw new BudgetError('FORBIDDEN');
-      const binding = structuredClone(await this.bindings.resolveForReservation(before.gateway, reservation.id));
-      if (binding.actorId !== before.actorId || binding.association.requestId !== row.callId) throw new BudgetError('FORBIDDEN');
-      const original = await this.db.aiGatewayInvocation.findFirst({ where: { ...where, id: row.id, callId: row.callId } });
-      if (!original || original.id !== row.id || original.taskId !== command.taskId
-        || original.runId !== binding.association.runId || original.stepId !== binding.association.stepId
-        || original.actionId !== binding.association.actionId || original.priceVersion !== binding.association.priceVersion
-        || original.configurationHash !== requestFingerprint(binding.association.config)) throw new BudgetError('FORBIDDEN');
-      const record = structuredClone(await this.records.get(reservation.id, binding.association));
-      if (!record || record.actorId !== before.actorId || record.scopeId !== before.scopeId
-        || record.callId !== row.callId || (record.status === 'settled' && record.actual === null)) throw new BudgetError('UNAVAILABLE');
-      observations.push(structuredClone(record));
+    const accumulate = (record: BudgetRecord) => {
       const held = quantityAtoms(record.reserved), actual = record.actual === null ? null : quantityAtoms(record.actual);
       if (record.actual !== null && !sameUnit(record.reserved, record.actual)
         || record.status !== 'settled' && actual !== null) throw new BudgetError('UNAVAILABLE');
@@ -200,6 +198,59 @@ export class TaskBudgetUsageReader {
       else if (record.status === 'released') group.releasedReservationAtoms += held;
       else group.reservedAtoms += held;
       amounts.set(key, group);
+    };
+    for (const row of rows.slice(0, command.limit)) {
+      const original = await this.db.aiGatewayInvocation.findFirst({ where: { ...where, id: row.id, callId: row.callId } });
+      if (!original || original.id !== row.id || original.taskId !== command.taskId || original.callId !== row.callId
+        || !isGatewayConfig(original.configuration) || requestFingerprint(original.configuration) !== original.configurationHash)
+        throw new BudgetError('FORBIDDEN');
+      // The counting admission precedes any text dispatch and is presented as
+      // its own reservation: the count request and the generation request are
+      // separately metered calls that never collapse into one charge. A scene
+      // code too long to derive a counting scene can never have produced a
+      // counting admission (admission itself would have failed), so the lookup
+      // is skipped rather than poisoning the whole page.
+      const countingScene = (() => { try { return countTokensSceneCode(original.sceneCode); } catch { return null; } })();
+      const countCallId = countTokensCallId(row.callId);
+      const counting = countingScene === null ? null : structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: countCallId } },
+        select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true, priceVersion: true } }));
+      if (counting) {
+        if (counting.scopeId !== before.scopeId || counting.scopeKind !== 'WORKSPACE'
+          || counting.actorId !== before.actorId || counting.callId !== countCallId
+          || typeof counting.priceVersion !== 'string' || !counting.priceVersion.length) throw new BudgetError('FORBIDDEN');
+        const association: AiUsageAssociationDraft = { requestId: countCallId, runId: original.runId, stepId: original.stepId,
+          actionId: original.actionId, idempotencyKey: countCallId, scope: structuredClone(before.context.scope),
+          config: structuredClone(original.configuration) as AiUsageAssociationDraft['config'],
+          priceVersion: counting.priceVersion };
+        const record = structuredClone(await this.records.get(counting.id, association));
+        if (!record || record.actorId !== before.actorId || record.scopeId !== before.scopeId
+          || record.callId !== countCallId || record.sceneCode !== countTokensSceneCode(original.sceneCode)
+          || record.status === 'settled' && record.actual === null) throw new BudgetError('UNAVAILABLE');
+        observations.push(structuredClone(record));
+        accumulate(record);
+        items.push(presentTaskBudgetUsageRecord(row, record, 'count_request'));
+      }
+      const reservation = structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: row.callId } },
+        select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true } }));
+      if (!reservation) {
+        absentCalls.push(row.callId);
+        items.push({ invocationId: row.id, callId: row.callId, accounting: 'not_recorded' as const });
+        continue;
+      }
+      if (reservation.scopeId !== before.scopeId || reservation.scopeKind !== 'WORKSPACE'
+        || reservation.actorId !== before.actorId || reservation.callId !== row.callId) throw new BudgetError('FORBIDDEN');
+      const binding = structuredClone(await this.bindings.resolveForReservation(before.gateway, reservation.id));
+      if (binding.actorId !== before.actorId || binding.association.requestId !== row.callId) throw new BudgetError('FORBIDDEN');
+      if (original.runId !== binding.association.runId || original.stepId !== binding.association.stepId
+        || original.actionId !== binding.association.actionId || original.priceVersion !== binding.association.priceVersion
+        || original.configurationHash !== requestFingerprint(binding.association.config)) throw new BudgetError('FORBIDDEN');
+      const record = structuredClone(await this.records.get(reservation.id, binding.association));
+      if (!record || record.actorId !== before.actorId || record.scopeId !== before.scopeId
+        || record.callId !== row.callId || (record.status === 'settled' && record.actual === null)) throw new BudgetError('UNAVAILABLE');
+      observations.push(structuredClone(record));
+      accumulate(record);
       items.push(presentTaskBudgetUsageRecord(row, record));
     }
     // Fresh original record observations; neither expiry nor a changed model

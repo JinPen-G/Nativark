@@ -29,7 +29,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   private readonly runtime: PublicGatewayRuntime;
   private readonly priceVersion: string;
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'
-    | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'>,
+    | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'> & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
   private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
@@ -135,6 +135,55 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       || requestFingerprint(latest.payload) !== requestFingerprint(receipt.payload)
       || taskModelIdentity(await this.execution.authorize(command.taskId)) !== taskModelIdentity(context)) throw denied();
     return { inputRef: receipt.id, fingerprint: receipt.fingerprint, execution: 'not_attested' as const };
+  }
+
+  /** Read the exact frozen input an invocation registered, for input counting
+   * only: verifies the persisted material against the invocation's registered
+   * hashes without publishing, leasing, registering a new call or dispatching.
+   * The counting consumer receives the same intent/configuration the text
+   * dispatch will send, so a receipt can never attest different content. */
+  async readFrozenCountingInput(value: unknown) {
+    const parsed = z.object({ callId: id.max(128), scopeId: id.max(36), actorId: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (this.kind || typeof this.db.aiTaskActionInput?.findFirst !== 'function') throw unavailable();
+    const invocation = await this.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId } } });
+    if (!invocation || invocation.callId !== parsed.data.callId || invocation.scopeId !== parsed.data.scopeId
+      || invocation.sceneCode !== this.scene.sceneCode || invocation.mode !== 'invoke') throw denied();
+    const context = structuredClone(await this.execution.authorize(invocation.taskId));
+    const actorId = this.narrow(context).actorId;
+    if (actorId !== parsed.data.actorId || invocation.actorId !== actorId) throw denied();
+    const access = aiTaskAccessFromContext(context, invocation.taskId, this.clock());
+    const task = await this.db.aiTask.findFirst({ where: access.where });
+    if (!task || task.scopeId !== invocation.scopeId) throw denied();
+    const step = await this.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: invocation.taskId,
+      runId: invocation.runId, id: invocation.stepId } });
+    if (!step || step.toolCode !== this.tool || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || !step.inputRef || step.requestFingerprint !== invocation.stepFingerprint) throw denied();
+    const saved = await this.db.aiTaskActionInput!.findFirst({ where: { id: step.inputRef, scopeId: task.scopeId,
+      taskId: invocation.taskId, runId: invocation.runId, toolCode: this.tool,
+      toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint: step.requestFingerprint } });
+    if (!saved || saved.id !== step.inputRef || saved.fingerprint !== step.requestFingerprint
+      || !(saved.expiresAt instanceof Date) || saved.expiresAt <= this.clock()) throw unavailable();
+    const frozen = parseTaskModelInput(saved.payload, this.policy);
+    if (taskModelFingerprint(frozen, this.policy) !== invocation.intentHash
+      || frozen.identityHash !== taskModelIdentity(context)
+      || frozen.priceVersion !== invocation.priceVersion
+      || requestFingerprint(frozen.configuration) !== invocation.configurationHash
+      || frozen.intent.requestId !== invocation.callId
+      || frozen.intent.maxOutputTokens !== invocation.maxOutputTokens
+      || frozen.intent.sceneCode !== invocation.sceneCode) throw denied();
+    const latest = await this.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: task.scopeId, callId: parsed.data.callId } } });
+    if (!latest || latest.registrationHash !== invocation.registrationHash || latest.intentHash !== invocation.intentHash
+      || taskModelIdentity(await this.execution.authorize(invocation.taskId)) !== taskModelIdentity(context)) throw denied();
+    return { scopeId: task.scopeId, actorId, context,
+      invocation: { id: invocation.id, taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId,
+        actionId: invocation.actionId, callId: invocation.callId, registrationHash: invocation.registrationHash,
+        intentHash: invocation.intentHash, configurationHash: invocation.configurationHash,
+        priceVersion: invocation.priceVersion, maxOutputTokens: invocation.maxOutputTokens,
+        sceneCode: invocation.sceneCode, expiresAt: new Date(invocation.expiresAt) },
+      intent: structuredClone(frozen.intent), configuration: structuredClone(frozen.configuration) };
   }
 
   async resolve(presented: AiTaskRunnerStepRef, held: AiTaskRunnerLease) {

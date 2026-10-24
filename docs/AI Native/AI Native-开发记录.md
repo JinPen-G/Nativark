@@ -12,6 +12,13 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：Claude A/B四批固定交付复核整合（2026-10-24）
+
+- 固定接收A `68a43441`、B `ddf00ca0`，保留主线`5da55aa3`后继和客户端归属；B整合`e78196a5`。新增计数/成本/报价交接及平台probe/知识附件组合均复用原账本、业务服务与权限，未启用生产模块或改任务门槛。
+- 主线独立复核另确认A的P1两项（预算事件重放可导致并发重复POST、原收据吞读取撤权）、P2两项（20 invocation双记录超公共schema、文本关键词误拒）；修为原键唯一持久派发领取、读取授权失败直接拒绝且读后复验、页40/汇总100记录上限及结构化媒体判断。B的consumer签名遗漏迁移两份既有用例；同时校正既有probe夹具的adapter方法形状和recordUsage端口，未删除业务断言。
+- 主线双preload/固定offline环境：A三份既有业务用例2+6+1全绿，B关联connection 14/14、持久步骤证据21/21、知识15/15、automation请求3/3；原平台冒烟19组及直接预算reserve权限补验1组通过。复用原output计数/报价冒烟，追加stdin六组验证并发单POST、重建不重发、INSERT应答丢失不重领、读取前/中撤权、22条记录实际仓储分页/汇总及普通文本，均退出0。首轮双ts-node注册导致编译失败，不算功能红测；统一进程兼容转译器后connection先12/14，再按上述真实接口修正为14/14。各阶段数量不拼成全量验收。
+- 所有Node命令沿`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -`，stdin单次注册已安装兼容TypeScript、preferTsExts读取本树shared源码；独立noEmit检查API/shared为707 roots/0诊断/退出0，diff检查退出0，离线守卫未触发违规，未覆盖shared dist或Prisma产物。日志/临时目录仅本树`output/review-claude-ab-20261024/`，无新增测试脚本。标准计数/成本装配、平台公共Gateway/admission/accounting/schema接点、正式计数/费率/政策配置、知识ACL/删除传播和适用真实验收仍缺，不据局部复核上调原任务百分比；精确下一步见接续。
+
 ## 近期核心：人工接管提交边界与原代次核对（2026-10-24）
 
 - 原PrismaTaskTakeoverRepository优先按事务提交边界分类，回调完成后的typed CAS/权限错误与写后普通异常保持AI_RESULT_UNKNOWN；COMMIT应答后再次核对当前takeover权限及租约期限，失败保留已可能提交的fence，不猜测释放/重接管。readReceipt仍按当前原结果读权观察同一代次，不依赖新takeover政策，不产生新步骤/计量/派发。

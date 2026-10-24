@@ -200,13 +200,6 @@ export class AiQuoteBusinessPreparationService {
       validity: { previous: a.expiresAt, current: b.expiresAt }, approvalReuse: 'forbidden_new_quote_requires_new_confirmation' as const };
   }
 
-  /** No formal order-creation handoff is owned by this lane. */
-  async commitHandoff() {
-    return { status: 'unavailable' as const, reason: 'formal_order_commit_input_port_not_exposed' as const,
-      required: ['original_request_reference', 'quote_id', 'selection_revision', 'source_versions'],
-      sideEffects: 'not_attempted' as const, orderApproval: 'not_granted' as const };
-  }
-
   async prepareInput(value: unknown, modelAvailability: 'not_requested' | 'unavailable' = 'not_requested') {
     if (!['not_requested', 'unavailable'].includes(modelAvailability)) throw new ModelGatewayError('INVALID_REQUEST');
     const facts = await this.prepare(value);
@@ -215,13 +208,5 @@ export class AiQuoteBusinessPreparationService {
       model: { status: modelAvailability, answer: 'not_generated' as const },
       gaps: ['human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'],
       execution: 'not_attempted' as const });
-  }
-
-  /** There is no original-operation key on Core.createQuote/getQuote. Never
-   * use a latest-quote lookup or retry a create to manufacture reconciliation. */
-  async reconciliationAvailability() {
-    return this.authority.withRead('quote_context', {}, async () => ({ status: 'unavailable' as const,
-      nextAction: 'reconcile' as const, retryable: false as const,
-      missingDependency: 'Core quote lookup by original operation key + request fingerprint + owner/scope' as const }));
   }
 }

@@ -7,6 +7,7 @@ const { MembershipService } = require('../../../apps/api/src/modules/platform/me
 const { RentalWorkspaceReportRepository } = require('../../../apps/api/src/modules/rental-core/rental-workspace-report.repository');
 const { composeAiAuthorizedBusinessTools } = require('../../../apps/api/src/modules/ai-native/tools/business-tools.composition');
 const stores = require('../../helpers/absorbing-config-store.cjs');
+const { requestFingerprint } = require('../../../apps/api/src/modules/rental-core/rental-idempotency.repository');
 exports.setup = async (categoryCode = 'camera', withMembership = false) => {
   const h = await authorizedRunnerHarness();
   h.identity.user.tenantId = 'tenant_001';
@@ -15,6 +16,20 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
   config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode, isDefault: true }];
   const facts = stores.createAbsorbingFactStore();
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
+  // Declared synthetic pagination endpoint over the SAME seeded synthetic
+  // catalog (not a Prisma integrity simulation): deterministic id-ordered
+  // pages with the formal cursor/truncated contract for the persisted port.
+  config.listItemGroupsPage = async (tenantId, workspaceId, query) => {
+    if (workspaceId !== 'workspace-a') throw Error('synthetic workspace mismatch');
+    const seeded = core.listItemGroups(tenantId);
+    const all = seeded.filter(row => (!query.itemGroupId || row.id === query.itemGroupId)
+      && (!query.name || row.name === query.name) && (!query.cursor || row.id > query.cursor))
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const rows = all.slice(0, query.limit), truncated = all.length > query.limit;
+    return { rows, truncated, nextCursor: truncated ? rows[rows.length - 1].id : null,
+      source: 'persisted_workspace_configuration',
+      configurationVersion: requestFingerprint(seeded.map(row => [row.id, row.name, row.status, row.unit])) };
+  };
   const businessFacts = stores.createAbsorbingBusinessFactStore();
   const membershipRows = { customer:{id:'customer-a',tenantId:'tenant_001',customerType:'personal',name:'Synthetic customer',phoneMasked:'138****0000'},
     link:{tenantId:'tenant_001',customerId:'customer-a',status:'active'}, bookingOptions:[], bookingQueries:[], corporateCustomers:[], corporateLinks:[] };
