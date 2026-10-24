@@ -17,10 +17,38 @@ for (const code of ['camera', 'camping', 'vehicle', 'construction']) test(`${cod
   const choice = contract.fields.find(field => field.fieldId === 'pricing_unit_selection');
   assert.ok(choice.options.length > 0 && choice.options.every(row => description.pricingUnits.includes(row.value)));
   const explicit = applyOriginalQuoteAnswers(incomplete, [{ contract, answers: [{ fieldId: choice.fieldId, value: h.candidate.items[0].pricingUnit }] }]);
-  const first = await h.tools.quote.candidates.prepare(explicit);
-  const revised = await h.tools.quote.candidates.prepare({ ...explicit, items: [{ ...explicit.items[0], quantity: 2 }] });
-  assert.equal(first.status, 'needs_confirmation'); assert.equal(revised.request.lines[0].quantity, 2);
-  assert.notDeepEqual(revised.request, first.request); assert.equal(revised.reservation, 'not_reserved');
+  // The answered unit changes the candidate fingerprint: the current contract
+  // re-offers the current choices until the exact candidate is reconfirmed,
+  // and any modified parameter (quantity) reopens the same reconfirmation.
+  // Reconfirm answers re-select the candidate's own current values.
+  const reconfirmWith = (candidateValue, preparation, key) => {
+    const round = originalQuoteAnswerContract(candidateValue, preparation, key);
+    return applyOriginalQuoteAnswers(candidateValue, [{ contract: round,
+      answers: round.fields.filter(field => field.kind === 'choice').map(field => {
+        const current = field.fieldId === 'pricing_unit_selection' ? candidateValue.items[0].pricingUnit
+          : field.fieldId === 'item_selection' ? candidateValue.items[0].itemGroupId
+          : field.fieldId === 'customer_selection' ? candidateValue.customerId
+          : field.fieldId === 'pickup_location' ? candidateValue.locationId : field.options[0].value;
+        return { fieldId: field.fieldId, value: field.options.some(option => option.value === current) ? current : field.options[0].value };
+      }) }]);
+  };
+  let candidate = explicit, settled = await h.tools.quote.candidates.prepare(explicit);
+  for (let round = 0; round < 4 && settled.status === 'missing_input'; round++) {
+    candidate = reconfirmWith(candidate, settled, `Reconfirm the current candidate ${round}`);
+    settled = await h.tools.quote.candidates.prepare(candidate);
+  }
+  assert.equal(settled.status, 'needs_confirmation');
+  const modified = { ...candidate, items: [{ ...candidate.items[0], quantity: 2 }] };
+  let reopened = await h.tools.quote.candidates.prepare(modified);
+  assert.equal(reopened.status, 'missing_input'); assert.ok(reopened.missingFields.includes('selectionRevision'));
+  let adjusted = modified;
+  for (let round = 0; round < 4 && reopened.status === 'missing_input'; round++) {
+    adjusted = reconfirmWith(adjusted, reopened, `Reconfirm the modified candidate ${round}`);
+    reopened = await h.tools.quote.candidates.prepare(adjusted);
+  }
+  const revised = reopened;
+  assert.equal(revised.request.lines[0].quantity, 2);
+  assert.notDeepEqual(revised.request, settled.request); assert.equal(revised.reservation, 'not_reserved');
   const alternatives = await h.tools.quote.businessPreparation.alternatives({ candidate: h.candidate, limit: 2 });
   assert.equal(alternatives.status, 'candidates_only'); assert.ok(alternatives.rows.length <= 2);
   assert.ok(alternatives.rows.every(row => row.price === 'not_quoted' && row.candidate.id !== h.group.id));

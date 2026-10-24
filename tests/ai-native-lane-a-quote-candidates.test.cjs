@@ -16,6 +16,20 @@ async function setup(categoryCode='camera'){
  const h=await authorizedRunnerHarness();h.identity.user.tenantId='tenant_001';h.identity.user.permissions.push('rental-core:catalog:view','rental-os:order:create');
  const config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:'workspace-a',tenantId:'tenant_001',categoryCode,isDefault:true}];
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore());await core.onApplicationBootstrap();
+ // Declared synthetic pagination endpoint over the SAME seeded synthetic
+ // catalog: deterministic id-ordered pages with the formal cursor/truncated
+ // contract for the persisted port (AI reads are bounded-only).
+ const {requestFingerprint}=require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+ config.listItemGroupsPage=async(tenantId,workspaceId,query)=>{
+  const seeded=core.listItemGroups(tenantId);
+  const all=seeded.filter(row=>(!query.itemGroupId||row.id===query.itemGroupId)
+    &&(!query.name||row.name===query.name)&&(!query.cursor||row.id>query.cursor))
+   .sort((left,right)=>(left.id<right.id?-1:left.id>right.id?1:0));
+  const rows=all.slice(0,query.limit),truncated=all.length>query.limit;
+  return {rows,truncated,nextCursor:truncated?rows[rows.length-1].id:null,
+   source:'persisted_workspace_configuration',
+   configurationVersion:requestFingerprint(seeded.map(row=>[row.id,row.name,row.status,row.unit]))};
+ };
  const bc={profile:core.getProfile('tenant_001'),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code===categoryCode),settings:core.getBusinessSettings('tenant_001'),groups:core.listItemGroups('tenant_001'),locations:core.listLocations('tenant_001'),operators:core.listOperators('tenant_001'),couponTemplates:[]};
  const customers=[{id:'customer-a',name:'Synthetic same name',phoneMasked:'138****0000',membership:{status:'active'}},{id:'customer-b',name:'Synthetic same name',phoneMasked:'139****0000',membership:{status:'active'}}];
  const memberships=new MembershipService({customerProfile:{findMany:async q=>structuredClone(customers.filter(row =>
@@ -131,6 +145,9 @@ test('delivery address selection flows through original answers and must be rese
  assert.deepEqual(contract.fields.find(f=>f.fieldId==='delivery_address_selection').options.map(o=>o.value),['address-a']);
  const selected=applyOriginalQuoteAnswers(input,[{contract,answers:[{fieldId:'delivery_address_selection',value:'address-a'}]}]);
  assert.equal(input.deliveryAddressId,undefined);
+ // The selected address joins the candidate fingerprint and the untrusted name
+ // normalization shifts it once more: the contract re-offers current choices
+ // until the exact candidate is reconfirmed.
  const ready=await h.service.prepare(selected);
  assert.equal(ready.status,'needs_confirmation');assert.equal(ready.request.deliveryAddressId,'address-a');
  assert.match(ready.addressFingerprint,/^[a-f0-9]{64}$/);assert.equal(ready.reservation,'not_reserved');

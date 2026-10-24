@@ -30,9 +30,11 @@ export async function withRequestAbort<T>(request: AiRequestAbortSource, work: (
   const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
   const response = request?.res;
   const listensResponse = typeof response?.once === 'function' && typeof response?.removeListener === 'function';
-  if (request?.aborted || response?.destroyed && response.writableFinished !== true) {
-    throw new AiRequestWaitError('AI_RESOURCE_UNAVAILABLE'); // work never entered
-  }
+  // A request that already arrived aborted still delivers its explicit
+  // submission to the application: the application's own abort checks own the
+  // not-started outcomes. Only abandonment during flight rejects the wait.
+  const preAborted = Boolean(request?.aborted)
+    || Boolean(response?.destroyed) && response?.writableFinished !== true;
   return new Promise<T>((resolve, reject) => {
     let settled = false, timer: unknown, timerStarted = false;
     const cleanup = () => {
@@ -57,7 +59,7 @@ export async function withRequestAbort<T>(request: AiRequestAbortSource, work: (
       if (listensResponse) response.once!('close', responseClosed);
       timer = clock.setTimeout(abort, maxWaitMs); timerStarted = true;
       if (settled) { cleanup(); return; }
-      if (request?.aborted || response?.destroyed && response.writableFinished !== true) { abort(); return; }
+      if (preAborted) controller.abort();
       // Attach both handlers even if the dependency later ignores interruption.
       Promise.resolve(work(controller.signal)).then(value => finish(true, value), error => finish(false, error));
     } catch (error) { finish(false, error); }
