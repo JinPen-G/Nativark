@@ -285,6 +285,10 @@ export function composeRequestBoundSettingsTaskControls(
   const readSchema = reference.extend({ operation: z.string() }).strict();
   const writeSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
   const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
+  const operationSchema = z.discriminatedUnion('mutation', [
+    readSchema.extend({ mutation: z.literal('configure'), expectedRevision: z.number().int().min(1).max(4294967293).nullable() }).strict(),
+    readSchema.extend({ mutation: z.literal('clear'), expectedRevision: z.number().int().min(1).max(4294967293) }).strict()
+  ]);
   const cancellationSchema = reference.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
   const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, input => ({
     input, policies: composeTaskActionPolicyManagement(input), settings: composeApprovedSettingsApplication(input),
@@ -320,12 +324,12 @@ export function composeRequestBoundSettingsTaskControls(
       const operation = template.operation as AiTaskActionPolicyMutation['operation'];
       let receipt;
       if (mode === 'read') receipt = await root.policies.read(found.task.taskId, operation);
-      else if (mode === 'clear') receipt = await root.policies.clear(found.task.taskId, operation, clearSchema.parse(value).expectedRevision);
+      else if (mode === 'clear') receipt = await root.policies.clear(found.task.taskId, operation, clearSchema.parse(value).expectedRevision, true);
       else {
         const now = root.clock().getTime(), expiresAt = Math.min(Date.parse(found.change.expiresAt), now + ttlMs);
         if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         receipt = await root.policies.put({ taskId: found.task.taskId, operation, requiredPermissions: template.requiredPermissions,
-          expiresAt: new Date(expiresAt) }, writeSchema.parse(value).expectedRevision);
+          expiresAt: new Date(expiresAt) }, writeSchema.parse(value).expectedRevision, true);
       }
       try { await found.verify(); }
       catch (error) {
@@ -334,6 +338,20 @@ export function composeRequestBoundSettingsTaskControls(
       }
       return freezeOriginalInput({ receipt, semantics: 'policy_not_approval_or_dispatch' as const });
     }, { write: mode !== 'read', signal });
+  };
+  const readPolicyOperation = (request: AiSceneHttpRequest, value: unknown) => {
+    const parsed = operationSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, value) => {
+      const input = operationSchema.parse(value);
+      if (!templates.some(row => row.operation === input.operation)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const found = await target(root, request, { creationKey: input.creationKey, changeKey: input.changeKey });
+      const receipt = structuredClone(await root.policies.readMutation(found.task.taskId,
+        input.operation as AiTaskActionPolicyMutation['operation'], input.expectedRevision, input.mutation));
+      await found.verify();
+      return freezeOriginalInput({ mutation: input.mutation, expectedRevision: input.expectedRevision, receipt,
+        semantics: 'original_policy_mutation_not_current_permission' as const });
+    }, { write: false });
   };
   const cancellation = (request: AiSceneHttpRequest, value: unknown,
     mode: 'request' | 'settle_unstarted' | 'read_request' | 'read_settlement', signal?: AbortSignal) => {
@@ -365,6 +383,7 @@ export function composeRequestBoundSettingsTaskControls(
     readCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'read_request', signal),
     readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => cancellation(request, value, 'read_settlement', signal),
     readPolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'read', signal),
+    readPolicyOperation,
     configurePolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'configure', signal),
     clearPolicy: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => policy(request, value, 'clear', signal),
     start(request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) {

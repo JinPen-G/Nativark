@@ -59,8 +59,9 @@ export function composeTaskActionPolicyManagement(input: Dependencies) {
     read(taskId: string, operation: AiTaskActionPolicyMutation['operation']) {
       return new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock).read(taskId, operation);
     },
-    readMutation(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null) {
-      return new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock).readMutation(taskId, operation, expectedRevision);
+    readMutation(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null,
+      mutation: 'configure' | 'clear' = 'configure') {
+      return new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock).readMutation(taskId, operation, expectedRevision, mutation);
     },
     /** Required permissions are server-selected existing codes, never inferred
      * from a model. The manager must currently hold every selected permission;
@@ -71,9 +72,9 @@ export function composeTaskActionPolicyManagement(input: Dependencies) {
       const repository = new PrismaTaskActionPolicyRepository(input.db, scopes, authority([...command.requiredPermissions]), clock);
       return repository.put(command, expectedRevision, recordOriginalReceipt);
     },
-    clear(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number) {
+    clear(taskId: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number, recordOriginalReceipt = false) {
       const repository = new PrismaTaskActionPolicyRepository(input.db, scopes, authority([]), clock);
-      return repository.clear(taskId, operation, expectedRevision);
+      return repository.clear(taskId, operation, expectedRevision, recordOriginalReceipt);
     },
   });
 }

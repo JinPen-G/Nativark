@@ -13,11 +13,15 @@ import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsChangeReceiptDra
   AiApprovedSettingsChangePreparationResultDraft, AiApprovedSettingsTaskCreatedDraft, AiApprovedSettingsTaskCreationReadDraft,
   AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft,
   AiApprovedSettingsTaskRunDraft, AiApprovedSettingsTaskCheckpointDraft, AiApprovedSettingsTaskRecoveryDraft,
-  AiApprovedSettingsTaskCancelResponseDraft } from '@rental-os/shared';
+  AiApprovedSettingsTaskCancelResponseDraft, AiApprovedSettingsTaskPolicyMutationDraft,
+  AiApprovedSettingsTaskPolicyOperationDraft, AiApprovedSettingsTaskPolicyReadResultDraft } from '@rental-os/shared';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiApprovedSettingsTaskPolicyMutationDraft: AiApprovedSettingsTaskPolicyMutationDraft;
+  AiApprovedSettingsTaskPolicyReadResultDraft: AiApprovedSettingsTaskPolicyReadResultDraft;
+  AiApprovedSettingsTaskPolicyOperationDraft: AiApprovedSettingsTaskPolicyOperationDraft;
   AiApprovedSettingsTaskRunDraft: AiApprovedSettingsTaskRunDraft;
   AiApprovedSettingsTaskCheckpointDraft: AiApprovedSettingsTaskCheckpointDraft;
   AiApprovedSettingsTaskRecoveryDraft: AiApprovedSettingsTaskRecoveryDraft;

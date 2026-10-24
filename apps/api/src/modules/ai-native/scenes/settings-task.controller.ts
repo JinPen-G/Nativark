@@ -65,6 +65,21 @@ async function settingsLifecycleResponse(name: SettingsLifecycleContract, work: 
     return result;
   } catch { return invalidSettingsResponse(writing); }
 }
+async function settingsPolicyResponse(work: () => Promise<unknown>, body: unknown, writing: boolean, current = false) {
+  const command = structuredClone(body) as { operation: string; expectedRevision: number | null; mutation?: string };
+  const reply = await work();
+  try {
+    const result = writing ? settingsContract('AiApprovedSettingsTaskPolicyMutationDraft', reply, true)
+      : current ? settingsContract('AiApprovedSettingsTaskPolicyReadResultDraft', reply, true)
+        : settingsContract('AiApprovedSettingsTaskPolicyOperationDraft', reply, true);
+    if ('mutation' in result && (result.mutation !== command.mutation || result.expectedRevision !== command.expectedRevision))
+      return invalidSettingsResponse(writing);
+    const policy = 'state' in result.receipt ? 'policy' in result.receipt ? result.receipt.policy : null : result.receipt;
+    if (policy && (policy.operation !== command.operation || !current && policy.revision !== (command.expectedRevision ?? 0) + 1))
+      return invalidSettingsResponse(writing);
+    return result;
+  } catch { return invalidSettingsResponse(writing); }
+}
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
@@ -150,15 +165,21 @@ export class AiSettingsTaskControlController {
   }
   @Post(routes.readSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.readPolicy(request, body));
+    return respondAiScene(() => settingsPolicyResponse(() => this.controls.readPolicy(request, body), body, false, true));
+  }
+  @Post(routes.readSettingsTaskPolicyOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPolicyOperation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => settingsPolicyResponse(() => this.controls.readPolicyOperation(request, body), body, false));
   }
   @Post(routes.configureSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   configure(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.controls.configurePolicy(request, body, signal)), 'read_settings_task_policy');
+    return respondAiScene(() => withRequestAbort(request, signal => settingsPolicyResponse(
+      () => this.controls.configurePolicy(request, body, signal), body, true)), 'read_settings_task_policy_operation');
   }
   @Post(routes.clearSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   clear(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.controls.clearPolicy(request, body, signal)), 'read_settings_task_policy');
+    return respondAiScene(() => withRequestAbort(request, signal => settingsPolicyResponse(
+      () => this.controls.clearPolicy(request, body, signal), body, true)), 'read_settings_task_policy_operation');
   }
   @Post(routes.startOriginalSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {

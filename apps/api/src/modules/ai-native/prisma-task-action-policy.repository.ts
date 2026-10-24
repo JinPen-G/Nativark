@@ -134,8 +134,10 @@ export class PrismaTaskActionPolicyRepository {
 
   /** Observe the exact CAS transition, never infer a save from today's policy.
    * This receipt grants neither current policy validity nor dispatch rights. */
-  async readMutation(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number | null) {
-    if (!operations.includes(operation) || expectedRevision !== null
+  async readMutation(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number | null,
+    mutation: 'configure' | 'clear' = 'configure') {
+    if (!['configure', 'clear'].includes(mutation) || mutation === 'clear' && expectedRevision === null
+      || !operations.includes(operation) || expectedRevision !== null
       && (!Number.isInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision)) throw error('AI_INVALID_INPUT');
     if (typeof this.db.operationLog?.findUnique !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
     const access = await this.access(taskId), context = access.context;
@@ -151,13 +153,28 @@ export class PrismaTaskActionPolicyRepository {
     const detail = row.detail as { payload?: { kind?: string; scopeId?: string; taskId?: string; operation?: string;
       expectedRevision?: number | null; result?: AiTaskActionPolicyMutationResult }; payloadHash?: string } | null;
     const payload = detail?.payload, result = payload?.result;
-    if (!payload || detail?.payloadHash !== requestFingerprint(payload) || payload.kind !== 'ai-task-action-policy-save-1'
+    if (!payload || detail?.payloadHash !== requestFingerprint(payload)
+      || !['ai-task-action-policy-save-1', 'ai-task-action-policy-clear-1'].includes(payload.kind ?? '')
       || payload.scopeId !== access.scopeId || payload.taskId !== taskId || payload.operation !== operation
       || payload.expectedRevision !== expectedRevision || !result || result.taskId !== taskId || result.operation !== operation
       || result.revision !== (expectedRevision ?? 0) + 1 || typeof result.expiresAt !== 'string') throw error('AI_STORAGE_UNAVAILABLE');
     const policy = this.project({ ...result, expiresAt: new Date(result.expiresAt) });
     await this.recheck(taskId, access.bindingKey);
+    if (payload.kind !== (mutation === 'clear' ? 'ai-task-action-policy-clear-1' : 'ai-task-action-policy-save-1')) return absent;
     return { state: 'recorded' as const, policy, retryable: false as const };
+  }
+
+  private async recordMutation(tx: Tx, access: { scopeId: string; context: AiExecutionContext },
+    taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number | null,
+    result: AiTaskActionPolicyMutationResult, mutation: 'configure' | 'clear') {
+    const context = access.context;
+    if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
+      || typeof tx.operationLog?.create !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
+    const payload = { kind: mutation === 'clear' ? 'ai-task-action-policy-clear-1' : 'ai-task-action-policy-save-1',
+      scopeId: access.scopeId, taskId, operation, expectedRevision, result };
+    await tx.operationLog.create({ data: { id: receiptId(access.scopeId, taskId, operation, expectedRevision),
+      tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
+      action: receiptAction, detail: JSON.parse(JSON.stringify({ payloadHash: requestFingerprint(payload), payload })) as Prisma.InputJsonValue } });
   }
 
   async put(value: AiTaskActionPolicyMutation, expectedRevision: number | null, recordOriginalReceipt = false): Promise<AiTaskActionPolicyMutationResult> {
@@ -191,13 +208,7 @@ export class PrismaTaskActionPolicyRepository {
           || result.expiresAt !== next.expiresAt.toISOString()
           || requestFingerprint(result.requiredPermissions) !== requestFingerprint(next.requiredPermissions)) throw error('AI_STORAGE_UNAVAILABLE');
         if (recordOriginalReceipt) {
-          if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
-            || typeof tx.operationLog?.create !== 'function') throw error('AI_RESOURCE_UNAVAILABLE');
-          const payload = { kind: 'ai-task-action-policy-save-1', scopeId: access.scopeId, taskId: next.taskId,
-            operation: next.operation, expectedRevision, result };
-          await tx.operationLog.create({ data: { id: receiptId(access.scopeId, next.taskId, next.operation, expectedRevision),
-            tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
-            action: receiptAction, detail: JSON.parse(JSON.stringify({ payloadHash: requestFingerprint(payload), payload })) as Prisma.InputJsonValue } });
+          await this.recordMutation(tx, access, next.taskId, next.operation, expectedRevision, result, 'configure');
         }
         await this.recheck(next.taskId, access.bindingKey);
         this.validate(next);
@@ -214,13 +225,17 @@ export class PrismaTaskActionPolicyRepository {
     }
   }
 
-  async clear(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number): Promise<AiTaskActionPolicyMutationResult> {
+  async clear(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number,
+    recordOriginalReceipt = false): Promise<AiTaskActionPolicyMutationResult> {
     const now = this.clock();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw error('AI_INVALID_INPUT');
     if (!operations.includes(operation) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision) throw error('AI_INVALID_INPUT');
     const access = await this.access(taskId);
+    if (recordOriginalReceipt && (access.context.scope.kind !== 'workspace' || access.context.actor.kind !== 'user'
+      || typeof this.db.operationLog?.findUnique !== 'function')) throw error('AI_RESOURCE_UNAVAILABLE');
+    let completed = false;
     try {
-      return await this.db.$transaction(async (tx: Tx) => {
+      const saved = await this.db.$transaction(async (tx: Tx) => {
         const task = await tx.aiTask.findFirst({ where: { scopeId: access.scopeId, id: taskId, archivedAt: null }, select: { id: true } });
         if (!task || task.id !== taskId) throw error('AI_RESOURCE_UNAVAILABLE');
         const changed = await tx.aiTaskActionPolicy.updateMany({ where: { scopeId: access.scopeId, taskId, operation, revision: expectedRevision }, data: { revision: expectedRevision + 1, expiresAt: now } });
@@ -228,10 +243,17 @@ export class PrismaTaskActionPolicyRepository {
         const row = await tx.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: { scopeId: access.scopeId, taskId, operation } }, select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
         if (!row) throw error('AI_STORAGE_UNAVAILABLE');
         const result = this.project(row);
+        if (result.taskId !== taskId || result.operation !== operation || result.revision !== expectedRevision + 1
+          || result.expiresAt !== now.toISOString()) throw error('AI_STORAGE_UNAVAILABLE');
+        if (recordOriginalReceipt) await this.recordMutation(tx, access, taskId, operation, expectedRevision, result, 'clear');
         await this.recheck(taskId, access.bindingKey);
+        completed = true;
         return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      await this.recheck(taskId, access.bindingKey);
+      return saved;
     } catch (cause) {
+      if (completed) throw new AiTaskActionPolicyResultUnknownError();
       if (cause instanceof AiTaskRepositoryError) throw cause;
       throw new AiTaskActionPolicyResultUnknownError();
     }

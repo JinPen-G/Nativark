@@ -89,6 +89,27 @@ export interface AiApprovedSettingsTaskEventsReadDraft extends AiApprovedSetting
 export interface AiApprovedSettingsTaskPolicyReadDraft extends AiApprovedSettingsTaskCreationDraft { operation: string; }
 export interface AiApprovedSettingsTaskPolicyConfigureDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number | null; }
 export interface AiApprovedSettingsTaskPolicyClearDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number; }
+/** Original CAS observation, not a read of today's potentially changed policy. */
+export type AiApprovedSettingsTaskPolicyOperationReadDraft = AiApprovedSettingsTaskPolicyReadDraft & (
+  | { mutation: 'configure'; expectedRevision: number | null }
+  | { mutation: 'clear'; expectedRevision: number });
+export interface AiApprovedSettingsTaskPolicyValueDraft {
+  taskId: string; operation: string; revision: number; requiredPermissions: readonly string[]; expiresAt: string;
+}
+export interface AiApprovedSettingsTaskPolicyMutationDraft {
+  receipt: AiApprovedSettingsTaskPolicyValueDraft; semantics: 'policy_not_approval_or_dispatch';
+}
+export interface AiApprovedSettingsTaskPolicyReadResultDraft {
+  receipt: { state: 'observed'; policy: AiApprovedSettingsTaskPolicyValueDraft; retryable: false; nextAction: 'read_original_policy' }
+    | { state: 'not_observed'; retryable: false; nextAction: 'reconcile' };
+  semantics: 'policy_not_approval_or_dispatch';
+}
+export interface AiApprovedSettingsTaskPolicyOperationDraft {
+  mutation: 'configure' | 'clear'; expectedRevision: number | null;
+  receipt: { state: 'recorded'; policy: AiApprovedSettingsTaskPolicyValueDraft; retryable: false }
+    | { state: 'not_observed'; policy: null; retryable: false };
+  semantics: 'original_policy_mutation_not_current_permission';
+}
 /** The original receipt, not a caller task/run or cancellation proof. */
 export interface AiApprovedSettingsTaskCancellationDraft extends AiApprovedSettingsTaskCreationDraft { expectedRevision: number; }
 export interface AiApprovedSettingsReferenceDraft {

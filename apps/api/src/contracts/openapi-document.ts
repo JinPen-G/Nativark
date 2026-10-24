@@ -2024,7 +2024,11 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
   readSettingsDecision: ['AiApprovedSettingsReferenceDraft', 'AiApprovedSettingsDecisionReceiptDraft'],
   continueSettingsConfirmation: ['AiApprovedSettingsTaskContinueDraft', 'AiApprovedSettingsTaskRunDraft'],
   reconcileSettingsTask: ['AiApprovedSettingsTaskRunRequestDraft', 'AiApprovedSettingsTaskRecoveryDraft'],
-  cancelSettingsTask: ['AiApprovedSettingsTaskCancelDraft', 'AiApprovedSettingsTaskCancelResponseDraft']
+  cancelSettingsTask: ['AiApprovedSettingsTaskCancelDraft', 'AiApprovedSettingsTaskCancelResponseDraft'],
+  configureSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyConfigureDraft', 'AiApprovedSettingsTaskPolicyMutationDraft'],
+  readSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyReadDraft', 'AiApprovedSettingsTaskPolicyReadResultDraft'],
+  clearSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyClearDraft', 'AiApprovedSettingsTaskPolicyMutationDraft'],
+  readSettingsTaskPolicyOperation: ['AiApprovedSettingsTaskPolicyOperationReadDraft', 'AiApprovedSettingsTaskPolicyOperationDraft']
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
