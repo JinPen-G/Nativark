@@ -53,7 +53,8 @@ export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
   /** Current-authorized binding of an existing step, never a start grant. */
-  resolveOriginal?: import('../ai-step-registration.repository').AiStepRegistrationAuthority['resolveOriginal'];
+  resolveOriginal?: (command: import('../ai-step-registration.repository').AiStepRegistrationCommand,
+    tx?: Prisma.TransactionClient) => Promise<import('../ai-step-registration.repository').AiStepOriginalRegistrationGrant>;
 }
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
 type Tx = Prisma.TransactionClient;
