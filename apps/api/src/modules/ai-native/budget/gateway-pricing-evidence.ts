@@ -31,6 +31,11 @@ export const gatewayInputBoundEvidenceSchema = z.object({
   kind: z.literal('gateway-input-bound-1'), invocationId: key.max(36), scopeId: key.max(36),
   registrationHash: hash, intentHash: hash, configurationHash: hash, priceVersion: key.max(64), priceHash: hash,
   maxInputTokens: count, maxOutputTokens: count.min(1).max(32768),
+  /** Provider-receipt bounds also bind the exact serialized count material
+   * (endpoint path + request body). Optional: pre-existing rows predate the
+   * field; its absence never weakens the registration/intent/configuration
+   * hashes above. */
+  countRequestHash: hash.optional(),
   modality: z.literal('text'), additionalBillingDimensions: z.literal('none'),
   method: z.enum(['provider_count_tokens_receipt', 'certified_tokenizer_bound']),
   validFrom: timestamp, expiresAt: timestamp, provenance

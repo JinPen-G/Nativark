@@ -10,6 +10,7 @@ import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiExecutionContext, AiUsageAssociationDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
+import { aiTaskAccessFromContext } from '../ai-task.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -46,15 +47,30 @@ export class InputCountTokensAuthorizationSource implements BudgetAuthorizationS
   private readonly bindings;
   private readonly taskAuthority;
   private readonly clock;
+  private readonly taskDb: Pick<PrismaClient, 'aiTask'>;
   constructor(input: PersistedTaskAuthorizationDependencies & { guard: ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0]['guard'] },
     private readonly db: CountTokensAdmissionDb) {
     this.base = new PrismaTaskBudgetAuthorizationSource(input);
     this.bindings = new PrismaGatewayInvocationBindings(input.db, this.base.scopes, input.clock ?? (() => new Date()));
     this.taskAuthority = composePersistedTaskAuthorization(input);
     this.clock = input.clock ?? (() => new Date());
+    this.taskDb = input.db;
   }
   get scopes(): Pick<AiScopeRepository, 'resolveCurrent'> { return this.base.scopes; }
   async resolveContext() { return this.base.resolveContext(); }
+  /** Receipt-free observation still requires current original-task read
+   * policy and persisted ownership; knowing an invocation id is not authority. */
+  async authorizeObservation(taskId: string): Promise<AiExecutionContext> {
+    const context = structuredClone(await this.taskAuthority.authority.resolve(taskId, 'read_step_terminal'));
+    const current = structuredClone(await this.scopes.resolveCurrent());
+    if (identity(context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    const task = await this.taskDb.aiTask.findFirst({ where: aiTaskAccessFromContext(context, taskId, this.clock()).where,
+      select: { id: true, scopeId: true } });
+    if (!task || task.id !== taskId || task.scopeId !== current.scope.id) throw new BudgetError('FORBIDDEN');
+    const after = await this.taskAuthority.authority.resolve(taskId, 'read_step_terminal');
+    if (identity(context) !== identity(after)) throw new BudgetError('FORBIDDEN');
+    return context;
+  }
   /** The counting association must bind the original invocation: same
    * run/step/action and config, with the count request id derived by the
    * server from the original call id — never chosen by the caller. */

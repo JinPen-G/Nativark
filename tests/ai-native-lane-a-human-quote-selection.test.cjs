@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), path = require('node:path');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-original-request.cjs');
 const { PrismaQuoteSelectionRepository } = require('../apps/api/src/modules/ai-native/task-request/prisma-quote-selection.repository');
 const { composeHumanQuoteOrder } = require('../apps/api/src/modules/ai-native/scenes/human-quote-order.composition');
@@ -75,12 +75,6 @@ test('selected quote task HTTP uses normal runner and current human decision wit
   const { AiHumanQuoteSelectionModule } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
   for (const mode of ['approve', 'reject', 'cancel', 'unknown']) {
     const h = await selectedOrderHarness({ initializeOnly: true });
-    Object.assign(h.sceneDependencies.core, {
-      getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
-      getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
-      getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
-        fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
-    });
     const configuration = { holderId: 'selected-host', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
       audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } };
     const { credentials, originals, ...dependencies } = h.sceneDependencies;
@@ -332,12 +326,6 @@ test('selected order goes through human review and decision before Core commit a
   const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
-  Object.assign(h.sceneDependencies.core, {
-    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
-    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
-    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
-      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
-  });
   const { credentials, originals, ...dependencies } = h.sceneDependencies;
   const requests = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application').composeRequestBoundHumanQuoteOrder(
     dependencies, { enabled: true, audience: 'operator' }, { holderId: 'worker-a',

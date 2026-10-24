@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), path = require('node:path');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-original-request.cjs');
 const { AiOriginalScenesModule } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.module');
 const { AiOriginalScenesController, AI_ORIGINAL_SCENES } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
@@ -202,7 +202,7 @@ test('persisted scene model result is bound to its original input and current au
   const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
   const created = await h.app.create(h.command(sceneCode)), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
-  const policy = { sceneCode, routeScene: 'chat', maxOutputTokens: 64 };
+  const policy = { sceneCode, maxOutputTokens: 64 };
   const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
   config.tenantId = original.context.scope.tenantId; config.configurationScope.tenantId = config.tenantId;
   const input = { mode: 'invoke', intent: taskModelIntent(task.id, created.task.runId, `scene-model:${ref.inputRef}`, policy.sceneCode,
@@ -1219,7 +1219,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const unusedWrite = async () => { throw Error('configuration writes are forbidden'); };
   const customerConfigDb = { ...db, aiTenantModelConfiguration: { findUnique: async query => {
       assert.equal(query.where.tenantId, 'tenant-client'); configReads++;
-      return { tenantId: 'tenant-client', mode: 'platform_managed', revision: 1, settings: null, credentialsEncrypted: null };
+      // Explicit service enablement: the hardened product contract requires
+      // serviceEnabled/settings.enabled for invoke selection (default-disabled).
+      return { tenantId: 'tenant-client', mode: 'platform_managed', revision: 1, serviceEnabled: true, settings: null, credentialsEncrypted: null };
     }, create: unusedWrite, updateMany: unusedWrite },
     aiProviderProfile: { findFirst: async () => null, create: unusedWrite, updateMany: unusedWrite },
     systemParameterSet: { findFirst: async () => null } };

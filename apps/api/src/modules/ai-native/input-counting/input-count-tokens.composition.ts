@@ -58,6 +58,9 @@ export class CountTokensGatewayPricingEvidenceSource implements GatewayPricingEv
       registrationHash: binding.registrationHash, intentHash: binding.intentHash,
       configurationHash: binding.configurationHash, priceVersion: binding.priceVersion, priceHash: binding.priceHash,
       maxInputTokens: receipt.inputTokens, maxOutputTokens: binding.maxOutputTokens,
+      // Bind the serialized count material actually sent so a changed tool
+      // schema or input serialization can never reuse this bound.
+      countRequestHash: receipt.countRequestHash,
       modality: 'text', additionalBillingDimensions: 'none', method: receipt.method,
       validFrom: receipt.observedAt, expiresAt: receipt.expiresAt,
       // The receipt row is immutable and single-version; the document hash
