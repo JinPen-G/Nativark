@@ -162,8 +162,9 @@ export class TaskBudgetUsageReader {
    * was actually admitted under. Read-only, no amounts, no association
    * objects; a missing basis is reported as null, never backfilled from
    * current configuration. */
-  async pricingBases(value: unknown): Promise<{ taskId: string; bases: Array<{ invocationId: string; callId: string;
-    kind: 'generation' | 'count_request'; reservationId: string; priceVersion: string | null;
+  async pricingBases(value: unknown): Promise<{ taskId: string; meaning: 'original_admission_basis_not_provider_invoice';
+    bases: Array<{ invocationId: string; callId: string; kind: 'generation' | 'count_request';
+    reservationId: string; priceVersion: string | null;
     configRevision: number | null; unit: 'money' | 'tokens' | 'calls' | null }> }> {
     const parsed = z.object({ taskId: id, limit: z.number().int().min(1).max(20), after: id.optional() }).strict()
       .safeParse(structuredClone(value));
@@ -173,7 +174,15 @@ export class TaskBudgetUsageReader {
       before.context, command.taskId, this.clock()).where, select: { id: true } }));
     if (!owned || owned.id !== command.taskId) throw new BudgetError('FORBIDDEN');
     const where = { scopeId: before.scopeId, taskId: command.taskId, actorId: before.actorId };
-    const rows = structuredClone(await this.db.aiGatewayInvocation.findMany({ where,
+    // Same cursor ownership contract as read(): an unknown or foreign cursor
+    // is invalid, and the window advances past it — never a silently repeated
+    // first page.
+    if (command.after) {
+      const cursor = await this.db.aiGatewayInvocation.findFirst({ where: { ...where, id: command.after }, select: { id: true } });
+      if (!cursor || cursor.id !== command.after) throw new BudgetError('INVALID');
+    }
+    const rows = structuredClone(await this.db.aiGatewayInvocation.findMany({ where: { ...where,
+      ...(command.after ? { id: { gt: command.after } } : {}) },
       orderBy: { id: 'asc' }, take: command.limit,
       select: { id: true, scopeId: true, taskId: true, actorId: true, callId: true } }));
     if (!Array.isArray(rows) || rows.some(row => row.scopeId !== before.scopeId || row.taskId !== command.taskId
@@ -199,7 +208,7 @@ export class TaskBudgetUsageReader {
     }
     const after = await this.current(command.taskId);
     if (after.scopeId !== before.scopeId || identity(after.context) !== identity(before.context)) throw new BudgetError('FORBIDDEN');
-    return { taskId: command.taskId, bases };
+    return { taskId: command.taskId, bases, meaning: 'original_admission_basis_not_provider_invoice' as const };
   }
   async read(value: unknown): Promise<AiTaskBudgetUsagePageDraft> {
     const parsed = request.safeParse(structuredClone(value));

@@ -58,8 +58,11 @@ export interface AiCountingUsagePricingBasesDraft {
 }
 
 /** Closed JSON-schema drafts for response validation. Field-level shapes
- * intentionally mirror the server result types above; every response also
- * passes ajv validation in the module before leaving the server. */
+ * intentionally mirror the server result types above. The four
+ * counting-owned responses (count / observe / receipt / pricing bases) are
+ * structurally validated in AiInputCountingController via lockstep zod
+ * mirrors; wiring THESE JSON schemas centrally (urn:rental:counting:* ids,
+ * key = schema name) is the mainline's single-author integration step. */
 export const AI_COUNTING_HTTP_SCHEMAS = {
   AiCountingCountResultDraft: {
     type: 'object', additionalProperties: false,
@@ -104,13 +107,44 @@ export const AI_COUNTING_HTTP_SCHEMAS = {
       ] },
       admission: { oneOf: [
         { type: 'null' },
-        { $ref: '#/components/schemas/AiCountingCountResultDraft/properties/admission' }
+        { type: 'object', additionalProperties: false,
+          required: ['reservationId', 'sceneCode', 'unit', 'status'],
+          properties: {
+            reservationId: { type: 'string', minLength: 1, maxLength: 36 },
+            sceneCode: { type: 'string', minLength: 1, maxLength: 128 },
+            unit: { type: 'string', const: 'calls' },
+            status: { type: 'string', enum: ['settled', 'reserved', 'released', 'pending_reconciliation'] }
+          } }
       ] },
       receipt: { oneOf: [
         { type: 'null' },
-        { $ref: '#/components/schemas/AiCountingCountResultDraft' }
+        { $ref: 'urn:rental:counting:AiCountingCountResultDraft' }
       ] }
     }
+  },
+  AiCountingReceiptReadDraft: {
+    allOf: [
+      { $ref: 'urn:rental:counting:AiCountingCountResultDraft' },
+      { type: 'object', additionalProperties: false,
+        required: ['diagnostics', 'lifecycle'],
+        properties: {
+          diagnostics: { type: 'object', additionalProperties: false, required: ['applicable', 'bound'],
+            properties: {
+              applicable: { type: 'boolean' },
+              bound: { type: 'object', additionalProperties: false, required: ['published'],
+                properties: {
+                  published: { type: 'boolean' },
+                  id: { type: 'string', minLength: 1, maxLength: 128 },
+                  maxInputTokens: { type: 'integer', minimum: 0 }
+                } }
+            } },
+          lifecycle: { oneOf: [
+            { type: 'string', enum: ['not_started', 'reserved', 'claimed_dispatched'] },
+            { type: 'object', additionalProperties: false, required: ['receiptRecorded'],
+              properties: { receiptRecorded: { type: 'string', enum: ['observed', 'failed', 'unknown'] } } }
+          ] }
+        } }
+    ]
   },
   AiCountingUsagePricingBasesDraft: {
     type: 'object', additionalProperties: false, required: ['taskId', 'bases', 'meaning'],

@@ -14,8 +14,12 @@ import type { AuthService } from '../../auth/auth.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
 import type { SubscriptionService } from '../../subscription/subscription.service';
-import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { BudgetError } from '../budget/budget.ports';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiScopeResolutionError } from '../ai-scope.repository';
+import { ModelGatewayError } from '../model-gateway.ports';
+import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
 import { createPersistedBudgetSubsystem } from '../budget/budget.module';
 import { GatewayPricingRecordManagement } from '../budget/prisma-gateway-pricing-records';
 import type { GatewayPricingEvidenceSource } from '../budget/prisma-gateway-pricing-records';
@@ -43,13 +47,20 @@ export interface InputCountingServerConfiguration {
    * other scene are refused by the frozen reader's fingerprint binding. */
   sceneCode: string;
   countingPriceVersion: string;
-  /** Must mirror the scene's task-gateway registration. */
-  toolPolicy?: { orderExplainTool?: { name: string; version: typeof AI_TOOL_DRAFT_VERSION } };
+  /** The scene's registered per-request output ceiling — the same value the
+   * scene's task gateway was composed with. Refused material never exceeds
+   * it; a drifted (too-small) value only fails closed. */
+  sceneMaxOutputTokens: number;
+  /** The scene's registered protocol tool policy. Explicit and mandatory:
+   * a silent default here could make the counted serialization diverge from
+   * the dispatch serialization with no fail-safe able to detect it. */
+  toolPolicy: { orderExplainTool?: { name: string; version: typeof AI_TOOL_DRAFT_VERSION } };
   timeoutMs?: number;
 }
 export interface InputCountingRequestDependencies {
   db: CountTokensServiceDb & InputCountingFrozenReaderDb & ConstructorParameters<typeof TaskBudgetUsageReader>[0]
-    & Pick<RentalCoreService, never>;
+    & Pick<Parameters<typeof composePersistedTaskAuthorization>[0]['db'],
+      'aiTaskActionPolicy' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge' | 'aiRun' | 'aiTaskRunPlan'>;
   auth: Pick<AuthService, 'resolveAccessContext'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
@@ -66,13 +77,7 @@ export interface InputCountingRequestDependencies {
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const actions: readonly InputCountingRequestAction[] = ['count', 'observeCountKey', 'readCountReceipt',
   'publishInputBound', 'readInputBound', 'readPublication', 'usagePage', 'usageSummary', 'usagePricingBases', 'taskCosts'];
-const hash = (value: unknown) => {
-  const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical)
-    : item && typeof item === 'object' ? Object.fromEntries(Object.keys(item as Record<string, unknown>)
-      .sort().map(key => [key, canonical((item as Record<string, unknown>)[key])])) : item;
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
-  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
-};
+const hash = requestFingerprint;
 const denied = () => new BudgetError('FORBIDDEN');
 
 export class InputCountingRequestFactory {
@@ -85,6 +90,9 @@ export class InputCountingRequestFactory {
       || server.transport !== undefined && typeof server.transport.post !== 'function'
       || !server.configuration || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u).safeParse(server.configuration.sceneCode).success
       || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u).safeParse(server.configuration.countingPriceVersion).success
+      || !server.configuration.toolPolicy || typeof server.configuration.toolPolicy !== 'object'
+      || !Number.isSafeInteger(server.configuration.sceneMaxOutputTokens)
+      || server.configuration.sceneMaxOutputTokens < 1 || server.configuration.sceneMaxOutputTokens > 32768
       || server.clock !== undefined && typeof server.clock !== 'function') throw new BudgetError('UNAVAILABLE');
     Object.freeze(server.resolvers);
   }
@@ -133,41 +141,56 @@ export class InputCountingRequestFactory {
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
         const configuration = server.configuration;
-        const taskAuthorization = composePersistedTaskAuthorization({ db: server.db as never, auth, credentials,
-          subscriptions: server.subscriptions, clock });
+        const taskAuthorization = composePersistedTaskAuthorization({
+          // The composition declares PrismaClient, but its internals touch a
+          // bounded table set already included in this factory's db union;
+          // the single cast keeps that contract visible in one place.
+          db: server.db as unknown as Parameters<typeof composePersistedTaskAuthorization>[0]['db'],
+          auth, credentials, subscriptions: server.subscriptions, clock });
         const frozen = new InputCountingFrozenInputReader({ db: server.db,
           execution: { authorize: async (taskId: string) => taskAuthorization.execution.authorize(taskId) },
           scenePolicy: { sceneCode: configuration.sceneCode,
-            maxOutputTokens: 32768,
-            ...(configuration.toolPolicy?.orderExplainTool ? { orderExplainTool: true } : {}) }, clock });
+            maxOutputTokens: configuration.sceneMaxOutputTokens,
+            ...(configuration.toolPolicy.orderExplainTool ? { orderExplainTool: true } : {}) }, clock });
         const countingAuthorization = new InputCountTokensAuthorizationSource(
-          { db: server.db as never, auth, credentials, subscriptions: server.subscriptions, guard, clock } as never, server.db as never);
-        const quotes = new InputCountTokensCallPricing(server.db as never, countingAuthorization.scopes,
+          { db: server.db as unknown as Parameters<typeof composePersistedTaskAuthorization>[0]['db'],
+            auth, credentials, subscriptions: server.subscriptions, guard, clock }, server.db);
+        const quotes = new InputCountTokensCallPricing(server.db, countingAuthorization.scopes,
           configuration.countingPriceVersion, clock);
-        const evidence = new InputCountTokensEvidence(server.db as never);
-        const budget = createPersistedBudgetSubsystem({ db: server.db as never, subscriptions: server.subscriptions,
-          authorization: countingAuthorization, quotes, evidence, clock });
+        const evidence = new InputCountTokensEvidence(server.db);
+        const budget = createPersistedBudgetSubsystem({
+          db: server.db as unknown as Parameters<typeof createPersistedBudgetSubsystem>[0]['db'],
+          subscriptions: server.subscriptions, authorization: countingAuthorization, quotes, evidence, clock });
         const service = new InputCountTokensService({ db: server.db, scopes: countingAuthorization.scopes,
           authorization: countingAuthorization, budget, frozen,
           resolvers: server.resolvers, transport: server.transport ?? createNativeModelEgressTransport(),
-          policyOptions: configuration.toolPolicy ?? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } },
+          policyOptions: configuration.toolPolicy,
           sceneCode: configuration.sceneCode, countingPriceVersion: configuration.countingPriceVersion,
           ...(configuration.timeoutMs !== undefined ? { timeoutMs: configuration.timeoutMs } : {}), clock });
         const pricingEvidence = new CountTokensGatewayPricingEvidenceSource(server.db, server.priceDelegate);
-        const management = new GatewayPricingRecordManagement(server.db as never, countingAuthorization.scopes,
-          countingAuthorization, pricingEvidence, new PrismaGatewayInvocationBindings(server.db as never,
-          countingAuthorization.scopes, clock), configuration.sceneCode, clock);
-        const usage = new TaskBudgetUsageReader(server.db as never, taskAuthorization.authority,
+        const management = new GatewayPricingRecordManagement(
+          server.db as unknown as ConstructorParameters<typeof GatewayPricingRecordManagement>[0], countingAuthorization.scopes,
+          countingAuthorization, pricingEvidence, new PrismaGatewayInvocationBindings(
+            server.db as unknown as ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0],
+            countingAuthorization.scopes, clock), configuration.sceneCode, clock);
+        const usage = new TaskBudgetUsageReader(
+          server.db as unknown as ConstructorParameters<typeof TaskBudgetUsageReader>[0], taskAuthorization.authority,
           countingAuthorization.scopes, clock);
-        const observation = composeTaskCostObservation({ db: server.db as never, actions: taskAuthorization.authority,
+        const observation = composeTaskCostObservation({
+          db: server.db as unknown as Parameters<typeof composeTaskCostObservation>[0]['db'], actions: taskAuthorization.authority,
           scopes: countingAuthorization.scopes, counting: { readCountReceipt: cmd => service.readCountReceipt(cmd) }, clock });
         let result: unknown;
         if (action === 'count') {
           const receipt = await service.count(command, signal);
+          // The first returned receipt means reserve/claim/dispatch/receipt all
+          // committed: any later failure (replay drift, revoked permission
+          // during the re-read) must surface as an original-key unknown, never
+          // as a denial or an availability failure for a completed mutation.
+          mutationReturned = true;
           const replay = await service.count(command, signal);
           const stable = (item: unknown) => { const { admission: _admission, ...rest } = (item ?? {}) as Record<string, unknown>; return rest; };
           if (hash(stable(receipt)) !== hash(stable(replay))) throw new BudgetError('PENDING_RECONCILIATION');
-          mutationReturned = true; result = receipt;
+          result = receipt;
         } else if (action === 'observeCountKey') result = await service.observeCountKey(command);
         else if (action === 'readCountReceipt') {
           const receipt = await service.readCountReceipt(command);
@@ -193,15 +216,16 @@ export class InputCountingRequestFactory {
       }), action === 'count' || action === 'publishInputBound', signal);
     } catch (error) {
       if (mutationReturned) throw new BudgetError('PENDING_RECONCILIATION');
+      // Error surface mirrors gateway-pricing-request.composition: an
+      // original-outcome unknown (dependency wait, lost acknowledgement) stays
+      // a 409 reconcile; authorization denials from any original chain stay
+      // denials; only the remainder is unavailable.
+      if (error instanceof AiTaskRunnerError && (error as AiTaskRunnerError).code === 'AI_RESULT_UNKNOWN') throw new BudgetError('PENDING_RECONCILIATION');
+      if (error instanceof ModelGatewayError && error.code === 'FORBIDDEN') throw denied();
+      if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw denied();
+      if (error instanceof AiScopeResolutionError && ['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(error.code)) throw denied();
       if (error instanceof BudgetError) throw error;
       throw new BudgetError('UNAVAILABLE');
     } finally { active = false; signal?.removeEventListener('abort', close); }
   }
-}
-
-/** Explicit opt-in factory; no Nest provider or route is registered here. */
-export function createInputCountingRequestFactory(dependencies: InputCountingRequestDependencies,
-  options: { enabled?: boolean } = {}) {
-  if (options.enabled !== true) return null;
-  return new InputCountingRequestFactory(dependencies);
 }
