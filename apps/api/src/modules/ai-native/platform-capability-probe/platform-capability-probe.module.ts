@@ -20,6 +20,6 @@ export class PlatformCapabilityProbeModule {
       providers: [{ provide: PLATFORM_CAPABILITY_PROBE, useValue: composition },
         { provide: PLATFORM_CAPABILITY_PROBE_REQUESTS,
           useValue: new PlatformCapabilityProbeRequestFactory(dependencies as PlatformCapabilityProbeRequestDependencies) }],
-      exports: [PLATFORM_CAPABILITY_PROBE, PLATFORM_CAPABILITY_PROBE_REQUESTS, PlatformCapabilityProbeRequestFactory] };
+      exports: [PLATFORM_CAPABILITY_PROBE, PLATFORM_CAPABILITY_PROBE_REQUESTS] };
   }
 }

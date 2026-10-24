@@ -60,13 +60,14 @@ export class PlatformCapabilityProbeController {
         }
         current = this.requests.open(request);
         const operation = (current as Record<string, (...args: unknown[]) => unknown>)[method];
-        if (typeof operation !== 'function') throw new Error('AI_INVALID_INPUT');
+        if (typeof operation !== 'function') throw Object.assign(new Error('AI_INVALID_INPUT'), { code: 'AI_INVALID_INPUT' });
         return await (operation as (v: unknown, s?: AbortSignal) => Promise<unknown>)(body, controller.signal);
       } catch (error) {
         const raw = error instanceof Error && 'code' in error ? error.code : undefined;
         const mapped = typeof raw === 'string' && Object.prototype.hasOwnProperty.call(gatewayCodes, raw) ? gatewayCodes[raw] : raw;
         const code = typeof mapped === 'string' && Object.prototype.hasOwnProperty.call(statuses, mapped) ? mapped as keyof typeof statuses : 'AI_STORAGE_UNAVAILABLE';
-        throw new HttpException({ code, retryable: false }, statuses[code]);
+        throw new HttpException({ code, retryable: false,
+          ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: 'reconcile' as const } : {}) }, statuses[code]);
       } finally {
         current?.close();
         if (listens) request.removeListener!('aborted', abort);

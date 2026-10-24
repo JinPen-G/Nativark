@@ -20,7 +20,7 @@ import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bin
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
 import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from './gateway-budget-principal';
-import { isPlatformGatewayContext, type BudgetGatewayContext } from './budget-gateway-adapter';
+import { type BudgetGatewayContext } from './budget-gateway-adapter';
 import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
 import { budgetSettingsOperationSchema, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
 import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
@@ -188,7 +188,7 @@ export function createPersistedGatewayBudget(input: {
     const before = structuredClone(await input.scopes.resolveCurrent());
     // Dual-scope principal: workspace consumers keep their tenant attribution;
     // explicit SaaS/platform principals carry actorId only for the binding.
-    const gatewayContext: BudgetGatewayContext = isPlatformGatewayContext({ actorId: '' }) || before.scope.kind === 'PLATFORM'
+    const gatewayContext: BudgetGatewayContext = before.scope.kind === 'PLATFORM'
       ? { actorId: gatewayPlatformBudgetPrincipal(before.context).actorId }
       : (() => { const p = gatewayBudgetPrincipal(before.context);
           return { tenantId: p.tenantId, workspaceId: p.workspaceId, actorId: p.actorId }; })();
