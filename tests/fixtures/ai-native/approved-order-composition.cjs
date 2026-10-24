@@ -179,20 +179,26 @@ async function approvedOrderHarness() {
     // Declared historical-quote read port for scene assemblies that reach
     // business tools through this harness. Reads the harness's own seeded
     // quote snapshot only — never a re-quote, price rebuild or mutation.
+    // Divergence from RentalBusinessService.getQuote: a missing id returns
+    // null instead of NotFoundException; no current consumer in this harness
+    // distinguishes the two, and AiOrderSavedQuoteSource treats null as
+    // INVALID_RESPONSE (fail-closed) rather than 'missing'.
     getQuote: async (tenantId, _context, quoteId) =>
       structuredClone(state.records.quote.find(row => row.id === quoteId && row.tenantId === tenantId)) ?? null,
-    // Declared opening-readiness projection for the scene assembly's
-    // diagnostic reader. Sections absent: a read projection, never a write.
+    // Declared-existence stub: satisfies the scene assembly's composition
+    // requireMethod check only. The returned body does NOT match the
+    // readiness read schema — any actual opening.read through this harness
+    // fails closed with INVALID_RESPONSE. Not a readiness projection.
     tenantReadiness: async () => ({ sections: [] }) };
   const coreFacts = { findOrder: async (tenantId, id) => structuredClone(state.records.rentalOrder.find(o => o.tenantId === tenantId && o.id === id)),
     saveOrderAggregate: async (order, _lines, tx) => { await tx.rentalOrder.create({ data: order }); } };
   const confirmation = new RentalOrderConfirmationService(db, core, business, coreFacts, quoteFacts, new RentalIdempotencyRepository(db));
   const snapshots = { read: async () => structuredClone(state.snapshots) };
-  // Declared bounded-report port for composeAiAuthorizedBusinessTools's
+  // Declared-existence stub for composeAiAuthorizedBusinessTools's
   // composition check: scene assemblies reached through this harness (human
-  // quote selection) require the risk tool's original-operation report read.
-  // Reads from the same absorbing fact store and stays within its
-  // no-query-semantics stance.
+  // quote selection) require the risk tool's bounded report port. The body
+  // does NOT match the report read schema — any actual risk read through
+  // this harness fails closed with INVALID_RESPONSE. Not a report source.
   const reports = { getBoundedOperationReport: async () => ({ coverage: 'page_not_total', window: { from: null, to: null },
     totals: 'not_computed', items: [], source: 'synthetic_bounded_report' }) };
 

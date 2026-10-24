@@ -21,10 +21,13 @@ async function setup(audience = 'operator', tenantId = 'tenant-a') {
   // Declared synthetic pagination port for the formal listInspectionsPage
   // contract, backed by the same per-test listInspections stub the cases
   // patch (deterministic single page <=50, page_not_total). Not a Prisma
-  // integrity simulation.
+  // integrity simulation: unlike the production repository it does not
+  // filter tenant/workspace/order or validate cursor ownership — the Core
+  // service layer above it performs those rejections.
   facts.listInspectionsPage = async (tenant, orderId, query) => {
-    // No tenant/orderId filtering here: foreign or malformed rows flow through
-    // so the Core's own page validation rejects them, exactly as production.
+    // No tenant/orderId filtering here: foreign or malformed rows flow
+    // through so the Core's own page validation rejects them. The third
+    // parameter of listInspections stubs is the page query, not a tx.
     const all = (await facts.listInspections(tenant, orderId, query))
       .filter(row => !query.cursor || row.id > query.cursor)
       .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
