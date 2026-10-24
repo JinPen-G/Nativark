@@ -2,6 +2,7 @@ import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
+import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT } from "@rental-os/shared";
@@ -2277,13 +2278,17 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...(['operator', 'staff'] as const).flatMap(audience => [
     ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
     ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
+    [AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation, 'createEventTask'],
     ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation']
   ].map(([suffix, action]) => ({ method: 'post' as const, path: `/api/ai-native/automation/${audience}/${suffix}`, tag: 'AI Native',
     operationId: `humanAutomation_${audience}_${action}`,
     permissions: audience === 'staff' ? ['rental-os:order:view']
       : ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view', 'rental-os:finance:reconcile'],
-    summary: 'Original human audience/tenant/workspace/location and event source are revalidated. Metadata preparation/close is not business resolution or execution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action. Response remains draft-polymorphic.',
-    requestSchema: 'GenericObject', responseSchema: 'GenericObject' }))),
+    summary: action === 'createEventTask'
+      ? 'Explicit original event to candidate, immutable input and idempotent Task metadata, under current human resource rights and the server-selected automation policy/subject/budget. Unknown input stops before task creation; recover by reviews/for-event and the original input/creation readers. No run, worker, model, approval, notification, refund or business action is started. Named closed request/response; defaults remain disabled.'
+      : 'Original human audience/tenant/workspace/location and event source are revalidated. Metadata preparation/close is not business resolution or execution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action. Response remains draft-polymorphic.',
+    requestSchema: action === 'createEventTask' ? 'AiAutomationEventTaskRequestDraft' : 'GenericObject',
+    responseSchema: action === 'createEventTask' ? 'AiAutomationEventTaskResponseDraft' : 'GenericObject' }))),
   ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
     method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],

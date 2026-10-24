@@ -1,5 +1,8 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from '@rental-os/shared';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { AutomationError } from './prisma-automation.authority';
@@ -7,12 +10,23 @@ import { HumanAutomationReviewError } from './human-automation-review.service';
 import { HumanAutomationRequestFactory, type HumanAutomationHttpRequest, type HumanAutomationRequestAction } from './human-automation-request.composition';
 import { withRequestAbort } from '../scenes/request-abort';
 
+const eventTaskAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(eventTaskAjv);
+const validEventTask = eventTaskAjv.compile(AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS.AiAutomationEventTaskResponseDraft);
+
 abstract class HumanAutomationController {
   protected abstract readonly audience: 'operator' | 'staff';
   constructor(protected readonly requests: HumanAutomationRequestFactory) {}
 
   private async call(request: HumanAutomationHttpRequest, action: HumanAutomationRequestAction, value: unknown) {
-    try { return await withRequestAbort(request, signal => this.requests.call(request, this.audience, action, value, signal)); }
+    try {
+      const result = await withRequestAbort(request, signal => this.requests.call(request, this.audience, action, value, signal));
+      if (action !== 'createEventTask') return result;
+      // Metadata writes can already have committed. A bad reply is unknown,
+      // never a new task, execution grant, or safe automatic retry.
+      try { const copy = structuredClone(result); if (validEventTask(copy)) return copy; } catch { /* no raw result escapes */ }
+      throw new AutomationError('result_unknown');
+    }
     catch (error) {
       const reason = error instanceof AutomationError || error instanceof HumanAutomationReviewError || error instanceof BusinessFailureError
         ? error.code : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input'
@@ -46,6 +60,9 @@ abstract class HumanAutomationController {
 
   @Post('tasks/create') @HttpCode(200) @Header('Cache-Control', 'no-store')
   createTask(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'createTask', value); }
+
+  @Post(AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  createEventTask(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'createEventTask', value); }
 
   @Post('tasks/read-creation') @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCreation(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'readCreation', value); }
