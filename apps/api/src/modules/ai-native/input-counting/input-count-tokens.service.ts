@@ -22,7 +22,8 @@ import type { AiProviderProfileRecord } from '../provider-profile.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { BudgetError, type BudgetAuthorizationSource, type BudgetServiceLike } from './input-count-tokens.ports';
 import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from '../budget/prisma-gateway-pricing-records';
-import { countTokensSupport, anthropicCountTokensRequest, parseCountTokensResponse, postCountTokens } from './count-tokens.protocol';
+import { countTokensSupport, prepareCountTokensMaterial, countTokensMaterialHash, anthropicCountTokensRequest,
+  parseCountTokensResponse, postCountTokens, type CountTokensMaterial } from './count-tokens.protocol';
 import { countTokensCallId, countTokensSceneCode } from './input-count-tokens.admission';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensReference,
   type CountTokensReceipt, type CountTokensReceiptDb } from './input-count-tokens.receipt';
@@ -170,24 +171,36 @@ export class InputCountTokensService {
   private async accountAdmission(receipt: CountTokensReceipt, association: AiUsageAssociationDraft): Promise<CountTokensAdmissionState> {
     const admission = (status: CountTokensAdmissionState['status']): CountTokensAdmissionState =>
       ({ reservationId: receipt.admission.reservationId, sceneCode: receipt.admission.sceneCode, unit: 'calls', status });
-    try {
-      const current = await this.dependencies.budget.read(receipt.admission.reservationId, association);
-      if (!current) return admission('pending_reconciliation');
-      if (receipt.state === 'unknown') {
-        if (current.status !== 'pending_reconciliation') {
+    // An unreadable ledger row is a pending original outcome; a permission
+    // denial is NEVER downgraded into that label — it propagates.
+    let current: Awaited<ReturnType<BudgetServiceLike['read']>>;
+    try { current = await this.dependencies.budget.read(receipt.admission.reservationId, association); }
+    catch { return admission('pending_reconciliation'); }
+    if (!current) return admission('pending_reconciliation');
+    if (receipt.state === 'unknown') {
+      if (current.status !== 'pending_reconciliation') {
+        try {
           await this.dependencies.budget.markUnknown(receipt.admission.reservationId, association,
             requestFingerprint({ association, phase: 'unknown:count_result_unknown' }), 'count_result_unknown');
+        } catch (error) {
+          if (error instanceof BudgetError && ['FORBIDDEN', 'INVALID'].includes(error.code)) throw error;
         }
-        return admission('pending_reconciliation');
       }
-      if (current.status === 'settled') return admission('settled');
-      await this.dependencies.budget.settle(receipt.admission.reservationId, association,
-        requestFingerprint({ association, phase: 'settle:count-tokens' }), countTokensOperationId(receipt));
-      const settled = await this.dependencies.budget.read(receipt.admission.reservationId, association);
-      return admission(settled?.status ?? 'pending_reconciliation');
-    } catch {
       return admission('pending_reconciliation');
     }
+    if (current.status === 'settled' || current.status === 'released') return admission(current.status);
+    // Both observed and definite-failure receipts settle the one real call the
+    // admission reserved: the external request was made in either case.
+    try {
+      await this.dependencies.budget.settle(receipt.admission.reservationId, association,
+        requestFingerprint({ association, phase: 'settle:count-tokens' }), countTokensOperationId(receipt));
+    } catch (error) {
+      if (error instanceof BudgetError && ['FORBIDDEN', 'INVALID'].includes(error.code)) throw error;
+      return admission('pending_reconciliation');
+    }
+    const settled = await this.dependencies.budget.read(receipt.admission.reservationId, association)
+      .catch(() => null);
+    return admission(settled?.status ?? 'pending_reconciliation');
   }
   async count(value: unknown, signal?: AbortSignal): Promise<CountTokensResult> {
     const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
@@ -214,6 +227,10 @@ export class InputCountTokensService {
       const countCallId = countTokensCallId(frozen.invocation.callId);
       const association = this.association(frozen, countCallId);
       const admissionScene = countTokensSceneCode(frozen.invocation.sceneCode);
+      // Serialize the count material BEFORE reserving/dispatching admission:
+      // a locally unsupported combination (media part, unregistered structured
+      // schema) must never mark the ledger dispatched for an unsent request.
+      const material = this.countMaterial(frozen);
       const reservation = await life.wait(() => this.dependencies.budget.reserve({
         association, callId: countCallId, sceneCode: admissionScene,
         expiresAt: new Date(Math.min(this.clock().getTime() + this.timeoutMs, frozen.invocation.expiresAt.getTime())) }));
@@ -221,16 +238,19 @@ export class InputCountTokensService {
       if (!reserved) throw new BudgetError('PENDING_RECONCILIATION');
       if (reserved.dispatched) {
         // A previous attempt already sent this count; its outcome stays unknown.
-        // No serialized material from this attempt exists to bind.
+        // No serialized material from this attempt exists to bind, so the
+        // recovery receipt carries an explicitly labelled derivation instead
+        // of pretending to hash sent bytes.
         const receipt = await this.persistReceipt(frozen, association, reservation.id, 'unknown', {},
-          requestFingerprint({ requestId: association.requestId, intentHash: frozen.invocation.intentHash }));
+          requestFingerprint({ kind: 'count-recovery-no-serialized-material',
+            requestId: association.requestId, intentHash: frozen.invocation.intentHash }));
         const admission = await this.accountAdmission(receipt, association);
         await gate.recheck();
         return this.summary(receipt, admission);
       }
       await life.wait(() => this.dependencies.budget.dispatch(reservation.id, association,
         requestFingerprint({ association, phase: 'dispatch' })));
-      const outcome = await this.performCount(frozen, gate, life);
+      const outcome = await this.performCount(frozen, gate, life, material);
       const receipt = await this.persistReceipt(frozen, association, reservation.id, outcome.state,
         outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
           : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash);
@@ -241,9 +261,10 @@ export class InputCountTokensService {
   }
   /** Historical observation of one counting receipt under current read
    * authority: the original bound inputs only, never a fresh count, a text
-   * dispatch or an admission refund. Missing receipts report unavailable;
-   * execution shutdown does not erase a legitimately recorded fact. Accepts
-   * either the original call id or the original invocation id. */
+   * dispatch, an admission refund or any ledger mutation. Missing receipts
+   * report unavailable; execution shutdown does not erase a legitimately
+   * recorded fact. Accepts either the original call id or the original
+   * invocation id. */
   async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics }> {
     const parsed = z.object({ callId: callIdSchema.optional(), invocationId: z.string().min(1).max(36)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict().refine(item =>
@@ -270,7 +291,8 @@ export class InputCountTokensService {
       || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
     if (receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
       || receipt.intentHash !== invocation.intentHash || receipt.configurationHash !== invocation.configurationHash
-      || receipt.priceVersion !== invocation.priceVersion
+      || receipt.priceVersion !== invocation.priceVersion || receipt.sceneCode !== invocation.sceneCode
+      || receipt.maxOutputTokens !== invocation.maxOutputTokens
       || receipt.countCallId !== countTokensCallId(invocation.callId)
       || !isGatewayConfig(invocation.configuration)
       || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
@@ -278,7 +300,14 @@ export class InputCountTokensService {
       stepId: invocation.stepId, actionId: invocation.actionId, idempotencyKey: receipt.countCallId,
       scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
       config: invocation.configuration, priceVersion: this.dependencies.countingPriceVersion };
-    const admission = await this.accountAdmission(receipt, association);
+    // Read-only admission observation: this entry never settles, marks unknown
+    // or releases. Convergence of a lost acknowledgement stays with count()'s
+    // original-key replay; here the ledger state is reported exactly as-is.
+    const observedAdmission = await this.dependencies.budget.read(receipt.admission.reservationId, association)
+      .catch(() => null);
+    const admission: CountTokensAdmissionState = { reservationId: receipt.admission.reservationId,
+      sceneCode: receipt.admission.sceneCode, unit: 'calls',
+      status: observedAdmission?.status ?? 'pending_reconciliation' };
     // Applicability is advisory: the recorded basis can still ground a new
     // bound publication only while observed and unexpired. The published-bound
     // state is read from the original bound store, never asserted from memory.
@@ -315,8 +344,25 @@ export class InputCountTokensService {
     const admission = await this.accountAdmission(receipt, association);
     return { receipt, admission };
   }
+  /** Connection-independent serialization of the frozen input: the exact
+   * body the provider will receive. Rejects unsupported combinations before
+   * any admission is reserved. */
+  private countMaterial(frozen: CountTokensFrozenInvocation): CountTokensMaterial {
+    const features = [...new Set(frozen.intent.requiredFeatures.flatMap(feature =>
+      feature === 'tools' ? ['tools' as const] : feature === 'structured_output' ? ['structuredOutput' as const] : []))];
+    return prepareCountTokensMaterial({ callId: frozen.invocation.callId, model: frozen.configuration.model,
+      // Identical text-only conversion to prepareGatewayTextIntent: join a
+      // message's text parts into one string; non-text parts refuse outright.
+      messages: frozen.intent.messages.map(message => ({ role: message.role,
+        content: message.content.map(part => {
+          if (part.kind !== 'text') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+          return part.text;
+        }).join('') })),
+      maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy);
+  }
+
   private async performCount(frozen: CountTokensFrozenInvocation, gate: Awaited<ReturnType<InputCountTokensService['commandGate']>>,
-    life: GatewayDeadline): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
+    life: GatewayDeadline, material: Readonly<CountTokensMaterial>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
     const configuration = frozen.configuration;
     const profile = await this.profile(configuration, gate.tenantId);
     const resolver = configuration.serviceMode === 'platform_managed'
@@ -326,17 +372,7 @@ export class InputCountTokensService {
     if (connection.profileFingerprint !== capabilityProfileFingerprint(profile)) throw new BudgetError('FORBIDDEN');
     const assertCurrent = resolver.assertCurrent?.bind(resolver);
     if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
-    const features = [...new Set(frozen.intent.requiredFeatures.flatMap(feature =>
-      feature === 'tools' ? ['tools' as const] : feature === 'structured_output' ? ['structuredOutput' as const] : []))];
-    const request = anthropicCountTokensRequest({ callId: frozen.invocation.callId, model: configuration.model,
-      // Identical text-only conversion to prepareGatewayTextIntent: join a
-      // message's text parts into one string; non-text parts refuse outright.
-      messages: frozen.intent.messages.map(message => ({ role: message.role,
-        content: message.content.map(part => {
-          if (part.kind !== 'text') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-          return part.text;
-        }).join('') })),
-      maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy, connection.baseUrl);
+    const request = anthropicCountTokensRequest(material, connection.baseUrl);
     try {
       const response = await life.wait(() => postCountTokens(this.dependencies.transport, request,
         connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES));

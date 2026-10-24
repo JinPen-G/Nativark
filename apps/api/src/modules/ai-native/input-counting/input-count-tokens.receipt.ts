@@ -69,26 +69,32 @@ export class PrismaCountTokensReceipts {
   async read(id: string): Promise<CountTokensReceipt> {
     if (!hash64.safeParse(id).success) throw new BudgetError('INVALID');
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
-    const parsed = countTokensReceiptSchema.safeParse(row?.detail);
-    if (!row || row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !parsed.success
-      || row.tenantId !== parsed.data.tenantId || row.workspaceId !== parsed.data.workspaceId
-      || row.userId !== parsed.data.actorId) throw new BudgetError('UNAVAILABLE');
+    if (!row) throw new BudgetError('UNAVAILABLE');
+    const parsed = countTokensReceiptSchema.safeParse(row.detail);
+    // A present-but-unreadable audit row is NOT absence: surface it as an
+    // unreadable original outcome instead of a silent "no receipt".
+    if (row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !parsed.success)
+      throw new BudgetError('PENDING_RECONCILIATION');
+    if (row.tenantId !== parsed.data.tenantId || row.workspaceId !== parsed.data.workspaceId
+      || row.userId !== parsed.data.actorId) throw new BudgetError('PENDING_RECONCILIATION');
     return parsed.data;
   }
   /** Same original key replays the stored fact; a different payload for the
-   * key is a conflict, not an overwrite or a fresh count. */
+   * key is a conflict, not an overwrite or a fresh count. A concurrent append
+   * racing on the same key converges by re-reading the committed original. */
   async append(receipt: CountTokensReceipt): Promise<{ replayed: boolean; receipt: CountTokensReceipt }> {
     const value = countTokensReceiptSchema.parse(structuredClone(receipt));
     const id = countTokensOperationId(value);
     const existing = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
-    if (existing) {
-      const stored = countTokensReceiptSchema.safeParse(existing.detail);
-      if (existing.id !== id || existing.action !== COUNT_TOKENS_RECEIPT_ACTION || !stored.success
-        || requestFingerprint(stored.data) !== requestFingerprint(value)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-      return { replayed: true, receipt: stored.data };
+    if (!existing) {
+      try { await this.db.operationLog.create({ data: { id, tenantId: value.tenantId, workspaceId: value.workspaceId,
+        userId: value.actorId, action: COUNT_TOKENS_RECEIPT_ACTION, detail: json(value) } }); }
+      catch { /* unique race: fall through to the committed original read */ }
     }
-    await this.db.operationLog.create({ data: { id, tenantId: value.tenantId, workspaceId: value.workspaceId,
-      userId: value.actorId, action: COUNT_TOKENS_RECEIPT_ACTION, detail: json(value) } });
-    return { replayed: false, receipt: value };
+    const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
+    const stored = countTokensReceiptSchema.safeParse(row?.detail);
+    if (!row || row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !stored.success
+      || requestFingerprint(stored.data) !== requestFingerprint(value)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+    return { replayed: true, receipt: stored.data };
   }
 }

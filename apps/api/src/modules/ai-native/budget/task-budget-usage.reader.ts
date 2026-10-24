@@ -206,9 +206,13 @@ export class TaskBudgetUsageReader {
         throw new BudgetError('FORBIDDEN');
       // The counting admission precedes any text dispatch and is presented as
       // its own reservation: the count request and the generation request are
-      // separately metered calls that never collapse into one charge.
+      // separately metered calls that never collapse into one charge. A scene
+      // code too long to derive a counting scene can never have produced a
+      // counting admission (admission itself would have failed), so the lookup
+      // is skipped rather than poisoning the whole page.
+      const countingScene = (() => { try { return countTokensSceneCode(original.sceneCode); } catch { return null; } })();
       const countCallId = countTokensCallId(row.callId);
-      const counting = structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
+      const counting = countingScene === null ? null : structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
         scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: countCallId } },
         select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true, priceVersion: true } }));
       if (counting) {

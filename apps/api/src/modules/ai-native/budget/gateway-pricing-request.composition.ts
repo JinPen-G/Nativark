@@ -125,15 +125,19 @@ export class GatewayPricingRequestFactory {
         } else if (action === 'countTokens') {
           // The trusted counting dependency performs the admitted provider count
           // and persists its receipt; the immediate replay only re-reads the
-          // original keys, so a mismatch means an unresolved original outcome.
+          // original keys. Compare the stable receipt identity and outcome, not
+          // the advisory admission status, which a legitimate lost-ack
+          // convergence between the two reads may have changed.
           if (!server.inputCounting) throw new BudgetError('UNAVAILABLE');
+          const stable = (value: unknown) => { const { admission: _admission, ...receipt } =
+            (value ?? {}) as Record<string, unknown>; return receipt; };
           const receipt = await server.inputCounting.count(command, signal);
           const replay = await server.inputCounting.count(command, signal);
-          if (hash(receipt) !== hash(replay)) throw new BudgetError('PENDING_RECONCILIATION');
+          if (hash(stable(receipt)) !== hash(stable(replay))) throw new BudgetError('PENDING_RECONCILIATION');
           result = receipt;
         } else if (action === 'countTokensRead') {
           // Read-only historical observation; it cannot start a count, publish
-          // a bound or settle an admission.
+          // a bound, settle an admission or mutate the ledger.
           if (!server.inputCounting) throw new BudgetError('UNAVAILABLE');
           const receipt = await server.inputCounting.readCountReceipt(command);
           if (hash(receipt) !== hash(await server.inputCounting.readCountReceipt(command)))

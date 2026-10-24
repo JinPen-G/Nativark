@@ -137,7 +137,17 @@ export class AiQuotePreviewService {
       || !['operator', 'staff'].includes(context.audience)) throw new ModelGatewayError('FORBIDDEN');
     if (typeof this.core.readQuoteForOriginalReference !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     const tenantId = context.scope.tenantId, key = originalQuoteKey(context, reference);
-    const stored = await this.core.readQuoteForOriginalReference(tenantId, key);
+    // Sanitize the fact-store read exactly like execute(): an infrastructure
+    // failure is a structured unknown for the original operation, never a raw
+    // business exception crossing the authentication boundary.
+    let stored: RentalQuoteSnapshotV1 | undefined;
+    try {
+      stored = await this.core.readQuoteForOriginalReference(tenantId, key);
+    } catch (error) {
+      if (error instanceof ModelGatewayError) throw error;
+      return { ...this.failure(context, 'unavailable', '原报价读取暂不可用；请稍后按原操作核对'),
+        quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+    }
     if (!stored) return { ...this.failure(context, 'unavailable', '原报价尚未观察到；不得据此重报'),
       quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
     const guardInput = structuredClone(stored.request);
@@ -148,7 +158,13 @@ export class AiQuotePreviewService {
     });
     return this.authority.withQuote(guardInput, async current => {
       if (quoteIdentityHash(current) !== quoteIdentityHash(context)) throw new ModelGatewayError('FORBIDDEN');
-      const again = await this.core.readQuoteForOriginalReference!(tenantId, key);
+      let again: RentalQuoteSnapshotV1 | undefined;
+      try { again = await this.core.readQuoteForOriginalReference!(tenantId, key); }
+      catch (error) {
+        if (error instanceof ModelGatewayError) throw error;
+        return { ...this.failure(context, 'unavailable', '原报价复验暂不可用；请稍后按原操作核对'),
+          quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+      }
       const immutable = (quote: RentalQuoteSnapshotV1) => {
         const { consumedAt: _at, consumedOrderId: _order, ...basis } = quote;
         return requestFingerprint(basis);

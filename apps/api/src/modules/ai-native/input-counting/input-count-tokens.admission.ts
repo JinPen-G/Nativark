@@ -207,9 +207,13 @@ export class InputCountTokensEvidence implements BudgetEvidencePort {
   async usage(record: Readonly<BudgetRecord>, evidenceRef: string, _reconcile: boolean): Promise<BudgetUsageEvidence> {
     if (!code.max(191).safeParse(evidenceRef).success) throw new BudgetError('INVALID');
     const receipt = await this.receipts.read(evidenceRef);
-    if (receipt.state !== 'observed' || receipt.countCallId !== record.callId || receipt.actorId !== record.actorId
-      || receipt.admission.reservationId !== record.id) throw new BudgetError('UNAVAILABLE');
-    return { quantity: { unit: 'calls' as const, value: 1 }, inputTokens: receipt.inputTokens,
+    // Both observed and definite-failure receipts attest the one real external
+    // call the admission reserved; 'unknown' stays unsettled by design.
+    if (!['observed', 'failed'].includes(receipt.state) || receipt.countCallId !== record.callId
+      || receipt.actorId !== record.actorId || receipt.admission.reservationId !== record.id)
+      throw new BudgetError('UNAVAILABLE');
+    return { quantity: { unit: 'calls' as const, value: 1 },
+      ...(receipt.inputTokens !== undefined ? { inputTokens: receipt.inputTokens } : {}),
       evidenceHash: countTokensReceiptDocumentHash(receipt) };
   }
 }
