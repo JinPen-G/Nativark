@@ -42,6 +42,29 @@ async function settingsCancellationResponse(work: () => Promise<unknown>, body: 
     return result;
   } catch { return invalidSettingsResponse(writing); }
 }
+type SettingsLifecycleContract = 'AiApprovedSettingsTaskRunDraft' | 'AiApprovedSettingsTaskCheckpointDraft'
+  | 'AiApprovedSettingsTaskRecoveryDraft' | 'AiApprovedSettingsTaskCancelResponseDraft' | 'AiApprovedSettingsDecisionReceiptDraft';
+async function settingsLifecycleResponse(name: SettingsLifecycleContract, work: () => Promise<unknown>, body: unknown, writing: boolean) {
+  const command = structuredClone(body) as Record<string, unknown>;
+  const reply = await work();
+  try {
+    const result = settingsContract(name, reply, true);
+    const sameSnapshot = (value: { task: { taskId: string }; run: { runId: string } }) =>
+      value.task.taskId === command.taskId && value.run.runId === command.runId;
+    if ('checkpointRef' in result && (result.taskId !== command.taskId || result.runId !== command.runId
+      || result.stepId !== command.stepId)) return invalidSettingsResponse(writing);
+    if ('mode' in result && !sameSnapshot(result.snapshot)) return invalidSettingsResponse(writing);
+    if ('approval' in result && (result.approval.proposalId !== command.proposalId
+      || result.approval.proposalRevision !== command.proposalRevision || result.approval.payloadHash !== command.reviewedPayloadHash
+      || command.decision !== undefined && result.approval.decision !== (command.decision === 'approve' ? 'approved' : 'rejected')))
+      return invalidSettingsResponse(writing);
+    if ('reconciliation' in result && (result.receipt.event.taskId !== command.taskId
+      || result.receipt.event.taskRevision !== Number(command.expectedRevision) + 1
+      || result.receipt.event.data.to !== 'cancel_requested' || result.receipt.event.data.reason !== 'cancel_requested'
+      || 'mode' in result.reconciliation && !sameSnapshot(result.reconciliation.snapshot))) return invalidSettingsResponse(writing);
+    return result;
+  } catch { return invalidSettingsResponse(writing); }
+}
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
@@ -139,7 +162,8 @@ export class AiSettingsTaskControlController {
   }
   @Post(routes.startOriginalSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.controls.start(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsTaskRunDraft',
+      () => this.controls.start(request, body, signal), body, true)), 'read_original_settings_result');
   }
 }
 /** Metadata producer only. This neither publishes a run plan nor starts work. */
@@ -168,30 +192,37 @@ export class AiSettingsTaskController {
   constructor(@Inject(AI_SETTINGS_TASK_HTTP_REQUESTS) private readonly requests: SettingsTaskHttpRequests) {}
   @Post(routes.startSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   startSettingsTask(@Req() request: RunRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.requests.startSettingsTask(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsTaskRunDraft',
+      () => this.requests.startSettingsTask(request, body, signal), body, true)));
   }
   @Post(routes.readSettingsConfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSettingsConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.requests.readSettingsConfirmation(request, body));
+    return respondAiScene(() => settingsLifecycleResponse('AiApprovedSettingsTaskCheckpointDraft',
+      () => this.requests.readSettingsConfirmation(request, body), body, false));
   }
   @Post(routes.decideSettingsProposal) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  decideSettingsProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.requests.decideSettingsProposal(request, body), 'read_decision_receipt');
+  decideSettingsProposal(@Req() request: RunRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsDecisionReceiptDraft',
+      () => this.requests.decideSettingsProposal(request, body, signal), body, true)), 'read_decision_receipt');
   }
   @Post(routes.readSettingsDecision) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSettingsDecision(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.requests.readSettingsDecision(request, body), 'read_decision_receipt');
+    return respondAiScene(() => settingsLifecycleResponse('AiApprovedSettingsDecisionReceiptDraft',
+      () => this.requests.readSettingsDecision(request, body), body, false), 'read_decision_receipt');
   }
   @Post(routes.continueSettingsConfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continueSettingsConfirmation(@Req() request: RunRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.requests.continueSettingsConfirmation(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsTaskRunDraft',
+      () => this.requests.continueSettingsConfirmation(request, body, signal), body, true)));
   }
   @Post(routes.reconcileSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcileSettingsTask(@Req() request: RunRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.requests.reconcileSettingsTask(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsTaskRecoveryDraft',
+      () => this.requests.reconcileSettingsTask(request, body, signal), body, true)));
   }
   @Post(routes.cancelSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.requests.cancelSettingsTask(request, body));
+  cancelSettingsTask(@Req() request: RunRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => settingsLifecycleResponse('AiApprovedSettingsTaskCancelResponseDraft',
+      () => this.requests.cancelSettingsTask(request, body, signal), body, true)), 'read_original_settings_cancellation');
   }
 }

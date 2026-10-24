@@ -1,5 +1,6 @@
 import type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDraft, AiApprovalRecordDraft } from './ai-proposal-draft';
 import type { AiTaskEventDraft, AiTaskStatusDraft } from './ai-task-draft';
+import type { AiTaskRunnerOutcomeDraft, AiTaskRecoverySnapshot } from './ai-task-recovery-draft';
 
 export const AI_APPROVED_SETTINGS_DRAFT_VERSION = 'ain-approved-settings-draft-1' as const;
 export const AI_APPROVED_SETTINGS_TOOL_CODE = 'tenant.notifications.commit' as const;
@@ -52,6 +53,34 @@ export type AiApprovedSettingsTaskCancellationReadDraft = SettingsCancellationBa
   cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
   automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
 } };
+/** Same persisted runner outcome, not a model result or proof of a Core commit. */
+export interface AiApprovedSettingsTaskRunRequestDraft { taskId: string; runId: string; }
+export interface AiApprovedSettingsTaskCheckpointReadDraft extends AiApprovedSettingsTaskRunRequestDraft { stepId: string; }
+export interface AiApprovedSettingsTaskContinueDraft extends AiApprovedSettingsTaskRunRequestDraft { checkpointRef: string; }
+export interface AiApprovedSettingsTaskCancelDraft { taskId: string; expectedRevision: number; }
+export type AiApprovedSettingsTaskRunDraft =
+  | { kind: 'not_started'; reason: 'host_aborted' | 'plan_unavailable' | 'task_not_runnable' | 'lease_held'
+      | 'recovery_lease_unavailable' | 'confirmation_lease_unavailable' }
+  | { kind: 'run_outcome'; outcome: AiTaskRunnerOutcomeDraft };
+export interface AiApprovedSettingsTaskCheckpointDraft {
+  taskId: string; runId: string; stepId: string; taskRevision: number; checkpointRef: string;
+  proposal: { contractVersion: AiProposalPayloadDraft['contractVersion']; proposalId: string;
+    proposalRevision: number; reviewedPayloadHash: string };
+  execution: 'not_attested';
+}
+/** Expired input/terminal work permits original observation, never another run. */
+export type AiApprovedSettingsTaskRecoveryDraft = AiApprovedSettingsTaskRunDraft | {
+  mode: 'read_only'; snapshot: AiTaskRecoverySnapshot; retryable: false; execution: 'original_result_read_no_restart';
+} & (
+  | { operation: { state: 'committed'; receipt: AiApprovedSettingsOperationReceiptDraft }; businessOutcome: 'committed' }
+  | { operation: null; businessOutcome: 'unknown' | 'not_observed' }
+);
+export type AiApprovedSettingsTaskCancelResponseDraft = {
+  receipt: { event: SettingsCancellationEvent; runRevision: null }; cancellation: 'requested_not_rollback';
+  reconciliation: AiApprovedSettingsTaskRecoveryDraft | { kind: 'unavailable';
+    errorCode: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT' | 'AI_STORAGE_UNAVAILABLE';
+    nextAction: 'read_original_task'; retryable: false };
+};
 /** Task-local cursor stays a string; a reset requires a new formal snapshot. */
 export interface AiApprovedSettingsTaskEventsReadDraft extends AiApprovedSettingsTaskCreationDraft {
   after: string; limit: number;

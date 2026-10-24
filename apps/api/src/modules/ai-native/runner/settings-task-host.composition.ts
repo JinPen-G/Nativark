@@ -207,29 +207,29 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
       }
     }
   };
-  const requestCancel = async (value: unknown) => {
+  const requestCancel = async (value: unknown, signal?: AbortSignal) => {
     const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
     if (!parsed.success || parsed.data.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false));
-    const receipt = await bounded(() => taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' }), true);
+    const before = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false, 5000, signal));
+    const receipt = await bounded(() => taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' }), true, 5000, signal);
     // Failure to observe after a write must not imply the cancellation was absent.
-    const after = await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true);
+    const after = await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true, 5000, signal);
     if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return { receipt, cancellation: 'requested_not_rollback' as const };
   };
-  const requestCancelOriginal = async (value: unknown) => {
+  const requestCancelOriginal = async (value: unknown, signal?: AbortSignal) => {
     // Persist the authorized intent first. Only an acknowledged request may
     // attempt original-run reconciliation; no new step or external dispatch.
-    const initial = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false));
-    const result = await requestCancel(value);
+    const initial = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false, 5000, signal));
+    const result = await requestCancel(value, signal);
     let reconciliation;
-    try { reconciliation = await recoverOriginal({ taskId: task.taskId, runId: task.runId }, false); }
+    try { reconciliation = await recoverOriginal({ taskId: task.taskId, runId: task.runId }, false, signal); }
     catch (error) {
       if (!(error instanceof AiTaskRepositoryError) || error.code === 'AI_ACCESS_DENIED' || error.code === 'AI_INVALID_INPUT') throw error;
       reconciliation = { kind: 'unavailable' as const, errorCode: error.code,
         nextAction: 'read_original_task' as const, retryable: false as const };
     }
-    if ((await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true)).bindingKey !== initial.bindingKey) {
+    if ((await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true, 5000, signal)).bindingKey !== initial.bindingKey) {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     }
     return { ...result, reconciliation };

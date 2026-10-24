@@ -2008,6 +2008,25 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
 ];
 
+/** Existing settings lifecycle: names publish the actual request/response,
+ * not permission to execute or proof of a committed business transaction. */
+const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
+  createSettingsTask: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreatedDraft'],
+  readSettingsTaskCreation: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreationReadDraft'],
+  requestOriginalSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationResultDraft'],
+  readOriginalSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationReadDraft'],
+  settleUnstartedSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationResultDraft'],
+  readOriginalSettingsCancellationSettlement: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationReadDraft'],
+  startOriginalSettingsTask: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskRunDraft'],
+  startSettingsTask: ['AiApprovedSettingsTaskRunRequestDraft', 'AiApprovedSettingsTaskRunDraft'],
+  readSettingsConfirmation: ['AiApprovedSettingsTaskCheckpointReadDraft', 'AiApprovedSettingsTaskCheckpointDraft'],
+  decideSettingsProposal: ['AiApprovedSettingsDecisionDraft', 'AiApprovedSettingsDecisionReceiptDraft'],
+  readSettingsDecision: ['AiApprovedSettingsReferenceDraft', 'AiApprovedSettingsDecisionReceiptDraft'],
+  continueSettingsConfirmation: ['AiApprovedSettingsTaskContinueDraft', 'AiApprovedSettingsTaskRunDraft'],
+  reconcileSettingsTask: ['AiApprovedSettingsTaskRunRequestDraft', 'AiApprovedSettingsTaskRecoveryDraft'],
+  cancelSettingsTask: ['AiApprovedSettingsTaskCancelDraft', 'AiApprovedSettingsTaskCancelResponseDraft']
+};
+
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...DESKTOP_BUSINESS_OPERATIONS,
   { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
@@ -2297,16 +2316,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...Object.entries(AI_SCENE_MODEL_HTTP_DRAFT).filter(([name]) => /Settings/u.test(name)).map(([name, action]) => ({
     method: 'post' as const, path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
     operationId: `originalNotificationSettings_${name}`, permissions: ['rental-os:price:manage'],
-    summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Creation, cancellation and task-policy mutation propagate HTTP abandonment into request credential closure; it never proves rollback. Unknown requires original change/task/decision/operation observation. Metadata creation and cancellation use closed response contracts; other outcomes remain draft-polymorphic.',
-    requestSchema: name === 'createSettingsTask' || name === 'readSettingsTaskCreation' ? 'AiApprovedSettingsTaskCreationDraft'
-      : ['requestOriginalSettingsCancellation', 'readOriginalSettingsCancellation', 'settleUnstartedSettingsCancellation',
-        'readOriginalSettingsCancellationSettlement'].includes(name) ? 'AiApprovedSettingsTaskCancellationDraft' : 'GenericObject',
-    responseSchema: name === 'createSettingsTask' ? 'AiApprovedSettingsTaskCreatedDraft'
-      : name === 'readSettingsTaskCreation' ? 'AiApprovedSettingsTaskCreationReadDraft'
-        : name === 'requestOriginalSettingsCancellation' || name === 'settleUnstartedSettingsCancellation'
-          ? 'AiApprovedSettingsTaskCancellationResultDraft'
-          : name === 'readOriginalSettingsCancellation' || name === 'readOriginalSettingsCancellationSettlement'
-            ? 'AiApprovedSettingsTaskCancellationReadDraft' : 'GenericObject' })),
+    summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Creation, human decision, cancellation and task-policy mutation propagate HTTP abandonment into request credential closure; it never proves rollback. Unknown requires original change/task/decision/operation observation. Named metadata, execution, checkpoint, decision, recovery and cancellation responses are closed; remaining generic outcomes are not frozen. Runner success is not an original Core receipt.',
+    requestSchema: SETTINGS_TASK_CONTRACTS[name]?.[0] ?? 'GenericObject',
+    responseSchema: SETTINGS_TASK_CONTRACTS[name]?.[1] ?? 'GenericObject' })),
   ...Object.entries(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
     method: 'post' as const, path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
     operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,

@@ -413,22 +413,22 @@ export function composeRequestBoundSettingsTask(dependencies: Omit<ApprovedSetti
       || 'runId' in value && value.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const settingsHost = composeTaskSettingsHost({ ...input, host, task });
     return { settingsHost };
-  });
+  }, { write: false });
   return Object.freeze({
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (root, command) => root.settingsHost.application.start(command, signal)),
+      call(request, value, (root, command) => root.settingsHost.application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (root, command) => root.settingsHost.application.readConfirmation(command)),
-    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (root, command) => root.settingsHost.settings.application.decide(command)),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.settings.application.decide(command), { write: true, signal }),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (root, command) => root.settingsHost.settings.application.readDecisionReceipt(command)),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (root, command) => root.settingsHost.application.continueOriginalConfirmation(command, signal)),
+      call(request, value, (root, command) => root.settingsHost.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (root, command) => root.settingsHost.application.reconcileOriginal(command, signal)),
-    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (root, command) => root.settingsHost.application.requestCancelOriginal(command))
+      call(request, value, (root, command) => root.settingsHost.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.requestCancelOriginal(command, signal), { write: true, signal })
   });
 }
 
@@ -495,7 +495,7 @@ export function composeRequestBoundPersistedSettingsTask(
     return { settingsHost, input, verify: async () => {
       if ((await read()).binding !== before.binding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     } };
-  });
+  }, { write: false });
   const use = <R>(request: AiSceneHttpRequest, value: unknown,
     consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>,
     lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true }) =>
@@ -520,16 +520,16 @@ export function composeRequestBoundPersistedSettingsTask(
       use(request, value, (root, command) => root.application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.application.readConfirmation(command), { write: false }),
-    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.settings.application.decide(command), { write: true }),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      use(request, value, (root, command) => root.settings.application.decide(command), { write: true, signal }),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command), { write: false }),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       use(request, value, (root, command) => root.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       use(request, value, (root, command) => root.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
-    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
-      use(request, value, (root, command) => root.application.requestCancelOriginal(command), { write: true })
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      use(request, value, (root, command) => root.application.requestCancelOriginal(command, signal), { write: true, signal })
   });
 }
 
@@ -1288,16 +1288,16 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readTaskPerformance: recoveryReaders.readTaskPerformance,
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       requireSettingsRequests().readSettingsConfirmation(request, value),
-    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
-      requireSettingsRequests().decideSettingsProposal(request, value),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().decideSettingsProposal(request, value, signal),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
       requireSettingsRequests().readSettingsDecision(request, value),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       requireSettingsRequests().continueSettingsConfirmation(request, value, signal),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       requireSettingsRequests().reconcileSettingsTask(request, value, signal),
-    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
-      requireSettingsRequests().cancelSettingsTask(request, value),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      requireSettingsRequests().cancelSettingsTask(request, value, signal),
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
@@ -1695,21 +1695,21 @@ export function composeRequestBoundSettingsBusinessTask(
     return { settings, requireTask, get consumer() {
       return composeAiSettingsBusinessConsumer({ ...input, settingsHost: requireHost() });
     } };
-  });
+  }, { write: false });
   return Object.freeze({
     readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.settings.readCurrent()),
-    prepareChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settings.prepareChange(command)),
+    prepareChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.settings.prepareChange(command), { write: true, signal }),
     readChangeReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settings.readChangeReceipt(command)),
     readBusiness: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => {
       app.requireTask(command && typeof command === 'object' && 'preparation' in command ? command.preparation : undefined);
       return app.consumer.read(command);
     }),
-    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.start(command, signal)),
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.start(command, signal), { write: true, signal, preflightOnly: true }),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).application.readConfirmation(command)),
-    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).settings.application.decide(command)),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).settings.application.decide(command), { write: true, signal }),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).settings.application.readDecisionReceipt(command)),
-    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.continueOriginalConfirmation(command, signal)),
-    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.reconcileOriginal(command, signal)),
-    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).application.requestCancelOriginal(command))
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.requestCancelOriginal(command, signal), { write: true, signal })
   });
 }

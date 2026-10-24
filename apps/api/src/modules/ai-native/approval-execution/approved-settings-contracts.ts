@@ -11,10 +11,17 @@ import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, typ
   type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '@rental-os/shared';
 import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsChangeReceiptDraft,
   AiApprovedSettingsChangePreparationResultDraft, AiApprovedSettingsTaskCreatedDraft, AiApprovedSettingsTaskCreationReadDraft,
-  AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft } from '@rental-os/shared';
+  AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft,
+  AiApprovedSettingsTaskRunDraft, AiApprovedSettingsTaskCheckpointDraft, AiApprovedSettingsTaskRecoveryDraft,
+  AiApprovedSettingsTaskCancelResponseDraft } from '@rental-os/shared';
+import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiApprovedSettingsTaskRunDraft: AiApprovedSettingsTaskRunDraft;
+  AiApprovedSettingsTaskCheckpointDraft: AiApprovedSettingsTaskCheckpointDraft;
+  AiApprovedSettingsTaskRecoveryDraft: AiApprovedSettingsTaskRecoveryDraft;
+  AiApprovedSettingsTaskCancelResponseDraft: AiApprovedSettingsTaskCancelResponseDraft;
   AiApprovedSettingsTaskCreatedDraft: AiApprovedSettingsTaskCreatedDraft;
   AiApprovedSettingsTaskCreationReadDraft: AiApprovedSettingsTaskCreationReadDraft;
   AiApprovedSettingsTaskCancellationResultDraft: AiApprovedSettingsTaskCancellationResultDraft;
@@ -40,6 +47,8 @@ const ajv = new Ajv({ strict: true, allErrors: false, coerceTypes: false, useDef
 ajv.addFormat('date-time', value => z.string().datetime({ offset: true }).safeParse(value).success);
 const definitions = JSON.parse(JSON.stringify({ AiPlatformScope: AI_NATIVE_COMPONENT_SCHEMAS.AiPlatformScope,
   AiTenantScope: AI_NATIVE_COMPONENT_SCHEMAS.AiTenantScope, AiWorkspaceScope: AI_NATIVE_COMPONENT_SCHEMAS.AiWorkspaceScope,
+  AiTaskRecoverySnapshot: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiTaskRecoverySnapshot,
+  AiTaskRunnerOutcomeDraft: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiTaskRunnerOutcomeDraft,
   ...AI_PROPOSAL_DRAFT_SCHEMAS, ...AI_APPROVED_SETTINGS_DRAFT_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
 const validators = Object.fromEntries(Object.keys(AI_APPROVED_SETTINGS_DRAFT_SCHEMAS).map(name => [name,
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: definitions })])) as Record<keyof Contracts, ValidateFunction>;
