@@ -7,7 +7,7 @@ import { dispatchBindingSchema, dispatchOutcomeSchema, type AdmissionDispatchRep
 import { admissionCallIdSchema, admissionInputSchema, admissionPatchSchema, admissionRecordSchema, admissionScopeSchema, admissionStatusSchema } from './invocation-admission.validation';
 
 const select = {
-  id: true, tenantId: true, workspaceId: true, actorId: true, callId: true, requestHash: true, profileId: true,
+  id: true, scopeKind: true, platformDedupKey: true, tenantId: true, workspaceId: true, actorId: true, callId: true, requestHash: true, profileId: true,
   status: true, dispatchId: true, unknownReason: true, expiresAt: true, admittedAt: true, updatedAt: true, revokedAt: true, completedAt: true
 } satisfies Prisma.AiInvocationAdmissionSelect;
 type Row = Prisma.AiInvocationAdmissionGetPayload<{ select: typeof select }>;
@@ -27,7 +27,7 @@ function attributionMatches(scope: Scope, row: { scopeKind?: string | null; tena
 
 function record(row: Row, scope: Scope, callId: string): AiInvocationAdmissionRecord {
   if (!attributionMatches(scope, row) || row.callId !== callId) throw new ModelGatewayError('CONFIG_INVALID');
-  const { tenantId: _, workspaceId: __, ...fields } = row;
+  const { tenantId: _, workspaceId: __, scopeKind: ___, platformDedupKey: ____, ...fields } = row;
   const parsed = admissionRecordSchema.safeParse({ ...fields, scope });
   if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
   return parsed.data;
