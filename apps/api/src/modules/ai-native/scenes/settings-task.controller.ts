@@ -108,16 +108,18 @@ export class AiSettingsChangeController {
 export class AiSettingsTaskControlController {
   constructor(@Inject(AI_SETTINGS_TASK_CONTROL_REQUESTS) private readonly controls: ReturnType<typeof composeRequestBoundSettingsTaskControls>) {}
   @Post(routes.requestOriginalSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  requestCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => settingsCancellationResponse(() => this.controls.requestCancellation(request, body), body, true, 'cancel_requested'), 'read_original_settings_cancellation');
+  requestCancellation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => settingsCancellationResponse(
+      () => this.controls.requestCancellation(request, body, signal), body, true, 'cancel_requested')), 'read_original_settings_cancellation');
   }
   @Post(routes.readOriginalSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => settingsCancellationResponse(() => this.controls.readCancellation(request, body), body, false, 'cancel_requested'));
   }
   @Post(routes.settleUnstartedSettingsCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => settingsCancellationResponse(() => this.controls.settleUnstartedCancellation(request, body), body, true, 'cancelled'), 'read_original_settings_cancellation_settlement');
+  settleUnstartedCancellation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => settingsCancellationResponse(
+      () => this.controls.settleUnstartedCancellation(request, body, signal), body, true, 'cancelled')), 'read_original_settings_cancellation_settlement');
   }
   @Post(routes.readOriginalSettingsCancellationSettlement) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCancellationSettlement(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -128,12 +130,12 @@ export class AiSettingsTaskControlController {
     return respondAiScene(() => this.controls.readPolicy(request, body));
   }
   @Post(routes.configureSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  configure(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.configurePolicy(request, body), 'read_settings_task_policy');
+  configure(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.controls.configurePolicy(request, body, signal)), 'read_settings_task_policy');
   }
   @Post(routes.clearSettingsTaskPolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  clear(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.controls.clearPolicy(request, body), 'read_settings_task_policy');
+  clear(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.controls.clearPolicy(request, body, signal)), 'read_settings_task_policy');
   }
   @Post(routes.startOriginalSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
@@ -145,8 +147,9 @@ export class AiSettingsTaskControlController {
 export class AiSettingsTaskCreationController {
   constructor(@Inject(AI_SETTINGS_TASK_CREATION_REQUESTS) private readonly creation: ReturnType<typeof composeRequestBoundSettingsTaskCreation>) {}
   @Post(routes.createSettingsTask) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => settingsCreationResponse(() => this.creation.create(request, body), body, true), 'read_settings_task_creation');
+  create(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => settingsCreationResponse(
+      () => this.creation.create(request, body, signal), body, true)), 'read_settings_task_creation');
   }
   @Post(routes.readSettingsTaskCreation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
