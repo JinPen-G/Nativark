@@ -130,11 +130,21 @@ export class InputCountTokensService {
     const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: before.tenantId, workspaceId: before.workspaceId });
     const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
     if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
-    await this.dependencies.authorization.authorize('settings_write', structuredClone(before.context),
-      { policy: { scopeId: scope.id, scopeKind: 'WORKSPACE', sceneCode: this.dependencies.sceneCode } });
+    const resource = { policy: { scopeId: scope.id, scopeKind: 'WORKSPACE', sceneCode: this.dependencies.sceneCode } };
+    const authorize = async (context: AiExecutionContext) => {
+      const grant = structuredClone(await this.dependencies.authorization.authorize('settings_write', structuredClone(context), resource));
+      const now = this.clock().getTime();
+      if (!grant || typeof grant.authorizationKey !== 'string'
+        || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(grant.authorizationKey)
+        || !Number.isFinite(now) || !(grant.expiresAt instanceof Date)
+        || !Number.isFinite(grant.expiresAt.getTime()) || grant.expiresAt.getTime() <= now) throw new BudgetError('FORBIDDEN');
+      return grant;
+    };
+    const grant = await authorize(before.context);
     const recheck = async () => {
       const after = await this.current();
-      if (after.scopeId !== before.scopeId || identity(after.context) !== identity(before.context)) throw new BudgetError('FORBIDDEN');
+      if (after.scopeId !== before.scopeId || identity(after.context) !== identity(before.context)
+        || (await authorize(after.context)).authorizationKey !== grant.authorizationKey) throw new BudgetError('FORBIDDEN');
     };
     await recheck();
     return { ...before, scopeId: scope.id, recheck };
@@ -177,18 +187,19 @@ export class InputCountTokensService {
    * accounting write keeps the receipt and reports a pending admission instead
    * of pretending the operation never happened. A replay first observes the
    * terminal state, so re-running count() returns a stable summary. */
-  private async accountAdmission(receipt: CountTokensReceipt, association: AiUsageAssociationDraft): Promise<CountTokensAdmissionState> {
+  private async accountAdmission(receipt: CountTokensReceipt, association: AiUsageAssociationDraft,
+    life: GatewayDeadline): Promise<CountTokensAdmissionState> {
     const admission = (status: CountTokensAdmissionState['status']): CountTokensAdmissionState =>
       ({ reservationId: receipt.admission.reservationId, sceneCode: receipt.admission.sceneCode, unit: 'calls', status });
     // This read also proves current task policy. An unavailable authority is
     // not permission to return an old receipt; all read failures propagate.
-    const current = await this.dependencies.budget.read(receipt.admission.reservationId, association);
+    const current = await life.wait(() => this.dependencies.budget.read(receipt.admission.reservationId, association));
     if (!current) return admission('pending_reconciliation');
     if (receipt.state === 'unknown') {
       if (current.status !== 'pending_reconciliation') {
         try {
-          await this.dependencies.budget.markUnknown(receipt.admission.reservationId, association,
-            requestFingerprint({ association, phase: 'unknown:count_result_unknown' }), 'count_result_unknown');
+          await life.wait(() => this.dependencies.budget.markUnknown(receipt.admission.reservationId, association,
+            requestFingerprint({ association, phase: 'unknown:count_result_unknown' }), 'count_result_unknown'));
         } catch (error) {
           if (!(error instanceof BudgetError && ['UNAVAILABLE', 'PENDING_RECONCILIATION', 'REVISION_CONFLICT'].includes(error.code))) throw error;
         }
@@ -199,13 +210,13 @@ export class InputCountTokensService {
     // Both observed and definite-failure receipts settle the one real call the
     // admission reserved: the external request was made in either case.
     try {
-      await this.dependencies.budget.settle(receipt.admission.reservationId, association,
-        requestFingerprint({ association, phase: 'settle:count-tokens' }), countTokensOperationId(receipt));
+      await life.wait(() => this.dependencies.budget.settle(receipt.admission.reservationId, association,
+        requestFingerprint({ association, phase: 'settle:count-tokens' }), countTokensOperationId(receipt)));
     } catch (error) {
       if (!(error instanceof BudgetError && ['UNAVAILABLE', 'PENDING_RECONCILIATION', 'REVISION_CONFLICT'].includes(error.code))) throw error;
       return admission('pending_reconciliation');
     }
-    const settled = await this.dependencies.budget.read(receipt.admission.reservationId, association);
+    const settled = await life.wait(() => this.dependencies.budget.read(receipt.admission.reservationId, association));
     return admission(settled?.status ?? 'pending_reconciliation');
   }
   async count(value: unknown, signal?: AbortSignal): Promise<CountTokensResult> {
@@ -214,7 +225,7 @@ export class InputCountTokensService {
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let originalMayExist = false;
     try {
-      const gate = await this.commandGate();
+      const gate = await life.wait(() => this.commandGate());
       const frozen = await life.wait(() => this.dependencies.frozen.readFrozenCountingInput(
         { callId: parsed.data.callId, scopeId: gate.scopeId, actorId: gate.actorId }));
       if (frozen.scopeId !== gate.scopeId || frozen.actorId !== gate.actorId
@@ -223,12 +234,12 @@ export class InputCountTokensService {
         || frozen.context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
       const support = countTokensSupport(frozen.configuration.protocol);
       if (!support.supported) throw new BudgetError('UNAVAILABLE');
-      const price = await this.records.price(frozen.scopeId, frozen.invocation.configurationHash, frozen.invocation.priceVersion);
+      const price = await life.wait(() => this.records.price(frozen.scopeId, frozen.invocation.configurationHash, frozen.invocation.priceVersion));
       const now = this.clock().getTime();
       if (Date.parse(price.evidence.validFrom) > now || Date.parse(price.evidence.expiresAt) <= now) throw new BudgetError('UNAVAILABLE');
-      const replay = await this.readReplay(frozen, () => { originalMayExist = true; });
+      const replay = await this.readReplay(frozen, life, () => { originalMayExist = true; });
       if (replay) {
-        await gate.recheck();
+        await life.wait(() => gate.recheck());
         return this.summary(replay.receipt, replay.admission);
       }
       const countCallId = countTokensCallId(frozen.invocation.callId);
@@ -238,10 +249,13 @@ export class InputCountTokensService {
       // a locally unsupported combination (media part, unregistered structured
       // schema) must never mark the ledger dispatched for an unsent request.
       const material = this.countMaterial(frozen);
-      const reservation = await life.wait(() => this.dependencies.budget.reserve({
-        association, callId: countCallId, sceneCode: admissionScene,
-        expiresAt: new Date(Math.min(this.clock().getTime() + this.timeoutMs, frozen.invocation.expiresAt.getTime())) }));
-      originalMayExist = true;
+      const reservation = await life.wait(() => {
+        // The write may commit before its reply is lost. Mark uncertainty at
+        // invocation, never only after an acknowledgement has arrived.
+        originalMayExist = true;
+        return this.dependencies.budget.reserve({ association, callId: countCallId, sceneCode: admissionScene,
+          expiresAt: new Date(Math.min(this.clock().getTime() + this.timeoutMs, frozen.invocation.expiresAt.getTime())) });
+      });
       const reserved = await life.wait(() => this.dependencies.budget.read(reservation.id, association));
       if (!reserved) throw new BudgetError('PENDING_RECONCILIATION');
       if (reserved.dispatched) {
@@ -254,14 +268,14 @@ export class InputCountTokensService {
         actorId: frozen.actorId, callId: frozen.invocation.callId, reservationId: reservation.id,
         registrationHash: frozen.invocation.registrationHash, intentHash: frozen.invocation.intentHash,
         configurationHash: frozen.invocation.configurationHash, countRequestHash: countTokensMaterialHash(material) }));
-      await life.wait(() => this.dependencies.budget.dispatch(reservation.id, association,
-        requestFingerprint({ association, phase: 'dispatch' })));
-      const outcome = await this.performCount(frozen, gate, life, material);
-      const receipt = await this.persistReceipt(frozen, association, reservation.id, outcome.state,
+      const outcome = await this.performCount(frozen, gate, life, material,
+        () => this.dependencies.budget.dispatch(reservation.id, association,
+          requestFingerprint({ association, phase: 'dispatch' })));
+      const receipt = await life.wait(() => this.persistReceipt(frozen, association, reservation.id, outcome.state,
         outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
-          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash);
-      const admission = await this.accountAdmission(receipt, association);
-      await gate.recheck();
+          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash));
+      const admission = await this.accountAdmission(receipt, association, life);
+      await life.wait(() => gate.recheck());
       return this.summary(receipt, admission);
     } catch (error) {
       // Once an original admission exists (or its receipt is being converged),
@@ -427,12 +441,12 @@ export class InputCountTokensService {
     return { callId: invocation.callId, countCallId, lifecycle, admission, receipt: null };
   }
 
-  private async readReplay(frozen: CountTokensFrozenInvocation, beforeAccounting: () => void = () => {}) {
+  private async readReplay(frozen: CountTokensFrozenInvocation, life: GatewayDeadline, beforeAccounting: () => void = () => {}) {
     const scope = frozen.context.scope as { tenantId: string; workspaceId: string };
     const receiptId = countTokensOperationId({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
       actorId: frozen.actorId, callId: frozen.invocation.callId });
     let receipt: CountTokensReceipt;
-    try { receipt = await this.receipts.read(receiptId); } catch (error) {
+    try { receipt = await life.wait(() => this.receipts.read(receiptId)); } catch (error) {
       if (error instanceof CountTokensReceiptNotFoundError) return null;
       throw error;
     }
@@ -444,7 +458,7 @@ export class InputCountTokensService {
       || receipt.countCallId !== countTokensCallId(frozen.invocation.callId)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
     const association = this.association(frozen, receipt.countCallId);
     beforeAccounting();
-    const admission = await this.accountAdmission(receipt, association);
+    const admission = await this.accountAdmission(receipt, association, life);
     return { receipt, admission };
   }
   /** Connection-independent serialization of the frozen input: the exact
@@ -465,9 +479,9 @@ export class InputCountTokensService {
   }
 
   private async performCount(frozen: CountTokensFrozenInvocation, gate: Awaited<ReturnType<InputCountTokensService['commandGate']>>,
-    life: GatewayDeadline, material: Readonly<CountTokensMaterial>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
+    life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
     const configuration = frozen.configuration;
-    const profile = await this.profile(configuration, gate.tenantId);
+    const profile = await life.wait(() => this.profile(configuration, gate.tenantId));
     const resolver = configuration.serviceMode === 'platform_managed'
       ? this.dependencies.resolvers.platform : this.dependencies.resolvers.tenant;
     const context = { actorId: gate.actorId, tenantId: gate.tenantId, workspaceId: gate.workspaceId };
@@ -476,6 +490,11 @@ export class InputCountTokensService {
     const assertCurrent = resolver.assertCurrent?.bind(resolver);
     if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
     const request = anthropicCountTokensRequest(material, connection.baseUrl);
+    // Resolve the connection first; then re-authorize the original task/run/
+    // step and lease through the existing dispatch boundary immediately before
+    // POST. A cancellation while credentials resolve cannot inherit an old grant.
+    await life.wait(() => gate.recheck());
+    await life.wait(dispatch);
     try {
       const response = await life.wait(() => postCountTokens(this.dependencies.transport, request,
         connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES));
@@ -493,7 +512,7 @@ export class InputCountTokensService {
       throw error;
     } finally {
       if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
-      await gate.recheck();
+      await life.wait(() => gate.recheck());
     }
   }
   private async persistReceipt(frozen: CountTokensFrozenInvocation, association: AiUsageAssociationDraft,
