@@ -4,7 +4,15 @@ import { inspectPcmWav } from './pcm-wav';
 import { inspectBoundedImage } from './bounded-image';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
-export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
+/** Explicit SaaS/platform gateway principal, never an absent tenantId silently
+ * interpreted as platform work. Discriminate by field presence: platform
+ * contexts carry actorId only, workspace consumers keep the legacy shape. */
+export interface WorkspaceGatewayContext { tenantId: string; workspaceId: string; actorId: string; }
+export interface PlatformGatewayContext { actorId: string; }
+export type GatewayContext = WorkspaceGatewayContext | PlatformGatewayContext;
+export function isPlatformGatewayContext(value: Readonly<GatewayContext>): value is PlatformGatewayContext {
+  return !('tenantId' in value) && !('workspaceId' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
+}
 /** Content bytes, not provider tokens or the serialized HTTP envelope. Keep
  * the existing media ceiling for every ingress, including text-only calls. */
 export const GATEWAY_MAX_INPUT_BYTES = 900_000;

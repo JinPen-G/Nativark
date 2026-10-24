@@ -532,8 +532,15 @@ model AiProviderCapabilityEvidence {
 /// it cannot be silently retried or treated as a successful business action.
 model AiInvocationAdmission {
   id             String   @id @default(uuid()) @db.VarChar(36)
-  tenantId       String   @db.VarChar(191)
-  workspaceId    String   @db.VarChar(191)
+  /// Explicit scope ownership: WORKSPACE keeps the legacy tenant attribution;
+  /// PLATFORM rows carry null tenant/workspace and the platform dedup key.
+  scopeKind      AiScopeKind @default(WORKSPACE)
+  /// Non-null only for PLATFORM rows (callId under the single platform scope);
+  /// unique-indexed so MySQL still enforces single-admission dedup where the
+  /// nullable tenant columns cannot.
+  platformDedupKey String? @unique(map: "ai_invocation_admission_platform_dedup_key") @db.VarChar(191)
+  tenantId       String?  @db.VarChar(191)
+  workspaceId    String?  @db.VarChar(191)
   actorId        String   @db.VarChar(191)
   callId         String   @db.VarChar(128)
   requestHash    String   @db.VarChar(128)
@@ -632,8 +639,9 @@ model AiGatewayAccountingReceipt {
   scopeId       String @db.VarChar(36)
   scopeKind     AiScopeKind
   taskId        String @db.VarChar(36)
-  tenantId      String @db.VarChar(191)
-  workspaceId   String @db.VarChar(191)
+  /// Null for PLATFORM rows; scopeKind is the authoritative attribution.
+  tenantId      String? @db.VarChar(191)
+  workspaceId   String? @db.VarChar(191)
   invocationId  String @unique @db.VarChar(36)
   reservationId String @unique @db.VarChar(36)
   admissionId   String @unique @db.VarChar(36)
@@ -649,7 +657,8 @@ model AiGatewayAccountingReceipt {
   updatedAt     DateTime @updatedAt @db.DateTime(3)
   invocation    AiGatewayInvocation @relation(fields: [scopeId, taskId, invocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   reservation   AiBudgetReservation @relation(fields: [scopeId, scopeKind, reservationId], references: [scopeId, scopeKind, id], onDelete: Restrict, onUpdate: Restrict)
-  admission     AiInvocationAdmission @relation(fields: [tenantId, workspaceId, admissionId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Optional because PLATFORM rows carry null tenant/workspace attribution.
+  admission     AiInvocationAdmission? @relation(fields: [tenantId, workspaceId, admissionId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([scopeId, state], map: "ai_gateway_accounting_scope_state_idx")
   @@map("ai_gateway_accounting_receipts")

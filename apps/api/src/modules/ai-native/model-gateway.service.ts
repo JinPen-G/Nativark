@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  ModelAdapterError, ModelGatewayError, modelRequestSchema, type ModelAdapter, type GatewayContext,
+  ModelAdapterError, ModelGatewayError, modelRequestSchema, type ModelAdapter, type WorkspaceGatewayContext,
   type GatewayPorts, type ModelRequest, type ModelUsage
 } from "./model-gateway.ports";
 
@@ -33,7 +33,7 @@ export class ModelGatewayService {
     }
   }
 
-  async generate(context: GatewayContext, request: ModelRequest, cancellation?: AbortSignal) {
+  async generate(context: WorkspaceGatewayContext, request: ModelRequest, cancellation?: AbortSignal) {
     const parsedContext = contextSchema.safeParse(context), parsedRequest = requestSchema.safeParse(request);
     if (!parsedContext.success || !parsedRequest.success) throw new ModelGatewayError("INVALID_REQUEST");
     const scope = parsedContext.data, input = parsedRequest.data;
@@ -80,7 +80,7 @@ export class ModelGatewayService {
     }
   }
 
-  private async execute(scope: GatewayContext, input: ModelRequest, controller: AbortController,
+  private async execute(scope: WorkspaceGatewayContext, input: ModelRequest, controller: AbortController,
     wait: <T>(operation: () => Promise<T>) => Promise<T>, cleanup: (operation: () => Promise<void>) => Promise<void>,
     mapped: (error: unknown, code: "FORBIDDEN" | "CONFIG_INVALID" | "CREDENTIAL_UNAVAILABLE" | "BUDGET_UNAVAILABLE") => ModelGatewayError,
     tighten: (timeoutMs: number) => void) {

@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-// The received admission table is workspace-only. Never silently collapse platform/tenant scopes into it.
-export const admissionScopeSchema = z.object({
-  id, kind: z.literal('WORKSPACE'), tenantId: id, workspaceId: id
-}).strict();
+// Workspace admissions keep the legacy shape; the explicit PLATFORM member
+// carries the single platform scope with no tenant attribution to borrow.
+export const admissionScopeSchema = z.union([
+  z.object({ id, kind: z.literal('WORKSPACE'), tenantId: id, workspaceId: id }).strict(),
+  z.object({ id, kind: z.literal('PLATFORM') }).strict()
+]);
 export const admissionStatusSchema = z.enum(['admitted', 'revoked', 'cancelled', 'completed', 'unknown']);
 export const admissionInputSchema = z.object({
   scope: admissionScopeSchema, actorId: id, callId: id.max(128), requestHash: z.string().min(1).max(128),

@@ -23,9 +23,10 @@ export class InvocationAdmissionService {
     const parsed = admissionRecordSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     const row = parsed.data;
+    const sameScope = (a: { kind: string; id: string; tenantId?: string | null; workspaceId?: string | null }, b: typeof a) =>
+      a.kind === b.kind && a.id === b.id && (a.tenantId ?? null) === (b.tenantId ?? null) && (a.workspaceId ?? null) === (b.workspaceId ?? null);
     if (row.actorId !== input.actorId || row.callId !== input.callId || row.requestHash !== input.requestHash
-      || row.profileId !== (input.profileId ?? null) || row.scope.kind !== input.scope.kind || row.scope.id !== input.scope.id
-      || row.scope.tenantId !== input.scope.tenantId || row.scope.workspaceId !== input.scope.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
+      || row.profileId !== (input.profileId ?? null) || !sameScope(row.scope, input.scope)) throw new ModelGatewayError('CONFIG_INVALID');
     if (row.status === 'unknown') throw new ModelGatewayError('ACCOUNTING_PENDING');
     if (row.status !== 'admitted' || row.expiresAt <= this.now() || row.revokedAt !== null || row.completedAt !== null || row.dispatchId !== null) throw new ModelGatewayError('INVALID_REQUEST');
     return structuredClone(row);
@@ -66,8 +67,10 @@ export class InvocationAdmissionService {
     try { next = await this.repository.transition(structuredClone(parsedScope.data), callId, from, to, structuredClone(parsedPatch.data)); }
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }
     const parsed = admissionRecordSchema.safeParse(next);
+    const sameScope = (a: { id: string; tenantId?: string | null; workspaceId?: string | null }, b: typeof a) =>
+      a.id === b.id && (a.tenantId ?? null) === (b.tenantId ?? null) && (a.workspaceId ?? null) === (b.workspaceId ?? null);
     if (!parsed.success || parsed.data.callId !== callId || parsed.data.status !== to
-      || parsed.data.scope.id !== scope.id || parsed.data.scope.tenantId !== scope.tenantId || parsed.data.scope.workspaceId !== scope.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
+      || parsed.data.scope.kind !== scope.kind || !sameScope(parsed.data.scope, scope)) throw new ModelGatewayError('CONFIG_INVALID');
     return structuredClone(parsed.data);
   }
 }

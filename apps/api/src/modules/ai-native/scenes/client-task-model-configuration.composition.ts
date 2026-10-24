@@ -178,6 +178,9 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
       manage: async () => { throw new ModelGatewayError('FORBIDDEN'); },
       invoke: async value => {
         const expected = structuredClone(value);
+        // Customer execution contexts are always workspace-shaped; a platform
+        // principal can never satisfy the customer task authority anyway.
+        if (!('tenantId' in expected && 'workspaceId' in expected)) throw new ModelGatewayError('FORBIDDEN');
         const principal = gatewayBudgetPrincipal(await authorization.execution.authorize(taskId));
         if (principal.actorKind !== 'CUSTOMER' || principal.actorId !== expected.actorId
           || principal.tenantId !== expected.tenantId || principal.workspaceId !== expected.workspaceId)

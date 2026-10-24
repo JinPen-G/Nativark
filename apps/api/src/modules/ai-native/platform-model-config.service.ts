@@ -1,4 +1,4 @@
-import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
+import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import { TenantModelConfigService, type TenantModelConfigPorts } from './tenant-model-config.service';
 import { SecretBox } from '../../common/secret-box';
 
@@ -16,14 +16,14 @@ export interface PlatformModelConfigSummary {
 export class PlatformModelConfigService {
   private readonly tenant: TenantModelConfigService;
   constructor(ports: TenantModelConfigPorts, secrets: SecretBox) { this.tenant = new TenantModelConfigService(ports, secrets); }
-  async get(context: GatewayContext): Promise<PlatformModelConfigSummary> { return this.tenant.get(context); }
-  async saveTenantService(context: GatewayContext, input: unknown): Promise<PlatformModelConfigSummary> {
+  async get(context: WorkspaceGatewayContext): Promise<PlatformModelConfigSummary> { return this.tenant.get(context); }
+  async saveTenantService(context: WorkspaceGatewayContext, input: unknown): Promise<PlatformModelConfigSummary> {
     // Editing retained BYOK settings does not change the selected service mode.
     // The save has already committed: do not turn a valid platform-mode summary
     // into a false failure response that encourages another write.
     return this.tenant.save(context, input);
   }
-  async clearTenantService(context: GatewayContext, expectedRevision: number): Promise<PlatformModelConfigSummary> {
+  async clearTenantService(context: WorkspaceGatewayContext, expectedRevision: number): Promise<PlatformModelConfigSummary> {
     const current = await this.tenant.get(context);
     if (current.mode !== 'tenant_managed' || !current.protocol || !current.baseUrl || !current.model) {
       throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
@@ -40,11 +40,11 @@ export class PlatformModelConfigService {
       secretChange: { operation: 'clear' },
     });
   }
-  async switchMode(context: GatewayContext, mode: AiServiceMode, expectedRevision: number): Promise<PlatformModelConfigSummary> {
+  async switchMode(context: WorkspaceGatewayContext, mode: AiServiceMode, expectedRevision: number): Promise<PlatformModelConfigSummary> {
     return this.tenant.changeMode(context, { mode, expectedRevision });
   }
-  async selection(context: GatewayContext) { return this.tenant.selection(context); }
-  async selectionForInvocation(context: GatewayContext) { return this.tenant.selectionForInvocation(context); }
-  async tenantProfile(context: GatewayContext) { return this.tenant.profile(context); }
-  async tenantCredential(reference: string, context: GatewayContext) { return this.tenant.credential(reference, context); }
+  async selection(context: WorkspaceGatewayContext) { return this.tenant.selection(context); }
+  async selectionForInvocation(context: WorkspaceGatewayContext) { return this.tenant.selectionForInvocation(context); }
+  async tenantProfile(context: WorkspaceGatewayContext) { return this.tenant.profile(context); }
+  async tenantCredential(reference: string, context: WorkspaceGatewayContext) { return this.tenant.credential(reference, context); }
 }

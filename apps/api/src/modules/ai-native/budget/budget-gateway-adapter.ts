@@ -17,15 +17,10 @@ export interface BudgetGatewayInvocationBinding {
   expiresAt: Date;
 }
 
-/** Explicit SaaS/platform gateway principal, never an absent tenantId silently
- * interpreted as platform work. Discriminated by the missing tenantId field. */
-export interface PlatformGatewayContext {
-  actorId: string;
-}
-export type BudgetGatewayContext = GatewayContext | PlatformGatewayContext;
-export function isPlatformGatewayContext(value: Readonly<BudgetGatewayContext>): value is PlatformGatewayContext {
-  return !('tenantId' in value) && !('workspaceId' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
-}
+/** Aliases of the canonical gateway context union from model-gateway.ports. */
+export type { PlatformGatewayContext } from '../model-gateway.ports';
+export type BudgetGatewayContext = GatewayContext;
+export { isPlatformGatewayContext } from '../model-gateway.ports';
 
 export interface GatewayBudgetReserveRequest {
   callId: string; model: string; maxOutputTokens: number; intentHash: string;

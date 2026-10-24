@@ -1,7 +1,5 @@
-import type { ModelProtocolRequest, ModelRequest, ModelUsage } from './model-gateway.ports';
-import type { GatewayContext } from './model-gateway.ports';
+import type { ModelProtocolRequest, ModelRequest, ModelUsage, GatewayContext } from './model-gateway.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
-import type { AiGatewayRoutingService } from './gateway-routing.service';
 import type { InvocationDispatchService } from './invocation-dispatch.service';
 import type { InvocationAdmissionService } from './invocation-admission.service';
 import type { UnifiedGatewayBudget } from './gateway-accounting.ports';
@@ -33,6 +31,10 @@ export interface GatewayBudgetDenialObservation {
   call: import('./gateway-accounting.ports').GatewayAccountingCall;
   code: 'BUDGET_UNAVAILABLE';
 }
-export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>;
+export interface UnifiedGatewayAudit { append(entry: { callId: string; /** Null for explicit SaaS/platform calls (no tenant attribution). */ tenantId: string | null; workspaceId: string | null; event: string; status: string; detail?: string }): Promise<void>;
   budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void>; }
-export interface UnifiedGatewayPorts { routing: Pick<AiGatewayRoutingService, 'resolve' | 'assertCurrent'>; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void>; budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void> }; }
+export interface UnifiedGatewayRoutingPort {
+  resolve(context: Readonly<GatewayContext>, requested: readonly import('./provider-profile.ports').AiProfileCapability[]): Promise<import('./gateway-routing.service').GatewayRoutingResolution>;
+  assertCurrent(context: Readonly<GatewayContext>, resolution: import('./gateway-routing.service').GatewayRoutingResolution): Promise<void>;
+}
+export interface UnifiedGatewayPorts { routing: UnifiedGatewayRoutingPort; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void>; budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void> }; }
