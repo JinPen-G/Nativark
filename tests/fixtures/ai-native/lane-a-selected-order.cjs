@@ -113,6 +113,31 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
   };
   Object.assign(h.dependencies.db, db);
   const dependencies = { ...h.dependencies, ...h.policyDependencies, scene: { code: 'quote_clarification', version: '1' } };
+  // The deferred scene assembly composes the full business-tools surface,
+  // which requires more of core/business than the approval chain does. Build
+  // a SEPARATE scene core so the approval chain's own core object is not
+  // mutated (an availability echo on the shared core regressed committed
+  // approval outcomes). Scene-only additions fail closed on use:
+  // resolvePricingGroupQuoteRequest and createQuote are financial ports that
+  // this harness must not fake — the selected flow's quote already exists in
+  // the approval chain, and no scene endpoint here creates a new one.
+  const sceneCore = { ...dependencies.core,
+    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
+    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
+    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
+      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 }),
+    listItemGroups: () => [], listPricingGroups: () => [], listCouponTemplates: () => [],
+    listLocations: () => [], listOperators: () => [], resolveWorkspaceId: () => 'workspace-a',
+    availability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
+      startAt: request.startAt, endAt: request.endAt,
+      lines: request.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: line.itemGroupId,
+        itemGroupName: line.itemGroupId, inventoryMode: 'quantity', requestedQuantity: line.quantity,
+        availableQuantity: 0, available: false, reasons: ['synthetic_fixture_unavailable'] })) }),
+    resolvePricingGroupQuoteRequest: async () => { throw new Error('pricing_group_resolution_not_available_in_harness'); } };
+  const sceneBusiness = { ...dependencies.business,
+    createQuote: async () => { throw new Error('quote_creation_not_available_in_harness'); } };
+  dependencies.core = sceneCore;
+  dependencies.business = sceneBusiness;
   const route = new AiApprovedOrderRouteAuthority(dependencies.guard, dependencies.credentials, dependencies.clock);
   const identity = new (require('../../../apps/api/src/modules/ai-native/task-current-identity.authority').AiTaskCurrentIdentityAuthority)(h.auth, dependencies.credentials, dependencies.clock);
   const authority = new AiCurrentOriginalRequestAuthority(dependencies.db, { ...dependencies,
