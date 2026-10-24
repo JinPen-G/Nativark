@@ -19,7 +19,8 @@ import { PrismaGatewayAccountingFacts, type GatewayActualUsagePricing } from './
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
-import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from './gateway-budget-principal';
+import { isPlatformGatewayContext, type BudgetGatewayContext } from './budget-gateway-adapter';
 import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
 import { budgetSettingsOperationSchema, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
 import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
@@ -185,8 +186,13 @@ export function createPersistedGatewayBudget(input: {
     const parsed = recoveryCommand.safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
     const before = structuredClone(await input.scopes.resolveCurrent());
-    const { actorKind: _, ...context } = gatewayBudgetPrincipal(before.context);
-    const binding = structuredClone(await bindings.resolveForReservation(context, parsed.data.reservationId));
+    // Dual-scope principal: workspace consumers keep their tenant attribution;
+    // explicit SaaS/platform principals carry actorId only for the binding.
+    const gatewayContext: BudgetGatewayContext = isPlatformGatewayContext({ actorId: '' }) || before.scope.kind === 'PLATFORM'
+      ? { actorId: gatewayPlatformBudgetPrincipal(before.context).actorId }
+      : (() => { const p = gatewayBudgetPrincipal(before.context);
+          return { tenantId: p.tenantId, workspaceId: p.workspaceId, actorId: p.actorId }; })();
+    const binding = structuredClone(await bindings.resolveForReservation(gatewayContext, parsed.data.reservationId));
     const record = await service.read(parsed.data.reservationId, binding.association);
     return { before, binding, record, reservationId: parsed.data.reservationId };
   };
@@ -198,17 +204,19 @@ export function createPersistedGatewayBudget(input: {
       const parsed = originalCallCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new BudgetError('INVALID');
       const before = structuredClone(await input.scopes.resolveCurrent());
-      const principal = gatewayBudgetPrincipal(before.context);
-      if (before.scope.kind !== 'WORKSPACE' || before.scope.tenantId !== principal.tenantId
-        || before.scope.workspaceId !== principal.workspaceId) throw new BudgetError('FORBIDDEN');
+      const platform = before.scope.kind === 'PLATFORM';
+      const principal = platform ? { actorId: gatewayPlatformBudgetPrincipal(before.context).actorId, tenantId: null as string | null, workspaceId: null as string | null }
+        : (() => { const p = gatewayBudgetPrincipal(before.context); return { actorId: p.actorId, tenantId: p.tenantId as string | null, workspaceId: p.workspaceId as string | null }; })();
+      const scopeKind = platform ? 'PLATFORM' as const : 'WORKSPACE' as const;
       const row = structuredClone(await input.db.aiBudgetReservation.findUnique({ where: {
-        scopeId_scopeKind_callId: { scopeId: before.scope.id, scopeKind: 'WORKSPACE', callId: parsed.data.callId }
+        scopeId_scopeKind_callId: { scopeId: before.scope.id, scopeKind, callId: parsed.data.callId }
       }, select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true, callId: true } }));
       // Absence is not proof of no consumption. In particular, do not perform
       // a replacement reserve after a lost COMMIT response or a missing link.
       if (!row) throw new BudgetError('PENDING_RECONCILIATION');
-      if (row.scopeId !== before.scope.id || row.scopeKind !== 'WORKSPACE'
-        || row.tenantId !== principal.tenantId || row.workspaceId !== principal.workspaceId
+      if (row.scopeId !== before.scope.id || row.scopeKind !== scopeKind
+        || (platform ? row.tenantId !== null || row.workspaceId !== null
+          : row.tenantId !== principal.tenantId || row.workspaceId !== principal.workspaceId)
         || row.actorId !== principal.actorId || row.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
       const { record } = await originalReservation({ reservationId: row.id });
       if (record.id !== row.id || record.callId !== parsed.data.callId
