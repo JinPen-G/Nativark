@@ -144,8 +144,11 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
     // submission to the application: the application's own abort checks own the
     // not-started outcomes (a durable answer receipt with a suppressed
     // continuation, a plain not_started, or an idempotent original-request
-    // write that replays its persisted receipt). Only abandonment during
-    // flight revokes request-local credentials before any late consume.
+    // write that replays its persisted receipt). Such a delivery runs without
+    // the five-second preflight bound — the request is already gone, the
+    // application's abort gates precede every lease claim, and idempotent
+    // writes replay instead of re-executing. Only abandonment during flight
+    // revokes request-local credentials before any late consume.
     const deadOnArrival = Boolean(lifetime?.signal?.aborted);
     if (!deadOnArrival) lifetime?.signal?.addEventListener('abort', close, { once: true });
     try {
