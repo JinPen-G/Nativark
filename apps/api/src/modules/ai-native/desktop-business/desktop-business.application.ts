@@ -95,9 +95,15 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
         if (input.query.limit > policy.policy.maxRows || !policy.policy.destinations.some(destination => requestFingerprint(destination) === requestFingerprint(input.query.destination)))
           throw fail('AI_ACCESS_DENIED');
         await revalidate();
-        const reader = new AiCatalogReadFactsService(dependencies.core,
-          new AiBusinessReadRouteAuthority(dependencies.guard, credentials, clock), clock);
-        const facts = await reader.read({ limit: input.query.limit }, before); assertActive();
+        const authority = new AiBusinessReadRouteAuthority(dependencies.guard, credentials, clock);
+        return authority.withRead('catalog', { limit: input.query.limit }, async authorized => {
+        assertActive();
+        if (authorized.actor.kind !== 'user' || authorized.actor.userId !== binding.actorId || authorized.scope.kind !== 'workspace'
+          || authorized.scope.tenantId !== binding.tenantId || authorized.scope.workspaceId !== binding.workspaceId) throw fail('AI_SCOPE_CHANGED');
+        // Compare reader facts against the Guard-expanded scope, not Auth's raw organization/location settings.
+        // The enclosing authority also rechecks that scope after the audit before disclosing this result.
+        const reader = new AiCatalogReadFactsService(dependencies.core, authority, clock);
+        const facts = await reader.read({ limit: input.query.limit }, authorized); assertActive();
         if (facts.items.some(item => !Object.values(RentalCategoryCode).includes(item.categoryCode as RentalCategoryCode))) throw fail('AI_RESOURCE_UNAVAILABLE');
         await revalidate();
         const verifyPolicy = async () => {
@@ -123,6 +129,7 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
         assertActive(); await verifyPolicy();
         if (Date.parse(result.expiresAt) <= clock().getTime()) throw fail('AI_RESOURCE_UNAVAILABLE');
         return result;
+        });
       }), action === 'change', signal);
     } catch (error) {
       if (action === 'change' && !(error instanceof AiTaskRepositoryError) && !(error instanceof DesktopBusinessError)) throw fail('AI_RESULT_UNKNOWN');
