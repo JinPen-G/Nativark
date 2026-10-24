@@ -43,7 +43,8 @@ export interface CountTokensFrozenInvocation {
 export interface CountTokensFrozenInputSource {
   readFrozenCountingInput(command: Readonly<{ callId: string; scopeId: string; actorId: string }>): Promise<CountTokensFrozenInvocation>;
 }
-export type CountTokensServiceDb = CountTokensReceiptDb & GatewayPricingRecordDb & Pick<PrismaClient, 'aiScope' | 'aiProviderProfile'>;
+export type CountTokensServiceDb = CountTokensReceiptDb & GatewayPricingRecordDb & Pick<PrismaClient, 'aiScope' | 'aiProviderProfile'>
+  & Partial<Pick<PrismaClient, 'aiBudgetReservation'>>;
 export interface InputCountTokensDependencies {
   db: CountTokensServiceDb;
   scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
@@ -70,6 +71,11 @@ export type CountTokensResult = {
   admission: CountTokensAdmissionState;
   observedAt: string; expiresAt: string; executionPermission: false; textDispatch: 'not_started';
 };
+/** Read-path lifecycle evidence: which durable stage the ORIGINAL count key
+ * has actually reached. 'claimed_dispatched' means the unique INSERT-won
+ * dispatch claim exists; it never proves the provider received the call. */
+export type CountTokensLifecycle = 'not_started' | 'reserved' | 'claimed_dispatched'
+  | { receiptRecorded: CountTokensReceipt['state'] };
 /** Read-path only diagnostics: applicability of the recorded basis for a new
  * publication, and the already-published bound from the original store. */
 export type CountTokensDiagnostics = { applicable: boolean;
@@ -260,7 +266,8 @@ export class InputCountTokensService {
    * report unavailable; execution shutdown does not erase a legitimately
    * recorded fact. Accepts either the original call id or the original
    * invocation id. */
-  async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics }> {
+  async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics;
+    lifecycle: CountTokensLifecycle }> {
     const parsed = z.object({ callId: callIdSchema.optional(), invocationId: z.string().min(1).max(36)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict().refine(item =>
       (item.callId !== undefined) !== (item.invocationId !== undefined)).safeParse(structuredClone(value));
@@ -302,6 +309,10 @@ export class InputCountTokensService {
     const admission: CountTokensAdmissionState = { reservationId: receipt.admission.reservationId,
       sceneCode: receipt.admission.sceneCode, unit: 'calls',
       status: observedAdmission?.status ?? 'pending_reconciliation' };
+    // Lifecycle evidence for the original key: a receipt row is terminal
+    // truth for the observation entry; the claim check is only relevant on
+    // the receipt-free observe entry (observeCountKey).
+    const lifecycle: CountTokensLifecycle = { receiptRecorded: receipt.state };
     // Applicability is advisory: the recorded basis can still ground a new
     // bound publication only while observed and unexpired. The published-bound
     // state is read from the original bound store, never asserted from memory.
@@ -319,7 +330,71 @@ export class InputCountTokensService {
     await this.dependencies.budget.read(receipt.admission.reservationId, association);
     const after = await this.current();
     if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
-    return { ...this.summary(receipt, admission), diagnostics };
+    return { ...this.summary(receipt, admission), diagnostics, lifecycle };
+  }
+
+  /** Receipt-free original-key observation: which durable stage the count key
+   * has reached — not started, admission reserved, dispatch claimed (the
+   * unique INSERT winner may have sent), or a terminal receipt state. Strictly
+   * read-only; it never claims, sends, settles or releases anything, and a
+   * missing receipt is reported as its true stage, never as zero or failure. */
+  async observeCountKey(value: unknown): Promise<{ callId: string; countCallId: string; lifecycle: CountTokensLifecycle;
+    admission: CountTokensAdmissionState | null; receipt: CountTokensResult | null }> {
+    const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const current = await this.current();
+    const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId });
+    const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
+    if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
+    const invocation = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } });
+    if (!invocation || invocation.scopeId !== scope.id || invocation.actorId !== current.actorId
+      || invocation.callId !== parsed.data.callId || !isGatewayConfig(invocation.configuration)
+      || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
+    const scopeFields = current.context.scope as { tenantId: string; workspaceId: string };
+    const receiptId = countTokensOperationId({ tenantId: scopeFields.tenantId, workspaceId: scopeFields.workspaceId,
+      actorId: current.actorId, callId: invocation.callId });
+    let receipt: CountTokensReceipt | null = null;
+    try { receipt = await this.receipts.read(receiptId); } catch (error) {
+      if (!(error instanceof BudgetError && error.code === 'UNAVAILABLE')) throw error; }
+    if (receipt && (receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
+      || receipt.countCallId !== countTokensCallId(invocation.callId))) throw new BudgetError('FORBIDDEN');
+    if (receipt) {
+      const result = await this.readCountReceipt({ callId: invocation.callId });
+      return { callId: invocation.callId, countCallId: receipt.countCallId,
+        lifecycle: { receiptRecorded: receipt.state }, admission: result.admission, receipt: result };
+    }
+    const claimed = await this.receipts.hasDispatchClaim({ tenantId: scopeFields.tenantId,
+      workspaceId: scopeFields.workspaceId, actorId: current.actorId, callId: invocation.callId });
+    const countCallId = countTokensCallId(invocation.callId);
+    const association: AiUsageAssociationDraft = { requestId: countCallId, runId: invocation.runId,
+      stepId: invocation.stepId, actionId: invocation.actionId, idempotencyKey: countCallId,
+      scope: structuredClone(current.context.scope), config: invocation.configuration,
+      priceVersion: this.dependencies.countingPriceVersion };
+    // The admission row is located by its own original key (workspace scope +
+    // derived count call id); its current status is reported exactly as stored.
+    const admissionRow = typeof this.dependencies.db.aiBudgetReservation?.findUnique === 'function'
+      ? structuredClone(await this.dependencies.db.aiBudgetReservation.findUnique({ where: {
+        scopeId_scopeKind_callId: { scopeId: scope.id, scopeKind: 'WORKSPACE', callId: countCallId } },
+        select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true, sceneCode: true, status: true } }))
+      : null;
+    if (admissionRow && (admissionRow.scopeId !== scope.id || admissionRow.scopeKind !== 'WORKSPACE'
+      || admissionRow.actorId !== current.actorId || admissionRow.callId !== countCallId))
+      throw new BudgetError('FORBIDDEN');
+    let admission: CountTokensAdmissionState | null = null;
+    if (admissionRow) {
+      const status: CountTokensAdmissionState['status'] | null = admissionRow.status === 'reserved'
+        ? 'reserved' : admissionRow.status === 'settled' ? 'settled'
+        : admissionRow.status === 'released' ? 'released'
+        : admissionRow.status === 'pending_reconciliation' ? 'pending_reconciliation' : null;
+      if (status === null) throw new BudgetError('UNAVAILABLE');
+      admission = { reservationId: admissionRow.id, sceneCode: admissionRow.sceneCode, unit: 'calls', status };
+    }
+    const lifecycle: CountTokensLifecycle = claimed ? 'claimed_dispatched'
+      : admissionRow ? 'reserved' : 'not_started';
+    const after = await this.current();
+    if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    return { callId: invocation.callId, countCallId, lifecycle, admission, receipt: null };
   }
 
   private async readReplay(frozen: CountTokensFrozenInvocation) {

@@ -85,6 +85,18 @@ export class PrismaCountTokensReceipts {
       throw new BudgetError('PENDING_RECONCILIATION');
     }
   }
+  /** Read the persisted dispatch-claim row for one original count key. This
+   * proves a claim EXISTS, never that the provider received the call; it is
+   * read-only lifecycle evidence for observations. */
+  async hasDispatchClaim(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>): Promise<boolean> {
+    const binding = structuredClone(value);
+    const id = createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1',
+      countTokensOperationId(binding)])).digest('hex');
+    const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
+    return Boolean(row && row.id === id && row.action === 'ai.model.count_tokens.dispatch'
+      && row.tenantId === binding.tenantId && row.workspaceId === binding.workspaceId
+      && row.userId === binding.actorId);
+  }
   async read(id: string): Promise<CountTokensReceipt> {
     if (!hash64.safeParse(id).success) throw new BudgetError('INVALID');
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
