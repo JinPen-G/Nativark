@@ -61,15 +61,23 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
     if (fulfillment !== undefined) {
       const mode = RENTAL_FULFILLMENT_MODES.find(value => value === fulfillment);
       if (!mode) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      // Only a mode change releases the delivery address. The reconfirmation
+      // design re-offers the current choices so a repeated same-mode answer
+      // re-binds the round; clearing it there would make a delivery candidate
+      // lose its already-confirmed address and never converge with it.
+      if (candidate.fulfillmentMode !== mode) delete candidate.deliveryAddressId;
       candidate.fulfillmentMode = mode;
-      delete candidate.deliveryAddressId;
     }
     for (const [field, property, oldName] of [['customer_selection', 'customerId', 'customerName'],
       ['pickup_location', 'locationId', 'locationName'], ['return_location', 'returnLocationId', 'returnLocationName']] as const) {
       const answer = answers.get(field);
       if (typeof answer === 'string') {
+        // Only a customer change releases the delivery address (it belongs to
+        // the selected customer); a repeated same-customer reconfirmation must
+        // keep the already-confirmed address.
+        const customerChanged = field === 'customer_selection' && candidate[property] !== answer;
         candidate[property] = answer; delete candidate[oldName];
-        if (field === 'customer_selection') delete candidate.deliveryAddressId;
+        if (customerChanged) delete candidate.deliveryAddressId;
       }
     }
     const deliveryAddress = answers.get('delivery_address_selection');

@@ -139,13 +139,12 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
       fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 }),
     listItemGroups: () => [], listPricingGroups: () => [], listCouponTemplates: () => [],
     // The formal catalog read is bounded-only (listItemGroupsPage); the legacy
-    // unbounded method is never called by AI reads. Page over the same empty
-    // synthetic catalog with the formal cursor/truncated contract.
+    // unbounded method is never called by AI reads. The scene catalog is
+    // intentionally empty and the version only satisfies the 64-hex format
+    // check — it is a synthetic constant carrying no business fact.
     listItemGroupsPage: async (_tenantId, query) => {
-      const all = [].filter(row => (!query.itemGroupId || row.id === query.itemGroupId)
-        && (!query.name || row.name === query.name) && (!query.cursor || row.id > query.cursor));
-      const rows = all.slice(0, query.limit), truncated = all.length > query.limit;
-      return { rows, truncated, nextCursor: truncated ? rows[rows.length - 1].id : null,
+      const rows = [], truncated = false;
+      return { rows, truncated, nextCursor: null,
         source: 'persisted_workspace_configuration', configurationVersion: '0'.repeat(64) };
     },
     listLocations: () => [], listOperators: () => [], resolveWorkspaceId: () => 'workspace-a',

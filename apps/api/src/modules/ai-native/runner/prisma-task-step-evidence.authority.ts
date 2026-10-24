@@ -78,6 +78,10 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(saved.policyVersion))) throw denied();
     // Completing a measured original result is not a new tool invocation.
     // Legacy adapters without original evidence retain their stricter gate.
+    // The legacy authorize fallback deliberately keeps the unbumped lease and
+    // its own committed view: at in-tx-resolve time the run CAS is uncommitted,
+    // so the committed revision still equals it, and the digest comparison
+    // fail-closes on drift. Teaching it post-CAS revisions would false-deny.
     const proof = original ? { authorityHash: saved.authorityHash, policyVersion: saved.policyVersion,
       expiresAt: run.leaseExpiresAt.toISOString() }
       : structuredClone(await this.plans.authorize(structuredClone(plan), lease));

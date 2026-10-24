@@ -141,10 +141,11 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
     let active = true;
     const close = () => { active = false; };
     // A request that already arrived aborted still delivers its explicit
-    // submission to the application: the application's own abort checks own
-    // the not-started outcomes (a durable answer receipt with a suppressed
-    // continuation, or a plain not_started). Only abandonment during flight
-    // revokes request-local credentials before any late consume.
+    // submission to the application: the application's own abort checks own the
+    // not-started outcomes (a durable answer receipt with a suppressed
+    // continuation, a plain not_started, or an idempotent original-request
+    // write that replays its persisted receipt). Only abandonment during
+    // flight revokes request-local credentials before any late consume.
     const deadOnArrival = Boolean(lifetime?.signal?.aborted);
     if (!deadOnArrival) lifetime?.signal?.addEventListener('abort', close, { once: true });
     try {

@@ -29,7 +29,14 @@ for (const code of ['camera', 'camping', 'vehicle', 'construction']) test(`${cod
           : field.fieldId === 'item_selection' ? candidateValue.items[0].itemGroupId
           : field.fieldId === 'customer_selection' ? candidateValue.customerId
           : field.fieldId === 'pickup_location' ? candidateValue.locationId : field.options[0].value;
-        return { fieldId: field.fieldId, value: field.options.some(option => option.value === current) ? current : field.options[0].value };
+        // The reconfirm contract must re-offer the candidate's own current
+        // value ("offer current authorized choices again"); falling back to
+        // options[0] would mask a product violation of that contract. Fields
+        // the candidate has not resolved yet (e.g. a name-only location) take
+        // the first re-offered option as the explicit first selection.
+        if (current !== undefined) assert.ok(field.options.some(option => option.value === current),
+          `the reconfirm round must re-offer the current ${field.fieldId}`);
+        return { fieldId: field.fieldId, value: current !== undefined ? current : field.options[0].value };
       }) }]);
   };
   let candidate = explicit, settled = await h.tools.quote.candidates.prepare(explicit);
