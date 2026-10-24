@@ -22,7 +22,7 @@ import type { AiProviderProfileRecord } from '../provider-profile.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { BudgetError, type BudgetAuthorizationSource, type BudgetServiceLike } from './input-count-tokens.ports';
 import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from '../budget/prisma-gateway-pricing-records';
-import { countTokensSupport, prepareCountTokensMaterial, countTokensMaterialHash, anthropicCountTokensRequest,
+import { countTokensSupport, prepareCountTokensMaterial, anthropicCountTokensRequest,
   parseCountTokensResponse, postCountTokens, type CountTokensMaterial } from './count-tokens.protocol';
 import { countTokensCallId, countTokensSceneCode } from './input-count-tokens.admission';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensReference,
@@ -172,7 +172,8 @@ export class InputCountTokensService {
     const admission = (status: CountTokensAdmissionState['status']): CountTokensAdmissionState =>
       ({ reservationId: receipt.admission.reservationId, sceneCode: receipt.admission.sceneCode, unit: 'calls', status });
     // An unreadable ledger row is a pending original outcome; a permission
-    // denial is NEVER downgraded into that label — it propagates.
+    // denial from the settle/markUnknown writes below is NEVER downgraded into
+    // that label — it propagates.
     let current: Awaited<ReturnType<BudgetServiceLike['read']>>;
     try { current = await this.dependencies.budget.read(receipt.admission.reservationId, association); }
     catch { return admission('pending_reconciliation'); }
@@ -415,7 +416,6 @@ export class InputCountTokensService {
       ...(outcome.inputTokens !== undefined ? { inputTokens: outcome.inputTokens } : {}),
       ...(outcome.failureCode !== undefined ? { failureCode: outcome.failureCode } : {})
     };
-    const appended = await this.receipts.append(receipt);
-    return appended.receipt;
+    return this.receipts.append(receipt);
   }
 }

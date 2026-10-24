@@ -81,8 +81,9 @@ export class PrismaCountTokensReceipts {
   }
   /** Same original key replays the stored fact; a different payload for the
    * key is a conflict, not an overwrite or a fresh count. A concurrent append
-   * racing on the same key converges by re-reading the committed original. */
-  async append(receipt: CountTokensReceipt): Promise<{ replayed: boolean; receipt: CountTokensReceipt }> {
+   * racing on the same key converges by re-reading the committed original.
+   * The return value is always the committed original receipt. */
+  async append(receipt: CountTokensReceipt): Promise<CountTokensReceipt> {
     const value = countTokensReceiptSchema.parse(structuredClone(receipt));
     const id = countTokensOperationId(value);
     const existing = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
@@ -95,6 +96,6 @@ export class PrismaCountTokensReceipts {
     const stored = countTokensReceiptSchema.safeParse(row?.detail);
     if (!row || row.id !== id || row.action !== COUNT_TOKENS_RECEIPT_ACTION || !stored.success
       || requestFingerprint(stored.data) !== requestFingerprint(value)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-    return { replayed: true, receipt: stored.data };
+    return stored.data;
   }
 }

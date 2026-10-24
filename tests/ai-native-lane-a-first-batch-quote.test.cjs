@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-business-consumption.cjs');
 
 test('enterprise booking options use the original guarded member and bounded relationship query without selecting', async () => {
@@ -53,19 +53,23 @@ test('enterprise identity uses current authorized options and real Core membersh
   assert.deepEqual(selected.bookingIdentity,selectedIdentity);
   await assert.rejects(async()=>applyOriginalQuoteAnswers(candidate,[{contract,answers:answers.map(row=>row.fieldId==='enterprise_selection'?{...row,value:'unoffered-company'}:row)}]));
   const prepared=await h.tools.quote.candidates.prepare(selected);
-  assert.equal(prepared.status,'needs_confirmation');assert.deepEqual(prepared.request.bookingIdentity,selectedIdentity);
+  // Answers change the candidate fingerprint: the old revision cannot confirm
+  // the final request. Re-read the new revision and explicitly reconfirm it.
+  assert.equal(prepared.status,'missing_input');assert.ok(prepared.missingFields.includes('selectionRevision'));
+  const reconfirmed=await h.tools.quote.candidates.prepare({...selected,selectionRevision:prepared.selectionRevision});
+  assert.equal(reconfirmed.status,'needs_confirmation');assert.deepEqual(reconfirmed.request.bookingIdentity,selectedIdentity);
   let resolved=0;const original=h.memberships.resolveBookingIdentity.bind(h.memberships);
   h.memberships.resolveBookingIdentity=async(...args)=>{const snapshot=await original(...args);resolved++;
     assert.equal(snapshot.corporateMembershipId,'relationship-a');assert.equal(snapshot.personalCustomerId,'customer-a');
     assert.equal(snapshot.enterpriseContractAndPayer,false);return snapshot;};
-  const preview=await h.tools.quote.previewSelection(selected);
+  const preview=await h.tools.quote.previewSelection({...selected,selectionRevision:reconfirmed.selectionRevision});
   assert.equal(preview.status,'quoted');assert.equal(preview.quote.reservation,'not_reserved');assert.equal(resolved,1);
   // Core persistence is allowed for quotes, never inventory ownership or approval.
   assert.equal(h.businessFacts.writes.some(row=>/order|reservation/i.test(row.kind)),false);
   const corporatePayer={...selected,bookingIdentity:{...selectedIdentity,enterpriseContractAndPayer:true}};
   const unsupported=await h.tools.quote.candidates.prepare(corporatePayer);
   assert.equal(unsupported.status,'unavailable');assert.equal(unsupported.reason,'enterprise_payer_authority_unavailable');
-  await assert.rejects(h.tools.quote.preview.preview({...prepared.request,bookingIdentity:corporatePayer.bookingIdentity}),e=>e.code==='CAPABILITY_UNSUPPORTED');
+  await assert.rejects(h.tools.quote.preview.preview({...reconfirmed.request,bookingIdentity:corporatePayer.bookingIdentity}),e=>e.code==='CAPABILITY_UNSUPPORTED');
   assert.equal(resolved,1,'unsupported payer never reaches Core or silently becomes personal payer');
   const unknown=await h.tools.quote.candidates.prepare({...selected,bookingIdentity:{...candidate.bookingIdentity,corporateCustomerId:'other'}});
   assert.equal(unknown.status,'missing_input');assert.ok(unknown.missingFields.includes('bookingIdentity.corporateCustomerId'));
@@ -98,16 +102,23 @@ test('formal input provenance distinguishes explicit fields and blocks order han
   assert.ok(sources.fields.every(field => field.confirmed === false));
   assert.ok(sources.fields.every(field => !field.kind.startsWith('explicit_user')));
   assert.equal(sources.fields.some(field => field.field === 'bookingIdentity'), false);
+  // Supplying the pre-identity revision would mismatch; the fresh candidate is
+  // prepared without a stale assertion so provenance reflects the new input.
   const identified = await h.tools.quote.businessPreparation.inputSources({ ...h.candidate,
-    selectionRevision: first.selectionRevision, bookingIdentity: { bookingIdentity: 'personal' } });
+    bookingIdentity: { bookingIdentity: 'personal' } });
   const identitySource = identified.fields.find(field => field.field === 'bookingIdentity');
   assert.deepEqual(identitySource.value, { bookingIdentity: 'personal' });
   assert.equal(identitySource.kind, 'supplied_candidate');
   assert.equal(identitySource.confirmed, false);
   assert.notEqual(identified.inputFingerprint, sources.inputFingerprint);
-  const handoff = await h.tools.quote.businessPreparation.commitHandoff();
-  assert.equal(handoff.status, 'unavailable');
+  const handoff = await h.tools.quote.commitHandoff({ reference: 'legacy-handoff-reference' });
+  assert.equal(handoff.status, 'prepared_not_submitted');
+  assert.equal(handoff.stages.quoteSaved, 'unknown');
+  assert.equal(handoff.stages.resultUnknown.state, 'unknown');
+  assert.equal(handoff.stages.userConfirmedQuote, 'not_attested_by_this_lane_host_selection_evidence_required');
+  assert.equal(handoff.stages.humanApproval, 'owned_by_persisted_approval_flow');
   assert.equal(handoff.orderApproval, 'not_granted');
+  assert.equal(handoff.execution, 'not_attempted');
 });
 
 test('quote comparison reports Core changes without recomputing money or reusing approval', async () => {
@@ -131,9 +142,13 @@ test('quote comparison reports Core changes without recomputing money or reusing
   const a = await h.tools.quote.previewSelection(input);
   assert.equal(a.status, 'quoted');
   const changed = { ...input, end: '2026-11-12T09:00:00+08:00' };
-  const second = await h.tools.quote.candidates.prepare(changed);
-  assert.equal(second.status, 'needs_confirmation');
-  const b = await h.tools.quote.previewSelection({ ...changed, selectionRevision: second.selectionRevision });
+  const second = await h.tools.quote.candidates.prepare({ ...changed });
+  // The new period rebinds the candidate fingerprint: confirm the fresh
+  // revision before the second preview.
+  assert.equal(second.status, 'missing_input');
+  const reconfirmedPeriod = await h.tools.quote.candidates.prepare({ ...changed, selectionRevision: second.selectionRevision });
+  assert.equal(reconfirmedPeriod.status, 'needs_confirmation');
+  const b = await h.tools.quote.previewSelection({ ...changed, selectionRevision: reconfirmedPeriod.selectionRevision });
   assert.equal(b.status, 'quoted');
   assert.equal(resolvedIdentities, 2);
   const comparison = h.tools.quote.businessPreparation.compareQuotes(a.quote, b.quote);

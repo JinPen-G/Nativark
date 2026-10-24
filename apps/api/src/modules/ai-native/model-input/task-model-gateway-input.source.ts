@@ -119,7 +119,8 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   }
   /** Revalidate an original frozen publication without regenerating messages,
    * changing its price/config binding, registering or dispatching a call. */
-  async revalidatePublished(value: unknown) {    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
+  async revalidatePublished(value: unknown) {
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data, context = await this.execution.authorize(command.taskId);
     const receipt = await this.inputs.readModelInputReceipt(command);

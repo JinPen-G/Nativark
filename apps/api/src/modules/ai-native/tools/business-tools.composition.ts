@@ -159,7 +159,8 @@ export function composeAiAuthorizedBusinessTools(input: {
         return routes.withRead('quote_context', {}, async context => {
           const { requestId: _request, authorizedAt: _at, ...identity } = context;
           const result = await quote.recoverOriginal(parsed.data.reference, requestFingerprint(identity));
-          const quoted = result.status === 'quoted' && result.quote;          return { status: 'prepared_not_submitted' as const,
+          const quoted = result.status === 'quoted' && result.quote;
+          return { status: 'prepared_not_submitted' as const,
             stages: {
               preparation: 'completed_before_quote_reobservable_via_businessPreparation' as const,
               quoteSaved: result.quotePersistence === 'saved' && quoted ? 'saved' as const : result.quotePersistence ?? 'unknown' as const,
