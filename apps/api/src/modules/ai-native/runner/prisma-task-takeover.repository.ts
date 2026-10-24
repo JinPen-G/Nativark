@@ -46,9 +46,9 @@ export class PrismaTaskTakeoverRepository {
     const initial = await this.access.resolveAccess(input.taskId, 'takeover_run');
     active();
     if (initial.actorKind !== 'USER' || !initial.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    let callbackCompleted = false;
+    let callbackCompleted = false, writeAttempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      const acknowledgement = await this.db.$transaction(async tx => {
         const found = await tx.aiTask.findFirst({ where: initial.where, select: { id: true, scopeId: true } });
         if (!found) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${found.scopeId} AND id = ${input.taskId} FOR UPDATE`);
@@ -62,6 +62,7 @@ export class PrismaTaskTakeoverRepository {
         // snapshot. A conditional no-op UPDATE verifies the current row without
         // inventing a public task revision/event for a lease-only mutation.
         active();
+        writeAttempted = true;
         const lockedTask = await tx.aiTask.updateMany({ where: { ...initial.where, scopeId: found.scopeId,
           revision: input.expectedTaskRevision, contractVersion: AI_TASK_DRAFT_VERSION,
           status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'] }
@@ -100,9 +101,21 @@ export class PrismaTaskTakeoverRepository {
           revision: input.expectedRunRevision + 1, fencingToken: (BigInt(input.expectedFencingToken) + 1n).toString(),
           expiresAt: expiresAt.toISOString(), purpose: 'recovery_only' as const };
       }, { maxWait: 2500, timeout: 5000 });
+      // The committed fencing mutation is not undone by revocation while the
+      // commit acknowledgement was in flight. Do not disclose an execution
+      // acknowledgement under stale authority, nor label it uncommitted.
+      const after = await this.access.resolveAccess(input.taskId, 'takeover_run');
+      if (after.bindingKey !== initial.bindingKey || Date.parse(acknowledgement.expiresAt) <= after.now.getTime()) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      return acknowledgement;
     } catch (error) {
+      // Classify the commit boundary before trusting an error's public code.
+      // Even an apparent CAS/authorization error can be a lost COMMIT reply.
+      if (callbackCompleted || writeAttempted && !(error instanceof AiTaskRepositoryError)) {
+        throw new AiTaskTakeoverCommitUnknownError();
+      }
       if (error instanceof AiTaskRepositoryError) throw error;
-      if (callbackCompleted) throw new AiTaskTakeoverCommitUnknownError();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
