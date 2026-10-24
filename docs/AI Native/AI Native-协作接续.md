@@ -2,7 +2,7 @@
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
 > 更新时间：2026-10-24。Claude A固定`68a43441`、Claude B固定`ddf00ca0`已由主线复核并整合，B整合提交`e78196a5`；A并发计数/撤权读取/双账务记录分页/普通文本误拒及B旧调用签名遗漏已修正。主线原`5da55aa3`及客户端独立成果保留。当前缺口是正式生产装配与适用真实验收，不重复开发已交付类；原28项64.3%、ENTRY52.8%、正式0/28保持。
-> **当前仅主线服务端整合，辅助线没有自动续派或同步。** Claude A/B原四批固定成果已消费；后续开工先安全同步本轮主线整合提交，再重新认领。Codex A/B继续暂停；客户端/Harness不在本片范围。没有合main、推送、安装、真实环境连接或生产启用。
+> **负责人已授权Claude A/B同步并接下一服务端长批。** 原四批固定成果已消费，两树无源码WIP或独有提交，已快进功能基线`01ceba7a`；本分工提交后再同步一次，以开工实际HEAD为准。Codex A/B继续暂停，客户端/Harness不在本批范围；不自动启动旧心跳，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -14,11 +14,11 @@
 ## 工作树与写入归属
 
 本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
-分支：`ai/ai-native-contracts-s01-20261002`。服务端会话认领原Gateway/预算、运行器及审批接点；本轮不向辅助树写入或派工，不与其他线双写公共文件。
+分支：`ai/ai-native-contracts-s01-20261002`。主线保留AppModule/ai-native-application.providers.ts、shared中央出口/OpenAPI、Auth/Guard内核、公共runner/审批及最终整合；下述Gateway平台适配及相关持久化本批转由Claude B单作者，计数/计价/成本请求由Claude A单作者，主线不同时修改其认领文件。同步辅助树仅快进固定提交，不直接代写辅助源码。
 
 原服务端与客户端作者的代码和归属分别保留；本次仅统一保全和同步，不把继承成果改称本轮功能实现，也不续接旧会话的执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
 
-四条辅助树位于同级目录，分别为 `codex-ai-native-lane-a` / `ai/codex-ai-native-lane-a-20261007`、`codex-ai-native-lane-b` / `ai/codex-ai-native-lane-b-20261007`、`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`、`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。同步前均无独有提交、未提交源码或合并状态，原落后主线85个提交；本次仅快进到功能保全及本接续更新后的固定主线，保留各树与全部output。源码同步不包括依赖安装、私有client生成或运行验收。派工前逐树重核HEAD/status和唯一文件作者，主线后续提交不会自动同步。
+辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。本次两树从已整合固定交付快进到本轮主线，保留全部output、依赖、缓存和私有client；源码同步不代表生成物、数据库或运行环境同步。Codex A/B两树继续暂停，本轮未同步或派工。主线后续提交不会自动同步，交付只报固定SHA，不追活动HEAD。
 
 开工仍须核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本次负责人明确授权在全部停写后提交保全并同步，既有正式依据内容原样保留，未重排任务或上调进度。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交；后续新WIP必须重新核对，不能据本次清洁现场覆盖。
 
@@ -33,6 +33,15 @@
 - 下一步A装配：`composeInputCountingPricing`、`composeTaskCostObservation`及pricing factory的请求级可信依赖尚未接入标准应用。当前计数codec仅实现Messages文本/获准工具；其他协议、媒体、未登记schema、客户计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种、把calls当token上界或把审核费率当供应商账单。
 - 下一步B装配：公共GatewayContext/Public Gateway平台分支、admission/accounting平台归属字段与必要追加迁移、accounting平台断言及默认关闭的模块注册仍缺。平台probe对象可装配不等于平台已可真实派发；缺项继续拒绝。知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍按原任务补齐。
 - 本片验证为主线源码、实际服务/仓储与串行DB/外部端口替身；两线原有两轮审查报告不能替代本次复核，也不能代替MySQL锁/供应商/浏览器/微信或原G4。两线工作树和全部output保留，未经新授权不追活动HEAD、不直接写辅助树；正式百分比未跨档不调整。
+
+### 下一长批认领：完整纵向功能包，不逐片等待继续
+
+- **Claude A：可信计数/计价发布与成本观察正式请求闭环（AIN-04/05/11/25）。** 连续完成请求级身份与可信依赖工厂、冻结输入读取去循环依赖、当前计数与原键只读核对、可信上界发布和真实recorded pricing消费、计数/生成原账收敛、调用/任务成本受权查询、命名响应与显式默认关闭HTTP模块。至少交付可直接装配的实际请求入口及其消费者，不以新增接口或材料包收尾。保留本轮唯一INSERT派发领取、读前/中撤权拒绝与20 invocation/40记录契约。客户资格/精确计数等缺正式来源的变体单独不可用，不能伪造或推断协议一定有/无计数端点。
+- **A文件：** `input-counting/**`、`budget/gateway-pricing-request.composition.ts`、原计价证据/记录/审阅相关文件、`budget/task-budget-usage.reader.ts`、`observability/task-cost-observation*`及必要新增专用请求/模块/Controller；原`budget-management.module.ts`仅计价入口；`model-input/task-model-gateway-input.source.ts`仅冻结输入计数读取。公共契约优先复用；确需新增只交专用shared源文件和中央出口/OpenAPI精确接线建议，由主线单作者处理，不私有复制公共DTO。
+- **Claude B：平台独立主体真实Gateway单账及知识受权消费闭环（AIN-03/04/05/10/11/19/24）。** 前半连续补平台公共Gateway/独立admission与dispatch所有权、平台accounting持久归属、原收据/usage/能力验证及原任务恢复、专用请求/默认关闭HTTP模块；必要可空归属和约束仅追加迁移，平台不借tenant/workspace。后半继续知识/确认记忆实际生命周期、附件当前绑定、撤回删除后检索/来源重开/冻结输入复验及请求级消费；不用单实例缓存冒充跨实例删除传播。优先让平台文本/流/tools/structured和有合法来源的vision/audio连通，未实现能力精确拒绝。
+- **B文件：** `platform-capability-probe/**`、原text-capability-probe及其仓储/组合、`model-gateway.ports.ts`/Public/Unified/Routed Gateway相关内部端口与平台适配、admission/dispatch仓储服务及`gateway-accounting.ports.ts`、`budget/prisma-gateway-accounting-facts.ts`/`persistent-gateway-budget.ts`/`prisma-gateway-invocation-bindings.ts`/平台principal和budget-gateway相关文件；必要AI归属schema及追加迁移；`knowledge/**`、既有知识/记忆专用服务及`scenes/original-scene-knowledge.ts`。保持原workspace GatewayContext兼容，优先独立平台类型/显式收窄，不把缺tenant字段直接当平台授权；公共类型变化不能要求A同时双写。原生协议编码、A计数材料、财务预算service/repository、公共runner/审批与Core逻辑不在B范围。
+- **共用边界：** 只写各自树，主线只读；不跨摘另一线活动成果，不改AppModule/中央provider/shared出口/OpenAPI/三份主文档/UI。这些接线需要时一次交准确方法/参数/配置及最小补丁给主线，继续本包其他可做功能。每个完整功能阶段一次定向冒烟和必要noEmit，修实际失败后只复验相关处；不新增测试脚本、不递归审查、不重复大矩阵、不凭离线检查宣布AIN100%。完整功能阶段窄提交并简报固定SHA后直接继续，只有全部可做项收口或剩余均有具体正式阻塞才交最终包。
+- **全程离线：** 原双preload、固定无效DATABASE_URL与各自绝对审计/写入/TEMP/cache目录；生成仅原隔离方案，不能复制别树client或覆盖shared dist。不读.env、不安装、不启服务、不连真实HTTP/DB/DNS/模型/支付/对象存储，不执行迁移、不推送/合main/启用生产。Runtime/Provider SDK可替换边界保留，当前不安装迁移；unknown只核对原键，不能换主体/引擎/Provider重发。
 
 当前收口与下一队列（覆盖下方历史接点中的旧待办）：
 
