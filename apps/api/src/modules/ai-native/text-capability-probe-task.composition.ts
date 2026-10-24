@@ -210,6 +210,9 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     readCreation: ReturnType<typeof composeAuthorizedTextProbeTaskProducer>['readCreation'];
   };
   taskPolicies?: ReturnType<typeof composeTaskActionPolicyManagement>;
+  /** Platform consumers must supply their original ledger instead of taking
+   * the workspace-only session/authority fallback. */
+  accountingRecovery?: TextCapabilityProbeApplication['financialRecovery'];
 }) {
   const platform = input.taskScopeKind === 'PLATFORM';
   const taskScopeKind = platform ? 'PLATFORM' as const : 'WORKSPACE' as const;
@@ -296,9 +299,10 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     let returnedMutation = false;
     try {
       await observe(verify);
-      const recovery = composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
+      const recovery = platform ? input.accountingRecovery : composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
         credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard, taskId, clock: input.clock,
         pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+      if (!recovery) throw unavailable();
       if (receiptOnly) {
         if (operation === 'read') throw unavailable();
         const observed = await observe(() => recovery.readOperation({ reservationId: reservation.id, operation }));
@@ -382,7 +386,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       if (Object.entries(where).some(([key, expected]) => stored[key as keyof typeof stored] !== expected)) throw unavailable();
       // The original key locates, never authorizes. Use current task policies,
       // without resolving today's model, plan policy or an execution lease.
-      const authorization = composePersistedTaskAuthorization(input);
+      const authorization = input.authorization ?? (platform ? undefined : composePersistedTaskAuthorization(input));
+      if (!authorization) throw unavailable();
       const access = await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_metadata'));
       const metadata = await observe(() => authorization.tasks.readMetadata(stored.id));
       const runs = await observe(() => input.db.aiRun.findMany({ where: { scopeId: stored.scopeId, taskId: stored.id, sequence: 1 }, take: 2,
@@ -427,7 +432,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       if (!found.task) throw unavailable();
       // Observing metadata must not construct an execution host, register
       // inputs or require a working Gateway/resource writer.
-      const taskId = found.task.taskId, authorization = composePersistedTaskAuthorization(input);
+      const taskId = found.task.taskId, authorization = input.authorization ?? (platform ? undefined : composePersistedTaskAuthorization(input));
+      if (!authorization) throw unavailable();
       const before = await observe(() => authorization.tasks.resolveAccess(taskId, 'read_metadata'));
       const metadata = await observe(() => authorization.tasks.readMetadata(taskId));
       if ((await observe(() => authorization.tasks.resolveAccess(taskId, 'read_metadata'))).bindingKey !== before.bindingKey) throw denied();

@@ -193,7 +193,7 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
     clock, ...(input.monotonic !== undefined ? { monotonic: input.monotonic } : {}),
     ...(input.runnerClock !== undefined ? { runnerClock: input.runnerClock } : {}),
     authorization: taskAuthorization, taskScopeKind: 'PLATFORM' as const,
-    producer, taskPolicies,
+    producer, taskPolicies, accountingRecovery: application.financialRecovery,
   });
   return Object.freeze({ application, workflow, authorization: taskAuthorization, scopes, identity: platformIdentity });
 }

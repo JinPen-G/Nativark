@@ -24,7 +24,7 @@ import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
 import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
-import { isPlatformAiProviderPath, platformAiProviderPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
+import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
 
 interface RequestLike {
   method: string;
@@ -246,6 +246,8 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  const platformProbePermission = platformCapabilityProbePermission(method, path);
+  if (platformProbePermission) return [platformProbePermission];
   if (method.toUpperCase() === 'POST' && path === '/ai-native/desktop-business/catalog')
     return ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/desktop-business\/policy(?:\/(?:change|operation))?$/u.test(path))
@@ -918,7 +920,8 @@ export class ApiAuthGuard implements CanActivate {
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
     const tenantMembershipRoute = isTenantMembershipRoute(path);
     const accessContext = await this.authService.resolveAccessContext(token, {
-      allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/"),
+      allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/")
+        || platformCapabilityProbePermission(request.method, path) !== undefined,
       audience: staffApiRequest ? "staff" : "operator"
     });
     const user = tenantMembershipRoute ? accessContext?.tenantUser : accessContext?.user;
@@ -963,6 +966,10 @@ export class ApiAuthGuard implements CanActivate {
     if (isBudgetPlatformRoute(request.method, path) && !user.isSaasAdmin) {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
+    const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    if (path === '/ai-native/platform-capability' || path.startsWith('/ai-native/platform-capability/')) {
+      if (!platformProbePermission || !user.isSaasAdmin) throw new ForbiddenException('平台能力验证仅向 SaaS 管理员开放已登记操作');
+    }
     // An explicit wildcard role cannot make a not-yet-defined AI action ready.
     // Keep the reserved platform-AI namespace closed beyond this exact policy.
     if ((path === '/platform/ai' || path.startsWith('/platform/ai/'))
@@ -986,6 +993,7 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/rental-categories") &&
       !isPlatformAiProviderPath(path) &&
       !isBudgetPlatformRoute(request.method, path) &&
+      !platformProbePermission &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");

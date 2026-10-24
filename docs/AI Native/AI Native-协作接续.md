@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-24。Claude A `8c628101`、Claude B `1e677bec`已合入，整合提交为`87bf9ff3`和`de9b89b0`。追加深查第一片为`147d9332`；本片继续收口计数命令全程等待期限、预留提交丢应答、连接等待后原任务派发授权与当前管理授权。原28项64.3%、ENTRY52.8%、正式0/28保持，仍有失败用例及正式装配缺口。
-> **两棵Claude辅助树已按授权快进到`de9b89b0`并开始下一服务端长批。** A负责原runner/步骤事务、多轮输入、审批及订单/设置场景，B负责平台HTTP/恢复消费者、知识隐私与事件人工办理；后继成果未自动接收。主线本片只修已合入版本，未移动活动辅助HEAD；Codex A/B继续暂停。不启动旧心跳，不合main、推送或启用生产。
+> 更新时间：2026-10-25。原计数追加修复为`147d9332`、`2c0bac7d`；本片固定接收Claude B `1524161a`（两提交，基于`de9b89b0`），随整合补平台HTTP正式Guard入口、历史/原账实际消费者、unknown及原账操作收据接点。原28项64.3%、ENTRY52.8%、正式0/28保持，仍有原红测及正式装配缺口。
+> **Claude A当前认领原runner/步骤事务、多轮输入及审批/订单场景；B本批固定交付已停止写入。** 本次只整合B `1524161a`，未同步或移动辅助树HEAD，A后继成果不自动接收。Codex A/B继续暂停。不启动旧心跳，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -31,7 +31,8 @@
 - Claude A固定`8c628101`已接：请求级计数/可信上界/recorded pricing/成本观察工厂和默认关闭模块。主线复核补齐无收据观察的当前原任务读权、闭合shared/Controller响应及提交后撤权unknown；计数schema已从shared中央导出。原唯一INSERT领取、原键恢复和20 invocation/40条账务记录边界保留，不把全部旧业务场景算成本批新实现。
 - Claude B固定`1e677bec`已接：平台GatewayContext/Public/Unified、admission/dispatch/accounting归属及追加迁移、平台请求工厂。主线修正实际Routed的actor-only接点、原账务平台principal、scopeKind交叉核对、能力收据上下文，以及每次open独立关闭/迟到Guard凭据复核。知识/automation/员工多数为既有成果和验证，不能把报告的四批标题当新增功能数。
 - 下一步A装配：`AiInputCountingModule.registerHttp`及请求级可信计数/计价/成本依赖仍需接入标准应用，计数OpenAPI路径尚未挂接。当前codec只支持实际已实现变体；其他协议、媒体、未登记schema、客户计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种或把calls当token上界。
-- 下一步B装配：平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。`PlatformCapabilityProbeModule`仅导出组合/请求工厂，尚无HTTP Controller，不能称已挂载平台HTTP。迁移仅隔离validate/diff和client生成，尚未执行。知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。
+- B本片已接：显式模块现有平台HTTP Controller；主线补14个精确Guard路由（SaaS身份、无空间会话与view/manage分别校验），能力收据核对按写操作处理；unknown按原提交阶段指向读取，资金变更用新增原操作收据读取，不用当前余额冒充已提交。公共路径从shared现有正式出口复用，旧模块Symbol出口保持兼容。此注册不代表AppModule已挂载，平台HTTP完整OpenAPI请求/响应schema仍待正式公开接线，不可用租户输入/响应schema冒充平台原始工作流协议。
+- 平台历史与资金恢复现在消费组合已提供的平台task authority及同一Gateway账本的financialRecovery，不再构造workspace-only授权/租户session；缺平台依赖拒绝，不回退到租户。正式平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。迁移未执行；知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。当前历史reader仍要求原管理权限，不能宣称仅view权限已打通全部历史消费。
 - 再审修复的消费注意：计数HTTP的原价格/上界读取现复用既有安全摘要及共享schema，不再返回含配置引用的内部证据；`textDispatch`新输出为`not_attested`，旧`not_started`仅兼容解析，不授重试。历史计数从原reservation取计价版本；真正缺行与存储失败分开。未验证的结构化输出计数在准入前拒绝，不静默丢schema。平台实际authority接受actor-only公共上下文并拒绝租户混入；文本/视觉协议链及音频授权绑定已离线核验，音频本片未做传输验收。
 - 计数派发顺序已收紧：原键唯一claim仍先落库，连接解析完成后才经原budget.dispatch复验任务/run/step/lease再POST；取消或当前管理授权失效会阻止发送。命令等待及原收据账务重放共用GatewayDeadline，调用预留写入前即标记可能已提交；取消/超时只终止等待，不证明未派发、自动退款或允许重发。6个针对性离线场景通过，未新增测试脚本。
 - 尚有红测：本轮实际复跑human-quote-selection为6/9、original-scene-host为14/19、inspection-media-submission为14/17；保留全部失败断言。媒体失败涉及原步骤事务递增run revision后再用旧lease复核，相关仓储/输入来源未被A/B固定提交修改；需按真实事务视图修正，不能仅豁免同fence的revision。其余报价/场景夹具与正式依赖仍须收敛，不能宣称全链完成。

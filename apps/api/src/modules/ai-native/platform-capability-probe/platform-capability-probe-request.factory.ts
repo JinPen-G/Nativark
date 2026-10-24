@@ -53,7 +53,17 @@ export class PlatformCapabilityProbeRequestFactory {
         try {
           await waitForTaskApplicationDependency(current, false, signal);
           entered = true;
-          const result = execution ? await run() : await waitForTaskApplicationDependency(run, writes, signal);
+          // Preserve an original-result unknown raised by the workflow. The
+          // read wait barrier may classify its OWN timeout as unavailable, but
+          // must not relabel an observed financial unknown as an absent fact.
+          const result = execution ? await run() : await (async () => {
+            const outcome = await waitForTaskApplicationDependency(async () => {
+              try { return { ok: true as const, value: await run() }; }
+              catch (error) { return { ok: false as const, error }; }
+            }, writes, signal);
+            if (!outcome.ok) throw outcome.error;
+            return outcome.value;
+          })();
           await waitForTaskApplicationDependency(current, writes, signal);
           return structuredClone(result);
         } catch (error) {
@@ -72,13 +82,19 @@ export class PlatformCapabilityProbeRequestFactory {
       inspect: (value: unknown) => guard(() => composed.workflow.inspectOriginal(value)),
       requestCancellation: (value: unknown) => { const command = structuredClone(value); return guard(() => composed.workflow.requestCancellationOriginal(command), true); },
       reconcile: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.reconcileOriginal(command, signal), true, true, signal); },
-      readCapabilityReceipt: (value: unknown) => guard(() => composed.workflow.readCapabilityReceipt(value)),
+      readCapabilityReceipt: (value: unknown) => guard(() => composed.workflow.readCapabilityReceipt(value), true),
       readHistory: (value: unknown) => guard(() => composed.workflow.readHistoricalOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''))),
       readTaskPolicyMutation: (value: unknown) => guard(() => composed.workflow.readTaskPolicyMutation(
         String((value as { requestKey?: string }).requestKey ?? ''),
         ((value as { operation?: import('../prisma-task-action-policy.repository').AiTaskActionPolicyMutation['operation'] }).operation ?? 'configure_action_policy') as import('../prisma-task-action-policy.repository').AiTaskActionPolicyMutation['operation'],
         (value as { expectedRevision?: number | null }).expectedRevision ?? null)),
       readAccounting: (value: unknown) => guard(() => composed.workflow.readOriginalAccounting(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''))),
+      readAccountingOperation: (value: unknown) => guard(() => {
+        const command = z.object({ requestKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+          operation: z.enum(['releaseUnsent', 'reconcileAccounting']) }).strict().safeParse(structuredClone(value));
+        if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        return composed.workflow.readOriginalAccountingOperation(command.data.requestKey, command.data.operation);
+      }),
       releaseUnsent: (value: unknown) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.releaseOriginalUnsent(key), true); },
       reconcileAccounting: (value: unknown) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.reconcileOriginalAccounting(key), true); },
     });

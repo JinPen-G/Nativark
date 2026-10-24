@@ -66,6 +66,9 @@ export class TextCapabilityProbeApplication {
   /** Read-only evidence from the SAME accounting facts as this Gateway ledger.
    * Runner consumers cannot substitute a different success/dispatch source. */
   readonly financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
+  /** Original-key recovery from the SAME ledger and current principal. This
+   * port grants no reserve, runner claim or replacement provider dispatch. */
+  readonly financialRecovery: ReturnType<typeof createPersistedGatewayBudget>['recovery'];
   private readonly accounting;
   private readonly admission;
   private readonly dispatch;
@@ -84,6 +87,7 @@ export class TextCapabilityProbeApplication {
     this.receipts = new PrismaTextCapabilityReceiptRepository(input.db, input.clock);
     this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock);
     this.accounting = createPersistedGatewayBudget(input);
+    this.financialRecovery = this.accounting.recovery;
     this.financialEvidence = Object.freeze({ readDispatch: (reservationId: string) =>
       this.accounting.facts.readDispatch(reservationId) });
     const admissions = new PrismaAdmissionRepository(input.db);

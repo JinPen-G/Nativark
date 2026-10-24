@@ -13,6 +13,15 @@ export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   readAccounting: 'accounting/read', releaseUnsent: 'accounting/release-unsent', reconcileAccounting: 'accounting/reconcile',
   readAccountingOperation: 'accounting/operation',
 });
+/** Independent SaaS/platform host, not tenant-management authority. The receipt
+ * endpoint reconciles persisted capability evidence; history is read-only. */
+export const AI_PLATFORM_CAPABILITY_HTTP_DRAFT = Object.freeze({
+  basePath: 'ai-native/platform-capability', method: 'POST',
+  publish: 'original/publish', readOriginal: 'original/read', createTask: 'task/create', readTask: 'task/read',
+  start: 'start', inspect: 'inspect', cancel: 'cancel', reconcile: 'reconcile',
+  readCapabilityReceipt: 'receipt', readHistory: 'history', readAccounting: 'accounting/read',
+  readAccountingOperation: 'accounting/operation', releaseUnsent: 'accounting/release-unsent', reconcileAccounting: 'accounting/reconcile'
+});
 export type AiTextCapabilityRequestDraft = { requestKey: string };
 /** Selection is constrained by the server whitelist and current management
  * authorization; this field cannot select a provider or confer capability. */
