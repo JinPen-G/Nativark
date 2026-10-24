@@ -6,6 +6,7 @@ import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
+import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
@@ -2450,6 +2451,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : action === 'readTaskActionReceipt'
       ? 'Read the immutable same-owner action-policy CAS save receipt under current management authority. Policy and receipt commit atomically; original task, operation, prior revision, actor and scope must match. Does not resolve a live model or require the saved policy to remain unexpired. Missing/legacy receipt is not proof of rollback; observing a receipt grants no current policy, lease, dispatch or retry. Trusted probe host configuration is still required.'
       : 'Standard capability workflow, unavailable without separate trusted server probe configuration. Human configuration of persisted scene and same-owner task policies is required; never seeded on task creation. Immutable original input, measured runner, unique Gateway dispatch and the original single ledger remain mandatory. Probe completion is not capability evidence: read its persisted receipt. Historical observations/accounting do not dispatch; unknown uses the same original key, never automatic retry or caller usage. Calls quotas do not prove supplier token/money pricing.' })),
+  ...AI_COUNTING_HTTP_OPERATIONS.map(([action, requestSchema, responseSchema, permission]) => ({ method: 'post' as const,
+    path: `/api/${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `inputCounting_${action}`, authRequired: true,
+    permissions: permission === 'management' ? ['system:params:manage'] : [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema, responseSchema,
+    summary: 'Explicit opt-in operator counting host. Current Auth/Guard/ALS, original task owner/action policy and one budget ledger remain mandatory. Caller provides only original identifiers; protocol/model, tool policy, count evidence, price and transport are server-owned. Count/publish acknowledgement loss uses observeCountKey/readInputBound respectively, never a replacement call or automatic refund. Task cost views distinguish missing records, unknown, calls and generation usage; they are not supplier invoices. Omitted dependencies do not register or enable this module.' })),
   ...AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS.map(([action, requestSchema, responseSchema, permission]) => ({ method: 'post' as const,
     path: `/api/${AI_PLATFORM_CAPABILITY_HTTP_DRAFT.basePath}/${AI_PLATFORM_CAPABILITY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `platformCapability_${action}`, authRequired: true,

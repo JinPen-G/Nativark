@@ -23,7 +23,7 @@ export const AI_COUNTING_HTTP_DRAFT = Object.freeze({
 export interface AiCountingHttpFailureDraft {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT' | 'AI_RESULT_UNKNOWN';
   retryable: false;
-  nextAction?: 'reconcile';
+  nextAction?: Exclude<keyof typeof AI_COUNTING_HTTP_DRAFT, 'basePath' | 'method' | 'count' | 'publishInputBound'> | 'reconcile';
 }
 
 export interface AiCountingCountResultDraft {
@@ -93,7 +93,36 @@ const countResultSchema = {
     }
   } as const;
 
+const originalId = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } as const);
+const callRequest = { type: 'object', additionalProperties: false, required: ['callId'], properties: { callId: originalId(128) } } as const;
+const taskRequest = { type: 'object', additionalProperties: false, required: ['taskId'], properties: { taskId: originalId(36) } } as const;
+const pageRequest = { ...taskRequest, required: ['taskId', 'limit'], properties: { ...taskRequest.properties,
+  limit: { type: 'integer', minimum: 1, maximum: 20 }, after: originalId(36) } } as const;
+
 export const AI_COUNTING_HTTP_SCHEMAS = {
+  AiCountingCallRequestDraft: callRequest,
+  AiCountingReceiptQueryDraft: { oneOf: [callRequest, { type: 'object', additionalProperties: false,
+    required: ['invocationId'], properties: { invocationId: originalId(36) } }] },
+  AiCountingTaskRequestDraft: taskRequest,
+  AiCountingTaskPageRequestDraft: pageRequest,
+  AiCountingInputBoundPublishRequestDraft: { ...callRequest, required: ['callId', 'reference'],
+    properties: { ...callRequest.properties, reference: originalId(191) } },
+  AiCountingInputBoundReceiptDraft: { type: 'object', additionalProperties: false,
+    required: ['state', 'id', 'payloadHash', 'callId', 'executionPermission'], properties: {
+      state: { type: 'string', const: 'recorded' }, id: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      payloadHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, callId: originalId(128),
+      executionPermission: { type: 'boolean', const: false } } },
+  AiCountingTaskCostsDraft: { type: 'object', additionalProperties: false, required: ['page', 'summary', 'counting', 'semantics'], properties: {
+    page: { $ref: '#/components/schemas/AiTaskBudgetUsagePageDraft' },
+    summary: { $ref: '#/components/schemas/AiTaskBudgetUsageSummaryDraft' },
+    counting: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: false,
+      required: ['invocationId', 'receipt'], properties: { invocationId: originalId(36),
+        receipt: { $ref: 'urn:rental:counting:AiCountingReceiptReadDraft' } } } },
+    semantics: { type: 'object', additionalProperties: false, required: ['execution', 'basis', 'countingBasis', 'absence'], properties: {
+      execution: { type: 'string', const: 'read_only_no_dispatch_or_release' },
+      basis: { type: 'string', const: 'persisted_budget_records_not_provider_invoice' },
+      countingBasis: { type: 'string', const: 'provider_count_tokens_receipt_not_generation_usage' },
+      absence: { type: 'string', const: 'no_record_is_not_proof_of_no_consumption' } } } } },
   AiCountingCountResultDraft: countResultSchema,
   AiCountingLifecycleObservationDraft: {
     type: 'object', additionalProperties: false, required: ['callId', 'countCallId', 'lifecycle', 'admission', 'receipt'],
@@ -165,3 +194,18 @@ export const AI_COUNTING_HTTP_SCHEMAS = {
     }
   }
 } as const;
+
+/** Exact public routes; task-read alternatives are only an entry superset.
+ * The current owner/action policy remains authoritative inside the original reader. */
+export const AI_COUNTING_HTTP_OPERATIONS = [
+  ['count', 'AiCountingCallRequestDraft', 'AiCountingCountResultDraft', 'management'],
+  ['observeCountKey', 'AiCountingCallRequestDraft', 'AiCountingLifecycleObservationDraft', 'task_read'],
+  ['readCountReceipt', 'AiCountingReceiptQueryDraft', 'AiCountingReceiptReadDraft', 'task_read'],
+  ['publishInputBound', 'AiCountingInputBoundPublishRequestDraft', 'AiCountingInputBoundReceiptDraft', 'management'],
+  ['readInputBound', 'AiGatewayInputBoundReadDraft', 'AiGatewayInputBoundSummaryDraft', 'management'],
+  ['readPublication', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft', 'management'],
+  ['usagePage', 'AiCountingTaskPageRequestDraft', 'AiTaskBudgetUsagePageDraft', 'task_read'],
+  ['usageSummary', 'AiCountingTaskRequestDraft', 'AiTaskBudgetUsageSummaryDraft', 'task_read'],
+  ['usagePricingBases', 'AiCountingTaskPageRequestDraft', 'AiCountingUsagePricingBasesDraft', 'task_read'],
+  ['taskCosts', 'AiCountingTaskPageRequestDraft', 'AiCountingTaskCostsDraft', 'task_read']
+] as const;

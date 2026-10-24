@@ -12,6 +12,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
+import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -25,6 +26,9 @@ import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, is
 import { PrismaService } from "../modules/database/prisma.service";
 import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
 import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
+
+const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
+  [`${AI_COUNTING_HTTP_DRAFT.method} /${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`, access] as const));
 
 interface RequestLike {
   method: string;
@@ -246,6 +250,8 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  const counting = countingRouteAccess.get(`${method.toUpperCase()} ${path}`);
+  if (counting) return counting === 'management' ? ['system:params:manage'] : [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
   const platformProbePermission = platformCapabilityProbePermission(method, path);
   if (platformProbePermission) return [platformProbePermission];
   if (method.toUpperCase() === 'POST' && path === '/ai-native/desktop-business/catalog')
@@ -967,6 +973,8 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    if ((path === `/${AI_COUNTING_HTTP_DRAFT.basePath}` || path.startsWith(`/${AI_COUNTING_HTTP_DRAFT.basePath}/`))
+      && !countingRouteAccess.has(`${request.method.toUpperCase()} ${path}`)) throw new ForbiddenException('计数入口未登记该操作');
     if (path === '/ai-native/platform-capability' || path.startsWith('/ai-native/platform-capability/')) {
       if (!platformProbePermission || !user.isSaasAdmin) throw new ForbiddenException('平台能力验证仅向 SaaS 管理员开放已登记操作');
     }
