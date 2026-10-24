@@ -202,7 +202,7 @@ test('persisted scene model result is bound to its original input and current au
   const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
   const created = await h.app.create(h.command(sceneCode)), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
-  const policy = { sceneCode, routeScene: 'chat', maxOutputTokens: 64 };
+  const policy = { sceneCode, maxOutputTokens: 64 };
   const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
   config.tenantId = original.context.scope.tenantId; config.configurationScope.tenantId = config.tenantId;
   const input = { mode: 'invoke', intent: taskModelIntent(task.id, created.task.runId, `scene-model:${ref.inputRef}`, policy.sceneCode,
