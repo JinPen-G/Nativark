@@ -5,6 +5,22 @@
 > 用途：按完整阶段记录实际已做、未做、来源和证据，不作为第二份百分比台账。
 > 范围与验收见[需求](Agent接入改造-需求.md)，研发进度唯一维护在[开发任务](Agent接入改造-开发任务.md)，最新现场见[协作接续](Agent接入改造-协作接续.md)。
 
+## 阶段：政策约束的客户端目录人工预览（2026-10-24）
+
+- 功能提交 `256a67d3ca9bb92dbcc6d8270825a9814b635391`。接通工作台 → 原生受限IPC → 原Web HTTP → 当前Auth / Guard / ALS → 持久空间政策 → 有界Core目录 / 最少投影 / 原持久审计；缺政策或审计失败拒绝。政策管理有CAS / 本人原键收据，提交丢应答为unknown，不换键重做。新迁移未执行，原导航 / 恢复WIP同片保全，无默认许可、模型请求、资金账或业务写入。
+- 本树preload / 固定离线DB / 绝对audit和TEMP下：`node --test tests/agent-desktop.test.cjs` 为4 pass / 0 fail / 0 skip / 0 todo；四个内联定向检查调用实际应用 / Prisma仓储 / AuthService / ApiAuthGuard / OperationLogService、原生IPC、Web回调、工作台注册 / 原store，最终均退出0。覆盖缺政策、跨空间、await撤权、最少字段、审计失败、原键重放 / 冲突、提交丢应答、迟到结果与清除；DB事务 / Electron / 浏览器基础设施为替身，非真库锁或GUI。没有新增测试脚本，既有断言保留。
+- 收口复核提交 `f79d78b2e4f5a08a2cf19fa1c22b96539501123f`：整个目录读取 / 审计 / 返回复用原Guard展开后的组织与地点范围，不将Auth原配置当作展开结果。旧提交的同一内联组织案例退出1 / FORBIDDEN；修复后合法读取、审计中地点变化拒绝、审计失败拒绝、撤权后不调用Core，退出0，API635源根noEmit退出0；未改公共身份adapter或Guard算法。
+- API635 / Admin249 / Desktop Host70、Client5 / 工作台6个源根的noEmit均退出0；目标类型发射、工作台 / 两个preload私有协议打包退出0。四条Controller元数据 / Guard / OpenAPI对应、schema编译通过；Prisma离线validate / schema diff与新迁移一致，隔离generate成功，共享产物41文件在构建前后哈希一致。双语配对、界面机械检查与diff check通过，真实视觉未验。
+- 首轮问题保留：错误union / Web timer类型已修；多工程检查调用、空solution、迁移文本格式比较、Web替身缺AbortController和README旧锚点 / 语言链接已纠正后仅复验相关项。隔离产物留 `output/agent-desktop-continuation-20261024/`；其他作者OpenAPI / runner / shared WIP不夹带。08 / 09仅G1各25%，基础57.1% / 正式0/8不变；首次模型输入投影、目的地证明、历史隔离、累计额度、政策页面及模型工具 / 报价 / 建单 / 协同仍待接。未安装、启服务、连真实HTTP / DB / 模型或迁移、推送 / 合main / 生产启用。
+
+## 阶段：客户端操作确认与恢复收口（2026-10-24）
+
+- 基线 `8ede5906`，本轮尚未提交。复用原登录 / 菜单 / 空间接点，补实际路由与目标空间确认、等待后当前身份复验；切空间撤回旧本地 Host，原会话不删除。页面 / 桥握手20秒有界，重连须等新文档复核会话才解除导航 unknown，不重发旧命令。
+- 进度按原 G1～G4 复核：01/04/06 达50%（实际实现与原独立构建保全，仍缺场景验证）；02/03/05 达75%（真实消费者、离线行为与类型已验）；07 达25%（原验收接点与缺口已核对）。基础57.1%、正式0/8；追加08～14仍0%，原28项未改。
+- 沿本树既有离线 preload 与固定无效库，Node24.21.0执行 `node --test tests/agent-desktop.test.cjs`：4 pass / 0 fail / 0 skip / 0 todo；临时命令复用实际桥 / 投影 / 原生所有者验证正常导航、草稿拦截、空间切换、迟到换账号、unknown重连与握手截止，未新增测试文件。首次桥冒烟缺少夹具路由登记，补齐后通过；Electron / React宿主由替身提供，非真实GUI。
+- Desktop `tsc -p apps/desktop/tsconfig.host.json --noEmit` 与 Admin `tsc -p apps/admin/tsconfig.json --noEmit`最终退出0；首轮两处本轮类型错误已修。Desktop本目录执行 `tsc -p tsconfig.host.json`、`tsdown --config-loader native`退出0（首次编译目录参数错误已纠正）；构建后 `node --import tsx/esm scripts/build.ts --scope check` 为2 pass / 0 fail / 0 skip。停滞加载冒烟改用明确的开始信号等待后通过，不依赖微任务顺序。原shared/dist及dist-agent-desktop共41文件前后SHA256一致；审计 / 临时产物留本树 `output/agent-desktop-continuation-20261024/`。
+- 未安装、启服务、连接真实API/DB/模型或做桌面联调、提交 / 推送。剩余：获准后台地址下的Electron登录 / 改密 / 撤权、原页面 / 上传下载 / 打印与发布刷新；之后按08→09→13补正式本地工具政策、受限业务桥、模型投影及原键恢复。其他作者的服务端WIP原样保留。
+
 ## 阶段：统一业务范围与过渡接入边界（2026-10-23）
 
 - 负责人确认后，需求 / 任务更新为 v1.4，原服务端需求为 v1.10：本地业务范围不超统一服务端政策，允许获准正式 Web API 的接线先行；个人通用工具保留但不可作业务旁路。R09.2、AGC-10、A11 对应，接续同步；原任务编号、依赖和百分比未改。
