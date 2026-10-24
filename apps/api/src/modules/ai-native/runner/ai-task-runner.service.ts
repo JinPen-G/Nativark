@@ -4,7 +4,7 @@
  * 恢复必须保留 fencing 和原操作关联；租约过期或取消不证明外部副作用未发生。
  */
 import {
-  type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult,
+  type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult, type AiTaskRunnerClaimInput,
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,
   type AiTaskRunnerOutcome, type AiTaskRunnerPlan, type AiTaskRunnerStepPlan,
   type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef, type AiTaskRunnerTaskOutcome,
@@ -18,6 +18,26 @@ export class AiTaskRunnerError extends Error {
     super(message);
     this.name = "AiTaskRunnerError";
   }
+}
+
+/** Claim acknowledgement, not a later lease read, owns execution/cleanup.
+ * Share this check with original business recovery hosts; an uncertain claim
+ * may already have committed, so no guessed release or second claim is safe. */
+export function snapshotAiTaskRunnerClaimLease(input: AiTaskRunnerClaimInput, value: unknown): AiTaskRunnerLease {
+  let lease: AiTaskRunnerLease;
+  try { lease = structuredClone(value) as AiTaskRunnerLease; }
+  catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is not snapshot-safe'); }
+  const fence = /^(0|[1-9][0-9]{0,19})$/u;
+  if (!lease || lease.taskId !== input.taskId || lease.runId !== input.runId || lease.holderId !== input.holderId
+    || !finiteInteger(input.expectedRunRevision, 1, 4294967294)
+    || lease.revision !== input.expectedRunRevision + 1
+    || typeof input.expectedFencingToken !== 'string' || !fence.test(input.expectedFencingToken)
+    || typeof lease.fencingToken !== 'string' || !fence.test(lease.fencingToken)
+    || BigInt(lease.fencingToken) !== BigInt(input.expectedFencingToken) + 1n
+    || typeof lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(lease.expiresAt))) {
+    throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim does not match the original CAS');
+  }
+  return lease;
 }
 
 const defaultClock: AiTaskRunnerClock = {
@@ -156,8 +176,7 @@ export class AiTaskRunner {
       const observed = await this.callBounded(() => recovery
         ? this.deps.leases.claimRecoveryRun(structuredClone(claimInput))
         : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal);
-      try { lease = structuredClone(observed); }
-      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is not snapshot-safe'); }
+      lease = snapshotAiTaskRunnerClaimLease(claimInput, observed);
     } catch (error) {
       // A transaction may have committed. A late acknowledgement is observed
       // by callBounded but NEVER re-enters runHeld or grants execution rights.
@@ -166,19 +185,6 @@ export class AiTaskRunner {
         throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is uncertain');
       }
       throw error;
-    }
-    // Match the original CAS, not a later read or an adapter-selected holder.
-    // An invalid acknowledgement may still have acquired the requested lease;
-    // never enter execution, claim again or release a guessed/foreign token.
-    const fence = /^(0|[1-9][0-9]{0,19})$/u;
-    if (!lease || lease.taskId !== input.taskId || lease.runId !== input.runId || lease.holderId !== input.holderId
-      || !finiteInteger(input.expectedRunRevision, 1, 4294967294)
-      || lease.revision !== input.expectedRunRevision + 1
-      || typeof input.expectedFencingToken !== 'string' || !fence.test(input.expectedFencingToken)
-      || typeof lease.fencingToken !== 'string' || !fence.test(lease.fencingToken)
-      || BigInt(lease.fencingToken) !== BigInt(input.expectedFencingToken) + 1n
-      || typeof lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(lease.expiresAt))) {
-      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim does not match the original CAS');
     }
     return this.runHeld(input, recovery, initial, lease, signal, false, prepare);
   }

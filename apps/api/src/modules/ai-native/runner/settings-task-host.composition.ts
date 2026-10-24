@@ -18,7 +18,7 @@ import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -110,9 +110,15 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     if (command.taskId !== task.taskId || command.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     const before = structuredClone(await read(() => authorization.tasks.resolveAccess(task.taskId, confirmation ? 'claim_recovery_run' : 'read_metadata')));
-    const stored = await read(() => input.db.aiTask.findFirst({ where: before.where }));
-    const run = stored && await read(() => input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } }));
-    if (!stored || !run || run.actorKind !== before.actorKind || run.actorId !== before.actorId
+    const stored = structuredClone(await read(() => input.db.aiTask.findFirst({ where: before.where })));
+    const foundRun = stored && await read(() => input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } }));
+    // Preserve Decimal exactly before the next await; structuredClone alone
+    // does not retain Prisma.Decimal methods, and shared row objects can move.
+    const run = foundRun && Object.freeze({ id: foundRun.id, taskId: foundRun.taskId, scopeId: foundRun.scopeId,
+      actorKind: foundRun.actorKind, actorId: foundRun.actorId, revision: foundRun.revision,
+      fencingToken: foundRun.fencingToken.toFixed(0) });
+    if (!stored || stored.id !== task.taskId || !run || run.id !== task.runId || run.taskId !== task.taskId
+      || run.scopeId !== stored.scopeId || run.actorKind !== before.actorKind || run.actorId !== before.actorId
       || before.scope.kind !== 'WORKSPACE' || !before.scope.tenantId || !before.scope.workspaceId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const tenantId = before.scope.tenantId, workspaceId = before.scope.workspaceId;
     // Terminal recovery is observation, not reacquisition. A committed Core
@@ -158,9 +164,11 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     // Claim acknowledgement is required. A lost response never grants a lease
     // by rereading it; original-key recovery remains a separate request.
-    const lease = await wait(() => authorization.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
+    const claim = Object.freeze({ taskId: task.taskId, runId: task.runId,
       holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: stored.revision,
-      expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) }), true);
+      expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken });
+    const lease = snapshotAiTaskRunnerClaimLease(claim,
+      await wait(() => authorization.tasks.claimRecoveryRun({ ...claim }), true));
     let cleanupSafe = true, failed = false;
     try {
       if ((await read(() => authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run'))).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
