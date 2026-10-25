@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-25。本片固定接收Claude A `4b0b38ea`的执行证据、报价/场景修复，并补断线投递的默认拒绝边界及有限等待；既有平台14动作`c57b342c`、计数/成本10动作`5742521d`及B整合`f7298c43`保留。原28项64.3%、ENTRY52.8%、正式0/28保持；标准装配、后续闭环和适用G4尚未齐备。
-> **A本批固定交付已复核；B此前固定交付已整合。** 负责人本轮要求先同步再派下一长批：Claude A/B已安全快进到本阶段主线，output、8条stash及各树隔离依赖保留；最新源码HEAD开工时实查，不追移动HEAD。下一批由负责人转交后各树单作者施工，不恢复旧心跳。Codex A/B继续暂停，不合main、推送或启用生产。
+> 更新时间：2026-10-25。本轮复核A固定`288f8f8e`与B固定`eaaed7ff`；A任务计数/上界/轮转已整合为`b0ec4afa`，B平台只读身份及本轮纵深修复按当前HEAD核对。此前平台/计数公共接线、执行修复和独立客户端成果保留。原28项64.3%、ENTRY52.8%、正式0/28保持；自动计数资源、标准装配、知识/隐私/事件余项及适用G4未齐。
+> **本轮只接收上述固定交付，不代表两份长任务全文完成。** A有5个新增提交，B有2个；B本批未增加知识/隐私/事件功能。两树均无WIP，未移动辅助HEAD或恢复心跳；后继开工先保全现场并同步主线修复，不追活动HEAD。Codex A/B继续暂停，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -32,9 +32,9 @@
 - Claude B固定`1e677bec`已接：平台GatewayContext/Public/Unified、admission/dispatch/accounting归属及追加迁移、平台请求工厂。主线修正实际Routed的actor-only接点、原账务平台principal、scopeKind交叉核对、能力收据上下文，以及每次open独立关闭/迟到Guard凭据复核。知识/automation/员工多数为既有成果和验证，不能把报告的四批标题当新增功能数。
 - 计数公共接点：10动作的共享元数据已接正式Guard和OpenAPI，HTTP全量请求/响应（包括taskCosts嵌套收据、账务页/汇总及上界发布收据）闭合校验；管理调用与原任务读取入口分开，原owner/动作政策仍在内部复核，SaaS不借租户计数入口。count未知指向observeCountKey，发布未知指向readInputBound，其余读取保留原invocation/task/reference参数，不依赖不存在的通用reconcile路由。未改计数、计价或账本核心；`registerHttp`保持显式默认关闭，标准应用配置/依赖尚需装配。
 - 当前codec只支持实际已实现变体；其他协议、媒体、未登记schema、客户/平台计数授权缺正式来源时继续不可用。计数calls政策需管理员正式配置，不能自动播种或把calls当token上界；本片不提供模型、费率、批准或预算默认值。
-- 自动场景接入仍有具体权限/配置缺口：现有count和上界发布使用settings_write，本片只完成管理/观察HTTP，不代表普通操作员可自动完成计数→上界→模型准入。标准模型宿主需提供绑定单个原task/run/step/call的正式服务权限及可信场景配置，复用原执行/预算政策，不能给员工补settings白名单来绕过。当前模块配置固定服务器sceneCode，不宣称多场景自动生产者已交付。
+- A新增任务内部`taskCount`/`TaskInputBoundPublisher`，以原调用和当前transition_task政策读取服务端场景；管理HTTP仍settings_write、固定sceneCode，两者不互授。主线补上组合授权漏传、旧严格reader兼容、上界证据/有效期/原绑定复验及写后unknown→runner unknown。该组合可用不代表标准宿主已接：新增计数调用尚须独立进入原runner持久CALLS资源，并补原取消信号/完整原键恢复，再挂标准模型；财务计数单账不能代替任务累计资源。不放开普通场景自动计数，不扩员工settings白名单、不重置计划或增加第二账本。
 - 平台HTTP现有14个公共动作：shared同一操作元数据驱动Guard和OpenAPI，Controller运行时校验同一封闭schema。发布需当前可核验的服务器准备command；其余公开动作使用原requestKey，由服务器复用textProbeTaskCreationKey并查当前原输入生成内部定位，不接受调用方的creationKey/inputRef/lease。任务/运行/检查/能力输出投影后复用既有共享响应，不返回完整步骤、租约、注册材料或任意附加账务字段；写入后响应损坏保持unknown。内部factory原接口保留，未另建任务/账本或改变执行政策。模块仍显式默认关闭，不代表AppModule已挂载。
-- 平台历史与资金恢复现在消费组合已提供的平台task authority及同一Gateway账本的financialRecovery，不再构造workspace-only授权/租户session；缺平台依赖拒绝，不回退到租户。正式平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。迁移未执行；知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。当前历史reader仍要求原管理权限，不能宣称仅view权限已打通全部历史消费。
+- B平台身份改走当前view Guard；主线补不可变原历史locator的专用当前读授权，保留owner/scope/原内容hash和读后复验，不要求当前材料重新有效。真实任务仍须原读取政策，不自动降级旧政策。账务写、新预留/派发和新任务动作在内部独立要求manage，不能只依赖外层HTTP或较宽任务政策；关闭新执行不抹掉合法原读/善后。正式平台审计落点、标准AppModule/provider和未执行迁移仍待处理；知识正式authority、存储ACL/删除传播、多实例缓存与可靠业务事件新增生产者，本批无新交付，继续未完成。
 - 再审修复的消费注意：计数HTTP的原价格/上界读取现复用既有安全摘要及共享schema，不再返回含配置引用的内部证据；`textDispatch`新输出为`not_attested`，旧`not_started`仅兼容解析，不授重试。历史计数从原reservation取计价版本；真正缺行与存储失败分开。未验证的结构化输出计数在准入前拒绝，不静默丢schema。平台实际authority接受actor-only公共上下文并拒绝租户混入；文本/视觉协议链及音频授权绑定已离线核验，音频本片未做传输验收。
 - 计数派发顺序已收紧：原键唯一claim仍先落库，连接解析完成后才经原budget.dispatch复验任务/run/step/lease再POST；取消或当前管理授权失效会阻止发送。命令等待及原收据账务重放共用GatewayDeadline，调用预留写入前即标记可能已提交；取消/超时只终止等待，不证明未派发、自动退款或允许重发。6个针对性离线场景通过，未新增测试脚本。
 - A执行线固定`135a8418`→`4da4aa96`→`6066793a`→`4b0b38ea`已接：步骤/计划原证据使用转换事务视图及精确CAS后修订，不豁免fence/revision；同客户、同履约方式的重新确认保留配送地址，真正切换仍清除并重验；原有夹具补正式有界端口及稳定凭证。主线另修两处取消边界：公共HTTP默认不进入已断开的普通回调，仅原模型的信号门/应答收据宿主显式选择投递；已中止的原请求整条不启动/收据路径仍受5秒依赖上限，超时保持unknown并关闭本地凭据。

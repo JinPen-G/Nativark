@@ -13,6 +13,7 @@ import { isAiStepExecutionContext } from '../task-contract-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { TEXT_PROBE_SCENE } from '../text-capability-probe';
+import { PLATFORM_AI_PROVIDER_PERMISSIONS } from '../../../common/platform-ai-access-policy';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -25,14 +26,19 @@ const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery
   'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] as const;
 
 /** Current SaaS/platform identity only: the real platform Guard behind the
- * bound Profile resource. This grants neither tenant membership nor execution. */
+ * bound Profile resource. This grants neither tenant membership nor execution.
+ * Base identity uses the GET (view) Guard path so the identity/scope
+ * resolution itself does not require manage. Write authorization is
+ * separately enforced by task action policies, the policy management
+ * authority (manage) and budget sources. Immutable historical locators use
+ * their explicit current read action, never a new-effect management grant. */
 export class PlatformTaskIdentityAuthority implements AiCurrentScopeAuthority {
   constructor(private readonly management: PlatformModelConfigurationAuthority,
     private readonly clock: () => Date = () => new Date()) {
-    if (typeof management?.resolve !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (typeof management?.resolveRead !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
   async resolve(): Promise<AiExecutionContext> {
-    const context = structuredClone(await this.management.resolve());
+    const context = structuredClone(await this.management.resolveRead());
     if (!isAiStepExecutionContext(context) || context.actor.kind !== 'saas_admin'
       || context.audience !== 'operator' || context.scope.kind !== 'platform') throw denied();
     const now = this.clock();
@@ -73,8 +79,10 @@ export class PlatformTaskActionAuthority implements AiTaskRepositoryAuthority {
       // level (no `access` member); an absent or non-array list fails closed.
       const heldPermissions = 'permissions' in final.context && Array.isArray(final.context.permissions)
         ? final.context.permissions : null;
+      const observing = ['read_metadata', 'read_events', 'read_step_terminal', 'release_run'].includes(operation);
       if (current.fingerprint !== initial.fingerprint || final.fingerprint !== initial.fingerprint || requestFingerprint(rechecked) !== requestFingerprint(policy)
         || Date.parse(policy.expiresAt) <= this.clock().getTime() || heldPermissions === null
+        || !observing && !heldPermissions.includes(PLATFORM_AI_PROVIDER_PERMISSIONS.manage)
         || policy.requiredPermissions.some(permission => !heldPermissions.includes(permission))) throw denied();
       return structuredClone(final.context);
     } catch (error) {

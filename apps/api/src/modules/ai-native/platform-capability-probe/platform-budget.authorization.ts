@@ -11,6 +11,7 @@ import type { BudgetAuthorizationSource, BudgetEntitlementSource } from '../budg
 import type { GatewayActualUsagePricing } from '../budget/prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import { TEXT_PROBE_SCENE } from '../text-capability-probe';
+import { PLATFORM_AI_PROVIDER_PERMISSIONS } from '../../../common/platform-ai-access-policy';
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _id, authorizedAt: _at, ...value } = context;
@@ -39,6 +40,12 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
     if (identity(context) !== identity(before.context) || context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform'
       || before.scope.kind !== 'PLATFORM'
       || context.actor.userId !== principal.actorId) throw new BudgetError('FORBIDDEN');
+    // Base identity may be read-only. A task policy can narrow a financial
+    // action, but cannot turn that read identity into platform management.
+    // Enforce it here too: non-HTTP/internal callers must retain the boundary.
+    if (action !== 'read' && action !== 'settings_read'
+      && (!('permissions' in context) || !Array.isArray(context.permissions)
+        || !context.permissions.includes(PLATFORM_AI_PROVIDER_PERMISSIONS.manage))) throw new BudgetError('FORBIDDEN');
     const gatewayContext = { actorId: principal.actorId };
     const clock = this.input.clock ?? (() => new Date());
     let proof: unknown;
@@ -64,6 +71,9 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
         ? await this.bindings.resolveForReservation(gatewayContext, resource.reservationId) : null;
       if (!binding || requestFingerprint(binding.association) !== requestFingerprint(association)
         || binding.actorId !== principal.actorId || binding.sceneCode !== row.sceneCode) throw new BudgetError('FORBIDDEN');
+      // Recovery needs the original terminal-read policy as well as today's
+      // independent management permission above. It does not require the old
+      // new-execution policy or enable reserve/dispatch after shutdown.
       const operation = dispatching ? 'transition_task' : 'read_step_terminal';
       const policyRow = await this.input.db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: {
         scopeId: before.scope.id, taskId: row.taskId, operation } } });

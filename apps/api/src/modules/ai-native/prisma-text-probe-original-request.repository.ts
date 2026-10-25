@@ -38,6 +38,9 @@ export interface TextProbeOriginalAccessPort {
   access(): Promise<{ context: import('@rental-os/shared').AiExecutionContext;
     owner: { scopeId: string; audience: import('@prisma/client').AiAudience; ownerKind: import('@prisma/client').AiActorKind; ownerId: string }; binding: string }>;
   authorizeManagement?(context: import('@rental-os/shared').AiExecutionContext): Promise<void>;
+  /** Current read permission for immutable original locators only. Never
+   * reused for publication, task creation, policy changes or dispatch. */
+  authorizeHistoricalRead?(context: import('@rental-os/shared').AiExecutionContext): Promise<void>;
 }
 
 /** A failed commit acknowledgement is not evidence that nothing was stored.
@@ -60,8 +63,8 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
     policy: Pick<PrismaTaskPlanPolicyRepository, 'read'>;
     probe: Pick<TextCapabilityProbeApplication, 'prepareCurrent'>;
-    /** Only historical reads use this real current management authority. A
-     * missing port keeps history closed, never substitutes old authorization. */
+    /** Workspace history retains its current management authority. Explicit
+     * platform access can supply a separate historical-read action below. */
     management?: Pick<TenantModelConfigurationAuthority, 'authorize'>;
     /** Optional composition-owned access port (e.g. the SaaS platform
      * principal); absent keeps the workspace operator behaviour. */
@@ -149,8 +152,9 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     const before = await this.access(), context = before.context;
     if (context.actor.kind !== 'user' && context.actor.kind !== 'saas_admin') throw denied();
     if (this.input.access) {
-      if (typeof this.input.access.authorizeManagement !== 'function') throw unavailable();
-      await this.input.access.authorizeManagement(context);
+      const authorize = this.input.access.authorizeHistoricalRead ?? this.input.access.authorizeManagement;
+      if (typeof authorize !== 'function') throw unavailable();
+      await authorize.call(this.input.access, context);
     } else {
       if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
       if (typeof this.input.management?.authorize !== 'function') throw unavailable();

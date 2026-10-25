@@ -125,6 +125,10 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
       if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform') throw denied();
       await platformAuthority.manage(input.platformProfileId);
     },
+    async authorizeHistoricalRead(context) {
+      if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform') throw denied();
+      await platformAuthority.read(input.platformProfileId);
+    },
   };
   const planPolicyReader = new PlatformTaskPlanPolicyReader(input.db, platformIdentity,
     { code: TEXT_PROBE_SCENE, version: input.sceneVersion },
