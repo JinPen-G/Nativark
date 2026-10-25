@@ -29,6 +29,8 @@ Provide the shared DeepSeek Messages transport, request configuration, and model
 
 This package exports the transport library; the provider plugins register routes with the harness LLM service. It captures connection options from Config references once per operation.
 
+`prepareCall()` detaches the endpoint from reusable connection objects and reports its Messages API root as initial `destination` metadata. The matching stream retains that connection; changing the original options affects the next preparation. Metadata alone does not dispatch or authorize a model call.
+
 The adapter accepts the LLM service's [request-only user inputs](../llm/README.md#use-this-package) alongside durable history; omitting request-only identity and attribution does not alter provider content.
 
 ### When to choose it

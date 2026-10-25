@@ -48,9 +48,11 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
     return resolveRequestImageTarget(entry, image)
   }
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
-    const connection = await this.connection(signal)
+    // Detach the endpoint even when a connection provider returns a reusable options object.
+    const connection = { ...await this.connection(signal) }
     this.dependencies.admit?.(connection, model)
-    return { model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) }
+    return { model: modelInfo(connection, provider, model), destination: { protocol: 'anthropic-messages', baseUrl: messagesApiRoot(connection.baseURL) },
+      stream: options => this.generate(options, connection) }
   }
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const connection = this.dependencies.options()

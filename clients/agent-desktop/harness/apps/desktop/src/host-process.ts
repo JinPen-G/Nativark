@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import type { PlatformSession } from '@deepseek-ai/dsh-deepseek-account'
 import { desktopNodeEnvironment } from './node-environment.ts'
+import { parseRentalDesktopModelInspection, parseRentalDesktopModelSelection, type RentalDesktopModelSelection } from '@rental-os/shared/agent-desktop'
 
 interface ReadyEvent {
   readonly type: 'ready'
@@ -24,6 +25,12 @@ interface PlatformSessionEvent {
 }
 
 type DesktopHostEvent = ReadyEvent | FatalEvent | PlatformSessionEvent | { readonly type: 'shutdown-complete' } | {
+  readonly type: 'rental-model'
+  readonly requestId: number
+  readonly ok: boolean
+  readonly inspection?: unknown
+  readonly error?: never
+} | {
   readonly type: 'update-tasks'
   readonly requestId: number
   readonly active: boolean
@@ -85,6 +92,9 @@ function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
     case 'quit-inspection':
       return Number.isSafeInteger(candidate.requestId) && typeof candidate.activeTasks === 'boolean'
         && typeof candidate.scheduledTasks === 'boolean' && (candidate.error === undefined || typeof candidate.error === 'string')
+    case 'rental-model':
+      return Number.isSafeInteger(candidate.requestId) && typeof candidate.ok === 'boolean'
+        && Object.keys(candidate).every(key => ['type', 'requestId', 'ok', 'inspection'].includes(key))
     default:
       return false
   }
@@ -256,9 +266,19 @@ export class DesktopHostProcess {
     if (response.type !== 'quit-inspection') throw new Error('desktop quit: Host answered with a different control response')
     return { activeTasks: response.activeTasks, scheduledTasks: response.scheduledTasks }
   }
+  /** Inspect a real prepared model without dispatching it. @param selection - Exact local route/model. @returns Sanitized initial-route observation. */
+  async inspectRentalModel(selection: RentalDesktopModelSelection) {
+    const requested = parseRentalDesktopModelSelection(selection)
+    const response = await this.control({ type: 'rental-model', selection: requested }, 5000, 'AI_RESOURCE_UNAVAILABLE')
+    if (response.type !== 'rental-model' || !response.ok) throw new Error('AI_RESOURCE_UNAVAILABLE')
+    const inspection = parseRentalDesktopModelInspection(response.inspection)
+    if (JSON.stringify(inspection.selection) !== JSON.stringify(requested) || Date.parse(inspection.expiresAt) <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
+    return inspection
+  }
 
   private async control(
-    request: { readonly type: 'update-tasks'; readonly action: 'inspect' | 'lock' | 'unlock' } | { readonly type: 'quit-inspection' },
+    request: { readonly type: 'update-tasks'; readonly action: 'inspect' | 'lock' | 'unlock' } | { readonly type: 'quit-inspection' }
+      | { readonly type: 'rental-model'; readonly selection: RentalDesktopModelSelection },
     deadlineMs: number, deadlineMessage: string,
   ): Promise<DesktopHostControlResponse> {
     const child = this.child

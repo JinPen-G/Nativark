@@ -62,6 +62,8 @@ for await (const chunk of ctx.llm.stream({
 
 `prepareCall(config, signal, configure?)` 接受具体的 `LlmCallConfig` 值。可选的同步纯函数 `ConfigureCall` 接收已分离且深度冻结的 `LlmCallControls`，以及捕获的适配器代次所提供的模型元数据。调用方可组合普通函数来选择具体控制项；后执行的写入替换先前的值。准备操作保留捕获的路由，为省略的控制项应用默认值，校验结果，再返回用于记录与分发的冻结配置。回调失败或取消会在分发前拒绝。准备操作要求注册适配器。
 
+提交的配置在异步解析前分离。准备好的适配器还可从其流实际使用的路由返回 `destination: { protocol, baseUrl }`，由运行时分离并冻结。缺元数据表示未知，不能回退到Provider目录。它只标识初始路由，不授予外发许可、不证明重定向或附件目标、不派发请求，也不自行进入会话历史。
+
 配置函数在适配器默认值物化之前选择控制项。例如，将最低强度选择与显式输出上限组合，再将 `configure(maxTokens)` 作为第三个参数传入：
 
 ```ts

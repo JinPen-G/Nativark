@@ -14,6 +14,7 @@ import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
+import { inspectRentalModel } from './rental-model.ts'
 
 async function main(): Promise<void> {
   const runtimeDir = process.argv[2] as string
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
   const control: {
     updateTasks?: ReturnType<typeof installDesktopUpdateTaskControl>
     quitInspection?: ReturnType<typeof installDesktopQuitInspection>
+    rentalModel?: (selection: unknown) => Promise<unknown>
   } = {}
   const send = (message: object): Promise<void> => new Promise((resolve, reject) => {
     if (!process.connected || process.send === undefined) { resolve(); return }
@@ -59,6 +61,19 @@ async function main(): Promise<void> {
   process.on('message', (message: unknown) => {
     if (typeof message !== 'object' || message === null || !('type' in message)) return
     if (message.type === 'shutdown') { void stop(); return }
+    if (message.type === 'rental-model' && 'requestId' in message && Number.isSafeInteger(message.requestId) && 'selection' in message) {
+      void (async () => {
+        try {
+          if (stopping !== undefined || control.rentalModel === undefined) throw new Error('AI_RESOURCE_UNAVAILABLE')
+          const inspection = await control.rentalModel(message.selection)
+          if (stopping === undefined) await send({ type: 'rental-model', requestId: message.requestId, ok: true, inspection })
+        } catch {
+          // Provider errors can contain credentials or raw endpoint configuration. Never carry them over this channel.
+          await send({ type: 'rental-model', requestId: message.requestId, ok: false })
+        }
+      })().catch(() => undefined)
+      return
+    }
     if (message.type === 'quit-inspection') {
       if (!('requestId' in message) || !Number.isSafeInteger(message.requestId)) return
       const requestId = message.requestId
@@ -90,6 +105,7 @@ async function main(): Promise<void> {
   })
   process.once('disconnect', () => { void stop() })
   const { ctx } = await application
+  control.rentalModel = selection => inspectRentalModel(ctx, selection)
   control.updateTasks = installDesktopUpdateTaskControl(ctx)
   control.quitInspection = installDesktopQuitInspection(ctx)
   await ctx.plugin(desktopOffice, {

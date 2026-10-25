@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RentalDesktopBridge, RentalDesktopSnapshot, RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
-import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult } from '@rental-os/shared/agent-desktop'
+import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult } from '@rental-os/shared/agent-desktop'
 import { WorkbenchContext, WorkbenchNavigation, WorkbenchMain, WorkbenchToast } from './Workbench.tsx'
 import type { WorkbenchInjected, WorkbenchState } from './contract.ts'
 import { zh, en } from './locales.ts'
@@ -16,13 +16,13 @@ export const inject = ['slots', 'layout', 'locale']
 export function apply(ctx: Context): void {
   const bridge = (globalThis as typeof globalThis & { rentalDesktop?: RentalDesktopBridge }).rentalDesktop
   if (bridge?.protocolVersion !== RENTAL_DESKTOP_PROTOCOL_VERSION) return
-  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null } })
+  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null, inspection: null } })
   let catalogGeneration = 0
   let catalogExpiry: ReturnType<typeof setTimeout> | undefined
   const clearCatalog = () => {
     catalogGeneration++
     clearTimeout(catalogExpiry)
-    state.update(value => { value.catalog = { busy: false, failed: false, result: null } })
+    state.update(value => { value.catalog = { busy: false, failed: false, result: null, inspection: null } })
   }
   let noticeSequence = 0
   const panel = 'rental-business' as MainPanelId
@@ -86,23 +86,24 @@ export function apply(ctx: Context): void {
       clearCatalog()
       const generation = catalogGeneration
       let input
-      try { input = parseRentalDesktopCatalogQuery(query) }
+      try { input = parseRentalDesktopModelCatalogQuery(query) }
       catch { state.update(value => { value.catalog.failed = true }); return }
       state.update(value => { value.catalog.busy = true })
-      // Human-only preview. It neither inserts facts into a conversation nor attests a model destination.
+      // Human-only preview; the native Host resolves the prepared route. Never fall back to a hand-entered URL.
       void Promise.resolve().then(() => {
-        if (!bridge.catalog) throw new Error('AI_RESOURCE_UNAVAILABLE')
-        return bridge.catalog(input)
+        if (!bridge.catalogForModel) throw new Error('AI_RESOURCE_UNAVAILABLE')
+        return bridge.catalogForModel(input)
       }).then(value => {
         if (disposed || generation !== catalogGeneration) return
-        const result = parseRentalDesktopCatalogResult(value)
+        const { catalog: result, inspection } = parseRentalDesktopModelCatalogResult(value)
         const session = state.getSnapshot().snapshot?.session
         if (session?.status !== 'ready' || result.binding.actorId !== session.actorId || result.binding.tenantId !== session.tenantId
-          || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()) throw new Error('AI_SCOPE_CHANGED')
-        state.update(draft => { draft.catalog = { busy: false, failed: false, result } })
+          || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()
+          || JSON.stringify(inspection.selection) !== JSON.stringify(input.selection)) throw new Error('AI_SCOPE_CHANGED')
+        state.update(draft => { draft.catalog = { busy: false, failed: false, result, inspection } })
         catalogExpiry = setTimeout(clearCatalog, Math.max(0, Date.parse(result.expiresAt) - Date.now()))
       }).catch(() => {
-        if (!disposed && generation === catalogGeneration) state.update(value => { value.catalog = { busy: false, failed: true, result: null } })
+        if (!disposed && generation === catalogGeneration) state.update(value => { value.catalog = { busy: false, failed: true, result: null, inspection: null } })
       })
     },
     measure: element => {

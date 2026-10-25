@@ -1,6 +1,7 @@
 /** Desktop business-view protocol. Carries display/navigation data, never credentials or business execution authority. */
 export * from './agent-desktop-business';
-import type { RentalDesktopCatalogQuery, RentalDesktopCatalogRequest, RentalDesktopCatalogResult, RentalDesktopCatalogReply } from './agent-desktop-business';
+import type { RentalDesktopCatalogQuery, RentalDesktopCatalogRequest, RentalDesktopCatalogResult, RentalDesktopCatalogReply,
+  RentalDesktopModelCatalogQuery, RentalDesktopModelCatalogResult } from './agent-desktop-business';
 export const RENTAL_DESKTOP_PROTOCOL_VERSION = 1 as const;
 
 export interface RentalDesktopMenuItem { id: string; path: string; label: string }
@@ -46,6 +47,8 @@ export interface RentalDesktopBridge {
   retry(): Promise<void>;
   /** Available only with the closed business bridge; does not grant model/session admission. */
   catalog?(query: RentalDesktopCatalogQuery): Promise<RentalDesktopCatalogResult>;
+  /** Resolve a Host-owned prepared model route before and after the same human-only catalog read. */
+  catalogForModel?(query: RentalDesktopModelCatalogQuery): Promise<RentalDesktopModelCatalogResult>;
 }
 export interface RentalAdminDesktopBridge {
   protocolVersion: typeof RENTAL_DESKTOP_PROTOCOL_VERSION;

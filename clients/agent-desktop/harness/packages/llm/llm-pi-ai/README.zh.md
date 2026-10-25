@@ -100,6 +100,8 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 ### 带推理（reasoning）与协议兼容运行
 
+准备调用会在流开始前固定已解析模型描述和凭据覆盖值。标准 OpenAI Responses、OpenAI Completions 和 Anthropic Messages 路由使用显式非空API Key覆盖时可提供 `destination`；隐式认证、SDK将OpenAI账号切到Codex的路径及其他协议族保持未知。这是初始路由元数据，不是重定向或供应商兼容性验证。
+
 `reasoningEfforts` 声明模型可选择的 thinking 等级：每个键都是选择器提供的等级，其值是分派时在协议中发送的拼写，因此 `max: ultra` 可以为拥有自有词汇的网关重命名等级。省略该字段时保留已安装目录条目的能力；`false` 声明非推理模型。对于 pi-ai 无法识别的端点，`compat` 开关重塑请求——哪个角色携带系统提示词、哪个字段限制输出、thinking 等级如何传递——可逐路由、逐模型配置。条目与已安装目录都没有尺寸的模型，会采用路由的 `defaultContextWindow` 与 `defaultMaxTokens` 回退值。
 
 确切模型元数据将 `reasoning.efforts` 按可选强度从低到高排列。配置函数可从该列表中选择，再由 `prepareCall()` 校验具体强度。适配器只接收解析后的控制项。选择 `off` 不保证禁用推理：以省略推理字段表达该值的协议会沿用网关默认行为。所选等级下产生的推理 token 都计入该请求的输出上限。

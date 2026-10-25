@@ -341,12 +341,23 @@ export class PiAiAdapter extends LlmAdapter {
     }
   }
 
-  override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const snapshot = this.current()
-    return Promise.resolve({
+    // Pin the exact descriptor passed to the SDK, including per-model endpoint overrides.
+    const resolved = { ...this.modelOf(snapshot, provider, model) }
+    const apiKey = await this.config.resolveApiKey(provider, this.profileOf(snapshot, provider))
+    signal?.throwIfAborted()
+    // The SDK can switch the OpenAI route to Codex for account credentials. Until that route
+    // has its own inspection, neither ambient auth nor this credential-dependent family attests a destination.
+    const accountRoute = resolved.api === 'openai-responses' && resolved.provider === 'openai'
+      && resolved.baseUrl === 'https://api.openai.com/v1' && !apiKey?.startsWith('sk-')
+    const supported = typeof apiKey === 'string' && apiKey.length > 0 && !accountRoute
+      && ['openai-responses', 'openai-completions', 'anthropic-messages'].includes(resolved.api)
+    return {
       model: this.modelInfo(snapshot, provider, model),
-      stream: options => this.streamWithSnapshot(options, snapshot),
-    })
+      ...supported ? { destination: { protocol: resolved.api, baseUrl: resolved.baseUrl } } : {},
+      stream: options => this.streamWithSnapshot(options, snapshot, { model: resolved, apiKey }),
+    }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -356,6 +367,7 @@ export class PiAiAdapter extends LlmAdapter {
   private async * streamWithSnapshot(
     options: GenerateOptions,
     snapshot: PiAiSnapshot,
+    prepared?: { model: Model<Api>; apiKey: string | undefined },
   ): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-pi-ai does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
@@ -366,7 +378,7 @@ export class PiAiAdapter extends LlmAdapter {
     // mid-request builds a separate snapshot, so this request finishes under
     // the one it started with and the next call picks up the new one.
     const profile = this.profileOf(snapshot, options.provider)
-    const model = this.modelOf(snapshot, options.provider, options.model)
+    const model = prepared?.model ?? this.modelOf(snapshot, options.provider, options.model)
     const updates = conversationUpdates(model)
     // pi-ai collapses Anthropic tool updates without an initially active declaration.
     const tools = options.tools ?? []
@@ -381,7 +393,7 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
-    const apiKey = await this.config.resolveApiKey(options.provider, profile)
+    const apiKey = prepared === undefined ? await this.config.resolveApiKey(options.provider, profile) : prepared.apiKey
 
     const consumer = new AbortController()
     const upstream = options.signal === undefined

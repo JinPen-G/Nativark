@@ -34,22 +34,23 @@ export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, s
 
 /** A scoped human request never enters ordinary Harness chat, session history or a model. */
 function CatalogPreview({ catalog, busy, readCatalog, discardCatalog, t }: Pick<ContextProps, 'readCatalog' | 'discardCatalog' | 't'> & { catalog: WorkbenchState['catalog']; busy: boolean }) {
-  const [provider, setProvider] = useState(''), [baseUrl, setBaseUrl] = useState(''), [text, setText] = useState('')
+  const [provider, setProvider] = useState(''), [model, setModel] = useState(''), [text, setText] = useState('')
   const prepared = prepareRentalDesktopCatalogInput(text)
   return <details className={css.catalog}>
       <summary>{t('catalogPreview')}</summary>
       <p>{t('catalogBoundary')}</p>
-      <form autoComplete="off" onSubmit={event => { event.preventDefault(); if (prepared.state === 'prepared') readCatalog({ limit: prepared.input.limit, destination: { provider, baseUrl } }) }}>
+      <form autoComplete="off" onSubmit={event => { event.preventDefault(); if (prepared.state === 'prepared') readCatalog({ limit: prepared.input.limit, selection: { provider, model } }) }}>
         <label>{t('catalogRequest')}<Input value={text} maxLength={256} required disabled={catalog.busy} onChange={event => { setText(event.target.value); discardCatalog() }} /></label>
         <p>{t('catalogSyntax')}</p>
         <label>{t('provider')}<Input value={provider} maxLength={128} required disabled={catalog.busy} onChange={event => { setProvider(event.target.value); discardCatalog() }} /></label>
-        <label>{t('destination')}<Input type="url" value={baseUrl} maxLength={2048} required disabled={catalog.busy} onChange={event => { setBaseUrl(event.target.value); discardCatalog() }} /></label>
+        <label>{t('catalogModel')}<Input value={model} maxLength={256} required disabled={catalog.busy} onChange={event => { setModel(event.target.value); discardCatalog() }} /></label>
         <p role="status">{prepared.state === 'prepared' ? <>{t('catalogPreparedLimit')}: {prepared.input.limit} · {t(prepared.sources.limit === 'preview_default' ? 'catalogDefaultLimit' : 'catalogExplicitLimit')}</>
           : t(prepared.reason === 'empty' ? 'catalogInputEmpty' : 'catalogClarify')}</p>
         <Button type="submit" variant="outline" disabled={busy || catalog.busy || prepared.state !== 'prepared'}>{t(catalog.busy ? 'catalogLoading' : 'catalogRead')}</Button>
       </form>
       <div role="status" aria-live="polite">
         {catalog.failed && <p>{t('catalogDenied')}</p>}
+        {catalog.inspection && <p>{t('catalogInspectedRoute')}: {catalog.inspection.selection.model} · {catalog.inspection.protocol} · {catalog.inspection.destination.baseUrl}<br />{t('catalogInspectionBoundary')}</p>}
         {catalog.result && <>
           <p>{t('catalogObserved')} <time dateTime={catalog.result.observedAt}>{catalog.result.observedAt}</time></p>
           <p>{t(catalog.result.truncated ? 'catalogPartial' : catalog.result.items.length ? 'catalogReady' : 'catalogEmpty')}</p>

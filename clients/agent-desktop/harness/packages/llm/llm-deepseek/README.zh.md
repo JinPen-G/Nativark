@@ -29,6 +29,8 @@ kind: "package-reference"
 
 本包导出传输库；provider 插件向 harness LLM 服务注册路由。它在每次操作开始时从 Config 引用捕获连接选项。
 
+`prepareCall()` 从可复用连接对象中分离端点，将Messages API根作为初始 `destination` 元数据返回；对应流保留同一连接，修改原选项只影响下一次准备。元数据本身不派发或授权模型调用。
+
 适配器接受 LLM 服务的[仅供请求使用的 user 输入](../llm/README.zh.md#use-this-package)，并可将其与持久历史混用；省略请求输入的身份与来源不会改变提供方内容。
 
 ### 何时选择

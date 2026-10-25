@@ -5,6 +5,20 @@ export const RENTAL_DESKTOP_BUSINESS_HTTP = {
   savePolicy: 'policy/change', policyOperation: 'policy/operation'
 } as const;
 export interface RentalDesktopModelDestination { provider: string; baseUrl: string }
+export interface RentalDesktopModelSelection { provider: string; model: string }
+/** Local Host observation of a real prepared call; not dispatch admission or a final network/redirect attestation. */
+export interface RentalDesktopModelInspection {
+  selection: RentalDesktopModelSelection;
+  destination: RentalDesktopModelDestination;
+  protocol: 'openai-responses' | 'openai-completions' | 'anthropic-messages';
+  preparationVersion: string;
+  observedAt: string;
+  expiresAt: string;
+  source: 'prepared_initial_route';
+  execution: 'not_dispatched';
+}
+export interface RentalDesktopModelCatalogQuery { selection: RentalDesktopModelSelection; limit: number }
+export interface RentalDesktopModelCatalogResult { catalog: RentalDesktopCatalogResult; inspection: RentalDesktopModelInspection }
 export interface RentalDesktopBusinessBinding { actorId: string; tenantId: string; workspaceId: string }
 export interface RentalDesktopCatalogQuery {
   limit: number;
@@ -111,6 +125,33 @@ export function parseRentalDesktopDestination(value: unknown): RentalDesktopMode
   const url = new URL(row.baseUrl);
   if (url.username || url.password || url.search || url.hash || url.protocol !== 'https:') throw new Error('Invalid model destination');
   return { provider: word(row.provider, 128), baseUrl: url.href.replace(/\/+$/u, '') };
+}
+export function parseRentalDesktopModelSelection(value: unknown): RentalDesktopModelSelection {
+  const row = record(value, ['provider', 'model']);
+  if (typeof row.model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(row.model)) throw new Error('Invalid model selection');
+  return { provider: word(row.provider, 128), model: row.model };
+}
+export function parseRentalDesktopModelInspection(value: unknown): RentalDesktopModelInspection {
+  const row = record(value, ['selection', 'destination', 'protocol', 'preparationVersion', 'observedAt', 'expiresAt', 'source', 'execution']);
+  const selection = parseRentalDesktopModelSelection(row.selection), destination = parseRentalDesktopDestination(row.destination);
+  if (selection.provider !== destination.provider || typeof row.protocol !== 'string'
+    || !['openai-responses', 'openai-completions', 'anthropic-messages'].includes(row.protocol)
+    || row.source !== 'prepared_initial_route' || row.execution !== 'not_dispatched') throw new Error('Invalid prepared model route');
+  const observedAt = timestamp(row.observedAt), expiresAt = timestamp(row.expiresAt);
+  if (Date.parse(expiresAt) <= Date.parse(observedAt) || Date.parse(expiresAt) - Date.parse(observedAt) > 30000) throw new Error('Invalid model inspection lifetime');
+  return { selection, destination, protocol: row.protocol as RentalDesktopModelInspection['protocol'], preparationVersion: hash(row.preparationVersion), observedAt, expiresAt,
+    source: 'prepared_initial_route', execution: 'not_dispatched' };
+}
+export function parseRentalDesktopModelCatalogQuery(value: unknown): RentalDesktopModelCatalogQuery {
+  const row = record(value, ['selection', 'limit']);
+  return { selection: parseRentalDesktopModelSelection(row.selection), limit: positive(row.limit, 50) };
+}
+export function parseRentalDesktopModelCatalogResult(value: unknown): RentalDesktopModelCatalogResult {
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 65536) throw new Error('Model catalog result too large');
+  const row = record(value, ['catalog', 'inspection']), catalog = parseRentalDesktopCatalogResult(row.catalog), inspection = parseRentalDesktopModelInspection(row.inspection);
+  if (JSON.stringify(catalog.destination) !== JSON.stringify(inspection.destination) || Date.parse(catalog.expiresAt) > Date.parse(inspection.expiresAt))
+    throw new Error('Model route differs from authorized catalog destination');
+  return { catalog, inspection };
 }
 export function parseRentalDesktopBusinessBinding(value: unknown): RentalDesktopBusinessBinding {
   const row = record(value, ['actorId', 'tenantId', 'workspaceId']);

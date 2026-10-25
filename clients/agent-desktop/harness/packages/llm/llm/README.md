@@ -62,6 +62,8 @@ After a successful mount, `ctx.llm.listProviders()` reports the registered route
 
 `prepareCall(config, signal, configure?)` accepts concrete `LlmCallConfig` values. The optional synchronous, pure `ConfigureCall` function receives detached, deeply frozen `LlmCallControls` and model metadata from the captured adapter generation. Callers can compose ordinary functions to choose concrete controls; later writes replace earlier ones. Preparation retains the captured route, applies defaults to omitted controls, validates the result, and returns a frozen configuration for recording and dispatch. Callback failures or cancellation reject before dispatch. Preparation requires a registered adapter.
 
+The submitted config is detached before asynchronous resolution. A prepared adapter may also return `destination: { protocol, baseUrl }` from the exact route its stream uses; the runtime detaches and freezes it. Missing metadata means unknown, not a provider-directory fallback. It identifies only the initial route: it does not authorize egress, attest redirects or attachments, dispatch a request, or enter session history by itself.
+
 Configuration functions select controls before adapter defaults are materialized. For example, combine least-effort selection with an explicit output cap, then pass `configure(maxTokens)` as the third argument:
 
 ```ts

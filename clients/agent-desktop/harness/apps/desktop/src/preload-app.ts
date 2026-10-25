@@ -93,6 +93,7 @@ if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
     read: () => ipcRenderer.invoke(RENTAL_IPC.read),
     request: command => ipcRenderer.invoke(RENTAL_IPC.request, command),
     catalog: query => ipcRenderer.invoke(RENTAL_IPC.catalog, query),
+    catalogForModel: query => ipcRenderer.invoke(RENTAL_IPC.catalogForModel, query),
     present: input => ipcRenderer.invoke(RENTAL_IPC.present, input),
     retry: () => ipcRenderer.invoke(RENTAL_IPC.retry),
     subscribe: listener => {

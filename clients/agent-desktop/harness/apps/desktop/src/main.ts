@@ -512,6 +512,7 @@ async function main(): Promise<void> {
       },
       updateTasks: (action: 'inspect' | 'lock' | 'unlock') => host.updateTasks(action),
       inspectQuit: () => host.inspectQuit(),
+      inspectRentalModel: (selection: Parameters<DesktopHostProcess['inspectRentalModel']>[0]) => host.inspectRentalModel(selection),
     }
   }, (state) => {
     if (state.phase === 'error') reportFatal(state.failure, 'host')
@@ -622,7 +623,13 @@ async function main(): Promise<void> {
       })
       void rentalPause.catch((error: unknown) => { reportFatal(error, 'host') })
     }, () => ({ unavailable: locale.messages.rentalAdminUnavailable, reconnect: locale.messages.rentalAdminReconnect,
-      cancel: locale.messages.cancel, draft: locale.messages.rentalAdminDraft, download: locale.messages.rentalAdminDownload }))
+      cancel: locale.messages.cancel, draft: locale.messages.rentalAdminDraft, download: locale.messages.rentalAdminDownload }), async selection => {
+      const host = backend.host
+      if (!host || quitting) throw new Error('AI_RESOURCE_UNAVAILABLE')
+      const inspection = await host.inspectRentalModel(selection)
+      if (host !== backend.host || quitting) throw new Error('AI_RESOURCE_UNAVAILABLE')
+      return inspection
+    })
   rentalView?.install()
   const updateChannel = desktopUpdateChannel(manifest)
   const updates = new DesktopUpdateCoordinator(

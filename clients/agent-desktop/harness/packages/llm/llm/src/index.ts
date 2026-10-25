@@ -166,9 +166,16 @@ export function assertUsableApiKey(raw: string, pkg: string, ref: string): strin
 }
 
 /** One model call whose config and adapter registration were resolved together. */
+/** Adapter-resolved initial request route. It is not an egress authorization, redirect guarantee or credential. */
+export interface PreparedLlmDestination {
+  readonly protocol: string
+  readonly baseUrl: string
+}
 export interface PreparedLlmCall {
   /** Detached, deep-frozen config with any adapter-owned default materialized. */
   readonly config: LlmCallConfig
+  /** Available only when the captured adapter can identify its actual model-specific route. */
+  readonly destination?: PreparedLlmDestination
   /** Immutable retry policy captured with the adapter registration. */
   readonly retryPolicy: ResolvedRetryPolicy
   /** Detached context metadata resolved with the registration-bound call. */
@@ -195,6 +202,8 @@ export interface PreparedLlmCall {
 export interface PreparedAdapterCall {
   /** Exact model metadata from the same adapter generation as {@link stream}. */
   readonly model: LlmResolvedModelInfo
+  /** Initial endpoint used by this prepared stream, never a provider directory default. Omission means unknown. */
+  readonly destination?: PreparedLlmDestination
   /** Dispatch through that generation without re-reading dynamic connection facts. */
   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 }
@@ -959,13 +968,18 @@ export class LlmRuntime extends TypertRemoteService {
     configure?: ConfigureCall,
   ): Promise<PreparedLlmCall> {
     signal?.throwIfAborted()
-    const { provider, model, ...controls } = config
+    const submitted = deepFreeze(structuredClone(config))
+    const { provider, model, ...controls } = submitted
     const registration = this.registration(provider)
     const adapterCall = await registration.adapter.prepareCall(provider, model, signal)
     signal?.throwIfAborted()
+    const destination = adapterCall.destination === undefined ? undefined : deepFreeze(structuredClone(adapterCall.destination))
+    if (destination !== undefined && (typeof destination.protocol !== 'string' || !destination.protocol
+      || typeof destination.baseUrl !== 'string' || !destination.baseUrl))
+      throw new LlmError('adapter returned invalid prepared destination', 'INVALID_MODEL_INFO')
     const modelInfo = this.normalizeModelInfo(registration, model, adapterCall.model)
     const proposed = configure === undefined
-      ? config
+      ? submitted
       : { ...configure(deepFreeze(structuredClone(controls)), deepFreeze(modelInfo)), provider, model }
     signal?.throwIfAborted()
     const resolved = this.resolveCallWithInfo(proposed, modelInfo)
@@ -984,6 +998,7 @@ export class LlmRuntime extends TypertRemoteService {
     let dispatched = false
     return Object.freeze({
       config: resolvedConfig,
+      ...destination === undefined ? {} : { destination },
       retryPolicy: registration.retryPolicy,
       adapterDefaults,
       ...context === undefined ? {} : { context },
