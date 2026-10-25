@@ -111,7 +111,8 @@
 .arc-password-field[data-status="error"] [class*="shell"] { border-color: var(--danger); }
 .arc-password-field[data-status="warning"] [class*="shell"] { border-color: var(--warning); }
 .arc-select-trigger-with-clear > :last-child,
-.arc-date-range[data-inline-clear] > :first-child > :first-child > button[aria-haspopup="dialog"] > :last-child { visibility: hidden; }
+.arc-date-range[data-inline-clear]:not(:has(.arc-range-advanced)) > :first-child > :first-child > button[aria-haspopup="dialog"] > :last-child,
+.arc-date-range[data-inline-clear] .arc-range-advanced-trigger .lucide-chevron-down { visibility: hidden; }
 .arc-select-clear, .arc-date-range-clear { position: absolute; z-index: 1; top: 50%; inset-inline-end: var(--space-2); display: grid; width: var(--space-6); height: var(--space-6); place-items: center; transform: translateY(-50%); border: 0; border-radius: var(--rental-ui-radius-button, 18px); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
 .arc-date-range-clear { top: calc(var(--control-height-md) / 2); inset-inline-end: calc(var(--rental-date-clear-offset, 0px) + var(--space-2)); }
 .arc-date-range:has(button[aria-expanded="true"]) > :first-child > .arc-date-range-clear { visibility: hidden; }
@@ -125,6 +126,11 @@
 .arc-select-field[data-status="error"] input { border-color: var(--danger); }
 .arc-select-field[data-status="warning"] input { border-color: var(--warning); }
 .arc-range-endpoints { display: flex; flex-wrap: wrap; gap: 12px; }
+.arc-range-advanced { min-width: 0; width: 100%; }
+.arc-date-range .arc-range-advanced-trigger { width: 100%; justify-content: flex-start; gap: var(--space-2); font-weight: var(--rental-typography-body-weight); }
+.arc-range-advanced-trigger > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: start; white-space: nowrap; }
+.arc-range-advanced-popup { width: var(--rental-list-filter-popover-width); max-width: calc(100vw - var(--space-5)); }
+.arc-range-advanced-popup .arc-range-endpoints > * { width: 100%; }
 .arc-time-fields { display: flex; align-items: center; gap: 8px; }
 .arc-seconds { display: flex; align-items: center; gap: 4px; }
 .arc-seconds input { width: 60px; border-radius: var(--radius-control); border: 1px solid var(--border); background: var(--surface); padding: 6px; }

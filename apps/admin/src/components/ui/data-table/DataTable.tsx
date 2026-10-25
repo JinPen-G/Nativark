@@ -28,11 +28,11 @@ declare module "@tanstack/react-table" {
 export function DataTableColumnHeader<T>({ column, label, disabled }: { column: Column<T, unknown>; label: string; disabled?: boolean }) {
   const { t } = useLocale();
   const sorted = column.getIsSorted();
-  if (!column.getCanSort() && !column.getCanHide()) return <span>{label}</span>;
+  if (!column.getCanSort() && !column.getCanHide()) return <span className={styles.headerLabel} title={label}>{label}</span>;
   const indicator = <Menu.ItemIndicator className={styles.indicator}><Check size={14} /></Menu.ItemIndicator>;
   return <Menu.Root>
     <Menu.Trigger type="button" className={styles.headerTrigger} disabled={disabled} aria-label={`${label} · ${t("列选项")}`}>
-      {label}{column.getCanSort() && (sorted === "desc" ? <ChevronDown /> : sorted === "asc" ? <ChevronUp /> : <ChevronsUpDown />)}
+      <span className={styles.headerLabel} title={label}>{label}</span>{column.getCanSort() && (sorted === "desc" ? <ChevronDown /> : sorted === "asc" ? <ChevronUp /> : <ChevronsUpDown />)}
     </Menu.Trigger>
     <Menu.Portal><Menu.Content className={styles.menu} align="start" sideOffset={4} collisionPadding={12}>
       {column.getCanSort() && <>

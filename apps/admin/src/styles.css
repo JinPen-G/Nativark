@@ -498,7 +498,7 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
 .workspace-context .ant-breadcrumb-overlay-link:hover { background: var(--rental-color-fill-tertiary); }
 .breadcrumb-home { cursor: pointer; }
 .app-content { min-height: 0; padding: var(--rental-layout-page-top-gap) var(--space-6) var(--space-6); overflow: auto; background: transparent; }
-.content-canvas { width: 100%; }
+.content-canvas { width: 100%; container: admin-content / inline-size; }
 
 .page-header { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--rental-layout-header-content-gap); min-width: 0; margin-block-end: var(--rental-layout-header-content-gap); }
 .page-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--rental-layout-inline-gap) var(--rental-layout-header-content-gap); min-height: var(--rental-control-height-default); min-width: 0; }
@@ -620,6 +620,20 @@ h5.ant-typography {
 .panel-toolbar-start,
 .panel-toolbar-end { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--rental-dashboard-card-min-width)), 1fr)); gap: var(--rental-layout-section-gap); margin-bottom: var(--rental-layout-section-gap); }
+/* Balance five overview values instead of leaving one isolated card below four. */
+@container admin-content (min-width: 700px) and (max-width: 1063px) {
+  .metric-grid:has(> .metric-card:nth-child(5):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .metric-grid:has(> .metric-card:nth-child(5):last-child) > * { grid-column: span 2; }
+  .metric-grid:has(> .metric-card:nth-child(5):last-child) > :nth-child(n + 4) { grid-column: span 3; }
+}
+@container admin-content (min-width: 420px) and (max-width: 699px) {
+  .metric-grid:has(> .metric-card:nth-child(5):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-grid:has(> .metric-card:nth-child(5):last-child) > :last-child { grid-column: 1 / -1; }
+}
+.report-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--rental-layout-section-gap); margin-bottom: var(--rental-layout-section-gap); }
+.report-metrics .ant-card-body { padding: var(--space-4); }
+@container admin-content (max-width: 899px) { .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container admin-content (max-width: 419px) { .metric-grid, .report-metrics { grid-template-columns: minmax(0, 1fr); } }
 .rental-info-popover > h2 { margin: 0 0 var(--space-2); font-size: var(--rental-typography-panel-title-size); font-weight: var(--rental-typography-panel-title-weight); line-height: var(--rental-typography-panel-title-line-height); }
 .metric-card { min-height: 110px; }
 .metric-card .ant-card-body { display: flex; flex-direction: column; justify-content: center; height: 100%; padding: 24px; }

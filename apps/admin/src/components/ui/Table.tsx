@@ -190,7 +190,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
     enableRowSelection: row => selectable && !loading && !selectionConfig?.getCheckboxProps?.(row.original)?.disabled, enableMultiSort: true, autoResetPageIndex: false, autoResetExpanded: false,
     getRowCanExpand: row => Boolean(props.expandable?.expandedRowRender && (props.expandable.rowExpandable?.(row.original) ?? true)),
     state: { sorting, columnVisibility: visibility, expanded: expansion, rowSelection: selectedState, pagination: { pageIndex: current - 1, pageSize },
-      columnPinning: { left: sourceColumns.flatMap((c, i) => c.fixed === "left" || c.fixed === true ? [columns.find(col => columnSources.get(col.id!) === c)?.id ?? `column_${i}`] : []),
+      columnPinning: { left: [...(selectable ? ["select"] : []), ...sourceColumns.flatMap((c, i) => c.fixed === "left" || c.fixed === true ? [columns.find(col => columnSources.get(col.id!) === c)?.id ?? `column_${i}`] : [])],
         right: sourceColumns.flatMap(c => c.fixed === "right" ? [columns.find(col => columnSources.get(col.id!) === c)!.id!] : []) } },
     onColumnVisibilityChange: setVisibility,
     onRowSelectionChange: updater => updateSelection(typeof updater === "function" ? updater(selectedState) : updater),

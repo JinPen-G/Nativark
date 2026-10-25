@@ -195,17 +195,15 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
 
   return (
     <>
-      <Row className="page-metrics" gutter={[16, 16]}>
+      <div className="report-metrics">
         {cards.map((card) => (
-          <Col xs={12} xl={4} key={card.label}>
-            <Card className="data-panel">
+            <Card className="data-panel" key={card.label}>
               <Statistic title={card.label} value={card.value} prefix={card.prefix} precision={card.precision} />
             </Card>
-          </Col>
         ))}
-      </Row>
+      </div>
 
-      <Card className="data-panel" title={t("订单量按状态")} style={{ marginTop: 16 }}>
+      <ListSection title={t("订单量按状态")}>
         {data.statusBreakdown.length ? (
           <Space wrap>
             {data.statusBreakdown.map((row) => (
@@ -217,7 +215,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         ) : (
           <span className="muted">{t("当前经营空间尚无非草稿订单")}</span>
         )}
-      </Card>
+      </ListSection>
 
       <ListSection title={t("异常费用构成")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
         <Table
@@ -237,7 +235,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         </div>
       </ListSection>
       {/* 快照与区间必须在同一张卡里说清楚，否则「在租占比」会被当成区间利用率。 */}
-      <Card className="data-panel" title={t("库存与资产（当前快照）")} style={{ marginTop: 16 }}>
+      <ListSection title={t("库存与资产（当前快照）")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
         <Alert
           type="warning"
           showIcon
@@ -291,7 +289,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             />
           </Col>
         </Row>
-      </Card>
+      </ListSection>
       {/* 维度表分页展示：地点与客户基数可能很大，一次全渲染会把页面拖死。
           分页只是展示层的事——数字本身已由服务端聚合，不受翻页影响。 */}
       <ListSection title={t("地点维度")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>

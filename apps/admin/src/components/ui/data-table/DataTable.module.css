@@ -141,6 +141,7 @@
 .statusNote[data-tone="warning"] { color: var(--warning); }
 .headerTrigger { display: flex; align-items: center; gap: .375rem; height: var(--rental-control-height-toolbar); max-width: 100%; padding: .375rem var(--space-2); margin-inline-start: calc(-1 * var(--space-2)); border: 0; border-radius: var(--rental-ui-radius-button); color: inherit; background: transparent; font: inherit; white-space: nowrap; cursor: pointer; }
 .headerTrigger > svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text-muted); }
+.headerLabel { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .headerTrigger:hover, .headerTrigger[data-state="open"] { background: var(--surface-muted); color: var(--foreground); }
 .headerTrigger:disabled { cursor: wait; opacity: .6; }
 .viewTrigger { height: var(--rental-control-height-toolbar); min-height: var(--rental-control-height-toolbar); white-space: nowrap; }

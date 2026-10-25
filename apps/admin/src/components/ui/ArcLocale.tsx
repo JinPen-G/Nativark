@@ -14,7 +14,7 @@ const chrome: Record<string, string> = {
   "Show password": "显示密码", "Hide password": "隐藏密码",
   "Browse": "浏览文件", "Uploading": "上传中", "Uploaded": "已上传", "Ready": "待提交", "Failed": "上传失败",
   "Previous page": "上一页", "Next page": "下一页", "Previous month": "上个月", "Next month": "下个月",
-  "Today": "今天", "Apply": "应用", "Cancel": "取消", "Reset": "重置", "Not started": "未开始", "Completed": "已完成",
+  "Today": "今天", "Apply": "应用", "Cancel": "取消", "Reset": "重置", "Clear": "清空", "Choose a day": "选择日期", "Not started": "未开始", "Completed": "已完成",
   "Bold": "加粗", "Italic": "斜体", "Strikethrough": "删除线", "Link": "链接", "Unlink": "移除链接",
   "Undo": "撤销", "Redo": "重做", "Paragraph": "段落", "Heading 1": "一级标题", "Heading 2": "二级标题", "Heading 3": "三级标题",
   "Bullet list": "无序列表", "Numbered list": "有序列表", "Quote": "引用", "Code": "代码", "Code block": "代码块",
@@ -41,7 +41,7 @@ export function ArcLocale({ children }: { children: ReactNode }) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const parent = text.parentElement;
-        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel']")) continue;
+        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel']")) continue;
         const original = text.textContent ?? "";
         const next = localize(original);
         if (next !== text.textContent) text.textContent = next;

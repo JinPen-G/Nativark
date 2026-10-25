@@ -115,7 +115,7 @@ export function AssetWorkspacePage() {
 
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> cardView={assetCards({ t, groups: groups.data ?? [], statusLabel: value => t(statusMap[value]?.label ?? value), canManage, canView, edit: openAssetEditor, history: setStatusHistoryAsset, identifier: t(profile.data?.terminology.identifierLabel ?? "资产编号") })} exportConfig={{ filename: t("器材资产"), fields: [{ label: t("资产编号"), value: row => row.assetNo }, { label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("状态"), value: row => row.status }] }} rowKey="id" onRefresh={() => assets.refetch()} loading={assets.isFetching} dataSource={assetRows} scroll={{ x: 960 }} columns={[
-            { title: locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`, width: 110, fixed: "left", render: (_, row) => {
+            { title: t("照片"), width: 88, fixed: "left", render: (_, row) => {
               const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
               const image = group?.images?.find((item) => item.isCover) ?? group?.images?.[0];
               return group && image ? <ItemGroupPhoto groupId={group.id} image={image} /> : <span className="muted">{t("未上传")}</span>;
