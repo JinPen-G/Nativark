@@ -1,4 +1,4 @@
-import { Blocks, ChartNoAxesCombined, House, MessagesSquare } from "lucide-react";
+import { AnimatedIcon, type AnimatedIconName } from "./ui/AnimatedIcon";
 import { useState } from "react";
 import { SearchField, SidebarMenu } from "@/components/ui";
 import { useLocale } from "@/app/locale";
@@ -10,10 +10,10 @@ export function SidebarQuickEntries({ collapsed, selectedKey, onNavigate }: { co
   const { t } = useLocale();
   const [query, setQuery] = useState("");
   const entries = [
-    { key: "home", label: "首页", icon: House },
-    { key: "ask-ai", label: "询问 AI", icon: MessagesSquare },
-    { key: "integrations", label: "集成", icon: Blocks, count: 3 },
-    { key: "insights", label: "洞察", icon: ChartNoAxesCombined },
+    { key: "home", label: "首页", icon: "house" },
+    { key: "ask-ai", label: "询问 AI", icon: "messages" },
+    { key: "integrations", label: "集成", icon: "blocks", count: 3 },
+    { key: "insights", label: "洞察", icon: "chart" },
   ];
   return <div className={`sider-quick${collapsed ? " is-compact" : ""}`}>
     {!collapsed && <div className="sider-search-preview">
@@ -24,7 +24,7 @@ export function SidebarQuickEntries({ collapsed, selectedKey, onNavigate }: { co
       <SidebarMenu mode="inline" inlineCollapsed={collapsed} selectedKeys={selectedKey ? [selectedKey] : []}
         onClick={({ key }) => onNavigate(String(key))}
         items={entries.map(({ key, label, icon: Icon, count }) => ({
-          key, icon: <Icon size={14} strokeWidth={1.75} aria-hidden="true" />,
+          key, icon: <AnimatedIcon name={Icon as AnimatedIconName} />,
           title: t(label),
           label: <span className="sider-quick-label">{t(label)}
             {!collapsed && count !== undefined && <span className="sider-quick-count" title={t("示意计数")}>{count}</span>}

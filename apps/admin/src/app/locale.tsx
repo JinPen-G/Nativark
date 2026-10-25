@@ -12,6 +12,11 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "经营能力": "Capabilities", "版本订阅": "Subscription", "外观音效": "Appearance",
+  "客户渠道": "Channels", "定价营销": "Pricing", "会员客户": "Clients",
+  "账号权限": "Access", "服务渠道": "Services", "财务对账": "Finance",
+  "器材库存": "Inventory", "能力目录": "Capabilities", "公共日历": "Calendars",
+  "功能定价": "Plans & pricing", "价格调价": "Rates",
   "实名核验记录": "Identity reviews", "查看明文": "View unmasked",
   "男": "Male", "女": "Female", "转介绍": "Referral",
   "预览客户资料": "Preview customer",

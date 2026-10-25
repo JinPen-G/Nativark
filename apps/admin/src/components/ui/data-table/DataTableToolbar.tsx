@@ -1,7 +1,7 @@
 /** Shared list tools. Refresh only invokes the reader supplied by the owning page. */
 import { useState, type ReactNode } from "react";
 import type { Table } from "@tanstack/react-table";
-import { RefreshCw } from "lucide-react";
+import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
 import { Button } from "../Button";
 import { ListFilterBar, splitListControls } from "../ListFilterBar";
@@ -41,7 +41,7 @@ export function DataTableToolbar<T>({ table, label, onRefresh, busy, note, contr
       {heading?.extra}
       {extra}
       <span title={t(onRefresh ? "刷新表格" : "本地预览随源数据更新")}><Button size="small" type="text" className={styles.refreshControl}
-        aria-label={t("刷新表格")} disabled={!onRefresh || busy || refreshing} onClick={() => void refresh()}><RefreshCw size={16} aria-hidden="true" /></Button></span>
+        aria-label={t("刷新表格")} disabled={!onRefresh || busy || refreshing} onClick={() => void refresh()}><AnimatedIcon name="refresh" busy={Boolean(busy || refreshing)} /></Button></span>
       <DataTableSortList table={table} label={label} disabled={sortDisabled} hint={sortHint} keyboardShortcut={keyboardShortcut} />
       {!hideColumns && <DataTableViewOptions table={table} label={label} />}
       {trailingExtra}

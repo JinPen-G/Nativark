@@ -273,6 +273,29 @@ button, input, textarea, select { font: inherit; }
   border-top: 1px solid var(--rental-color-border-secondary);
 }
 :is(.sider-nav, .sider-quick-nav) .ant-menu-item { margin-block: 2px; }
+/* Compact rail keeps the same business groups and native submenu/keyboard engine.
+   Scope to direct rail items so popup children keep their normal horizontal rows. */
+.sider-shell.is-collapsed :is(.sider-nav, .sider-quick-nav) .ant-menu-inline-collapsed { width: 100%; }
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > :is(.ant-menu-item, .ant-menu-submenu) { width: 100%; margin-inline: 0; }
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-item,
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-submenu > .ant-menu-submenu-title {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; height: var(--sidebar-compact-height); line-height: normal;
+  padding-inline: 2px; margin-inline: 0; width: 100%; border-radius: var(--rental-ui-radius-control);
+}
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-item > .ant-menu-item-icon,
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-submenu > .ant-menu-submenu-title > .ant-menu-item-icon {
+  margin: 0; font-size: var(--sidebar-compact-icon); width: var(--sidebar-compact-icon); height: var(--sidebar-compact-icon); line-height: 1;
+}
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-item > .ant-menu-title-content,
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-submenu > .ant-menu-submenu-title > .ant-menu-title-content {
+  display: block; opacity: 1; flex: none; width: 100%; margin: 0;
+  font-size: var(--sidebar-compact-label); line-height: 16px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sider-shell.is-collapsed .sider-quick-label { text-align: center; }
+.sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-submenu > .ant-menu-submenu-title > .ant-menu-submenu-arrow { display: none; }
+.sider-shell.is-collapsed .ant-menu-submenu-selected > .ant-menu-submenu-title { background: var(--rental-color-fill-secondary); color: var(--rental-color-text); }
 /* 选中项是一块主色圆角，浅色文字与图标。取色思路与 BoardUI 侧栏选中态一致（它用 accent），
    但这里走本仓的主题色 --rental-color-primary；暗色下由 darkAlgorithm 派生同一色族，
    不写死任何外来色值。

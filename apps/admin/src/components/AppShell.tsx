@@ -10,6 +10,9 @@ import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
+import { ADMIN_SIDEBAR_METRICS } from "@/app/designTokens";
+import { MENU_GROUP_ICONS, MENU_GROUP_LABELS, MENU_ROUTE_ICONS, menuRouteLabel } from "@/app/navigation-display";
+import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AccountMenu } from "./AccountMenu";
@@ -101,18 +104,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   /**
    * 展开态：一级是**不可点的分组标题**，二级直接铺开（`type: "group"`）。
    *
-   * 收起态：一级换成**只有图标的父项**（去掉 `type`，即 SubMenu），二级收进悬浮浮层。
-   * 64px 宽放不下分组标题，但把二级平铺成一串图标会丢掉归属关系；保留一级、
-   * 悬停才展开二级，层级和展开态是同一套说法。
+   * 收起态：一级换成图标＋短名称的父项，二级收进原生悬浮子菜单。
+   * 保留原业务归属与键盘操作，不将所有功能挤成无名称的图标。
    *
    * 收起判据传参而不是直接读 `collapsed`：抽屉里永远是展开态，两处必须一致，
    * 否则抽屉会拿到收起态的结构。
    */
   const buildMenuItems = (isCollapsed: boolean): MenuProps["items"] => sections.map((section) => {
-    const children = section.routes.map((route) => ({ key: route.path, icon: route.icon, label: t(route.label) }));
+    const children = section.routes.map((route) => ({ key: route.path,
+      icon: MENU_ROUTE_ICONS[route.path] ? <AnimatedIcon name={MENU_ROUTE_ICONS[route.path]} /> : route.icon,
+      label: t(menuRouteLabel(route.path, route.label)) }));
     return isCollapsed
-      ? { key: section.key, icon: section.icon, label: t(section.label), children }
-      : { type: "group" as const, key: section.key, label: t(section.label), children };
+      ? { key: section.key, icon: MENU_GROUP_ICONS[section.key] ? <AnimatedIcon name={MENU_GROUP_ICONS[section.key]} /> : section.icon, label: t(MENU_GROUP_LABELS[section.key] ?? section.label), children }
+      : { type: "group" as const, key: section.key, label: t(MENU_GROUP_LABELS[section.key] ?? section.label), children };
   });
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
@@ -179,7 +183,8 @@ export function AppShell({ children }: { children: ReactNode }) {
    * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。
    */
   const renderSider = (inDrawer = false) => (
-    <div id={inDrawer ? undefined : "workspace-sidebar"} className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}>
+    <div id={inDrawer ? undefined : "workspace-sidebar"} className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}
+      style={{ "--sidebar-compact-height": `${ADMIN_SIDEBAR_METRICS.collapsedItemHeight}px`, "--sidebar-compact-icon": `${ADMIN_SIDEBAR_METRICS.collapsedIconSize}px`, "--sidebar-compact-label": `${ADMIN_SIDEBAR_METRICS.collapsedLabelSize}px` } as import("react").CSSProperties}>
       <div className="sider-workspace"><WorkspaceSwitcher collapsed={collapsed && !inDrawer} /></div>
       <SidebarQuickEntries collapsed={collapsed && !inDrawer} selectedKey={activeFixedKey}
         onNavigate={key => { setFixedSelection(key); navigation.fromSidebar(overviewPath); setDrawerOpen(false); }} />
@@ -206,8 +211,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         {isDesktop ? (
           <Sider
             className="app-sider"
-            width={240}
-            collapsedWidth={64}
+            width={ADMIN_SIDEBAR_METRICS.expandedWidth}
+            collapsedWidth={ADMIN_SIDEBAR_METRICS.collapsedWidth}
             trigger={null}
             collapsible
             collapsed={collapsed}

@@ -1,6 +1,7 @@
 /** Optional list capabilities. Domain pages choose fields and legal actions; this layer never invents writes. */
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Download, Upload, Grid2X2, Rows3, X } from "lucide-react";
+import { Grid2X2, Rows3, X } from "lucide-react";
+import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { Button } from "../Button";
@@ -37,8 +38,8 @@ export function ListTransferTools<T>({ config, rows, busy, importConfig }: { con
   const [open, setOpen] = useState(false);
   if (!config && !importConfig) return null;
   return <div className={styles.tools}>
-    {importConfig && <Button size="small" disabled={busy || !importConfig.allowed()} aria-label={t("导入")} title={t("导入")} icon={<Upload size={16} aria-hidden="true" />} onClick={() => setOpen(true)}><span className={styles.transferLabel}>{t("导入")}</span></Button>}
-    {config && <Button size="small" disabled={busy || !rows.length} aria-label={t(config.scope === "page" ? "导出本页" : "导出")} title={t(config.scope === "page" ? "导出当前页" : "导出筛选结果")} icon={<Download size={16} aria-hidden="true" />} onClick={() => exportRows(config, rows)}><span className={styles.transferLabel}>{t(config.scope === "page" ? "导出本页" : "导出")}</span></Button>}
+    {importConfig && <Button size="small" disabled={busy || !importConfig.allowed()} aria-label={t("导入")} title={t("导入")} icon={<AnimatedIcon name="upload" />} onClick={() => setOpen(true)}><span className={styles.transferLabel}>{t("导入")}</span></Button>}
+    {config && <Button size="small" disabled={busy || !rows.length} aria-label={t(config.scope === "page" ? "导出本页" : "导出")} title={t(config.scope === "page" ? "导出当前页" : "导出筛选结果")} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}><span className={styles.transferLabel}>{t(config.scope === "page" ? "导出本页" : "导出")}</span></Button>}
     {importConfig && open && <ListImportDialog key={listIdentity()} config={importConfig} onClose={() => setOpen(false)} />}
   </div>;
 }
@@ -172,7 +173,7 @@ export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, o
   return <>
     {!!rows.length && <div ref={barRef} data-list-selection-bar="" className={styles.bar} role="region" aria-label={t("批量操作")}><span role="status">{t("已选择")} {rows.length}</span>
       {onSelectPage && <Button type="text" size="small" disabled={busy || running} onClick={onSelectPage}>{t("选择当前页")}</Button>}
-      {config && <Button size="small" disabled={busy || running} icon={<Download size={16} aria-hidden="true" />} onClick={() => exportRows(config, rows)}>{t("导出所选")}</Button>}
+      {config && <Button size="small" disabled={busy || running} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}>{t("导出所选")}</Button>}
       {actions.filter(item => item.allowed()).map(item => <Button key={item.key} size="small" danger={item.danger} disabled={busy || running || !rows.some(item.eligible)} onClick={() => { setAction(item); setActionRows([...rows]); setReason(""); setResults([]); }}>{t(item.label)}</Button>)}
       <Button type="text" size="small" disabled={running} aria-label={t("清除选择")} icon={<X size={16} aria-hidden="true" />} onClick={clear} />
     </div>}

@@ -1,0 +1,110 @@
+{
+  "repository": "https://github.com/imskyleen/animate-ui",
+  "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
+  "license": "LICENSE.md",
+  "adaptations": "Import paths only; cn uses the installed clsx utility as upstream expects, including conditional classes. V1 engine and V2 variants share one pinned revision. Host controls interaction and reduced motion.",
+  "files": [
+    {
+      "file": "runtime.tsx",
+      "source": "apps/v1/apps/www/registry/icons/icon/index.tsx",
+      "upstreamSha256": "3cb80b1ba0f2cbf2821e05fd22b2a8e48565b8bc1da4e74e73ac2a5643f8da3b",
+      "adaptedSha256": "9cef9c1870e36337074862caae9590a68d87184486df194c9ca3a4035717ad90"
+    },
+    {
+      "file": "house.tsx",
+      "source": "apps/v2/registry/icons/house/index.tsx",
+      "upstreamSha256": "7eea86613bb5f048dc9db3b48b7ab743a3895c1ab74833feaba2b488ceeb2153",
+      "adaptedSha256": "270fd410ad47c977055947a8bbce62837fe12af89ce966c716c9b26b45b5493a"
+    },
+    {
+      "file": "message-square.tsx",
+      "source": "apps/v2/registry/icons/message-square/index.tsx",
+      "upstreamSha256": "3b629d52ece2ea62f8b2ce4aebe7a0e105d159a271ade4c0c51b7672eeef569c",
+      "adaptedSha256": "9df787b2f53e139426a091495a3994aebd15b7e37c46dcbf9cfda78a5eede59f"
+    },
+    {
+      "file": "blocks.tsx",
+      "source": "apps/v2/registry/icons/blocks/index.tsx",
+      "upstreamSha256": "2b200ab59b551a104f6525d3b0776659f10007fe97a59c66bee36a915f080448",
+      "adaptedSha256": "8156890a37eed8e416885e3e0b50bc2ffbd8a9dbb222628f23b9ed58caefdd38"
+    },
+    {
+      "file": "chart-column.tsx",
+      "source": "apps/v2/registry/icons/chart-column/index.tsx",
+      "upstreamSha256": "386c65680e2686292c2bec07d5370f99b06907c01bdcad307169dd5ab636bc08",
+      "adaptedSha256": "14fc4a85546286c0bc39a18366c883fd063f3d95f1013b67508a25c24e9ffd47"
+    },
+    {
+      "file": "file-text.tsx",
+      "source": "apps/v2/registry/icons/file-text/index.tsx",
+      "upstreamSha256": "00fa8dcda6995b32f16bf7dd2dd99b39740adf5c98154ec0abb707a394aa3720",
+      "adaptedSha256": "4bb06e8dc41911ac87cbd481da411eacaad1beb5c5907b35be9a3d1974516f2a"
+    },
+    {
+      "file": "camera.tsx",
+      "source": "apps/v2/registry/icons/camera/index.tsx",
+      "upstreamSha256": "fec5544cd9f8e6127a705cb41fef214428b5a76ba85f182471ef3a602b89005d",
+      "adaptedSha256": "27650a3194498baeef76a8fb94aa4c6bebddf3094a7345fbd1195c691845d40c"
+    },
+    {
+      "file": "tag.tsx",
+      "source": "apps/v2/registry/icons/tag/index.tsx",
+      "upstreamSha256": "8b225a44418f29cdb8155277d4180793d1f906ecc6a2a30aa6aa246c6677be4f",
+      "adaptedSha256": "a13fd3d28535a5678922dafff1e0935571882b5cb37e6650e9901a38d91675e9"
+    },
+    {
+      "file": "users.tsx",
+      "source": "apps/v2/registry/icons/users/index.tsx",
+      "upstreamSha256": "35a796038c5923b86bb053edc51a0529f84e03154d725923b9c52106ec238c11",
+      "adaptedSha256": "717a0294df835554e160a3b35707782cc9c913a84c7c764c1ba1d9e7f5c4f3b0"
+    },
+    {
+      "file": "settings.tsx",
+      "source": "apps/v2/registry/icons/settings/index.tsx",
+      "upstreamSha256": "9bf2bff741037546946b3712a1acdf5262d0c38058650e40a7a823ca2c33d072",
+      "adaptedSha256": "2045bb67ea09f386036a8e98b2cd2f5b2d6827fe220cf012ffb78ed2d6b33f8a"
+    },
+    {
+      "file": "shield-check.tsx",
+      "source": "apps/v2/registry/icons/shield-check/index.tsx",
+      "upstreamSha256": "eadaf4a31b3ed95edaf68732e454f2b8c884978aaadcba0ffaf4caefb6f5db3f",
+      "adaptedSha256": "230103a67b01345cdd421f2c77dbe05fde68237b7a36e786d7c1464b8edf12c2"
+    },
+    {
+      "file": "wallet.tsx",
+      "source": "apps/v2/registry/icons/wallet/index.tsx",
+      "upstreamSha256": "3468f21d421de677f8d87731bfe8a3581e401ba115a63508f85ee291aa68331d",
+      "adaptedSha256": "3171686195b7888ca0536f7a58d9e608f45b10fd9c26db1bf2d7731bb83f224d"
+    },
+    {
+      "file": "layers.tsx",
+      "source": "apps/v2/registry/icons/layers/index.tsx",
+      "upstreamSha256": "e1b64cb420320c385ef6fdbadaf9ec60b9749fab7af6267c01ddd44eab218f8f",
+      "adaptedSha256": "ea84f12db1a68a19ff4e759d53869ab9e7d13c1733877519f9344ba4475d2a23"
+    },
+    {
+      "file": "refresh-cw.tsx",
+      "source": "apps/v2/registry/icons/refresh-cw/index.tsx",
+      "upstreamSha256": "25a91891fbf14562d388b9d09b0d98558bfcd00565e3956bb97cf43e1dd69555",
+      "adaptedSha256": "94a7c729a64d44faf4a9fa90fb1d483cb2f4fcb9b59fef09fe6a43baaa0016f3"
+    },
+    {
+      "file": "download.tsx",
+      "source": "apps/v2/registry/icons/download/index.tsx",
+      "upstreamSha256": "9e997d1304e92a9e0fa31ea0f873b539c52862cb9ff015b8be55d6ebd4d26e12",
+      "adaptedSha256": "24ab42fe73263d466bc983663881fe6e105bd3b2f16b1d7c20647e015aa7923c"
+    },
+    {
+      "file": "upload.tsx",
+      "source": "apps/v2/registry/icons/upload/index.tsx",
+      "upstreamSha256": "c22b63a90c60e424bb862167747f496b982385424cebd4a89952fe2f790821e2",
+      "adaptedSha256": "fec8b5afe3f02d3b0f79a566674f8a543ac9e48e75bfac3f23a6434af62c43b3"
+    },
+    {
+      "file": "bell.tsx",
+      "source": "apps/v2/registry/icons/bell/index.tsx",
+      "upstreamSha256": "1849d4a882d214908cad0fc8f14446234da687080f5de06afd1a4faf70ee031f",
+      "adaptedSha256": "4fa7a13ad0632d1d1888d23de113b553af175160ae349fef97ad6d7933c287d5"
+    }
+  ]
+}
