@@ -56,6 +56,15 @@ function titleText(title: ReactNode): string {
   return "";
 }
 
+/** Action access must survive horizontal scrolling in both renderers. Keep an
+ * explicit pinning choice, and descend into the Ant grouped-column fallback. */
+function pinActionColumns<T extends object>(columns: TableProps<T>["columns"], actionLabel: string): TableProps<T>["columns"] {
+  return columns?.map(column => "children" in column
+    ? { ...column, children: pinActionColumns<T>(column.children, actionLabel)! }
+    : column.fixed == null && (column.key === "actions" || column.key === "action" || titleText(typeof column.title === "function" ? column.title({}) : column.title) === actionLabel)
+      ? { ...column, fixed: "right" as const } : column);
+}
+
 declare module "@tanstack/react-table" {
   interface ColumnMeta<TData extends RowData, TValue> {
     business?: { label: string; render: (row: TData, index: number) => ReactNode };
@@ -76,18 +85,20 @@ function ExpansionCell<T>({ row }: CellContext<T, unknown>) {
 }
 
 export function Table<T extends object>(props: BusinessTableProps<T>) {
+  const { t } = useLocale();
+  const columns = useMemo(() => pinActionColumns(props.columns, t("操作")), [props.columns, t]);
   const reader = useTableRefresh();
   const controls = useListControls();
   const toolbarHeading = useListHeading();
   const inherited = props.onRefresh === undefined;
-  const resolved = { ...props, toolbarHeading, toolbar: props.toolbar ?? controls, onRefresh: (inherited ? reader.onRefresh : props.onRefresh) ?? undefined,
+  const resolved = { ...props, columns, toolbarHeading, toolbar: props.toolbar ?? controls, onRefresh: (inherited ? reader.onRefresh : props.onRefresh) ?? undefined,
     loading: props.loading ?? (inherited ? reader.busy : false) };
   const selection = props.rowSelection;
   const incompatibleSelection = selection && (selection.type === "radio" || selection.onSelect || selection.onSelectAll || selection.onSelectInvert || selection.onSelectNone || selection.selections || selection.renderCell || selection.columnTitle || selection.onCell || selection.checkStrictly === false);
   const incompatible = incompatibleSelection || props.components || props.summary || props.children ||
     props.columns?.some(column => "children" in column || column.filters || column.filterDropdown) ||
     props.dataSource?.some(row => Array.isArray((row as Record<string, unknown>).children));
-  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><AntTable<T> {...props} /></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
+  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><AntTable<T> {...props} columns={columns} /></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
 }
 Table.listToolbarHost = true;
 
@@ -137,7 +148,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   const columns: ColumnDef<T, unknown>[] = sourceColumns.map((column, index) => {
     const title = typeof column.title === "function" ? column.title({}) : column.title;
     const label = titleText(title) || t("列 {index}", { index: index + 1 });
-    const action = label === t("操作") || column.key === "actions";
+    const action = label === t("操作") || column.key === "actions" || column.key === "action";
     let id = action ? "actions" : String(column.key ?? (Array.isArray(column.dataIndex) ? column.dataIndex.join(".") : column.dataIndex) ?? `column_${index}`);
     if (ids.has(id)) id = `${id}_${index}`;
     ids.add(id); labels[id] = label; columnSources.set(id, column);

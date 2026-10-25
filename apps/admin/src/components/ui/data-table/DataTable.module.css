@@ -67,6 +67,8 @@
 .table tr > :first-child { padding-inline-start: var(--space-4); }
 .table tr > :last-child { padding-inline-end: var(--space-4); }
 .table th[data-pinned], .table td[data-pinned] { background: var(--surface); }
+.table [data-pinned="right"] { border-inline-start: 1px solid var(--border); }
+.scroll { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; overscroll-behavior-inline: contain; }
 .scroll[data-scroll-y] .table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-muted); }
 .scroll[data-scroll-y] .table thead th[data-pinned] { z-index: 3; }
 .table tbody tr:hover > td { background: var(--surface-muted); }
@@ -206,5 +208,7 @@
 @keyframes menuIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
 @keyframes menuOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.95); } }
 @keyframes motiqPulse { 50% { opacity: .5; } }
-@media (max-width: 767px) { .table th[data-pinned], .table td[data-pinned] { position: static !important; } }
+/* Keep the task column reachable on narrow screens. Leading identity columns
+   may scroll normally so they do not cover the remaining data beside actions. */
+@media (max-width: 767px) { .table th[data-pinned="left"], .table td[data-pinned="left"] { position: static !important; } }
 @media (prefers-reduced-motion: reduce) { .menu[data-state], .columnViewMenu[data-state] { animation: none; } .table tbody td { transition: none; } }
