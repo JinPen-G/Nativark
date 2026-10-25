@@ -12,6 +12,11 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：超限澄清有界连续轮（2026-10-25，A新批第二段）
+
+- `originalQuoteAnswerContract` 增加已问字段集合：一轮映射超过八字段上限时，未问过的字段先问、已问的按原序重绑，超限截断不再永远丢弃同一段尾部；场景输入源从持久回答历史推导已问集合。多行/组合不支持仍返回具体限制的 context 契约与人工路径；轮数仍受 maxCalls 与原answer历史约束。
+- 冒烟（`output/multiround-batch-20261025/item12-rotation-smoke.cjs`）：八字段上限保持、第8个新字段轮入替换文本fallback、全部已问轮重绑不发明文本逃逸、原候选不可变、代际（新候选对象+原selectionRevision不动）。回归：quote-candidates 17/17、quote-authority 13/13、business-second-quote 4/4、human-quote-selection 9/9、original-scene-host 19/19。tsc 0诊断；离线边界同前。
+
 ## 近期核心：原任务计数正式授权与可信上界链（2026-10-25，A新批第一段）
 
 - 固定 `e3fb03b0`：`InputCountTokensService.taskCount` 以原调用自身的 transition_task 政策为门（服务端持久 invocation 行+双快照复核），为单个已注册原调用计数其冻结输入；场景/配置/输入指纹/计划依据全部来自服务端持久事实，服务不再绑定工厂 sceneCode——一个服务服务全部宿主场景；管理 `count` 入口与其 settings_write 门保持不变，两个入口互不授权。
