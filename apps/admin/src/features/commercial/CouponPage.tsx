@@ -78,9 +78,9 @@ export function CouponPage() {
             { title: t("客户"), dataIndex: "customerId" },
             { title: t("优惠券"), render: (_, row) => <><b>{row.templateName}</b><br /><span className="muted">{row.templateCode}</span></> },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "claimed" ? "blue" : value === "locked" ? "gold" : value === "redeemed" ? "success" : "default"}>{t({ claimed: "已领取", locked: "已锁定", redeemed: "已核销", void: "已作废", expired: "已过期" }[value as string] ?? value)}</Tag> },
-            { title: t("领取时间"), dataIndex: "claimedAt" },
+            { title: t("领取时间"), dataIndex: "claimedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
             { title: t("关联订单"), render: (_, row) => row.redeemedOrderId ?? row.lockedOrderId ?? "-" },
-            { title: t("有效期"), render: (_, row) => `${dayjs(row.effectiveFrom).format("YYYY-MM-DD")} → ${dayjs(row.effectiveTo).format("YYYY-MM-DD")}` },
+            { title: t("有效期"), render: (_, row) => <div><span>{dayjs(row.effectiveFrom).format("YYYY-MM-DD")}</span><br /><span className="muted">→ {dayjs(row.effectiveTo).format("YYYY-MM-DD")}</span></div> },
             { title: t("操作"), render: (_, row) => row.status === "claimed" ? <Button danger type="link" onClick={() => setVoiding(row)}>{t("作废")}</Button> : "-" }
           ]} />
         </QueryState>

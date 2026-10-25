@@ -81,7 +81,8 @@ export function AssetWorkspacePage() {
   const assetFields = category?.businessModel.assetFields.filter((field) => field.scope === "asset" && field.code !== "serialNo") ?? [];
   const summaryAssetFields = (presentation?.assetSummaryFields ?? assetFields.map((field) => field.code))
     .map((code) => assetFields.find((field) => field.code === code))
-    .filter((field): field is RentalAttributeDefinition => Boolean(field));
+    .filter((field): field is RentalAttributeDefinition => Boolean(field))
+    .filter(field => (assets.data ?? []).some(asset => asset.attributes[field.code] != null && asset.attributes[field.code] !== ""));
   const supportsAssets = category?.supportedInventoryModes.includes(RentalInventoryMode.Serialized) ?? true;
   const supportsStock = category?.supportedInventoryModes.some((mode) => [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(mode)) ?? true;
   const countLabel = (label: string, count: number) => locale === "en-US" ? `${label} (${count})` : `${label}（${count}）`;

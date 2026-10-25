@@ -9,6 +9,9 @@
 [data-rental-control-size="default"] { padding-inline: var(--rental-control-padding-default); }
 [data-rental-control-size="large"] { padding-inline: var(--rental-control-padding-large); }
 [data-rental-arc-action] { padding-inline: var(--rental-control-padding-default); }
+/* Inline forms include validation space below fields; actions must not stretch
+   into that reserved area. Keep the native action motion and control token. */
+.arc-form.ant-form-inline > [data-rental-arc-action] { align-self: flex-start; height: var(--rental-control-height-default); }
 /* Count the original track padding/frame in the total field height. Only geometry,
  * never override the travelling selection, springs, scroll mask or transitions. */
 .arc-segmented { --control-height-sm: calc(var(--control-height-md) - var(--rental-segmented-frame-inset)); min-width: 0; max-width: 100%; }

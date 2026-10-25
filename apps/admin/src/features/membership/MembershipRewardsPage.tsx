@@ -103,6 +103,7 @@ export function MembershipRewardsPage() {
               </Form.Item>
               <Form.Item name="triggerType" label={t("触发")}>
                 <Select
+                  placeholder={t("触发")}
                   style={{ width: "var(--rental-control-width-select)" }}
                   options={[
                     { value: "registration", label: t("注册赠礼") },

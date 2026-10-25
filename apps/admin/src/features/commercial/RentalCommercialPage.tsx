@@ -612,7 +612,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
 
         <Table rowKey="id" loading={versions.isFetching} onRefresh={() => versions.refetch()} dataSource={versions.data?.rows ?? []} columns={[
           { title: t("版本"), dataIndex: "version" },
-          { title: t("生效时间"), dataIndex: "effectiveFrom" },
+          { title: t("生效时间"), dataIndex: "effectiveFrom", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
           { title: t("价格条目"), dataIndex: "rateCount", render: (value) => locale === "en-US" ? `${value} items` : `${value} 条` },
           { title: t("变更原因"), dataIndex: "changeReason" },
           { title: t("创建人"), dataIndex: "createdBy" },

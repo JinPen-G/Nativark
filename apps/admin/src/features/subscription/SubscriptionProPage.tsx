@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Descriptions, Space, Tag, Typography } from "antd";
-import { Empty, ListSection } from "@/components/ui";
+import { ListSection } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { Select } from "@/components/ui";
@@ -34,7 +34,7 @@ export function SubscriptionProPage() {
   function featureBlock(title: string, entries: SubscriptionFeatureEntitlement[], description: string) {
     return <ListSection title={t(title)}>
       <Typography.Paragraph type="secondary">{t(description)}</Typography.Paragraph>
-      {!entries.length ? <Empty description={t("暂无该类功能")} /> : <Descriptions column={1} size="small" items={entries.map((feature) => ({
+      {!entries.length ? <span className="muted">{t("暂无该类功能")}</span> : <Descriptions column={1} size="small" items={entries.map((feature) => ({
         key: feature.code, label: feature.name,
         children: <Space orientation="vertical" size={4}>
           <Space wrap><Tag>{t(ENTITLEMENT_SOURCE_LABEL[feature.source])}</Tag><Tag>{t(RELEASE_STATUS_LABEL[feature.releaseStatus])}</Tag><span>{feature.module} · {feature.categories.join(" / ")}</span></Space>
@@ -54,7 +54,7 @@ export function SubscriptionProPage() {
           <Alert type="info" showIcon message={t("正式 PRO 销售尚未开放；四品类首批专业包及销售清单全部通过后才可正式收费。目前仅接受升级咨询或有明确范围的受控试点，不自动收款或开通。")} />
           <ListSection title={t("适用场景与范围")}>
             <Typography.Paragraph>{t("基础版保留已承诺的基础租赁经营闭环。PRO 规划面向项目协同、专业交接与养护等更复杂的经营需求，以下以实际发布目录为准；已有授权不重复作为升级卖点。")}</Typography.Paragraph>
-            <Select allowClear style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map((value) => ({ value, label: value }))} />
+            {categories.length > 0 && <Select allowClear style={{ width: "var(--rental-control-width-select)" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map((value) => ({ value, label: value }))} />}
             <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t("查看某品类不表示已经营该品类；启用仍需相应空间、人员权限和业务准备。")}</Typography.Paragraph>
           </ListSection>
           {featureBlock("已上线且本租户已包含 / 已获授权", groups.included, "无需为这些权益重复升级；到期、空间配置和安全条件仍单独校验。")}

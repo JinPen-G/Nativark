@@ -223,7 +223,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   };
   const pageRows = table.getRowModel().rows.map(row => row.original);
   const exportConfig = props.exportConfig ? { ...props.exportConfig, scope: remote ? "page" as const : "filtered" as const } : undefined;
-  const pager = paged ? <Pagination {...config} showSizeChanger={config.showSizeChanger ?? true} hideOnSinglePage={false}
+  const pager = paged && total > 0 ? <Pagination {...config} showSizeChanger={config.showSizeChanger ?? true} hideOnSinglePage={config.hideOnSinglePage ?? false}
     disabled={loading || config.disabled} current={current} pageSize={pageSize} total={total} onShowSizeChange={undefined} onChange={changePage} /> : undefined;
   return <div className={`${styles.root} ${selectedRows.length ? capabilityStyles.reserved : ""} ${props.className ?? ""}`} style={props.style}>
     {props.title?.(pageRows)}

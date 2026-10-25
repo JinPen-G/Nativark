@@ -82,7 +82,7 @@ export function Select<ValueType = any, OptionType extends BaseOptionType | Defa
   // Ant keeps a stored selection visible even when a later catalog no longer contains it.
   if (currentValue !== undefined && !usableOptions.some(option => Object.is(option.value, currentValue))) return <AntSelect {...props} />;
   const sourceLabel = typeof props["aria-label"] === "string" ? props["aria-label"] : typeof props.placeholder === "string" ? props.placeholder : t("选择选项");
-  const sourcePlaceholder = typeof props.placeholder === "string" ? props.placeholder : undefined;
+  const sourcePlaceholder = typeof props.placeholder === "string" ? props.placeholder : t("选择选项");
   const update = (nextKey: string) => {
     const option = usableOptions.find(item => keyFor(item.value) === nextKey);
     if (!option) return;
