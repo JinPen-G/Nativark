@@ -4,7 +4,7 @@
    No outer card or overrides of UIArc motion. Data motion follows the Motiq source. */
 .root { --table-header-height: 40px; display: flex; flex-direction: column; gap: var(--rental-layout-list-toolbar-gap); min-width: 0; }
 /* Query widths are role-based and scoped: forms outside these hosts keep their grid geometry. */
-.toolbar, .filterPopover {
+.toolbar, .filterBar, .filterPopover {
   --rental-control-width-search: var(--rental-list-control-width-search);
   --rental-control-width-select: var(--rental-list-control-width-select);
   --rental-control-width-date: var(--rental-list-control-width-date);
@@ -47,6 +47,8 @@
 .filterPanelFooter { display: flex; align-items: center; justify-content: flex-end; margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border); }
 @container list-tools (max-width: 720px) {
   .toolbar:is([data-has-filters], [data-has-section-actions]) > .toolbarHeading { flex-basis: 100%; min-height: var(--rental-typography-section-title-line-height); }
+}
+@container list-tools (max-width: 960px) {
   .toolLabel { display: none; }
   .toolbarControls .viewTrigger { padding-inline: var(--space-2); }
 }

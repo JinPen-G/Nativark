@@ -82,10 +82,10 @@ function ProfileSummary({ overview }: { overview: CustomerProfileOverview }) {
     <RecordFacts items={[
       { key: "email", label: "邮箱", value: profile.email || "—" },
       { key: "identity", label: "证件号", value: profile.identityNoMasked || "—" },
-      { key: "gender", label: "性别", value: profile.gender || "—" },
+      { key: "gender", label: "性别", value: profile.gender ? t(({ male: "男", female: "女", other: "其他", unknown: "未填写" } as Record<string, string>)[profile.gender] ?? profile.gender) : "—" },
       { key: "birthday", label: "生日", value: profile.birthday || "—" },
       { key: "region", label: "常住地区", value: profile.region || "—" },
-      { key: "source", label: "来源渠道", value: profile.sourceChannel || "—" }
+      { key: "source", label: "来源渠道", value: profile.sourceChannel ? t(({ referral: "转介绍", app: "APP", web: "官网", admin: "后台", miniprogram: "小程序" } as Record<string, string>)[profile.sourceChannel] ?? profile.sourceChannel) : "—" }
     ]} />
     <RecordDisclosure key={profile.id} title={t("建档信息")}><RecordFacts items={[
       { key: "created", label: "建档时间", value: dateTime(profile.createdAt) },

@@ -1,5 +1,5 @@
 import { ListFilters, useListFilter } from "@/components/ui";
-import { EditOutlined, KeyOutlined, PlusOutlined } from "@/components/ui/icons";
+import { EditOutlined, PlusOutlined } from "@/components/ui/icons";
 import type {
   BusinessWorkspace,
   PermissionModule,
@@ -20,7 +20,8 @@ import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, ConfirmAction, CopyButton, Drawer, SaveButton } from "@/components/ui";
+import { Button, ConfirmAction, CopyButton, DataTableRowActions, Drawer, SaveButton } from "@/components/ui";
+import { KeyRound, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { useLocale } from "@/app/locale";
@@ -208,7 +209,7 @@ export function TenantOperationsAccountPage() {
             return accessible.length ? <Space size={[4, 4]} wrap>{accessible.map((member) => <Tag key={member.workspaceId}>{workspaceMap.get(member.workspaceId)?.name ?? member.workspaceId}</Tag>)}</Space> : <Typography.Text type="secondary">{t("未授权")}</Typography.Text>;
           } },
           { title: t("状态"), width: 100, render: (_, record) => <Switch checked={record.isActive} disabled={record.id === currentUserId} loading={toggleStatus.isPending} onChange={(isActive) => toggleStatus.mutate({ id: record.id, isActive })} /> },
-          { title: t("操作"), fixed: "right", width: 180, render: (_, record) => <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑授权")}</Button><Button type="link" icon={<KeyOutlined />} onClick={() => modal.confirm({ title: `${t("重置")} ${record.account} ${t("的密码？")}`, content: t("重置后原登录会话失效，并生成一次性临时密码。"), onOk: () => resetPassword.mutateAsync(record.id) })}>{t("重置密码")}</Button></Space> }
+          { title: t("操作"), fixed: "right", render: (_, record) => <DataTableRowActions primary={{ id: "edit", label: t("编辑授权"), icon: Pencil, onSelect: () => openEditor(record) }} details={() => openEditor(record)} detailLabel={t("编辑授权")} menuLabel={`${record.account} · ${t("更多操作")}`} actions={[{ id: "reset", label: t("重置密码"), icon: KeyRound, onSelect: () => modal.confirm({ title: `${t("重置")} ${record.account} ${t("的密码？")}`, content: t("重置后原登录会话失效，并生成一次性临时密码。"), onOk: () => resetPassword.mutateAsync(record.id) }) }]} /> }
         ]} />
       </ListSection>
     </QueryState>

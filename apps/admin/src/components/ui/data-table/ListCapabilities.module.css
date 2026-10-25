@@ -3,6 +3,7 @@
 .switch { gap: var(--space-1); }
 .viewIcon { display: inline-flex; align-items: center; justify-content: center; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@container list-tools (max-width: 960px) { .transferLabel { display: none; } }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--rental-list-card-min-width)), 1fr)); gap: var(--space-4); }
 .card { min-width: 0; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); overflow-wrap: anywhere; color: var(--foreground); background: var(--surface); }
 .cardHead { display: flex; align-items: start; justify-content: space-between; gap: var(--space-2); }

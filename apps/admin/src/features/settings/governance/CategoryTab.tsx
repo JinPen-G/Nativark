@@ -20,6 +20,7 @@ const PAYMENT_METHOD_LABELS: Record<(typeof RENTAL_PAYMENT_METHOD_CODES)[number]
   wechat_pay: "微信支付",
 };
 const pricingUnitLabels = RENTAL_PRICING_UNIT_LABELS;
+const locationTypeLabels: Record<string, string> = { store: "门店", warehouse: "仓库", station: "取还点", locker: "自提柜", delivery_hub: "配送中心", project_site: "项目现场" };
 const modeLabels: Record<string, string> = {
   store_pickup_return: "门店取还",
   partner_pickup_return: "合作商取还",
@@ -270,7 +271,7 @@ export function CategoryTab({
             </Form.Item>
             <Space wrap>
               {category.businessModel.locationTypes.map((value) => (
-                <Tag key={value}>{t(value)}</Tag>
+                <Tag key={value}>{t(locationTypeLabels[value] ?? value)}</Tag>
               ))}
             </Space>
           </Card>
