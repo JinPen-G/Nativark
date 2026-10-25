@@ -70,9 +70,9 @@ const statusLabel: Record<string, string> = {
   ...detailStatusLabels,
   active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销",
   pending_activation: "待激活", claimed: "可用", locked: "已锁定", redeemed: "已核销", expired: "已过期", void: "已作废",
-  granted: "已发放", reversed: "已冲正"
+  granted: "已发放", reversed: "已冲正", approved: "已通过", rejected: "已驳回", pending: "待审核"
 };
-const statusColor = (value: string) => value === "active" || value === "granted" || value === "claimed" ? "success" : value === "reversed" || value === "void" || value === "closed" ? "default" : "warning";
+const statusColor = (value: string) => value === "approved" || value === "active" || value === "granted" || value === "claimed" ? "success" : value === "reversed" || value === "void" || value === "closed" ? "default" : value === "rejected" ? "error" : "warning";
 const relationLabel: Record<string, string> = { customer: "订单客户", contract_subject: "签约主体", payer: "付款主体", user: "使用人", booking_identity: "预约身份" };
 
 function ProfileSummary({ overview }: { overview: CustomerProfileOverview }) {
@@ -158,14 +158,14 @@ function AccountTab({ overview }: { overview: CustomerProfileOverview }) {
       { title: t("原因"), dataIndex: "reason", render: (value) => value || "—" },
       { title: t("撤销原因"), dataIndex: "revokeReason", render: (value) => value || "—" }
     ]} /></ListSection>}
-    {Boolean(overview.corporateRelations.length) && <><h2 className={profileStyles.sectionTitle}>{t("企业关系")}</h2> <Table size="small" rowKey="id" dataSource={overview.corporateRelations} pagination={false} columns={[
+    {Boolean(overview.corporateRelations.length) && <ListSection title={t("企业关系")} style={{ marginTop: "var(--rental-layout-section-gap)" }}><Table size="small" rowKey="id" dataSource={overview.corporateRelations} pagination={false} columns={[
       { title: t("企业"), dataIndex: "corporateName", render: (_, row) => <CustomerPreview customerId={row.corporateCustomerId} name={row.corporateName} type="corporate" /> },
       { title: t("个人会员"), dataIndex: "personalCustomerName", render: (_, row) => <CustomerPreview customerId={row.personalCustomerId} name={row.personalCustomerName} type="personal" /> },
       { title: t("角色"), dataIndex: "role", render: (value) => value === "admin" ? t("企业管理员") : t("员工") },
       { title: t("部门"), dataIndex: "department", render: (value) => value || "—" },
       { title: t("工号"), dataIndex: "employeeNo", render: (value) => value || "—" },
       { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{t(statusLabel[value] ?? value)}</Tag> }
-    ]} /></>}
+    ]} /></ListSection>}
   </>;
 }
 
@@ -176,7 +176,7 @@ function QualificationTab({ revisions, canManage, onQualification }: { revisions
     {revisions.length ? <Table<CustomerQualificationRevision> size="small" rowKey="id" dataSource={revisions} pagination={{ defaultPageSize: 20 }} scroll={{ x: 980 }} columns={[
       { title: t("证件类型"), dataIndex: "qualificationType" },
       { title: t("证件编号"), dataIndex: "referenceNoMasked", render: (value) => value || "—" },
-      { title: t("品类"), dataIndex: "categoryCode" },
+      { title: t("品类"), dataIndex: "categoryCode", render: value => t(categoryLabel(value)) },
       { title: t("提交空间"), dataIndex: "workspaceId" },
       { title: t("证件状态"), dataIndex: "qualificationStatus", render: (value) => <Tag color={statusColor(value)}>{t(statusLabel[value] ?? value)}</Tag> },
       { title: t("审核状态"), dataIndex: "reviewStatus", render: (value) => <Tag color={statusColor(value)}>{t(statusLabel[value] ?? value)}</Tag> },
@@ -249,16 +249,17 @@ function AuditTab({ overview, canReveal }: { overview: CustomerProfileOverview; 
       { title: t("原因"), dataIndex: "reason" },
       { title: t("操作人"), dataIndex: "operator", render: (value) => value || "—" }
     ]} /></ListSection>}
-    <h2 className={profileStyles.sectionTitle}>{t("敏感资料访问审计")}</h2>
+    <ListSection title={t("敏感资料访问审计")}>
     {!canReveal && <Alert type="info" showIcon title={t("敏感访问审计需要单独的客户敏感资料解密权限")} description={t("基础资料仍可按脱敏结果查看；没有该权限时不返回访问画像。")} />}
     {canReveal && overview.sensitiveAccess?.length ? <Table size="small" rowKey="id" dataSource={overview.sensitiveAccess} pagination={{ defaultPageSize: 20 }} columns={[
       { title: t("时间"), dataIndex: "at", render: dateTime },
-      { title: t("字段"), dataIndex: "field" },
-      { title: t("动作"), dataIndex: "action" },
+      { title: t("字段"), dataIndex: "field", render: value => t(({ customer_detail: "客户资料", customer_identity_verifications: "实名核验记录" } as Record<string, string>)[value] ?? value) },
+      { title: t("动作"), dataIndex: "action", render: value => t(({ detail: "查看资料", reveal: "查看明文" } as Record<string, string>)[value] ?? value) },
       { title: t("是否看到明文"), dataIndex: "revealed", render: (value) => value ? <Tag color="warning">{t("是")}</Tag> : t("否") },
       { title: t("操作人"), dataIndex: "operator", render: (value) => value || "—" },
       { title: t("原因"), dataIndex: "reason", render: (value) => value || "—" }
     ]} /> : canReveal ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("暂无敏感资料访问记录")} /> : null}
+    </ListSection>
   </>;
 }
 

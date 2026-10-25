@@ -151,7 +151,7 @@ export function DataTable<T>({ table, caption, busy, loading, empty, footer, ani
               {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...pinningStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />
               </td>; })}
-            </motion.tr>, row.getIsExpanded() && renderExpanded ? <tr key={`${row.id}-detail`} className={styles.expandedRow}><td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}>{empty}</td></tr>}
+            </motion.tr>, row.getIsExpanded() && renderExpanded ? <tr key={`${row.id}-detail`} className={styles.expandedRow}><td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}><div className={styles.emptyContent}>{empty}</div></td></tr>}
           </AnimatePresence>}
         </tbody></LayoutGroup>
       </table>

@@ -62,7 +62,7 @@
 .root[data-compact-header] { --table-header-height: var(--rental-table-compact-header-height); }
 .root[data-compact-header] .table thead th { height: var(--table-header-height); padding-block: 0; background: var(--surface-muted); color: var(--foreground); }
 .viewport { position: relative; min-width: 0; }
-.scroll { position: relative; overflow: auto; max-width: 100%; isolation: isolate; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); }
+.scroll { position: relative; overflow: auto; max-width: 100%; isolation: isolate; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); container: table-viewport / inline-size; }
 .table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); }
 .table th, .table td { padding: var(--space-3); text-align: start; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .table th { height: var(--table-header-height); padding-block: var(--space-1); color: var(--text-secondary); font-weight: 500; vertical-align: middle; }
@@ -206,7 +206,8 @@
 .sortFooter { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .sortOverlay { padding: var(--space-2); background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); box-shadow: var(--shadow-floating); color: var(--foreground); font-size: var(--rental-typography-body-size); }
 .dragHandle:focus-visible, .directionTrigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.empty { height: 6rem; text-align: center !important; vertical-align: middle !important; color: var(--text-muted); }
+.empty { height: 6rem; padding: 0 !important; text-align: center !important; vertical-align: middle !important; color: var(--text-muted); }
+.emptyContent { position: sticky; left: 0; width: 100cqi; max-width: 100%; box-sizing: border-box; padding: var(--space-4); }
 .empty :global(.arc-empty-state) > * { padding-block: var(--space-4); }
 .empty :global(.arc-empty-state) h3 { margin-top: var(--space-2); }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }

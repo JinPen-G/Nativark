@@ -12,6 +12,7 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "实名核验记录": "Identity reviews", "查看明文": "View unmasked",
   "男": "Male", "女": "Female", "转介绍": "Referral",
   "预览客户资料": "Preview customer",
   "正在读取当前资料": "Loading current profile…",

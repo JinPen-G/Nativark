@@ -12,6 +12,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { RuleSetupWizard } from "./RuleSetupWizard";
+import { overdueFeeModeLabels, paymentTimingLabels } from "./ruleOptionLabels";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import {
   errorText,
@@ -242,7 +243,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                 {
                   key: "payment",
                   label: t("支付与占位"),
-                  children: `${t(currentRule.config.payment.timing)} · ${currentRule.config.payment.unpaidHoldMinutes} ${t("分钟")}`,
+                  children: `${t(paymentTimingLabels[currentRule.config.payment.timing] ?? currentRule.config.payment.timing)} · ${currentRule.config.payment.unpaidHoldMinutes} ${t("分钟")}`,
                 },
                 {
                   key: "deposit",
@@ -260,7 +261,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                 {
                   key: "overdue",
                   label: t("逾期"),
-                  children: `${currentRule.config.overdue.graceMinutes} ${t("分钟")} · ${t(currentRule.config.overdue.feeMode)}`,
+                  children: `${currentRule.config.overdue.graceMinutes} ${t("分钟")} · ${t(overdueFeeModeLabels[currentRule.config.overdue.feeMode] ?? currentRule.config.overdue.feeMode)}`,
                 },
                 {
                   key: "cancel",

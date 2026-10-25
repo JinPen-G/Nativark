@@ -168,19 +168,14 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
   return (
     <>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <div className="table-toolbar">
-          <Typography.Text type="secondary">
-            只有租户设置已启用的事件与渠道可以保存模板；发送时严格校验变量
-            schema。
-          </Typography.Text>
+        <ListSection title="通知模板" extra={<>
           <Button type="primary" onClick={() => openTemplate()}>
             新增模板
           </Button>
           <Button loading={retryDueNotifications.isPending} onClick={() => retryDueNotifications.mutate()}>
             重试到期短信
           </Button>
-        </div>
-        <ListSection title="通知模板">
+        </>}>
           <Table<RentalNotificationTemplateV1>
             rowKey="id"
             onRefresh={() => templates.refetch()} loading={templates.isFetching} dataSource={templates.data ?? []}
@@ -208,7 +203,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                 render: (_, row) =>
                   Object.keys(row.variableSchema).join("、"),
               },
-              { title: "状态", dataIndex: "status" },
+              { title: "状态", dataIndex: "status", render: (value: string) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "已启用" : value === "disabled" ? "已停用" : value}</Tag> },
               {
                 title: "操作",
                 render: (_, row) => (
@@ -243,7 +238,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                 ),
               },
               { title: "模板版本", dataIndex: "templateVersion" },
-              { title: "提供商", dataIndex: "provider" },
+              { title: "提供商", dataIndex: "provider", render: value => value === "simulation" ? "模拟" : value },
               { title: "外部回执", dataIndex: "providerMessageId", render: (value) => value || "—" },
               {
                 title: "状态",
@@ -254,7 +249,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                   </Tag>
                 ),
               },
-              { title: "时间", dataIndex: "createdAt" },
+              { title: "时间", dataIndex: "createdAt", render: value => value ? new Date(value).toLocaleString() : "—" },
               {
                 title: "操作",
                 render: (_, row) => row.channel !== "sms" ? "—" : (

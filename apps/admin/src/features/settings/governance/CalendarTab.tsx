@@ -277,7 +277,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 currentYear + 1,
               ].map((value) => ({ value, label: locale === "en-US" ? String(value) : `${value} ${t("年")}` }))}
             />
-            <Tag
+            {calendar.data && <Tag
               color={
                 calendar.data?.status === "published"
                   ? "success"
@@ -285,7 +285,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               }
             >
               {t(calendarStatusLabels[calendar.data?.status ?? ""] ?? calendar.data?.status ?? "")} · v{calendar.data?.version}
-            </Tag>
+            </Tag>}
             <Typography.Text type="secondary">
               {calendar.data?.sourceName ?? t("未引用官方来源")}
             </Typography.Text>

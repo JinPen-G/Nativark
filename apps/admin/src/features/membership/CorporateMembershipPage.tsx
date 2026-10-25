@@ -274,10 +274,7 @@ export function CorporateMembershipPage() {
           </Form>
         </> },
         { key: "invoice", label: t("开票资料"), disabled: !selected, children: <QueryState loading={invoiceProfiles.isLoading} error={invoiceProfiles.error}>
-          <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
-            <span>{t("支持多份开票资料；设为默认时会自动取消其他默认项。敏感账号仅显示掩码。")}</span>
-            <Button disabled={!canManage} onClick={() => openInvoice()}>{t("新增开票资料")}</Button>
-          </Space>
+          <ListSection controls={<Button disabled={!canManage} onClick={() => openInvoice()}>{t("新增开票资料")}</Button>}>
           <Table<CustomerCorporateInvoiceProfile> rowKey="id" size="small" onRefresh={() => invoiceProfiles.refetch()} loading={invoiceProfiles.isFetching} dataSource={invoiceProfiles.data ?? []} pagination={false} scroll={{ x: 720 }} columns={[
             { title: t("开票抬头"), dataIndex: "title" },
             { title: t("类型"), render: (_, row) => row.invoiceType === "vat_special" ? t("增值税专用发票") : t("增值税普通发票") },
@@ -285,7 +282,7 @@ export function CorporateMembershipPage() {
             { title: t("默认"), dataIndex: "isDefault", render: (value) => value ? t("是") : "—" },
             { title: t("状态"), dataIndex: "status", render: (value) => value === "active" ? t("启用") : t("停用") },
             { title: t("操作"), render: (_, row) => <Button type="link" disabled={!canManage} onClick={() => openInvoice(row)}>{t("编辑")}</Button> }
-          ]} />
+          ]} /></ListSection>
           {invoiceTarget && <Alert type="info" showIcon title={t("敏感资料保护")}
             description={`${t("银行账号")}：${invoiceTarget.bankAccountMasked ?? t("未设置")}；${t("联系电话")}：${invoiceTarget.contactPhoneMasked ?? t("未设置")}。${t("不回显原值；留空为保留，勾选清除才会删除。")}`} style={{ margin: "16px 0" }} />}
           {invoiceEditorOpen && <Card className={recordStyles.editor} title={t("开票资料")} extra={<Button onClick={() => setInvoiceEditorOpen(false)}>{t("取消")}</Button>}><Form form={invoiceForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && selected && saveInvoice.mutate(values)}>
@@ -305,16 +302,13 @@ export function CorporateMembershipPage() {
           </Form></Card>}
         </QueryState> },
         { key: "contracts", label: t("企业合同"), disabled: !selected, children: <QueryState loading={contracts.isLoading} error={contracts.error}>
-          <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
-            <span>{t("合同按企业留档；修改会递增版本，历史订单快照不随资料变动。")}</span>
-            <Button disabled={!canManage} onClick={() => openContract()}>{t("新增合同")}</Button>
-          </Space>
+          <ListSection controls={<Button disabled={!canManage} onClick={() => openContract()}>{t("新增合同")}</Button>}>
           <Table<CustomerCorporateContract> rowKey="id" size="small" onRefresh={() => contracts.refetch()} loading={contracts.isFetching} dataSource={contracts.data ?? []} pagination={false} scroll={{ x: 760 }} columns={[
             { title: t("合同编号"), dataIndex: "contractNo" }, { title: t("合同名称"), dataIndex: "name" },
             { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 10)} ~ ${row.effectiveTo?.slice(0, 10) ?? t("长期")}` },
             { title: t("状态"), dataIndex: "status" },
             { title: t("操作"), render: (_, row) => <Button type="link" disabled={!canManage} onClick={() => openContract(row)}>{t("编辑")}</Button> }
-          ]} />
+          ]} /></ListSection>
           {contractEditorOpen && <Card className={recordStyles.editor} title={t("企业合同")} extra={<Button onClick={() => setContractEditorOpen(false)}>{t("取消")}</Button>}><Form form={contractForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && selected && saveContract.mutate(values)}>
             <Form.Item name="contractNo" label={t("合同编号")} rules={[{ required: true, whitespace: true }]}><Input maxLength={100} /></Form.Item>
             <Form.Item name="name" label={t("合同名称")} rules={[{ required: true, whitespace: true }]}><Input maxLength={180} /></Form.Item>

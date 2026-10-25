@@ -914,7 +914,7 @@ export function RentalOrderDetailPage() {
             {!(canReview || canRecordResponse || canAdjust) && "-"}
           </Space>; } }
         ]} />}
-      </Space></ListSection> : <ListSection title={t("检查记录")}><p className={detailStyles.note}>{t("尚未登记检查记录")}</p><Button onClick={() => void inspections.refetch()}>{t("刷新记录")}</Button></ListSection>}</QueryState>{relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
+      </Space></ListSection> : <ListSection title={t("检查记录")} extra={<Button onClick={() => void inspections.refetch()}>{t("刷新记录")}</Button>}><p className={detailStyles.note}>{t("尚未登记检查记录")}</p></ListSection>}</QueryState>{relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
         <ListSection title={t("归还处置与养护工单")}>
           {relatedWorkOrders.data?.length ? (
             <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} onRefresh={() => relatedWorkOrders.refetch()} loading={relatedWorkOrders.isFetching} dataSource={relatedWorkOrders.data} columns={[
