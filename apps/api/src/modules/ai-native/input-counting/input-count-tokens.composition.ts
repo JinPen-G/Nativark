@@ -19,6 +19,7 @@ import type { GatewayConnectionResolver } from '../routed-model-transport';
 import type { PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { InputCountTokensAuthorizationSource, InputCountTokensCallPricing, InputCountTokensEvidence } from './input-count-tokens.admission';
+import { CountingTaskModelInvocationPreparation, TaskCountingGateSource, TaskInputBoundPublisher } from './input-count-tokens.task-bound';
 import { InputCountTokensService, type CountTokensFrozenInputSource } from './input-count-tokens.service';
 import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, type CountTokensReceiptDb } from './input-count-tokens.receipt';
 import { countTokensSupport } from './count-tokens.protocol';
@@ -79,7 +80,9 @@ export interface InputCountTokensCompositionDependencies extends PersistedTaskAu
   /** Must match the original task gateway adapter registration so a counted
    * tool schema is the schema the dispatch will send. */
   policyOptions?: ChatProtocolOptions;
-  sceneCode: string;
+  /** Management entries only. Omitted for task-only compositions: the
+   * in-task counting entry derives the scene from the persisted invocation. */
+  sceneCode?: string;
   countingPriceVersion: string;
   priceDelegate?: Pick<GatewayPricingEvidenceSource, 'readPrice'>;
   timeoutMs?: number;
@@ -101,7 +104,7 @@ export function composeInputCountTokensService(input: InputCountTokensCompositio
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), clock });
   const pricingEvidence = new CountTokensGatewayPricingEvidenceSource(input.db, input.priceDelegate);
   return Object.freeze({ service, pricingEvidence, authorization, budget, support: countTokensSupport,
-    admissionScene: countTokensAdmissionScene(input.sceneCode) });
+    admissionScene: input.sceneCode !== undefined ? countTokensAdmissionScene(input.sceneCode) : null });
 }
 function countTokensAdmissionScene(sceneCode: string) {
   return `${sceneCode}:count-tokens`;
@@ -116,6 +119,7 @@ export { countTokensSupport as inputCountTokensSupport };
  * route, timer or second ledger, and the settings-manage authority for
  * publication stays with the original budget authorization chain. */
 export function composeInputCountingPricing(input: InputCountTokensCompositionDependencies) {
+  if (input.sceneCode === undefined) throw new BudgetError('UNAVAILABLE');
   const counting = composeInputCountTokensService(input);
   const clock = input.clock ?? (() => new Date());
   const bindings = new PrismaGatewayInvocationBindings(input.db, counting.authorization.scopes, clock);
@@ -129,4 +133,31 @@ export function composeInputCountingPricing(input: InputCountTokensCompositionDe
       readInputBound: (command: unknown) => management.readInputBound(command),
       readPrice: (command: unknown) => management.readPrice(command)
     }) });
+}
+
+/** The in-task counting chain for recorded model hosts: the formal
+ * task-internal permission (the same transition_task policy that may dispatch
+ * the original call) authorizes counting the registered frozen input and
+ * publishing its trusted input bound BEFORE the recorded budget reserve.
+ * Multi-scene by construction — the scene, configuration, input fingerprint
+ * and plan basis come from the server-persisted invocation of each host; the
+ * management counting entry, its settings_write gate and this chain stay
+ * separate, and neither grants the other. */
+export interface TaskInputCountingChainDependencies extends InputCountTokensCompositionDependencies {
+  taskExecution: TaskCountingGateSource;
+}
+export function composeTaskInputCountingChain(input: TaskInputCountingChainDependencies) {
+  const counting = composeInputCountTokensService(input);
+  const publisher = new TaskInputBoundPublisher({ db: input.db, scopes: counting.authorization.scopes,
+    taskExecution: input.taskExecution, evidence: counting.pricingEvidence,
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.clock !== undefined ? { clock: input.clock } : {}) });
+  const chain = { taskCount: (command: unknown, signal?: AbortSignal) => counting.service.taskCount(command, signal),
+    publish: (command: unknown, signal?: AbortSignal) => publisher.publish(command, signal) };
+  return Object.freeze({ ...counting, publisher, chain,
+    /** Wraps the host's invocation preparation: register → count → publish.
+     * Providing it is the recorded host's explicit server decision; a calls
+     * host composes without it and never counts. */
+    preparation: (inner: { prepare(step: unknown, lease: unknown): Promise<{ invocationId: string }> }) =>
+      new CountingTaskModelInvocationPreparation(inner, chain) });
 }
