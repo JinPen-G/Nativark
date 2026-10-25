@@ -12,6 +12,13 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：原任务计数正式授权与可信上界链（2026-10-25，A新批第一段）
+
+- 固定 `e3fb03b0`：`InputCountTokensService.taskCount` 以原调用自身的 transition_task 政策为门（服务端持久 invocation 行+双快照复核），为单个已注册原调用计数其冻结输入；场景/配置/输入指纹/计划依据全部来自服务端持久事实，服务不再绑定工厂 sceneCode——一个服务服务全部宿主场景；管理 `count` 入口与其 settings_write 门保持不变，两个入口互不授权。
+- `TaskInputBoundPublisher`：以同一 transition_task 许可从持久计数收据发布可信输入上界，镜像管理发布的证据与幂等行语义（同键异载荷为冲突、丢创建应答为待核对，绝不二次发布）。`CountingTaskModelInvocationPreparation` 供 recorded 宿主组合（注册→计数→发布）；unknown 计数保持 runner 未知语义且绝不重派发，确定失败使步骤失败；calls 宿主不组合即不计数。宿主组合 `composeCurrentAuthorizedTaskModelInput` 经可选 `inputCounting` 显式装配。
+- 无循环依赖：invocation 行在注册（预留前）持久化，计数只读该行且不触碰生成自身的预留；计数与生成为两个真实请求——各自派生id/calls单位/计数价版本的预留与收据，共用原单账。原键重放返回原收据不重发；unknown 按原键观察恢复。
+- 冒烟（`output/input-counting-20261025/task-chain-smoke.cjs`，禁settings授权）：双场景同服务计数、任务门拒绝他主体/过期transition政策、原键重放不重发、unknown后无上界且装饰器抛AI_RESULT_UNKNOWN、发布幂等、recorded quote消费上界得 tokens=1234+64；原管理冒烟 `count-tokens-smoke.cjs` 复跑通过（textDispatch断言随主线更新为not_attested）。离线双preload、固定无效DATABASE_URL、本树绝对审计/TEMP；tsc（api+shared）0诊断。未新增测试文件、未连接真实模型/DB；真实tokenizer/供应商计数与标准装配仍缺，百分比不跨档。
+
 ## 近期核心：A执行证据与报价场景整合（2026-10-25）
 
 - 固定接收A `135a8418`→`4da4aa96`→`6066793a`→`4b0b38ea`：步骤/计划持久证据复用转换事务与精确CAS后租约；同值客户/履约重确认保留已确认配送地址，变化仍清除并重验。复用有界业务端口，修正夹具凭证跨秒变化与多轮确认断言，未删除既有断言或新增测试脚本。
