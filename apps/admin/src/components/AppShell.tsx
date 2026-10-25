@@ -56,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [fixedSelection, setFixedSelection] = useState<string>();
   const navRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const navigation = useWorkspaceNavigation(contentRef);
+  const navigation = useWorkspaceNavigation(contentRef, navRef);
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useLocale();
@@ -156,9 +156,24 @@ export function AppShell({ children }: { children: ReactNode }) {
    * 依赖里带上 `sections`：权限与品类档案是异步到的，菜单变长后位置会重排。
    */
   useEffect(() => {
-    navRef.current?.querySelector(".ant-menu-item-selected, .ant-menu-submenu-selected")
-      ?.scrollIntoView({ block: "nearest" });
-  }, [selectedKey, sections, drawerOpen]);
+    const host = navRef.current;
+    if (!host) return;
+    let frame = 0;
+    // Menu mounts expanded children after the collapse state commits. Wait for
+    // the actual selected item rather than scrolling the outgoing submenu.
+    const reveal = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const selector = collapsed && !drawerOpen ? ".ant-menu-submenu-selected, .ant-menu-item-selected" : ".ant-menu-item-selected";
+        const selected = Array.from(host.querySelectorAll<HTMLElement>(selector)).find(item => item.getBoundingClientRect().height > 0);
+        if (selected) { selected.scrollIntoView({ block: "nearest" }); observer.disconnect(); }
+      });
+    };
+    const observer = new MutationObserver(reveal);
+    observer.observe(host, { childList: true, subtree: true });
+    reveal();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [selectedKey, sections, drawerOpen, collapsed]);
   /**
    * 侧栏内容抽成一个渲染函数：常驻侧栏与窄屏抽屉必须是同一份导航，
    * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。

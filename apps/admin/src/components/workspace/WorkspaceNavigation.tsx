@@ -23,7 +23,7 @@ type Capture = { finished: Promise<void>; skipTransition: () => void };
 type Pending = { target: string; from: string; release: () => void };
 const ROOT_MARK = "data-workspace-navigation";
 
-export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>) {
+export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>, sidebar?: RefObject<HTMLElement | null>) {
   const navigate = useNavigate(), { pathname } = useLocation(), reduced = useReducedMotion();
   const owner = useId();
   const [running, setRunning] = useState(false);
@@ -46,6 +46,28 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>)
     document.addEventListener("visibilitychange", hide);
     return () => { mounted.current = false; ++navigationRequest.current; stop(); window.removeEventListener("resize", stop); document.removeEventListener("visibilitychange", hide); };
   }, [stop]);
+
+  useEffect(() => {
+    // Chrome retargets clicks to <html> during the snapshot capture itself.
+    // Replay only a primary click inside a currently visible sidebar menu item,
+    // through that item's original handler (including its route/permission rules).
+    const replayShellClick = (event: MouseEvent) => {
+      const host = sidebar?.current;
+      if (!host || event.target !== document.documentElement || event.button !== 0 || !event.detail
+        || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+        || document.documentElement.getAttribute(ROOT_MARK) !== owner) return;
+      const bounds = host.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return;
+      const item = Array.from(host.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(node => {
+        const rect = node.getBoundingClientRect();
+        return !node.matches('[aria-disabled="true"], .ant-menu-item-disabled') && rect.width > 0 && rect.height > 0
+          && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      });
+      if (item) { event.preventDefault(); event.stopPropagation(); item.click(); }
+    };
+    document.addEventListener("click", replayShellClick, true);
+    return () => document.removeEventListener("click", replayShellClick, true);
+  }, [owner, sidebar]);
 
   const ready = useCallback((path: string) => {
     const waiting = pending.current;

@@ -1,6 +1,9 @@
 /* Animate UI stack: enter from one viewport below; old page sinks to .94/.6.
    Only the scrollable workspace is named. Header and sidebar remain still. */
 .app-content[data-workspace-page-transition] { view-transition-name: rental-workspace-page; }
+/* Keep the shell live: a root snapshot still consumes hit testing in Chrome,
+   even with pointer-events disabled on the transition pseudo-elements. */
+:root[data-workspace-navigation] { view-transition-name: none; }
 :root[data-workspace-navigation]::view-transition { pointer-events: none; }
 :root[data-workspace-navigation]::view-transition-old(root) { display: none; }
 :root[data-workspace-navigation]::view-transition-new(root) { animation: none; }
