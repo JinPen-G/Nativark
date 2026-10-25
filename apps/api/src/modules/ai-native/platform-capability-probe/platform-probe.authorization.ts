@@ -25,14 +25,17 @@ const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery
   'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] as const;
 
 /** Current SaaS/platform identity only: the real platform Guard behind the
- * bound Profile resource. This grants neither tenant membership nor execution. */
+ * bound Profile resource. This grants neither tenant membership nor execution.
+ * Base identity uses the GET (view) Guard path so view-only SaaS admins can
+ * read history and receipts; write authorization is enforced separately by
+ * task action policies, the policy management authority and budget sources. */
 export class PlatformTaskIdentityAuthority implements AiCurrentScopeAuthority {
   constructor(private readonly management: PlatformModelConfigurationAuthority,
     private readonly clock: () => Date = () => new Date()) {
-    if (typeof management?.resolve !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (typeof management?.resolveRead !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
   async resolve(): Promise<AiExecutionContext> {
-    const context = structuredClone(await this.management.resolve());
+    const context = structuredClone(await this.management.resolveRead());
     if (!isAiStepExecutionContext(context) || context.actor.kind !== 'saas_admin'
       || context.audience !== 'operator' || context.scope.kind !== 'platform') throw denied();
     const now = this.clock();
