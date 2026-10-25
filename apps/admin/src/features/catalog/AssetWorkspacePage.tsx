@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
+import { assetCards, stockCards } from "./assetCards";
 import { StockOperationsPanel } from "./StockOperationsPanel";
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -112,7 +113,7 @@ export function AssetWorkspacePage() {
       <ListSection controls={<SearchField label={t("搜索资产")} placeholder={locale === "en-US" ? `${t(profile.data?.terminology.identifierLabel ?? "资产编号")}, ${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} or ${t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")}` : `${profile.data?.terminology.identifierLabel ?? "资产编号"}、${profile.data?.terminology.itemGroupLabel ?? "产品型号"}或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} />}>
 
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
-          {activeTab === "assets" ? <Table<RentalAsset> exportConfig={{ filename: t("器材资产"), fields: [{ label: t("资产编号"), value: row => row.assetNo }, { label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("状态"), value: row => row.status }] }} rowKey="id" onRefresh={() => assets.refetch()} loading={assets.isFetching} dataSource={assetRows} scroll={{ x: 960 }} columns={[
+          {activeTab === "assets" ? <Table<RentalAsset> cardView={assetCards({ t, groups: groups.data ?? [], statusLabel: value => t(statusMap[value]?.label ?? value), canManage, canView, edit: openAssetEditor, history: setStatusHistoryAsset, identifier: t(profile.data?.terminology.identifierLabel ?? "资产编号") })} exportConfig={{ filename: t("器材资产"), fields: [{ label: t("资产编号"), value: row => row.assetNo }, { label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("状态"), value: row => row.status }] }} rowKey="id" onRefresh={() => assets.refetch()} loading={assets.isFetching} dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`, width: 110, fixed: "left", render: (_, row) => {
               const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
               const image = group?.images?.find((item) => item.isCover) ?? group?.images?.[0];
@@ -125,7 +126,7 @@ export function AssetWorkspacePage() {
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={statusMap[value]?.color}>{t(statusMap[value]?.label ?? value)}</Tag> },
             { title: t("操作"), fixed: "right", render: (_, row) => canView ? <Space size={0}>{canManage && <Button type="link" onClick={() => openAssetEditor(row)}>{t("编辑")}</Button>}<Button type="link" onClick={() => setStatusHistoryAsset(row)}>{t("状态历史")}</Button></Space> : "-" }
-          ]} /> : <Table<RentalStockBalance> exportConfig={{ filename: t("库存"), fields: [{ label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("在手"), value: row => row.onHandQuantity }, { label: t("已预占"), value: row => row.reservedQuantity }, { label: t("维护/清洁"), value: row => row.maintenanceQuantity }] }} rowKey="id" onRefresh={() => stocks.refetch()} loading={stocks.isFetching} dataSource={stockRows} columns={[
+          ]} /> : <Table<RentalStockBalance> cardView={stockCards({ t, groups: groups.data ?? [], dispositions: dispositions.data ?? [] })} exportConfig={{ filename: t("库存"), fields: [{ label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("在手"), value: row => row.onHandQuantity }, { label: t("已预占"), value: row => row.reservedQuantity }, { label: t("维护/清洁"), value: row => row.maintenanceQuantity }] }} rowKey="id" onRefresh={() => stocks.refetch()} loading={stocks.isFetching} dataSource={stockRows} columns={[
             { title: t("商品"), render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("在手"), dataIndex: "onHandQuantity", align: "right" },

@@ -3430,6 +3430,8 @@ const ENGLISH: Record<string, string> = {
   "操作已完成": "Operation completed",
   "操作失败，请刷新后重试": "Operation failed. Refresh and try again",
   "搜索工单、商品、资产、地点或订单": "Search work orders, items, assets, locations, or orders",
+  "工单号、原因或负责人": "Work order, issue or assignee",
+  "更多操作": "More actions",
   "清除筛选": "Clear filters",
   "处理结果": "Work result",
   "负责人": "Owner",

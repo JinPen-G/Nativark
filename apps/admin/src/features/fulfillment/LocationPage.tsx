@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { locationCapabilities, operatorCapabilities } from "@/features/listCapabilities";
+import { locationCards } from "./locationCards";
 
 const locationTypeLabels: Record<string, string> = { store: "门店", warehouse: "仓库", station: "取还点", locker: "自提柜", delivery_hub: "配送中心", project_site: "项目现场" };
 const capabilityLabels: Record<string, string> = { pickup: "领取", return: "归还", storage: "仓储", delivery: "配送" };
@@ -78,7 +79,7 @@ export function LocationPage() {
       <ListSection controls={<><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
 
           <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
-          <Table<RentalFulfillmentLocation> rowKey="id" onRefresh={() => locations.refetch()} loading={locations.isFetching} dataSource={rows} scroll={{ x: 960 }}
+          <Table<RentalFulfillmentLocation> cardView={locationCards({ t, typeLabels: locationTypeLabels, capabilityLabels, canManage, edit: openEditor })} rowKey="id" onRefresh={() => locations.refetch()} loading={locations.isFetching} dataSource={rows} scroll={{ x: 960 }}
             {...locationCapabilities(t, category?.businessModel.locationTypes ?? [], () => locations.refetch({ throwOnError: true }))} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("归属组织"), render: (_, row) => row.organizationId ? organizationNames.get(row.organizationId) ?? t("已关联组织") : t("未分配") },

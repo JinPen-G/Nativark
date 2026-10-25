@@ -9,7 +9,7 @@ import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import styles from "./RecordCard.module.css";
 
-export type CardKind = "membership" | "catalog" | "pricing" | "discount" | "service";
+export type CardKind = "membership" | "catalog" | "pricing" | "discount" | "service" | "asset" | "stock" | "location";
 export type CardAfterClose = (operation: () => void) => void;
 export interface RecordCardConfig<T> {
   kind?: CardKind;

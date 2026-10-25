@@ -18,7 +18,9 @@ import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";
 import recordStyles from "@/components/RecordDetailLayout.module.css";
-import { Button, DataTableStatus, SearchField, Select, Tabs } from "@/components/ui";
+import { Button, DataTableRowActions, DataTableStatus, SearchField, Select, Tabs } from "@/components/ui";
+import { ClipboardCheck, FileText, History, Play, UserRoundPen, X } from "lucide-react";
+import type { DataTableRowAction } from "@/components/ui/data-table/DataTableRowActions";
 import { useEffect, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -165,12 +167,24 @@ export function MaintenanceWorkOrdersPage() {
     if (typeFilter && row.type !== typeFilter) return false;
     if (assigneeFilter && row.assigneeId !== assigneeFilter) return false;
     const keyword = resourceFilter.trim().toLowerCase();
-    if (keyword && ![row.workNo, row.itemGroupId, row.locationId, row.assetId, row.orderId].some((value) => value?.toLowerCase().includes(keyword))) return false;
+    if (keyword && ![row.workNo, row.reason, row.assigneeName, row.itemGroupId, row.locationId, row.assetId, row.orderId].some((value) => value?.toLowerCase().includes(keyword))) return false;
     return true;
   });
   useEffect(() => { setDialog(undefined); setActiveWorkOrder(undefined); setWriteOffTarget(undefined); }, [workOrderId]);
   const loading = dispositions.isLoading || workOrders.isLoading || assignees.isLoading;
   const error = dispositions.error || workOrders.error || assignees.error;
+  function rowActions(row: RentalWorkOrder) {
+    const actions: DataTableRowAction[] = [];
+    if (canManage && ["pending", "in_progress"].includes(row.status)) actions.push({ id: "assign", label: t("派工"), icon: UserRoundPen, onSelect: () => openDialog("assign", row) });
+    if (canManage && row.status === "pending") actions.push({ id: "start", label: t("开始处理"), icon: Play, onSelect: () => run.mutate({ kind: "start", id: row.id }) });
+    if (canManage && row.status === "in_progress") actions.push({ id: "submit", label: t("提交验收"), icon: ClipboardCheck, onSelect: () => openDialog("submit", row) });
+    if (canReview && row.status === "pending_review") actions.push({ id: "review", label: t("验收"), icon: ClipboardCheck, onSelect: () => openDialog("review", row) });
+    const primary = actions.find(action => ["start", "submit", "review"].includes(action.id));
+    if (primary) actions.push({ id: "detail", label: t("详情"), icon: FileText, onSelect: () => openDialog("detail", row) });
+    actions.push({ id: "history", label: t("历史"), icon: History, onSelect: () => openDialog("history", row) });
+    if (canManage && ["pending", "in_progress", "pending_review"].includes(row.status)) actions.push({ id: "cancel", label: t("取消"), icon: X, danger: true, onSelect: () => openDialog("cancel", row) });
+    return <DataTableRowActions primary={primary} actions={actions} details={() => openDialog("detail", row)} detailLabel={t("详情")} detailAccessibleLabel={`${row.workNo} · ${t("详情")}`} menuLabel={`${row.workNo} · ${t("更多操作")}`} />;
+  }
 
   return <>
     {!workOrderId && <>
@@ -197,7 +211,7 @@ export function MaintenanceWorkOrdersPage() {
           </Space> }
         ]} />
       </ListSection>
-      <ListSection title={t("养护工单")} controls={<><SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("搜索工单、商品、资产、地点或订单")} style={{ width: "var(--rental-control-width-search)" }} /><Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} /><Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /><Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: "var(--rental-control-width-select)" }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} /><Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button></>}>
+      <ListSection title={t("养护工单")} controls={<><SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("工单号、原因或负责人")} style={{ width: "var(--rental-control-width-search)" }} /><Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} /><Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /><Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: "var(--rental-control-width-select)" }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} /><Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button></>}>
 
         <Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty description={t("暂无匹配的养护工单")} /> }} columns={[
           { title: t("工单号"), dataIndex: "workNo", width: 190 },
@@ -221,16 +235,7 @@ export function MaintenanceWorkOrdersPage() {
           { title: t("原因"), dataIndex: "reason", width: 260 },
           { title: t("处理人"), render: (_, row) => row.assigneeName || row.assigneeId || t("未派工") },
           { title: t("更新时间"), dataIndex: "updatedAt", width: 180, render: (value: string) => dateTime(value, locale) },
-          { title: t("操作"), fixed: "right", width: 310, render: (_, row) => <Space size={0} wrap>
-            {canManage && ["pending", "in_progress"].includes(row.status) && <Button type="link" onClick={() => openDialog("assign", row)}>{t("派工")}</Button>}
-            {canManage && row.status === "pending" && <Button type="link" onClick={() => run.mutate({ kind: "start", id: row.id })}>{t("开始处理")}</Button>}
-            {canManage && row.status === "in_progress" && <Button type="link" onClick={() => openDialog("submit", row)}>{t("提交验收")}</Button>}
-            {canReview && row.status === "pending_review" && <Button type="link" onClick={() => openDialog("review", row)}>{t("验收")}</Button>}
-            {canManage && ["pending", "in_progress", "pending_review"].includes(row.status) && <Button type="link" danger onClick={() => openDialog("cancel", row)}>{t("取消")}</Button>}
-            <Button type="link" onClick={() => openDialog("detail", row)}>{t("详情")}</Button>
-            <Button type="link" onClick={() => openDialog("history", row)}>{t("历史")}</Button>
-            {row.status === "completed" && <Typography.Text type="secondary">{t("已完成")}</Typography.Text>}
-          </Space> }
+          { title: t("操作"), fixed: "right", width: 180, render: (_, row) => rowActions(row) }
         ]} />
       </ListSection>
     </QueryState>
