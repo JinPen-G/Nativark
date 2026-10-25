@@ -26,9 +26,12 @@ const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery
 
 /** Current SaaS/platform identity only: the real platform Guard behind the
  * bound Profile resource. This grants neither tenant membership nor execution.
- * Base identity uses the GET (view) Guard path so view-only SaaS admins can
- * read history and receipts; write authorization is enforced separately by
- * task action policies, the policy management authority and budget sources. */
+ * Base identity uses the GET (view) Guard path so the identity/scope
+ * resolution itself does not require manage. Write authorization is
+ * separately enforced by task action policies, the policy management
+ * authority (manage) and budget sources. Historical reads still require
+ * current management authority via authorizeManagement — the shared
+ * contract's 'view' tag for those routes is a mainline alignment item. */
 export class PlatformTaskIdentityAuthority implements AiCurrentScopeAuthority {
   constructor(private readonly management: PlatformModelConfigurationAuthority,
     private readonly clock: () => Date = () => new Date()) {

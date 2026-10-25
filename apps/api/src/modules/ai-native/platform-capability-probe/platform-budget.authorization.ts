@@ -64,6 +64,11 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
         ? await this.bindings.resolveForReservation(gatewayContext, resource.reservationId) : null;
       if (!binding || requestFingerprint(binding.association) !== requestFingerprint(association)
         || binding.actorId !== principal.actorId || binding.sceneCode !== row.sceneCode) throw new BudgetError('FORBIDDEN');
+      // Financial recovery writes (release/settle/reconcile/unknown) share the
+      // read_step_terminal policy row with terminal-step reads. The outer
+      // HTTP Guard requiring manage for releaseUnsent/reconcileAccounting is
+      // the sole barrier preventing a manage holder from configuring weak
+      // permissions on this row to grant view-level financial write access.
       const operation = dispatching ? 'transition_task' : 'read_step_terminal';
       const policyRow = await this.input.db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: {
         scopeId: before.scope.id, taskId: row.taskId, operation } } });
