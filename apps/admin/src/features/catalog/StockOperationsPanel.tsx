@@ -9,7 +9,7 @@ import type {
   RentalStockOperationType
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
@@ -84,16 +84,7 @@ export function StockOperationsPanel({
   const currentDescription = t(OPERATION_OPTIONS.find((item) => item.value === operationType)?.description ?? "");
   const itemLabel = t(terminology?.itemGroupLabel ?? "商品");
   return <>
-    <Card
-      title={t("数量与耗材库存日常作业")}
-      extra={<Space><Typography.Text type="secondary">{t("余额变化必须有来源流水")}</Typography.Text>{canManage && <Button type="primary" icon={<PlusOutlined />} onClick={openEditor}>{t("新增库存作业")}</Button>}</Space>}
-      style={{ marginTop: 16 }}
-    >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        {t("已预占或维修隔离的库存不可直接扣减。")}
-      </Typography.Paragraph>
-    </Card>
-    <ListSection title={<Space><HistoryOutlined />{t("库存流水")}</Space>} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+    <ListSection title={<Space><HistoryOutlined />{t("库存流水")}</Space>} extra={canManage && <Button icon={<PlusOutlined />} onClick={openEditor}>{t("新增库存作业")}</Button>} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
       <Table<RentalStockLedgerEntry>
         rowKey="id"
         loading={ledger.isFetching}
@@ -131,6 +122,7 @@ export function StockOperationsPanel({
           <Select options={OPERATION_OPTIONS.map((item) => ({ value: item.value, label: t(item.label) }))} onChange={(value: RentalStockOperationType) => { setOperationType(value); form.setFieldValue("type", value); }} />
         </Form.Item>
         <Typography.Paragraph type="secondary">{currentDescription}</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">{t("已预占或维修隔离的库存不可直接扣减。")} {t("余额变化必须有来源流水")}</Typography.Paragraph>
         <Form.Item label={itemLabel} name="itemGroupId" rules={[{ required: true }]}>
           <Select showSearch={{ optionFilterProp: "label" }} options={quantityGroups.map((group) => ({ value: group.id, label: `${group.code} · ${group.name}${group.inventoryMode === "consumable" ? `（${t("一次性耗材")}）` : ""}` }))} />
         </Form.Item>

@@ -107,6 +107,7 @@
 .rowMenuIcon { width: 1rem; height: 1rem; flex-shrink: 0; color: var(--text-muted); }
 .rowMenuItem[data-variant="destructive"], .rowMenuItem[data-variant="destructive"] > svg { color: var(--danger); }
 .rowMenuItem[data-variant="destructive"][data-highlighted] { background: color-mix(in oklab, var(--danger) 10%, var(--surface-raised)); }
+.rowMenuItem[data-disabled] { color: var(--text-muted); pointer-events: none; }
 :global([data-theme="dark"]) .rowMenuItem[data-variant="destructive"][data-highlighted] { background: color-mix(in oklab, var(--danger) 20%, var(--surface-raised)); }
 .rowMenuSeparator { height: 1px; margin: var(--space-1) calc(-1 * var(--space-1)); background: var(--border); }
 @keyframes rowMenuIn { from { opacity: 0; transform: translate(var(--row-menu-x), var(--row-menu-y)) scale(.95); } to { opacity: 1; transform: none; } }
@@ -210,5 +211,5 @@
 @keyframes motiqPulse { 50% { opacity: .5; } }
 /* Keep the task column reachable on narrow screens. Leading identity columns
    may scroll normally so they do not cover the remaining data beside actions. */
-@media (max-width: 767px) { .table th[data-pinned="left"], .table td[data-pinned="left"] { position: static !important; } }
+@media (max-width: 767px) { .table th[data-pinned="left"], .table td[data-pinned="left"] { left: auto !important; right: auto !important; } }
 @media (prefers-reduced-motion: reduce) { .menu[data-state], .columnViewMenu[data-state] { animation: none; } .table tbody td { transition: none; } }

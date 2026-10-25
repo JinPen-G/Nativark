@@ -13,7 +13,8 @@ import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer, SaveButton, Select } from "@/components/ui";
+import { Button, DataTableRowActions, Drawer, SaveButton, Select } from "@/components/ui";
+import { Pencil, Send } from "lucide-react";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
@@ -154,10 +155,9 @@ export function MembershipPlanPage() {
         { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "active" ? "success" : value === "disabled" ? "error" : "default"}>{value === "active" ? t("已启用") : value === "disabled" ? t("已停用") : t("草稿")}</Tag> },
         { title: "权益适用范围", render: (_, row) => <MembershipBenefitScopeSummary benefits={row.currentVersion?.benefits ?? []} options={scopeOptions.data} /> },
         { title: t("版本"), render: (_, row) => <Button type="link" disabled={!canView} onClick={() => setHistoryPlan(row)}>{t("查看")} {row.versions?.length ?? 0} {t("个版本")}</Button> },
-        { title: t("操作"), render: (_, row) => <Space>
-          <Button type="link" disabled={!canManage} onClick={() => open(row)}>{t("编辑草稿")}</Button>
-          {row.currentVersion?.status === "draft" && <Button type="link" disabled={!canPublish} loading={publish.isPending} onClick={() => publish.mutate({ planId: row.id, versionId: row.currentVersion!.id })}>{t("发布")} v{row.currentVersion.version}</Button>}
-        </Space> },
+        { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "edit", label: t("编辑草稿"), icon: Pencil, disabled: !canManage, onSelect: () => open(row) }} details={() => setHistoryPlan(row)} detailLabel={t("版本")} menuLabel={`${row.name} · ${t("更多操作")}`} actions={row.currentVersion?.status === "draft" ? [
+          { id: "publish", label: `${t("发布")} v${row.currentVersion.version}`, icon: Send, disabled: !canPublish || publish.isPending, onSelect: () => publish.mutate({ planId: row.id, versionId: row.currentVersion!.id }) }
+        ] : []} /> },
       ]} />
     </ListSection>
     <Drawer title={selected ? `${t("编辑方案")}: ${selected.name}` : t("新增会员方案")} size={640} open={editorOpen} onClose={() => { setSelected(undefined); setEditorOpen(false); form.resetFields(); }} destroyOnHidden>

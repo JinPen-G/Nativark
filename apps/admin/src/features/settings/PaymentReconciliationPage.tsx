@@ -8,8 +8,8 @@ import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Download } from "lucide-react";
-import { Button, DataTableStatus, Drawer, downloadCsv } from "@/components/ui";
+import { CheckCheck, Download, SearchCheck } from "lucide-react";
+import { Button, DataTableRowActions, DataTableStatus, Drawer, downloadCsv } from "@/components/ui";
 import type { UploadFile } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { RecordDetailLayout } from "@/components/RecordDetailLayout";
@@ -115,7 +115,7 @@ export function PaymentReconciliationPage() {
       </Typography.Paragraph>
     </Card>
     <ListSection title={t("对账批次")} controls={<ListFilters filter={batchFilter} placeholder="文件名或支付平台" options={Object.entries(batchStatusLabels).map(([value, label]) => ({ value, label }))} />}>
-      <QueryState loading={batches.isLoading} error={batches.error}>
+      <QueryState loading={batches.isLoading} error={batches.error} onRetry={() => batches.refetch({ throwOnError: true })}>
         <Table<PaymentStatementBatchSummary>
           rowKey="id"
           onRefresh={() => batches.refetch()} loading={batches.isFetching} dataSource={batchFilter.rows}
@@ -143,7 +143,7 @@ export function PaymentReconciliationPage() {
         { key: "reviewed", label: "已处理", value: detail.data.acknowledgedRows }
       ] : undefined}>
       <Alert type="warning" showIcon title={t("这里只记录处理结论，不会修改支付、退款或资金事实。")} />
-      <QueryState loading={detail.isLoading} error={detail.error}>
+      <QueryState loading={detail.isLoading} error={detail.error} onRetry={() => detail.refetch({ throwOnError: true })}>
         {detail.data && <ListSection title={t("对账明细")} controls={<ListFilters filter={lineFilter} placeholder="商户单号或差异编码" options={Object.entries(reviewStatusLabels).map(([value, label]) => ({ value, label }))} />}>
           <Table<PaymentStatementLineSummary>
             rowKey="id"
@@ -158,7 +158,9 @@ export function PaymentReconciliationPage() {
               { title: t("金额"), render: (_, row) => `${row.amount.toFixed(2)} ${row.currency}` },
               { title: t("差异"), dataIndex: "differenceCodes", render: (value: string[]) => value.length ? <Space wrap>{value.map((code) => <Tag color="orange" key={code}>{code}</Tag>)}</Space> : "—" },
               { title: t("处理状态"), dataIndex: "reviewStatus", render: (value: string) => <Tag color={value === "acknowledged" || value === "not_required" ? "green" : "orange"}>{t(reviewStatusLabels[value] ?? value)}</Tag> },
-              { title: t("操作"), fixed: "right", width: 220, render: (_, row) => row.reviewStatus === "open" || row.reviewStatus === "query_pending" ? <Space><Button type="link" onClick={() => openReview(row, "query_provider")}>{t("标记待核对")}</Button><Button type="link" onClick={() => openReview(row, "acknowledge")}>{t("确认差异")}</Button></Space> : "—" }
+              { title: t("操作"), fixed: "right", render: (_, row) => row.reviewStatus === "open" || row.reviewStatus === "query_pending" ? <DataTableRowActions primary={{ id: "acknowledge", label: t("确认差异"), icon: CheckCheck, onSelect: () => openReview(row, "acknowledge") }} details={() => openReview(row, "acknowledge")} detailLabel={t("确认差异")} menuLabel={`${row.rowNumber} · ${t("更多操作")}`} actions={[
+                { id: "query", label: t("标记待核对"), icon: SearchCheck, onSelect: () => openReview(row, "query_provider") }
+              ]} /> : "—" }
             ]}
           />
         </ListSection>}

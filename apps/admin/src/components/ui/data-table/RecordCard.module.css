@@ -34,6 +34,7 @@
 .section h4 { margin: 0; color: var(--foreground); font-size: var(--rental-typography-panel-title-size); font-weight: var(--rental-typography-panel-title-weight); }
 .preview { display: grid; gap: var(--space-5); color: var(--foreground); }
 .previewActions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); border-top: 1px solid var(--border); padding-block-start: var(--space-4); }
+.previewActions:empty, .context:empty, .footnote:empty { display: none; }
 .badge { display: inline-flex; gap: var(--space-1); align-items: center; max-width: 100%; padding: var(--space-1) var(--space-2); background: var(--surface); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-control); color: var(--foreground); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); font-weight: 500; }
 .badge[data-emphasis] { background: color-mix(in oklab, var(--warning) 10%, var(--surface)); border-color: color-mix(in oklab, var(--warning) 35%, var(--surface)); }
 .badge[data-tone="positive"] { color: var(--success); border-color: transparent; background: color-mix(in oklab, var(--success) 8%, var(--surface)); }

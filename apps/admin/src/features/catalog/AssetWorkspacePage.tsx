@@ -8,7 +8,8 @@ import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer, SearchField, Select, Tabs } from "@/components/ui";
+import { Button, DataTableRowActions, Drawer, SearchField, Select, Tabs } from "@/components/ui";
+import { History, Pencil } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -125,7 +126,7 @@ export function AssetWorkspacePage() {
             ...summaryAssetFields.map((field) => ({ title: t(field.label), render: (_: unknown, row: RentalAsset) => String(row.attributes[field.code] ?? "-") })),
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={statusMap[value]?.color}>{t(statusMap[value]?.label ?? value)}</Tag> },
-            { title: t("操作"), fixed: "right", render: (_, row) => canView ? <Space size={0}>{canManage && <Button type="link" onClick={() => openAssetEditor(row)}>{t("编辑")}</Button>}<Button type="link" onClick={() => setStatusHistoryAsset(row)}>{t("状态历史")}</Button></Space> : "-" }
+            { title: t("操作"), fixed: "right", render: (_, row) => canView ? <DataTableRowActions primary={canManage ? { id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => openAssetEditor(row) } : undefined} details={() => setStatusHistoryAsset(row)} detailLabel={t("状态历史")} menuLabel={`${row.assetNo} · ${t("更多操作")}`} actions={canManage ? [{ id: "history", label: t("状态历史"), icon: History, onSelect: () => setStatusHistoryAsset(row) }] : []} /> : "-" }
           ]} /> : <Table<RentalStockBalance> cardView={stockCards({ t, groups: groups.data ?? [], dispositions: dispositions.data ?? [] })} exportConfig={{ filename: t("库存"), fields: [{ label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("在手"), value: row => row.onHandQuantity }, { label: t("已预占"), value: row => row.reservedQuantity }, { label: t("维护/清洁"), value: row => row.maintenanceQuantity }] }} rowKey="id" onRefresh={() => stocks.refetch()} loading={stocks.isFetching} dataSource={stockRows} columns={[
             { title: t("商品"), render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },

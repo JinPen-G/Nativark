@@ -44,7 +44,7 @@ export function MembershipRewardsPage() {
     enabled: canSeeRewards,
   });
   const accountFilter = useListFilter(benefitAccounts.data, { fields: row => [row.customerId] });
-  const rewardFilter = useListFilter(rewards.data, { fields: row => [row.customerId, row.reason, row.idempotencyKey, t(rewardLabels[row.rewardType]), t(triggerLabels[row.triggerType])], status: row => row.status });
+  const rewardFilter = useListFilter(rewards.data, { fields: row => [row.customerId, row.reason, row.idempotencyKey, t(rewardLabels[row.rewardType] ?? row.rewardType), t(triggerLabels[row.triggerType] ?? row.triggerType)], status: row => row.status });
   // 营销余额按空间结算币种显示；经营设置的读取只对价格/规则权限开放，
   // 只有平台参数权限的账号拿不到币种时退回无币种格式，不发注定 403 的请求。
   const settings = useQuery({

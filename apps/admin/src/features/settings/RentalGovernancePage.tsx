@@ -157,12 +157,13 @@ export function RentalGovernancePage() {
     label: definition.key === "category"
       ? t("品类与租赁方式")
       : definition.key === "rules"
-        ? <span><SafetyCertificateOutlined />{t("业务规则")}</span>
+        ? t("业务规则")
         : definition.key === "calendar"
-          ? <span><CalendarOutlined />{t("营业日历")}</span>
+          ? t("营业日历")
           : definition.key === "membership"
-            ? <span><TeamOutlined />{t("会员奖励规则")}</span>
-            : <span><NotificationOutlined />{t("通知模板")}</span>
+            ? t("会员奖励规则")
+            : t("通知模板"),
+    icon: definition.key === "rules" ? <SafetyCertificateOutlined /> : definition.key === "calendar" ? <CalendarOutlined /> : definition.key === "membership" ? <TeamOutlined /> : definition.key === "notifications" ? <NotificationOutlined /> : undefined
   }));
   return (
     <>
@@ -174,7 +175,7 @@ export function RentalGovernancePage() {
         className="standalone-tabs"
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}
-        items={localizedTabs.map(({ key, label }) => ({ key, label }))}
+        items={localizedTabs.map(({ key, label, icon }) => ({ key, label, icon }))}
       />
       <QueryState
         loading={settings.isLoading || profile.isLoading}

@@ -194,11 +194,11 @@ export function TenantOperationsAccountPage() {
   const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error ?? fulfillmentLocations.error;
 
   return <>
-    <PageHeader title={t("运营账号管理")} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
+    <PageHeader title={t("运营账号管理")} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button>} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
     <QueryState loading={loading} error={error}>
       <ListSection>
 
-        <Table<SystemUserRow> toolbar={<><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
+        <Table<SystemUserRow> toolbar={<><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
           { title: t("账号"), width: 190, render: (_, record) => <><b>{record.displayName}</b><br /><Typography.Text type="secondary">{record.account}</Typography.Text></> },
           { title: t("手机"), dataIndex: "phone", width: 140, render: (value) => value || "-" },
           { title: t("归属组织"), dataIndex: "organizationName", width: 160, render: (value) => value || t("未分配") },
@@ -291,12 +291,12 @@ export function TenantRolePermissionPage() {
   }
 
   return <>
-    <PageHeader title={t("角色权限管理")} />
+    <PageHeader title={t("角色权限管理")} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>} />
     <QueryState loading={roles.isLoading || permissions.isLoading} error={roles.error ?? permissions.error}>
       <Alert type="warning" showIcon title={t("数据权限")} description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")} style={{ marginBottom: "var(--space-4)" }} />
       <ListSection>
 
-        <Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
+        <Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
           { title: t("角色"), width: 220, render: (_, record) => <><b>{record.name}</b><br /><Typography.Text type="secondary">{record.code}</Typography.Text></> },
           { title: t("适用层级"), dataIndex: "scope", width: 130, render: (value) => <Tag>{t(SCOPE_LABELS[value] ?? value)}</Tag> },
           { title: t("默认数据范围"), dataIndex: "dataScope", width: 200, render: (value: SystemDataScope) => dataScopeTag(value, t) },

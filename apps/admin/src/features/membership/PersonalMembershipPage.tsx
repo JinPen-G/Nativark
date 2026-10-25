@@ -10,7 +10,8 @@ import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer, Select, Tooltip } from "@/components/ui";
+import { Button, DataTableRowActions, Drawer, Select, Tooltip } from "@/components/ui";
+import { BadgeCheck, FileCheck, KeyRound, ShieldCheck, UserPlus } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { customerApi } from "@/api/customer";
@@ -121,15 +122,15 @@ export function PersonalMembershipPage() {
       exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
       { title: t("会员"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.name} type="personal" levelName={row.levelName} phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
       { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus])}</Tag> }, { title: t("证件"), render: (_, row) => row.qualifications.length ? row.qualifications.map((item) => <Tag key={item.id} color={qualificationStatus[item.status]?.color}>{item.qualificationType} · {t(qualificationStatus[item.status]?.text ?? item.status)}</Tag>) : "—" },
-      { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() }, { title: t("操作"), render: (_, row) => <Space wrap>
-        <Button type="link" disabled={!canView} onClick={() => navigate(`/membership/personal/${encodeURIComponent(row.customerId)}`)}>{t("查看资料")}</Button>
-        {!row.account.provisioned && <Tooltip title={canManageAccount ? undefined : t("需要租户会员账号管理权限")}><Button type="link" disabled={!canManageAccount} loading={ensureAccount.isPending} onClick={() => ensureAccount.mutate(row.customerId)}>{t("开通账号")}</Button></Tooltip>}
-        <Button type="link" disabled={!canManageAccount || !row.account.provisioned || row.account.status === "closed"} onClick={() => { setSelected(row); form.resetFields(); setDrawer("password"); }}>{t("密码")}</Button>
-        <Button type="link" disabled={(!canManageAccount && !canClose) || !row.account.provisioned || row.account.status === "closed"} onClick={() => openStatus(row, "account")}>{t("账号状态")}</Button>
-        <Button type="link" disabled={(!canManage && !canRiskAction && !canClose) || row.membershipStatus === "closed"} onClick={() => openStatus(row, "membership")}>{t("会员状态")}</Button>
-        <Button type="link" disabled={!canManage || !currentWorkspaceId} onClick={() => { setSelected(row); qualificationForm.resetFields(); setDrawer("qualification"); }}>{t("提交证件")}</Button>
-        <Button type="link" disabled={!canGrant} onClick={() => { setSelected(row); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
-      </Space> }
+      { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() },
+      { title: t("操作"), render: (_, row) => <DataTableRowActions details={() => navigate(`/membership/personal/${encodeURIComponent(row.customerId)}`)} detailsDisabled={!canView} detailLabel={t("查看资料")} detailAccessibleLabel={`${row.name} · ${t("查看资料")}`} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
+        ...(!row.account.provisioned ? [{ id: "provision", label: t("开通账号"), icon: UserPlus, disabled: !canManageAccount || ensureAccount.isPending, onSelect: () => ensureAccount.mutate(row.customerId) }] : []),
+        { id: "password", label: t("密码"), icon: KeyRound, disabled: !canManageAccount || !row.account.provisioned || row.account.status === "closed", onSelect: () => { setSelected(row); form.resetFields(); setDrawer("password"); } },
+        { id: "account", label: t("账号状态"), icon: ShieldCheck, disabled: (!canManageAccount && !canClose) || !row.account.provisioned || row.account.status === "closed", onSelect: () => openStatus(row, "account") },
+        { id: "membership", label: t("会员状态"), icon: ShieldCheck, disabled: (!canManage && !canRiskAction && !canClose) || row.membershipStatus === "closed", onSelect: () => openStatus(row, "membership") },
+        { id: "qualification", label: t("提交证件"), icon: FileCheck, disabled: !canManage || !currentWorkspaceId, onSelect: () => { setSelected(row); qualificationForm.resetFields(); setDrawer("qualification"); } },
+        { id: "grant", label: t("授予方案"), icon: BadgeCheck, disabled: !canGrant, onSelect: () => { setSelected(row); grantForm.resetFields(); setDrawer("grant"); } }
+      ]} /> }
     ]} /></ListSection>
     </>}
     {customerId && <CustomerProfileDetails key={customerId}

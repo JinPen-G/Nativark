@@ -1,5 +1,5 @@
 import { pricingGroupCards } from "./commercialCards";
-import { DeleteOutlined, EditOutlined, PlusOutlined } from "@/components/ui/icons";
+import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, InputNumber, Space, Tag, Typography } from "antd";
@@ -7,7 +7,8 @@ import { ListSection, App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
+import { Button, DataTableRowActions, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
+import { Pencil, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -154,10 +155,9 @@ export function PricingGroupPage() {
             return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</Tag>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
           } },
           { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "启用" : "停用")}</Tag> },
-          { title: t("操作"), width: 190, render: (_, row) => <Space>
-            <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>{t("编辑")}</Button>
-            <Button type="link" disabled={!securityRateFields.length || !currentVersionDetail.data} onClick={() => editSecurityRates(row)}>{t("押金/预授权")}</Button>
-          </Space> }
+          { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => edit(row) }} details={() => edit(row)} detailLabel={t("编辑")} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
+            { id: "security", label: t("押金/预授权"), icon: ShieldCheck, disabled: !securityRateFields.length || !currentVersionDetail.data, onSelect: () => editSecurityRates(row) }
+          ]} /> }
         ]} />
       </QueryState>
     </ListSection>

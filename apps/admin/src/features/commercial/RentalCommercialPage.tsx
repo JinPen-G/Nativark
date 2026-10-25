@@ -370,13 +370,13 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       {section === "pricing" && (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
 
-          <Alert
-            type="info"
+          {!versions.isLoading && !versions.error && !currentPriceVersion && <Alert
+            type="warning"
             showIcon
-            title={versions.isLoading ? t("正在读取当前整体价格版本") : currentPriceVersion ? t("当前价格版本 {version}", { version: currentPriceVersion.version }) : t("当前还没有生效的整体价格版本")}
-            description={versions.isLoading ? undefined : currentPriceVersion ? t("生效于 {date}", { date: dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm") }) : t("请先到定价分组页面新建分组并填写基本价。")}
-          />
-          <ListSection title={t("当前基础价格")}>
+            title={t("当前还没有生效的整体价格版本")}
+            description={t("请先到定价分组页面新建分组并填写基本价。")}
+          />}
+          <ListSection title={t("当前整体价格版本")} extra={currentPriceVersion && <Typography.Text type="secondary">{currentPriceVersion.version} · {t("生效于 {date}", { date: dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm") })}</Typography.Text>}>
           <QueryState loading={pricing.isLoading || pricingGroups.isLoading || versions.isLoading || currentPriceVersionDetail.isLoading} error={pricing.error || pricingGroups.error || versions.error || currentPriceVersionDetail.error}>
             <Table<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }>
               rowKey={(row) => `${row.group.id}:${row.rate?.unit ?? "unpriced"}`}
@@ -405,7 +405,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </QueryState>
           </ListSection>
           {unpricedCount > 0 && <Alert type="warning" showIcon title={locale === "en-US" ? `${unpricedCount} legacy groups are missing base prices` : `有 ${unpricedCount} 个历史分组缺少基本价`} description={t("本页不再负责初始化。请停用该历史分组，并在定价分组页按新流程重新建立并填写基本价。")} />}
-          <ListSection title={t("调价计划")} extra={<Button type="primary" ghost icon={<PlusOutlined />} disabled={unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增计划")}</Button>}>
+          <ListSection title={t("调价计划")}>
             <Table rowKey="id" loading={adjustments.isFetching} onRefresh={() => adjustments.refetch()} dataSource={adjustments.data ?? []} columns={[
               { title: t("计划"), render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },
               { title: t("生效时间"), render: (_, row) => row.scheduledAt ? dayjs(row.scheduledAt).format("YYYY-MM-DD HH:mm") : t("确认后立即") },

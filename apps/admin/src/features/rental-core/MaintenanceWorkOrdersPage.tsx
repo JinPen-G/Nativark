@@ -235,7 +235,7 @@ export function MaintenanceWorkOrdersPage() {
           { title: t("原因"), dataIndex: "reason", width: 260 },
           { title: t("处理人"), render: (_, row) => row.assigneeName || row.assigneeId || t("未派工") },
           { title: t("更新时间"), dataIndex: "updatedAt", width: 180, render: (value: string) => dateTime(value, locale) },
-          { title: t("操作"), fixed: "right", width: 180, render: (_, row) => rowActions(row) }
+          { title: t("操作"), fixed: "right", render: (_, row) => rowActions(row) }
         ]} />
       </ListSection>
     </QueryState>

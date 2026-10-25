@@ -30,7 +30,7 @@ export const ADMIN_TABS_METRICS = { frameInset: 10 } as const;
 export const ADMIN_LIST_METRICS = { queryMinWidth: 760, searchWidth: ADMIN_LIST_CONTROL_WIDTH.search, searchMinWidth: ADMIN_LIST_CONTROL_WIDTH.searchMin, statusWidth: ADMIN_LIST_CONTROL_WIDTH.select, statusMinWidth: ADMIN_LIST_CONTROL_WIDTH.select, categoryInlineMinWidth: 400, compactTriggerMaxWidth: 360, moreSearchWidth: 144, moreSearchCompactWidth: 64, filterPopoverWidth: 320 } as const;
 export const ADMIN_TABLE_COLUMN_WIDTH = {
   select: 52, identifier: 180, identity: 176, summary: 216, dateTime: 176, dateTimeWithNote: 184,
-  money: 120, status: 155, actions: 168, resources: 240, location: 210, security: 190, snapshot: 210,
+  money: 120, status: 155, actions: 208, resources: 240, location: 210, security: 190, snapshot: 210,
 } as const;
 /** Shared shell spacing, derived from the existing foundation scale. Never
  * compensate for the breadcrumb/title gap in individual business pages. */
@@ -47,7 +47,7 @@ export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */
 export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, accountLabelWidth: ADMIN_CONTROL_WIDTH.select } as const;
 /** One leading slot for table badges, financial values and row actions; not whole-row centering. */
-export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: 220, columnMinWidth: 56, expandWidth: 52 } as const;
+export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, expandWidth: 52 } as const;
 /** Structural loading geometry; controls/type/colors continue to use their existing roles. */
 export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: 80, textRadius: 4 } as const;
 export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 240, bulkMaxWidth: 760, previewMaxHeight: 320 } as const;

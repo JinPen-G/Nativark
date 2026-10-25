@@ -9,7 +9,8 @@ import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, DataTableStatus, Drawer, Select, Tabs } from "@/components/ui";
+import { Button, DataTableRowActions, DataTableStatus, Drawer, Select, Tabs } from "@/components/ui";
+import { BadgeCheck, Landmark, Users } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";
 import recordStyles from "@/components/RecordDetailLayout.module.css";
@@ -418,12 +419,11 @@ export function CorporateMembershipPage() {
         { title: t("企业管理员"), dataIndex: "adminCount" },
         { title: t("员工数"), dataIndex: "employeeCount" },
         { title: t("创建时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() },
-        { title: t("操作"), render: (_, row) => <Space wrap>
-          <Button type="link" disabled={!canView} onClick={() => navigate(`/membership/corporate/${encodeURIComponent(row.customerId)}`)}>{t("企业资料")}</Button>
-          <Button type="link" disabled={!canView || row.membershipStatus !== "active"} onClick={() => openEmployees(row)}>{t("管理员与员工")}</Button>
-          <Button type="link" disabled={!canGrant || row.membershipStatus !== "active"} onClick={() => { setSelected(row); grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button>
-          {canViewCredit && <Button type="link" onClick={() => openCredit(row)}>{t("授信账务")}</Button>}
-        </Space> },
+        { title: t("操作"), render: (_, row) => <DataTableRowActions details={() => navigate(`/membership/corporate/${encodeURIComponent(row.customerId)}`)} detailsDisabled={!canView} detailLabel={t("企业资料")} detailAccessibleLabel={`${row.corporateName ?? row.name} · ${t("企业资料")}`} menuLabel={`${row.corporateName ?? row.name} · ${t("更多操作")}`} actions={[
+          { id: "employees", label: t("管理员与员工"), icon: Users, disabled: !canView || row.membershipStatus !== "active", onSelect: () => openEmployees(row) },
+          { id: "grant", label: t("授予方案"), icon: BadgeCheck, disabled: !canGrant || row.membershipStatus !== "active", onSelect: () => { setSelected(row); grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); } },
+          ...(canViewCredit ? [{ id: "credit", label: t("授信账务"), icon: Landmark, onSelect: () => openCredit(row) }] : [])
+        ]} /> },
       ]} />
     </ListSection>
     </>}
