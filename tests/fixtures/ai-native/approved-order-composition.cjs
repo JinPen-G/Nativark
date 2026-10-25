@@ -143,8 +143,12 @@ async function approvedOrderHarness() {
   const auth = new AuthService({ getAuthSession: async () => state.session ? { id: 'session-a', userId: state.user.id, audience: 'operator', currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.member ? state.user : undefined, listUserWorkspaces: async () => [] },
   { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-composition-secret' : undefined });
+  // One request retains one credential. Regenerating its exp on every read
+  // falsely simulates identity replacement at each wall-clock second boundary
+  // (same flake class task-authorized-runner.cjs documents).
+  const tokenExpiresAt = Math.floor(Date.now() / 1000) + 600;
   const credentials = { current: async () => ({ requestId: 'composition-request', audience: 'operator',
-    authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: 'operator', exp: Math.floor(Date.now() / 1000) + 600 })}` }) };
+    authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: 'operator', exp: tokenExpiresAt })}` }) };
   const policy = { resolve: async (request, operation) => {
     state.trace.push(`policy.${operation}`);
     if (!state.policy || (operation === 'execute' && !state.entitled)) throw Error('synthetic policy denied');

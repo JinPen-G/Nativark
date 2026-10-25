@@ -1,8 +1,8 @@
 # AI Native：当前协作接续
 
 > 文档状态：当前接续入口，只覆盖最新现场和未完成事项，不追加历史流水。
-> 更新时间：2026-10-25。平台公共14动作契约已收口为`c57b342c`；本片补计数/成本10动作的共享请求响应、正式Guard/OpenAPI和原键读取指引。B固定整合`f7298c43`及计数核心修复`147d9332`、`2c0bac7d`保留。原28项64.3%、ENTRY52.8%、正式0/28保持，原红测及正式装配/验收缺口尚在。
-> **Claude A当前认领原runner/步骤事务、多轮输入及审批/订单场景；B本批固定交付已停止写入。** 本次只整合B `1524161a`，未同步或移动辅助树HEAD，A后继成果不自动接收。Codex A/B继续暂停。不启动旧心跳，不合main、推送或启用生产。
+> 更新时间：2026-10-25。本片固定接收Claude A `4b0b38ea`的执行证据、报价/场景修复，并补断线投递的默认拒绝边界及有限等待；既有平台14动作`c57b342c`、计数/成本10动作`5742521d`及B整合`f7298c43`保留。原28项64.3%、ENTRY52.8%、正式0/28保持；标准装配、后续闭环和适用G4尚未齐备。
+> **A本批固定交付已复核，不自动接收后继活动HEAD；B此前固定交付已整合。** 未同步或移动辅助树，不恢复其心跳或自动派新包。主线继续公共集成，其他后继任务仍须确认唯一作者。Codex A/B继续暂停，不合main、推送或启用生产。
 
 ## 权威依据
 
@@ -14,11 +14,11 @@
 ## 工作树与写入归属
 
 本会话唯一写入树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`。
-分支：`ai/ai-native-contracts-s01-20261002`。主线负责既有交付复查、计数/计价投影及公共接点，保留AppModule、中央provider/shared出口/OpenAPI、Auth/Guard和最终整合。A当前认领runner/步骤事务/输入/审批及相关场景，不与主线重复修旧租约红测；B认领平台请求/知识/隐私/事件消费者。主线本片对`platform-probe.authority.ts`的窄修复需在下次B固定整合时保留，不能被旧上下文适配覆盖。主线另有后台/Harness作者独立WIP，不夹带提交。
+分支：`ai/ai-native-contracts-s01-20261002`。主线负责既有交付复查、计数/计价投影及公共接点，保留AppModule、中央provider/shared出口/OpenAPI、Auth/Guard和最终整合。A本批runner/步骤事务与报价场景修复已按固定提交接回；B平台请求交付此前已接。后继批次先确认唯一作者，不重复修已收敛红测或追活动HEAD。主线对`platform-probe.authority.ts`及本次中止/等待边界的修复需在后继整合保留，不能被旧适配覆盖。主线另有后台/Harness作者独立WIP，不夹带提交。
 
-原服务端与客户端作者的代码和归属分别保留；本次仅统一保全和同步，不把继承成果改称本轮功能实现，也不续接旧会话的执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
+原服务端与客户端作者的代码和归属分别保留；此前保全成果不改称本轮功能实现，也不据旧会话记录续接其执行权。此前未提交的 `clients/`、后台agent-desktop、Auth/HTTP/Router/Shell、shared出口、Agent接入改造四册，以及服务端/预算/隐私/支付/Core等成果均已纳入上述保全提交。Harness固定上游源码、许可和来源记录保留；依赖、缓存、构建产物、output及私有Prisma产物未纳入。
 
-辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。本次同步仅快进源码到`de9b89b0`，原output、stash、依赖、缓存和私有client保留，不代表生成物或数据库已同步。两线已在各自树续作，主线后续修复不自动同步，不追活动HEAD；以新固定交付核对等价依赖再整合。
+辅助树位于同级目录：Claude A为`claude-ai-native-lane-a` / `ai/claude-ai-native-lane-a-20261007`，Claude B为`claude-ai-native-lane-b` / `ai/claude-ai-native-lane-b-20261007`。本轮仅接收固定交付，未快进辅助树或移动其HEAD；原output、stash、依赖、缓存和私有client保留，不代表生成物或数据库已同步。主线后续修复尚须辅助线下次开工安全同步，不追活动HEAD，不覆盖其新WIP；以新固定交付核对等价依赖再整合。
 
 开工仍须核对 branch、HEAD、status、index、MERGE_HEAD、CHERRY_PICK_HEAD、未提交归属及写入者。本次负责人明确授权在全部停写后提交保全并同步，既有正式依据内容原样保留，未重排任务或上调进度。未跟踪output、保全副本、旧patch、私有Prisma client及锁继续保留，不清理或附带提交；后续新WIP必须重新核对，不能据本次清洁现场覆盖。
 
@@ -37,7 +37,8 @@
 - 平台历史与资金恢复现在消费组合已提供的平台task authority及同一Gateway账本的financialRecovery，不再构造workspace-only授权/租户session；缺平台依赖拒绝，不回退到租户。正式平台审计落点和标准AppModule/provider依赖仍需提供，缺audit在admission/reserve前拒绝。迁移未执行；知识正式authority、对象存储ACL/撤回删除传播、多实例缓存及新增可靠业务事件生产者仍缺。当前历史reader仍要求原管理权限，不能宣称仅view权限已打通全部历史消费。
 - 再审修复的消费注意：计数HTTP的原价格/上界读取现复用既有安全摘要及共享schema，不再返回含配置引用的内部证据；`textDispatch`新输出为`not_attested`，旧`not_started`仅兼容解析，不授重试。历史计数从原reservation取计价版本；真正缺行与存储失败分开。未验证的结构化输出计数在准入前拒绝，不静默丢schema。平台实际authority接受actor-only公共上下文并拒绝租户混入；文本/视觉协议链及音频授权绑定已离线核验，音频本片未做传输验收。
 - 计数派发顺序已收紧：原键唯一claim仍先落库，连接解析完成后才经原budget.dispatch复验任务/run/step/lease再POST；取消或当前管理授权失效会阻止发送。命令等待及原收据账务重放共用GatewayDeadline，调用预留写入前即标记可能已提交；取消/超时只终止等待，不证明未派发、自动退款或允许重发。6个针对性离线场景通过，未新增测试脚本。
-- 尚有红测：本轮实际复跑human-quote-selection为6/9、original-scene-host为14/19、inspection-media-submission为14/17；保留全部失败断言。媒体失败涉及原步骤事务递增run revision后再用旧lease复核，相关仓储/输入来源未被A/B固定提交修改；需按真实事务视图修正，不能仅豁免同fence的revision。其余报价/场景夹具与正式依赖仍须收敛，不能宣称全链完成。
+- A执行线固定`135a8418`→`4da4aa96`→`6066793a`→`4b0b38ea`已接：步骤/计划原证据使用转换事务视图及精确CAS后修订，不豁免fence/revision；同客户、同履约方式的重新确认保留配送地址，真正切换仍清除并重验；原有夹具补正式有界端口及稳定凭证。主线另修两处取消边界：公共HTTP默认不进入已断开的普通回调，仅原模型的信号门/应答收据宿主显式选择投递；已中止的原请求整条不启动/收据路径仍受5秒依赖上限，超时保持unknown并关闭本地凭据。
+- 原登记三套红测本片复验为human-quote-selection 9/9、original-scene-host 19/19、inspection-media-submission 17/17；另正式报价13/13，合计58/58，fail/skip/todo均0。未重复作者119项全量；stdin另复现并修复2处边界，补验迟到等待/凭据关闭。后续仍需多轮输入→批准→Core→恢复的剩余正式消费、计数/平台标准装配、多行/超过8字段澄清的实际支持及适用G4，不把本阶段判为整链完结。
 - 本片验证为主线源码、实际服务/仓储与串行DB/外部端口替身；两线原有两轮审查报告不能替代本次复核，也不能代替MySQL锁/供应商/浏览器/微信或原G4。两线工作树和全部output保留，未经新授权不追活动HEAD、不直接写辅助树；正式百分比未跨档不调整。
 
 ### 本轮已接收的认领范围：后续先核对实际源码，不重复派工

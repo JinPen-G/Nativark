@@ -175,6 +175,11 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     return { resultId: proof.artifact.id, contentHash: proof.artifact.contentHash,
       invocation: result.requestId, inputHash: frozen.fingerprint };
   };
+  // This chain's resolve keeps the one-argument signature on purpose: its
+  // evidence readers only touch committed worker-written rows, so the
+  // transition transaction's uncommitted run CAS is irrelevant here and the
+  // unbumped lease matches the committed revision. Consuming the transition tx
+  // without teaching these reads the post-CAS revision would false-deny.
   const transitionAuthority: AiStepTransitionAuthority = { resolve: async command => {
     command = structuredClone(command);
     const access = await model.tasks.resolveAccess(command.taskId, 'transition_task');

@@ -16,6 +16,20 @@ async function setup(categoryCode='camera'){
  const h=await authorizedRunnerHarness();h.identity.user.tenantId='tenant_001';h.identity.user.permissions.push('rental-core:catalog:view','rental-os:order:create');
  const config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:'workspace-a',tenantId:'tenant_001',categoryCode,isDefault:true}];
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore());await core.onApplicationBootstrap();
+ // Declared synthetic pagination endpoint over the SAME seeded synthetic
+ // catalog: deterministic id-ordered pages with the formal cursor/truncated
+ // contract for the persisted port (AI reads are bounded-only).
+ const {requestFingerprint}=require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+ config.listItemGroupsPage=async(tenantId,workspaceId,query)=>{
+  const seeded=core.listItemGroups(tenantId);
+  const all=seeded.filter(row=>(!query.itemGroupId||row.id===query.itemGroupId)
+    &&(!query.name||row.name===query.name)&&(!query.cursor||row.id>query.cursor))
+   .sort((left,right)=>(left.id<right.id?-1:left.id>right.id?1:0));
+  const rows=all.slice(0,query.limit),truncated=all.length>query.limit;
+  return {rows,truncated,nextCursor:truncated?rows[rows.length-1].id:null,
+   source:'persisted_workspace_configuration',
+   configurationVersion:requestFingerprint(seeded.map(row=>[row.id,row.name,row.status,row.unit]))};
+ };
  const bc={profile:core.getProfile('tenant_001'),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code===categoryCode),settings:core.getBusinessSettings('tenant_001'),groups:core.listItemGroups('tenant_001'),locations:core.listLocations('tenant_001'),operators:core.listOperators('tenant_001'),couponTemplates:[]};
  const customers=[{id:'customer-a',name:'Synthetic same name',phoneMasked:'138****0000',membership:{status:'active'}},{id:'customer-b',name:'Synthetic same name',phoneMasked:'139****0000',membership:{status:'active'}}];
  const memberships=new MembershipService({customerProfile:{findMany:async q=>structuredClone(customers.filter(row =>
@@ -79,7 +93,16 @@ test('actionable clarification to explicit resource IDs rereads original readers
  const confirmed=applyOriginalQuoteAnswers(selected,[{contract,answers}]);
  assert.notEqual(confirmed.selectionRevision,selected.selectionRevision);
  assert.equal(selected.selectionRevision,narrowed.selectionRevision);
- assert.equal((await h.service.prepare(confirmed)).status,'needs_confirmation');
+ // Answering the stale contract normalizes the candidate (the untrusted name
+ // is dropped) and the configuration has changed, so the server demands one
+ // more reread of the current readers before the candidate can confirm.
+ const afterStale=await h.service.prepare(confirmed);
+ assert.equal(afterStale.status,'missing_input');
+ assert.equal(afterStale.clarifications[0].action,'reread_and_reconfirm');
+ const settledContract=originalQuoteAnswerContract(confirmed,afterStale,'Reconfirm under the current configuration');
+ const settled=applyOriginalQuoteAnswers(confirmed,[{contract:settledContract,
+   answers:settledContract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:field.options[0].value}))}]);
+ assert.equal((await h.service.prepare(settled)).status,'needs_confirmation');
  const usage=await setup('construction');
  const invalidUnit={...usage.candidate,items:[{...usage.candidate.items[0],pricingUnit:'night'}]};
  const unitChoice=await usage.service.prepare(invalidUnit);
@@ -89,12 +112,31 @@ test('actionable clarification to explicit resource IDs rereads original readers
  const input=applyOriginalQuoteAnswers(invalidUnit,[{contract:unitContract,answers:[{fieldId:'pricing_unit_selection',value:'usage'}]}]);
  const needsUsage=await usage.service.prepare(input);
  assert.ok(needsUsage.missingFields.includes('items.0.usageQuantity'));
- const usageContract=originalQuoteAnswerContract(input,needsUsage,'Supply actual planned usage, not a price');
- assert.ok(usageContract.fields.some(field=>field.fieldId==='usage_quantity'));
- const usageAnswers=usageContract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:field.fieldId==='usage_quantity'?'1.5':field.options[0].value}));
- const supplied=applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers}]);
- assert.equal((await usage.service.prepare(supplied)).request.lines[0].usageQuantity,1.5);
+ // Re-answering a round shifts the candidate fingerprint (the untrusted name
+ // is normalized away) and the unit must be re-bound before the usage
+ // quantity is asked, so the contract re-offers current choices until the
+ // exact candidate settles. Every round is answered with the candidate's own
+ // current values and each round must re-offer them.
+ const answerCurrent=(candidateValue,field)=>{
+  const current=field.fieldId==='usage_quantity'?'1.5':field.fieldId==='pricing_unit_selection'?candidateValue.items[0].pricingUnit
+   :field.fieldId==='item_selection'?candidateValue.items[0].itemGroupId:field.fieldId==='customer_selection'?candidateValue.customerId
+   :field.fieldId==='pickup_location'?candidateValue.locationId:field.fieldId==='fulfillment_selection'?candidateValue.fulfillmentMode
+   :field.fieldId==='delivery_address_selection'?candidateValue.deliveryAddressId:undefined;
+  if(!field.options) return current;
+  return field.options.some(option=>option.value===current)?current:field.options[0].value;
+ };
+ let usageCandidate=input,usagePreparation=await usage.service.prepare(usageCandidate),usageAsked=false;
+ for(let round=0;round<6&&usagePreparation.status==='missing_input';round++){
+  const roundContract=originalQuoteAnswerContract(usageCandidate,usagePreparation,'Reconfirm the usage candidate');
+  if(roundContract.fields.some(field=>field.fieldId==='usage_quantity')) usageAsked=true;
+  usageCandidate=applyOriginalQuoteAnswers(usageCandidate,[{contract:roundContract,
+   answers:roundContract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:answerCurrent(usageCandidate,field)}))}]);
+  usagePreparation=await usage.service.prepare(usageCandidate);
+ }
+ assert.equal(usageAsked,true);
+ assert.equal(usagePreparation.request.lines[0].usageQuantity,1.5);
  assert.equal(input.items[0].usageQuantity,undefined);
+ const supplied=usageCandidate;
  const previousRates=usage.readers.rates.read;
  usage.readers.rates.read=async()=> (await previousRates()).map(row=>({...row,baseAmount:101}));
  const rateChanged=await usage.service.prepare(supplied);
@@ -104,7 +146,12 @@ test('actionable clarification to explicit resource IDs rereads original readers
  const timeBased=applyOriginalQuoteAnswers(input,[{contract:reselect,answers:reselect.fields.filter(field=>field.required)
    .map(field=>({fieldId:field.fieldId,value:field.options[0].value}))}]);
  assert.notEqual(timeBased.items[0].pricingUnit,'usage');assert.equal(timeBased.items[0].usageQuantity,undefined);
- assert.equal((await usage.service.prepare(timeBased)).status,'needs_confirmation');
+ // The switched unit joins the candidate fingerprint: one reconfirmation with
+ // the candidate's own current values re-binds it before the request derives.
+ const unitRound=originalQuoteAnswerContract(timeBased,await usage.service.prepare(timeBased),'Reconfirm the switched unit');
+ const unitSettled=applyOriginalQuoteAnswers(timeBased,[{contract:unitRound,answers:unitRound.fields.filter(field=>field.required)
+   .map(field=>({fieldId:field.fieldId,value:answerCurrent(timeBased,field)}))}]);
+ assert.equal((await usage.service.prepare(unitSettled)).status,'needs_confirmation');
  usage.readers.rates.read=async()=>[];
  assert.equal((await usage.service.prepare(supplied)).reason,'current_product_rates_unavailable');
  for(const value of ['-1','NaN','1e3','1000001','0.10000000000000000001'])assert.throws(()=>applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers.map(answer=>answer.fieldId==='usage_quantity'?{...answer,value}:answer)}]));
@@ -131,7 +178,24 @@ test('delivery address selection flows through original answers and must be rese
  assert.deepEqual(contract.fields.find(f=>f.fieldId==='delivery_address_selection').options.map(o=>o.value),['address-a']);
  const selected=applyOriginalQuoteAnswers(input,[{contract,answers:[{fieldId:'delivery_address_selection',value:'address-a'}]}]);
  assert.equal(input.deliveryAddressId,undefined);
- const ready=await h.service.prepare(selected);
+ // The selected address joins the candidate fingerprint and the untrusted name
+ // normalization shifts it once more: the contract re-offers the candidate's
+ // own current values until the exact candidate is reconfirmed, keeping the
+ // confirmed address bound throughout.
+ const answerCurrent17=(candidateValue,field)=>{
+  const current=field.fieldId==='delivery_address_selection'?'address-a':field.fieldId==='fulfillment_selection'?candidateValue.fulfillmentMode
+   :field.fieldId==='pricing_unit_selection'?candidateValue.items[0].pricingUnit:field.fieldId==='item_selection'?candidateValue.items[0].itemGroupId
+   :field.fieldId==='customer_selection'?candidateValue.customerId:field.fieldId==='pickup_location'?candidateValue.locationId:undefined;
+  if(!field.options) return current;
+  return field.options.some(option=>option.value===current)?current:field.options[0].value;
+ };
+ let addressCandidate=selected,ready=await h.service.prepare(addressCandidate);
+ for(let round=0;round<6&&ready.status==='missing_input';round++){
+  const roundContract=originalQuoteAnswerContract(addressCandidate,ready,'Reconfirm the chosen address');
+  addressCandidate=applyOriginalQuoteAnswers(addressCandidate,[{contract:roundContract,
+   answers:roundContract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:answerCurrent17(addressCandidate,field)}))}]);
+  ready=await h.service.prepare(addressCandidate);
+ }
  assert.equal(ready.status,'needs_confirmation');assert.equal(ready.request.deliveryAddressId,'address-a');
  assert.match(ready.addressFingerprint,/^[a-f0-9]{64}$/);assert.equal(ready.reservation,'not_reserved');
  row.revision++;

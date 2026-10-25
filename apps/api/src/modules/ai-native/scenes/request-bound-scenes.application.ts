@@ -140,8 +140,18 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
     const command = structuredClone(value), credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
     let active = true;
     const close = () => { active = false; };
-    lifetime?.signal?.addEventListener('abort', close, { once: true });
-    if (lifetime?.signal?.aborted) close();
+    // A request that already arrived aborted still delivers its explicit
+    // submission to the application: the application's own abort checks own the
+    // not-started outcomes (a durable answer receipt with a suppressed
+    // continuation, a plain not_started, or an idempotent original-request
+    // write that replays its persisted receipt). Keep its dependency bound:
+    // a disconnected host still cannot wait forever or retain credentials
+    // indefinitely. Only the wait ignores the already-aborted signal; the
+    // application receives that original signal and must suppress execution.
+    // A timeout is still unknown for writes, never proof of rollback.
+    const deadOnArrival = Boolean(lifetime?.signal?.aborted);
+    const waitSignal = deadOnArrival ? undefined : lifetime?.signal;
+    if (!deadOnArrival) lifetime?.signal?.addEventListener('abort', close, { once: true });
     try {
       const operation = () => runWithRequestIdentity({}, async () => {
         const assemble = () => Promise.resolve(compose({ ...server, credentials: {
@@ -153,8 +163,8 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
         // Original execution preflight is read-only. Bound identity/material
         // resolution without imposing this five-second limit on a valid run.
         // Abort revokes request-local credentials before any late consume.
-        const app = lifetime?.preflightOnly
-          ? await waitForTaskApplicationDependency(assemble, false, lifetime.signal) : await assemble();
+        const app = !deadOnArrival && lifetime?.preflightOnly
+          ? await waitForTaskApplicationDependency(assemble, false, waitSignal) : await assemble();
         if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return consume(app, command);
       });
@@ -162,11 +172,13 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       // request. Execution bounds only preflight here and retains the runner's
       // own limits after that. An abandoned wait
       // revokes these credentials, never proves an original write rolled back.
-      return lifetime && !lifetime.preflightOnly
-        ? await waitForTaskApplicationDependency(operation, lifetime.write, lifetime.signal) : await operation();
+      // An already-aborted execution cannot enter a long-running runner:
+      // bound the whole not-started/receipt path, including its consumer.
+      return lifetime && (deadOnArrival || !lifetime.preflightOnly)
+        ? await waitForTaskApplicationDependency(operation, lifetime.write, waitSignal) : await operation();
     } finally {
       active = false;
-      lifetime?.signal?.removeEventListener('abort', close);
+      if (!deadOnArrival) lifetime?.signal?.removeEventListener('abort', close);
     }
   };
 }

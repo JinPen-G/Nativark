@@ -420,20 +420,31 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   /** Observe an already registered action under today's independent read
    * permission. Original plan/input hashes, task owner and held generation
    * remain mandatory; this proof cannot register or execute anything new. */
-  async resolveOriginal(raw: Readonly<AiStepRegistrationCommand>): Promise<AiStepOriginalRegistrationGrant> {
+  async resolveOriginal(raw: Readonly<AiStepRegistrationCommand>, tx?: Prisma.TransactionClient): Promise<AiStepOriginalRegistrationGrant> {
     const command = structuredClone(raw);
     const context = structuredClone(await this.authorization.resolve(command.taskId, 'read_step_terminal'));
     const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
-    const observed = await this.db.$transaction(async tx => {
-      const task = await tx.aiTask.findFirst({ where: access.where });
+    // Inside the transition transaction the caller's tx is consumed directly:
+    // the transition has already CAS-incremented the run revision, and a
+    // separate snapshot would see the pre-transition lease and falsely deny
+    // the very generation whose result is being committed. Standalone
+    // callers (registration-time revalidation) keep their own
+    // RepeatableRead snapshot.
+    const readView = async (db: Prisma.TransactionClient) => {
+      const task = await db.aiTask.findFirst({ where: access.where });
       if (!task || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId || task.audience !== access.audience
         || task.archivedAt !== null) throw denied();
-      const run = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: command.lease.runId } });
+      // The transition caller consumes its own transaction (whose run CAS has
+      // produced the exact post-CAS revision carried in command.lease) and
+      // this read shares that view. Standalone callers open their own
+      // RepeatableRead snapshot over the committed lease. Either way this
+      // exact revision is the only acceptable one.
+      const run = await db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: command.lease.runId } });
       if (!run || run.actorKind !== access.actorKind || run.actorId !== access.actorId || run.leaseOwnerId !== command.lease.holderId
         || run.revision !== command.lease.revision || run.fencingToken.toFixed(0) !== command.lease.fencingToken
         || run.status !== 'RUNNING' || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()) throw denied();
       const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
-      const stored = await tx.aiTaskRunPlan.findFirst({ where: key });
+      const stored = await db.aiTaskRunPlan.findFirst({ where: key });
       if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== key.runId
         || !/^[a-f0-9]{64}$/u.test(stored.authorityHash) || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
       const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
@@ -442,19 +453,22 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         || selected[0].toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
       const source = selected[0].toolCode === this.toolCode ? this : this.planSources?.get(selected[0].toolCode as PersistedTaskInputTool);
       if (!source) throw denied();
-      const input = await source.input(await tx.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
+      const input = await source.input(await db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
         { ...key, registrationRef: command.registrationRef }, true);
       if (stored.policyVersion !== `scene-policy-${input.policyRevision}`) throw denied();
       const inputRef = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id;
       const fingerprint = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint;
       const actionId = aiStepActionId(access.scope, task.id, command.registrationRef);
-      const step = await tx.aiStep.findFirst({ where: { ...key, actionId, toolCode: source.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
+      const step = await db.aiStep.findFirst({ where: { ...key, actionId, toolCode: source.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
         inputRef, requestFingerprint: fingerprint } });
       if (!step || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId || step.actionId !== actionId
         || step.inputRef !== inputRef || step.requestFingerprint !== fingerprint || step.toolCode !== source.toolCode
         || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
       return { inputRef, fingerprint, planHash: stored.planHash, inputHash: input.fingerprint, stepId: step.id, toolCode: source.toolCode };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    };
+    const observed = tx ? await readView(tx)
+      : await this.db.$transaction(readView, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        maxWait: 2500, timeout: 5000 });
     const current = await this.authorization.resolve(command.taskId, 'read_step_terminal');
     if (identity(current) !== identity(context)) throw denied();
     return { context: structuredClone(current), registrationAllowed: false, taskId: command.taskId,

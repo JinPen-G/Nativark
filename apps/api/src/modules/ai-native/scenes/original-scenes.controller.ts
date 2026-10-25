@@ -317,7 +317,9 @@ export class AiOriginalSceneRecoveryController extends AiOriginalSceneObservatio
 
 /** Standard quote execution actions only. Existing observation routes remain
  * on their independent read host; no duplicate route or legacy driver is mounted.
- * The server provider selects one quote runner/Gateway, never caller settings. */
+ * The server provider selects one quote runner/Gateway, never caller settings.
+ * Aborted delivery is explicitly opted in only for runner/input methods whose
+ * application owns not-started outcomes and durable answer receipts. */
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
 export class AiOriginalQuoteModelExecutionController {
   constructor(@Inject(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS)
@@ -327,7 +329,7 @@ export class AiOriginalQuoteModelExecutionController {
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelStartResponseDraft',
-      await withRequestAbort(request, signal => this.model.start(request, body, signal)), true), 'read_execution');
+      await withRequestAbort(request, signal => this.model.start(request, body, signal), { deliverAborted: true }), true), 'read_execution');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.refreshInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   refreshInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -341,27 +343,27 @@ export class AiOriginalQuoteModelExecutionController {
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume) @HttpCode(200) @Header('Cache-Control', 'no-store')
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelResumeResponseDraft',
-      await withRequestAbort(request, signal => this.model.resume(request, body, signal)), true), 'read_answer');
+      await withRequestAbort(request, signal => this.model.resume(request, body, signal), { deliverAborted: true }), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continueAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelContinueAnswerResponseDraft',
-      await withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), true), 'read_answer');
+      await withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal), { deliverAborted: true }), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelReconcileResponseDraft',
-      await withRequestAbort(request, signal => this.model.reconcile(request, body, signal)), true), 'read_execution');
+      await withRequestAbort(request, signal => this.model.reconcile(request, body, signal), { deliverAborted: true }), true), 'read_execution');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.recover) @HttpCode(200) @Header('Cache-Control', 'no-store')
   recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelExecutionDraft',
-      await withRequestAbort(request, signal => this.model.recover(request, body, signal)), true), 'read_execution');
+      await withRequestAbort(request, signal => this.model.recover(request, body, signal), { deliverAborted: true }), true), 'read_execution');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.takeover) @HttpCode(200) @Header('Cache-Control', 'no-store')
   takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelExecutionDraft',
-      await withRequestAbort(request, signal => this.model.takeover(request, body, signal)), true), 'read_takeover_receipt');
+      await withRequestAbort(request, signal => this.model.takeover(request, body, signal), { deliverAborted: true }), true), 'read_takeover_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -398,7 +400,7 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
         'readClarifiedQuoteReceipt' | 'continueAnswer' | 'reconcile' | 'recover' | 'readExecution' | 'takeover' | 'requestCancel'>) { super(model); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.start)
   start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal), { deliverAborted: true }));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readInput)
   readInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readInput(request, body)); }
@@ -410,11 +412,11 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume)
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal)), 'read_answer');
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal), { deliverAborted: true }), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer)
   continueAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), 'read_answer');
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal), { deliverAborted: true }), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation)
   readQuotePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -430,7 +432,7 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile)
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcile(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcile(request, body, signal), { deliverAborted: true }));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readExecution)
   readExecution(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -439,11 +441,11 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
   /** Reclaim the original persisted run only. No fresh plan or invocation. */
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.recover)
   recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.recover(request, body, signal)), 'read_execution');
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.recover(request, body, signal), { deliverAborted: true }), 'read_execution');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.takeover)
   takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal)), 'read_takeover_receipt');
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal), { deliverAborted: true }), 'read_takeover_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel)
   requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {

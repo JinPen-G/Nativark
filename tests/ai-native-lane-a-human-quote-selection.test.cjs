@@ -76,7 +76,8 @@ test('selected quote task HTTP uses normal runner and current human decision wit
   for (const mode of ['approve', 'reject', 'cancel', 'unknown']) {
     const h = await selectedOrderHarness({ initializeOnly: true });
     const configuration = { holderId: 'selected-host', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
-      audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } };
+      audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } };
     const { credentials, originals, ...dependencies } = h.sceneDependencies;
     Object.assign(dependencies, { creationRules: configuration.creationRules, memberships: configuration.memberships });
     let ticks = 0;
@@ -327,10 +328,17 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
   const { credentials, originals, ...dependencies } = h.sceneDependencies;
+  // The scene assembly requires the declared creation rules and bounded
+  // member-candidate port even when the reprepare configuration is separate.
+  Object.assign(dependencies, { creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
+    audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
+    memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const requests = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application').composeRequestBoundHumanQuoteOrder(
     dependencies, { enabled: true, audience: 'operator' }, { holderId: 'worker-a',
       creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1, audiences: ['operator'],
-        requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } });
+        requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
+      memberships: { listPersonalOptions: async () => [], listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const request = { headers: { authorization: (await credentials.current()).authorization } };
   assert.equal(requests.submitSelectedOrder, undefined);
   const humanController = new (require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller').AiHumanQuoteOrderController)(requests);
@@ -451,6 +459,9 @@ test('selected new human materials reprepare through the formal factory and reta
   const { AiHumanQuoteSelectionModule } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
   const h = await selectedReprepareHarness();
   const { credentials, originals, reprepareServices, ...dependencies } = h.dependencies;
+  Object.assign(dependencies, { creationRules: h.configuration.creationRules,
+    memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const options = { enabled: true, audience: 'operator' };
   const module = AiHumanQuoteSelectionModule.registerHttpApplication(dependencies, options, h.configuration);
   const { AiHumanQuoteOrderController, AI_HUMAN_QUOTE_ORDER_REQUESTS } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');

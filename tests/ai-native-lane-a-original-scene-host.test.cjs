@@ -438,18 +438,35 @@ test('original quote host uses persisted authorized clarification facts instead 
   await assert.rejects(host().resume({ original: h.reference, submission }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   assert.equal(h.execution.sent.length, 1);
   h.b.h.identity.session = true;
+  // Any answer round changes the candidate fingerprint: the contract re-offers
+  // the current authorized choices (including the explicit pricing unit) until
+  // the exact current candidate is reconfirmed. Each round runs one model call.
+  const answersFor = (contract, key) => ({ draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: contract.requestId, expectedRevision: contract.revision, submissionKey: key,
+    answers: contract.contract.fields.map(field=>({fieldId:field.fieldId,value:field.kind==='choice'?field.options[0].value
+      :field.kind==='integer'?2:field.fieldId==='starts_at'?'2027-02-01T00:00:00.000Z'
+      :field.fieldId==='ends_at'?'2027-02-02T00:00:00.000Z':'Please explain which absolute dates and product I need to select.'})) });
   const resumed = await host().resume({ original: h.reference, submission });
-  assert.equal(resumed.continuation.outcome.status, 'succeeded', JSON.stringify(resumed));
+  assert.equal(resumed.continuation.outcome.status, 'paused', JSON.stringify(resumed));
   assert.equal(h.execution.sent.length, 2);
+  const reconfirm = await host().readInput(h.reference);
+  assert.equal(reconfirm.contract.code, 'original_quote_parameters');
+  assert.ok(reconfirm.contract.fields.some(field => field.fieldId === 'pricing_unit_selection'));
+  await host().resume({ original: h.reference, submission: answersFor(reconfirm, 'quote-context-reconfirm') });
+  const exact = await host().readInput(h.reference);
+  assert.equal(exact.contract.code, 'original_quote_parameters');
+  const finished = await host().resume({ original: h.reference, submission: answersFor(exact, 'quote-context-exact') });
+  assert.equal(finished.continuation.outcome.status, 'succeeded', JSON.stringify(finished));
+  assert.equal(h.execution.sent.length, 4);
   const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
   assert.equal(read.facts.payload.facts.status, 'missing_input');
-  assert.equal(h.state.aiTaskActionInput.length, 2);
+  assert.equal(h.state.aiTaskActionInput.length, 4);
   assert.equal(h.state.aiTaskActionInput[0].fingerprint, originalModelFingerprint);
   assert.equal(JSON.parse(h.execution.sent[1].messages.at(-1).content).facts.payload.facts.selectionRevision, pending.contract.version);
   assert.doesNotMatch(h.execution.sent[1].messages.at(-1).content, /Synthetic authorized explanation/);
   assert.match(h.execution.sent[1].messages.at(-1).content, /Please explain which absolute dates/);
   assert.equal(h.state.aiTaskExecutionBudget.length, 1);
-  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 4n);
   assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
   const prepared = await host().readQuotePreparation({ original: h.reference, submission });
   assert.equal(prepared.candidate.fulfillmentMode, 'store_pickup_return');
@@ -729,15 +746,29 @@ test('opt-in model controller executes persisted quote clarification and denies 
   assert.equal(h.execution.sent.length,1);
   await assert.rejects(controller.readAnswer(h.request,{original:h.reference,submission:{...submission,taskId:'wrong-task'}}),e=>e.getStatus()===403);
   request.aborted=false;
+  // The confirmed quote freezes its own candidate; the run continuation still
+  // re-offers the current authorized choices until the exact fingerprint is
+  // reconfirmed, one model call per answer round.
+  const answersFor=(contract,key)=>({draftVersion:AI_TASK_INPUT_DRAFT_VERSION,taskId:h.created.task.taskId,
+    requestId:contract.requestId,expectedRevision:contract.revision,submissionKey:key,
+    answers:contract.contract.fields.map(field=>({fieldId:field.fieldId,value:field.kind==='choice'?field.options[0].value
+      :field.kind==='integer'?2:field.fieldId==='starts_at'?'2027-02-01T00:00:00.000Z'
+      :field.fieldId==='ends_at'?'2027-02-02T00:00:00.000Z':'Explain the required fields without choosing for me.'}))});
   const continued=await controller.continueAnswer(request,{original:h.reference,submission});
-  assert.equal(continued.execution.outcome.status,'succeeded');
+  assert.equal(continued.execution.outcome.status,'paused',JSON.stringify(continued));
   assert.equal(continued.receipt.runId,received.runId);
   assert.equal(request.listenerCount('aborted'),0);
-  assert.equal(h.state.aiTaskExecutionBudget.length,1);assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls,2n);
+  // The confirmed quote froze its candidate and the pricing unit was already
+  // explicit in round one, so one reconfirmation of the current fingerprint
+  // converges; the reconfirmation round still runs its own model call.
+  const finished=await controller.resume(h.request,{original:h.reference,
+    submission:answersFor(await controller.readInput(h.request,h.reference),'reconfirm-2')});
+  assert.equal(finished.continuation.outcome.status,'succeeded',JSON.stringify(finished));
+  assert.equal(h.state.aiTaskExecutionBudget.length,1);assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls,3n);
   await assert.rejects(controller.continueAnswer(request,{original:h.reference,submission}),e=>e.getStatus()===403);
   const read = await controller.readModelResult(h.request, { original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
   assert.equal(read.status, 'available'); assert.equal(read.facts.payload.facts.status, 'missing_input');
-  assert.equal(h.execution.sent.length, 2);
+  assert.equal(h.execution.sent.length, 3);
   const aggregateCommand = { kind: 'original', original: h.reference, taskId: h.created.task.taskId,
     runId: read.runId, resultId: read.resultId };
   assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelTaskSceneDraft)(aggregateCommand), true);
@@ -750,10 +781,10 @@ test('opt-in model controller executes persisted quote clarification and denies 
   assert.equal(aggregate.snapshot.availability, 'available');
   const events = await controller.readTaskEvents(h.request, { original: h.reference, after: '0', limit: 10 });
   assert.equal(events.taskId, h.created.task.taskId);
-  assert.equal(h.execution.sent.length, 2);
+  assert.equal(h.execution.sent.length, 3);
   await assert.rejects(controller.readTaskScene(h.request, { ...aggregateCommand, runId: 'wrong-run' }), e => e.getStatus() === 403);
   assert.equal((await controller.resume(h.request, { original: h.reference, submission })).continuation.reason, 'receipt_replayed');
-  assert.equal(h.execution.sent.length, 2);
+  assert.equal(h.execution.sent.length, 3);
   await assert.rejects(controller.readInput({ headers: {} }, h.reference), e => e.getStatus() === 403);
   h.b.h.identity.session = false;
   await assert.rejects(controller.readTaskScene(h.request, aggregateCommand), e => e.getStatus() === 403);
@@ -791,7 +822,10 @@ test('request-bound model runs original scenes and reads knowledge results witho
     if (sceneCode === 'quote_clarification') {
       const review = await app.reviewQuote(request, reference);
       assert.equal(review.quotePersistence, 'not_attempted');
-      await assert.rejects(app.readQuoteReceipt(request, reference), e => e.code === 'FORBIDDEN');
+      // A missing exact-operation quote lookup is an explicit unavailable
+      // receipt with unknown persistence — never a fabricated quote.
+      const absent = await app.readQuoteReceipt(request, reference);
+      assert.equal(absent.result.status, 'unavailable'); assert.equal(absent.result.quote ?? null, null);
       // The Core method is real; only the missing exact-operation database
       // lookup is supplied. No quote/result or permission is fabricated.
       h.b.businessFacts.findQuoteForOriginalReference = async (tenantId, key) => {
@@ -895,8 +929,10 @@ test('request-bound model keeps unknown receipts and cancellation distinct from 
     audit: { async append() { throw new Error('must not call Gateway'); } } };
   const formalOptions = { enabled: true, audience: 'operator', host: aborted.options.host };
   const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
-  const records = createTaskInputStore({ aiTenantModelConfiguration: [], systemParameterSet: [], aiPlatformModelConnection: [], aiProviderCapabilityEvidence: [] });
+  const records = createTaskInputStore({ aiTenantModelConfiguration: [], systemParameterSet: [], aiPlatformModelConnection: [], aiProviderCapabilityEvidence: [],
+    operationLog: [] });
   for (const table of ['aiTenantModelConfiguration', 'systemParameterSet', 'aiPlatformModelConnection', 'aiProviderCapabilityEvidence']) aborted.db[table] = records.db[table];
+  aborted.db.operationLog = records.db.operationLog;
   aborted.db.aiProviderProfile ??= { async findFirst() { return null; }, async updateMany() { throw new Error('must not write profile'); } };
   aborted.db.aiProviderProfile.create ??= async () => { throw new Error('must not create profile'); };
   aborted.db.aiPlatformModelConnection ??= { async findUnique() { return null; },
@@ -1217,7 +1253,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const { composeClientTaskModelConfiguration } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-configuration.composition');
   let configReads = 0;
   const unusedWrite = async () => { throw Error('configuration writes are forbidden'); };
-  const customerConfigDb = { ...db, aiTenantModelConfiguration: { findUnique: async query => {
+  const customerConfigDb = { ...db,
+    operationLog: { create: unusedWrite, findUnique: async () => null },
+    aiTenantModelConfiguration: { findUnique: async query => {
       assert.equal(query.where.tenantId, 'tenant-client'); configReads++;
       // Explicit service enablement: the hardened product contract requires
       // serviceEnabled/settings.enabled for invoke selection (default-disabled).
@@ -1469,12 +1507,17 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const ownGetQuote = client.getQuote; client.getQuote = undefined;
   assert.deepEqual((await bookingHttp.readHostCapabilities(request, {})).capabilities.entryActions, ['OPEN_ORDER']);
   client.getQuote = ownGetQuote;
+  // Host-capability reads authorize 'read', which deliberately never consults
+  // budget gates or the commercial entitlement: exhausted usage must not hide
+  // the host surface or force an existing task to stay. The creation entry
+  // actions still require live gates and degrade to an empty listing.
   taskStore.state.aiBudgetPolicy[1].enabled = false;
-  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
-  taskStore.state.aiBudgetPolicy[1].enabled = true;
   commercialAvailable = false;
-  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
+  assert.deepEqual((await bookingHttp.readHostCapabilities(request, {})).capabilities.entryActions, []);
+  taskStore.state.aiBudgetPolicy[1].enabled = true;
   commercialAvailable = true;
+  assert.deepEqual((await bookingHttp.readHostCapabilities(request, {})).capabilities.entryActions,
+    ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING']);
   const commercialRead = subscriptions.readCategoryCommercialContext;
   subscriptions.readCategoryCommercialContext = async (...args) => {
     const value = await commercialRead(...args); taskPolicies[1].revision++; return value;
