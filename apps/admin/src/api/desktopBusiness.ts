@@ -1,7 +1,7 @@
 /** Closed business-page transport. The original HTTP client alone owns Rental OS credentials. */
-import { RENTAL_DESKTOP_BUSINESS_HTTP, parseRentalDesktopCatalogRequest, parseRentalDesktopCatalogResult,
+import { RENTAL_DESKTOP_BUSINESS_HTTP, parseRentalDesktopBusinessReadRequest, parseRentalDesktopCatalogResult, parseRentalDesktopCatalogSourcesResult,
   parseRentalDesktopBusinessPolicyRead, parseRentalDesktopPolicySave, parseRentalDesktopPolicySaved,
-  parseRentalDesktopPolicyObservation, type RentalDesktopPolicySave, type RentalDesktopCatalogRequest } from '@rental-os/shared';
+  parseRentalDesktopPolicyObservation, type RentalDesktopPolicySave, type RentalDesktopBusinessReadRequest } from '@rental-os/shared';
 import type { ApiResult } from '@rental-os/shared';
 import { http } from './http';
 
@@ -13,12 +13,13 @@ export const desktopBusinessPolicyApi = Object.freeze({
   operation: async (operationKey: string, signal: AbortSignal) => parseRentalDesktopPolicyObservation((await http.post<ApiResult<unknown>>(path('policyOperation'), { operationKey }, { signal })).data.data)
 });
 
-export async function readDesktopBusinessCatalog(value: RentalDesktopCatalogRequest, signal: AbortSignal) {
-  const input = parseRentalDesktopCatalogRequest(value);
+export async function readDesktopBusinessCatalog(value: RentalDesktopBusinessReadRequest, signal: AbortSignal) {
+  const input = parseRentalDesktopBusinessReadRequest(value);
   try {
-    const result = await http.request<ApiResult<unknown>>({ method: 'POST', url: `/${RENTAL_DESKTOP_BUSINESS_HTTP.basePath}/${RENTAL_DESKTOP_BUSINESS_HTTP.catalog}`,
+    const action = 'kind' in input ? RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources : RENTAL_DESKTOP_BUSINESS_HTTP.catalog;
+    const result = await http.request<ApiResult<unknown>>({ method: 'POST', url: `/${RENTAL_DESKTOP_BUSINESS_HTTP.basePath}/${action}`,
       data: input, signal });
-    return parseRentalDesktopCatalogResult(result.data.data);
+    return 'kind' in input ? parseRentalDesktopCatalogSourcesResult(result.data.data) : parseRentalDesktopCatalogResult(result.data.data);
   } catch (error) {
     const code = error && typeof error === 'object' && 'response' in error
       ? (error.response as { data?: { code?: unknown } } | undefined)?.data?.code : undefined;

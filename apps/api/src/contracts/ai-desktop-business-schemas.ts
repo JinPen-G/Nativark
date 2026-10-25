@@ -15,6 +15,7 @@ const configured = object({ state: literal('configured'), revision, policy: ref(
 export const DESKTOP_BUSINESS_SCHEMAS: Record<string, SchemaObject> = {
   DesktopBusinessDestination: object({ provider: key, baseUrl: { type: 'string', format: 'uri', maxLength: 2048, description: 'HTTPS model destination, no credentials/query/hash; not an attestation of actual model egress.' } }),
   DesktopBusinessBinding: object({ actorId: id, tenantId: id, workspaceId: id }),
+  DesktopBusinessCatalogSourceRef: object({ auditId: id, requestId: key }),
   DesktopBusinessModelRoute: object({ provider: key, baseUrl: { type: 'string', format: 'uri', maxLength: 2048 },
     model: { type: 'string', minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,255}$' },
     protocol: { type: 'string', enum: ['openai-responses', 'openai-completions', 'anthropic-messages'] } }),
@@ -27,14 +28,23 @@ export const DESKTOP_BUSINESS_SCHEMAS: Record<string, SchemaObject> = {
   DesktopBusinessPolicySaved: object({ state: literal('saved'), operationKey: key, result: configured }),
   DesktopBusinessPolicyOperation: { oneOf: [object({ state: literal('not_observed') }), object({ state: literal('observed'), operationKey: key, result: configured })] },
   DesktopBusinessCatalogRequest: object({ id: key, binding: ref('DesktopBusinessBinding'), query: object({ limit: { type: 'integer', minimum: 1, maximum: 50 }, destination: ref('DesktopBusinessDestination'),
-    modelRoute: ref('DesktopBusinessModelRoute') }, ['modelRoute']) }),
+    modelRoute: ref('DesktopBusinessModelRoute'), sourceRef: ref('DesktopBusinessCatalogSourceRef') }, ['modelRoute', 'sourceRef']) }),
+  DesktopBusinessCatalogSourcesRequest: object({ kind: literal('catalog_sources'), id: key, binding: ref('DesktopBusinessBinding'), query: object({ limit: { type: 'integer', minimum: 1, maximum: 10 } }) }),
+  DesktopBusinessCatalogSource: { oneOf: [object({ state: literal('unavailable'), auditId: id, observedAt: time }),
+    object({ state: literal('reference'), auditId: id, requestId: key, observedAt: time, sourceExpiresAt: time,
+      configurationVersion: hash, policyRevision: revision, policyHash: hash,
+      query: object({ limit: { type: 'integer', minimum: 1, maximum: 50 }, destination: ref('DesktopBusinessDestination'), modelRoute: ref('DesktopBusinessModelRoute') }) })] },
+  DesktopBusinessCatalogSourcesResult: object({ version: { type: 'integer', enum: [1] }, requestId: key, binding: ref('DesktopBusinessBinding'),
+    observedAt: time, expiresAt: time, execution: literal('references_only'), truncated: { type: 'boolean' },
+    items: { type: 'array', maxItems: 10, items: ref('DesktopBusinessCatalogSource') } }),
   DesktopBusinessCatalogResult: object({ version: { type: 'integer', enum: [1] }, requestId: key, binding: ref('DesktopBusinessBinding'),
     policyRevision: revision, policyHash: hash, observedAt: time, expiresAt: time, configurationVersion: hash,
     source: literal('persisted_workspace_configuration'), destination: ref('DesktopBusinessDestination'),
     modelRoute: ref('DesktopBusinessModelRoute'),
+    reopenedFrom: object({ auditId: id, requestId: key, observedAt: time, configurationVersion: hash }),
     items: { type: 'array', maxItems: 50, items: object({ reference: id, categoryCode: { ...id, maxLength: 64 }, status: { type: 'string', enum: ['enabled', 'disabled'] } }) },
     truncated: { type: 'boolean' }, omittedFields: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string', enum: ['name', 'code', 'unit', 'availability', 'price'] }, description: 'Exact ordered list: name, code, unit, availability, price.' },
-    execution: literal('read_only') }, ['modelRoute'])
+    execution: literal('read_only') }, ['modelRoute', 'reopenedFrom'])
 };
 const base = `/api/${RENTAL_DESKTOP_BUSINESS_HTTP.basePath}`;
 const row = (path: string, operationId: string, summary: string, requestSchema: string | SchemaObject, responseSchema: string, permissions: string[]): ContractOperation =>
@@ -43,6 +53,8 @@ const manage = ['system:params:manage'];
 export const DESKTOP_BUSINESS_OPERATIONS: ContractOperation[] = [
   row(RENTAL_DESKTOP_BUSINESS_HTTP.catalog, 'readDesktopBusinessCatalog', 'Current workspace policy and original catalog permission; read-only minimal projection, not a model call.',
     'DesktopBusinessCatalogRequest', 'DesktopBusinessCatalogResult', ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create']),
+  row(RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources, 'readDesktopBusinessCatalogSources', 'Own current-workspace audit references, bounded to the last 30 days and 10 rows; no old bodies or execution permission.',
+    'DesktopBusinessCatalogSourcesRequest', 'DesktopBusinessCatalogSourcesResult', ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create']),
   row(RENTAL_DESKTOP_BUSINESS_HTTP.policy, 'readDesktopBusinessPolicy', 'Read local-business policy under current model-configuration management permission.', object({}), 'DesktopBusinessPolicyRead', manage),
   row(RENTAL_DESKTOP_BUSINESS_HTTP.savePolicy, 'changeDesktopBusinessPolicy', 'Human policy CAS with original operation receipt; unknown must be reconciled by the same key, never auto-retried.', 'DesktopBusinessPolicyChange', 'DesktopBusinessPolicySaved', manage),
   row(RENTAL_DESKTOP_BUSINESS_HTTP.policyOperation, 'readDesktopBusinessPolicyOperation', 'Observe own original policy-save receipt; absence is not proof of rollback.', object({ operationKey: key }), 'DesktopBusinessPolicyOperation', manage)

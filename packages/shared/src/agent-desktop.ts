@@ -1,7 +1,7 @@
 /** Desktop business-view protocol. Carries display/navigation data, never credentials or business execution authority. */
 export * from './agent-desktop-business';
-import type { RentalDesktopCatalogQuery, RentalDesktopCatalogRequest, RentalDesktopCatalogResult, RentalDesktopCatalogReply,
-  RentalDesktopModelCatalogQuery, RentalDesktopModelCatalogResult } from './agent-desktop-business';
+import type { RentalDesktopCatalogQuery, RentalDesktopCatalogResult, RentalDesktopCatalogReply,
+  RentalDesktopModelCatalogQuery, RentalDesktopModelCatalogResult, RentalDesktopBusinessReadRequest, RentalDesktopCatalogSourcesResult } from './agent-desktop-business';
 export const RENTAL_DESKTOP_PROTOCOL_VERSION = 1 as const;
 
 export interface RentalDesktopMenuItem { id: string; path: string; label: string }
@@ -49,13 +49,15 @@ export interface RentalDesktopBridge {
   catalog?(query: RentalDesktopCatalogQuery): Promise<RentalDesktopCatalogResult>;
   /** Resolve a Host-owned prepared model route before and after the same human-only catalog read. */
   catalogForModel?(query: RentalDesktopModelCatalogQuery): Promise<RentalDesktopModelCatalogResult>;
+  /** Current-authorized source references only; never old catalog bodies or automatic re-execution. */
+  catalogSources?(query: { limit: number }): Promise<RentalDesktopCatalogSourcesResult>;
 }
 export interface RentalAdminDesktopBridge {
   protocolVersion: typeof RENTAL_DESKTOP_PROTOCOL_VERSION;
   report(session: RentalDesktopSession): Promise<void>;
   onCommand(listener: (request: RentalDesktopCommandRequest) => void): () => void;
   complete(result: RentalDesktopCommandResult): Promise<void>;
-  onCatalog?(listener: (request: RentalDesktopCatalogRequest) => void): () => void;
+  onCatalog?(listener: (request: RentalDesktopBusinessReadRequest) => void): () => void;
   completeCatalog?(result: RentalDesktopCatalogReply): Promise<void>;
 }
 

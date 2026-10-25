@@ -1,4 +1,4 @@
-/** Owns one isolated admin document, non-secret session projection, and bounded navigation requests. */
+/** Owns one isolated admin document, non-secret session projection, navigation and closed catalog/source reads. */
 import { createHash, randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { WebContentsView, session, ipcMain, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
@@ -7,8 +7,10 @@ import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRental
   parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult,
   parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult, parseRentalDesktopModelInspection,
   projectRentalDesktopCatalogMaterial,
+  parseRentalDesktopCatalogSourcesQuery, parseRentalDesktopCatalogSourcesResult,
+  type RentalDesktopBusinessReadRequest, type RentalDesktopBusinessReadResult,
   type RentalDesktopModelSelection,
-  type RentalDesktopCatalogResult, type RentalDesktopCatalogRequest,
+  type RentalDesktopCatalogResult,
   type RentalDesktopSnapshot, type RentalDesktopSession, type RentalDesktopBounds, type RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
 import { RENTAL_IPC } from './rental-desktop-protocol.ts'
 import type { RentalDesktopConfig } from './rental-desktop-config.ts'
@@ -37,8 +39,8 @@ export class RentalBusinessView {
   private failurePrompt: Promise<void> | undefined
   private readonly origin: string
   private readonly waiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>()
-  private readonly catalogReads = new Map<string, { document: string; request: RentalDesktopCatalogRequest;
-    resolve: (result: RentalDesktopCatalogResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  private readonly catalogReads = new Map<string, { document: string; request: RentalDesktopBusinessReadRequest;
+    resolve: (result: RentalDesktopBusinessReadResult) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   private modelReads = 0
 
   /** Current UI admission; every API request still keeps the original business authorization. */
@@ -63,6 +65,7 @@ export class RentalBusinessView {
   install(): void {
     ipcMain.handle(RENTAL_IPC.catalog, (event, value: unknown) => { this.assertApplication(event); return this.readCatalog(value) })
     ipcMain.handle(RENTAL_IPC.catalogForModel, (event, value: unknown) => { this.assertApplication(event); return this.readCatalogForModel(value) })
+    ipcMain.handle(RENTAL_IPC.catalogSources, (event, value: unknown) => { this.assertApplication(event); return this.readBusiness(value, 'sources').then(parseRentalDesktopCatalogSourcesResult) })
     ipcMain.handle(RENTAL_IPC.catalogComplete, (event, envelope: unknown) => {
       const value = this.adminMessage(event, envelope)
       if (!value || typeof value !== 'object' || Array.isArray(value) || !('id' in value) || typeof value.id !== 'string'
@@ -78,14 +81,18 @@ export class RentalBusinessView {
             ? value.code : 'AI_RESOURCE_UNAVAILABLE'
           pending.reject(new Error(code)); return
         }
-        const result = parseRentalDesktopCatalogResult('result' in value ? value.result : undefined)
+        const result = 'kind' in pending.request ? parseRentalDesktopCatalogSourcesResult('result' in value ? value.result : undefined)
+          : parseRentalDesktopCatalogResult('result' in value ? value.result : undefined)
         const current = this.snapshot.session
         if (pending.document !== this.document || this.disposed || this.pending || this.unknownCommand || current.status !== 'ready' || current.audience !== 'tenant'
           || current.actorId !== pending.request.binding.actorId || current.tenantId !== pending.request.binding.tenantId
           || current.currentWorkspaceId !== pending.request.binding.workspaceId || result.requestId !== pending.request.id
           || JSON.stringify(result.binding) !== JSON.stringify(pending.request.binding)
-          || JSON.stringify(result.destination) !== JSON.stringify(pending.request.query.destination)
-          || JSON.stringify(result.modelRoute ?? null) !== JSON.stringify(pending.request.query.modelRoute ?? null)
+          || (!('kind' in pending.request) && (result.execution !== 'read_only'
+            || JSON.stringify(result.destination) !== JSON.stringify(pending.request.query.destination)
+            || JSON.stringify(result.modelRoute ?? null) !== JSON.stringify(pending.request.query.modelRoute ?? null)
+            || JSON.stringify(result.reopenedFrom ? { auditId: result.reopenedFrom.auditId, requestId: result.reopenedFrom.requestId } : null)
+              !== JSON.stringify(pending.request.query.sourceRef ?? null)))
           || result.items.length > pending.request.query.limit || Date.parse(result.expiresAt) <= Date.now()) throw Error()
         pending.resolve(result)
       } catch { pending.reject(new Error('AI_RESOURCE_UNAVAILABLE')) }
@@ -330,7 +337,8 @@ export class RentalBusinessView {
       const first = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
       if (JSON.stringify(first.selection) !== JSON.stringify(input.selection) || Date.parse(first.expiresAt) <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
       const modelRoute = { ...first.destination, model: first.selection.model, protocol: first.protocol }
-      const catalog = await this.readCatalog({ limit: input.limit, destination: first.destination, modelRoute }); current()
+      const catalog = await this.readCatalog({ limit: input.limit, destination: first.destination, modelRoute,
+        ...input.sourceRef ? { sourceRef: input.sourceRef } : {} }); current()
       const last = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
       if (JSON.stringify(last.selection) !== JSON.stringify(input.selection) || JSON.stringify(first.destination) !== JSON.stringify(last.destination)
         || first.protocol !== last.protocol || first.preparationVersion !== last.preparationVersion
@@ -343,14 +351,19 @@ export class RentalBusinessView {
     } finally { this.modelReads-- }
   }
   private readCatalog(value: unknown): Promise<RentalDesktopCatalogResult> {
-    const query = parseRentalDesktopCatalogQuery(value), current = this.snapshot.session
+    return this.readBusiness(value, 'catalog').then(parseRentalDesktopCatalogResult)
+  }
+  private readBusiness(value: unknown, kind: 'catalog' | 'sources'): Promise<RentalDesktopBusinessReadResult> {
+    const current = this.snapshot.session
     const document = this.document, view = this.view
     if (!document || !view || view.webContents.isDestroyed() || this.disposed || this.pending || this.unknownCommand
       || current.status !== 'ready' || current.audience !== 'tenant' || !current.currentWorkspaceId || this.catalogReads.size >= 2)
       return Promise.reject(new Error('AI_RESOURCE_UNAVAILABLE'))
-    const request: RentalDesktopCatalogRequest = { id: randomUUID(), query,
-      binding: { actorId: current.actorId, tenantId: current.tenantId, workspaceId: current.currentWorkspaceId } }
-    return new Promise((resolve, reject) => {
+    const binding = { actorId: current.actorId, tenantId: current.tenantId, workspaceId: current.currentWorkspaceId }
+    const request: RentalDesktopBusinessReadRequest = kind === 'sources'
+      ? { kind: 'catalog_sources', id: randomUUID(), query: parseRentalDesktopCatalogSourcesQuery(value), binding }
+      : { id: randomUUID(), query: parseRentalDesktopCatalogQuery(value), binding }
+    return new Promise<RentalDesktopBusinessReadResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (!this.catalogReads.delete(request.id)) return
         reject(new Error('AI_RESOURCE_UNAVAILABLE'))
@@ -490,6 +503,6 @@ export class RentalBusinessView {
     this.disposed = true; this.close()
     for (const waiter of this.waiters) waiter.reject(new Error('Business view disposed')); this.waiters.clear()
     for (const channel of [RENTAL_IPC.connect, RENTAL_IPC.read, RENTAL_IPC.report, RENTAL_IPC.complete, RENTAL_IPC.request, RENTAL_IPC.present, RENTAL_IPC.retry,
-      RENTAL_IPC.catalog, RENTAL_IPC.catalogComplete, RENTAL_IPC.catalogForModel]) ipcMain.removeHandler(channel)
+      RENTAL_IPC.catalog, RENTAL_IPC.catalogComplete, RENTAL_IPC.catalogForModel, RENTAL_IPC.catalogSources]) ipcMain.removeHandler(channel)
   }
 }

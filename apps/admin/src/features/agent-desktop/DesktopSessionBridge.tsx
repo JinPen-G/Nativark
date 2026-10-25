@@ -6,7 +6,7 @@ import { readDesktopBusinessCatalog } from '@/api/desktopBusiness';
 import type { RentalCategoryTerminology } from "@rental-os/shared";
 import { useLocation, useNavigate } from "react-router-dom";
 import { parseRentalDesktopCommand, type RentalDesktopCommandRequest, type RentalDesktopSession } from "@rental-os/shared";
-import { parseRentalDesktopCatalogRequest, type RentalDesktopCatalogRequest, type RentalDesktopBusinessFailureCode } from '@rental-os/shared';
+import { parseRentalDesktopBusinessReadRequest, type RentalDesktopBusinessReadRequest, type RentalDesktopBusinessFailureCode } from '@rental-os/shared';
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -119,15 +119,15 @@ export function DesktopSessionBridge() {
     };
     const unsubscribe = host.onCommand(request => { void handle(request).catch(unavailable); });
     const catalogReads = new Map<string, AbortController>();
-    const catalogContext = (request: RentalDesktopCatalogRequest) => {
+    const catalogContext = (request: RentalDesktopBusinessReadRequest) => {
       const current = useAuthStore.getState();
       if (!live || !current.ready || !current.sessionVerified || !current.token || current.user?.mustChangePassword || current.user?.isSaasAdmin
         || current.user?.id !== request.binding.actorId || current.tenant?.tenantId !== request.binding.tenantId
         || current.currentWorkspaceId !== request.binding.workspaceId) throw new Error('AI_SCOPE_CHANGED');
     };
-    const handleCatalog = async (value: RentalDesktopCatalogRequest) => {
+    const handleCatalog = async (value: RentalDesktopBusinessReadRequest) => {
       if (!host.completeCatalog) return;
-      const request = parseRentalDesktopCatalogRequest(value);
+      const request = parseRentalDesktopBusinessReadRequest(value);
       const controller = new AbortController();
       let timer: number | undefined;
       try {

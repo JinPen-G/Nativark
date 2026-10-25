@@ -11,6 +11,7 @@ import { respondAiScene } from '../scenes/original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from '../scenes/request-abort';
 import { composeDesktopBusinessApplication, type DesktopBusinessRequest } from './desktop-business.application';
 import { PrismaDesktopBusinessPolicyRepository } from './desktop-business-policy.repository';
+import { PrismaDesktopCatalogSourceRepository } from './desktop-catalog-source.repository';
 
 type Request = DesktopBusinessRequest & AiRequestAbortSource;
 @Controller(RENTAL_DESKTOP_BUSINESS_HTTP.basePath)
@@ -22,13 +23,16 @@ export class AiDesktopBusinessController {
         auth: this.modules.get(AuthService, { strict: false }), guard: this.modules.get(ApiAuthGuard, { strict: false }),
         core: this.modules.get(RentalCoreService, { strict: false }),
         audit: this.modules.get(OperationLogService, { strict: false }),
-        policies: new PrismaDesktopBusinessPolicyRepository(this.modules.get(PrismaService, { strict: false }))
+        policies: new PrismaDesktopBusinessPolicyRepository(this.modules.get(PrismaService, { strict: false })),
+        sources: new PrismaDesktopCatalogSourceRepository(this.modules.get(PrismaService, { strict: false }))
       });
       return application[method](request, body, signal);
     }), 'read_same_policy_operation');
   }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.catalog) @HttpCode(200) @Header('Cache-Control', 'no-store')
   catalog(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'catalog'); }
+  @Post(RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  sources(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'readCatalogSources'); }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.policy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   policy(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'readPolicy'); }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.savePolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')

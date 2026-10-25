@@ -6,7 +6,7 @@ import type { WorkbenchState } from './contract.ts'
 import { prepareRentalDesktopCatalogInput } from '@rental-os/shared/agent-desktop'
 import css from './Workbench.module.css'
 
-export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, t }: ContextProps) {
+export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, readSources, t }: ContextProps) {
   const state = useBusiness(value => value)
   const mode = useWorkMode(value => value)
   const [open, setOpen] = useState(false)
@@ -28,12 +28,12 @@ export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, s
       <Button variant="ghost" disabled={state.busy} onClick={logout}>{t('logout')}</Button></div>
     {state.failed && <span className={css.failure} role="status">{t('unavailable')}</span>}
     {wide && session.audience === 'tenant' && session.currentWorkspaceId && <CatalogPreview key={JSON.stringify([session.actorId, session.tenantId, session.currentWorkspaceId])}
-      catalog={state.catalog} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog} t={t} />}
+      catalog={state.catalog} sources={state.sources} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog} readSources={readSources} t={t} />}
   </div>
 }
 
 /** A scoped human request never enters ordinary Harness chat, session history or a model. */
-function CatalogPreview({ catalog, busy, readCatalog, discardCatalog, t }: Pick<ContextProps, 'readCatalog' | 'discardCatalog' | 't'> & { catalog: WorkbenchState['catalog']; busy: boolean }) {
+function CatalogPreview({ catalog, sources, busy, readCatalog, discardCatalog, readSources, t }: Pick<ContextProps, 'readCatalog' | 'discardCatalog' | 'readSources' | 't'> & { catalog: WorkbenchState['catalog']; sources: WorkbenchState['sources']; busy: boolean }) {
   const [provider, setProvider] = useState(''), [model, setModel] = useState(''), [text, setText] = useState('')
   const prepared = prepareRentalDesktopCatalogInput(text)
   return <details className={css.catalog}>
@@ -54,6 +54,7 @@ function CatalogPreview({ catalog, busy, readCatalog, discardCatalog, t }: Pick<
         {catalog.result && <>
           <p>{t('catalogObserved')} <time dateTime={catalog.result.observedAt}>{catalog.result.observedAt}</time></p>
           <p>{t('catalogPolicyRevision')}: {catalog.result.policyRevision} · {t('catalogExpires')}: <time dateTime={catalog.result.expiresAt}>{catalog.result.expiresAt}</time></p>
+          {catalog.result.reopenedFrom && <p>{t('catalogReopened')}: <time dateTime={catalog.result.reopenedFrom.observedAt}>{catalog.result.reopenedFrom.observedAt}</time> · {t(catalog.result.configurationVersion === catalog.result.reopenedFrom.configurationVersion ? 'catalogVersionSame' : 'catalogVersionChanged')}</p>}
           <p>{t(catalog.result.truncated ? 'catalogPartial' : catalog.result.items.length ? 'catalogReady' : 'catalogEmpty')}</p>
           <ul>{catalog.result.items.map(item => <li key={item.reference}><span>{item.reference}</span><span>{item.categoryCode} · {t(item.status)}</span></li>)}</ul>
         </>}
@@ -64,6 +65,26 @@ function CatalogPreview({ catalog, busy, readCatalog, discardCatalog, t }: Pick<
           <p>{t('catalogMaterialHash')}: <code>{catalog.material.contentHash}</code></p>
         </details>}
       </div>
+      <details>
+        <summary>{t('catalogSources')}</summary>
+        <p>{t('catalogSourcesBoundary')}</p>
+        <Button type="button" variant="outline" disabled={busy || sources.busy} onClick={readSources}>{t(sources.busy ? 'catalogLoading' : 'catalogReadSources')}</Button>
+        {sources.failed && <p role="status">{t('catalogSourcesUnavailable')}</p>}
+        {sources.result && <>
+          <p role="status">{t(sources.result.truncated ? 'catalogSourcesPartial' : sources.result.items.length ? 'catalogSourcesReady' : 'catalogSourcesEmpty')}</p>
+          <ul>{sources.result.items.map(source => <li key={source.auditId}>
+            <time dateTime={source.observedAt}>{source.observedAt}</time>
+            {source.state === 'reference' ? <>
+              <span>{source.query.modelRoute.model} · {source.query.modelRoute.protocol} · {t('catalogPolicyRevision')}: {source.policyRevision}</span>
+              <Button type="button" variant="outline" disabled={busy || catalog.busy || Date.parse(source.sourceExpiresAt) <= Date.now()} onClick={() => {
+                const selection = { provider: source.query.modelRoute.provider, model: source.query.modelRoute.model }
+                setProvider(selection.provider); setModel(selection.model); setText(`show first ${source.query.limit} products`)
+                readCatalog({ selection, limit: source.query.limit, sourceRef: { auditId: source.auditId, requestId: source.requestId } })
+              }}>{t('catalogReopenSource')}</Button>
+            </> : <span>{t('catalogSourceLegacy')}</span>}
+          </li>)}</ul>
+        </>}
+      </details>
     </details>
 }
 
