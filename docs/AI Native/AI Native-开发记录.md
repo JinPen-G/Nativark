@@ -17,6 +17,13 @@
 - `originalQuoteAnswerContract` 增加已问字段集合：一轮映射超过八字段上限时，未问过的字段先问、已问的按原序重绑，超限截断不再永远丢弃同一段尾部；场景输入源从持久回答历史推导已问集合。多行/组合不支持仍返回具体限制的 context 契约与人工路径；轮数仍受 maxCalls 与原answer历史约束。
 - 冒烟（`output/multiround-batch-20261025/item12-rotation-smoke.cjs`）：八字段上限保持、第8个新字段轮入替换文本fallback、全部已问轮重绑不发明文本逃逸、原候选不可变、代际（新候选对象+原selectionRevision不动）。回归：quote-candidates 17/17、quote-authority 13/13、business-second-quote 4/4、human-quote-selection 9/9、original-scene-host 19/19。tsc 0诊断；离线边界同前。
 
+## 近期核心：本批收口复验（2026-10-25，A新批第三段）
+
+- 提交序列：`e3fb03b0`（原任务计数授权+可信上界链）→ `22f2a061`（记录）→ `fd67186f`（超限澄清轮转）→ `9b0245e4`（记录）。开工核对HEAD 411c6e35同步点、无MERGE/CHERRY_PICK、8条stash保留；主线收紧（withRequestAbort默认不进入预先断开回调、deliverAborted显式选择、已中止请求仍受5秒依赖上限、写入超时unknown、步骤证据转换事务+CAS后修订）全部核对保留。
+- 收口复验：12文件串行全绿（inspection-media 17、hqs 9、osh 19、ain07 3+2、first-batch 6、business-second 4、quote-authority 13、quote-boundaries 17、quote-candidates 17、quote-consumption 2、saved-order 10；合计119，一次hqs偶发失败单跑9/9复现绿，根因为已知预存夹具时序）；quote-business冒烟复验通过（含save-unknown与permission-loss路径）；任务链/轮转/item12冒烟均绿。
+- 事项核对：1-8（计数授权/多场景/无循环依赖/双请求资源边界/unknown恢复）见第一段；9-11/13（多轮链正常入口、代际、资源承接、保存继续分离）沿既有实现与hqs/osh回归核验；12见第二段；14-18（报价→人类批准→Core→恢复）与19-21（设置链/任务中心）沿前批已贯通链与本次12文件回归核验复用，未重做。22（装配入口）以composeTaskInputCountingChain与可选inputCounting装配参数交付，不自行注册AppModule。
+- 未验边界：真实tokenizer/供应商计数收据、标准装配（AppModule/provider）、真实MySQL/供应商/浏览器/微信、适用G4；原28项与ENTRY百分比不在本片调整。
+
 ## 近期核心：原任务计数正式授权与可信上界链（2026-10-25，A新批第一段）
 
 - 固定 `e3fb03b0`：`InputCountTokensService.taskCount` 以原调用自身的 transition_task 政策为门（服务端持久 invocation 行+双快照复核），为单个已注册原调用计数其冻结输入；场景/配置/输入指纹/计划依据全部来自服务端持久事实，服务不再绑定工厂 sceneCode——一个服务服务全部宿主场景；管理 `count` 入口与其 settings_write 门保持不变，两个入口互不授权。
