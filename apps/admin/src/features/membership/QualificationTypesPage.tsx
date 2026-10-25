@@ -34,7 +34,7 @@ export function QualificationTypesEditor() {
     message.success(t("证件类型已保存"));
   } });
   if (!canView) return <Alert type="warning" title={t("需要当前空间的证件配置权限")} />;
-  return <QueryState loading={types.isLoading} error={types.error}>
+  return <QueryState loading={types.isLoading} error={types.error} onRetry={() => types.refetch({ throwOnError: true })}>
     <Card size="small">
     <Form form={form} layout="vertical" disabled={!canManage} onFinish={values => canManage && save.mutate(values)}>
       <Row gutter={16}>

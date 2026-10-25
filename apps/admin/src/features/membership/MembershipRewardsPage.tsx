@@ -86,7 +86,7 @@ export function MembershipRewardsPage() {
         title={t("会员激励")}
         description={t("人工补发仅用于补偿；营销余额不是支付资金。")}
       />
-      <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error}>
+      <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error} onRetry={() => Promise.all([rewards.refetch({ throwOnError: true }), benefitAccounts.refetch({ throwOnError: true })])}>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Card title={t("人工补发奖励流水")}>
             <Form

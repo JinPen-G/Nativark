@@ -53,7 +53,7 @@ export function MembershipReviewPage() {
 
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员审核")} description={t("需要租户级会员查看、注册审核或资质审核权限，且数据范围为全部。")} />;
 
-  return <QueryState loading={reviews.isLoading} error={reviews.error}>
+  return <QueryState loading={reviews.isLoading} error={reviews.error} onRetry={() => reviews.refetch({ throwOnError: true })}>
     <PageHeader title={t("会员审核")} description={t("审核结果在租户内共享；证件要求按经营空间设置。")}  />
 
     {scopeOptions.error && <Alert type="warning" showIcon title={t("来源空间名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
