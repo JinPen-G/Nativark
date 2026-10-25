@@ -1,7 +1,9 @@
 import { RightOutlined } from "@/components/ui/icons";
 import { useState } from "react";
-import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { ListSection, Empty } from "@/components/ui";
+import { Descriptions, Space, Tag, Typography } from "antd";
+import { ListSection, Empty, Tabs } from "@/components/ui";
+import { RecordFacts } from "@/components/RecordDetailLayout";
+import styles from "./TenantSubscription.module.css";
 import { Alert, Table } from "@/components/ui";
 import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
@@ -42,31 +44,39 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
   ];
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <div className={styles.stack}>
       {!canManage && <Alert type="info" showIcon message={t("你可查看版本与到期摘要；升级、续费、降级等办理需订阅管理权限，请联系租户管理员或平台。")} />}
 
-      <Card size="small" title={t("当前版本与服务")}>
-        <Descriptions column={{ xs: 1, md: 2 }} size="small" colon={false} items={[
-          { key: "tenant", label: t("租户"), children: `${overview.tenantName}（${overview.tenantCode}）` },
-          { key: "plan", label: t("当前套餐版本"), children: <Tag color={isPro ? "gold" : "default"}>{t(PLAN_LABEL[overview.plan])}</Tag> },
-          { key: "status", label: t("服务状态"), children: t(SERVICE_STATUS_LABEL[overview.serviceStatus]) },
-          { key: "period", label: t("有效期 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone, t)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone, t)}` },
-          { key: "amount", label: t("本期确认金额"), children: t(formatMoney(overview.currentAmount)) },
-          { key: "handled", label: t("办理日期"), children: formatSubscriptionDate(overview.handledAt, overview.timeZone, t) }
+      <section className={styles.summary} aria-label={t("当前版本与服务")}>
+        <div className={styles.identity}><strong>{t(PLAN_LABEL[overview.plan])}</strong><Tag color={overview.serviceStatus === "active" ? "success" : "default"}>{t(SERVICE_STATUS_LABEL[overview.serviceStatus])}</Tag></div>
+        <RecordFacts items={[
+          { key: "tenant", label: "租户", value: `${overview.tenantName}（${overview.tenantCode}）` },
+          { key: "period", label: "有效期 [开始, 截止)", value: `${formatSubscriptionDate(overview.startAt, overview.timeZone, t)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone, t)}`, wide: true },
+          { key: "amount", label: "本期确认金额", value: t(formatMoney(overview.currentAmount)) },
+          { key: "handled", label: "办理日期", value: formatSubscriptionDate(overview.handledAt, overview.timeZone, t) }
         ]} />
-      </Card>
-
-      <Card size="small" title={t("当前操作")}>
-        <Space wrap>
+        <Space wrap className={styles.actions}>
           <Button onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t(isPro ? "查看 PRO 权益" : "了解 PRO")}<RightOutlined /></Button>
           {!isPro && requestButton(SubscriptionRequestType.UpgradeConsult, "升级咨询", true)}
           {requestButton(isPro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard, "续费")}
           {isPro && requestButton(SubscriptionRequestType.NextStandard, "申请下期基础版")}
           {requestButton(SubscriptionRequestType.NoRenew, "到期不续费")}
         </Space>
-      </Card>
-
-      <Card size="small" title={t("当前功能权益与版本对比")}>
+      </section>
+      {overview.next && <Alert type="info" showIcon message={`${t("下一套餐")}：${t(PLAN_LABEL[overview.next.plan])}${overview.next.effectiveAt ? ` · ${overview.next.effectiveAt} ${t("生效")}` : ""}`} />}
+      <Tabs aria-label={t("版本与订阅")} items={[
+        { key: "overview", label: t("概览"), children: <div className={styles.stack}>
+          <ListSection title={t("申请与办理记录")}>
+            <Table<SubscriptionRequestRecord> rowKey="id" size="small" columns={requestColumns} dataSource={requests} pagination={{ defaultPageSize: 20 }} locale={{ emptyText: t("暂无申请记录") }} />
+          </ListSection>
+          <ListSection title={t("标准套餐价与续费说明")}>
+            <Descriptions column={{ xs: 1, md: 2 }} size="small" colon={false} items={standardPricing.map((price) => ({
+              key: price.plan, label: t(PLAN_LABEL[price.plan]), children: price.published ? t(formatMoney(price.annualFee, "价格待公布")) : t("价格待公布")
+            }))} />
+            <Typography.Text type="secondary">{t("升级补差与外部费用另计，不代表已开通自动扣费。")}</Typography.Text>
+          </ListSection>
+        </div> },
+        { key: "features", label: t("功能权益"), children: <ListSection title={t("当前功能权益与版本对比")}>
         {entitlements.length === 0 ? <Empty description={t("待平台确认")} /> : (
           <Descriptions column={1} size="small" colon={false} items={entitlements.map((feature) => ({
             key: feature.code,
@@ -74,23 +84,9 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
             children: `${t(ENTITLEMENT_SOURCE_LABEL[feature.source])} · ${t(RELEASE_STATUS_LABEL[feature.releaseStatus])}${feature.needsConfig ? t("（需配置）") : feature.available ? t("（可启用）") : ""}`
           }))} />
         )}
-        <Button type="link" style={{ paddingInline: 0, marginTop: 8 }} onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t("查看 PRO 介绍与完整对比")}<RightOutlined /></Button>
-      </Card>
-
-      <Card size="small" title={t("标准套餐价与续费说明")}>
-        <Descriptions column={{ xs: 1, md: 2 }} size="small" colon={false} items={standardPricing.map((price) => ({
-          key: price.plan,
-          label: t(PLAN_LABEL[price.plan]),
-          children: price.published ? t(formatMoney(price.annualFee, "价格待公布")) : t("价格待公布")
-        }))} />
-        <Typography.Text type="secondary">{t("升级补差与外部费用另计，不代表已开通自动扣费。")}</Typography.Text>
-      </Card>
-
-      <ListSection title={t("申请与办理记录")}>
-        {requests.length === 0 ? <Empty description={t("暂无申请记录")} /> : <Table<SubscriptionRequestRecord> rowKey="id" size="small" columns={requestColumns} dataSource={requests} pagination={false} />}
-      </ListSection>
-
-      <Card size="small" title={t("订阅变更记录")}>
+        <Button type="link" style={{ paddingInline: 0, alignSelf: "start" }} onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t("查看 PRO 介绍与完整对比")}<RightOutlined /></Button>
+        </ListSection> },
+        { key: "history", label: t("订阅变更记录"), children: <ListSection>
         {changeLog.length === 0 ? <Empty description={t("暂无变更记录")} /> : (
           <Descriptions column={1} size="small" colon={false} items={changeLog.map((entry) => ({
             key: entry.id,
@@ -98,16 +94,9 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
             children: [entry.beforeText, entry.afterText, entry.reason].filter(Boolean).join(" → ") || t("—")
           }))} />
         )}
-      </Card>
-
-      <Card size="small" title={t("待生效变更与退出说明")}>
-        <Typography.Text type="secondary">
-          {overview.next
-            ? `${t("下一套餐")}：${t(PLAN_LABEL[overview.next.plan])}${overview.next.effectiveAt ? `，${overview.next.effectiveAt} ${t("生效")}` : ""}`
-            : t("暂无待生效变更；到期不续费登记后当前已付费服务仍持续到到期。历史查询与数据保留按平台说明。")}
-        </Typography.Text>
-      </Card>
+        </ListSection> }
+      ]} />
       <SubscriptionRequestModal open={requestType !== null} type={requestType} onClose={() => setRequestType(null)} />
-    </Space>
+    </div>
   );
 }

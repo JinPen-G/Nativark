@@ -1,0 +1,5 @@
+.stack { display: flex; flex-direction: column; gap: var(--rental-layout-section-gap); min-width: 0; }
+.summary { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+.identity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.identity strong { font-size: var(--rental-typography-page-title-size); font-weight: var(--rental-typography-page-title-weight); line-height: var(--rental-typography-page-title-line-height); }
+.actions { min-width: 0; max-width: 100%; }
