@@ -1,7 +1,7 @@
-import { RightOutlined } from "@ant-design/icons";
+import { RightOutlined } from "@/components/ui/icons";
 import { useState } from "react";
 import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { Empty } from "@/components/ui";
+import { ListSection, Empty } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
@@ -50,9 +50,9 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
           { key: "tenant", label: t("租户"), children: `${overview.tenantName}（${overview.tenantCode}）` },
           { key: "plan", label: t("当前套餐版本"), children: <Tag color={isPro ? "gold" : "default"}>{t(PLAN_LABEL[overview.plan])}</Tag> },
           { key: "status", label: t("服务状态"), children: t(SERVICE_STATUS_LABEL[overview.serviceStatus]) },
-          { key: "period", label: t("有效期 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone)}` },
+          { key: "period", label: t("有效期 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone, t)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone, t)}` },
           { key: "amount", label: t("本期确认金额"), children: t(formatMoney(overview.currentAmount)) },
-          { key: "handled", label: t("办理日期"), children: formatSubscriptionDate(overview.handledAt, overview.timeZone) }
+          { key: "handled", label: t("办理日期"), children: formatSubscriptionDate(overview.handledAt, overview.timeZone, t) }
         ]} />
       </Card>
 
@@ -86,9 +86,9 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
         <Typography.Text type="secondary">{t("升级补差与外部费用另计，不代表已开通自动扣费。")}</Typography.Text>
       </Card>
 
-      <Card size="small" title={t("申请与办理记录")}>
+      <ListSection title={t("申请与办理记录")}>
         {requests.length === 0 ? <Empty description={t("暂无申请记录")} /> : <Table<SubscriptionRequestRecord> rowKey="id" size="small" columns={requestColumns} dataSource={requests} pagination={false} />}
-      </Card>
+      </ListSection>
 
       <Card size="small" title={t("订阅变更记录")}>
         {changeLog.length === 0 ? <Empty description={t("暂无变更记录")} /> : (

@@ -37,6 +37,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     loading={busy}
     data-rental-arc-button=""
     data-button-kind={type}
+    data-rental-control-size={size === "small" ? "small" : size === "large" ? "large" : "default"}
     data-button-danger={danger || color === "danger" || undefined}
     className={[className, rootClassName].filter(Boolean).join(" ")}
     style={{ ...(block ? { width: "100%" } : {}), ...(shape === "circle" ? { borderRadius: "50%", aspectRatio: "1", paddingInline: 0 } : {}), ...(shape === "round" ? { borderRadius: "var(--radius-pill)" } : {}), ...(type === "dashed" ? { borderStyle: "dashed" } : {}), ...style }}

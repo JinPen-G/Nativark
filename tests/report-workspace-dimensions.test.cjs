@@ -460,7 +460,7 @@ void withCleanup(async () => {
   );
   assert.match(page, /exportOperationReport\(filter\)/u, "导出必须复用页面同一组筛选");
   assert.match(page, /这一节是读取瞬间的快照，不是区间利用率/u, "页面必须显著标注快照口径");
-  assert.match(page, /historicalCaliberGaps\.map/u, "页面必须把历史口径缺口显示出来");
+  assert.match(page, /缺少历史可用时长，暂不计算区间利用率/u, "页面必须说明历史口径缺口及不提供的指标，不能把数据库诊断当作操作提示");
   assert.match(page, /可运营资产数（分母）/u, "页面必须标注分母");
   assert.match(page, /在租资产数（分子）/u, "页面必须标注分子");
   assert.match(page, /locationBreakdown/u, "页面必须展示地点维度");

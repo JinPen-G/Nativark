@@ -15,7 +15,7 @@ export function SubscriptionRequestDetails({ request, timeZone }: { request: Req
       { key: "type", label: t("申请类型"), children: t(REQUEST_TYPE_LABEL[request.type]) },
       { key: "status", label: t("状态"), children: <Tag color={REQUEST_STATUS_TONE[request.status]}>{t(REQUEST_STATUS_LABEL[request.status])}</Tag> },
       { key: "target", label: t("目标套餐"), children: request.targetPlan ? t(PLAN_LABEL[request.targetPlan]) : t("不变更套餐 / 咨询意向") },
-      { key: "submitted", label: t("提交人 / 时间"), children: `${request.submittedBy ?? t("待确认")} · ${formatSubscriptionDate(request.submittedAt, timeZone)}` },
+      { key: "submitted", label: t("提交人 / 时间"), children: `${request.submittedBy ?? t("待确认")} · ${formatSubscriptionDate(request.submittedAt, timeZone, t)}` },
       { key: "contact", label: t("联系人 / 联系方式"), children: [request.contactName, request.contactPhone].filter(Boolean).join(" / ") || t("未填写") },
       { key: "modules", label: t("希望使用的模块"), children: request.moduleIntent?.join("、") || t("未填写") },
       { key: "note", label: t("需求说明"), children: request.note || t("未填写") },
@@ -24,7 +24,7 @@ export function SubscriptionRequestDetails({ request, timeZone }: { request: Req
       { key: "reason", label: t("可公开处理原因"), children: request.reason || t("尚未登记") }
     ]} />
     {request.timeline?.length ? <Timeline items={request.timeline.map((item, index) => ({
-      key: `${item.at}-${index}`, title: formatSubscriptionDate(item.at, timeZone),
+      key: `${item.at}-${index}`, title: formatSubscriptionDate(item.at, timeZone, t),
       content: `${t(REQUEST_STATUS_LABEL[item.status])}${item.note ? ` · ${item.note}` : ""}`
     }))} /> : <Empty description={t("暂无处理过程记录")} />}
   </Space>;

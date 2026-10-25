@@ -1,6 +1,6 @@
 import { Card, Space, Tag, Typography } from "antd";
 import { Button, Tooltip } from "@/components/ui";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined } from "@/components/ui/icons";
 import type { CSSProperties } from "react";
 import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
@@ -68,15 +68,16 @@ function daysInMonth(year: number, month: number): number {
 }
 
 const cellStyle: CSSProperties = {
-  border: "1px solid #f0f0f0",
-  borderRadius: 8,
+  border: "1px solid var(--border)",
+  borderRadius: "var(--rental-ui-radius-container)",
   minHeight: 76,
-  padding: "6px 8px",
+  minWidth: 0,
+  padding: "var(--space-2)",
   display: "flex",
   flexDirection: "column",
-  gap: 2,
+  gap: "var(--space-1)",
   cursor: "pointer",
-  background: "#fff",
+  background: "var(--surface)",
   textAlign: "left",
   width: "100%",
 };
@@ -97,7 +98,7 @@ export function CalendarMonthGrid({
   timePriceSummary?: RentalCalendarTimePriceDay[];
   onDayClick: (day: RentalCalendarDay) => void;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const byDate = new Map(days.map((day) => [day.date, day]));
   const summaryByDate = new Map((timePriceSummary ?? []).map((row) => [row.date, row]));
   const leading = firstWeekdayOfMonth(year, month);
@@ -113,9 +114,11 @@ export function CalendarMonthGrid({
     }),
   ];
 
-  const monthLabel = `${year} ${t("年")} ${month} ${t("月")}`;
+  const monthLabel = new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", timeZone: "UTC" })
+    .format(new Date(Date.UTC(year, month - 1, 1)));
   return (
     <Card
+      className="calendar-month-card"
       title={
         <Space>
           <Button
@@ -143,7 +146,8 @@ export function CalendarMonthGrid({
         </Space>
       }
     >
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+      <div className="calendar-month-scroll">
+      <div className="calendar-month-grid">
         {WEEKDAY_LABELS.map((label) => (
           <Typography.Text key={label} type="secondary" className="calendar-weekday">
             {t(label)}
@@ -199,7 +203,7 @@ export function CalendarMonthGrid({
               </button>
             </Tooltip>
           ) : (
-            <div key={cell.date} style={{ ...cellStyle, cursor: "default", color: "#bbb" }}>
+            <div key={cell.date} style={{ ...cellStyle, cursor: "default", color: "var(--text-muted)" }}>
               <Typography.Text type="secondary" className="calendar-day-number">
                 {cell.dayNumber}
               </Typography.Text>
@@ -210,6 +214,7 @@ export function CalendarMonthGrid({
           );
           return body;
         })}
+      </div>
       </div>
       <Typography.Paragraph type="secondary" className="calendar-help" style={{ marginTop: 12, marginBottom: 0 }}>
         {t("图例——日期类型")}：<Tag>{t("工作日")}</Tag>

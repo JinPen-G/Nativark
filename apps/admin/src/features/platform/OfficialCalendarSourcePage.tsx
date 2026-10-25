@@ -1,6 +1,7 @@
-import { SaveButton } from "@/components/ui";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Tag, Typography } from "antd";
+import { Space, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -33,6 +34,7 @@ export function OfficialCalendarSourcePage() {
   const [versionForm] = Form.useForm<{ year: number; publishedAt: string; daysText: string }>();
 
   const sources = useQuery({ queryKey: ["official-calendars"], queryFn: officialCalendarApi.sources });
+  const sourceFilter = useListFilter(sources.data, { fields: row => [row.name, row.url] });
   const versions = useQuery({
     queryKey: ["official-calendar-versions", expanded],
     queryFn: () => officialCalendarApi.versions(expanded!),
@@ -81,10 +83,10 @@ export function OfficialCalendarSourcePage() {
   });
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <>
       <PageHeader
         title={t("公共官方日历来源")}
-        description={t("登记中国大陆官方节假日来源与年度来源版本。租户经营空间只能引用某一版生成自己的年度草稿并自行确认发布。")}
+        description={t("租户引用官方来源后，仍需自行确认发布日历。")}
         note={{
           title: t("官方数据是公共基础来源，导入不会自动影响任何经营空间"),
           description: t("官方再次调整时请登记新的来源版本；已发布的空间日历、有效报价和订单继续指向它们各自引用的那一版，不会被静默覆盖。")
@@ -102,11 +104,11 @@ export function OfficialCalendarSourcePage() {
         }
       />
       <QueryState loading={sources.isLoading} error={sources.error}>
-        <Card className="data-panel">
+        <ListSection controls={<ListFilters filter={sourceFilter} placeholder="来源名称或网址" />}>
           <Table<OfficialCalendarSource>
             rowKey="id"
             size="small"
-            dataSource={sources.data ?? []}
+            onRefresh={() => sources.refetch()} loading={sources.isFetching} dataSource={sourceFilter.rows}
             pagination={false}
             expandable={{
               expandedRowKeys: expanded ? [expanded] : [],
@@ -116,7 +118,7 @@ export function OfficialCalendarSourcePage() {
                   <Table
                     rowKey="id"
                     size="small"
-                    dataSource={versions.data ?? []}
+                    onRefresh={() => versions.refetch()} loading={versions.isFetching} dataSource={versions.data ?? []}
                     pagination={false}
                     locale={{ emptyText: t("该来源尚未登记任何年度版本") }}
                     columns={[
@@ -195,7 +197,7 @@ export function OfficialCalendarSourcePage() {
               }
             ]}
           />
-        </Card>
+        </ListSection>
       </QueryState>
       <Drawer
         title={sourceEditor ? `${t("编辑来源")}：${sourceEditor.name}` : t("登记官方来源")}
@@ -261,6 +263,6 @@ export function OfficialCalendarSourcePage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Space>
+    </>
   );
 }

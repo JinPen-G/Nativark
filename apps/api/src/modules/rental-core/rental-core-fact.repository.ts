@@ -42,6 +42,8 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
+import { rentalOrderListSort } from "./rental-order-list-sort";
+import { allocateRentalOrderNumber } from "./rental-order-number";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
 import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
 import {
@@ -221,6 +223,7 @@ export interface RentalCoreFactStore {
    */
   lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void>;
   countOrders(tenantId: string): Promise<number>;
+  allocateOrderNumber(tenantId: string, createdAt: string, timeZone: string | undefined, tx: RentalFactTx): Promise<string>;
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[], stockTransfers?: StockReturnTransfer[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
@@ -574,9 +577,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
     const where = Prisma.join(conditions, " AND ");
     const paging = query.take !== undefined ? Prisma.sql`LIMIT ${query.take} OFFSET ${query.skip ?? 0}` : Prisma.empty;
+    const orderBy = rentalOrderListSort(query);
     const [countRows, idRows] = await Promise.all([
       this.prisma.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`SELECT COUNT(*) AS total FROM \`rental_orders\` o ${joins} WHERE ${where}`),
-      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT o.\`id\` FROM \`rental_orders\` o ${joins} WHERE ${where} ORDER BY o.\`createdAt\` DESC, o.\`id\` DESC ${paging}`)
+      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT o.\`id\` FROM \`rental_orders\` o ${joins} WHERE ${where} ORDER BY ${orderBy} ${paging}`)
     ]);
     const total = Number(countRows[0]?.total ?? 0);
     const ids = idRows.map((row) => row.id);
@@ -703,6 +707,11 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async countOrders(tenantId: string): Promise<number> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     return this.prisma.rentalOrder.count({ where: { tenantId, workspaceId } });
+  }
+
+  async allocateOrderNumber(tenantId: string, createdAt: string, timeZone: string | undefined, tx: RentalFactTx): Promise<string> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    return allocateRentalOrderNumber(tx, tenantId, workspaceId, createdAt, timeZone);
   }
 
   /**

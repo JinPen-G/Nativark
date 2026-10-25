@@ -57,6 +57,12 @@ for (const [start, end] of [
   assert.equal(section(adapter), section(upstream), 'Keep upstream springs, thumb and keyboard interactions');
 }
 assert.match(adapter, /@\/registry\/components\/user-menu\/user-menu\.module\.css/);
+const bridge = read('apps/admin/src/components/ui/arc-bridge.css');
+assert.match(bridge, /\.sider-account > span \{[^}]*justify-content: flex-start;/);
+assert.match(bridge, /\.sider-account \.rental-account-trigger \{[^}]*width: 100%;[^}]*justify-content: flex-start;/);
+assert.match(bridge, /\.sider-account \[data-rental-user-name\] \{[^}]*flex: 1;[^}]*text-align: start;/);
+assert.match(bridge, /\.is-collapsed \.sider-account \.rental-account-trigger \{ justify-content: center;/);
+assert.match(adapter, /className=\{styles.triggerName\} data-rental-user-name=""/);
 const shell = read('apps/admin/src/components/AppShell.tsx');
 assert.match(shell, /<AccountMenu collapsed=/);
 assert.doesNotMatch(shell, /<AppearanceSwitcher|<LanguageSwitcher/);

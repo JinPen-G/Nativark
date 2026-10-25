@@ -1,7 +1,9 @@
+import { CustomerPreview } from "@/features/membership/CustomerPreview";
+import { SearchField, useListFilter } from "@/components/ui";
 import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Tag } from "antd";
-import { App, Modal, Radio } from "@/components/ui";
+import { ListSection, App, Modal, Radio } from "@/components/ui";
 import { Alert, Button, Drawer, Form, Input, Select, Table } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
@@ -30,6 +32,7 @@ export function MembershipReviewPage() {
   const [detailTarget, setDetailTarget] = useState<CustomerMembershipReview>();
   const [form] = Form.useForm<ReviewForm>();
   const reviews = useQuery({ queryKey: ["membership-reviews", filter], queryFn: () => membershipApi.reviews(filter), enabled: canView });
+  const reviewSearch = useListFilter(reviews.data, { fields: row => [row.customerName] });
   const scopeOptions = useQuery({ queryKey: ["membership-benefit-scope-options"], queryFn: membershipApi.benefitScopeOptions, enabled: canView });
   const decide = useMutation({
     mutationFn: (values: ReviewForm) => membershipApi.review(selected!.id, values),
@@ -51,15 +54,12 @@ export function MembershipReviewPage() {
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员审核")} description={t("需要租户级会员查看、注册审核或资质审核权限，且数据范围为全部。")} />;
 
   return <QueryState loading={reviews.isLoading} error={reviews.error}>
-    <PageHeader title={t("会员审核")} description={t("租户统一会员：注册策略和审核结果共享，来源空间仅供追溯。")} view={<Space>
-      <Select value={filter.status} style={{ width: 120 }} options={[{ value: "", label: t("全部状态") }, ...Object.entries(statusMeta).map(([value, item]) => ({ value, label: t(item.text) }))]} onChange={(status) => setFilter((value) => ({ ...value, status: status || undefined }))} />
-      <Select value={filter.type} style={{ width: 140 }} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => setFilter((value) => ({ ...value, type: type || undefined }))} />
-    </Space>} />
-    <Alert type="info" showIcon title={t("租户统一会员")} description={t("注册策略、注册审核与资质资料在租户内共享；切换经营空间仍显示同一份会员及审核记录。来源空间仅用于追溯，不限制审核结果的共享范围。会员暂停、退出或注销影响租户全部空间；证件类型及下单要求仍由各空间配置。")} style={{ marginBottom: 16 }} />
+    <PageHeader title={t("会员审核")} description={t("审核结果在租户内共享；证件要求按经营空间设置。")}  />
+
     {scopeOptions.error && <Alert type="warning" showIcon title={t("来源空间名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
-    <Card>
-      <Table<CustomerMembershipReview> rowKey="id" dataSource={reviews.data ?? []} pagination={{ pageSize: 20 }} columns={[
-        { title: t("会员"), dataIndex: "customerName" },
+    <ListSection controls={<><SearchField label={t("会员姓名")} placeholder={t("会员姓名")} value={reviewSearch.keyword} onValueChange={reviewSearch.setKeyword} /><Select value={filter.status} style={{ width: "var(--rental-control-width-select)" }} options={[{ value: "", label: t("全部状态") }, ...Object.entries(statusMeta).map(([value, item]) => ({ value, label: t(item.text) }))]} onChange={(status) => { setFilter((value) => ({ ...value, status: status || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} /><Select value={filter.type} style={{ width: "var(--rental-control-width-select)" }} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => { setFilter((value) => ({ ...value, type: type || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} /></>}>
+      <Table<CustomerMembershipReview> rowKey="id" onRefresh={() => reviews.refetch()} loading={reviews.isFetching} dataSource={reviewSearch.rows} pagination={reviewSearch.pagination} columns={[
+        { title: t("会员"), dataIndex: "customerName", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerName ?? "—"} type={row.reviewType === "corporate_registration" ? "corporate" : undefined} /> },
         { title: t("审核类型"), render: (_, row) => t(typeText[row.reviewType] ?? row.reviewType) },
         { title: t("证件类型"), dataIndex: "qualificationType", render: (value) => value ?? "—" },
         { title: t("渠道"), dataIndex: "channel", render: (value) => value === "app" ? t("APP 提交") : t("后台") },
@@ -73,7 +73,7 @@ export function MembershipReviewPage() {
             : <span>{row.reason ?? "—"}</span>}
         </Space> },
       ]} />
-    </Card>
+    </ListSection>
     <Modal title={selected ? `${t(typeText[selected.reviewType])}${t("审核")}` : t("审核")} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onConfirm={() => form.validateFields().then(async values => { const operation = selected && canHandle(selected) && decide.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; })} okButtonProps={{ disabled: !selected || !canHandle(selected) }} confirmLoading={decide.isPending} destroyOnHidden>
       <Form form={form} layout="vertical" disabled={!selected || !canHandle(selected)} onFinish={(values) => selected && canHandle(selected) && decide.mutate(values)}>
         <Form.Item label={t("审核结论")} name="status" rules={[{ required: true }]}><Radio.Group options={[{ value: "approved", label: t("通过") }, { value: "supplement_required", label: t("补充资料") }, { value: "rejected", label: t("拒绝") }, { value: "cancelled", label: t("取消") }]} /></Form.Item>

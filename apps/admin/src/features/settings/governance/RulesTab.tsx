@@ -1,7 +1,7 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { App, Modal } from "@/components/ui";
+import { ListSection, App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -280,11 +280,11 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
             />
           </Card>
         )}
-        <Card title={t("版本历史")}>
+        <ListSection title={t("版本历史")}>
           <Table<RentalRuleVersion>
             rowKey="id"
             pagination={false}
-            dataSource={rules.data ?? []}
+            onRefresh={() => rules.refetch()} loading={rules.isFetching} dataSource={rules.data ?? []}
             columns={[
               { title: t("版本"), dataIndex: "version" },
               {
@@ -360,14 +360,14 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               },
             ]}
           />
-        </Card>
-        <Card title={t("发布与作废审计")}>
+        </ListSection>
+        <ListSection title={t("发布与作废审计")}>
           <QueryState loading={ruleAudits.isLoading} error={ruleAudits.error}>
             <Table
               rowKey="id"
               size="small"
               pagination={false}
-              dataSource={ruleAudits.data ?? []}
+              onRefresh={() => ruleAudits.refetch()} loading={ruleAudits.isFetching} dataSource={ruleAudits.data ?? []}
               columns={[
                 { title: t("版本"), dataIndex: "version" },
                 {
@@ -391,7 +391,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               ]}
             />
           </QueryState>
-        </Card>
+        </ListSection>
       </Space>
 
       <Drawer

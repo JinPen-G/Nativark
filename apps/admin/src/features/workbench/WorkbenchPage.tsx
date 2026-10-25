@@ -1,8 +1,8 @@
-import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, ReloadOutlined } from "@/components/ui/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, Space, Statistic, Tag, Typography } from "antd";
-import { App } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
 import { Alert, Progress, Table } from "@/components/ui";
 import { ActionButton, Button, Segmented } from "@/components/ui";
 import { useState } from "react";
@@ -121,7 +121,7 @@ export function WorkbenchPage() {
   }
 
   return <>
-    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />} extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => { const result = await reconcilePayments.mutateAsync(); if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention"); }} />}</Space>} />
+    <PageHeader title="运营概览" view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />} extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => { const result = await reconcilePayments.mutateAsync(); if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention"); }} />}</Space>} />
     <QueryState loading={loading} error={error}>
       {showMetrics ? <div className="metric-grid">
         {canViewOrders && <>
@@ -132,38 +132,33 @@ export function WorkbenchPage() {
         </>}
         {canViewAssets && <Card className="metric-card"><Statistic title={t("可租库存")} value={availableUnits} /><div className="metric-foot"><span>{t("独立资产 + 数量库存")}</span><span className="metric-trend">{t("当前快照")}</span></div></Card>}
       </div> : <Alert type="info" showIcon title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} style={{ marginBottom: 16 }} />}
-      <Card
-        className="workspace-panel"
-        title={<span className="panel-title">{t("运营待办")} <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>}
-        extra={<Button type="link" onClick={() => todos.refetch()}>{t("刷新待办")}</Button>}
-        style={{ marginBottom: 16 }}
-      >
+      <ListSection title={<span className="panel-title">{t("运营待办")} <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>} style={{ marginBottom: "var(--space-4)" }}>
         <Table<RentalWorkbenchTodo>
           size="small"
           rowKey="id"
           pagination={false}
-          dataSource={(todos.data?.items ?? []).slice(0, 8)}
+          onRefresh={() => todos.refetch()} loading={todos.isFetching} dataSource={(todos.data?.items ?? []).slice(0, 8)}
           locale={{ emptyText: t("当前空间没有需要处理的待办") }}
           columns={[
-            { title: t("事项"), render: (_, item) => <Space size={8}><Tag color={todoTypeColors[item.type]}>{t(todoTypeLabels[item.type])}</Tag><Typography.Text strong>{item.title}</Typography.Text>{item.orderNo && <Typography.Text type="secondary">{item.orderNo}</Typography.Text>}</Space> },
+            { title: t("事项"), render: (_, item) => <Space orientation="vertical" size={4} style={{ alignItems: "flex-start" }}><Tag color={todoTypeColors[item.type]}>{t(todoTypeLabels[item.type])}</Tag><Typography.Text strong>{item.title}</Typography.Text>{item.orderNo && <Typography.Text type="secondary">{item.orderNo}</Typography.Text>}</Space> },
             { title: t("说明"), dataIndex: "description", ellipsis: true },
             { title: t("金额"), dataIndex: "amount", align: "right", render: (value) => value === undefined ? "—" : money(Number(value)) },
             { title: t("操作"), align: "right", render: (_, item) => canOpenTodo(item) ? <Button type="link" onClick={() => navigate(item.href)}>{t("处理")}</Button> : <Typography.Text type="secondary">{t("无详情权限")}</Typography.Text> }
           ]}
         />
         {(todos.data?.items.length ?? 0) > 8 && <Typography.Text type="secondary">{t("还有")} {(todos.data?.items.length ?? 0) - 8}{t("项，请从订单或工单页面继续处理。")}</Typography.Text>}
-      </Card>
+      </ListSection>
       {showMetrics && <div className="workspace-grid">
-        {canViewOrders && <Card className="workspace-panel" title={<span className="panel-title">{t("订单状态")} <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
-          <Table pagination={false} rowKey="status" dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
+        {canViewOrders && <ListSection title={<span className="panel-title">{t("订单状态")} <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
+          <Table pagination={false} rowKey="status" onRefresh={() => report.refetch()} loading={report.isFetching} dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
             { title: t("阶段"), dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
             { title: t("订单数"), dataIndex: "count", align: "right" },
             { title: t("占比"), align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
           ]} />
-        </Card>}
+        </ListSection>}
         {canViewAssets && <Card className="workspace-panel" title={t("库存状态（当前快照）")} extra={<Button type="link" onClick={() => navigate("/rental/assets")}>{t("资产与库存")} <ArrowRightOutlined /></Button>}>
-          {/* 快照说明随报表出参下发，必须显示：少了它，运营会把快照当区间利用率用。 */}
-          {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title={t("这一节是读取瞬间的快照，不是区间利用率")} description={data!.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)} style={{ marginBottom: 12 }} />}
+          {/* Keep the decision boundary visible, without rendering database diagnostics as UI help. */}
+          {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title={t("这一节是读取瞬间的快照，不是区间利用率")} description={t("缺少历史可用时长，暂不计算区间利用率。")} style={{ marginBottom: "var(--space-3)" }} />}
           <Space orientation="vertical" size={0} style={{ width: "100%" }}>
             {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{t(assetStatusLabels[row.status] ?? row.status)}</Typography.Text><Typography.Text type="secondary">{t("独立资产")}</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}>{row.count} {t("项")}</Tag></div>)}
             {stock && stock.onHandTotal > 0 && <div className="status-row"><div><Typography.Text strong>{t("数量库存")}</Typography.Text><Typography.Text type="secondary">{t("可租 / 在库（已占用")} {stock.reservedTotal}，{t("维修")} {stock.maintenanceTotal}）</Typography.Text></div><Tag color={stock.availableTotal > 0 ? "green" : "orange"}>{stock.availableTotal} / {stock.onHandTotal}</Tag></div>}

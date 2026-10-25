@@ -1,4 +1,5 @@
 import { proposalDisplayState } from "./proposal-preview-state";
+import { Table } from "@/components/ui";
 
 export type ProposalPreviewData = {
   title: string;
@@ -27,24 +28,12 @@ export function ProposalPreview({ proposal, nowIso, stale = false }: ProposalPre
           ? `依据：${proposal.evidence}`
           : "依据缺失，尚不能视为已批准"}
       </p>
-      <table>
-        <thead>
-          <tr>
-            <th>字段</th>
-            <th>变更前</th>
-            <th>变更后</th>
-          </tr>
-        </thead>
-        <tbody>
-          {proposal.changes.slice(0, 200).map((change) => (
-            <tr key={change.label}>
-              <td>{change.label}</td>
-              <td>{change.before}</td>
-              <td>{change.after}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table caption="提案变更" rowKey={(change, index) => `${index}:${change.label}`} pagination={false} onRefresh={null}
+        dataSource={proposal.changes.slice(0, 200)} columns={[
+          { title: "字段", dataIndex: "label" },
+          { title: "变更前", dataIndex: "before" },
+          { title: "变更后", dataIndex: "after" },
+        ]} />
       {proposal.changes.length > 200 && <p role="status">变更列表超过展示上限，已截断。</p>}
     </section>
   );

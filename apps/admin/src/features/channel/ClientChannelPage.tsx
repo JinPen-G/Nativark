@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
 import { Card, Col, Divider, Row, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
@@ -29,7 +29,7 @@ function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { 
   const preview = value ? (value.startsWith("/") ? `${apiAssetOrigin}${value}` : value) : "";
   return (
     <div>
-      {preview ? <img src={preview} alt="" style={{ height: previewHeight, maxWidth: 240, objectFit: "contain", borderRadius: 8, border: "1px solid #eee", display: "block", marginBottom: 8, background: "#fafafa" }} /> : null}
+      {preview ? <img src={preview} alt="" style={{ height: previewHeight, maxWidth: 240, objectFit: "contain", borderRadius: "var(--rental-ui-radius-container)", border: "1px solid var(--border)", display: "block", marginBottom: "var(--space-2)", background: "var(--surface-muted)" }} /> : null}
       <Space>
         <FileUpload
           accept="image/jpeg,image/png,image/webp"
@@ -489,7 +489,6 @@ export function ClientChannelPage() {
   return (
     <PageHeader
       title={t("客户端渠道")}
-      description={t("配置小程序、APP 与 web 官网对客户展示的品牌、客服、协议、帮助与发布服务（租户级共用），以及微信小程序凭证与官网特有内容。")}
       note={{ title: t("一份通用配置，多端共用"), description: t("品牌、客服、协议正文/版本、帮助与发布服务由小程序、APP 和官网共用；微信 AppID/AppSecret 是微信渠道专有；站点标语、Hero、辅助色、页脚与 SEO 是官网专有。协议正文在客户端内直接渲染，请填写正文而不仅是外链。") }}
       view={<Tabs
         tabBarGutter={32}

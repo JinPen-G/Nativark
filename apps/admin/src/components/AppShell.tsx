@@ -1,35 +1,25 @@
-import {
-  HomeOutlined,
-  LayoutOutlined,
-  MenuOutlined
-} from "@ant-design/icons";
+import { MenuOutlined } from "@/components/ui/icons";
 import { Breadcrumb, Layout } from "antd";
 import { Button, Drawer, Tooltip, SidebarMenu } from "@/components/ui";
 import { motion } from "motion/react";
+import { Bell, ChevronLeft, ChevronRight } from "lucide-react";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
-import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
-import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_DEFAULT_MARK } from "@/app/branding";
+import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AccountMenu } from "./AccountMenu";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { SidebarQuickEntries } from "./SidebarQuickEntries";
+import { WorkspaceClock } from "./WorkspaceClock";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
+import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
 
 const { Sider, Content } = Layout;
-
-/**
- * 面包屑暂不展示。
- *
- * 二级菜单已经全部常显，面包屑那个「同组内跳转」的下拉在信息上是冗余的；
- * 但导航层级本身还没定论，所以**保留计算与渲染代码**，只用这个开关关掉显示，
- * 需要时改回 `true` 即可，不必重新实现。
- */
-const SHOW_BREADCRUMB = false;
 
 /**
  * 侧栏 / 抽屉的切换点。
@@ -62,7 +52,11 @@ const WIDE_DESKTOP_MIN_WIDTH = "(min-width: 1200px)";
 export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => !window.matchMedia(WIDE_DESKTOP_MIN_WIDTH).matches);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // One visible selection across fixed entries and business routes, including shared preview destinations.
+  const [fixedSelection, setFixedSelection] = useState<string>();
   const navRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const navigation = useWorkspaceNavigation(contentRef);
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useLocale();
@@ -99,6 +93,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission))
   })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, hasTenantMembershipPermission, tenant?.categoryCode, terminology, user]);
   const homePath = sections[0]?.routes[0]?.path ?? "/";
+  // Tenant overview when authorized; platform/restricted users retain an accessible destination.
+  const overviewPath = canAccessRoute(APP_ROUTES.workbench, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission)
+    ? APP_ROUTES.workbench.path : homePath;
+  const activeFixedKey = location.pathname === overviewPath ? fixedSelection : undefined;
+  useEffect(() => { if (location.pathname !== overviewPath) setFixedSelection(undefined); }, [location.pathname, overviewPath]);
   /**
    * 展开态：一级是**不可点的分组标题**，二级直接铺开（`type: "group"`）。
    *
@@ -124,22 +123,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       section: sections.find((section) => section.routes.some((entry) => entry.path === route?.path))
     };
   }, [location.pathname, routes, sections]);
-  // 新建订单、订单详情、订阅子页都不在菜单里，选中态归到各自的菜单父项，否则进这些页面菜单会整体失焦。
-  const selectedKey = location.pathname.startsWith("/rental/orders/") ? "/rental/orders"
-    : location.pathname.startsWith("/settings/subscription/") ? "/settings/subscription"
-    : location.pathname.startsWith("/platform/subscriptions/") ? "/platform/subscriptions"
-    : location.pathname;
-  const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
-    key: entry.path,
-    label: t(entry.label),
-    icon: entry.icon,
-    onClick: () => navigate(entry.path)
-  })) ?? sections.map((section) => ({
-    key: section.key,
-    label: t(section.label),
-    icon: section.icon,
-    onClick: () => navigate(section.routes[0].path)
-  })), [current.section, navigate, sections, t]);
+  // Detail routes inherit the longest permitted menu parent, including future record pages.
+  const selectedKey = current.route?.path ?? location.pathname;
+  const detailRoute = Object.values(APP_ROUTES).find(route => matchPath(route.path, location.pathname)
+    && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
+  const breadcrumbItems = [
+    ...(current.section ? [{ title: <span className="breadcrumb-section">{current.section.icon}{t(current.section.label)}</span> }] : []),
+    { title: detailRoute && detailRoute.path !== current.route?.path && current.route
+      ? <button type="button" className="breadcrumb-link" onClick={() => navigate(current.route!.path)}>{t(current.route.label)}</button>
+      : t(current.route?.label ?? detailRoute?.label ?? "工作台") },
+    ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: t(detailRoute.label) }] : []),
+  ];
 
   // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
@@ -170,42 +164,18 @@ export function AppShell({ children }: { children: ReactNode }) {
    * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。
    */
   const renderSider = (inDrawer = false) => (
-    <div className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}>
-      <div className="sider-brand">
-        <button className="app-brand" type="button" onClick={() => navigate(homePath)}>
-          <span className={`app-brand-mark${(!collapsed || inDrawer) ? " app-brand-mark-expanded" : ""}`}>
-            <img src={ADMIN_DEFAULT_MARK} alt="" aria-hidden="true" />
-          </span>
-          {(!collapsed || inDrawer) && (
-            <span className="app-brand-copy">
-              <img src={ADMIN_DEFAULT_LOGO} alt={ADMIN_BRAND_NAME} />
-            </span>
-          )}
-        </button>
-        {!inDrawer && (
-          <Tooltip title={collapsed ? t("展开导航") : t("收起导航")} placement="right">
-            <Button
-              type="text"
-              className="sider-collapse"
-              aria-label={collapsed ? t("展开导航") : t("收起导航")}
-              icon={<LayoutOutlined />}
-              onClick={() => setCollapsed((value) => !value)}
-            />
-          </Tooltip>
-        )}
-      </div>
-
-      {(!collapsed || inDrawer) && (
-        <div className="sider-workspace"><WorkspaceSwitcher /></div>
-      )}
+    <div id={inDrawer ? undefined : "workspace-sidebar"} className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}>
+      <div className="sider-workspace"><WorkspaceSwitcher collapsed={collapsed && !inDrawer} /></div>
+      <SidebarQuickEntries collapsed={collapsed && !inDrawer} selectedKey={activeFixedKey}
+        onNavigate={key => { setFixedSelection(key); navigation.fromSidebar(overviewPath); setDrawerOpen(false); }} />
 
       <motion.div layoutScroll className="sider-nav" ref={navRef}>
         <SidebarMenu
           mode="inline"
           inlineCollapsed={collapsed && !inDrawer}
-          selectedKeys={[selectedKey]}
+          selectedKeys={activeFixedKey ? [] : [selectedKey]}
           items={buildMenuItems(collapsed && !inDrawer)}
-          onClick={({ key }) => { if (String(key).startsWith("/")) navigate(String(key)); }}
+          onClick={({ key }) => { if (String(key).startsWith("/")) { setFixedSelection(undefined); navigation.fromSidebar(String(key)); } }}
         />
       </motion.div>
 
@@ -229,6 +199,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             theme={mode === "dark" ? "dark" : "light"}
           >
             {renderSider()}
+            <Tooltip title={collapsed ? t("展开导航") : t("收起导航")}>
+              <Button type="default" size="small" shape="circle" className="sider-edge-toggle"
+                aria-label={collapsed ? t("展开导航") : t("收起导航")}
+                aria-expanded={!collapsed} aria-controls="workspace-sidebar"
+                icon={collapsed ? <ChevronRight size={15} aria-hidden="true" /> : <ChevronLeft size={15} aria-hidden="true" />}
+                onClick={() => setCollapsed(value => !value)} />
+            </Tooltip>
           </Sider>
         ) : (
           <>
@@ -255,16 +232,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
 
         <Layout className="app-workspace">
-          {SHOW_BREADCRUMB && (
-            <div className="workspace-context">
-              <Breadcrumb items={[
-                { title: <HomeOutlined className="breadcrumb-home" onClick={() => navigate(homePath)} /> },
-                { title: current.section ? t(current.section.label) : t("工作台"), menu: { items: breadcrumbMenuItems } },
-                { title: current.route ? t(current.route.label) : t("租赁运营台") }
-              ]} />
+          <header className="workspace-context">
+            <div className="workspace-context-location">
+              <Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} />
             </div>
-          )}
-          <Content className="app-content"><main className="content-canvas">{children}</main></Content>
+            <div className="workspace-context-actions"><WorkspaceClock />
+              <Tooltip title={t("通知入口预留，暂未接入")}>
+                <Button type="text" size="small" className="workspace-notifications" aria-label={t("通知")} aria-disabled="true" icon={<Bell size={19} strokeWidth={1.75} />} />
+              </Tooltip>
+            </div>
+          </header>
+          <Content ref={contentRef} className="app-content"><main className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></main></Content>
         </Layout>
       </Layout>
       {/* SUB-02 §5.4 到期提醒：全局左下角浮窗，随各页常驻（无数据/平台账号时自渲染为空）。 */}

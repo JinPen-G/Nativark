@@ -14,6 +14,8 @@ const SELF_SERVICE_REUSABLE_MEMBERSHIP = new Set(["active", "pending_activation"
 const maskPhone = (value: string) => (value.length <= 4 ? "****" : `${value.slice(0, 3)}****${value.slice(-4)}`);
 
 export interface RegisterPersonalCustomerInput {
+  /** Only the authorized admin registration adapter enables create-only CSV imports. */
+  onlyNew?: boolean;
   tenantId: string;
   /** 调用方已规范化（去空白 / 去分隔符）的手机号，本层不再改写。 */
   phone: string;
@@ -61,6 +63,7 @@ export interface RegisterPersonalCustomerInput {
 }
 
 export interface RegisterPersonalCustomerResult {
+  skipped?: boolean;
   customer: PrismaCustomerProfile;
   membership: PrismaCustomerMembership;
   review?: PrismaCustomerMembershipReview;
@@ -146,6 +149,8 @@ export class CustomerRegistrationService {
     const existingMembership = await tx.customerMembership.findUnique({
       where: { tenantId_customerId: { tenantId, customerId: customer.id } }
     });
+    // Decide under the original customer business lock, before activation, review or credential writes.
+    if (input.onlyNew && !input.selfService && existingMembership) return { customer, membership: existingMembership, skipped: true };
     if (input.selfService && existingMembership && !SELF_SERVICE_REUSABLE_MEMBERSHIP.has(existingMembership.status)) {
       throw new ConflictException("该客户会员关系已受限、退出或关闭，不能通过注册重新激活");
     }

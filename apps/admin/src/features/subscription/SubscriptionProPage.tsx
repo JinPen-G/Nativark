@@ -46,7 +46,7 @@ export function SubscriptionProPage() {
     </Card>;
   }
 
-  return <PageHeader title="PRO 介绍与版本对比" description="当前权益按本租户的公共权益与额外授权展示；功能上线不等于 PRO 正式销售开放。"
+  return <PageHeader title="PRO 介绍与版本对比"
     extra={<Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" message={subscriptionError(query.error, t("订阅介绍加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
@@ -54,7 +54,7 @@ export function SubscriptionProPage() {
           <Alert type="info" showIcon message={t("正式 PRO 销售尚未开放；四品类首批专业包及销售清单全部通过后才可正式收费。目前仅接受升级咨询或有明确范围的受控试点，不自动收款或开通。")} />
           <Card size="small" title={t("适用场景与范围")}>
             <Typography.Paragraph>{t("基础版保留已承诺的基础租赁经营闭环。PRO 规划面向项目协同、专业交接与养护等更复杂的经营需求，以下以实际发布目录为准；已有授权不重复作为升级卖点。")}</Typography.Paragraph>
-            <Select allowClear style={{ minWidth: 200 }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map((value) => ({ value, label: value }))} />
+            <Select allowClear style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map((value) => ({ value, label: value }))} />
             <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t("查看某品类不表示已经营该品类；启用仍需相应空间、人员权限和业务准备。")}</Typography.Paragraph>
           </Card>
           {featureBlock("已上线且本租户已包含 / 已获授权", groups.included, "无需为这些权益重复升级；到期、空间配置和安全条件仍单独校验。")}
@@ -65,7 +65,7 @@ export function SubscriptionProPage() {
           <Card size="small" title={t("标准年费与费用边界")}>
             <Descriptions column={{ xs: 1, md: 2 }} items={[SubscriptionPlan.Standard, SubscriptionPlan.Pro].map((plan) => {
               const price = query.data.standardPricing.find((p) => p.plan === plan);
-              return { key: plan, label: t(PLAN_LABEL[plan]), children: <Space orientation="vertical" size={0}><span>{price?.published ? formatMoney(price.annualFee, t("价格待公布")) : t("价格待公布")}</span>{price?.note && <Typography.Text type="secondary">{price.note}</Typography.Text>}</Space> };
+              return { key: plan, label: t(PLAN_LABEL[plan]), children: <Space orientation="vertical" size={0}><span>{price?.published ? t(formatMoney(price.annualFee, t("价格待公布"))) : t("价格待公布")}</span>{price?.note && <Typography.Text type="secondary">{price.note}</Typography.Text>}</Space> };
             })} />
             <Typography.Text type="secondary">{t("有效基础版升级按相同计价口径核对剩余期间补差，保持统一截止。外部按量服务及硬件另计；不自动扣费、不默认试用。发布价格也不代表 PRO 销售条件已通过。")}</Typography.Text>
           </Card>

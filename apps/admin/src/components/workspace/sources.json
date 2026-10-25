@@ -1,0 +1,62 @@
+{
+  "purpose": "Internal Rental OS page-level motion. Not an independently distributed component library.",
+  "animateUi": {
+    "repository": "https://github.com/imskyleen/animate-ui",
+    "commit": "efeb96ffd7a3b7a4868667e4ac3c346620fb3044",
+    "license": "MIT + Commons Clause License Condition; see vendor/animate-ui/LICENSE.md",
+    "adaptations": [
+      "Fade imports point to local snapshots.",
+      "Slot cn import points to host CSS-module class-name joiner; PageEnter does not expose asChild.",
+      "No changes to upstream opacity/spring/viewport logic."
+    ],
+    "files": [
+      {
+        "file": "fade.tsx",
+        "sha256": "bfaf3638550da7e0bad8fe684696dad8443f33ecadaa4f9afb427ca8148d20e7"
+      },
+      {
+        "file": "slot.tsx",
+        "sha256": "4cec002146b92c0e9c64272b9159a5f269497018bf86f5edad10222c5c82855f"
+      },
+      {
+        "file": "use-is-in-view.ts",
+        "sha256": "937c20c97078349e6fb2d2b296f8749fcc70887a6ad691cbdcf284342fb468dc"
+      },
+      {
+        "file": "LICENSE.md",
+        "sha256": "bb145c4b692008a88e8e565953d1ca258f2f9ea25190afaa86877a9e9de1c040"
+      }
+    ]
+  },
+  "pageTransitionStack": {
+    "repository": "https://github.com/imskyleen/animate-ui",
+    "commit": "c28163655493f98bff9dc0362301a6242f74a1fd",
+    "license": "MIT + Commons Clause; unchanged license retained in vendor/animate-ui/LICENSE.md",
+    "reference": "apps/v2/app/docs/layout.tsx selects effect=stack",
+    "sources": [
+      { "file": "apps/v2/registry/components/page-transition/index.tsx", "sha256": "6ece792813e08eeaa11f34b51051827d223a88095d52ab6eb62d1df8a499bf0b" },
+      { "file": "packages/react/src/utils/motion/index.tsx", "sha256": "02cf5b62f79224e75fe57a4a74cf4d9cac3ec65b7f2e0a73947280fa37da6161" },
+      { "file": "apps/v2/app/docs/layout.tsx", "sha256": "3d38405db392620e8e2a981a2a86fc0f228a3fefcde7254aa765e8df3ca7a47c" }
+    ],
+    "adaptations": [
+      "Reuse only the stack effect: full visible-height upward cover, .94 old-page scale, .6 old-page opacity, 500ms, ease.resize.",
+      "The upstream React component requires React 19.3; this host remains on 19.2 and uses Document.startViewTransition with the existing React Router.",
+      "AppShell sidebar navigation owns the transition; Suspense route commit releases the snapshot. One live React page, no duplicated forms or effects.",
+      "Same-page controls, details navigation, tabs, theme transitions and existing overlay exits keep their current owners. Reduced motion and unsupported browsers navigate directly."
+    ]
+  },
+  "solidGlass": {
+    "repository": "https://github.com/deeplethe/solid-glass",
+    "commit": "6e8903e494a15491ceda38fafea5056c95a74d44",
+    "source": "src/solid-glass.css",
+    "license": "MIT; see vendor/solid-glass/LICENSE",
+    "adaptations": [
+      "Only the edge-lighting idea is retained, adapted to achromatic tokens and close-contact shadows on an existing Card; no extra wrapper.",
+      "Dark appearance follows existing html data-appearance rather than upstream global dark class.",
+      "Uses existing opaque surface color, no tint, backdrop blur or upstream opacity values; contrast and forced-colors remain host concerns.",
+      "No global stylesheet import, fonts, controls, table styles or agent blocks."
+    ],
+    "consumers": [],
+    "status": "Reserved only; the order page no longer uses any material wrapper or surface class."
+  }
+}

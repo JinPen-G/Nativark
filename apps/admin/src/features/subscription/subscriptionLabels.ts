@@ -18,11 +18,11 @@ import {
 import { serviceLocalTime } from "./subscriptionOperations";
 
 /** Accurate time + service zone. Missing zone is labelled UTC rather than silently using the device zone. */
-export function formatSubscriptionDate(value?: string | null, timeZone?: string): string {
-  if (!value || !Number.isFinite(Date.parse(value))) return "待平台确认";
+export function formatSubscriptionDate(value?: string | null, timeZone?: string, translate: (text: string) => string = text => text): string {
+  if (!value || !Number.isFinite(Date.parse(value))) return translate("待平台确认");
   const zone = timeZone || "UTC";
   try { return `${serviceLocalTime(value, zone).replace("T", " ")}（${zone}）`; }
-  catch { return `${new Date(value).toISOString()}（服务时区待确认）`; }
+  catch { return `${new Date(value).toISOString()}（${translate("服务时区待确认")}）`; }
 }
 
 export const PLAN_LABEL: Record<SubscriptionPlan, string> = {

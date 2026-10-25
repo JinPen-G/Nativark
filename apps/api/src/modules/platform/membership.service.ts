@@ -152,6 +152,7 @@ export class MembershipService {
     const row = await this.prisma.customerMembershipRegistrationSettings.findUnique({ where: { tenantId } });
     return {
       registrationMode: (row?.registrationMode ?? "manual") as CustomerMembershipRegistrationSettings["registrationMode"],
+      supportsOnlyNewImport: true,
       updatedAt: row?.updatedAt.toISOString()
     };
   }
@@ -165,7 +166,7 @@ export class MembershipService {
       create: { tenantId, registrationMode },
       update: { registrationMode }
     });
-    return { registrationMode: row.registrationMode as CustomerMembershipRegistrationSettings["registrationMode"], updatedAt: row.updatedAt.toISOString() };
+    return { registrationMode: row.registrationMode as CustomerMembershipRegistrationSettings["registrationMode"], updatedAt: row.updatedAt.toISOString(), supportsOnlyNewImport: true };
   }
 
   async registerPersonal(
@@ -175,6 +176,7 @@ export class MembershipService {
     canDirectApprove = false,
     canManageAccount = false
   ) {
+    if (input.onlyNew && input.channel !== "admin") throw new BadRequestException("仅新增模式只用于后台导入");
     if (input.channel === "app" && input.directApprove) {
       throw new BadRequestException("APP 注册不能请求后台直接通过");
     }
@@ -204,6 +206,7 @@ export class MembershipService {
       requestKey,
       reviewPayload: { name: input.name.trim(), email: input.email?.trim() || undefined } as Prisma.InputJsonValue,
       selfService: false,
+      onlyNew: input.onlyNew === true,
       account: input.temporaryPassword
         ? {
             passwordHash: hashPassword(input.temporaryPassword),
@@ -216,6 +219,7 @@ export class MembershipService {
 
     return {
       customerId: result.customer.id,
+      skipped: result.skipped || undefined,
       membershipStatus: result.membership.status,
       review: result.review ? this.toReview(result.review) : undefined
     };

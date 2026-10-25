@@ -1,5 +1,5 @@
-import { SaveButton } from "@/components/ui";
-import { HistoryOutlined, PlusOutlined } from "@ant-design/icons";
+import { ListSection, SaveButton } from "@/components/ui";
+import { HistoryOutlined, PlusOutlined } from "@/components/ui/icons";
 import type {
   RentalCategoryTerminology,
   RentalFulfillmentLocation,
@@ -90,14 +90,14 @@ export function StockOperationsPanel({
       style={{ marginTop: 16 }}
     >
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        {t("入库、盘点差异、地点调拨、报损和退出都会保留操作人、原因、前后余额及幂等记录；已预占或维修隔离的数量不能被直接抹掉。")}
+        {t("已预占或维修隔离的库存不可直接扣减。")}
       </Typography.Paragraph>
     </Card>
-    <Card title={<Space><HistoryOutlined />{t("库存流水")}</Space>} style={{ marginTop: 16 }}>
+    <ListSection title={<Space><HistoryOutlined />{t("库存流水")}</Space>} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
       <Table<RentalStockLedgerEntry>
         rowKey="id"
-        loading={ledger.isLoading}
-        dataSource={ledger.data ?? []}
+        loading={ledger.isFetching}
+        onRefresh={() => ledger.refetch()} dataSource={ledger.data ?? []}
         pagination={{ pageSize: 8 }}
         scroll={{ x: 1200 }}
         locale={{ emptyText: t("暂无库存作业流水") }}
@@ -113,7 +113,7 @@ export function StockOperationsPanel({
           { title: t("操作人"), dataIndex: "operator" }
         ]}
       />
-    </Card>
+    </ListSection>
     <Drawer
       title={t("新增数量/耗材库存作业")}
       size={560}

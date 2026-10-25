@@ -1,5 +1,5 @@
 import { SaveButton } from "@/components/ui";
-import { SaveOutlined } from "@ant-design/icons";
+import { SaveOutlined } from "@/components/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
 import { Card, Col, InputNumber, Row, Space, Typography } from "antd";

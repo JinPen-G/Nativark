@@ -1,5 +1,5 @@
-import { SaveButton } from "@/components/ui";
-import { PlusOutlined } from "@ant-design/icons";
+import { ListSection, SaveButton } from "@/components/ui";
+import { PlusOutlined } from "@/components/ui/icons";
 import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
@@ -107,12 +107,12 @@ export function AssetWorkspacePage() {
 
   return (
     <>
-      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产与库存"} description={locale === "en-US" ? "Maintain each serialized asset or quantity stock by location. Shared manufacturer and model details come from the product model master." : presentation?.assetDescription ?? "维护每件序列化资产或各地点的数量库存；厂商型号等共享资料由产品型号主档提供。"} note={{ title: `${t(profile.data?.terminology.assetLabel ?? category?.name ?? "当前品类资产")}${t("是具体可交付实体")}`, description: t("每条独立资产必须关联一个产品型号；厂商和型号不在这里重复填写，领取/归还使用量属于订单履约记录。") }} extra={canManage && activeTab === "assets" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openAssetEditor()}>{locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`}</Button> : undefined} />
-      {visibleTabs.length > 1 && <Tabs className="standalone-tabs" activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={visibleTabs} />}
-      <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space wrap style={{ marginBottom: 16 }}><SearchField label={t("搜索资产")} placeholder={locale === "en-US" ? `${t(profile.data?.terminology.identifierLabel ?? "资产编号")}, ${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} or ${t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")}` : `${profile.data?.terminology.identifierLabel ?? "资产编号"}、${profile.data?.terminology.itemGroupLabel ?? "产品型号"}或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onValueChange={setKeyword} style={{ width: 360 }} /></Space>
+      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产与库存"} note={{ title: `${t(profile.data?.terminology.assetLabel ?? category?.name ?? "当前品类资产")}${t("是具体可交付实体")}`, description: t("每条独立资产必须关联一个产品型号；厂商和型号不在这里重复填写，领取/归还使用量属于订单履约记录。") }} extra={canManage && activeTab === "assets" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openAssetEditor()}>{locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`}</Button> : undefined} />
+      {visibleTabs.length > 1 && <Tabs aria-label={t("库存视图")} activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={visibleTabs} />}
+      <ListSection controls={<SearchField label={t("搜索资产")} placeholder={locale === "en-US" ? `${t(profile.data?.terminology.identifierLabel ?? "资产编号")}, ${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} or ${t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")}` : `${profile.data?.terminology.identifierLabel ?? "资产编号"}、${profile.data?.terminology.itemGroupLabel ?? "产品型号"}或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} />}>
+
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
-          {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
+          {activeTab === "assets" ? <Table<RentalAsset> exportConfig={{ filename: t("器材资产"), fields: [{ label: t("资产编号"), value: row => row.assetNo }, { label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("状态"), value: row => row.status }] }} rowKey="id" onRefresh={() => assets.refetch()} loading={assets.isFetching} dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`, width: 110, fixed: "left", render: (_, row) => {
               const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
               const image = group?.images?.find((item) => item.isCover) ?? group?.images?.[0];
@@ -125,7 +125,7 @@ export function AssetWorkspacePage() {
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={statusMap[value]?.color}>{t(statusMap[value]?.label ?? value)}</Tag> },
             { title: t("操作"), fixed: "right", render: (_, row) => canView ? <Space size={0}>{canManage && <Button type="link" onClick={() => openAssetEditor(row)}>{t("编辑")}</Button>}<Button type="link" onClick={() => setStatusHistoryAsset(row)}>{t("状态历史")}</Button></Space> : "-" }
-          ]} /> : <Table<RentalStockBalance> rowKey="id" dataSource={stockRows} columns={[
+          ]} /> : <Table<RentalStockBalance> exportConfig={{ filename: t("库存"), fields: [{ label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("在手"), value: row => row.onHandQuantity }, { label: t("已预占"), value: row => row.reservedQuantity }, { label: t("维护/清洁"), value: row => row.maintenanceQuantity }] }} rowKey="id" onRefresh={() => stocks.refetch()} loading={stocks.isFetching} dataSource={stockRows} columns={[
             { title: t("商品"), render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("在手"), dataIndex: "onHandQuantity", align: "right" },
@@ -153,7 +153,7 @@ export function AssetWorkspacePage() {
             { title: t("操作"), render: () => canManage ? t("请使用下方库存作业") : "-" }
           ]} />}
         </QueryState>
-      </Card>
+      </ListSection>
       {activeTab === "stock" && <StockOperationsPanel groups={groups.data ?? []} locations={locations.data ?? []} terminology={profile.data?.terminology} canManage={canManage} />}
       <Drawer title={editing ? (locale === "en-US" ? `${t("编辑")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("编辑")}${t(profile.data?.terminology.assetLabel ?? "资产")}`) : (locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`)} size={640} open={assetDrawerOpen} destroyOnHidden onClose={() => setAssetDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={assetForm} pending={saveAsset.isPending} onSave={(values) => saveAsset.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
@@ -175,8 +175,8 @@ export function AssetWorkspacePage() {
       <Drawer title={`${statusHistoryAsset?.assetNo ?? t("资产")}${t("状态历史")}`} size={720} open={Boolean(statusHistoryAsset)} onClose={() => setStatusHistoryAsset(undefined)}>
         {statusHistory.isError ? <Alert type="error" showIcon title={t("状态历史读取失败")} description={t("请稍后重试；本次未将失败误显示为没有记录。")} /> : <Table<RentalAssetStatusHistory>
           rowKey="id"
-          loading={statusHistory.isLoading}
-          dataSource={statusHistory.data ?? []}
+          loading={statusHistory.isFetching}
+          onRefresh={() => statusHistory.refetch()} dataSource={statusHistory.data ?? []}
           pagination={{ pageSize: 10 }}
           locale={{ emptyText: t("暂无状态变化记录") }}
           columns={[

@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, CloudServerOutlined, SettingOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, CloudServerOutlined, SettingOutlined } from "@/components/ui/icons";
 import type {
   SaveTenantIntegrationRequest,
   TenantIntegrationCapability,
@@ -10,7 +10,7 @@ import { App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
-import { ActionButton, SaveButton, Tabs } from "@/components/ui";
+import { ActionButton, Button, SaveButton, Tabs } from "@/components/ui";
 import type { FormInstance } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -139,7 +139,7 @@ function ProviderCard({
             </Col>
           ))}
         </Row>
-        <Space>
+        <Space wrap>
           <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           <ActionButton variant="secondary" className="arc-action-connect" label={testFeedback === "failed" ? t("连接失败，重试") : t("测试连接")}
             pendingLabel={t("测试中")} successLabel={testFeedback === "live" ? t("连接成功") : t("配置完整（未联网）")}
@@ -172,15 +172,14 @@ export function TenantIntegrationsPage() {
     }
   }, []);
   if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
-  if (catalog.error || !catalog.data) return <PageHeader title={t("第三方服务")} description={t("暂时无法读取租户第三方服务配置，请刷新重试。")} />;
+  if (catalog.error || !catalog.data) return <PageHeader title={t("第三方服务")} view={<Alert type="error" showIcon title={t("暂时无法读取租户第三方服务配置，请刷新重试。")} action={<Button onClick={() => catalog.refetch()}>{t("重试")}</Button>} />} />;
   const configByProvider = new Map(catalog.data.configs.map((config) => [`${config.capability}:${config.provider}`, config]));
   return (
     <PageHeader
       title={t("第三方服务")}
-      description={t("为当前租户选择并配置支付、短信和云存储平台。配置按租户共享给各经营空间，业务模块只使用统一适配器。")}
       note={{ title: t("密钥只在服务端加密保存"), description: t("页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、云存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。") }}
       view={<Space orientation="vertical" size={20} style={{ width: "100%" }}>
-        <Alert showIcon type="info" icon={<SettingOutlined />} title={t("一个能力可以配置多个平台")} description={t("支付可以同时启用支付宝和微信支付；短信、云存储也可以分别配置多个平台，并指定默认平台。保存某个平台时不会覆盖其他平台。")} />
+
         <Tabs
           tabBarGutter={32}
           items={(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {

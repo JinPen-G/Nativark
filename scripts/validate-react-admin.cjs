@@ -35,6 +35,7 @@ const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
 const tenantManagementPage = read("apps/admin/src/features/platform/TenantManagementPage.tsx");
 const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOperationsPage.tsx");
 const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
+const rentalOrderDetailSummary = read("apps/admin/src/features/rental-core/OrderDetailSummary.tsx");
 const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
 const assetWorkspacePage = read("apps/admin/src/features/catalog/AssetWorkspacePage.tsx");
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
@@ -96,10 +97,13 @@ if (
   failures.push("capability governance UI coverage: missing production-readiness success title");
 }
 [
-  "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1",
-  "detail.fulfillmentLocationSnapshot.name", "detail.fulfillmentLocationSnapshot.operator.name",
-  "detail.returnLocationSnapshot.name", "detail.returnLocationSnapshot.operator.name"
+  "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1"
 ].forEach((label) => requireText(rentalOrderDetailPage, label, "inventory fulfillment UI coverage"));
+requireText(rentalOrderDetailPage, "<OrderDetailSummary order={detail}", "detail renders snapshot summary");
+[
+  "order.fulfillmentLocationSnapshot.name", "order.fulfillmentLocationSnapshot.operator.name",
+  "order.returnLocationSnapshot.name", "order.returnLocationSnapshot.operator.name"
+].forEach((label) => requireText(rentalOrderDetailSummary, label, "inventory fulfillment snapshot summary"));
 [
   "substitutionGroup", "默认组成", "替代候选"
 ].forEach((label) => requireText(catalogPage, label, "bundle component UI coverage"));
@@ -132,7 +136,7 @@ requireText(governanceRulesTab, "RULE_SECTIONS.map", "rules tab renders sections
 [
   'name="initialRates"',
   'name={[field.name, "baseAmount"]}',
-  "只需选择计价单位并填写对应价格"
+  "第一行是默认计价单位"
 ].forEach((label) => requireText(pricingGroupPage, label, "pricing group must create simple base rates"));
 [
   "初始化未定价分组",
@@ -143,7 +147,7 @@ requireText(governanceRulesTab, "RULE_SECTIONS.map", "rules tab renders sections
 ].forEach((label) => forbidText(commercialPage, label, "base pricing page must not expose initialization or advanced pricing fields"));
 [
   "新增统一调价计划",
-  "一次计划统一调整当前整体价格",
+  "只调整需要变更的价格；确认后才会生效或进入待生效。",
   "currentByKey",
   "价格没有变化，请先填写至少一个新的价格",
   'queryKey: ["rental-core", "price-adjustments"]'
@@ -151,7 +155,7 @@ requireText(governanceRulesTab, "RULE_SECTIONS.map", "rules tab renders sections
 [
   "currentPriceVersionDetail.data?.rates",
   "当前整体价格版本",
-  "包含当前经营空间全部有效定价分组价格",
+  "currentPriceVersion.effectiveFrom",
   "空间价格版本"
 ].forEach((label) => requireText(commercialPage, label, "space-wide immutable price version UI"));
 forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on independent sidebar routes instead of duplicate tabs");
@@ -259,7 +263,7 @@ forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retire
   [shell, 'app-frame-stage', "compact framed dashboard shell"],
   [styles, 'padding: 6px', "narrow browser-edge breathing room"],
   [styles, 'border-radius: 14px', "rounded application frame"],
-  [shell, 'menu: { items: breadcrumbMenuItems }', "selectable breadcrumb menu"],
+  [shell, '<Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems}', "plain contextual breadcrumb"],
   [themeSource, 'cellPaddingBlock: 12', "official dashboard table density"],
   [styles, '.ant-segmented', "official pill segmented styling"],
   [styles, '.ant-tabs .ant-tabs-nav-list', "pill section tabs"],

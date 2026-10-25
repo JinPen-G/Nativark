@@ -1,4 +1,4 @@
-import { DownloadOutlined, PrinterOutlined } from "@ant-design/icons";
+import { DownloadOutlined, PrinterOutlined } from "@/components/ui/icons";
 import type {
   RentalCategoryTerminology,
   RentalFundingBalance,
@@ -7,8 +7,8 @@ import type {
   RentalOrder,
   RentalReservation
 } from "@rental-os/shared";
-import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { Modal } from "@/components/ui";
+import { Descriptions, Space, Tag, Typography } from "antd";
+import { ListSection, Modal } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { useMemo, useState } from "react";
@@ -141,7 +141,7 @@ function documentRows(type: OrderDocumentType, order: RentalOrder, inspections: 
 
   if (type === "return") {
     return inspections.length ? <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      {inspections.map((record) => <Card key={record.id} size="small" title={`${record.stage === "pickup" ? labels.pickup : labels.return}${translate("检查")} · ${dateTime(record.createdAt)}`} extra={<Tag>{translate(record.stage === "pickup" ? "领取事实" : "归还事实")}</Tag>}>
+      {inspections.map((record) => <ListSection key={record.id} title={`${record.stage === "pickup" ? labels.pickup : labels.return}${translate("检查")} · ${dateTime(record.createdAt)}`} extra={<Tag>{translate(record.stage === "pickup" ? "领取事实" : "归还事实")}</Tag>}>
         <Descriptions size="small" column={2} items={[
           { key: "operator", label: translate("记录人"), children: record.operator },
           { key: "template", label: translate("检查模板"), children: record.templateCode }
@@ -151,7 +151,7 @@ function documentRows(type: OrderDocumentType, order: RentalOrder, inspections: 
           { title: translate("记录"), dataIndex: "value", render: (value: unknown) => text(value, translate) }
         ]} />
         {record.exceptions.length ? <><Typography.Text strong>{translate("异常记录")}</Typography.Text><ul>{record.exceptions.map((exception, index) => <li key={`${record.id}-${index}`}>{exception.description}{exception.customerResponseStatus === "confirmed" ? `（${translate("客户已确认")}）` : exception.customerResponseStatus === "disputed" ? `（${translate("客户已申诉")}）` : ""}</li>)}</ul></> : <Typography.Text type="secondary">{translate("未记录异常。")}</Typography.Text>}
-      </Card>)}
+      </ListSection>)}
     </Space> : <Typography.Text type="secondary">{translate("暂未保存领取或归还检查记录。")}</Typography.Text>;
   }
 
@@ -235,11 +235,12 @@ export function OrderDocumentsPanel({ order, inspections, templates, funding, te
     if (!printDocument(type, order, inspections, templates, funding, money, terminology, t)) return;
   };
   return <>
-    <Card title={t("客户业务凭证")} extra={<Typography.Text type="secondary">{t("基于订单快照查看、下载或浏览器打印；不构成法定票据")}</Typography.Text>}>
+    <ListSection title={t("客户业务凭证")}>
       <Space wrap>
         {DOCUMENT_TYPES.map((item) => <Button key={item.value} icon={<PrinterOutlined />} onClick={() => { setType(item.value); setOpen(true); }}>{t(item.label)}</Button>)}
       </Space>
-    </Card>
+      <Typography.Text type="secondary">{t("基于订单快照查看、下载或浏览器打印；不构成法定票据")}</Typography.Text>
+    </ListSection>
     <Modal title={`${t(selected.label)} · ${order.orderNo}`} open={open} width={900} onCancel={() => setOpen(false)} footer={<Space><Button onClick={() => setOpen(false)}>{t("关闭")}</Button><Button icon={<DownloadOutlined />} onClick={() => downloadDocument(type, order, inspections, templates, funding, money, terminology, t)}>{t("下载 HTML")}</Button><Button type="primary" icon={<PrinterOutlined />} onClick={print}>{t("打印")}</Button></Space>} destroyOnHidden>
       <Alert type="info" showIcon title={t(selected.description)} style={{ marginBottom: 16 }} />
       <Descriptions size="small" column={{ xs: 1, md: 2 }} items={orderHeaderRows(order, terminology, t)} />

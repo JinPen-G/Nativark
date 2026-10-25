@@ -9,7 +9,7 @@ import { LocaleProvider, useLocale } from "./locale";
 import { queryClient } from "./queryClient";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
 import { useAuthStore } from "@/features/auth/authStore";
-import { applyAdminFavicon } from "./branding";
+import { BrandIconProvider } from "./BrandIconProvider";
 import { applyAdminRadiusTokens, resolveAdminPrimaryColor } from "./designTokens";
 import { GlobalInteractionSounds } from "@/features/sound/GlobalInteractionSounds";
 import { applyArcThemeTokens } from "./arcTokens";
@@ -37,7 +37,6 @@ function ThemedApp() {
     applyArcThemeTokens(document.documentElement, mode === "dark", adminThemeColor);
   }, [radiusGroups, mode, adminThemeColor]);
   useEffect(() => {
-    applyAdminFavicon();
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (meta) meta.content = resolveAdminPrimaryColor(adminThemeColor);
   }, [tenant, adminThemeColor, user]);
@@ -56,7 +55,7 @@ function ThemedApp() {
         <AntdApp>
           <FeedbackProvider>
             <GlobalInteractionSounds />
-            <RouterProvider router={router} />
+            <BrandIconProvider><RouterProvider router={router} /></BrandIconProvider>
           </FeedbackProvider>
         </AntdApp>
       </QueryClientProvider>

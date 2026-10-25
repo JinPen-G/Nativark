@@ -1,0 +1,47 @@
+.page { min-width: 0; }
+.page:has([data-list-selection-bar]) { padding-block-end: calc(var(--rental-list-bulk-bar-height, var(--rental-control-height-large)) + var(--space-8)); }
+
+.filters { position: relative; z-index: 3; margin-bottom: var(--rental-layout-list-toolbar-gap); }
+.feedback { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.feeCondition { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.feeToggle { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.feeCondition > :global(button) { flex-shrink: 0; }
+.feeCondition :global(.ant-tag) { margin: 0; }
+
+.feeNote,
+.queryStatus {
+  color: var(--rental-color-text-secondary);
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
+
+.feedback,
+.error { margin-bottom: var(--space-3); }
+
+.cellStack { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.secondary { color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.orderLink { padding: 0 !important; text-align: start; white-space: normal; height: auto; min-height: 0 !important; overflow-wrap: anywhere; justify-content: flex-start; font-weight: var(--rental-typography-body-weight); font-variant-numeric: tabular-nums; }
+.identityRow { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.identityCopy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1; }
+.customerName { font-weight: var(--rental-typography-panel-title-weight); overflow-wrap: anywhere; }
+.identityDetail svg, .timingNotice svg, .moreItemsTrigger svg { width: var(--rental-table-identity-icon-size); height: var(--rental-table-identity-icon-size); flex-shrink: 0; }
+.identityDetail { display: flex; align-items: baseline; gap: var(--space-1); color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.identityDetail svg { align-self: flex-start; margin-block-start: calc((var(--rental-typography-meta-line-height) - var(--rental-table-identity-icon-size)) / 2); }
+.identityDetail > span { min-width: 0; overflow-wrap: anywhere; }
+.plannedDate { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); font-variant-numeric: tabular-nums; }
+.plannedClock { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.duration { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.timingNotice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-1); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.timingNotice > span { white-space: nowrap; }
+.timingNotice svg { margin-block-start: calc((var(--rental-typography-meta-line-height) - var(--rental-table-identity-icon-size)) / 2); }
+.timingNotice[data-tone="warning"] { color: var(--warning); }
+.timingNotice[data-tone="danger"] { color: var(--danger); }
+.itemList { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; min-width: 0; }
+.itemList[hidden] { display: none; }
+.itemLine { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); width: 100%; min-width: 0; }
+.itemName { color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); overflow-wrap: anywhere; }
+.itemMeta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.itemQuantity { color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.moreItemsTrigger { height: auto; min-height: 0 !important; padding: 0 !important; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); white-space: nowrap; }
+
+

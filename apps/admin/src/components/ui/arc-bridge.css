@@ -21,12 +21,39 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22v-5M9 8V2M15 8V2M7 8h10v4a5 5 0 0 1-10 0V8Z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .arc-copy-action button { border-radius: var(--rental-ui-radius-button, 18px); }
-[data-rental-arc-button][data-button-kind="link"] { padding-inline: 6px; min-height: 28px; }
+[data-rental-arc-button][data-button-kind="link"] { padding-inline: var(--rental-control-padding-small); min-height: var(--rental-control-height-small); }
 [data-rental-arc-button][data-button-kind="link"]:not([data-button-danger]) { color: var(--accent); }
 :root[data-tenant-accent] [data-rental-arc-button][data-button-kind="primary"] {
   background: var(--accent); border-color: var(--accent); color: var(--accent-foreground);
 }
 .arc-segmented-block > div { width: 100%; }
+/* Layout-only integration: tabs with externally rendered content and tabs owning
+ * panels share one spacing role. Outgoing popLayout panels keep their source origin. */
+.rental-tabs-navigation { margin-block-end: var(--rental-layout-tabs-content-gap); }
+.rental-tabs > [data-overflow] { vertical-align: top; }
+.rental-tabs > [role="tabpanel"]:not([data-motion-pop-id]) { margin-top: var(--rental-layout-tabs-content-gap); }
+/* Same choice states across navigation, list criteria and compatibility paths.
+   Scope to the owning track: nested panel content keeps its own semantics. */
+.rental-tabs > [data-overflow] [role="tab"],
+.arc-segmented [aria-pressed],
+.rental-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-disabled) .ant-tabs-tab-btn,
+.arc-segmented.ant-segmented:not(.ant-segmented-disabled) .ant-segmented-item:not(.ant-segmented-item-disabled) {
+  color: var(--rental-choice-text);
+  font-weight: var(--rental-choice-weight);
+}
+.rental-tabs > [data-overflow] [role="tab"]:is([data-state="active"], :active:not(:disabled)),
+.arc-segmented [aria-pressed]:is([aria-pressed="true"], :active:not(:disabled)),
+.rental-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn,
+.arc-segmented.ant-segmented:not(.ant-segmented-disabled) .ant-segmented-item-selected:not(.ant-segmented-item-disabled) {
+  color: var(--rental-choice-text-selected);
+  font-weight: var(--rental-choice-weight);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rental-tabs > [data-overflow] [role="tab"]:hover:not(:disabled),
+  .arc-segmented [aria-pressed]:hover:not(:disabled),
+  .rental-tabs.ant-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-disabled):hover .ant-tabs-tab-btn,
+  .arc-segmented.ant-segmented:not(.ant-segmented-disabled) .ant-segmented-item:not(.ant-segmented-item-disabled):hover { color: var(--rental-choice-text-selected); }
+}
 .rental-arc-drawer { z-index: 920; }
 /* Radix tooltip portals must sit above both drawer and existing AntD modal layers. */
 :root [data-radix-popper-content-wrapper]:has([role="tooltip"]) { z-index: 1200 !important; }
@@ -42,9 +69,7 @@
 .arc-form-field { display: block; width: 100%; }
 .arc-form-field > div { gap: 0; }
 .arc-form-field > div > label:empty { display: none; }
-.arc-form-field input, .arc-form-field textarea { border-radius: var(--rental-ui-radius-input, 18px); font-size: var(--rental-typography-body-size); }
-.arc-form-field[data-size="small"] input { min-height: 32px; }
-.arc-form-field[data-size="large"] input { min-height: 50px; }
+.arc-form-field input, .arc-form-field textarea { font-size: var(--rental-typography-body-size); }
 /* Keep keyboard focus visible despite the upstream foundation's no-outline policy. */
 :root [data-rental-arc-button]:focus-visible, :root .arc-form-field:not(.arc-password-field):not(.arc-password-strength):not(.arc-phone-field) :is(input,textarea):focus-visible,
 :root :is([role="tab"],[role="menuitem"],[role="switch"]):focus-visible {
@@ -56,11 +81,22 @@
 .arc-date-field { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
 .arc-date-field > div:first-child { flex: 1; min-width: 150px; }
 .arc-date-field > div:first-child > label:empty { display: none; }
-.arc-date-range { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.arc-date-range { position: relative; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 .arc-date-range > :first-child { flex: 1 1 auto; min-width: 0; }
+/* Upstream Months drops popLayout's DOM ref. Keep only exiting (inert) panes
+   out of flow; preserve their original slide/blur and the active pane's sizing. */
+.arc-date-range [class*="viewport"] > [class*="months"][inert] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+}
 /* UserMenu retains upstream CSS/motion; only integrate with our sidebar/drawer layers. */
-.sider-account > span { width: 100%; justify-content: center; }
-.rental-account-trigger { max-width: 100%; }
+.sider-account > span { width: 100%; min-width: 0; justify-content: flex-start; }
+/* Full-width anchor in closed/open states. Keep the original 40px height and portal panel geometry. */
+.sider-account .rental-account-trigger { display: flex; width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; }
+.sider-account [data-rental-user-name] { flex: 1; min-width: 0; max-width: none; text-align: start; }
+.is-collapsed .sider-account .rental-account-trigger { justify-content: center; }
 [data-rental-user-menu="panel"], [data-rental-user-menu="sheet"] { z-index: 1101; }
 [data-rental-user-menu="scrim"] { z-index: 1100; }
 [data-rental-user-menu] :is(button,[role="menuitemradio"]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -74,8 +110,13 @@
 .arc-checkbox-field { display: inline-flex; min-width: 0; }
 .arc-password-field[data-status="error"] [class*="shell"] { border-color: var(--danger); }
 .arc-password-field[data-status="warning"] [class*="shell"] { border-color: var(--warning); }
-.arc-select-field .arc-select-trigger-with-clear { padding-right: 48px; }
-.arc-select-clear { position: absolute; z-index: 1; top: 50%; right: 32px; display: grid; width: 24px; height: 24px; place-items: center; transform: translateY(-50%); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
+.arc-select-trigger-with-clear > :last-child,
+.arc-date-range[data-inline-clear] > :first-child > :first-child > button[aria-haspopup="dialog"] > :last-child { visibility: hidden; }
+.arc-select-clear, .arc-date-range-clear { position: absolute; z-index: 1; top: 50%; inset-inline-end: var(--space-2); display: grid; width: var(--space-6); height: var(--space-6); place-items: center; transform: translateY(-50%); border: 0; border-radius: var(--rental-ui-radius-button, 18px); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
+.arc-date-range-clear { top: calc(var(--control-height-md) / 2); inset-inline-end: calc(var(--rental-date-clear-offset, 0px) + var(--space-2)); }
+.arc-date-range:has(button[aria-expanded="true"]) > :first-child > .arc-date-range-clear { visibility: hidden; }
+.arc-date-range-clear:hover { background: var(--surface-muted); color: var(--foreground); }
+.arc-date-range-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arc-select-clear:hover:not(:disabled) { background: var(--surface-muted); color: var(--foreground); }
 .arc-select-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arc-select-clear:disabled { cursor: not-allowed; opacity: .5; }
@@ -93,7 +134,7 @@
 .arc-orders-table .ant-table-container {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--rental-ui-radius-container, 26px);
   background: var(--surface);
   color: var(--foreground);
   font-family: var(--font-body);
@@ -151,6 +192,11 @@
 .arc-pagination { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; align-items: center; margin-top: 16px; }
 .arc-pagination-main { display: flex; flex-direction: row; align-items: center; gap: 12px; }
 .arc-pagination-summary { font-size: var(--text-xs); color: var(--text-muted); }
+/* This size selector shows the selection in its trigger, not with a checkmark.
+   The portalled panel is marked by its own trigger's aria-controls. */
+.arc-pagination-size { width: max-content; min-width: 0; flex: none; white-space: nowrap; }
+[data-rental-page-size-menu] [role="option"] { padding-inline: var(--space-3); white-space: nowrap; }
+[data-rental-page-size-menu] [role="option"] > [class*="indicator"] { display: none; }
 .arc-pagination-jump { display: flex; gap: 8px; align-items: center; }
 .arc-pagination-jump input { max-width: 80px; }
 .arc-color-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -168,20 +214,16 @@
 @media (max-width: 640px) { .arc-rich-columns { grid-template-columns: minmax(0, 1fr); } .arc-rich-output { border-inline-start: 0; border-top: 1px solid var(--border); } }
 .arc-upload-field { min-width: 220px; width: 100%; }
 .arc-password-field label:empty { display: none; }
-.arc-password-field [class*="shell"] { border-radius: var(--rental-ui-radius-input, var(--radius-control)); }
-/* Password inputs sit inside the source shell: never add a second input height. */
-.arc-password-field input { border-radius: 0; }
-.arc-password-strength [class*="shell"], .arc-phone-field [class*="shell"] { border-radius: var(--rental-ui-radius-input, var(--radius-control)); }
 /* A standalone login step needs space for source focus rings and an open country picker. */
 .login-preview-viewport { overflow: visible; min-width: 0; padding: 6px; margin: -6px; }
 :root .rental-toast-viewport { z-index: 1300; }
 .arc-alert-actions { margin-top: var(--space-3); }
-.sider-nav .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item {
+:is(.sider-nav, .sider-quick-nav) .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item {
   position: relative;
   isolation: isolate;
   overflow: visible;
 }
-.sider-nav .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item-selected {
+:is(.sider-nav, .sider-quick-nav) .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item-selected {
   background: transparent !important;
 }
 .arc-sidebar-pill {
@@ -191,17 +233,6 @@
   border-radius: var(--rental-ui-radius-control);
   background: var(--rental-color-primary);
   pointer-events: none;
-}
-.arc-sidebar-pill::before {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 1px;
-  height: 16px;
-  border-radius: 1px;
-  background: var(--rental-color-text-light-solid);
-  content: "";
-  transform: translateY(-50%);
 }
 :root {
   --rental-form-field-gap: var(--space-5, 20px);

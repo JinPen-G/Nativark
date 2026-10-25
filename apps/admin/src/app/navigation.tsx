@@ -1,27 +1,4 @@
-import {
-  ApartmentOutlined,
-  ApiOutlined,
-  AppstoreOutlined,
-  BgColorsOutlined,
-  BoxPlotOutlined,
-  CalendarOutlined,
-  ControlOutlined,
-  CrownOutlined,
-  DashboardOutlined,
-  FileSearchOutlined,
-  FileTextOutlined,
-  FormOutlined,
-  FundOutlined,
-  GiftOutlined,
-  IdcardOutlined,
-  MobileOutlined,
-  SafetyCertificateOutlined,
-  SettingOutlined,
-  ShopOutlined,
-  TagsOutlined,
-  TeamOutlined,
-  ToolOutlined
-} from "@ant-design/icons";
+import { ApartmentOutlined, ApiOutlined, AppstoreOutlined, BgColorsOutlined, BoxPlotOutlined, CalendarOutlined, ControlOutlined, CrownOutlined, DashboardOutlined, FileSearchOutlined, FileTextOutlined, FormOutlined, FundOutlined, GiftOutlined, IdcardOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined, TagsOutlined, TeamOutlined, ToolOutlined } from "@/components/ui/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
 import type { ReactNode } from "react";
 import { applyTenantNavigationLabels } from "./navigation-terminology";
@@ -66,8 +43,11 @@ export const APP_ROUTES = {
   pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
   workOrders: { path: "/rental/work-orders", label: "养护工单", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined />, menu: true },
+  workOrderDetail: { path: "/rental/work-orders/:workOrderId", label: "养护工单详情", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined /> },
   locations: { path: "/rental/locations", label: "履约地点", permission: "rental-os:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
   pricing: { path: "/rental/pricing", label: "价格版本与调价", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
+  pricingVersions: { path: "/rental/pricing/versions", label: "空间价格版本", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined /> },
+  pricingVersionDetail: { path: "/rental/pricing/versions/:sequence", label: "价格版本详情", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined /> },
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   coupons: { path: "/rental/coupons", label: "优惠券", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   services: { path: "/rental/services", label: "增值服务", permission: "rental-os:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
@@ -77,7 +57,9 @@ export const APP_ROUTES = {
   rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },
   membershipReviews: { scope: "tenant-membership", path: "/membership/reviews", label: "会员审核", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:review", "rental-os:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   personalMembers: { scope: "tenant-membership", path: "/membership/personal", label: "个人会员", permission: "rental-os:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
+  personalMemberDetail: { scope: "tenant-membership", path: "/membership/personal/:customerId", label: "个人会员资料", permission: "rental-os:member:view", audience: "tenant", icon: <IdcardOutlined /> },
   corporateMembers: { scope: "tenant-membership", path: "/membership/corporate", label: "企业会员", permission: "rental-os:corporate:view", legacyPermissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
+  corporateMemberDetail: { scope: "tenant-membership", path: "/membership/corporate/:customerId", label: "企业资料", permission: "rental-os:corporate:view", legacyPermissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined /> },
   membershipPlans: { scope: "tenant-membership", path: "/membership/plans", label: "会员方案", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:plan:manage", "rental-os:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
   // 会员激励（人工补发奖励、权益账户与奖励流水）从「品类与业务规则」拆出来单独成页。
   // 它读写的是 /rental/v1/rewards 与 /rental/v1/benefit-accounts：这两条是**空间级**接口，
@@ -96,6 +78,7 @@ export const APP_ROUTES = {
   // 圆角与本地音效设置；品牌标识、主题色仍在客户端渠道维护。
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
   paymentReconciliation: { path: "/rental/payment-reconciliation", label: "支付对账", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined />, menu: true },
+  paymentReconciliationDetail: { path: "/rental/payment-reconciliation/:batchId", label: "对账批次详情", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined /> },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
   platformCategories: { path: "/platform/rental-categories", label: "租赁品类", permission: "system:rental-category:view", audience: "saas", icon: <AppstoreOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
   platformCategoryCapabilities: { path: "/platform/rental-category-capabilities", label: "内核能力目录", permission: "system:rental-category:view", audience: "saas", icon: <ControlOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },

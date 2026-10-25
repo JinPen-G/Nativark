@@ -1,8 +1,9 @@
-import { SaveButton } from "@/components/ui";
-import { ApartmentOutlined, EditOutlined, KeyOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
+import { ApartmentOutlined, EditOutlined, KeyOutlined, PauseCircleOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
 import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
-import { Card, Descriptions, Space, Tag, Typography } from "antd";
+import { Descriptions, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
@@ -52,6 +53,7 @@ export function TenantManagementPage() {
     tenant.tenantCode !== "platform" && (filter === "all" || tenant.tenantStatus === filter)
   ), [filter, tenants.data]);
 
+  const tenantFilter = useListFilter(rows, { fields: row => [row.tenantName, row.tenantCode] });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["saas-tenants"] });
   const refreshWorkspaces = async () => {
     await Promise.all([
@@ -185,29 +187,23 @@ export function TenantManagementPage() {
     <>
       <PageHeader
         title={t("SaaS 租户")}
-        description={t("管理使用 Rental OS 的租户主体、经营空间和生命周期；每个空间独立选择一个品类。")}
-        view={(
-          <Segmented
+
+        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t("新增 SaaS 租户")}</Button>}
+      />
+      <QueryState loading={tenants.isLoading || categories.isLoading} error={tenants.error ?? categories.error}>
+        <ListSection controls={<><ListFilters filter={tenantFilter} placeholder="租户名称或编码" /><Segmented
             value={filter}
-            onChange={(value) => setFilter(String(value))}
+            onChange={(value) => { setFilter(String(value)); tenantFilter.pagination.onChange(1, tenantFilter.pagination.pageSize); }}
             options={[
               { label: t("全部"), value: "all" },
               { label: t("正常"), value: TenantStatus.Active },
               { label: t("冻结"), value: TenantStatus.Frozen },
               { label: t("停用"), value: TenantStatus.Disabled }
             ]}
-          />
-        )}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t("新增 SaaS 租户")}</Button>}
-      />
-      <QueryState loading={tenants.isLoading || categories.isLoading} error={tenants.error ?? categories.error}>
-        <Card className="data-panel" title={<Space><SafetyCertificateOutlined />{t("租户管理")}<Typography.Text type="secondary">{tenants.data?.filter((item) => item.tenantCode !== "platform").length ?? 0}</Typography.Text></Space>}>
-          <div className="table-toolbar">
-            <Typography.Text type="secondary">{t("一个租户可有多个经营空间；已有空间的品类固定，新增品类请新建空间。租户不做物理删除。")}</Typography.Text>
-          </div>
+          /></>}>
           <Table<TenantSummary>
             rowKey="tenantId"
-            dataSource={rows}
+            onRefresh={() => tenants.refetch()} loading={tenants.isFetching} dataSource={tenantFilter.rows} pagination={tenantFilter.pagination}
             scroll={{ x: 1120 }}
             columns={[
               { title: t("租户"), fixed: "left", width: 230, render: (_, row) => <><b>{row.tenantName}</b><br /><span className="muted">{row.tenantCode}</span></> },
@@ -225,7 +221,7 @@ export function TenantManagementPage() {
               { title: t("操作"), fixed: "right", width: 340, render: (_, row) => <Space size={0} wrap><Button type="link" icon={<ApartmentOutlined />} onClick={() => openWorkspaceManager(row)}>{t("经营空间")}</Button><Button type="link" icon={<KeyOutlined />} loading={resetTenantAdmin.isPending} onClick={() => confirmResetAdmin(row)}>{t("重置管理员密码")}</Button><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(row)}>{t("资料")}</Button><Button type="link" icon={<PauseCircleOutlined />} onClick={() => openStatus(row)}>{t("状态")}</Button></Space> }
             ]}
           />
-        </Card>
+        </ListSection>
       </QueryState>
 
       <Drawer
@@ -275,7 +271,7 @@ export function TenantManagementPage() {
           <Table<BusinessWorkspace>
             rowKey="id"
             pagination={false}
-            dataSource={workspaces.data ?? []}
+            onRefresh={() => workspaces.refetch()} loading={workspaces.isFetching} dataSource={workspaces.data ?? []}
             columns={[
               { title: t("空间"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
               { title: t("经营品类"), width: 150, render: (_, row) => t(categoryNames.get(row.categoryCode) ?? row.categoryCode) },

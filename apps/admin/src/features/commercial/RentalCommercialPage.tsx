@@ -1,5 +1,7 @@
-import { SaveButton } from "@/components/ui";
-import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
+import { discountCards, serviceCards } from "./commercialCards";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
+import { EditOutlined, HistoryOutlined, PlusOutlined } from "@/components/ui/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingGroup, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +13,8 @@ import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, Drawer, Select } from "@/components/ui";
 import dayjs from "dayjs";
+import { useMatch, useNavigate, useParams } from "react-router-dom";
+import { RecordDetailLayout } from "@/components/RecordDetailLayout";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -60,8 +64,13 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
   const [adjustmentPreview, setAdjustmentPreview] = useState<RentalPriceAdjustmentPreviewRow[]>([]);
   const [createdAdjustmentId, setCreatedAdjustmentId] = useState<string>();
-  const [versionsOpen, setVersionsOpen] = useState(false);
-  const [versionSequence, setVersionSequence] = useState<number>();
+  const navigate = useNavigate();
+  const { sequence } = useParams<{ sequence: string }>();
+  const versionsOpen = Boolean(useMatch("/rental/pricing/versions"));
+  const versionSequence = sequence && /^[1-9]\d*$/.test(sequence) && Number.isSafeInteger(Number(sequence)) ? Number(sequence) : undefined;
+  const versionPage = sequence !== undefined;
+  const setVersionsOpen = (open: boolean) => navigate(open ? "/rental/pricing/versions" : "/rental/pricing");
+  const setVersionSequence = (value?: number) => navigate(value === undefined ? "/rental/pricing/versions" : `/rental/pricing/versions/${value}`);
   const [restoreSequence, setRestoreSequence] = useState<number>();
   const [restoreReason, setRestoreReason] = useState("");
   const [cancelAdjustmentId, setCancelAdjustmentId] = useState<string>();
@@ -332,58 +341,46 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   }
 
   const sectionTitle = t(section === "pricing" ? "价格版本与调价" : section === "discounts" ? "优惠方案" : "增值服务");
-  const sectionDescription = t(section === "pricing" ? "查看当前经营空间整体价格版本与各定价分组的当前基础价；已有价格只能通过调价计划变更。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。");
   const enabledPlans = [...(pricing.data ?? [])].filter((plan) => plan.status === "enabled").sort((left, right) => new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime());
   const currentPricingRows: Array<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }> = (pricingGroups.data ?? []).flatMap((group): Array<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }> => {
     const rates = currentPriceVersionDetail.data?.rates.filter((item) => (item.pricingGroupId ?? item.itemGroupId) === group.id) ?? [];
     return rates.length ? rates.map((rate) => ({ group, rate })) : [{ group, rate: undefined }];
   });
   const unpricedCount = new Set(currentPricingRows.filter((row) => row.group.status === "enabled" && !row.rate).map((row) => row.group.id)).size;
+  const discountFilter = useListFilter(discounts.data, { fields: row => [row.name, row.code], status: row => row.status });
+  const serviceFilter = useListFilter(services.data, { fields: row => [row.name, row.code], status: row => row.status });
   const priceMatrixReady = !versions.isLoading && (!currentPriceVersion || currentPriceVersionDetail.isSuccess);
 
   return (
     <>
+      {!versionsOpen && !versionPage && <>
       <PageHeader
         title={sectionTitle}
-        description={sectionDescription}
+        description={section === "pricing" ? t("已有价格须通过调价计划变更。") : undefined}
         extra={
           <Space>
             {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>{t("价格版本")}</Button>}
             {section === "pricing" ? (
               <Button type="primary" icon={<PlusOutlined />} disabled={!priceMatrixReady || unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增调价计划")}</Button>
-            ) : <Button type="primary" icon={<PlusOutlined />} onClick={() => section === "discounts" ? editDiscount() : editService()}>{locale === "en-US" ? `Add ${sectionTitle}` : `新增${sectionTitle}`}</Button>}
+            ) : <Button type="primary" icon={<PlusOutlined />} onClick={() => section === "discounts" ? editDiscount() : editService()}>{t(section === "discounts" ? "新增优惠方案" : "新增服务")}</Button>}
           </Space>
         }
       />
-      <div className="context-note">
-        <span>
-          {locale === "en-US" ? `${t(profile.data?.terminology.itemLabel ?? "商品")} pricing groups` : `${profile.data?.terminology.itemLabel ?? "商品"}定价分组`} · {profile.data?.categoryCode ?? "-"}
-        </span>
-        <span>{t("订单只能引用服务端报价快照，前端不能直接决定成交单价。")}</span>
-      </div>
+
       {section === "pricing" && (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Alert type="info" showIcon title={t("新增型号价格请在「定价分组」内录入；本页只查看空间整体价格版本并创建调价计划。")} />
+
           <Alert
             type="info"
             showIcon
-            title={versions.isLoading ? t("正在读取当前整体价格版本") : currentPriceVersion ? (locale === "en-US" ? `Current overall price version: ${currentPriceVersion.version}` : `当前整体价格版本：${currentPriceVersion.version}`) : t("当前还没有生效的整体价格版本")}
-            description={versions.isLoading ? "" : currentPriceVersion ? (locale === "en-US" ? `Effective ${dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm")}; ${currentPriceVersion.rateCount} rates cover all active pricing groups in this workspace. New orders store this version snapshot; historical orders do not change.` : `生效于 ${dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm")}，包含当前经营空间全部有效定价分组价格，共 ${currentPriceVersion.rateCount} 条；新订单保存此整体版本快照，历史订单不随调价变化。`) : t("请先到定价分组页面新建分组并填写基本价。")}
-            action={<Button type="link" onClick={() => setVersionsOpen(true)}>{t("查看历史版本")}</Button>}
+            title={versions.isLoading ? t("正在读取当前整体价格版本") : currentPriceVersion ? t("当前价格版本 {version}", { version: currentPriceVersion.version }) : t("当前还没有生效的整体价格版本")}
+            description={versions.isLoading ? undefined : currentPriceVersion ? t("生效于 {date}", { date: dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm") }) : t("请先到定价分组页面新建分组并填写基本价。")}
           />
-          <Card
-          className="data-panel"
-          title={
-            <Space>
-              <span>{t("当前基础价格")}</span>
-              <Tag>{currentPricingRows.length}</Tag>
-            </Space>
-          }
-        >
+          <ListSection title={t("当前基础价格")}>
           <QueryState loading={pricing.isLoading || pricingGroups.isLoading || versions.isLoading || currentPriceVersionDetail.isLoading} error={pricing.error || pricingGroups.error || versions.error || currentPriceVersionDetail.error}>
             <Table<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }>
               rowKey={(row) => `${row.group.id}:${row.rate?.unit ?? "unpriced"}`}
-              dataSource={currentPricingRows}
+              onRefresh={() => Promise.all([pricingGroups.refetch({ throwOnError: true }), versions.refetch({ throwOnError: true }), ...(currentPriceVersion ? [currentPriceVersionDetail.refetch({ throwOnError: true })] : [])])} loading={pricingGroups.isFetching || versions.isFetching || currentPriceVersionDetail.isFetching} dataSource={currentPricingRows}
               columns={[
                 {
                   title: t("定价分组"),
@@ -406,10 +403,10 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               ]}
             />
           </QueryState>
-          </Card>
+          </ListSection>
           {unpricedCount > 0 && <Alert type="warning" showIcon title={locale === "en-US" ? `${unpricedCount} legacy groups are missing base prices` : `有 ${unpricedCount} 个历史分组缺少基本价`} description={t("本页不再负责初始化。请停用该历史分组，并在定价分组页按新流程重新建立并填写基本价。")} />}
-          <Card title={t("调价计划")} className="data-panel" extra={<Button type="primary" ghost icon={<PlusOutlined />} disabled={unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增计划")}</Button>}>
-            <Table rowKey="id" loading={adjustments.isLoading} dataSource={adjustments.data ?? []} columns={[
+          <ListSection title={t("调价计划")} extra={<Button type="primary" ghost icon={<PlusOutlined />} disabled={unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增计划")}</Button>}>
+            <Table rowKey="id" loading={adjustments.isFetching} onRefresh={() => adjustments.refetch()} dataSource={adjustments.data ?? []} columns={[
               { title: t("计划"), render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },
               { title: t("生效时间"), render: (_, row) => row.scheduledAt ? dayjs(row.scheduledAt).format("YYYY-MM-DD HH:mm") : t("确认后立即") },
               { title: t("调整范围"), render: (_, row) => locale === "en-US" ? `${row.changes.length} price items` : `${row.changes.length} 个价格项` },
@@ -417,23 +414,16 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               { title: t("原因"), dataIndex: "changeReason" },
               { title: t("操作"), render: (_, row) => row.status === "draft" ? <Space size={0}><Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutate(row.id)}><Button type="link">{t("确认")}</Button></Popconfirm><Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button></Space> : row.status === "pending" ? <Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button> : <Typography.Text type="secondary">—</Typography.Text> },
             ]} />
-          </Card>
+          </ListSection>
         </Space>
       )}
       {section === "discounts" && (
-        <Card
-          className="data-panel"
-          title={
-            <Space>
-              <span>{t("自动优惠方案")}</span>
-              <Tag>{discounts.data?.length ?? 0}</Tag>
-            </Space>
-          }
-        >
+        <ListSection controls={<ListFilters filter={discountFilter} placeholder="优惠名称或编码" options={[{ value: "draft", label: "草稿" }, { value: "enabled", label: "已启用" }, { value: "disabled", label: "已停用" }]} />}>
           <QueryState loading={discounts.isLoading} error={discounts.error}>
             <Table<RentalDiscountPlan>
+              cardView={discountCards({ t, money, pricingGroups: pricingGroups.data ?? [], customerLabel: key => t(customerScopeLabels[key] ?? key), edit: editDiscount })} exportConfig={{ filename: t("优惠方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("状态"), value: row => row.status }] }}
               rowKey="id"
-              dataSource={discounts.data ?? []}
+              onRefresh={() => discounts.refetch()} loading={discounts.isFetching} dataSource={discountFilter.rows} pagination={discountFilter.pagination}
               columns={[
                 {
                   title: t("方案"),
@@ -484,22 +474,15 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               ]}
             />
           </QueryState>
-        </Card>
+        </ListSection>
       )}
       {section === "services" && (
-        <Card
-          className="data-panel"
-          title={
-            <Space>
-              <span>{t("增值服务及保障")}</span>
-              <Tag>{services.data?.length ?? 0}</Tag>
-            </Space>
-          }
-        >
+        <ListSection controls={<ListFilters filter={serviceFilter} placeholder="服务名称或编码" options={[{ value: "enabled", label: "已启用" }, { value: "disabled", label: "已停用" }]} />}>
           <QueryState loading={services.isLoading} error={services.error}>
             <Table<RentalValueAddedService>
+              cardView={serviceCards({ t, money, serviceLabel: key => t(serviceTypeLabels[key] ?? key), billingLabel: key => t(billingUnitLabels[key] ?? key), edit: editService, capacity: setCapacityService })} exportConfig={{ filename: t("增值服务"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("类型"), value: row => t(serviceTypeLabels[row.serviceType] ?? row.serviceType) }, { label: t("状态"), value: row => row.status }] }}
               rowKey="id"
-              dataSource={services.data ?? []}
+              onRefresh={() => services.refetch()} loading={services.isFetching} dataSource={serviceFilter.rows} pagination={serviceFilter.pagination}
               columns={[
                 {
                   title: t("服务"),
@@ -557,7 +540,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               ]}
             />
           </QueryState>
-        </Card>
+        </ListSection>
       )}
 
       <Drawer
@@ -570,8 +553,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <Alert
           type="info"
           showIcon
-          title={t("一次计划统一调整当前整体价格")}
-          description={t("只修改需要调整的价格，保持不变的项目无需改动。创建后先预览，确认时才会立即生效或进入待生效。")}
+          title={t("只调整需要变更的价格；确认后才会生效或进入待生效。")}
           style={{ marginBottom: 16 }}
         />
         <Form form={adjustmentForm} layout="vertical" onFinish={submitAdjustment}>
@@ -603,14 +585,14 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <Button type="primary" htmlType="submit" loading={createAdjustment.isPending}>{t("创建草稿并预览")}</Button>
         </Form>
         {adjustmentPreview.length > 0 && (
-          <Card title={t("本次最终价预览")} size="small" style={{ marginTop: 16 }} extra={createdAdjustmentId && <Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutate(createdAdjustmentId)}><Button type="primary" loading={confirmAdjustment.isPending}>{t("确认计划")}</Button></Popconfirm>}>
+          <ListSection title={t("本次最终价预览")} style={{ marginTop: "var(--rental-layout-section-gap)" }} extra={createdAdjustmentId && <Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutate(createdAdjustmentId)}><Button type="primary" loading={confirmAdjustment.isPending}>{t("确认计划")}</Button></Popconfirm>}>
             <Table rowKey={(row) => `${row.itemGroupId}:${row.unit}`} pagination={false} dataSource={adjustmentPreview} columns={[
               { title: t("定价分组"), dataIndex: "itemGroupCode" },
               { title: t("计价单位"), dataIndex: "unit", render: (value) => t(unitLabels[value as keyof typeof unitLabels] ?? value) },
               { title: t("调整前"), dataIndex: "beforeBaseAmount", render: money },
               { title: t("调整后"), dataIndex: "afterBaseAmount", render: money },
             ]} />
-          </Card>
+          </ListSection>
         )}
       </Drawer>
 
@@ -625,9 +607,10 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <Input.TextArea rows={3} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder={t("请填写取消原因")} />
       </Modal>
 
-      <Drawer title={t("空间价格版本")} size={760} open={versionsOpen} destroyOnHidden onClose={() => setVersionsOpen(false)}>
-        <Alert type="info" showIcon title={t("每一版都是该经营空间全部有效商品价格的完整不可变快照")} style={{ marginBottom: 16 }} />
-        <Table rowKey="id" loading={versions.isLoading} dataSource={versions.data?.rows ?? []} columns={[
+      </>}
+      {versionsOpen && <RecordDetailLayout title={t("空间价格版本")} onBack={() => navigate("/rental/pricing")}><QueryState loading={versions.isLoading} error={versions.error}><ListSection>
+
+        <Table rowKey="id" loading={versions.isFetching} onRefresh={() => versions.refetch()} dataSource={versions.data?.rows ?? []} columns={[
           { title: t("版本"), dataIndex: "version" },
           { title: t("生效时间"), dataIndex: "effectiveFrom" },
           { title: t("价格条目"), dataIndex: "rateCount", render: (value) => locale === "en-US" ? `${value} items` : `${value} 条` },
@@ -635,18 +618,23 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           { title: t("创建人"), dataIndex: "createdBy" },
           { title: t("操作"), render: (_, row) => <Space size={0}><Button type="link" onClick={() => setVersionSequence(row.sequence)}>{t("查看 / 对比")}</Button><Button type="link" onClick={() => setRestoreSequence(row.sequence)}>{t("恢复")}</Button></Space> },
         ]} />
-      </Drawer>
+      </ListSection></QueryState></RecordDetailLayout>}
 
-      <Drawer title={`${t("价格版本详情")} · v${versionSequence ?? ""}`} size={820} open={versionSequence !== undefined} destroyOnHidden onClose={() => setVersionSequence(undefined)}>
-        <Alert type="info" showIcon title={versionSequence && versionSequence > 1 ? (locale === "en-US" ? `Comparing with v${versionSequence - 1}` : `以下价格与 v${versionSequence - 1} 对比`) : t("首个价格版本")} style={{ marginBottom: 16 }} />
+      {versionPage && <RecordDetailLayout title={t("价格版本详情") + (versionSequence ? " · v" + versionSequence : "")} onBack={() => navigate("/rental/pricing/versions")} facts={versionDetail.data ? [
+        { key: "effective", label: "生效时间", value: dayjs(versionDetail.data.effectiveFrom).format("YYYY-MM-DD HH:mm") },
+        { key: "created", label: "创建人", value: versionDetail.data.createdBy || "—" },
+        { key: "reason", label: "变更原因", value: versionDetail.data.changeReason || "—" }
+      ] : undefined}>
+      {!versionSequence ? <Alert type="error" showIcon title={t("价格版本无效")} /> : <QueryState loading={versionDetail.isLoading || previousVersion.isLoading} error={versionDetail.error ?? previousVersion.error}><ListSection title={t("价格对比")}>
         <Table
+          toolbarNote={<span className="muted">{versionSequence && versionSequence > 1 ? (locale === "en-US" ? `Compared with v${versionSequence - 1}` : `对比 v${versionSequence - 1}`) : t("首个价格版本")}</span>}
           rowKey={pricingRateKey}
-          loading={versionDetail.isLoading || previousVersion.isLoading}
-          dataSource={versionDetail.data?.rates ?? []}
+          loading={versionDetail.isFetching || previousVersion.isFetching}
+          onRefresh={() => Promise.all([versionDetail.refetch({ throwOnError: true }), ...(versionSequence && versionSequence > 1 ? [previousVersion.refetch({ throwOnError: true })] : [])])} dataSource={versionDetail.data?.rates ?? []}
           columns={[
             { title: t("定价分组"), render: (_, row) => `${row.pricingGroupCode ?? row.itemGroupCode} · ${row.pricingGroupName ?? row.itemGroupName}` },
             { title: t("计价单位"), dataIndex: "unit", render: (value) => t(unitLabels[value as keyof typeof unitLabels] ?? value) },
-            { title: t("上一版基础价"), render: (_, row) => money(previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount) },
+            { title: t("上一版基础价"), render: (_, row) => { const before = previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount; return before === undefined ? "—" : money(before); } },
             { title: t("本版基础价"), dataIndex: "baseAmount", render: money },
             { title: t("变化"), render: (_, row) => {
               const before = previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount;
@@ -654,7 +642,8 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             } },
           ]}
         />
-      </Drawer>
+      </ListSection></QueryState>}
+    </RecordDetailLayout>}
 
       <Modal
         title={`${t("恢复价格版本")} v${restoreSequence ?? ""}`}
@@ -679,7 +668,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         }
       >
         <Form<SaveRentalDiscountPlanRequest> form={discountForm} layout="vertical" onFinish={(values) => saveDiscount.mutate(values)}>
-          <Alert type="info" showIcon title={t("按四个业务区完成配置；第一阶段一个方案对应一条优惠规则。")} style={{ marginBottom: 16 }} />
+
           <Form.Item name="id" hidden><Input /></Form.Item>
           <Form.Item name="applicableItemGroupIds" hidden><Select mode="multiple" /></Form.Item>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -895,7 +884,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <QueryState loading={capacities.isLoading} error={capacities.error}>
           <Table<RentalServiceCapacity>
             rowKey="id"
-            dataSource={capacities.data ?? []}
+            onRefresh={() => capacities.refetch()} loading={capacities.isFetching} dataSource={capacities.data ?? []}
             columns={[
               { title: t("地点"), dataIndex: "locationId", render: (value) => locations.data?.find((row) => row.id === value)?.name ?? value },
               { title: t("开始"), dataIndex: "windowStart", render: (value) => dayjs(value).format("YYYY-MM-DD HH:mm") },

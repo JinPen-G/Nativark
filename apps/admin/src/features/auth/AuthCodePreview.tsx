@@ -79,12 +79,12 @@ export function AuthCodePreview({ mode, tenantCode = "", tenantLocked, onTenantC
           <Button block type="primary" onClick={onBack}>{t("返回账号密码登录")}</Button>
         </div> : <form className={styles.form} onSubmit={submit} noValidate>
           {stage === "identity" && <>
-            {!tenantLocked && <ArcInput label={t("租户编码")} value={tenantCode} onChange={event => onTenantChange(event.target.value)} autoComplete="organization" />}
-            {channel === "phone" ? <PhoneInput label={t("手机号")} value={address} onValueChange={(value, details) => { setAddress(value); setPhoneValid(details.valid); setError(""); }} error={error} /> : <ArcInput label={t("邮箱")} type="email" value={address} onChange={event => { setAddress(event.target.value); setError(""); }} autoComplete="email" placeholder="name@example.com" maxLength={254} />}
+            {!tenantLocked && <ArcInput className="arc-input-control" label={t("租户编码")} value={tenantCode} onChange={event => onTenantChange(event.target.value)} autoComplete="organization" />}
+            {channel === "phone" ? <PhoneInput label={t("手机号")} value={address} onValueChange={(value, details) => { setAddress(value); setPhoneValid(details.valid); setError(""); }} error={error} /> : <ArcInput className="arc-input-control" label={t("邮箱")} type="email" value={address} onChange={event => { setAddress(event.target.value); setError(""); }} autoComplete="email" placeholder="name@example.com" maxLength={254} />}
           </>}
           {stage === "code" && <>
             <p className="login-preview-target">{t("验证目标")}: {address.trim()}</p>
-            <ArcLocale><OtpInput label={t("六位验证码")} value={code} onChange={value => { setCode(value); setError(""); }} error={error} description={t("本次仅预览：请输入 123456，未发送真实验证码。")}/></ArcLocale>
+            <ArcLocale><OtpInput className="arc-otp-field" label={t("六位验证码")} value={code} onChange={value => { setCode(value); setError(""); }} error={error} description={t("本次仅预览：请输入 123456，未发送真实验证码。")}/></ArcLocale>
             <div className="login-preview-links">
               <Button type="text" size="small" onClick={() => { setCode(""); setResendIn(0); go("identity", true); }}>{t("修改手机号或邮箱")}</Button>
               <Button type="text" size="small" disabled={resendIn > 0} onClick={() => { setCode(""); setError(""); setResendIn(30); }}>{resendIn > 0 ? `${resendIn}s ${t("后可重新获取")}` : t("重新获取（预览）")}</Button>

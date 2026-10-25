@@ -1,4 +1,5 @@
-import { EditOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { EditOutlined, KeyOutlined, PlusOutlined } from "@/components/ui/icons";
 import type {
   BusinessWorkspace,
   PermissionModule,
@@ -13,7 +14,7 @@ import type {
 import { RoleScope } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, Row, Space, Tag, Typography } from "antd";
-import { App } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -91,6 +92,7 @@ export function TenantOperationsAccountPage() {
   const queryClient = useQueryClient();
   const currentUserId = useAuthStore((state) => state.user?.id);
   const { organizations, users, roles, workspaces, members, fulfillmentLocations } = useTenantAccessData();
+  const accountFilter = useListFilter(users.data, { fields: row => [row.account, row.displayName, row.phone, row.organizationName], status: row => row.isActive ? "active" : "disabled" });
   const [form] = Form.useForm<TenantOperationsAccountForm>();
   const [editing, setEditing] = useState<SystemUserRow>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -192,11 +194,11 @@ export function TenantOperationsAccountPage() {
   const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error ?? fulfillmentLocations.error;
 
   return <>
-    <PageHeader title={t("运营账号管理")} description={t("账号属于租户；可访问空间、空间角色和数据范围按每个经营空间分别授权。")} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
+    <PageHeader title={t("运营账号管理")} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
     <QueryState loading={loading} error={error}>
-      <Card>
-        <div className="table-toolbar"><Typography.Text type="secondary">{t("共")} {users.data?.length ?? 0} {t("个运营账号")}</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button></div>
-        <Table<SystemUserRow> rowKey="id" dataSource={users.data ?? []} scroll={{ x: 1120 }} columns={[
+      <ListSection>
+
+        <Table<SystemUserRow> toolbar={<><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
           { title: t("账号"), width: 190, render: (_, record) => <><b>{record.displayName}</b><br /><Typography.Text type="secondary">{record.account}</Typography.Text></> },
           { title: t("手机"), dataIndex: "phone", width: 140, render: (value) => value || "-" },
           { title: t("归属组织"), dataIndex: "organizationName", width: 160, render: (value) => value || t("未分配") },
@@ -208,7 +210,7 @@ export function TenantOperationsAccountPage() {
           { title: t("状态"), width: 100, render: (_, record) => <Switch checked={record.isActive} disabled={record.id === currentUserId} loading={toggleStatus.isPending} onChange={(isActive) => toggleStatus.mutate({ id: record.id, isActive })} /> },
           { title: t("操作"), fixed: "right", width: 180, render: (_, record) => <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑授权")}</Button><Button type="link" icon={<KeyOutlined />} onClick={() => modal.confirm({ title: `${t("重置")} ${record.account} ${t("的密码？")}`, content: t("重置后原登录会话失效，并生成一次性临时密码。"), onOk: () => resetPassword.mutateAsync(record.id) })}>{t("重置密码")}</Button></Space> }
         ]} />
-      </Card>
+      </ListSection>
     </QueryState>
 
     <Drawer title={editing ? t("编辑运营账号") : t("新增运营账号")} open={drawerOpen} size="large" destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存账号与空间权限")} form={form} pending={save.isPending} onSave={(values) => { const { roleId, ...rest } = values; return save.mutateAsync({ ...rest, roleIds: roleId ? [roleId] : [] }); }} />}>
@@ -228,7 +230,7 @@ export function TenantOperationsAccountPage() {
         </Row>
         <Typography.Title level={5} style={{ marginTop: 12 }}>{t("经营空间授权")}</Typography.Title>
         <Typography.Paragraph type="secondary">{t("启用空间后必须指定该空间的角色；数据范围可覆盖角色默认值。关闭空间会使该账号无法进入该空间。")}</Typography.Paragraph>
-        <Table<WorkspaceAccessRow> rowKey="workspaceId" pagination={false} dataSource={accessRows} scroll={{ x: 1420 }} columns={[
+        <Table<WorkspaceAccessRow> rowKey="workspaceId" pagination={false} onRefresh={() => members.refetch()} loading={members.isFetching} dataSource={accessRows} scroll={{ x: 1420 }} columns={[
           { title: t("允许访问"), width: 95, render: (_, row) => <Switch checked={row.enabled} disabled={editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} onChange={(enabled) => updateAccess(row.workspaceId, { enabled })} /> },
           { title: t("经营空间"), width: 200, render: (_, row) => { const workspace = workspaceMap.get(row.workspaceId); return <><b>{workspace?.name}</b><br /><Typography.Text type="secondary">{workspace?.code}</Typography.Text></>; } },
           { title: t("空间角色（操作权限）"), render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.roleId} options={activeRoles.map((role) => ({ value: role.id, label: `${role.name} · ${t(SCOPE_LABELS[role.scope] ?? role.scope)}` }))} onChange={(roleId) => updateAccess(row.workspaceId, { roleId, dataScope: roleMap.get(roleId)?.dataScope ?? row.dataScope })} /> },
@@ -256,6 +258,7 @@ export function TenantRolePermissionPage() {
   const queryClient = useQueryClient();
   const roles = useQuery({ queryKey: ["tenant-access", "roles"], queryFn: api.roles });
   const permissions = useQuery({ queryKey: ["tenant-access", "permissions"], queryFn: api.permissionTree });
+  const roleFilter = useListFilter(roles.data, { fields: row => [row.name, row.code], status: row => row.isActive ? "active" : "disabled" });
   const [form] = Form.useForm<SaveSystemRoleRequest>();
   const [editing, setEditing] = useState<SystemRoleRow>();
   const [open, setOpen] = useState(false);
@@ -288,15 +291,12 @@ export function TenantRolePermissionPage() {
   }
 
   return <>
-    <PageHeader title={t("角色权限管理")} description={t("RBAC 角色统一管理操作权限；数据范围单独设置，并可在账号的具体经营空间授权中覆盖。")} />
+    <PageHeader title={t("角色权限管理")} />
     <QueryState loading={roles.isLoading || permissions.isLoading} error={roles.error ?? permissions.error}>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col xs={24} lg={12}><Alert type="info" showIcon title={t("操作权限")} description={t("决定账号能进入哪些页面、查看哪些模块，以及可以执行新增、编辑、审核、发布等动作。")} /></Col>
-        <Col xs={24} lg={12}><Alert type="warning" showIcon title={t("数据权限")} description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")} /></Col>
-      </Row>
-      <Card>
-        <div className="table-toolbar"><Typography.Text type="secondary">{t("角色可复用于多个运营账号和经营空间")}</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button></div>
-        <Table<SystemRoleRow> rowKey="id" dataSource={roles.data ?? []} scroll={{ x: 980 }} columns={[
+      <Alert type="warning" showIcon title={t("数据权限")} description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")} style={{ marginBottom: "var(--space-4)" }} />
+      <ListSection>
+
+        <Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
           { title: t("角色"), width: 220, render: (_, record) => <><b>{record.name}</b><br /><Typography.Text type="secondary">{record.code}</Typography.Text></> },
           { title: t("适用层级"), dataIndex: "scope", width: 130, render: (value) => <Tag>{t(SCOPE_LABELS[value] ?? value)}</Tag> },
           { title: t("默认数据范围"), dataIndex: "dataScope", width: 200, render: (value: SystemDataScope) => dataScopeTag(value, t) },
@@ -304,7 +304,7 @@ export function TenantRolePermissionPage() {
           { title: t("状态"), dataIndex: "isActive", width: 100, render: (value) => <Tag color={value ? "success" : "default"}>{t(value ? "启用" : "停用")}</Tag> },
           { title: t("操作"), fixed: "right", width: 170, render: (_, record) => record.fixedAllPermissions ? <Tag>{t("系统预设")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑")}</Button><ConfirmAction label={t("删除")} prompt={<>{`${t("删除角色")} ${record.name}？`} {t("已分配给账号或空间的角色不能删除。")}</>} onConfirm={() => remove.mutateAsync(record.id)} /></Space> }
         ]} />
-      </Card>
+      </ListSection>
     </QueryState>
 
     <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>

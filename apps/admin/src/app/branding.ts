@@ -2,8 +2,8 @@ import type { AuthUser, TenantContext } from "@rental-os/shared";
 
 export const ADMIN_BRAND_NAME = "Rental OS";
 export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-color.svg";
-export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon-1.svg";
-export const ADMIN_DEFAULT_FAVICON = "/brand/rentalos-icon-1.svg";
+export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon.svg";
+export const ADMIN_DEFAULT_FAVICON = ADMIN_DEFAULT_MARK;
 export const ADMIN_LOGIN_DEFAULTS = {
   title: "租赁生意，\n有序运转。",
   description: "从预订、交付到归还与结算，把资产、订单和客户放在同一个工作台。",
@@ -39,25 +39,23 @@ export function resolveAdminLogo(
 }
 
 export function resolveAdminFavicon(
-  tenant?: Pick<TenantContext, "faviconUrl">,
+  tenant?: Pick<TenantContext, "brandLogoUrl">,
   user?: Pick<AuthUser, "isSaasAdmin">,
 ) {
-  return isTenantUser(user)
-    ? tenant?.faviconUrl?.trim() || ADMIN_DEFAULT_FAVICON
-    : ADMIN_DEFAULT_FAVICON;
+  return resolveAdminMark(tenant, user);
 }
 
 export function resolveAdminMark(
-  tenant?: Pick<TenantContext, "faviconUrl">,
+  tenant?: Pick<TenantContext, "brandLogoUrl">,
   user?: Pick<AuthUser, "isSaasAdmin">,
 ) {
   return isTenantUser(user)
-    ? tenant?.faviconUrl?.trim() || ADMIN_DEFAULT_MARK
+    ? tenant?.brandLogoUrl?.trim() || ADMIN_DEFAULT_MARK
     : ADMIN_DEFAULT_MARK;
 }
 
 /** 登录前无法读取会话时也可安全替换 favicon；失败时保留 HTML 中的平台默认图标。 */
-export function applyAdminFavicon(url?: string) {
+export function applyAdminFavicon(url?: string, onError?: () => void) {
   if (typeof document === "undefined") return;
   const href = url?.trim() || ADMIN_DEFAULT_FAVICON;
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
@@ -67,4 +65,8 @@ export function applyAdminFavicon(url?: string) {
     document.head.appendChild(link);
   }
   link.href = href;
+  link.type = /^data:image\/svg\+xml[;,]|\.svg(?:[?#]|$)/iu.test(href) ? "image/svg+xml" : "";
+  const failed = () => { if (link?.getAttribute("href") === href) onError?.(); };
+  link.addEventListener("error", failed);
+  return () => link?.removeEventListener("error", failed);
 }

@@ -39,7 +39,7 @@ export function QualificationTypesEditor() {
       <Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>{t("下单必需")}</Checkbox></Form.Item>
       <SaveButton label={t("新增证件类型")} successLabel={t("已完成")} form={form} disabled={!canManage} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
     </Form>
-    <Table rowKey="id" size="small" style={{ marginTop: 20 }} dataSource={types.data ?? []} pagination={false} columns={[
+    <Table exportConfig={{ filename: t("证件类型"), fields: [{ label: t("名称"), value: row => row.name }, { label: t("编码"), value: row => row.code }, { label: t("下单要求"), value: row => t(row.requiredForBooking ? "必需" : "可选") }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }] }} rowKey="id" size="small" style={{ marginTop: 20 }} onRefresh={() => types.refetch()} loading={types.isFetching} dataSource={types.data ?? []} pagination={false} columns={[
       { title: t("名称"), dataIndex: "name" }, { title: t("编码"), dataIndex: "code" },
       { title: t("下单要求"), render: (_, row) => row.requiredForBooking ? t("必需") : t("可选") },
       { title: t("状态"), dataIndex: "status", render: value => value === "enabled" ? t("已启用") : t("已停用") }
@@ -49,5 +49,5 @@ export function QualificationTypesEditor() {
 
 export function QualificationTypesPage() {
   const { t } = useLocale();
-  return <><PageHeader title={t("空间证件类型")} description={t("按当前经营空间配置业务所需证件。")} /><QualificationTypesEditor /></>;
+  return <><PageHeader title={t("空间证件类型")} /><QualificationTypesEditor /></>;
 }

@@ -119,7 +119,7 @@ export function PlatformSubscriptionActionForm({ tenantId, overview, standardPri
             <Input type="datetime-local" step={0.001} />
           </Form.Item>
           <Form.Item name="termMode" label={t("期限方式")}>
-            <Select style={{ width: 170 }} onChange={(mode) => form.setFieldsValue(mode === "years" ? { endAt: undefined, serviceYears: 1 } : { serviceYears: undefined, endAt: undefined })}
+            <Select style={{ width: "var(--rental-control-width-select)" }} onChange={(mode) => form.setFieldsValue(mode === "years" ? { endAt: undefined, serviceYears: 1 } : { serviceYears: undefined, endAt: undefined })}
               options={[{ value: "years", label: t("服务年数") }, { value: "custom", label: t("明确截止时点") }]} />
           </Form.Item>
         </>}
@@ -127,14 +127,14 @@ export function PlatformSubscriptionActionForm({ tenantId, overview, standardPri
         {(isExtend || values.termMode === "custom") && <Form.Item name="endAt" label={t(isExtend ? "新截止时点（不含）" : "服务截止时点（不含）")} rules={[{ required: true }]}><Input type="datetime-local" step={0.001} /></Form.Item>}
       </Space>}
       <Typography.Paragraph type={previewError ? "secondary" : undefined}>
-        {previewError ? t(previewError) : `${t(isUpgrade ? "升级保持当前统一截止" : "保存前核对最终期间")}：[${formatSubscriptionDate(preview?.startAt, values.timeZone)}, ${formatSubscriptionDate(preview?.endAt, values.timeZone)})`}
+        {previewError ? t(previewError) : `${t(isUpgrade ? "升级保持当前统一截止" : "保存前核对最终期间")}：[${formatSubscriptionDate(preview?.startAt, values.timeZone, t)}, ${formatSubscriptionDate(preview?.endAt, values.timeZone, t)})`}
       </Typography.Paragraph>
       {!isExtend && <Space wrap align="start" size={16}>
         <Form.Item name="amount" label={t("实际收费金额")} rules={moneyRequired ? [{ required: true }, { type: "number", min: 0.01 }] : []}><InputNumber min={0.01} precision={2} /></Form.Item>
-        <Form.Item name="currency" label={t("币种")} rules={moneyRequired ? [{ required: true }, { pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} style={{ width: 110 }} /></Form.Item>
-        <Form.Item name="taxInclusive" label={t("税口径")} rules={moneyRequired ? [{ required: true }] : []}><Select style={{ width: 120 }} options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} /></Form.Item>
+        <Form.Item name="currency" label={t("币种")} rules={moneyRequired ? [{ required: true }, { pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} style={{ width: "var(--rental-control-width-compact)" }} /></Form.Item>
+        <Form.Item name="taxInclusive" label={t("税口径")} rules={moneyRequired ? [{ required: true }] : []}><Select style={{ width: "var(--rental-control-width-select)" }} options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} /></Form.Item>
         <Form.Item name="priceVersion" label={t("采用的已发布价格方案")} rules={values.source === SubscriptionSource.Sale ? [{ required: true, message: t("收费办理须核对价格版本") }] : []}>
-          <Select allowClear style={{ minWidth: 220 }} placeholder={t("未选择价格版本")} options={selectedPrice?.priceVersion ? [{ value: selectedPrice.priceVersion, label: `${t(PLAN_LABEL[targetPlan])} · ${selectedPrice.priceVersion}` }] : []} />
+          <Select allowClear style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("未选择价格版本")} options={selectedPrice?.priceVersion ? [{ value: selectedPrice.priceVersion, label: `${t(PLAN_LABEL[targetPlan])} · ${selectedPrice.priceVersion}` }] : []} />
         </Form.Item>
       </Space>}
       <Form.Item name="reason" label={t(isExtend ? "临时延长原因（租户可见，不记录收款）" : "办理依据 / 调整原因（租户可见）")} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={500} rows={2} /></Form.Item>

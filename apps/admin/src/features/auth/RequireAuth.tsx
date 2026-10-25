@@ -10,7 +10,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const mustChangePassword = useAuthStore((state) => state.user?.mustChangePassword);
   const bootstrap = useAuthStore((state) => state.bootstrap);
   useEffect(() => { void bootstrap(); }, [bootstrap]);
-  if (!ready) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}><LoadingState /></div>;
+  if (!ready) return <div className="auth-loader"><LoadingState /></div>;
   if (!token) return <Navigate to="/login" replace />;
   if (mustChangePassword) return <PasswordChangeGate />;
   return <>{children}</>;

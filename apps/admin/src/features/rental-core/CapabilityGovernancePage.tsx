@@ -1,5 +1,5 @@
-import { SaveButton } from "@/components/ui";
-import { HistoryOutlined, SettingOutlined } from "@ant-design/icons";
+import { ListSection, SaveButton } from "@/components/ui";
+import { HistoryOutlined, SettingOutlined } from "@/components/ui/icons";
 import type {
   RentalCapabilityConfigField,
   RentalCapabilityConfig,
@@ -8,7 +8,7 @@ import type {
   WorkspaceCapabilityView
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, InputNumber, Space, Tag, Typography } from "antd";
+import { InputNumber, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -199,7 +199,6 @@ export function CapabilityGovernancePage() {
     <>
       <PageHeader
         title={t("经营空间能力")}
-        description={t("能力的启用、暂停、停用与配置版本。菜单入口与 API 放行都以这里的「已启用」为准，品类声明不等于已启用。")}
       />
       <QueryState loading={overview.isLoading} error={overview.error}>
         {/* 「可访问」与「已达生产经营条件」分开表示：开发/演示空间可以继续验证通用
@@ -234,10 +233,10 @@ export function CapabilityGovernancePage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
+        <ListSection>
           <Table<WorkspaceCapabilityView>
             rowKey={(row) => row.definition.code}
-            dataSource={data?.capabilities ?? []}
+            onRefresh={() => overview.refetch()} loading={overview.isFetching} dataSource={data?.capabilities ?? []}
             scroll={{ x: 1280 }}
             columns={[
               {
@@ -344,27 +343,20 @@ export function CapabilityGovernancePage() {
               }
             ]}
           />
-        </Card>
+        </ListSection>
       </QueryState>
 
-      <Card
-        className="data-panel"
-        title={
+      <ListSection title={
           <Space>
             <span>{t("生命周期审计")}</span>
             {auditCode ? <Tag>{auditCode}</Tag> : <Tag>{t("全部能力")}</Tag>}
           </Space>
-        }
-        extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>{t("查看全部")}</Button> : null}
-        style={{ marginTop: 16 }}
-      >
-        <Typography.Paragraph type="secondary">
-          {t("审计只追加不修改。每次启用、暂停、停用、改配置与升级都必须填写原因，事后要能解释这项经营决策。")}
-        </Typography.Paragraph>
+        } extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>{t("查看全部")}</Button> : null} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+
         <QueryState loading={audits.isLoading} error={audits.error}>
           <Table
             rowKey={(row) => `${row.code}:${row.at}:${row.action}`}
-            dataSource={audits.data ?? []}
+            onRefresh={() => audits.refetch()} loading={audits.isFetching} dataSource={audits.data ?? []}
             columns={[
               { title: t("时间"), dataIndex: "at" },
               { title: t("能力"), dataIndex: "code" },
@@ -382,7 +374,7 @@ export function CapabilityGovernancePage() {
             ]}
           />
         </QueryState>
-      </Card>
+      </ListSection>
 
       <Drawer
         title={editing ? `${t(editing.definition.label)} · ${t("状态与配置")}` : t("状态与配置")}

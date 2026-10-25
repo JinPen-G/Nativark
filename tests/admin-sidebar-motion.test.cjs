@@ -19,5 +19,65 @@ assert.match(shell, /min-width: 768px/);
 assert.match(shell, /min-width: 1200px/);
 assert.match(shell, /setCollapsed\(!isWideDesktop\)/);
 assert.match(css, /\.arc-sidebar-pill[\s\S]*pointer-events: none/);
+assert.doesNotMatch(css, /\.arc-sidebar-pill::(?:before|after)/, 'selected pill must not recreate the removed short side marker');
 assert.match(css, /\.arc-sidebar-menu:not\(\.ant-menu-inline-collapsed\)[\s\S]*overflow: visible/);
-console.log('admin-sidebar-motion: integration guards passed (browser acceptance separate)');
+const layout = read('apps/admin/src/styles.css');
+const contentSpacingRules = require('postcss').parse(layout).nodes.flatMap(node =>
+  node.type === 'atrule' ? node.nodes ?? [] : [node]).filter(node => node.type === 'rule' && node.selector === '.app-content');
+assert.equal(contentSpacingRules.length, 2, 'desktop and narrow layouts share one content-top token');
+assert.deepEqual(contentSpacingRules.map(rule => rule.nodes.find(node => node.prop === 'padding').value), [
+  'var(--rental-layout-page-top-gap) var(--space-6) var(--space-6)',
+  'var(--rental-layout-page-top-gap) var(--space-4) var(--space-4)',
+], 'only reduce top spacing; preserve desktop/narrow side and bottom padding');
+assert.match(layout, /\.workspace-context \{[^}]*min-height: 56px;/, 'breadcrumb toolbar height is unchanged');
+assert.doesNotMatch(shell, /workspace-nav-toggle|LayoutOutlined/, 'desktop toggle must not occupy the breadcrumb row');
+assert.doesNotMatch(shell + layout, /SidebarResizeHandle|sider-resize-handle|sidebarSizing/, 'drag resizing is removed');
+assert.match(shell, /\{renderSider\(\)\}[\s\S]*className="sider-edge-toggle"[\s\S]*<\/Sider>/);
+assert.match(shell, /aria-expanded=\{!collapsed\} aria-controls="workspace-sidebar"/);
+assert.match(shell, /collapsed \? <ChevronRight[^\n]*: <ChevronLeft/);
+assert.match(shell, /onClick=\{\(\) => setCollapsed\(value => !value\)\}/);
+assert.match(shell, /width=\{240\}/);
+assert.match(shell, /collapsedWidth=\{64\}/);
+assert.match(layout, /\.app-sider \.sider-edge-toggle \{[^}]*position: absolute;[^}]*inset-inline-end: -14px;[^}]*width: 28px;/s);
+assert.match(shell, /className="sider-drawer-trigger"/, 'mobile drawer entry remains available');
+const switcher = read('apps/admin/src/components/WorkspaceSwitcher.tsx');
+const quick = read('apps/admin/src/components/SidebarQuickEntries.tsx');
+const locale = read('apps/admin/src/app/locale.tsx');
+assert.doesNotMatch(shell, /SHOW_BREADCRUMB|className="sider-brand"/);
+assert.match(shell, /<header className="workspace-context">/);
+assert.match(shell, /<WorkspaceClock/);
+assert.match(shell, /<SidebarQuickEntries collapsed=\{collapsed && !inDrawer\}/);
+assert.match(shell, /<WorkspaceSwitcher collapsed=\{collapsed && !inDrawer\}/);
+assert.match(switcher, /tenant\?\.tenantName/);
+assert.match(switcher, /workspace-select-subtitle/);
+assert.match(switcher, /ChevronsUpDown/);
+assert.match(switcher, /width=\{36\} height=\{36\}/, 'image intrinsic dimensions must not size the shell');
+assert.match(layout, /\.workspace-select-mark \{[^}]*width: 36px;[^}]*height: 36px;[^}]*overflow: hidden;/s);
+assert.match(layout, /\.workspace-select-mark img \{[^}]*width: 100%;[^}]*height: 100%;[^}]*object-fit: contain;/, 'brand logos must not be cropped like category photographs');
+assert.match(switcher, /<img src=\{brandIcon.src\} width=\{36\} height=\{36\}/);
+assert.doesNotMatch(switcher, /tenant\?\.faviconUrl|<WorkspaceMark/);
+assert.match(layout, /\.workspace-menu-mark \{[^}]*width: 20px;[^}]*height: 20px;[^}]*overflow: hidden;/);
+assert.match(quick, /<SidebarMenu mode="inline" inlineCollapsed=\{collapsed\}/, 'fixed entries share the original menu height, alignment and keyboard engine');
+assert.match(quick, /className="sider-quick-divider" role="separator"/);
+assert.match(layout, /\.sider-quick-divider \{[^}]*height: 1px;[^}]*background: var\(--rental-color-border-secondary\);/);
+assert.match(layout, /\.sider-quick \{ flex: none;/, 'fixed entries remain outside the independently scrolling menu');
+assert.doesNotMatch(quick, /<Button|sider-quick-link/, 'do not reintroduce centered action buttons as navigation rows');
+assert.doesNotMatch(shell, /breadcrumbMenuItems|menu: \{ items:/, 'breadcrumbs must not open a same-section dropdown');
+assert.match(quick, /onNavigate\(String\(key\)\)/, 'fixed navigation delegates selection to the one shell owner');
+assert.doesNotMatch(quick, /setSelectedKey|overviewActive/, 'do not restore an independent fixed-menu selection mirror');
+assert.match(shell, /selectedKey=\{activeFixedKey\}/);
+assert.match(shell, /selectedKeys=\{activeFixedKey \? \[\] : \[selectedKey\]\}/, 'a selected fixed entry leaves the business menu unselected');
+assert.match(shell, /setFixedSelection\(undefined\); navigate\(String\(key\)\)/, 'business clicks clear the fixed selection even when both open the same path');
+assert.match(css, /:is\(\.sider-nav, \.sider-quick-nav\) \.arc-sidebar-menu[^}]*\.ant-menu-item-selected \{\s*background: transparent !important;/);
+assert.match(layout, /:is\(\.sider-nav, \.sider-quick-nav\) \.ant-menu-item-selected \{[^}]*color: var\(--rental-color-text-light-solid\)/s);
+assert.match(layout, /\.sider-nav \.ant-menu-item-group-title \{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--app-sider-bg/s);
+assert.match(layout, /\.sider-nav \.ant-menu-item-group \{ position: relative; overflow: visible;/, 'sticky headings stay inside their own group boundary');
+assert.doesNotMatch(quick, /aria-disabled/);
+assert.match(shell, /navigate\(overviewPath\)/);
+for (const [key, english] of [['首页', 'Home'], ['询问 AI', 'Ask AI'], ['集成', 'Integrations'], ['洞察', 'Insights'], ['搜索', 'Search']]) {
+  assert.ok(locale.includes(`"${key}": "${english}"`));
+}
+assert.match(quick, /key: "integrations"[^\n]*count: 3/);
+assert.match(quick, /示意计数/);
+assert.doesNotMatch(quick, /useQuery|useMutation|fetch\(|\/api\//, 'placeholder entries must not silently connect AI/search');
+console.log('admin-sidebar-motion: edge button and integration guards passed (browser acceptance separate)');

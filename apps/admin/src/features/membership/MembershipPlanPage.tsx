@@ -1,3 +1,5 @@
+import { membershipPlanCards } from "./membershipPlanCards";
+import { ListFilters, useListFilter } from "@/components/ui";
 import type {
   CustomerMembershipBenefit,
   CustomerMembershipPlan,
@@ -6,7 +8,7 @@ import type {
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
-import { App } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -18,6 +20,7 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { planBatchActions } from "@/features/listCapabilities";
 
 const benefitOptions = [
   { value: "rental_discount", label: "租金优惠" },
@@ -70,6 +73,7 @@ export function MembershipPlanPage() {
   const [form] = Form.useForm<SaveCustomerMembershipPlanRequest>();
   const [actionForm] = Form.useForm<{ reason: string }>();
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans, enabled: canView });
+  const planFilter = useListFilter(plans.data, { fields: row => [row.name, row.code], status: row => row.status });
   const scopeOptions = useQuery({ queryKey: ["membership-benefit-scope-options"], queryFn: membershipApi.benefitScopeOptions, enabled: canView });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["membership-plans"] });
   const save = useMutation({
@@ -136,11 +140,14 @@ export function MembershipPlanPage() {
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员方案")} description={t("需要租户级会员查看、方案管理或方案发布权限，且数据范围为全部。")} />;
 
   return <QueryState loading={plans.isLoading} error={plans.error}>
-    <PageHeader title={t("会员方案")} description={t("租户统一会员方案，每条权益可单独指定适用范围。")} extra={<Button type="primary" disabled={!canManage} onClick={() => open()}>{t("新增方案")}</Button>} />
-    <Alert type="info" showIcon title={t("租户统一会员")} description={t("会员方案在租户内共享，切换经营空间仍显示同一份方案。每条权益可适用于全部空间、指定空间或指定品类；已发布版本不可回写，已授予的权益以快照为准。会员暂停、退出或注销影响租户全部空间。")} style={{ marginBottom: 16 }} />
+    <PageHeader title={t("会员方案")} description={t("方案在租户内共享，权益按各自适用范围生效。")} extra={<Button type="primary" disabled={!canManage} onClick={() => open()}>{t("新增方案")}</Button>} />
+
     {scopeOptions.error && <Alert type="error" showIcon title={t("适用范围名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
-    <Card>
-      <Table<CustomerMembershipPlan> rowKey="id" dataSource={plans.data ?? []} pagination={{ pageSize: 20 }} scroll={{ x: 1100 }} columns={[
+    <ListSection controls={<ListFilters filter={planFilter} placeholder="方案名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }, { value: "draft", label: "草稿" }]} />}>
+      <Table<CustomerMembershipPlan> rowKey="id" onRefresh={() => plans.refetch()} loading={plans.isFetching} dataSource={planFilter.rows} pagination={planFilter.pagination} scroll={{ x: 1100 }}
+        exportConfig={{ filename: t("会员方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("方案"), value: row => row.name }, { label: t("适用会员"), value: row => t(row.targetType === "corporate" ? "企业会员" : "个人会员") }, { label: t("版本"), value: row => row.currentVersion?.version }, { label: t("状态"), value: row => t(row.status === "active" ? "已启用" : row.status === "disabled" ? "已停用" : "草稿") }] }}
+        batchActions={planBatchActions(refresh)}
+        cardView={membershipPlanCards({ t, options: scopeOptions.data, canManage, canPublish, publishing: publish.isPending, edit: open, history: setHistoryPlan, publish: row => { if (row.currentVersion?.status === "draft" && canPublish) publish.mutate({ planId: row.id, versionId: row.currentVersion.id }); } })} columns={[
         { title: t("方案"), render: (_, row) => <Space orientation="vertical" size={0}><b>{row.name}</b><span>{row.code}</span></Space> },
         { title: t("适用会员"), dataIndex: "targetType", render: (value) => value === "corporate" ? t("企业会员") : t("个人会员") },
         { title: t("当前版本"), render: (_, row) => row.currentVersion ? `v${row.currentVersion.version}` : t("未建版本") },
@@ -152,7 +159,7 @@ export function MembershipPlanPage() {
           {row.currentVersion?.status === "draft" && <Button type="link" disabled={!canPublish} loading={publish.isPending} onClick={() => publish.mutate({ planId: row.id, versionId: row.currentVersion!.id })}>{t("发布")} v{row.currentVersion.version}</Button>}
         </Space> },
       ]} />
-    </Card>
+    </ListSection>
     <Drawer title={selected ? `${t("编辑方案")}: ${selected.name}` : t("新增会员方案")} size={640} open={editorOpen} onClose={() => { setSelected(undefined); setEditorOpen(false); form.resetFields(); }} destroyOnHidden>
       <Form form={form} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && save.mutate(values)}>
         <Form.Item name="code" label={t("方案编码")} rules={[{ required: true, whitespace: true, message: t("请输入方案编码") }]}><Input /></Form.Item>

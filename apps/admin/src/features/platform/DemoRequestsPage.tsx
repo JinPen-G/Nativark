@@ -1,7 +1,7 @@
-import { ReloadOutlined } from "@ant-design/icons";
-import { Card, Space } from "antd";
-import { Alert, Table } from "@/components/ui";
-import { Button } from "@/components/ui";
+import { ReloadOutlined } from "@/components/ui/icons";
+import { Space } from "antd";
+import { ListSection, Alert, Table } from "@/components/ui";
+import { Button, SearchField } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -14,9 +14,11 @@ export function DemoRequestsPage() {
   const { t, locale } = useLocale();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState("");
   const query = useQuery({
-    queryKey: ["platform-demo-requests", page, pageSize],
-    queryFn: () => demoRequestsApi.list({ page, pageSize })
+    queryKey: ["platform-demo-requests", page, pageSize, keyword],
+    queryFn: () => demoRequestsApi.list({ page, pageSize, keyword: keyword || undefined })
   });
   const contactLabels: Record<DemoContactType, string> = { phone: "手机", email: "邮箱", wechat: "微信" };
   const columns: ColumnsType<DemoRequestRow> = [
@@ -30,19 +32,20 @@ export function DemoRequestsPage() {
   return (
     <PageHeader
       title="演示预约"
-      description="查看官网提交的演示预约，仅 SaaS 管理员可见。"
       extra={<Button icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => void query.refetch()}>{t("刷新")}</Button>}
       view={
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           {query.isError ? <Alert type="error" showIcon message={t("演示预约加载失败")} description={<Button onClick={() => void query.refetch()}>{t("重试")}</Button>} /> : (
-            <Card size="small" styles={{ body: { padding: 0 } }}>
+            <ListSection controls={<SearchField label={t("姓名、公司或联系方式，回车搜索")} placeholder={t("姓名、公司或联系方式，回车搜索")}
+              value={keywordInput} onValueChange={value => { setKeywordInput(value); if (!value.trim()) { setKeyword(""); setPage(1); } }}
+              onSearch={value => { setKeyword(value.trim().slice(0, 120)); setPage(1); }} />}>
               <Table<DemoRequestRow>
-                rowKey="id" columns={columns} dataSource={query.data?.items ?? []} loading={query.isFetching}
-                scroll={{ x: 1160 }} locale={{ emptyText: t("暂无演示预约，官网提交后会显示在这里。") }}
+                rowKey="id" columns={columns} onRefresh={() => query.refetch()} dataSource={query.data?.items ?? []} loading={query.isFetching}
+                scroll={{ x: 1160 }} locale={{ emptyText: t(keyword ? "没有匹配的记录" : "暂无演示预约，官网提交后会显示在这里。") }}
                 pagination={{ current: page, pageSize, total: query.data?.total ?? 0, showSizeChanger: true,
                   onChange: (nextPage, nextSize) => { setPage(nextSize === pageSize ? nextPage : 1); setPageSize(nextSize); } }}
               />
-            </Card>
+            </ListSection>
           )}
         </Space>
       }

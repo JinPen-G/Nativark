@@ -1,4 +1,4 @@
-import { CloseOutlined } from "@ant-design/icons";
+import { CloseOutlined } from "@/components/ui/icons";
 import { Card, Space, Typography } from "antd";
 import { Button } from "@/components/ui";
 import { useEffect, useState } from "react";
@@ -55,7 +55,7 @@ function ScopedExpiryCard({ accountId, tenantId, canManage }: { accountId: strin
   if (!key || !reminder || dismissedKey === key || reminderIsDismissed(storage(), key)) return null;
   const expired = reminder.serviceStatus === SubscriptionServiceStatus.Expired;
   const summary = query.error ? t("未能刷新订阅期限，请重试；当前服务状态以服务器校验为准。")
-    : `${t(PLAN_LABEL[reminder.plan])} · ${t(expired ? "已到期" : "即将到期")}\n${formatSubscriptionDate(reminder.endAt, reminder.timeZone)}${typeof reminder.remainingDays === "number" && !expired ? ` · ${t("剩余")} ${reminder.remainingDays} ${t("天")}` : ""}`;
+    : `${t(PLAN_LABEL[reminder.plan])} · ${t(expired ? "已到期" : "即将到期")}\n${formatSubscriptionDate(reminder.endAt, reminder.timeZone, t)}${typeof reminder.remainingDays === "number" && !expired ? ` · ${t("剩余 {count} 天", { count: reminder.remainingDays })}` : ""}`;
 
   return <div className="subscription-reminder" role="status" aria-live="polite">
     <Card size="small" styles={{ body: { padding: 12 } }}>

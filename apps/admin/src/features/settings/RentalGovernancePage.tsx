@@ -1,9 +1,4 @@
-import {
-  CalendarOutlined,
-  NotificationOutlined,
-  SafetyCertificateOutlined,
-  TeamOutlined,
-} from "@ant-design/icons";
+import { CalendarOutlined, NotificationOutlined, SafetyCertificateOutlined, TeamOutlined } from "@/components/ui/icons";
 import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "@/components/ui";
@@ -173,9 +168,9 @@ export function RentalGovernancePage() {
     <>
       <PageHeader
         title={t("品类与业务规则")}
-        description={t("租户经营品类决定允许范围；价格、日历、规则、奖励与通知均按版本留痕。")}
       />
       <Tabs
+        aria-label={t("品类与业务规则")}
         className="standalone-tabs"
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}

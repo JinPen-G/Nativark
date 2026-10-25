@@ -1,9 +1,10 @@
-import { SaveButton } from "@/components/ui";
-import { EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
+import { EditOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@rental-os/shared";
 import { formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
@@ -28,7 +29,9 @@ export function CouponPage() {
   const [claimForm] = Form.useForm<{ templateId: string; customerId: string }>();
   const [voidForm] = Form.useForm<{ reason: string }>();
   const templates = useQuery({ queryKey: ["rental-core", "coupon-templates"], queryFn: rentalCoreApi.couponTemplates });
+  const couponFilter = useListFilter(templates.data, { fields: row => [row.name, row.code], status: row => row.status });
   const customerCoupons = useQuery({ queryKey: ["rental-core", "customer-coupons"], queryFn: () => rentalCoreApi.customerCoupons() });
+  const customerCouponFilter = useListFilter(customerCoupons.data, { fields: row => [row.templateName, row.templateCode], status: row => row.status });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const currency = useSettlementCurrency();
   const money = (value: number) => formatRentalMoney(Number(value), currency);
@@ -50,10 +53,10 @@ export function CouponPage() {
 
   return (
     <>
-      <PageHeader title={t("优惠券")} description={t("管理租户优惠券模板、客户领取凭证和订单核销状态。")} note={{ title: t("优惠券与预算按订单事务流转"), description: t("报价只计算；创建订单同时锁券和预算；订单确认转为核销预算；取消释放后按有效期恢复或过期。") }} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增优惠券模板")}</Button>} />
-      <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
+      <PageHeader title={t("优惠券")} note={{ title: t("优惠券与预算按订单事务流转"), description: t("报价只计算；创建订单同时锁券和预算；订单确认转为核销预算；取消释放后按有效期恢复或过期。") }} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增优惠券模板")}</Button>} />
+      <ListSection controls={<ListFilters filter={couponFilter} placeholder="优惠券名称或编码" options={[{ value: "draft", label: "草稿" }, { value: "scheduled", label: "待开始" }, { value: "active", label: "进行中" }, { value: "paused", label: "已暂停" }, { value: "ended", label: "已结束" }, { value: "void", label: "已作废" }]} />}>
         <QueryState loading={templates.isLoading || groups.isLoading} error={templates.error || groups.error}>
-          <Table<RentalCouponTemplate> rowKey="id" dataSource={templates.data ?? []} scroll={{ x: 1100 }} columns={[
+          <Table<RentalCouponTemplate> exportConfig={{ filename: t("优惠券"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("版本"), value: row => row.version }, { label: t("状态"), value: row => row.status }, { label: t("优惠"), value: row => row.discountValue }] }} rowKey="id" onRefresh={() => templates.refetch()} loading={templates.isFetching} dataSource={couponFilter.rows} pagination={couponFilter.pagination} scroll={{ x: 1100 }} columns={[
             { title: t("优惠券"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
             { title: t("优惠"), render: (_, row) => row.discountType === "fixed_amount" ? (locale === "en-US" ? `${t("减免")} ${money(row.discountValue)}` : `减 ${money(row.discountValue)}`) : `${row.discountValue}% ${t("折扣")}${row.maximumDiscount ? (locale === "en-US" ? `, ${t("最高减免")} ${money(row.maximumDiscount)}` : `，封顶 ${money(row.maximumDiscount)}`) : ""}` },
             { title: t("使用门槛"), dataIndex: "minimumSpend", render: (value) => value > 0 ? (locale === "en-US" ? `${t("满")} ${money(value)}` : `满 ${money(value)}`) : t("无门槛") },
@@ -66,12 +69,12 @@ export function CouponPage() {
             { title: t("操作"), fixed: "right", render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => openEditor(row)}>{t("编辑")}</Button> }
           ]} />
         </QueryState>
-      </Card>
+      </ListSection>
 
-      <Card className="data-panel" title={<Space><span>{t("客户优惠券")}</span><Tag>{customerCoupons.data?.length ?? 0}</Tag></Space>} extra={<Button onClick={() => setClaimOpen(true)}>{t("发放优惠券")}</Button>} style={{ marginTop: 16 }}>
-        <Typography.Paragraph type="secondary">{t("客户券是可交易凭证，不与模板发行配置混为一张表。")}</Typography.Paragraph>
+      <ListSection title={t("客户优惠券")} controls={<ListFilters filter={customerCouponFilter} placeholder="优惠券名称或编码" options={[{ value: "claimed", label: "已领取" }, { value: "locked", label: "已锁定" }, { value: "redeemed", label: "已核销" }, { value: "expired", label: "已过期" }, { value: "void", label: "已作废" }]} />} extra={<Button onClick={() => setClaimOpen(true)}>{t("发放优惠券")}</Button>} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+
         <QueryState loading={customerCoupons.isLoading} error={customerCoupons.error}>
-          <Table<RentalCustomerCoupon> rowKey="id" dataSource={customerCoupons.data ?? []} columns={[
+          <Table<RentalCustomerCoupon> exportConfig={{ filename: t("客户优惠券"), fields: [{ label: t("优惠券"), value: row => row.templateName }, { label: t("编码"), value: row => row.templateCode }, { label: t("状态"), value: row => row.status }] }} rowKey="id" onRefresh={() => customerCoupons.refetch()} loading={customerCoupons.isFetching} dataSource={customerCouponFilter.rows} pagination={customerCouponFilter.pagination} columns={[
             { title: t("客户"), dataIndex: "customerId" },
             { title: t("优惠券"), render: (_, row) => <><b>{row.templateName}</b><br /><span className="muted">{row.templateCode}</span></> },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "claimed" ? "blue" : value === "locked" ? "gold" : value === "redeemed" ? "success" : "default"}>{t({ claimed: "已领取", locked: "已锁定", redeemed: "已核销", void: "已作废", expired: "已过期" }[value as string] ?? value)}</Tag> },
@@ -81,7 +84,7 @@ export function CouponPage() {
             { title: t("操作"), render: (_, row) => row.status === "claimed" ? <Button danger type="link" onClick={() => setVoiding(row)}>{t("作废")}</Button> : "-" }
           ]} />
         </QueryState>
-      </Card>
+      </ListSection>
 
       <Drawer title={t(editing ? "编辑优惠券模板" : "新增优惠券模板")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalCouponTemplateRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>

@@ -1,0 +1,9 @@
+/* Shared idle border only. Do not remap --border-strong: menus, buttons and
+   source hover states still own that role. Tokens live in app/designTokens.ts.
+   :where keeps these below the original hover rules in specificity; focus,
+   disabled/error and specialised composed fields remain source-owned. */
+.arc-search-field:where(:not(:has(input:disabled, input[aria-invalid="true"]))) [class*="shell"]:where(:not(:focus-within)),
+.arc-form-field:where(:not(.arc-password-field, .arc-password-strength, .arc-phone-field)) :is(input, textarea):where(:not(:focus, :disabled, [aria-invalid="true"])),
+input.arc-input-control:where(:not(:focus, :disabled, [aria-invalid="true"])) {
+  border-color: var(--rental-color-input-border-default);
+}

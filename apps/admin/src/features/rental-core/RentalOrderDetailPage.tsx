@@ -1,5 +1,6 @@
-import { SaveButton } from "@/components/ui";
-import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { RecordDisclosure } from "@/components/RecordDisclosure";
+import { ListSection, SaveButton, Tabs } from "@/components/ui";
+import { ArrowLeftOutlined, CheckCircleOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@/components/ui/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, InputNumber, Space, Tag, Typography } from "antd";
@@ -20,9 +21,15 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderFactsEntry } from "@/features/ai-native/OrderFactsEntry";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
+import { OrderQuickActionNotice } from "./OrderQuickActionNotice";
 import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
+import { TableRefreshProvider } from "@/components/ui";
 import { CarrierShipmentPanel } from "./CarrierShipmentPanel";
 import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
+import { OrderDetailSummary, OrderMoney } from "./OrderDetailSummary";
+import { detailResourceLabels, detailChargeLabels } from "./orderDetailPresentation";
+import { OrderFundingPanel } from "./OrderFundingPanel";
+import detailStyles from "./OrderDetail.module.css";
 import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./orderServiceOccurrence";
 
 type FundingOperation = {
@@ -135,6 +142,7 @@ export function RentalOrderDetailPage() {
   const canReturn = canOperate || hasPermission("rental-os:order:return");
   const canExtend = canOperate || hasPermission("rental-os:order:extend");
   const canCancel = canOperate || hasPermission("rental-os:order:cancel");
+  const [detailView, setDetailView] = useState({ id, tab: "fulfillment" });
   const [operationSession, setOperationSession] = useState<{ id: string; token?: string }>();
   const operationToken = operationSession?.id === id ? operationSession.token : sessionStorage.getItem(`rental-operation:${id}`) ?? undefined;
   const setOperationToken = (token?: string) => { if (token) sessionStorage.setItem(`rental-operation:${id}`, token); else sessionStorage.removeItem(`rental-operation:${id}`); setOperationSession({ id, token }); };
@@ -609,6 +617,8 @@ export function RentalOrderDetailPage() {
   });
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
+  const pendingInspectionCount = (inspections.data ?? []).reduce((count, record) => count + record.exceptions.filter(row => row.reviewStatus === "pending" || row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && row.customerResponseStatus !== "confirmed").length, 0);
+  const pendingExtensionRefundCount = (extensions.data ?? []).filter(row => row.pricingSnapshot?.refundReview?.status === "pending").length;
   const orderHasPendingFee = hasPendingFeeReview(detail ?? {});
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。
@@ -672,46 +682,10 @@ export function RentalOrderDetailPage() {
     return Boolean(component?.substitutionGroup && bundle?.bundleComponents.some((item) => item.substitutionGroup === component.substitutionGroup && item.itemGroupId !== component.itemGroupId));
   };
 
-  return <>
-    <PageHeader title={detail?.orderNo ?? t("订单详情")} description={t("订单保存价格、优惠、规则、日历、服务条款和履约检查快照。" )} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回列表")}</Button>} />
-    {id && detail && <OrderFactsEntry key={id} orderId={id} />}
-    <QueryState loading={order.isLoading} error={order.error}>{detail && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Space wrap>
-        {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.Draft && <ActionButton label={t("确认订单并核销优惠券")} pending={action.isPending} onAction={() => action.mutateAsync("confirm")} />}
-        {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: t("进入待确认爽约？"), content: t("订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。"), okText: t("确认进入"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>{t("领取超时")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <ActionButton label={t("通知客户")} successLabel={t("客户通知记录已保存")} pending={sendNoShowNotice.isPending} onAction={() => sendNoShowNotice.mutateAsync()} />}
-        {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{t(noShowFinalReady ? "确认爽约" : "提前确认爽约")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: t("恢复为待领取？"), content: t("客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。"), okText: t("确认恢复"), cancelText: t("暂不处理"), onOk: () => resumePickup.mutateAsync() })}>{t("恢复领取")}</Button>}
-        {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{t(operationToken ? "结束办理" : "开始 / 接手办理")}</Button>}
-        {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true)) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{t(profile.data?.terminology.pickupLabel ?? "领取")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>{t("直接完成")}{t(profile.data?.terminology.pickupLabel ?? "领取")}</Button>)}
-        {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true)) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{t(profile.data?.terminology.returnLabel ?? "归还")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>{t("直接完成")}{t(profile.data?.terminology.returnLabel ?? "归还")}</Button>)}
-        {canReturn && !isCarrierShipping && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
-        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `${t("服务端会拒绝关单：")}${settleBlockers.join(locale === "en-US" ? ", " : "、")}` : undefined} onClick={() => settle.mutate()}>{t("结算并关闭订单")}</Button>}
-        {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && (!isCarrierShipping || (detail.status === RentalCoreOrderStatus.Renting && carrierSignedRecorded && !carrierHandoffRecorded)) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.Renting && exchangeableAllocations.length > 0 && <Button onClick={() => { postPickupExchangeForm.resetFields(); postPickupExchangeForm.setFieldsValue({ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); setPostPickupExchangeOpen(true); }}>{t("办理换货")}</Button>}
-        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>{t("部分取消商品 / 服务")}</Button>}
-        {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>{t("取消并按规则计费")}</Button>}
-      </Space>
-      {isCarrierShipping && <CarrierShipmentPanel order={detail} />}
-      <OrderAllocationPanel key={detail.id} order={detail} />
-      <Card><Descriptions column={{ xs: 1, md: 2, xl: 4 }} items={[
-        { key: "status", label: t("状态"), children: <Tag>{t({ draft: "待确认", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待领取", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已完成", cancelled: "已取消", no_show: "已爽约" }[detail.status])}</Tag> },
-        { key: "customer", label: t("客户"), children: detail.customerName },
-        { key: "mode", label: t("租赁方式"), children: t(detail.fulfillmentMode) },
-        {
-          key: "period",
-            label: t("租期"),
-          // 续租后两个时间会不同：约定归还是下单当时的，当前归还是最近一次生效续租推进到的。
-          children: detail.effectiveEndAt && detail.effectiveEndAt !== detail.endAt
-            ? <>{dayjs(detail.startAt).format("MM-DD HH:mm")} → {dayjs(detail.effectiveEndAt).format("MM-DD HH:mm")}<br /><span className="muted">{t("约定归还")} {dayjs(detail.endAt).format("MM-DD HH:mm")}，{t("已续租")}</span></>
-            : `${dayjs(detail.startAt).format("MM-DD HH:mm")} → ${dayjs(detail.endAt).format("MM-DD HH:mm")}`
-        },
-        { key: "location", label: t("领取/归还"), children: `${detail.fulfillmentLocationSnapshot.name}（${detail.fulfillmentLocationSnapshot.operator.name}） → ${detail.returnLocationSnapshot.name}（${detail.returnLocationSnapshot.operator.name}）` },
-        ...(detail.deliveryAddressSnapshot ? [{
-          key: "deliveryAddress",
-          label: t("收货地址"),
-          children: (() => {
+  return <TableRefreshProvider onRefresh={() => order.refetch()} busy={order.isFetching}>
+    <PageHeader title={detail?.orderNo ?? t("订单详情")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回列表")}</Button>} />
+    <QueryState loading={order.isLoading} error={order.error}>{detail && <div className={detailStyles.stack}>
+  <OrderDetailSummary order={detail} funding={!funding.isError && canViewFunding ? funding.data : undefined} fundingState={!canViewFunding ? "restricted" : funding.isError ? "error" : funding.data ? "ready" : "loading"} pickupLabel={profile.data?.terminology.pickupLabel} deliveryAddress={detail.deliveryAddressSnapshot ? ((() => {
             const address = revealedDeliveryAddress?.orderId === detail.id ? revealedDeliveryAddress.snapshot : detail.deliveryAddressSnapshot!;
             const fullPhoneVisible = revealedDeliveryAddress?.orderId === detail.id;
             return <Space wrap>
@@ -719,57 +693,48 @@ export function RentalOrderDetailPage() {
               {canRevealSensitive && !fullPhoneVisible && <Button type="link" size="small" loading={revealDeliveryAddress.isPending} onClick={() => revealDeliveryAddress.mutate()}>{t("查看完整收件电话")}</Button>}
               {canRevealSensitive && fullPhoneVisible && <Button type="link" size="small" onClick={() => setRevealedDeliveryAddress(undefined)}>{t("隐藏完整收件电话")}</Button>}
             </Space>;
-          })(),
-        }] : []),
-        { key: "quote", label: t("报价"), children: detail.quoteNo },
-        { key: "pricing", label: t("价格版本"), children: detail.pricingPlanVersion },
-        { key: "rule", label: t("规则版本"), children: detail.ruleVersion },
-        { key: "calendar", label: t("日历版本"), children: detail.calendarVersion ?? t("未发布") },
-        { key: "payable", label: t("原应付/最终应付/押金"), children: `${money(detail.payableAmount)} / ${money(detail.finalPayableAmount ?? detail.payableAmount)} / ${money(detail.depositAmount)}` },
-        // 价内税：应付本身就含税，这里只把税额拆出来给财务看，不额外加钱。
-        {
-          key: "tax",
-          label: t("其中税额"),
-          children: detail.taxRate
-            ? `${money(detail.taxAmount ?? 0)}（${t("含税价内")}，${t("税率")} ${(detail.taxRate * 100).toFixed(2)}%）`
-            : t("不计税")
-        }
-      ]} /></Card>
-      <OrderDocumentsPanel
-        order={detail}
-        inspections={inspections.data ?? []}
-        templates={templates.data ?? []}
-        funding={funding.data}
-        terminology={profile.data?.terminology}
-        money={money}
-      />
-      <Card title={t("商品明细")}><Table rowKey="id" pagination={false} dataSource={detail.lines} columns={[{ title: t("商品"), dataIndex: "itemGroupName" }, { title: t("数量"), dataIndex: "quantity", render: (value, row) => <>{value}{row.cancelledQuantity ? <Tag color="default" style={{ marginLeft: 8 }}>{t("已取消")} {row.cancelledQuantity}</Tag> : null}</> }, { title: t("租金"), dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
-      {Boolean(changes.data?.length) && <Card title={t("订单变更记录")} extra={<Tag color="processing">{t("原订单与原报价快照保留")}</Tag>}>
-        <Table rowKey="id" size="small" pagination={false} dataSource={changes.data ?? []} columns={[
-          { title: t("时间"), dataIndex: "appliedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
-          { title: t("变更"), render: (_, row) => t(row.type === "resume_pickup" ? "待确认爽约恢复领取" : row.type === "post_pickup_exchange" ? "取货后换货" : row.type === "service_cancel" ? "取货前取消服务" : "取货前整行部分取消") },
-          { title: t("取消商品"), render: (_, row) => (("lineIds" in row.request ? row.request.lineIds ?? [] : []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join(locale === "en-US" ? ", " : "、")) },
-          { title: t("退款差额"), align: "right", render: (_, row) => money(row.refundAmount) },
-          { title: t("补款差额"), align: "right", render: (_, row) => money(row.additionalAmount) },
-          { title: t("原因"), render: (_, row) => row.request.reason }
-        ]} />
-      </Card>}
-      <Card title={t("库存拆分与归还")}>{detail.allocations.length ? <Table<RentalAllocation> rowKey="id" pagination={false} dataSource={detail.allocations} columns={[
+          })()) : undefined} />
+  <OrderQuickActionNotice orderId={id} ready={!order.isFetching && !order.isError} />
+  <div className={detailStyles.actions} id="rental-order-operations" tabIndex={-1}>
+        {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.Draft && <span data-order-action="confirm" tabIndex={-1}><ActionButton label={t("确认订单并核销优惠券")} pending={action.isPending} onAction={() => action.mutateAsync("confirm")} /></span>}
+        {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: t("进入待确认爽约？"), content: t("订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。"), okText: t("确认进入"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>{t("领取超时")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <ActionButton label={t("通知客户")} successLabel={t("客户通知记录已保存")} pending={sendNoShowNotice.isPending} onAction={() => sendNoShowNotice.mutateAsync()} />}
+        {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{t(noShowFinalReady ? "确认爽约" : "提前确认爽约")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: t("恢复为待领取？"), content: t("客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。"), okText: t("确认恢复"), cancelText: t("暂不处理"), onOk: () => resumePickup.mutateAsync() })}>{t("恢复领取")}</Button>}
+        {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{t(operationToken ? "结束办理" : "开始 / 接手办理")}</Button>}
+        {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true)) ? <Button data-order-action="pickup" type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{t(profile.data?.terminology.pickupLabel ?? "领取")}{t("检查")}</Button> : <Button data-order-action="pickup" type="primary" onClick={() => handover.mutate("pickup")}>{t("直接完成")}{t(profile.data?.terminology.pickupLabel ?? "领取")}</Button>)}
+        {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true)) ? <Button data-order-action="return" type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{t(profile.data?.terminology.returnLabel ?? "归还")}{t("检查")}</Button> : <Button data-order-action="return" type="primary" onClick={() => handover.mutate("return")}>{t("直接完成")}{t(profile.data?.terminology.returnLabel ?? "归还")}</Button>)}
+        {canReturn && !isCarrierShipping && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
+        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button data-order-action="settle" type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `${t("服务端会拒绝关单：")}${settleBlockers.join(locale === "en-US" ? ", " : "、")}` : undefined} onClick={() => settle.mutate()}>{t("结算并关闭订单")}</Button>}
+        {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && (!isCarrierShipping || (detail.status === RentalCoreOrderStatus.Renting && carrierSignedRecorded && !carrierHandoffRecorded)) && <Button data-order-action="extend" icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.Renting && exchangeableAllocations.length > 0 && <Button onClick={() => { postPickupExchangeForm.resetFields(); postPickupExchangeForm.setFieldsValue({ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); setPostPickupExchangeOpen(true); }}>{t("办理换货")}</Button>}
+        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>{t("部分取消商品 / 服务")}</Button>}
+        {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button data-order-action="cancel" danger onClick={() => setCancelOpen(true)}>{t("取消并按规则计费")}</Button>}
+      </div>
+  <div className={detailStyles.attention}>
+    {pendingFeeReviews.length > 0 && <Button type="text" onClick={() => setDetailView({ id, tab: "finance" })}>{t("待裁定费用")} · {pendingFeeReviews.length}</Button>}
+    {pendingInspectionCount > 0 && <Button type="text" onClick={() => setDetailView({ id, tab: "inspection" })}>{t("检查与客户响应待处理")} · {pendingInspectionCount}</Button>}
+    {pendingExtensionRefundCount > 0 && <Button type="text" onClick={() => setDetailView({ id, tab: "records" })}>{t("续租退款待审核")} · {pendingExtensionRefundCount}</Button>}
+  </div>
+  {detail.assignment?.issue && <Alert type="error" showIcon title={detail.assignment.issue} />}
+  {detail.status === RentalCoreOrderStatus.Settling && settleBlockers.length > 0 && <Alert type="warning" showIcon title={t("结算前还需处理")} description={<ul>{settleBlockers.map(reason => <li key={reason}>{t(reason)}</li>)}</ul>} />}
+  <Tabs aria-label={t("订单详情分区")} activeKey={detailView.id === id ? detailView.tab : "fulfillment"} onChange={tab => setDetailView({ id, tab })} items={[
+    { key: "fulfillment", label: t("履约与商品"), children: <div className={detailStyles.stack}><ListSection title={t("商品明细")}><Table rowKey="id" pagination={false} dataSource={detail.lines} columns={[{ title: t("商品"), dataIndex: "itemGroupName" }, { title: t("数量"), dataIndex: "quantity", render: (value, row) => <>{value}{row.cancelledQuantity ? <Tag color="default" style={{ marginLeft: 8 }}>{t("已取消")} {row.cancelledQuantity}</Tag> : null}</> }, { title: t("租金"), dataIndex: "amount", render: (value) => money(Number(value)) }]} /></ListSection><div id="rental-order-allocation" tabIndex={-1} data-order-action={canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) ? "allocation" : undefined}><OrderAllocationPanel key={detail.id} order={detail} /></div><details><summary>{t("资源拆分与归还记录")}</summary><ListSection>{detail.allocations.length ? <Table<RentalAllocation> rowKey="id" pagination={false} dataSource={detail.allocations} columns={[
         { title: t("实际商品"), render: (_, row) => groups.data?.find((group) => group.id === row.itemGroupId)?.name ?? row.assetNo ?? t("历史分配") },
         { title: t("资产 / 数量"), render: (_, row) => row.assetNo ?? `${row.quantity} ${t("件")}` },
-        { title: t("状态"), dataIndex: "status", render: (value) => <Tag>{t(value)}</Tag> }
+        { title: t("状态"), dataIndex: "status", render: (value) => <Tag>{t(detailResourceLabels[String(value)] ?? String(value))}</Tag> }
       ]} /> : <Table<RentalReservation> rowKey="id" pagination={false} dataSource={detail.reservations} columns={[
         { title: t("实际预占商品"), render: (_, row) => groups.data?.find((group) => group.id === row.itemGroupId)?.name ?? row.itemGroupId },
         { title: t("数量"), render: (_, row) => `${Math.max(0, row.quantity - row.releasedQuantity)} / ${row.quantity}` },
-        { title: t("状态"), dataIndex: "status", render: (value) => <Tag>{t(value)}</Tag> },
+        { title: t("状态"), dataIndex: "status", render: (value) => <Tag>{t(detailResourceLabels[String(value)] ?? String(value))}</Tag> },
         { title: t("操作"), render: (_, row) => detail.status === RentalCoreOrderStatus.Reserved && canSubstituteReservation(row) ? <Button type="link" icon={<RetweetOutlined />} onClick={() => setSubstitution({ orderLineId: row.orderLineId, fromItemGroupId: row.itemGroupId })}>{t("替换组成")}</Button> : "-" }
-      ]} />}</Card>
-      {Boolean(detail.serviceSnapshots?.length) && <Card title={t("增值服务与履约承诺")} extra={<Tag color="processing">{t("按发生次数分别记录")}</Tag>}>
+      ]} />}</ListSection></details>{Boolean(detail.serviceSnapshots?.length) && <ListSection title={t("增值服务与履约承诺")} extra={<Tag color="processing">{t("按发生次数分别记录")}</Tag>}>
         <Alert
           type="info"
           showIcon
           title={t("这里只展示已承诺的服务与计划时段；实际开始与完成另行记录，不能用计划时间当作已履约。")}
-          style={{ marginBottom: 16 }}
+
         />
         <Table<RentalOrderServiceOccurrence>
           rowKey={(row) => row.occurrenceId ?? `${row.serviceId}:${row.scheduledStartAt}`}
@@ -778,7 +743,7 @@ export function RentalOrderDetailPage() {
           dataSource={detail.serviceSnapshots}
           columns={[
             { title: t("来源"), width: 150, render: (_, row) => t(serviceOccurrenceOriginText(row)) },
-            { title: t("服务"), render: (_, row) => <Space orientation="vertical" size={0}><span>{row.serviceName}</span><span style={{ color: "#999" }}>{row.serviceCode} · {t("服务版本")} {row.serviceVersion} · {t("条款")} {row.termsVersion}</span></Space> },
+            { title: t("服务"), render: (_, row) => <Space orientation="vertical" size={0}><span>{row.serviceName}</span><span style={{ color: "var(--text-secondary)" }}>{row.serviceCode} · {t("服务版本")} {row.serviceVersion} · {t("条款")} {row.termsVersion}</span></Space> },
             { title: t("计划时段"), render: (_, row) => `${new Date(row.scheduledStartAt).toLocaleString()} ～ ${new Date(row.scheduledEndAt).toLocaleString()}` },
             { title: t("数量 × 单位数 × 单价"), align: "right", render: (_, row) => `${row.quantity} × ${row.billingUnits} × ${money(row.unitPrice)}` },
             { title: t("原价"), align: "right", render: (_, row) => money(row.amount) },
@@ -788,7 +753,7 @@ export function RentalOrderDetailPage() {
               const status = row.executionStatus ?? "not_started";
               const total = serviceOccurrenceTotalQuantity(row);
               const executed = serviceOccurrenceExecutedQuantity(row);
-              return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{t(SERVICE_EXECUTION_STATUS_LABELS[status])}</Tag>{total > 1 && <span style={{ color: "#666" }}>{t("已执行")} {executed} / {total}</span>}<span style={{ color: "#999" }}>{row.actualStartAt ? `${t("开始")} ${new Date(row.actualStartAt).toLocaleString()}` : t("未记录实际开始")}</span>{row.actualEndAt && <span style={{ color: "#999" }}>{t("结束")} {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
+              return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{t(SERVICE_EXECUTION_STATUS_LABELS[status])}</Tag>{total > 1 && <span style={{ color: "var(--text-secondary)" }}>{t("已执行")} {executed} / {total}</span>}<span style={{ color: "var(--text-secondary)" }}>{row.actualStartAt ? `${t("开始")} ${new Date(row.actualStartAt).toLocaleString()}` : t("未记录实际开始")}</span>{row.actualEndAt && <span style={{ color: "var(--text-secondary)" }}>{t("结束")} {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
             }},
             { title: t("退款"), width: 150, render: (_, row) => row.refundStatus && row.refundStatus !== "none"
               ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : row.refundStatus === "refunded" ? "green" : row.refundStatus === "included_in_order_change" ? "blue" : "default"}>{row.refundStatus === "pending_review" ? `${t("待审核")} ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `${t("已核减，待退款")} ${money(row.refundAmount)}` : row.refundStatus === "refunded" ? `${t("已退款")} ${money(row.refundAmount)}` : row.refundStatus === "included_in_order_change" ? `${t("已纳入订单变更")} ${money(row.refundAmount)}` : t("已驳回")}</Tag>
@@ -797,7 +762,7 @@ export function RentalOrderDetailPage() {
               ? <Tag color={row.reservationKey ? "green" : "orange"}>{row.reservationKey ? `${t("已占")} ${row.capacityQuantity}` : t("无容量依据")}</Tag>
               : <Tag color="default">{t("不需要容量")}</Tag> },
             { title: t("操作"), width: 260, render: (_, row) => {
-              if (!row.occurrenceId) return <span style={{ color: "#999" }}>{t("历史记录，无操作")}</span>;
+              if (!row.occurrenceId) return <span style={{ color: "var(--text-secondary)" }}>{t("历史记录，无操作")}</span>;
               const status = row.executionStatus ?? "not_started";
               const canRecordForOrder = SERVICE_EXECUTION_ORDER_STATUSES.includes(detail.status);
               const canStartForOrder = SERVICE_START_ORDER_STATUSES.includes(detail.status);
@@ -825,25 +790,89 @@ export function RentalOrderDetailPage() {
               return <Space wrap>
                 {canOperate && actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}
                 {canSettleFunding && row.refundStatus === "approved_pending_refund" && <Button key="refund" type="primary" size="small" onClick={() => { serviceRefundForm.resetFields(); setServiceRefund(row); }}>{t("办理退款")}</Button>}
-                {canOperate && !actions.length && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "#999" }}>{terminalHint}</span>}
-                {!canOperate && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "#999" }}>{t("无操作权限")}</span>}
+                {canOperate && !actions.length && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "var(--text-secondary)" }}>{terminalHint}</span>}
+                {!canOperate && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "var(--text-secondary)" }}>{t("无操作权限")}</span>}
               </Space>;
             } }
           ]}
         />
-      </Card>}
-      <Card title={t("费用与版本快照")}><Table rowKey="code" pagination={false} dataSource={detail.chargeLines} columns={[{ title: t("费用项"), dataIndex: "name" }, { title: t("类型"), dataIndex: "type", render: (value) => t(String(value)) }, { title: t("来源版本"), dataIndex: "sourceVersion", render: (value) => value ?? "-" }, { title: t("说明"), dataIndex: "detail", render: (value) => value ?? "-" }, { title: t("金额"), dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
-      {Boolean(detail.membershipBenefitEvaluations?.length) && <Card title={t("会员权益应用快照")} extra={<Tag color="processing">{t("按下单时会员方案固化")}</Tag>}>
+        {detail.serviceSnapshots?.some(service => service.terms?.trim()) && <RecordDisclosure key={detail.id + ':service-terms'} title={t("服务条款快照")} description={t("按本单冻结版本查看")}>
+          <div className={detailStyles.stack}>{detail.serviceSnapshots.filter(service => service.terms?.trim()).map((service, index) => <section key={service.occurrenceId ?? service.serviceId + ':' + index}>
+            <h4>{service.serviceName} · {t("条款版本")} {service.termsVersion}</h4>
+            <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{service.terms}</p>
+          </section>)}</div>
+        </RecordDisclosure>}
+      </ListSection>}{isCarrierShipping && <CarrierShipmentPanel order={detail} />}</div> },
+    { key: "finance", label: <span>{t("费用与资金")}{pendingFeeReviews.length > 0 ? ' · ' + pendingFeeReviews.length : ''}</span>, children: <div className={detailStyles.stack}>
+<section className={detailStyles.snapshot} aria-label={t("订单费用摘要")}><dl className={detailStyles.facts}>
+    <div><dt>{t("原订单应付")}</dt><dd><OrderMoney value={detail.payableAmount} currency={detail.currency} /></dd></div>
+    <div><dt>{t("订单应付")}</dt><dd><OrderMoney value={detail.finalPayableAmount ?? detail.payableAmount} currency={detail.currency} /></dd></div>
+    <div><dt>{t("其中税额")}</dt><dd>{detail.taxRate ? <><OrderMoney value={detail.taxAmount} currency={detail.currency} /><span className={detailStyles.secondary}> · {t("含税价内")} {(detail.taxRate * 100).toFixed(2)}%</span></> : t("不计税")}</dd></div>
+    <div><dt>{t("结算币种")}</dt><dd>{detail.currency ?? "CNY"}</dd></div>
+  </dl></section>
+<ListSection title={t("费用明细")}>
+  <Table rowKey="code" pagination={false} dataSource={detail.chargeLines.filter(line => !["deposit", "preauthorization"].includes(line.type))} columns={[
+    { title: t("费用项"), dataIndex: "name" },
+    { title: t("计费依据"), render: (_, row) => <details><summary>{t("查看依据")}</summary><p className={detailStyles.note}>{t(detailChargeLabels[row.type] ?? String(row.type))} · {t("来源版本")} {row.sourceVersion ?? "—"}</p><p className={detailStyles.note}>{row.detail ?? "—"}</p></details> },
+    { title: t("金额"), dataIndex: "amount", align: "right", render: value => <OrderMoney value={Number(value)} currency={detail.currency} /> },
+  ]} />
+</ListSection>
+{Boolean(detail.membershipBenefitEvaluations?.length) && <ListSection title={t("会员权益应用快照")} extra={<Tag color="processing">{t("按下单时会员方案固化")}</Tag>}>
         <Table rowKey={(row) => `${row.planVersionId}:${row.type}:${row.appliesTo}`} pagination={false} size="small" dataSource={detail.membershipBenefitEvaluations} columns={[
           { title: t("权益来源"), render: (_, row) => <>{row.planName}<br /><span className="muted">{t(row.source === "corporate" ? "企业员工权益" : "个人会员权益")}</span></> },
           { title: t("权益"), dataIndex: "type", render: (value) => t(MEMBERSHIP_BENEFIT_LABELS[String(value)] ?? String(value)) },
           { title: t("配置"), render: (_, row) => `${t(row.calculation)} · ${row.configuredValue}` },
-          { title: t("本次效果"), render: (_, row) => row.appliedAmount > 0 ? <Tag color="green">{t("减免")} {money(row.appliedAmount)}</Tag> : <Tag>{row.skippedReason ? t(row.skippedReason) : t("未生效")}</Tag> },
-          { title: t("说明"), dataIndex: "detail", render: (value) => value ?? "-" }
+          { title: t("本次效果"), render: (_, row) => row.appliedAmount > 0 ? <Tag color="green">{t("减免")} {money(row.appliedAmount)}</Tag> : <span className={detailStyles.secondary}>{row.skippedReason ? t(row.skippedReason) : t("未生效")}</span> },
+          { title: t("说明"), dataIndex: "detail", render: (value) => value ? <details><summary>{t("查看说明")}</summary><p className={detailStyles.note}>{value}</p></details> : "—" }
         ]} />
-      </Card>}
-      <Card title={t("检查、使用量与异常审核")}><Space orientation="vertical" style={{ width: "100%" }} size={16}>
-        <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
+      </ListSection>}
+{detail.chargeLines.some(line => ["deposit", "preauthorization"].includes(line.type)) && <details><summary>{t("原报价保证金要求")}</summary><Table rowKey="code" pagination={false} dataSource={detail.chargeLines.filter(line => ["deposit", "preauthorization"].includes(line.type))} columns={[
+    { title: t("项目"), dataIndex: "name" }, { title: t("说明"), dataIndex: "detail" }, { title: t("金额"), dataIndex: "amount", align: "right", render: value => <OrderMoney value={Number(value)} currency={detail.currency} /> },
+  ]} /></details>}
+{feeReviews.length > 0 && <ListSection title={t("待审费用与裁定历史")} extra={<Tag color={pendingFeeReviews.length ? "orange" : "default"}>{pendingFeeReviews.length ? `${pendingFeeReviews.length} ${t("项待裁定")}` : t("无待办")}</Tag>}>
+        <Alert
+          type="info"
+          showIcon
+          title={t("裁定只决定应收金额；批准退款表示应收已核减、等待实际退款，实际收退款仍要在下方资金区按资金权限单独办理。")}
+
+        />
+        {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} onRefresh={() => order.refetch()} loading={order.isFetching} dataSource={feeReviews} columns={[
+          { title: t("类型"), dataIndex: "type", render: (value) => t(FEE_REVIEW_TYPE_LABELS[value as RentalOrderFeeReview["type"]] ?? String(value)) },
+          { title: t("来源"), render: () => t("订单费用审核") },
+          { title: t("建议金额"), dataIndex: "suggestedAmount", render: (value) => money(Number(value)) },
+          { title: t("依据"), dataIndex: "basis", render: (value) => <Space orientation="vertical" size={0}>{((value as string[]) ?? []).map((row) => <span key={row}>{t(row)}</span>)}</Space> },
+          { title: t("状态"), render: (_, row) => <Tag color={FEE_REVIEW_STATUS_COLORS[row.status]}>{t(feeReviewStatusText(row))}</Tag> },
+          { title: t("裁定额"), dataIndex: "decidedAmount", render: (value, row) => row.status === "pending" ? "-" : money(Number(value ?? 0)) },
+          { title: t("原因"), dataIndex: "reason", render: (value) => value ?? "-" },
+          { title: t("操作者"), dataIndex: "reviewedBy", render: (value) => value ?? "-" },
+          { title: t("时间"), render: (_, row) => new Date(row.reviewedAt ?? row.createdAt).toLocaleString() },
+          {
+            title: t("操作"),
+            render: (_, row) => row.status !== "pending"
+              ? "-"
+              : canReviewFees
+                ? <Button type="link" onClick={() => { setFeeReview(row); feeReviewForm.setFieldsValue({ decision: "approved", amount: row.suggestedAmount, reason: undefined }); }}>{t("裁定")}</Button>
+                : <span style={{ color: "var(--text-secondary)" }}>{t("无费用裁定权限")}</span>
+          }
+        ]} /> : <span style={{ color: "var(--text-secondary)" }}>{t("当前订单没有需要人工裁定的费用事项。")}</span>}
+      </ListSection>}
+{canViewFunding ? <OrderFundingPanel order={detail} funding={funding.data} loading={funding.isFetching} error={funding.isError} refresh={() => funding.refetch()} depositRequirement={depositRequirement} preauthorizationRequirement={preauthorizationRequirement} actions={{
+ rental: <>{canSettleFunding && funding.data && <Space wrap>
+            {funding.data.rental.balance + funding.data.rental.pendingExtensionAmount > 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "append" })}>{t("登记模拟收款／补款")}</Button>}
+            {funding.data.rental.balance < 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "refund" })}>{t("办理模拟退款")}</Button>}
+          </Space>}</>, deposit: <>{canSettleFunding && <>{depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>{t("模拟收取押金")}</Button>}
+{(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>{t("追加押金")}</Button>}
+{(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>{t("押金抵扣")}</Button>}
+{(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "refund" })}>{t("押金退款")}</Button>}
+{depositRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "deposit", action: "fail" })}>{t("记录押金收取失败")}</Button>}</>}</>, preauthorization: <>{canSettleFunding && <>{preauthorizationRequirement > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>{t("模拟冻结预授权")}</Button>}
+{(funding.data?.preauthorization.frozen ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "append" })}>{t("追加预授权")}</Button>}
+{(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "capture" })}>{t("预授权转扣")}</Button>}
+{(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "release" })}>{t("释放全部预授权")}</Button>}
+{preauthorizationRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "preauthorization", action: "fail" })}>{t("记录预授权冻结失败")}</Button>}</>}</>,
+}} /> : <p className={detailStyles.note}>{t("当前账号无资金查看权限")}</p>}
+</div> },
+    { key: "inspection", label: <span>{t("检查与处置")}{pendingInspectionCount > 0 ? ' · ' + pendingInspectionCount : ''}</span>, children: <div className={detailStyles.stack}><QueryState loading={inspections.isLoading} error={inspections.error}>{inspections.data?.length ? <ListSection title={t("检查、使用量与异常审核")}><Space orientation="vertical" style={{ width: "100%" }} size={16}>
+        {(inspections.data ?? []).some(record => Boolean(record.usageReadings?.length)) && <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
           { title: t("阶段"), dataIndex: "stage", render: (value) => value === "pickup" ? t("领取基线") : t("归还读数") },
           { title: t("读数字段"), dataIndex: "fieldCode" },
           { title: t("领取基线"), dataIndex: "baseline", render: (value) => value ?? "-" },
@@ -858,14 +887,14 @@ export function RentalOrderDetailPage() {
              usageCorrectionForm.setFieldsValue({ correctedCurrent: row.current });
              setUsageCorrection({ inspectionId: row.inspectionId, fieldCode: row.fieldCode, stage: row.stage, current: row.current, baseline: row.baseline });
            }}>{t("修正读数")}</Button> : "-" }
-        ]} />
-        <Table rowKey="id" size="small" pagination={false} dataSource={inspections.data ?? []} columns={[
+        ]} />}
+        <Table rowKey="id" size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={inspections.data ?? []} columns={[
           { title: t("检查记录"), render: (_, row) => row.stage === "pickup" ? t("领取检查") : t("归还检查") },
           { title: t("照片/证据引用"), dataIndex: "attachments", render: (value: string[]) => value?.length ? <Space size={[4, 4]} wrap>{value.map((ref) => <Tag key={ref}>{ref}</Tag>)}</Space> : <Typography.Text type="secondary">{t("未登记")}</Typography.Text> },
           { title: t("操作人"), dataIndex: "operator" },
           { title: t("时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleString() }
         ]} />
-        <Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
+        {(inspections.data ?? []).some(record => record.exceptions.length > 0) && <Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
           { title: t("阶段"), dataIndex: "stage", render: (value) => value === "pickup" ? t("领取") : t("归还") },
           { title: t("异常"), render: (_, row) => <>{row.code} · {row.description}<br /><Typography.Text type="secondary">{row.allocationId ? `${t("关联分配：")}${row.allocationId}` : t("本批全部归还资源")}</Typography.Text></> },
           { title: t("建议费用"), dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
@@ -884,39 +913,11 @@ export function RentalOrderDetailPage() {
              {canAdjust && <Button type="link" onClick={() => { setExceptionAdjustment({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, current: Number(row.approvedChargeAmount), suggested: row.suggestedChargeAmount }); exceptionAdjustmentForm.setFieldsValue({ approvedChargeAmount: Number(row.approvedChargeAmount), reason: undefined }); }}>{t("复核金额")}</Button>}
             {!(canReview || canRecordResponse || canAdjust) && "-"}
           </Space>; } }
-        ]} />
-      </Space></Card>
-      <Card title={t("待审费用与裁定历史")} extra={<Tag color={pendingFeeReviews.length ? "orange" : "default"}>{pendingFeeReviews.length ? `${pendingFeeReviews.length} ${t("项待裁定")}` : t("无待办")}</Tag>}>
-        <Alert
-          type="info"
-          showIcon
-          title={t("裁定只决定应收金额；批准退款表示应收已核减、等待实际退款，实际收退款仍要在下方资金区按资金权限单独办理。")}
-          style={{ marginBottom: 16 }}
-        />
-        {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} dataSource={feeReviews} columns={[
-          { title: t("类型"), dataIndex: "type", render: (value) => t(FEE_REVIEW_TYPE_LABELS[value as RentalOrderFeeReview["type"]] ?? String(value)) },
-          { title: t("来源"), render: () => t("订单费用审核") },
-          { title: t("建议金额"), dataIndex: "suggestedAmount", render: (value) => money(Number(value)) },
-          { title: t("依据"), dataIndex: "basis", render: (value) => <Space orientation="vertical" size={0}>{((value as string[]) ?? []).map((row) => <span key={row}>{t(row)}</span>)}</Space> },
-          { title: t("状态"), render: (_, row) => <Tag color={FEE_REVIEW_STATUS_COLORS[row.status]}>{t(feeReviewStatusText(row))}</Tag> },
-          { title: t("裁定额"), dataIndex: "decidedAmount", render: (value, row) => row.status === "pending" ? "-" : money(Number(value ?? 0)) },
-          { title: t("原因"), dataIndex: "reason", render: (value) => value ?? "-" },
-          { title: t("操作者"), dataIndex: "reviewedBy", render: (value) => value ?? "-" },
-          { title: t("时间"), render: (_, row) => new Date(row.reviewedAt ?? row.createdAt).toLocaleString() },
-          {
-            title: t("操作"),
-            render: (_, row) => row.status !== "pending"
-              ? "-"
-              : canReviewFees
-                ? <Button type="link" onClick={() => { setFeeReview(row); feeReviewForm.setFieldsValue({ decision: "approved", amount: row.suggestedAmount, reason: undefined }); }}>{t("裁定")}</Button>
-                : <span style={{ color: "#999" }}>{t("无费用裁定权限")}</span>
-          }
-        ]} /> : <span style={{ color: "#999" }}>{t("当前订单没有需要人工裁定的费用事项。")}</span>}
-      </Card>
-      {relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
-        <Card title={t("归还处置与养护工单")} size="small">
+        ]} />}
+      </Space></ListSection> : <ListSection title={t("检查记录")}><p className={detailStyles.note}>{t("尚未登记检查记录")}</p><Button onClick={() => void inspections.refetch()}>{t("刷新记录")}</Button></ListSection>}</QueryState>{relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
+        <ListSection title={t("归还处置与养护工单")}>
           {relatedWorkOrders.data?.length ? (
-            <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} dataSource={relatedWorkOrders.data} columns={[
+            <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} onRefresh={() => relatedWorkOrders.refetch()} loading={relatedWorkOrders.isFetching} dataSource={relatedWorkOrders.data} columns={[
               { title: t("工单号"), dataIndex: "workNo", width: 190 },
               { title: t("类型"), dataIndex: "type", width: 110, render: (value) => t(String(value)) },
               { title: t("状态"), dataIndex: "status", width: 110, render: (value) => { const status = WORK_ORDER_STATUS_LABELS[value] ?? { label: value, color: "default" }; return <Tag color={status.color}>{t(status.label)}</Tag>; } },
@@ -928,8 +929,8 @@ export function RentalOrderDetailPage() {
           )}
           {relatedDispositions.data?.length ? (
             <>
-              <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 4 }}>{t("归还处置（周转/隔离）：")}</Typography.Paragraph>
-              <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} dataSource={relatedDispositions.data} columns={[
+              <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{t("归还处置（周转/隔离）：")}</Typography.Paragraph>
+              <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} onRefresh={() => relatedDispositions.refetch()} loading={relatedDispositions.isFetching} dataSource={relatedDispositions.data} columns={[
                 { title: t("归还批次"), dataIndex: "returnBatchKey", ellipsis: true },
                 { title: t("数量"), dataIndex: "quantity", width: 70 },
                 { title: t("状态"), dataIndex: "status", width: 110, render: (value) => ({ buffered: <Tag color="orange">{t("周转缓冲")}</Tag>, blocked: <Tag color="red">{t("异常隔离")}</Tag>, restored: <Tag color="success">{t("已恢复")}</Tag>, written_off: <Tag>{t("已核销")}</Tag> }[value as string] ?? String(value)) },
@@ -938,49 +939,13 @@ export function RentalOrderDetailPage() {
               ]} />
             </>
           ) : null}
-          {canViewWorkOrders && <Button type="link" style={{ marginTop: 8, padding: 0 }} onClick={() => navigate("/rental/work-orders")}>{t("前往养护工单管理")}</Button>}
-        </Card>
-      ) : null}
-      {canViewFunding && <Card title={<Space><DollarOutlined />{t("收付款、押金与预授权")} <Tag color="orange">{t("模拟资金")}</Tag></Space>}>
-        {funding.data?.rental && <Space orientation="vertical" style={{ marginBottom: 16 }}>
-          <span>{t("最终应收")} {money(funding.data.rental.payable)} · {t("已收")} {money(funding.data.rental.collected)} · {t("已退")} {money(funding.data.rental.refunded)} · {t("保证金抵扣")} {money(funding.data.rental.securityCaptured)}</span>
-          <span>{funding.data.rental.balance < 0 ? t("待退") : t("待收")} {money(Math.abs(funding.data.rental.balance))} · {t("续租待补")} {money(funding.data.rental.pendingExtensionAmount)}</span>
-          {canSettleFunding && <Space>
-            {funding.data.rental.balance + funding.data.rental.pendingExtensionAmount > 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "append" })}>{t("登记模拟收款／补款")}</Button>}
-            {funding.data.rental.balance < 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "refund" })}>{t("办理模拟退款")}</Button>}
-          </Space>}
-        </Space>}
-        <Alert type="warning" showIcon title={t("当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。")} style={{ marginBottom: 16 }} />
-        <Descriptions column={{ xs: 1, md: 2 }} items={[
-          { key: "deposit", label: `${t("应收押金")} ${money(depositRequirement)}`, children: funding.data ? `${t("已收")} ${money(funding.data.deposit.collected)} / ${t("已抵扣")} ${money(funding.data.deposit.captured)} / ${t("已退")} ${money(funding.data.deposit.refunded)} / ${t("余额")} ${money(funding.data.deposit.balance)}${pendingDepositAmount > 0 ? ` / ${t("续租待补")} ${money(pendingDepositAmount)}` : ""}` : t("加载中") },
-          { key: "preauth", label: `${t("应冻结预授权")} ${money(preauthorizationRequirement)}`, children: funding.data ? `${t("已冻结")} ${money(funding.data.preauthorization.frozen)} / ${t("已转扣")} ${money(funding.data.preauthorization.captured)} / ${t("已释放")} ${money(funding.data.preauthorization.released)} / ${t("余额")} ${money(funding.data.preauthorization.balance)}${pendingPreauthorizationAmount > 0 ? ` / ${t("续租待补")} ${money(pendingPreauthorizationAmount)}` : ""}` : t("加载中") }
-        ]} />
-        {canSettleFunding && <Space wrap style={{ margin: "12px 0" }}>
-          {depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>{t("模拟收取押金")}</Button>}
-          {(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>{t("追加押金")}</Button>}
-          {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>{t("押金抵扣")}</Button>}
-          {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "refund" })}>{t("押金退款")}</Button>}
-          {preauthorizationRequirement > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>{t("模拟冻结预授权")}</Button>}
-          {(funding.data?.preauthorization.frozen ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "append" })}>{t("追加预授权")}</Button>}
-          {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "capture" })}>{t("预授权转扣")}</Button>}
-          {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "release" })}>{t("释放全部预授权")}</Button>}
-          {depositRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "deposit", action: "fail" })}>{t("记录押金收取失败")}</Button>}
-          {preauthorizationRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "preauthorization", action: "fail" })}>{t("记录预授权冻结失败")}</Button>}
-        </Space>}
-        <Table rowKey="id" size="small" pagination={false} loading={funding.isLoading} dataSource={funding.data?.events ?? []} columns={[
-          { title: t("时间"), dataIndex: "at", render: (value) => new Date(String(value)).toLocaleString() },
-          { title: t("对象"), dataIndex: "instrument", render: (value) => t(FUNDING_INSTRUMENT_LABELS[value as RentalFundingInstrument]) },
-          { title: t("动作"), dataIndex: "action", render: (value) => t(FUNDING_ACTION_LABELS[value as RentalFundingAction]) },
-          { title: t("方式"), dataIndex: "paymentMethod", render: (value) => value ? t(OFFLINE_PAYMENT_METHOD_LABELS[value as RentalOfflinePaymentMethod]) : "—" },
-          { title: t("金额"), dataIndex: "amount", render: (value) => money(Number(value)) },
-          { title: t("事件后余额"), dataIndex: "balanceAfter", render: (value) => money(Number(value)) },
-          { title: t("原因"), dataIndex: "reason" },
-          { title: t("状态"), render: (_, row) => <Tag color={row.action === "fail" ? "red" : "orange"}>{row.action === "fail" ? `${t("失败 · ")}${row.failureCode}` : t("模拟成功")}</Tag> }
-        ]} />
-      </Card>}
-      {Boolean(extensions.data?.length) && <Card className="data-panel" title={<span className="panel-title">{t("续租记录")} <span className="panel-count">{extensions.data?.length}</span></span>}>
-        <Alert type="info" showIcon title={order.data.ruleSnapshot?.extension?.pricingMode === "original_total" ? t("按原价格重算完整租期，只补差价") : t("新增时段单独计费")} description={t("续租方式以本单规则快照为准；须检查后续占用及缓冲，原始账单保留。缓冲只占库存，不计租金。")} style={{ marginBottom: 12 }} />
-        <Table<RentalOrderExtension> rowKey="id" size="small" pagination={false} dataSource={extensions.data ?? []} columns={[
+          {canViewWorkOrders && <Button type="link" style={{ padding: 0 }} onClick={() => navigate("/rental/work-orders")}>{t("前往养护工单管理")}</Button>}
+        </ListSection>
+      ) : null}</div> },
+    { key: "records", label: t("记录与单据"), children: <div className={detailStyles.stack}>
+      {Boolean(extensions.data?.length) && <ListSection title={t("续租记录")}>
+        <Alert type="info" showIcon title={order.data.ruleSnapshot?.extension?.pricingMode === "original_total" ? t("按原价格重算完整租期，只补差价") : t("新增时段单独计费")} description={t("续租方式以本单规则快照为准；须检查后续占用及缓冲，原始账单保留。缓冲只占库存，不计租金。")}  />
+        <Table<RentalOrderExtension> rowKey="id" size="small" pagination={false} onRefresh={() => extensions.refetch()} loading={extensions.isFetching} dataSource={extensions.data ?? []} columns={[
           { title: t("次序"), dataIndex: "sequence", width: 72 },
           { title: t("延长期间"), render: (_, row) => <>{dayjs(row.originalEndAt).format("YYYY-MM-DD HH:mm")} → {dayjs(row.newEndAt).format("YYYY-MM-DD HH:mm")}</> },
           { title: t("租金差额"), align: "right", render: (_, row) => money(row.rentalAmount) },
@@ -992,8 +957,33 @@ export function RentalOrderDetailPage() {
           { title: t("价格版本"), render: (_, row) => row.priceVersion ?? "—" },
           { title: t("操作"), align: "right", render: (_, row) => row.status === "pending_payment" ? <Button type="link" loading={payExtension.isPending} onClick={() => payExtension.mutate(row.id)}>{t("确认补款")}</Button> : row.pricingSnapshot?.refundReview?.status === "pending" && canReviewFees ? <Button type="link" onClick={() => { setExtensionRefundReview(row); extensionRefundForm.setFieldsValue({ decision: "approved", reason: "" }); }}>{t("审核退款差额")}</Button> : "—" }
         ]} />
-      </Card>}
-    </Space>}</QueryState>
+      </ListSection>}{Boolean(changes.data?.length) && <ListSection title={t("订单变更记录")} extra={<Tag color="processing">{t("原订单与原报价快照保留")}</Tag>}>
+        <Table rowKey="id" size="small" pagination={false} onRefresh={() => changes.refetch()} loading={changes.isFetching} dataSource={changes.data ?? []} columns={[
+          { title: t("时间"), dataIndex: "appliedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
+          { title: t("变更"), render: (_, row) => t(row.type === "resume_pickup" ? "待确认爽约恢复领取" : row.type === "post_pickup_exchange" ? "取货后换货" : row.type === "service_cancel" ? "取货前取消服务" : "取货前整行部分取消") },
+          { title: t("取消商品"), render: (_, row) => (("lineIds" in row.request ? row.request.lineIds ?? [] : []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join(locale === "en-US" ? ", " : "、")) },
+          { title: t("退款差额"), align: "right", render: (_, row) => money(row.refundAmount) },
+          { title: t("补款差额"), align: "right", render: (_, row) => money(row.additionalAmount) },
+          { title: t("原因"), render: (_, row) => row.request.reason }
+        ]} />
+      </ListSection>}
+      <ListSection title={t("订单资料")}><Descriptions column={{ xs: 1, md: 2, xl: 4 }} items={[{ key: "createdAt", label: t("创建时间"), children: detail.createdAt && dayjs(detail.createdAt).isValid() ? dayjs(detail.createdAt).format("YYYY-MM-DD HH:mm") : "—" },
+{ key: "quote", label: t("报价"), children: detail.quoteNo },
+{ key: "pricing", label: t("价格版本"), children: detail.pricingPlanVersion },
+{ key: "rule", label: t("规则版本"), children: detail.ruleVersion },
+{ key: "calendar", label: t("日历版本"), children: detail.calendarVersion ?? t("未发布") }]} /></ListSection>
+      <OrderDocumentsPanel
+        order={detail}
+        inspections={inspections.data ?? []}
+        templates={templates.data ?? []}
+        funding={funding.data}
+        terminology={profile.data?.terminology}
+        money={money}
+      />
+      <details className={detailStyles.assistant}><summary>{t("订单业务助手")}</summary>{id && <OrderFactsEntry key={id} orderId={id} />}</details>
+    </div> },
+  ]} />
+</div>}</QueryState>
      <Modal title={inspectionReturnItems?.length ? t("部分归还检查") : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>
       {inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => {
         const { attachmentsText, exceptionCode, exceptionDescription, exceptionAllocationId, exceptionChargeAmount, ...results } = values as Record<string, unknown> & { attachmentsText?: string; exceptionCode?: string; exceptionDescription?: string; exceptionAllocationId?: string; exceptionChargeAmount?: number };
@@ -1036,7 +1026,7 @@ export function RentalOrderDetailPage() {
           <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: "100%" }} onChange={() => setExtensionPreview(undefined)} disabledDate={(current) => current.isBefore(dayjs(detailEndAt), "day")} />
         </Form.Item>
         <Form.Item name="memo" label={t("备注")}><Input.TextArea rows={2} placeholder={t("客户申请原因、沟通记录等")} /></Form.Item>
-        {extensionPreview && <Card size="small" title={t("试算结果")}>
+        {extensionPreview && <ListSection title={t("试算结果")}>
           <Descriptions column={2} size="small" items={[
             { key: "period", label: t("延长期间"), span: 2, children: `${dayjs(extensionPreview.originalEndAt).format("MM-DD HH:mm")} → ${dayjs(extensionPreview.newEndAt).format("MM-DD HH:mm")}` },
             { key: "units", label: t("计费单位数"), children: extensionPreview.billableUnits },
@@ -1054,12 +1044,12 @@ export function RentalOrderDetailPage() {
             { key: "version", label: t("价格版本"), children: extensionPreview.priceVersion ?? "—" },
             { key: "rule", label: t("规则版本"), children: extensionPreview.ruleVersion }
           ]} />
-          <Table size="small" pagination={false} style={{ marginTop: 12 }} rowKey="code" dataSource={extensionPreview.chargeLines} columns={[
+          <Table size="small" pagination={false}  rowKey="code" onRefresh={null} dataSource={extensionPreview.chargeLines} columns={[
             { title: t("费用"), dataIndex: "name" },
             { title: t("金额"), align: "right", render: (_, row) => money(row.amount) },
             { title: t("计算说明"), dataIndex: "detail", render: (value) => <span className="muted">{value ?? "—"}</span> }
           ]} />
-        </Card>}
+        </ListSection>}
       </Form>
     </Modal>
     <Modal
@@ -1200,12 +1190,12 @@ export function RentalOrderDetailPage() {
           {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
             {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
               <Form.Item name={[field.name, "lineId"]} rules={[{ required: true, message: t("请选择商品") }]} style={{ flex: 1 }}>
-                <Select style={{ width: 360 }} placeholder={t("选择要取消的商品")} onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · ${t("可取消")} ${line.quantity - (line.cancelledQuantity ?? 0)} ${t("件")}${["quantity", "consumable"].includes(line.inventoryMode) ? (line.inventoryMode === "consumable" ? `（${t("一次性耗材")}）` : `（${t("数量库存")}）`) : `（${t("序列化资产，仅整行")}）`}` }))} />
+                <Select style={{ width: "var(--rental-control-width-wide)" }} placeholder={t("选择要取消的商品")} onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · ${t("可取消")} ${line.quantity - (line.cancelledQuantity ?? 0)} ${t("件")}${["quantity", "consumable"].includes(line.inventoryMode) ? (line.inventoryMode === "consumable" ? `（${t("一次性耗材")}）` : `（${t("数量库存")}）`) : `（${t("序列化资产，仅整行")}）`}` }))} />
               </Form.Item>
               <Form.Item name={[field.name, "quantity"]} rules={[{ required: true, message: t("请输入数量") }]}>
-                <InputNumber min={1} precision={0} style={{ width: 110 }} placeholder={t("数量")} onChange={() => setPartialCancelPreview(undefined)} />
+                <InputNumber min={1} precision={0} style={{ width: "var(--rental-control-width-compact)" }} placeholder={t("数量")} onChange={() => setPartialCancelPreview(undefined)} />
               </Form.Item>
-              <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
+              <Button type="text" danger aria-label={t("移除取消项")} icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
             </Space>)}
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>{t("增加取消项")}</Button>
           </Space>}
@@ -1226,12 +1216,12 @@ export function RentalOrderDetailPage() {
           {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
             {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
               <Form.Item name={[field.name, "occurrenceId"]} rules={[{ required: true, message: t("请选择服务") }]}>
-                <Select style={{ width: 360 }} placeholder={t("选择按数量取消的服务")} onChange={() => setPartialCancelPreview(undefined)} options={(detail?.serviceSnapshots ?? []).filter((row) => Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule).map((row) => ({ value: row.occurrenceId, label: `${row.serviceName} · ${t("可取消")} ${row.quantity} ${t("份")}` }))} />
+                <Select style={{ width: "var(--rental-control-width-wide)" }} placeholder={t("选择按数量取消的服务")} onChange={() => setPartialCancelPreview(undefined)} options={(detail?.serviceSnapshots ?? []).filter((row) => Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule).map((row) => ({ value: row.occurrenceId, label: `${row.serviceName} · ${t("可取消")} ${row.quantity} ${t("份")}` }))} />
               </Form.Item>
               <Form.Item name={[field.name, "quantity"]} rules={[{ required: true, message: t("请输入数量") }]}>
-                <InputNumber min={1} precision={0} style={{ width: 110 }} placeholder={t("数量")} onChange={() => setPartialCancelPreview(undefined)} />
+                <InputNumber min={1} precision={0} style={{ width: "var(--rental-control-width-compact)" }} placeholder={t("数量")} onChange={() => setPartialCancelPreview(undefined)} />
               </Form.Item>
-              <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
+              <Button type="text" danger aria-label={t("移除取消项")} icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
             </Space>)}
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>{t("增加服务取消数量项")}</Button>
           </Space>}
@@ -1269,7 +1259,7 @@ export function RentalOrderDetailPage() {
       </Form>
     </Modal>
     <Modal title={t("替换套装组成")} open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onConfirm={() => substitutionForm.validateFields().then((values) => substitute.mutateAsync(values))} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label={t("当前组成")}><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label={t("替代商品")} rules={[{ required: true }]}><Select options={substitutionOptions} placeholder={t("选择同一替代组的候选商品")} /></Form.Item></Form></Modal>
-    <Modal title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("部分归还检查") : t("部分归还")} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("选择本批归还项后，下一步填写归还检查。") : t("本批实物会直接释放；最后一批仍须使用整单归还。")} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: 320 }} placeholder={t("选择待归还资产或数量项")} options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${t("剩余")} ${allocation.quantity}` }))} /></Form.Item><Form.Item name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: 100 }} /></Form.Item><Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("增加归还项")}</Button></Space>}</Form.List></Form></Modal>
+    <Modal title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("部分归还检查") : t("部分归还")} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("选择本批归还项后，下一步填写归还检查。") : t("本批实物会直接释放；最后一批仍须使用整单归还。")} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: "var(--rental-control-width-wide)" }} placeholder={t("选择待归还资产或数量项")} options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${t("剩余")} ${allocation.quantity}` }))} /></Form.Item><Form.Item name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "var(--rental-control-width-compact)" }} /></Form.Item><Button type="text" danger aria-label={t("移除归还项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("增加归还项")}</Button></Space>}</Form.List></Form></Modal>
     <Modal title={fundingOperation ? `${t(FUNDING_ACTION_LABELS[fundingOperation.action])}${t(FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument])}（${t("模拟")}）` : t("模拟资金操作")} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onConfirm={() => fundingForm.validateFields().then((values) => fundingAction.mutateAsync(values))} confirmLoading={fundingAction.isPending} destroyOnHidden>
       <Alert type="warning" showIcon title={t("本操作仅写入模拟资金流水，不会发起真实扣款或冻结。")} style={{ marginBottom: 16 }} />
       <Form form={fundingForm} layout="vertical" onFinish={(values) => fundingAction.mutate(values)}>
@@ -1371,7 +1361,7 @@ export function RentalOrderDetailPage() {
         style={{ marginBottom: 16 }}
       />
       <Form form={serviceExecutionForm} layout="vertical" onFinish={(values) => executeService.mutate(values)}>
-        {serviceExecution?.action === "start" && <span style={{ color: "#666" }}>{t("点击确认后记录当前时间为实际开始时间。")}</span>}
+        {serviceExecution?.action === "start" && <span style={{ color: "var(--text-secondary)" }}>{t("点击确认后记录当前时间为实际开始时间。")}</span>}
         {serviceExecution?.action === "complete" && <>
           {serviceOccurrenceTotalQuantity(serviceExecution.occurrence) > 1 && <Form.Item name="executedQuantity" label={t("本次实际执行数量")} initialValue={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} rules={[{ required: true, message: t("请输入本次实际执行数量") }]} extra={`${t("剩余可执行")} ${serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)}${t("份；全部执行后才会结束该服务。")}`}><InputNumber min={1} max={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} precision={0} style={{ width: "100%" }} /></Form.Item>}
           <Form.Item name="result" label={t("执行结果")} rules={[{ required: true, whitespace: true, message: t("请填写执行结果") }]}><Input.TextArea rows={3} placeholder={t("例如：服务已完成，客户现场确认")} /></Form.Item>
@@ -1465,7 +1455,7 @@ export function RentalOrderDetailPage() {
         </Form.Item>
       </Form>
     </Modal>
-  </>;
+  </TableRefreshProvider>;
 }
 
 function inspectionFieldRules(field: RentalInspectionTemplate["fields"][number], translate: (value: string) => string = (value) => value) {

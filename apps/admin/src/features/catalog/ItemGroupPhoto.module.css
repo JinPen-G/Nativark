@@ -1,0 +1,3 @@
+.cover { display: flex; align-items: center; justify-content: center; height: var(--rental-record-card-media-height); width: 100%; background: var(--surface-muted); }
+.cover img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.placeholder { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }

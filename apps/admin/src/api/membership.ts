@@ -32,7 +32,7 @@ export const membershipApi = {
   personal: () => request<PersonalMembershipMember[]>("/membership/personal"),
   personalOptions: () => request<BookingMemberOption[]>("/membership/personal-options"),
   benefitScopeOptions: () => request<CustomerMembershipScopeOptions>("/membership/benefit-scope-options"),
-  registerPersonal: (data: RegisterPersonalMembershipRequest) => request<{ customerId: string }>("/membership/personal", { method: "post", data }),
+  registerPersonal: (data: RegisterPersonalMembershipRequest) => request<{ customerId: string; skipped?: boolean }>("/membership/personal", { method: "post", data }),
   savePersonal: (customerId: string, data: SavePersonalMembershipRequest) =>
     request<unknown>(`/membership/personal/${customerId}`, { method: "put", data }),
   setTemporaryPassword: (customerId: string, data: SetCustomerMembershipTemporaryPasswordRequest) =>

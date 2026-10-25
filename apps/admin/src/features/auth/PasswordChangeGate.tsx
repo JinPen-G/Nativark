@@ -1,4 +1,4 @@
-import { LockOutlined } from "@ant-design/icons";
+import { LockOutlined } from "@/components/ui/icons";
 import { Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";

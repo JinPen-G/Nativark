@@ -76,6 +76,7 @@ export function Select<ValueType = any, OptionType extends BaseOptionType | Defa
     </div>;
   }
   const currentKey = currentValue === undefined ? "" : keyFor(currentValue as ArcValue);
+  const clearable = Boolean(props.allowClear && currentValue !== undefined && currentValue !== "");
   const disabled = props.disabled ?? componentDisabled;
   const usableOptions = sourceOptions ?? [];
   // Ant keeps a stored selection visible even when a later catalog no longer contains it.
@@ -101,9 +102,10 @@ export function Select<ValueType = any, OptionType extends BaseOptionType | Defa
       value={currentKey} disabled={disabled} placeholder={sourcePlaceholder} emptyMessage={t("暂无数据")}
       onValueChange={key => key === "" ? clear() : update(key)} /></ArcLocale>
   </div>;
-  return <div className={["arc-select-field", props.rootClassName, props.className].filter(Boolean).join(" ")} style={props.style} data-status={status}>
+  return <div className={["arc-select-field", props.rootClassName, props.className].filter(Boolean).join(" ")} style={props.style} data-status={status}
+    title={usableOptions.find(option => Object.is(option.value, currentValue))?.label}>
     <ArcSelect id={props.id} label={sourceLabel} placeholder={sourcePlaceholder} options={usableOptions.map(option => ({ ...option, value: keyFor(option.value) }))}
-      value={currentKey} disabled={disabled} onValueChange={update} className={props.allowClear && currentValue !== undefined ? "arc-select-trigger-with-clear" : undefined} />
-    {props.allowClear && currentValue !== undefined && <button type="button" className="arc-select-clear" disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={clear} aria-label={t("清空选择")}><X size={14} aria-hidden="true" /></button>}
+      value={currentKey} disabled={disabled} onValueChange={update} className={clearable ? "arc-select-trigger-with-clear" : undefined} />
+    {clearable && <button type="button" className="arc-select-clear" disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={clear} aria-label={t("清空选择")}><X size={14} aria-hidden="true" /></button>}
   </div>;
 }

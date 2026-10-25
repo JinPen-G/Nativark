@@ -3,13 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, Space, Tag, Typography } from "antd";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
-import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/icons";
+import { CheckCircleFilled, RightOutlined, WarningFilled } from "@/components/ui/icons";
 import type { TenantReadinessStatus } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { LoadingState } from "@/components/LoadingState";
 import { useLocale } from "@/app/locale";
-import { useAuthStore } from "@/features/auth/authStore";
 
 /**
  * TENANT-READY-01：空白/半配置租户的开业配置状态页。
@@ -27,7 +26,6 @@ const STATUS_META: Record<TenantReadinessStatus["status"], { label: string; colo
 
 export function TenantReadinessPage() {
   const { t } = useLocale();
-  const tenantName = useAuthStore((state) => state.tenant?.tenantName);
   const readiness = useQuery({
     queryKey: ["rental-core", "tenant-readiness"],
     queryFn: rentalCoreApi.tenantReadiness
@@ -43,7 +41,7 @@ export function TenantReadinessPage() {
     return (
       <PageHeader
         title={t("开业配置")}
-        description={t("检查当前经营空间的开业配置状态。")}
+        view={<Alert type="error" showIcon title={t("数据暂不可用，请稍后重试")} />}
         extra={<Button onClick={() => readiness.refetch()}>{t("重试")}</Button>}
       />
     );
@@ -52,7 +50,6 @@ export function TenantReadinessPage() {
   return (
     <PageHeader
       title="开业配置"
-      description={`当前租户：${tenantName ?? ""}（经营空间 ${readiness.data.workspaceId}）。完成全部配置项后即可进行报价与订单；服务端会独立校验配置完整性，不以前端展示为准。`}
       view={<TenantReadinessBody data={readiness.data} onRefresh={() => readiness.refetch()} />}
     />
   );
@@ -89,7 +86,7 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
         <Card key={item.key} size="small">
           <Space style={{ justifyContent: "space-between", width: "100%" }}>
             <Space>
-              {item.done ? <CheckCircleFilled style={{ color: "#52c41a" }} /> : <WarningFilled style={{ color: "#faad14" }} />}
+              {item.done ? <CheckCircleFilled style={{ color: "var(--success)" }} /> : <WarningFilled style={{ color: "var(--warning)" }} />}
               <Typography.Text strong>{item.title}</Typography.Text>
               <Tag color={item.unavailable ? "default" : item.done ? "success" : "warning"}>
                 {item.unavailable ? t("待重试") : item.done ? t("已完成") : t("未完成")}

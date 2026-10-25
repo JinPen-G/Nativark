@@ -122,7 +122,7 @@ export function AppearancePage() {
 
   return (
     <>
-      <PageHeader title="外观与音效" description="设置管理后台圆角与界面音效。品牌标识及主题色请在客户端配置中维护。" />
+      <PageHeader title="外观与音效" />
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <AccountThemeColorCard />
         {profile.isLoading ? <LoadingState /> : profile.error || !profile.data ? (
@@ -131,7 +131,7 @@ export function AppearancePage() {
           <Form<AppearanceForm> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
             <Card size="small" title={t("管理后台圆角（分组）")}>
               <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
-                {t("容器、按钮、录入控件各自独立调节；圆形图标按钮、开关与胶囊标签保留各自形态不受影响。容器与输入为 8–40px（可做大圆角卡片），仅按钮组可选最右的 999px 极致圆角（胶囊按钮）；留空的组回退到旧的统一圆角。")}
+                {t("三组圆角独立调整；留空沿用统一圆角，圆形与胶囊控件保留原形态。")}
               </Typography.Paragraph>
               <Row gutter={[16, 0]}>
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminContainerRadius" label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} allowFull={false} /><RadiusPreview kind="container" radius={previewRadii.container} /></Col>

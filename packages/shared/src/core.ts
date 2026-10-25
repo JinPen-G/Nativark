@@ -1766,6 +1766,8 @@ export type CustomerQualificationStatus = (typeof CUSTOMER_QUALIFICATION_STATUSE
 export interface CustomerMembershipRegistrationSettings {
   registrationMode: CustomerMembershipRegistrationMode;
   updatedAt?: string;
+  /** Compatibility signal only; permissions still come from the original server guard. */
+  supportsOnlyNewImport?: boolean;
 }
 
 export interface UpdateCustomerMembershipRegistrationSettingsRequest {
@@ -1774,6 +1776,8 @@ export interface UpdateCustomerMembershipRegistrationSettingsRequest {
 
 /** APP 和后台均使用这份注册契约；workspaceId 永远从服务端会话解析。 */
 export interface RegisterPersonalMembershipRequest {
+  /** 后台资料导入：已存在会员只返回 skipped，不激活、不改资料、不重置账号。 */
+  onlyNew?: boolean;
   name: string;
   phone: string;
   email?: string;
@@ -5915,6 +5919,9 @@ export type RentalOrderAssignmentFilter = (typeof RENTAL_ORDER_ASSIGNMENT_FILTER
 
 export const RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE = 20;
 export const RENTAL_ORDER_LIST_MAX_PAGE_SIZE = 200;
+/** Public order-list sorting keys; never accept SQL identifiers from a client. */
+export const RENTAL_ORDER_SORT_FIELDS = ["createdAt", "orderNo", "customerName", "startAt", "endAt", "payableAmount", "quoteNo", "status"] as const;
+export type RentalOrderSortField = (typeof RENTAL_ORDER_SORT_FIELDS)[number];
 
 /**
  * ORDER-LIST-01：`GET /rental/v1/orders` 的查询参数。
@@ -5940,6 +5947,8 @@ export interface RentalOrderListQuery {
   assignment?: RentalOrderAssignmentFilter;
   /** 只看仍有待裁定费用审核的订单（ORDER-CLOSE-02：它们会阻止关单）。 */
   pendingFeeOnly?: boolean;
+  /** Global sort priorities, e.g. "startAt.asc,orderNo.desc". Max 8 unique allowlisted fields; omitted means createdAt desc, id desc. */
+  sort?: string;
 }
 
 export interface RentalOrderPage {

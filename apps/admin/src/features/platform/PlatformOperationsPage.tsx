@@ -1,5 +1,5 @@
-import { SaveButton } from "@/components/ui";
-import { BellOutlined, PlayCircleOutlined, SaveOutlined } from "@ant-design/icons";
+import { ListSection, SaveButton } from "@/components/ui";
+import { BellOutlined, PlayCircleOutlined, SaveOutlined } from "@/components/ui/icons";
 import type { InvokeMockAdapterRequest, SendMockNotificationRequest, SystemSecurityBaselineConfig } from "@rental-os/shared";
 import { Card, Col, Descriptions, InputNumber, Row, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
@@ -49,13 +49,13 @@ export function PlatformOperationsPage() {
 
   return (
     <>
-      <PageHeader title={t("平台运维中心")} description={t("查看集成能力、文件、通知与异步任务，并维护登录和敏感信息安全基线。")} note={{ title: t("能力状态以实际提供方为准"), description: t("mode=mock/reserved 只代表接口和留痕已预留，不代表支付、短信、电子签章或设备厂商已完成生产接入。") }} extra={<Button type="primary" icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>{t("模拟通知")}</Button>} />
-      <Card className="tabbed-workspace">
+      <PageHeader title={t("平台运维中心")} note={{ title: t("能力状态以实际提供方为准"), description: t("mode=mock/reserved 只代表接口和留痕已预留，不代表支付、短信、电子签章或设备厂商已完成生产接入。") }} extra={<Button type="primary" icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>{t("模拟通知")}</Button>} />
+      <ListSection>
         <Tabs className="standalone-tabs" items={[
           {
             key: "capabilities",
             label: t("集成能力"),
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="capability" dataSource={infra.data?.capabilities ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="capability" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.capabilities ?? []} columns={[
               { title: t("能力"), render: (_, record) => <><b>{t(capabilityLabels[record.capability] ?? record.name)}</b><br /><span className="muted">{record.provider}</span></> },
               { title: t("模式"), dataIndex: "mode", render: (value) => <Tag color={value === "real" ? "success" : value === "mock" ? "blue" : "default"}>{value}</Tag> },
               { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value)}</Tag> },
@@ -67,7 +67,7 @@ export function PlatformOperationsPage() {
           {
             key: "files",
             label: `${t("文件")} (${infra.data?.files.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" dataSource={infra.data?.files ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.files ?? []} columns={[
               { title: t("文件"), render: (_, record) => <><b>{record.fileName}</b><br /><span className="muted">{record.mimeType}</span></> },
               { title: t("业务模块"), dataIndex: "businessModule" },
               { title: t("业务类型"), dataIndex: "businessType" },
@@ -80,7 +80,7 @@ export function PlatformOperationsPage() {
           {
             key: "notifications",
             label: `${t("通知日志")} (${infra.data?.notificationLogs.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" dataSource={infra.data?.notificationLogs ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.notificationLogs ?? []} columns={[
               { title: t("模板 / 业务"), render: (_, record) => <><b>{record.templateCode ?? t("自定义")}</b><br /><span className="muted">{record.businessType} · {record.businessId ?? "—"}</span></> },
               { title: t("接收方"), render: (_, record) => `${record.targetName ?? record.targetType} ${record.targetMasked ?? ""}` },
               { title: t("渠道"), dataIndex: "channels", render: (values: string[]) => <Space>{values.map((value) => <Tag key={value}>{t(value)}</Tag>)}</Space> },
@@ -92,7 +92,7 @@ export function PlatformOperationsPage() {
           {
             key: "jobs",
             label: `${t("异步任务")} (${infra.data?.jobs.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" dataSource={infra.data?.jobs ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.jobs ?? []} columns={[
               { title: t("任务类型"), dataIndex: "jobType", render: (value, record) => <><b>{value}</b><br /><span className="muted">{record.businessType ?? t("平台")} · {record.businessId ?? "—"}</span></> },
               { title: t("计划时间"), dataIndex: "scheduledAt", render: (value) => value ?? t("立即") },
               { title: t("尝试次数"), render: (_, record) => `${record.attempt} / ${record.maxAttempts}` },
@@ -154,7 +154,7 @@ export function PlatformOperationsPage() {
             </Form></QueryState>
           }
         ]} />
-      </Card>
+      </ListSection>
 
       <Drawer title={t("发送模拟通知")} open={notificationOpen} size={480} destroyOnHidden onClose={() => setNotificationOpen(false)} extra={<SaveButton  label={t("写入发送日志")} form={notificationForm} pending={sendNotification.isPending} onSave={(values) => sendNotification.mutateAsync({ ...values, operator })} />}>
         <Typography.Paragraph type="secondary">{t("该功能使用 mock provider，只验证模板变量、渠道选择和审计留痕。")}</Typography.Paragraph>

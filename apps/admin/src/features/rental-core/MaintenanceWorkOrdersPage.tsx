@@ -1,5 +1,6 @@
-import { useNavigate } from "react-router-dom";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { RecordDisclosure } from "@/components/RecordDisclosure";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { PlusOutlined, ReloadOutlined } from "@/components/ui/icons";
 import type {
   CreateRentalWorkOrderRequest,
   CancelRentalWorkOrderRequest,
@@ -10,12 +11,14 @@ import type {
   SubmitRentalWorkOrderRequest
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Descriptions, Space, Tag, Typography } from "antd";
-import { App, Empty, Modal } from "@/components/ui";
+import { Descriptions, Space, Tag, Typography } from "antd";
+import { ListSection, App, Empty, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, SearchField, Select } from "@/components/ui";
+import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";
+import recordStyles from "@/components/RecordDetailLayout.module.css";
+import { Button, DataTableStatus, SearchField, Select, Tabs } from "@/components/ui";
 import { useEffect, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -63,7 +66,10 @@ export function MaintenanceWorkOrdersPage() {
   const canViewOrders = useAuthStore((state) => state.hasPermission("rental-os:order:view"));
   const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage"));
   const [dialog, setDialog] = useState<DialogKind>();
-  const [activeWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
+  const [actionWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
+  const { workOrderId } = useParams<{ workOrderId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const detailTab = searchParams.get("tab") === "history" ? "history" : "detail";
   const [createForm] = Form.useForm<CreateRentalWorkOrderRequest>();
   const [assignForm] = Form.useForm<{ assigneeId?: string }>();
   const [submitForm] = Form.useForm<SubmitFormValues>();
@@ -79,6 +85,7 @@ export function MaintenanceWorkOrdersPage() {
 
   const dispositions = useQuery({ queryKey: ["rental-core", "stock-dispositions"], queryFn: () => rentalCoreApi.stockDispositions() });
   const workOrders = useQuery({ queryKey: ["rental-core", "work-orders"], queryFn: () => rentalCoreApi.workOrders() });
+  const activeWorkOrder = workOrderId ? workOrders.data?.find(row => row.id === workOrderId) : actionWorkOrder;
   const selectedDispositionId = Form.useWatch("dispositionId", createForm);
   const selectedDisposition = (dispositions.data ?? []).find((row) => row.id === selectedDispositionId);
   const assigneeLocationId = dialog === "create"
@@ -90,7 +97,7 @@ export function MaintenanceWorkOrdersPage() {
     queryKey: ["rental-core", "work-order-assignees", assigneeLocationId ?? null],
     queryFn: () => rentalCoreApi.workOrderAssignees(assigneeLocationId)
   });
-  const history = useQuery({ queryKey: ["rental-core", "work-order-history", activeWorkOrder?.id], queryFn: () => rentalCoreApi.workOrderHistory(activeWorkOrder!.id), enabled: dialog === "history" && Boolean(activeWorkOrder) });
+  const history = useQuery({ queryKey: ["rental-core", "work-order-history", activeWorkOrder?.id], queryFn: () => rentalCoreApi.workOrderHistory(activeWorkOrder!.id), enabled: Boolean(workOrderId && detailTab === "history" && activeWorkOrder) });
   const refresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["rental-core", "stock-dispositions"] }),
@@ -128,6 +135,10 @@ export function MaintenanceWorkOrdersPage() {
   });
 
   function openDialog(kind: DialogKind, workOrder?: RentalWorkOrder) {
+    if ((kind === "detail" || kind === "history") && workOrder) {
+      navigate(`/rental/work-orders/${encodeURIComponent(workOrder.id)}${kind === "history" ? "?tab=history" : ""}`);
+      return;
+    }
     setActiveWorkOrder(workOrder);
     setDialog(kind);
   }
@@ -157,19 +168,21 @@ export function MaintenanceWorkOrdersPage() {
     if (keyword && ![row.workNo, row.itemGroupId, row.locationId, row.assetId, row.orderId].some((value) => value?.toLowerCase().includes(keyword))) return false;
     return true;
   });
+  useEffect(() => { setDialog(undefined); setActiveWorkOrder(undefined); setWriteOffTarget(undefined); }, [workOrderId]);
   const loading = dispositions.isLoading || workOrders.isLoading || assignees.isLoading;
   const error = dispositions.error || workOrders.error || assignees.error;
 
   return <>
+    {!workOrderId && <>
     <PageHeader
       title={t("养护工单")}
-      description={t("归还后的周转缓冲、异常隔离和养护处理在这里闭环；未完成验收的异常库存不能恢复可用。")}
+      description={t("异常隔离须完成养护并通过验收后才能恢复库存。")}
       extra={<Space><Button icon={<ReloadOutlined />} onClick={() => refresh()}>{t("刷新")}</Button>{canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => openDialog("create")}>{t("新建工单")}</Button>}</Space>}
     />
     <QueryState loading={loading} error={error}>
-      <Alert type="info" showIcon title={t("库存恢复规则")} description={t("周转缓冲结束后可直接恢复；异常隔离必须先完成养护工单并通过验收。恢复动作在服务端按租户、经营空间和剩余数量原子执行，重复点击不会重复加回库存。")} style={{ marginBottom: 16 }} />
-      <Card title={`${t("归还处置")}（${dispositions.data?.length ?? 0}）`} style={{ marginBottom: 16 }}>
-        <Table<RentalStockDisposition> rowKey="id" dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty description={t("暂无归还处置记录")} /> }} columns={[
+
+      <ListSection title={t("归还处置")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
+        <Table<RentalStockDisposition> rowKey="id" onRefresh={() => dispositions.refetch()} loading={dispositions.isFetching} dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty description={t("暂无归还处置记录")} /> }} columns={[
           { title: t("状态"), width: 110, render: (_, row) => { const status = DISPOSITION_STATUS_LABELS[row.status] ?? { label: row.status, color: "default" }; return <Tag color={status.color}>{t(status.label)}</Tag>; } },
           { title: t("商品/资产"), render: (_, row) => <><b>{row.itemGroupId}</b>{row.assetId && <><br /><Typography.Text type="secondary">{t("资产")}：{row.assetId}</Typography.Text></>}</> },
           { title: t("数量"), dataIndex: "quantity", width: 80, align: "right" },
@@ -183,16 +196,10 @@ export function MaintenanceWorkOrdersPage() {
             {row.status === "blocked" && row.assetId ? "-" : null}
           </Space> }
         ]} />
-      </Card>
-      <Card title={`${t("养护工单")}（${filteredWorkOrders.length}/${workOrders.data?.length ?? 0}）`}>
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: 130 }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} />
-          <Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: 130 }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} />
-          <Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: 190 }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} />
-          <SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("搜索工单、商品、资产、地点或订单")} style={{ width: 280 }} />
-          <Button onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>
-        </Space>
-        <Table<RentalWorkOrder> rowKey="id" dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty description={t("暂无匹配的养护工单")} /> }} columns={[
+      </ListSection>
+      <ListSection title={t("养护工单")} controls={<><SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("搜索工单、商品、资产、地点或订单")} style={{ width: "var(--rental-control-width-search)" }} /><Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} /><Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /><Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: "var(--rental-control-width-select)" }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} /><Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button></>}>
+
+        <Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty description={t("暂无匹配的养护工单")} /> }} columns={[
           { title: t("工单号"), dataIndex: "workNo", width: 190 },
           {
             title: t("来源订单"),
@@ -225,9 +232,49 @@ export function MaintenanceWorkOrdersPage() {
             {row.status === "completed" && <Typography.Text type="secondary">{t("已完成")}</Typography.Text>}
           </Space> }
         ]} />
-      </Card>
+      </ListSection>
     </QueryState>
 
+    </>}
+    {workOrderId && <RecordDetailLayout title={activeWorkOrder?.workNo ?? t("养护工单详情")} onBack={() => navigate("/rental/work-orders")}
+      status={activeWorkOrder && <DataTableStatus variant="soft" tone={activeWorkOrder.status === "completed" ? "success" : activeWorkOrder.status === "pending_review" ? "warning" : "neutral"}>{t(WORK_ORDER_STATUS_LABELS[activeWorkOrder.status]?.label ?? activeWorkOrder.status)}</DataTableStatus>}
+      facts={activeWorkOrder ? [
+        { key: "type", label: "类型", value: t(WORK_ORDER_TYPE_LABELS[activeWorkOrder.type]) },
+        { key: "assignee", label: "负责人", value: activeWorkOrder.assigneeName || t("未派工") },
+        { key: "quantity", label: "数量", value: activeWorkOrder.quantity },
+        { key: "updated", label: "更新时间", value: dateTime(activeWorkOrder.updatedAt, locale) }
+      ] : undefined}
+      actions={activeWorkOrder && <>
+        {canManage && ["pending", "in_progress"].includes(activeWorkOrder.status) && <Button onClick={() => openDialog("assign", activeWorkOrder)}>{t("派工")}</Button>}
+        {canManage && activeWorkOrder.status === "pending" && <Button type="primary" onClick={() => run.mutate({ kind: "start", id: activeWorkOrder.id })}>{t("开始处理")}</Button>}
+        {canManage && activeWorkOrder.status === "in_progress" && <Button type="primary" onClick={() => openDialog("submit", activeWorkOrder)}>{t("提交验收")}</Button>}
+        {canReview && activeWorkOrder.status === "pending_review" && <Button type="primary" onClick={() => openDialog("review", activeWorkOrder)}>{t("验收")}</Button>}
+        {canManage && ["pending", "in_progress", "pending_review"].includes(activeWorkOrder.status) && <Button danger onClick={() => openDialog("cancel", activeWorkOrder)}>{t("取消工单")}</Button>}
+      </>}>
+      <QueryState loading={workOrders.isLoading} error={workOrders.error}>
+        {!activeWorkOrder ? <Alert type="warning" showIcon title={t("未找到养护工单")} /> : <Tabs activeKey={detailTab} onChange={key => setSearchParams(key === "history" ? { tab: key } : {})} items={[
+          { key: "detail", label: t("处理与验收"), children: <div className={recordStyles.stack}>
+            <RecordFacts items={[
+              { key: "reason", label: "处理原因", value: activeWorkOrder.reason || "—", wide: true },
+              { key: "result", label: "处理结果", value: activeWorkOrder.result || "—", wide: true },
+              { key: "review", label: "验收", value: activeWorkOrder.reviewReason || "—" },
+              { key: "reviewer", label: "验收人", value: activeWorkOrder.reviewedBy || "—" }
+            ]} />
+            <ListSection title={t("关联资源")}><RecordFacts items={[
+              { key: "group", label: "商品", value: activeWorkOrder.itemGroupId },
+              { key: "location", label: "履约地点", value: activeWorkOrder.locationId },
+              { key: "asset", label: "资产", value: activeWorkOrder.assetId || "—" },
+              { key: "order", label: "来源订单", value: activeWorkOrder.orderId && canViewOrders ? <Button type="link" onClick={() => navigate('/rental/orders/' + activeWorkOrder.orderId)}>{activeWorkOrder.orderId}</Button> : activeWorkOrder.orderId || "—" }
+            ]} /></ListSection>
+            <RecordDisclosure key={activeWorkOrder.id} title={t("追溯资料")}><RecordFacts items={[
+              { key: "disposition", label: "归还处置", value: activeWorkOrder.dispositionId || "—" },
+              { key: "evidence", label: "证据引用", value: activeWorkOrder.attachments?.length ? activeWorkOrder.attachments.join('、') : "—", wide: true }
+            ]} /></RecordDisclosure>
+          </div> },
+          { key: "history", label: t("工单历史"), children: <QueryState loading={history.isLoading} error={history.error}><ListSection><Table rowKey="id" size="small" loading={history.isFetching} onRefresh={() => history.refetch()} dataSource={history.data ?? []} pagination={false} locale={{ emptyText: t("暂无操作记录") }} columns={[{ title: t("时间"), dataIndex: "createdAt", width: 180, render: (value: string) => dateTime(value, locale) }, { title: t("动作"), dataIndex: "action", render: (value) => value.replace("rental.work_order.", "") }, { title: t("操作人"), dataIndex: "operator", width: 110 }, { title: t("说明"), dataIndex: "detail" }]} /></ListSection></QueryState> }
+        ]} />}
+      </QueryState>
+    </RecordDetailLayout>}
     <Modal title={t("新建养护工单")} open={dialog === "create"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => createForm.validateFields().then((data) => run.mutateAsync({ kind: "create", data }))} destroyOnHidden>
       <Form form={createForm} layout="vertical" onFinish={(data) => run.mutate({ kind: "create", data })}>
         <Form.Item name="dispositionId" label={t("归还处置")} rules={[{ required: true, message: t("请选择归还处置") }]}><Select options={workOrderDispositions.map((row) => ({ value: row.id, label: `${row.itemGroupId} · ${row.blockReason || (row.status === "buffered" ? t("周转清洁") : t("异常隔离"))} · ${row.quantity} ${t("件")}` }))} placeholder={t("选择待处理的归还处置")} /></Form.Item>
@@ -268,22 +315,7 @@ export function MaintenanceWorkOrdersPage() {
         <Form.Item name="reason" label={t("取消原因")} rules={[{ required: true, message: t("请填写取消原因") }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={`${t("养护工单详情")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "detail"} footer={null} onCancel={() => setDialog(undefined)} destroyOnHidden>
-      <Descriptions column={1} bordered size="small" items={[
-        { key: "status", label: t("状态"), children: activeWorkOrder && t(WORK_ORDER_STATUS_LABELS[activeWorkOrder.status]?.label ?? activeWorkOrder.status) },
-        { key: "type", label: t("类型"), children: activeWorkOrder && t(WORK_ORDER_TYPE_LABELS[activeWorkOrder.type]) },
-        { key: "source", label: t("来源"), children: activeWorkOrder && `${activeWorkOrder.orderId ?? "-"} / ${activeWorkOrder.dispositionId ?? "-"}` },
-        { key: "resource", label: t("资源"), children: activeWorkOrder && `${activeWorkOrder.itemGroupId} · ${activeWorkOrder.locationId}${activeWorkOrder.assetId ? ` · ${activeWorkOrder.assetId}` : ""}` },
-        { key: "quantity", label: t("数量"), children: activeWorkOrder?.quantity },
-        { key: "assignee", label: t("负责人"), children: activeWorkOrder?.assigneeName || t("未派工") },
-        { key: "reason", label: t("处理原因"), children: activeWorkOrder?.reason },
-        { key: "result", label: t("处理结果"), children: activeWorkOrder?.result || "-" },
-        { key: "attachments", label: t("证据引用"), children: activeWorkOrder?.attachments?.length ? activeWorkOrder.attachments.join("、") : "-" },
-        { key: "review", label: t("验收"), children: activeWorkOrder?.reviewReason ? `${activeWorkOrder.reviewReason}${activeWorkOrder.reviewedBy ? `（${activeWorkOrder.reviewedBy}）` : ""}` : "-" }
-      ]} />
-    </Modal>
-    <Modal title={`${t("工单历史")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "history"} footer={null} onCancel={() => setDialog(undefined)} destroyOnHidden>
-      <Table rowKey="id" size="small" loading={history.isLoading} dataSource={history.data ?? []} pagination={false} locale={{ emptyText: t("暂无操作记录") }} columns={[{ title: t("时间"), dataIndex: "createdAt", width: 180, render: (value: string) => dateTime(value, locale) }, { title: t("动作"), dataIndex: "action", render: (value) => value.replace("rental.work_order.", "") }, { title: t("操作人"), dataIndex: "operator", width: 110 }, { title: t("说明"), dataIndex: "detail" }]} />
-    </Modal>
+
+
   </>;
 }

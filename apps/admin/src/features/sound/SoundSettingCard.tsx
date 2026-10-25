@@ -4,7 +4,7 @@ import { Slider } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { SoundOutlined } from "@ant-design/icons";
+import { SoundOutlined } from "@/components/ui/icons";
 import { useSyncExternalStore } from "react";
 import { useLocale } from "@/app/locale";
 import { INTERACTION_SOUNDS, NOTIFICATION_SOUNDS, SOUND_LABELS, SOUND_PACKS, type SoundName } from "./soundPacks";
@@ -29,7 +29,7 @@ export function SoundSettingCard() {
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Space wrap>
           <Typography.Text>{t("音效方案")}</Typography.Text>
-          <Select aria-label={t("音效方案")} value={preferences.pack} style={{ minWidth: 160 }}
+          <Select aria-label={t("音效方案")} value={preferences.pack} style={{ minWidth: "min(100%, var(--rental-control-width-select))" }}
             options={SOUND_PACKS.map(pack => ({ value: pack.id, label: t(pack.label) }))}
             onChange={pack => soundPreferences.update({ pack })} />
         </Space>

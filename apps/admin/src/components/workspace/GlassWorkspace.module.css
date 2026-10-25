@@ -1,0 +1,37 @@
+/* Solid Glass edge treatment (MIT; see sources.json), adapted to the existing
+ * achromatic UIArc surface. Apply to an existing panel, never add a wrapper.
+ * No tinted fill, backdrop filter, control overrides or extra padding.
+ */
+.surface:global(.ant-card) {
+  --workspace-space-1: .25rem;
+  --workspace-space-2: .5rem;
+  --workspace-space-3: .75rem;
+  --workspace-space-4: 1rem;
+  --workspace-space-6: 1.5rem;
+  --workspace-edge: rgb(0 0 0 / 9%);
+  --workspace-rim: rgb(255 255 255 / 90%);
+  --workspace-under: rgb(0 0 0 / 3%);
+  --workspace-contact: rgb(0 0 0 / 6%);
+  border: 1px solid var(--workspace-edge);
+  border-radius: var(--rental-ui-radius-container);
+  background: var(--rental-color-bg-container);
+  box-shadow:
+    inset 0 1px 0 var(--workspace-rim),
+    inset 0 -1px 0 var(--workspace-under),
+    0 1px 3px var(--workspace-contact);
+}
+
+:global(html[data-appearance="dark"]) .surface {
+  --workspace-edge: rgb(255 255 255 / 11%);
+  --workspace-rim: rgb(255 255 255 / 12%);
+  --workspace-under: rgb(0 0 0 / 20%);
+  --workspace-contact: rgb(0 0 0 / 22%);
+}
+
+@media (prefers-contrast: more) {
+  .surface:global(.ant-card) { border-color: var(--rental-color-text-secondary); }
+}
+
+@media (forced-colors: active) {
+  .surface:global(.ant-card) { background: Canvas; border: 1px solid CanvasText; box-shadow: none; }
+}

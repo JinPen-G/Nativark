@@ -1,15 +1,4 @@
-import {
-  AppstoreOutlined,
-  ArrowLeftOutlined,
-  CalculatorOutlined,
-  CalendarOutlined,
-  CheckCircleOutlined,
-  DeleteOutlined,
-  GiftOutlined,
-  PlusOutlined,
-  TagsOutlined,
-  UserOutlined,
-} from "@ant-design/icons";
+import { AppstoreOutlined, ArrowLeftOutlined, CalculatorOutlined, CalendarOutlined, CheckCircleOutlined, DeleteOutlined, GiftOutlined, PlusOutlined, TagsOutlined, UserOutlined } from "@/components/ui/icons";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_PRICING_UNIT_LABELS,
@@ -206,7 +195,7 @@ export function RentalOrderCreatePage() {
 
   if (created) {
     return <>
-      <PageHeader title={t("新建租赁订单")} description={t("订单已经创建完成。")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>} />
+      <PageHeader title={t("新建租赁订单")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>} />
       <Card className="data-panel">
         <Result
           status="success"
@@ -230,7 +219,6 @@ export function RentalOrderCreatePage() {
   return <>
     <PageHeader
       title={t("新建租赁订单")}
-      description={locale === "en-US" ? `Complete member, ${itemGroupLabel}, value-added service, discount, and quote confirmation on one page.` : `在一个页面内完成会员、${itemGroupLabel}、增值服务、优惠和报价确认。`}
       extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
     />
     <Form<FormValues> form={form} layout="vertical" onValuesChange={() => setQuote(undefined)}>
@@ -466,7 +454,7 @@ export function RentalOrderCreatePage() {
                           value={selected?.quantity ?? 1}
                           disabled={!selected}
                           onChange={(value) => updateServiceQuantity(service.id, value)}
-                          style={{ width: 80 }}
+                          style={{ width: "var(--rental-control-width-compact)" }}
                         />
                       </Card>
                     </Col>;
@@ -497,7 +485,6 @@ export function RentalOrderCreatePage() {
               </Card>
 
               <Card className="data-panel" title={<Space><CalculatorOutlined />{t("费用明细")}</Space>}>
-                {!quote && <Alert showIcon type="info" title={t("填写完成后生成报价")} description={t("价格、库存、营业日历、会员资格和优惠均由服务端统一计算。")} />}
                 {quote && <>
                   <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                     {quote.chargeLines.map((line) => <Row key={line.code} justify="space-between" wrap={false} gutter={12}>
@@ -524,10 +511,10 @@ export function RentalOrderCreatePage() {
                     <Typography.Text strong className="order-quote-total">{money(quote.payableAmount)}</Typography.Text>
                   </Row>
                 </>}
-                <Button block size="large" type={quote ? "default" : "primary"} loading={createQuote.isPending} onClick={quoteOrder} style={{ marginTop: 16 }}>
+                <Button block size="large" type={quote ? "default" : "primary"} loading={createQuote.isPending} onClick={quoteOrder} style={{ marginTop: quote ? "var(--space-4)" : 0 }}>
                   {quote ? t("重新计算报价") : t("生成报价")}
                 </Button>
-                {quote && <Button block size="large" type="primary" loading={createOrder.isPending} onClick={submitOrder} style={{ marginTop: 10 }}>{t("确认并创建订单")}</Button>}
+                {quote && <Button block size="large" type="primary" loading={createOrder.isPending} onClick={submitOrder} style={{ marginTop: "var(--space-3)" }}>{t("确认并创建订单")}</Button>}
               </Card>
             </Space>
           </div>

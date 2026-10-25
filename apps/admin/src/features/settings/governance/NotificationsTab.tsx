@@ -5,8 +5,8 @@ import type {
   TenantRentalBusinessSettings,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, Row, Space, Tag, Typography } from "antd";
-import { App, Modal } from "@/components/ui";
+import { Col, Row, Space, Tag, Typography } from "antd";
+import { ListSection, App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -180,10 +180,10 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
             重试到期短信
           </Button>
         </div>
-        <Card title="通知模板">
+        <ListSection title="通知模板">
           <Table<RentalNotificationTemplateV1>
             rowKey="id"
-            dataSource={templates.data ?? []}
+            onRefresh={() => templates.refetch()} loading={templates.isFetching} dataSource={templates.data ?? []}
             columns={[
               {
                 title: "模板",
@@ -227,11 +227,11 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
               },
             ]}
           />
-        </Card>
-        <Card title="通知记录">
+        </ListSection>
+        <ListSection title="通知记录">
           <Table
             rowKey="id"
-            dataSource={logs.data ?? []}
+            onRefresh={() => logs.refetch()} loading={logs.isFetching} dataSource={logs.data ?? []}
             columns={[
               { title: "事件", dataIndex: "eventCode", render: (value: string) => eventLabel(value) },
               {
@@ -274,7 +274,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
               },
             ]}
           />
-        </Card>
+        </ListSection>
       </Space>
 
       <Drawer

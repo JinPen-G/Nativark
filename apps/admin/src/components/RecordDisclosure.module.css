@@ -1,0 +1,2 @@
+.group { margin-block: var(--rental-layout-section-gap); --font-body: var(--rental-typography-font-family); }
+.group h4 { margin: 0 0 var(--space-2); font-size: var(--rental-typography-panel-title-size); line-height: var(--rental-typography-panel-title-line-height); font-weight: var(--rental-typography-panel-title-weight); }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, InputNumber, Space, Tag, Timeline } from "antd";
-import { App } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
@@ -174,9 +174,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
   const locked = Boolean(order.assignment?.operationLock);
   return (
     <>
-      <Card
-        title={t("预约商品与实际分配")}
-        extra={
+      {(editable || active.length > 0 || order.assignment?.issue) && <ListSection title={t("预约商品与实际分配")} extra={
           editable &&
           canOperate && (
             <Space wrap>
@@ -207,8 +205,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
               </Button>
             </Space>
           )
-        }
-      >
+        }>
         <Alert
           showIcon
           type={
@@ -225,17 +222,17 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
               : t("交付资源记录"))
           }
           description={
-            editable
-              ? t("按完整租期和前后缓冲检查资源；全部必要资源锁定后才能办理领取。预分配不会重复扣减预留库存。")
+            editable && progress.locked < progress.required
+              ? t("资源全部锁定后才能办理领取。")
               : undefined
           }
-          style={{ marginBottom: 16 }}
+
         />
         {locked && (
           <Alert
             type="info"
             title={`${order.assignment!.operationLock!.ownerName} ${t("正在办理，结束办理后才能改配")}`}
-            style={{ marginBottom: 12 }}
+
           />
         )}
         <Table<RentalAllocation>
@@ -343,9 +340,9 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
             },
           ]}
         />
-      </Card>
+      </ListSection>}
       {!!order.assignment?.history.length && (
-        <Card
+        <ListSection
           title={`${t("分配与办理记录")} (${order.assignment.history.length})`}
           extra={
             <Button type="text" onClick={() => setHistoryOpen((v) => !v)}>
@@ -402,7 +399,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
               }))}
             />
           )}
-        </Card>
+        </ListSection>
       )}
       <Drawer
         title={

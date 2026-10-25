@@ -1,4 +1,5 @@
-import { SaveButton } from "@/components/ui";
+import { CustomerPreview } from "@/features/membership/CustomerPreview";
+import { ListSection, SaveButton } from "@/components/ui";
 import { formatRentalMoney } from "@rental-os/shared";
 import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -78,14 +79,7 @@ export function MembershipRewardsPage() {
     <>
       <PageHeader
         title={t("会员激励")}
-        description={t("人工补发奖励、客户权益账户与奖励流水；奖励触发规则在「品类与业务规则 → 会员奖励规则」配置。")}
-      />
-      <Alert
-        type="info"
-        showIcon
-        title={t("注册、实名审核和首单完成会自动触发奖励判断")}
-        description={t("下方人工入口只用于补偿与联调；自动事件使用客户事件幂等键。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。奖励触发规则在「品类与业务规则 → 会员奖励规则」维护。")}
-        style={{ marginBottom: 16 }}
+        description={t("人工补发仅用于补偿；营销余额不是支付资金。")}
       />
       <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error}>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -104,7 +98,7 @@ export function MembershipRewardsPage() {
               </Form.Item>
               <Form.Item name="triggerType" label={t("触发")}>
                 <Select
-                  style={{ width: 180 }}
+                  style={{ width: "var(--rental-control-width-select)" }}
                   options={[
                     { value: "registration", label: t("注册赠礼") },
                     { value: "identity_verified", label: t("实名通过") },
@@ -126,27 +120,27 @@ export function MembershipRewardsPage() {
               <SaveButton  label={t("生成并入账")} form={rewardForm} pending={grantReward.isPending} onSave={async values => { const operation = grantReward.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
             </Form>
           </Card>
-          <Card className="data-panel" title={t("客户权益账户")}>
+          <ListSection title={t("客户权益账户")}>
             <Table
               rowKey="customerId"
-              dataSource={benefitAccounts.data ?? []}
+              onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isFetching} dataSource={benefitAccounts.data ?? []}
               locale={{ emptyText: t("还没有客户获得过积分、营销余额或奖励券") }}
               columns={[
-                { title: t("客户"), dataIndex: "customerId" },
+                { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },
                 { title: t("积分"), dataIndex: "pointsBalance", align: "right" },
                 { title: t("营销余额"), dataIndex: "marketingBalance", align: "right", render: (value) => formatRentalMoney(Number(value), currency) },
                 { title: t("可用奖励券"), dataIndex: "availableRewardCouponCount", align: "right" },
                 { title: t("更新时间"), dataIndex: "updatedAt" },
               ]}
             />
-          </Card>
-          <Card className="data-panel" title={t("奖励流水")}>
+          </ListSection>
+          <ListSection title={t("奖励流水")}>
             <Table
               rowKey="id"
-              dataSource={rewards.data ?? []}
+              onRefresh={() => rewards.refetch()} loading={rewards.isFetching} dataSource={rewards.data ?? []}
               locale={{ emptyText: t("还没有奖励流水：自动事件未触发，也没有人工补发") }}
               columns={[
-                { title: t("客户"), dataIndex: "customerId" },
+                { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },
                 {
                   title: t("奖励"),
                   render: (_, row) => `${row.rewardType} ${row.amount}`,
@@ -186,7 +180,7 @@ export function MembershipRewardsPage() {
                 },
               ]}
             />
-          </Card>
+          </ListSection>
         </Space>
       </QueryState>
     </>

@@ -1,0 +1,44 @@
+/* Shared control geometry only. Vendor transitions, shadows, colors and radii stay intact.
+ * Height scales are injected at app startup by designTokens.ts for every page and Portal.
+ * Do not put these rules in input-radius.css or duplicate them in business pages. */
+:is(.arc-form-field, .arc-search-field, .arc-date-field, .arc-date-range)[data-size="small"] { --control-height-md: var(--rental-control-height-small); }
+:is(.arc-form-field, .arc-search-field, .arc-date-field, .arc-date-range)[data-size="large"] { --control-height-md: var(--rental-control-height-large); }
+
+/* Original button sizes use min-height; adapt only padding, not their animated label slot. */
+[data-rental-control-size="small"] { padding-inline: var(--rental-control-padding-small); }
+[data-rental-control-size="default"] { padding-inline: var(--rental-control-padding-default); }
+[data-rental-control-size="large"] { padding-inline: var(--rental-control-padding-large); }
+[data-rental-arc-action] { padding-inline: var(--rental-control-padding-default); }
+/* Count the original track padding/frame in the total field height. Only geometry,
+ * never override the travelling selection, springs, scroll mask or transitions. */
+.arc-segmented { --control-height-sm: calc(var(--control-height-md) - var(--rental-segmented-frame-inset)); min-width: 0; max-width: 100%; }
+.arc-segmented-icons button[data-value] { display: inline-flex; align-items: center; justify-content: center; width: calc(var(--rental-control-height-default) - var(--rental-segmented-frame-inset)); padding: 0; }
+.arc-segmented-icons button[data-value] > span:not([aria-hidden]) { display: inline-flex; align-items: center; justify-content: center; }
+/* Limit this to the navigation shell: panel controls keep their own size roles. */
+.rental-tabs > [data-overflow] { --control-height-sm: calc(var(--rental-control-height-default) - var(--rental-tabs-frame-inset)); }
+
+/* Clamp to the parent; full-width form grids and narrow drawers must not overflow.
+ * Width values are semantic tokens at callers, never inline pixel overrides here. */
+:is(.arc-form-field, .arc-search-field, .arc-select-field, .arc-date-field, .arc-date-range,
+    .ant-input, .ant-input-affix-wrapper, .ant-input-number, .ant-select, .ant-picker) {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.arc-search-field { width: var(--rental-control-width-search); }
+.ant-form-item :is(.arc-search-field, .arc-select-field, .arc-date-field, .arc-date-range) { width: 100%; }
+.ant-space-item:has(> :is(.arc-form-field, .arc-search-field, .arc-select-field, .ant-select, .ant-picker)) { min-width: 0; max-width: 100%; }
+
+/* The closed date-range trigger may be constrained; the calendar surface is NOT.
+ * Never size the wrapper/animated viewport: source measuring and month exits rely on it. */
+.arc-date-range > :first-child { min-width: 0; max-width: 100%; }
+.arc-date-range > :first-child > button[aria-haspopup="dialog"],
+/* ArcLocale is display:contents; account for its DOM node without sizing the animated root. */
+.arc-date-range > :first-child > :first-child > button[aria-haspopup="dialog"] {
+  width: var(--rental-control-width-date-range);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Table actions share the compact role; navigation/account and special OTP/editor
+ * structures are not rewritten as ordinary single-line inputs. */
+.ant-table-wrapper .ant-table-tbody .ant-btn { height: var(--rental-control-height-small); }

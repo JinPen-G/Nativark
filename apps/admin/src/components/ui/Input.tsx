@@ -8,7 +8,7 @@ import { ArcLocale } from "./ArcLocale";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 
 const BaseInput = forwardRef<InputRef, InputProps>(function Input(props, ref) {
-  const { componentDisabled } = ConfigProvider.useConfig();
+  const { componentDisabled, componentSize } = ConfigProvider.useConfig();
   const feedback = AntForm.Item.useStatus();
   const nativeFeedback = useContext(NativeFieldFeedbackContext);
   const error = nativeFeedback && feedback.errors.length && feedback.errors.every(item => typeof item === "string") && !feedback.warnings.length
@@ -28,7 +28,7 @@ const BaseInput = forwardRef<InputRef, InputProps>(function Input(props, ref) {
     setSelectionRange: (start, end, direction) => nativeRef.current?.setSelectionRange(start, end, direction)
   } satisfies InputRef));
   const { prefix, suffix, addonBefore, addonAfter, allowClear, showCount, count, styles, classNames,
-    size, variant, bordered, rootClassName, status, onPressEnter, onClear, value, defaultValue, ...native } = props;
+    size = componentSize, variant, bordered, rootClassName, status, onPressEnter, onClear, value, defaultValue, ...native } = props;
   // Affixes, clear/count and semantic styles retain their existing editing contract.
   if (prefix || suffix || addonBefore || addonAfter || allowClear || showCount || count || styles || classNames ||
     bordered === false || variant && variant !== "outlined") return <AntInput {...props} ref={fallbackRef} />;
@@ -79,7 +79,7 @@ const TextArea = forwardRef<TextAreaRef, TextareaProps>(function TextArea(props,
 
 type PasswordProps = ComponentProps<typeof AntInput.Password>;
 const Password = forwardRef<InputRef, PasswordProps>(function Password(props, ref) {
-  const { componentDisabled } = ConfigProvider.useConfig();
+  const { componentDisabled, componentSize } = ConfigProvider.useConfig();
   const feedback = AntForm.Item.useStatus();
   const [internal, setInternal] = useState(props.defaultValue == null ? "" : String(props.defaultValue));
   const node = useRef<HTMLInputElement>(null);
@@ -98,7 +98,7 @@ const Password = forwardRef<InputRef, PasswordProps>(function Password(props, re
     select: () => fallback.current ? fallback.current.select() : node.current?.select(),
     setSelectionRange: (start, end, direction) => fallback.current ? fallback.current.setSelectionRange(start, end, direction) : node.current?.setSelectionRange(start, end, direction),
   }));
-  const { prefix, suffix, addonBefore, addonAfter, allowClear, showCount, count, styles, classNames, size, variant, bordered,
+  const { prefix, suffix, addonBefore, addonAfter, allowClear, showCount, count, styles, classNames, size = componentSize, variant, bordered,
     rootClassName, status, onPressEnter, onClear, value, defaultValue, visibilityToggle, iconRender, action, inputPrefixCls, type, ...native } = props;
   if (prefix || suffix || addonBefore || addonAfter || allowClear || showCount || count || styles || classNames || iconRender ||
     visibilityToggle !== undefined || action && action !== "click" || inputPrefixCls || bordered === false || variant && variant !== "outlined") return <AntInput.Password {...props} ref={fallback} />;

@@ -1,8 +1,8 @@
-import { PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@/components/ui/icons";
 import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
-import { App } from "@/components/ui";
+import { Col, InputNumber, Row, Space, Tag } from "antd";
+import { ListSection, App } from "@/components/ui";
 import { Button, Drawer, Form, Input, SaveButton, SearchField, Select, Table } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { api as platformApi } from "@/api/platform";
@@ -12,6 +12,7 @@ import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { locationCapabilities, operatorCapabilities } from "@/features/listCapabilities";
 
 const locationTypeLabels: Record<string, string> = { store: "门店", warehouse: "仓库", station: "取还点", locker: "自提柜", delivery_hub: "配送中心", project_site: "项目现场" };
 const capabilityLabels: Record<string, string> = { pickup: "领取", return: "归还", storage: "仓储", delivery: "配送" };
@@ -60,10 +61,11 @@ export function LocationPage() {
 
   return (
     <>
-      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点")} description={t("经营主体与地点分层管理，地点类型与履约能力由经营品类约束。")} note={{ title: `${t(category?.name ?? "当前品类")}${t("履约网络")}`, description: t("自营机构与合作商是经营主体；门店、仓库、自提柜、取还点和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。") }} extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>{t("新增经营主体")}</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增履约地点")}</Button></Space> : undefined} />
-      <Card title={`${t("经营主体")}（${operators.data?.length ?? 0}）`} className="data-panel" style={{ marginBottom: 16 }} styles={{ body: { paddingBottom: 0 } }}>
+      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点")} note={{ title: `${t(category?.name ?? "当前品类")}${t("履约网络")}`, description: t("自营机构与合作商是经营主体；门店、仓库、自提柜、取还点和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。") }} extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>{t("新增经营主体")}</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增履约地点")}</Button></Space> : undefined} />
+      <ListSection title={t("经营主体")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
         <QueryState loading={operators.isLoading} error={operators.error}>
-          <Table<RentalFulfillmentOperator> rowKey="id" dataSource={operators.data ?? []} pagination={false} columns={[
+          <Table<RentalFulfillmentOperator> rowKey="id" onRefresh={() => operators.refetch()} loading={operators.isFetching} dataSource={operators.data ?? []} pagination={false}
+            {...operatorCapabilities(t, () => Promise.all([operators.refetch({ throwOnError: true }), locations.refetch({ throwOnError: true })]))} columns={[
             { title: t("主体"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("经营方式"), dataIndex: "type", render: (value) => <Tag color={value === "partner" ? "purple" : "blue"}>{t(value === "partner" ? "合作商" : "自营")}</Tag> },
             { title: t("结算方式"), dataIndex: "settlementMode", render: (value) => t(({ self: "内部结算", monthly: "月结", per_order: "逐单结算" }[value as string] ?? "-")) },
@@ -72,11 +74,12 @@ export function LocationPage() {
             { title: t("操作"), render: (_, row) => canManage ? <Button type="link" onClick={() => openOperatorEditor(row)}>{t("编辑")}</Button> : "-" }
           ]} />
         </QueryState>
-      </Card>
-      <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space style={{ marginBottom: 16 }}><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: 320 }} /></Space>
+      </ListSection>
+      <ListSection controls={<><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
+
           <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
-          <Table<RentalFulfillmentLocation> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
+          <Table<RentalFulfillmentLocation> rowKey="id" onRefresh={() => locations.refetch()} loading={locations.isFetching} dataSource={rows} scroll={{ x: 960 }}
+            {...locationCapabilities(t, category?.businessModel.locationTypes ?? [], () => locations.refetch({ throwOnError: true }))} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("归属组织"), render: (_, row) => row.organizationId ? organizationNames.get(row.organizationId) ?? t("已关联组织") : t("未分配") },
             { title: t("经营主体"), render: (_, row) => <>{row.operatorName ?? t("未配置")}<br /><Tag color={row.operatorType === "partner" ? "purple" : "blue"}>{t(row.operatorType === "partner" ? "合作商" : "自营")}</Tag></> },
@@ -88,7 +91,7 @@ export function LocationPage() {
             { title: t("操作"), fixed: "right", render: (_, row) => canManage ? <Button type="link" onClick={() => openEditor(row)}>{t("编辑")}</Button> : "-" }
           ]} />
         </QueryState>
-      </Card>
+      </ListSection>
 
       <Drawer title={editing ? t("编辑履约地点") : t("新增履约地点")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => {
         const payload: SaveRentalFulfillmentLocationRequest = { ...values, id: editing?.id };

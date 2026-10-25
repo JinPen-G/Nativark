@@ -425,7 +425,7 @@ export function UserMenu({ preferenceGroups = [], labels = { account: "Account m
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-label={`${labels.account}, ${user.name}${showStatus ? `, ${statusLabel(status)}` : ""}`}
       onClick={onTriggerClick} onKeyDown={onTriggerKeyDown}>
       <Face user={user} status={showStatus ? status : undefined} size="sm" />
-      {showName && <><span className={styles.triggerName}>{user.name}</span><ChevronDown className={styles.chevron} size={15} strokeWidth={1.75} aria-hidden="true" /></>}
+      {showName && <><span className={styles.triggerName} data-rental-user-name="">{user.name}</span><ChevronDown className={styles.chevron} size={15} strokeWidth={1.75} aria-hidden="true" /></>}
     </button>
     {sheet ? createPortal(bottomSheet, document.body) : inline ? panel : hydrated ? createPortal(panel, document.body) : null}
   </span>;

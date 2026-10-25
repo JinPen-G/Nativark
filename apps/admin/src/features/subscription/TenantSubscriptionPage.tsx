@@ -8,6 +8,7 @@ import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { subscriptionApi } from "@/api/subscription";
 import { TenantSubscriptionBody } from "./TenantSubscriptionBody";
+import { TableRefreshProvider } from "@/components/ui";
 
 /**
  * SUB-02 租户后台「版本与订阅」页（需求 §5）。
@@ -15,8 +16,6 @@ import { TenantSubscriptionBody } from "./TenantSubscriptionBody";
  * 数据走 SUB-01 只读聚合视图 TenantSubscriptionView（加载/错误/空态已接）；
  * 写动作（升级/续费/降级/申请）待 SUB-03 写契约，当前按 :manage 门禁禁用。
  */
-const DESC = "当前租户全部适用经营空间共用同一版本、有效期与套餐；切换经营空间不影响本页。";
-
 export function TenantSubscriptionPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
@@ -30,7 +29,7 @@ export function TenantSubscriptionPage() {
     return (
       <PageHeader
         title="版本与订阅"
-        description={DESC}
+        description={t("所有经营空间共用同一订阅。")}
         extra={<Button onClick={() => query.refetch()}>{t("重试")}</Button>}
         view={<Alert type="error" showIcon message={t("订阅信息加载失败")} description={t("请稍后重试；订阅数据服务未就绪时也会出现此提示。")} />}
       />
@@ -39,9 +38,9 @@ export function TenantSubscriptionPage() {
   return (
     <PageHeader
       title="版本与订阅"
-      description={DESC}
+      description={t("所有经营空间共用同一订阅。")}
       note={{ title: "关于版本与订阅", description: "统一到期时间与权益由平台办理；金额与到期限制以平台确认为准，价格未发布显示「价格待公布」。" }}
-      view={<TenantSubscriptionBody data={query.data} canManage={canManage} navigate={navigate} />}
+      view={<TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><TenantSubscriptionBody data={query.data} canManage={canManage} navigate={navigate} /></TableRefreshProvider>}
     />
   );
 }

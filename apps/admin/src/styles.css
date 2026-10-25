@@ -54,7 +54,7 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-bg-layout);
   box-shadow: 0 2px 12px rgba(0, 0, 0, .1);
 }
-/* 侧栏三段：品牌 / 空间选择 → 菜单（可滚动）→ 工具与账号。顶栏已取消。 */
+/* Sidebar: tenant/workspace → search/fixed entries → scrollable business menu → account. */
 .sider-shell {
   display: flex;
   flex-direction: column;
@@ -139,24 +139,22 @@ button, input, textarea, select { font: inherit; }
 .appearance-option { display: grid; min-width: 192px; gap: 4px; padding-block: 4px; }
 
 
-/* 空间选择框：单行「图标 + 空间名 + 箭头」。占固定槽位，单空间/无空间也渲染。 */
-.sider-workspace { padding: 4px 12px 12px; }
-/* 侧栏里不再留硬描边：底色是 #f7f7f7，白色本身就够读成"浮起的控件"。
-   悬浮改成整块转灰，与菜单项用同一种语言。 */
+/* Square tenant mark, two-line identity and independent fixed shell navigation. */
+.sider-workspace { padding: var(--space-4) var(--space-3) var(--space-2); }
 .workspace-select {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
-  min-height: 40px;
-  padding: 0 10px;
+  min-height: 56px;
+  padding: var(--space-2);
   border: 0;
   border-radius: var(--rental-ui-radius-control);
   color: var(--rental-color-text);
-  background: var(--rental-color-bg-container);
+  background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background-color .2s;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 .workspace-select:hover:not(.is-static) { background: var(--rental-color-fill-tertiary); }
 /* 无可切换目标时是纯展示：去掉手型，但底色保留，槽位不塌。
@@ -165,32 +163,77 @@ button, input, textarea, select { font: inherit; }
 .workspace-select-mark {
   display: grid;
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 36px;
   place-items: center;
   border-radius: min(var(--rental-ui-radius-sm), 9px);
-  color: var(--rental-color-primary);
-  background: var(--rental-color-primary-bg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  background: var(--surface-muted);
   font-size: var(--rental-typography-meta-size);
 }
-.workspace-select-name {
+.workspace-select-mark img { display: block; width: 100%; height: 100%; max-width: 100%; object-fit: contain; }
+.workspace-menu-mark { display: block; width: 20px; height: 20px; overflow: hidden; border-radius: min(var(--rental-ui-radius-sm), 6px); }
+.workspace-menu-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.workspace-select-copy { display: grid; flex: 1; min-width: 0; text-align: start; }
+.workspace-select-name, .workspace-select-subtitle {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--rental-color-text-heading);
   font-size: var(--rental-typography-body-size);
-  font-weight: var(--rental-typography-body-weight);
+  font-weight: 500;
   line-height: var(--rental-typography-body-line-height);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.workspace-select-subtitle { color: var(--text-muted); font-size: var(--rental-typography-meta-size); font-weight: var(--rental-typography-meta-weight); line-height: var(--rental-typography-meta-line-height); }
 .workspace-select-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: var(--rental-typography-meta-size); }
+.workspace-select.is-compact { justify-content: center; padding: 0; min-height: 44px; }
+.sider-shell.is-collapsed .sider-workspace { padding-inline: var(--space-2); }
+.sider-quick { flex: none; padding: var(--space-2) var(--space-2) 0; }
+.sider-search-preview { position: relative; min-width: 0; margin: 0 var(--space-1) var(--space-3); }
+.sider-search-preview [class*="shell"] { border-color: transparent; background: var(--surface-muted); }
+.sider-search-hint { position: absolute; inset-inline-end: var(--space-3); top: 50%; transform: translateY(-50%); padding: 0 var(--space-1); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-sm); color: var(--text-muted); background: var(--surface-muted); font-family: inherit; font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); pointer-events: none; }
+.sider-quick-nav { min-width: 0; }
+/* Same Menu engine, theme itemHeight (36px), icon/label spacing and inline indent as business navigation. */
+.sider-quick-nav .ant-menu { padding: 0; border-inline-end: 0; background: transparent; }
+.sider-quick-label { display: block; text-align: start; }
+.sider-quick-count { position: absolute; top: 50%; inset-inline-end: var(--space-3); transform: translateY(-50%); min-width: 24px; padding-inline: var(--space-2); border-radius: var(--rental-ui-radius-pill); background: color-mix(in oklab, var(--accent) 18%, var(--surface)); color: var(--accent); text-align: center; font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); pointer-events: none; }
+.sider-quick-divider { height: 1px; margin-top: var(--space-3); background: var(--rental-color-border-secondary); }
 /* 侧栏底色见 app/theme.tsx 的 SIDER_BG；变量落地前的那一帧回落到外壳底色。 */
 .app-sider {
+  position: relative;
+  z-index: 5;
   background: var(--app-sider-bg, var(--rental-color-bg-layout)) !important;
+}
+/* Anchor to the actual sidebar edge, including its existing width transition.
+   This shell control is a circle, independent of configurable button radii. */
+.app-sider .sider-edge-toggle {
+  position: absolute;
+  top: 22px;
+  inset-inline-end: -14px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 6%);
+}
+.app-sider .sider-edge-toggle:hover,
+.app-sider .sider-edge-toggle:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+  color: var(--foreground);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
 }
 .app-sider .ant-layout-sider-children { display: flex; flex-direction: column; height: 100%; }
 .sider-nav {
+  isolation: isolate;
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
@@ -213,31 +256,37 @@ button, input, textarea, select { font: inherit; }
 }
 /* 一级分组是标题而不是可点项：弱化、缩进对齐二级文字。 */
 .sider-nav .ant-menu-item-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--app-sider-bg, var(--rental-color-bg-layout));
   padding: 14px 8px 6px;
   color: var(--rental-color-text-description);
   font-size: var(--rental-typography-meta-size);
   line-height: var(--rental-typography-meta-line-height);
 }
+/* A sticky title belongs to its real group, so the next group pushes it away at the last row. */
+.sider-nav .ant-menu-item-group { position: relative; overflow: visible; }
 /* 分组之间画细线：二级全部常显时，只靠标题的字号差不足以断句。第一组不画。 */
 .sider-nav .ant-menu-item-group + .ant-menu-item-group {
   margin-top: 8px;
   border-top: 1px solid var(--rental-color-border-secondary);
 }
-.sider-nav .ant-menu-item { margin-block: 2px; }
+:is(.sider-nav, .sider-quick-nav) .ant-menu-item { margin-block: 2px; }
 /* 选中项是一块主色圆角，浅色文字与图标。取色思路与 BoardUI 侧栏选中态一致（它用 accent），
    但这里走本仓的主题色 --rental-color-primary；暗色下由 darkAlgorithm 派生同一色族，
    不写死任何外来色值。
    BoardUI 那里其实是上下渐变，这里压成纯色：门禁把装饰性渐变列为禁用项，写进本文件
    会直接失败，而这么小的圆角块上渐变与纯色几乎看不出差别。
    尺寸、圆角、间距全部保持本仓原样（标签文字继承菜单项的颜色，antd 未单独设色）。 */
-.sider-nav .ant-menu-item-selected {
+:is(.sider-nav, .sider-quick-nav) .ant-menu-item-selected {
   color: var(--rental-color-text-light-solid) !important;
   font-weight: var(--rental-typography-section-title-weight);
   background: var(--rental-color-primary) !important;
   border-radius: var(--rental-ui-radius-control);
   box-shadow: none;
 }
-.sider-nav .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-text-light-solid); }
+:is(.sider-nav, .sider-quick-nav) .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-text-light-solid); }
 
 /* 底部工具区：主题 / 通知 / 设置各占一行，与上方菜单用分隔线断开。 */
 .sider-tools {
@@ -423,11 +472,24 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 54px;
-  padding: 0 24px;
+  flex: none;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-6);
   background: transparent;
 }
-.workspace-context .ant-breadcrumb { margin-block: 16px; }
+.workspace-context-location { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-3); }
+.workspace-context .ant-breadcrumb { min-width: 0; overflow: hidden; }
+.workspace-context .ant-breadcrumb ol { flex-wrap: nowrap; white-space: nowrap; }
+.workspace-context .ant-breadcrumb li:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+.breadcrumb-section { display: inline-flex; align-items: center; gap: var(--space-2); }
+.breadcrumb-link { padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.breadcrumb-link:hover { color: var(--foreground); }
+.breadcrumb-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workspace-context-actions { display: flex; flex: none; align-items: center; gap: var(--space-4); }
+.workspace-clock { color: var(--text-muted); font-size: var(--rental-typography-meta-size); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.workspace-notifications { width: var(--rental-control-height-toolbar); min-height: var(--rental-control-height-toolbar); height: var(--rental-control-height-toolbar); padding: 0; }
 .workspace-context .ant-breadcrumb-overlay-link {
   margin-inline: -4px;
   padding-inline: 4px;
@@ -435,13 +497,14 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
 }
 .workspace-context .ant-breadcrumb-overlay-link:hover { background: var(--rental-color-fill-tertiary); }
 .breadcrumb-home { cursor: pointer; }
-.app-content { min-height: 0; padding: 24px; overflow: auto; background: transparent; }
+.app-content { min-height: 0; padding: var(--rental-layout-page-top-gap) var(--space-6) var(--space-6); overflow: auto; background: transparent; }
 .content-canvas { width: 100%; }
 
-.page-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-height: 52px; margin-bottom: 16px; }
-/* 页面标题层级统一：标题行负责定位，副标题只负责说明，不再由各页面自行配字号。 */
-.page-heading { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
-.page-title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.page-header { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--rental-layout-header-content-gap); min-width: 0; margin-block-end: var(--rental-layout-header-content-gap); }
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--rental-layout-inline-gap) var(--rental-layout-header-content-gap); min-height: var(--rental-control-height-default); min-width: 0; }
+/* Single title row; essential business scope is adjacent text, never a reserved subtitle slot. */
+.page-heading { display: flex; flex-wrap: wrap; align-items: center; flex: 1 1 auto; min-width: 0; gap: var(--space-1) var(--rental-layout-header-content-gap); }
+.page-title-row { display: flex; align-items: center; gap: 2px; min-height: var(--rental-control-height-default); min-width: 0; }
 .page-title-icon {
   display: inline-flex;
   flex: none;
@@ -484,20 +547,35 @@ h5.ant-typography {
   font-weight: var(--rental-typography-panel-title-weight);
   line-height: var(--rental-typography-panel-title-line-height);
 }
-.page-subtitle {
-  max-width: 960px;
+.page-context {
+  flex: 0 1 auto;
+  max-width: 65ch;
   margin: 0;
-  overflow: hidden;
-  color: var(--rental-color-text-description);
-  font-size: var(--rental-typography-page-subtitle-size);
-  font-weight: var(--rental-typography-page-subtitle-weight);
-  line-height: var(--rental-typography-page-subtitle-line-height);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  color: var(--text-secondary);
+  font-size: var(--rental-typography-meta-size);
+  font-weight: var(--rental-typography-meta-weight);
+  line-height: var(--rental-typography-meta-line-height);
+  overflow-wrap: anywhere;
 }
 /* 筛选与视图切换自成一行：一组会换行的控件，跟标题同行会把标题挤走。 */
-.page-toolbar-view { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.page-toolbar-actions { flex: 0 0 auto; justify-content: flex-end; }
+/* A view can own a complete tab panel/form, not only inline controls. Keep it in
+   normal block flow; each control group owns its own wrapping and alignment. */
+.page-toolbar-view { display: block; min-width: 0; }
+.page-toolbar-view > * { min-width: 0; max-width: 100%; }
+/* Full-width page stacks are blocks. Ant Space defaults to inline-flex, whose
+   baseline/line box can add blank pixels above an otherwise correct page gap. */
+.page-header + .ant-space-vertical,
+.page-toolbar-view > .ant-space-vertical { display: flex; }
+/* Navigation-only tabs inside a header already receive the header's bottom gap. */
+.page-toolbar-view > .rental-tabs-navigation { margin-block-end: 0; }
+.page-toolbar-actions { flex: 0 1 auto; justify-content: flex-end; min-width: 0; max-width: 100%; }
+.page-toolbar-actions > .ant-space-item,
+.page-toolbar-actions > .ant-space-item > .ant-space { min-width: 0; max-width: 100%; }
+.calendar-month-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+.calendar-month-grid { display: grid; grid-template-columns: repeat(7, minmax(var(--rental-control-width-compact), 1fr)); gap: var(--space-2); }
+.calendar-month-card .ant-card-head-wrapper { flex-wrap: wrap; gap: var(--space-2); }
+.calendar-month-card .ant-card-head-title { flex-shrink: 0; }
+.calendar-month-grid .calendar-day-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 /* 口径说明的浮层正文：限宽避免长句拉成一行，行高与页面正文一致。 */
 .page-note {
   max-width: 360px;
@@ -534,24 +612,15 @@ h5.ant-typography {
   line-height: var(--rental-typography-meta-line-height);
 }
 .panel-toolbar,
-.table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.table-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--rental-layout-inline-gap); margin-bottom: var(--rental-layout-header-content-gap); min-width: 0; }
+/* A vertical Space already owns sibling separation. A nested toolbar must not
+   add its standalone margin to that gap (notably rules/calendar/notifications). */
+.ant-space-vertical > :is(.panel-toolbar, .table-toolbar),
+.ant-space-vertical > .ant-space-item > :is(.panel-toolbar, .table-toolbar) { margin-block-end: 0; }
 .panel-toolbar-start,
 .panel-toolbar-end { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.context-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 8px 12px;
-  border-radius: min(var(--rental-ui-radius-lg), 16px);
-  color: var(--rental-color-text);
-  background: var(--rental-color-info-bg);
-  font-size: var(--rental-typography-body-size);
-  line-height: var(--rental-typography-body-line-height);
-}
-.context-note .anticon { margin-top: 4px; color: var(--rental-color-info); }
-
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--rental-dashboard-card-min-width)), 1fr)); gap: var(--rental-layout-section-gap); margin-bottom: var(--rental-layout-section-gap); }
+.rental-info-popover > h2 { margin: 0 0 var(--space-2); font-size: var(--rental-typography-panel-title-size); font-weight: var(--rental-typography-panel-title-weight); line-height: var(--rental-typography-panel-title-line-height); }
 .metric-card { min-height: 110px; }
 .metric-card .ant-card-body { display: flex; flex-direction: column; justify-content: center; height: 100%; padding: 24px; }
 .metric-card .ant-statistic-title { margin-bottom: 8px; color: var(--rental-color-text-description); }
@@ -572,7 +641,7 @@ h5.ant-typography {
   line-height: var(--rental-typography-meta-line-height);
 }
 .metric-trend { color: var(--rental-color-success); font-weight: var(--rental-typography-section-title-weight); }
-.workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: var(--rental-layout-section-gap); }
 .status-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding-block: 8px; border-bottom: 1px solid var(--rental-color-border-secondary); }
 .status-row:last-child { border-bottom: 0; }
 .status-row > div { display: grid; gap: 4px; }
@@ -685,7 +754,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   background: var(--rental-color-fill-secondary);
 }
 
-.ant-tabs .ant-tabs-nav { margin-bottom: 16px; }
+.ant-tabs .ant-tabs-nav { margin-bottom: var(--rental-layout-tabs-content-gap); }
 .ant-tabs .ant-tabs-nav::before { border-bottom: 0; }
 .ant-tabs .ant-tabs-nav-list {
   gap: 0;
@@ -711,7 +780,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   font-weight: var(--rental-typography-body-weight);
   line-height: var(--rental-typography-body-line-height);
 }
-.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-color-text) !important; font-weight: var(--rental-typography-section-title-weight); }
+.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-choice-text-selected) !important; font-weight: var(--rental-choice-weight); }
 /* ink-bar 改造成会滑动的白色滑块，和 Segmented 的 thumb 是同一个交互：
    antd 本来就用内联 left/width 加 transition 驱动它，之前 display:none 把这段动画一起藏了，
    于是同样的胶囊控件在分段控件上会滑、在页签上是硬切换。
@@ -736,13 +805,13 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   box-shadow: none;
 }
 .tabbed-workspace > .ant-card-body { padding: 0; }
-.standalone-tabs > .ant-tabs-nav { margin: 0 0 12px; }
+.standalone-tabs > .ant-tabs-nav { margin: 0 0 var(--rental-layout-tabs-content-gap); }
 .standalone-tabs > .ant-tabs-content-holder {
   overflow: hidden;
-  padding: 24px;
-  border: 1px solid var(--rental-color-border-secondary);
-  border-radius: var(--rental-ui-radius-lg);
-  background: var(--rental-color-bg-container);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .standalone-tabs > .ant-tabs-content-holder > .ant-tabs-content { min-height: 100%; }
 
@@ -759,10 +828,6 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   line-height: var(--rental-typography-body-line-height);
 }
 .ant-table-wrapper .ant-table-cell { vertical-align: middle; }
-/* 行内操作交给 antd 原生的按钮样式，不再自绘胶囊描边——同一个 type="link" 在表格里
-   长成描边胶囊、在别处是纯文字链接，是这套自绘规则带来的不一致。
-   这里只压一下高度：全局按钮高度是 36，直接用会把每一行撑高。 */
-.ant-table-wrapper .ant-table-tbody .ant-btn { height: 28px; }
 .ant-form-item-label > label {
   font-size: var(--rental-typography-label-size);
   font-weight: var(--rental-typography-label-weight);
@@ -783,8 +848,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
    统一按"默认档观感"封顶：信息条 ≤16px（= 默认档 lg），标签/选项块/小徽标 ≤9px（= 默认档 sm）；
    低档位仍按比例缩小，banner 变体保持直角。 */
 .ant-alert:not(.ant-alert-banner) { border-radius: min(var(--rental-ui-radius-lg), 16px); }
-.ant-tag,
-.ant-select-selection-item { border-radius: min(var(--rental-ui-radius-sm), 9px); }
+.ant-tag { border-radius: min(var(--rental-ui-radius-sm), 9px); }
 
 /* SUB-02 §5.4 到期提醒浮窗：视窗左下角；桌面避开左侧栏底部控件（空间切换/主题/账号卡），窄屏抽屉时贴左。 */
 .subscription-reminder { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 900; width: min(290px, calc(100vw - 24px)); max-height: min(280px, 45dvh); overflow-y: auto; overflow-wrap: anywhere; }
@@ -828,21 +892,17 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .order-timeline .ant-timeline-item-content { min-height: 48px; }
 .query-state-loading { min-height: 280px; display: grid; place-items: center; }
 .route-loader { min-height: 360px; display: grid; place-items: center; }
+.auth-loader { min-height: 100vh; display: grid; place-items: center; }
 
-/* 统一页面级加载态：3×3 像素网格 + 右侧文案。动作按钮里的小型 Spin 不在此范围。 */
+/* Original page loading: staggered 3×3 pixel grid with the label on its right. */
 .rental-loading-state {
-  display: flex;
-  width: min(100%, 28rem);
-  flex-direction: column;
-  align-items: stretch;
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
   color: var(--rental-color-text-secondary);
   font-size: var(--rental-typography-body-size);
   font-weight: var(--rental-typography-body-weight);
   line-height: var(--rental-typography-body-line-height);
-}
-.rental-loading-label {
-  text-align: center;
 }
 .rental-loading-grid {
   display: grid;
@@ -1086,28 +1146,32 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 }
 
 @media (max-width: 1180px) {
-  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-grid { grid-template-columns: 1fr; }
 }
 
 /* <768px 侧栏改抽屉（由 AppShell 判定），内容面板占满并让出悬浮按钮的位置。 */
 @media (max-width: 767px) {
   .app-workspace { margin: 6px; }
-  .app-content { padding: 16px; }
-  .workspace-context { padding: 0 16px; }
-  .page-toolbar { align-items: flex-start; padding-left: 44px; }
+  .app-content { padding: var(--rental-layout-page-top-gap) var(--space-4) var(--space-4); }
+  .workspace-context { padding: var(--space-2) var(--space-4); padding-inline-start: 52px; }
+  .workspace-context-actions { gap: var(--space-2); }
+  .workspace-clock-date { display: none; }
+  .page-toolbar { align-items: flex-start; }
   .panel-toolbar,
   .table-toolbar { align-items: flex-start; flex-direction: column; }
-  .standalone-tabs > .ant-tabs-content-holder { padding: 16px; }
 }
 
 @media (max-width: 640px) {
+  /* Long localized labels must not keep an inline form wider than its card. */
+  .arc-form.ant-form-inline > .arc-form-item { flex-basis: 100%; max-width: 100%; margin-inline: 0; }
+  .arc-form.ant-form-inline > .arc-form-item > .ant-form-item-row { flex-direction: column; }
+  .arc-form.ant-form-inline > .arc-form-item > .ant-form-item-row > .ant-form-item-label { text-align: start; white-space: normal; padding-bottom: var(--rental-form-label-gap); }
+  .arc-form.ant-form-inline > .arc-form-item > .ant-form-item-row > .ant-form-item-control { min-width: 0; max-width: 100%; width: 100%; }
   .app-frame-stage,
   .login-stage { padding: 0; }
   .app-shell,
   .login-frame { height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
   .app-workspace { margin: 0; border: 0; border-radius: 0; }
-  .metric-grid { grid-template-columns: 1fr; }
   .login-workspace { padding: 16px; }
   .sider-drawer-trigger { top: 8px; left: 8px; }
   /* 窄屏内层卡片贴边留白收窄、去描边/阴影，避免"外框里还套一层卡片框"的双重边界感。 */

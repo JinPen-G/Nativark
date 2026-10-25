@@ -1,5 +1,5 @@
-import { SaveButton } from "@/components/ui";
-import { SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { ListSection, SaveButton } from "@/components/ui";
+import { SearchOutlined, UploadOutlined } from "@/components/ui/icons";
 import type { PaymentStatementBatchSummary, PaymentStatementLineSummary } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Tag, Typography } from "antd";
@@ -8,8 +8,11 @@ import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, Drawer } from "@/components/ui";
+import { Download } from "lucide-react";
+import { Button, DataTableStatus, Drawer, downloadCsv } from "@/components/ui";
 import type { UploadFile } from "antd";
+import { useNavigate, useParams } from "react-router-dom";
+import { RecordDetailLayout } from "@/components/RecordDetailLayout";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -30,7 +33,9 @@ export function PaymentReconciliationPage() {
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState("alipay");
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [selectedBatchId, setSelectedBatchId] = useState<string>();
+  const navigate = useNavigate();
+  const { batchId: selectedBatchId } = useParams<{ batchId: string }>();
+  const setSelectedBatchId = (id?: string) => navigate(id ? `/rental/payment-reconciliation/${encodeURIComponent(id)}` : "/rental/payment-reconciliation");
   const [reviewTarget, setReviewTarget] = useState<{ line: PaymentStatementLineSummary; decision: "acknowledge" | "query_provider" }>();
   const [reviewForm] = Form.useForm<{ reason: string }>();
   const batches = useQuery({ queryKey: ["rental-core", "payment-statement-batches"], queryFn: () => rentalCoreApi.paymentStatementBatches() });
@@ -76,14 +81,8 @@ export function PaymentReconciliationPage() {
   };
 
   return <>
-    <PageHeader title={t("支付对账")} description={t("导入当前经营空间的支付平台对账文件，核对差异并保留人工处理记录。" )} />
-    <Alert
-      type="info"
-      showIcon
-      title={t("对账只产生证据，不会自动改写支付或退款事实")}
-      description={t("重复导入同一经营空间、平台和文件会直接返回原批次。金额、币种、状态、第三方流水号或本地记录不一致时，必须由授权人员逐条确认或标记待向平台核对。")}
-      style={{ marginBottom: 16 }}
-    />
+    {!selectedBatchId && <>
+    <PageHeader title={t("支付对账")} description={t("对账不会自动修改收退款记录；差异须逐条核实。")} />
     <Card title={t("导入对账文件")} style={{ marginBottom: 16 }}>
       <Alert
         type="warning"
@@ -94,7 +93,7 @@ export function PaymentReconciliationPage() {
       <Space wrap align="end">
         <div>
           <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>{t("支付平台")}</Typography.Text>
-          <Select value={provider} onChange={setProvider} style={{ width: 180 }} options={Object.entries(providerLabels).map(([value, label]) => ({ value, label: t(label) }))} />
+          <Select value={provider} onChange={setProvider} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(providerLabels).map(([value, label]) => ({ value, label: t(label) }))} />
         </div>
         <Upload
           accept=".csv,text/csv"
@@ -106,17 +105,18 @@ export function PaymentReconciliationPage() {
         >
           <Button icon={<UploadOutlined />}>{t("选择 CSV 文件")}</Button>
         </Upload>
+        <Button icon={<Download size={16} aria-hidden="true" />} disabled={importStatement.isPending} onClick={() => downloadCsv(t("对账文件模板"), [["kind", "status", "amount", "currency", "merchant_order_no", "merchant_refund_no", "external_id", "occurred_at"]])}>{t("下载模板")}</Button>
         <Button type="primary" loading={importStatement.isPending} disabled={!fileList.length} onClick={() => importStatement.mutate()}>{t("导入并核对")}</Button>
       </Space>
       <Typography.Paragraph type="secondary" style={{ margin: "12px 0 0" }}>
         {t("单个文件不超过 10MB、最多 10,000 行；文件应包含 kind、status、amount、currency 和商户订单号列，退款行还需商户退款单号。")}
       </Typography.Paragraph>
     </Card>
-    <Card title={<Space>{t("对账批次")} <Tag>{batches.data?.length ?? 0}</Tag></Space>}>
+    <ListSection title={t("对账批次")}>
       <QueryState loading={batches.isLoading} error={batches.error}>
         <Table<PaymentStatementBatchSummary>
           rowKey="id"
-          dataSource={batches.data ?? []}
+          onRefresh={() => batches.refetch()} loading={batches.isFetching} dataSource={batches.data ?? []}
           pagination={{ pageSize: 10 }}
           locale={{ emptyText: <Empty description={t("当前经营空间还没有导入对账文件")} /> }}
           columns={[
@@ -130,19 +130,24 @@ export function PaymentReconciliationPage() {
           ]}
         />
       </QueryState>
-    </Card>
-    <Drawer title={detail.data ? `${t(providerLabels[detail.data.provider] ?? detail.data.provider)} · ${detail.data.fileName}` : t("对账批次详情")} size={1080} open={Boolean(selectedBatchId)} onClose={() => setSelectedBatchId(undefined)}>
+    </ListSection>
+    </>}
+    {selectedBatchId && <RecordDetailLayout title={detail.data?.fileName ?? t("对账批次详情")} onBack={() => setSelectedBatchId(undefined)}
+      status={detail.data && <><DataTableStatus variant="soft" tone={detail.data.status === "matched" ? "success" : "warning"}>{t(batchStatusLabels[detail.data.status] ?? detail.data.status)}</DataTableStatus><span>{t(providerLabels[detail.data.provider] ?? detail.data.provider)}</span></>}
+      facts={detail.data ? [
+        { key: "total", label: "行数", value: detail.data.totalRows },
+        { key: "difference", label: "差异", value: detail.data.differenceRows },
+        { key: "matched", label: "匹配", value: detail.data.matchedRows },
+        { key: "reviewed", label: "已处理", value: detail.data.acknowledgedRows }
+      ] : undefined}>
+      <Alert type="warning" showIcon title={t("这里只记录处理结论，不会修改支付、退款或资金事实。")} />
       <QueryState loading={detail.isLoading} error={detail.error}>
-        {detail.data && <>
-          <Space wrap style={{ marginBottom: 16 }}>
-            <Tag color={detail.data.status === "matched" ? "green" : detail.data.status === "reviewed" ? "blue" : "orange"}>{t(batchStatusLabels[detail.data.status] ?? detail.data.status)}</Tag>
-            <Typography.Text type="secondary">{t("共")} {detail.data.totalRows} {t("行")}，{t("匹配")} {detail.data.matchedRows} {t("行")}，{t("差异")} {detail.data.differenceRows} {t("行")}，{t("已处理")} {detail.data.acknowledgedRows} {t("行")}</Typography.Text>
-          </Space>
+        {detail.data && <ListSection title={t("对账明细")}>
           <Table<PaymentStatementLineSummary>
             rowKey="id"
             size="small"
-            dataSource={detail.data.lines}
-            pagination={{ pageSize: 8 }}
+            onRefresh={() => detail.refetch()} loading={detail.isFetching} dataSource={detail.data.lines}
+            pagination={{ defaultPageSize: 20 }}
             scroll={{ x: 980 }}
             columns={[
               { title: t("行"), dataIndex: "rowNumber", width: 56 },
@@ -154,9 +159,9 @@ export function PaymentReconciliationPage() {
               { title: t("操作"), fixed: "right", width: 220, render: (_, row) => row.reviewStatus === "open" || row.reviewStatus === "query_pending" ? <Space><Button type="link" onClick={() => openReview(row, "query_provider")}>{t("标记待核对")}</Button><Button type="link" onClick={() => openReview(row, "acknowledge")}>{t("确认差异")}</Button></Space> : "—" }
             ]}
           />
-        </>}
+        </ListSection>}
       </QueryState>
-    </Drawer>
+    </RecordDetailLayout>}
     <Drawer title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} onClose={() => setReviewTarget(undefined)} extra={<SaveButton  label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
       <Form form={reviewForm} layout="vertical" onFinish={(values) => reviewLine.mutate(values)}>
         <Alert type="warning" showIcon title={t("这里只记录处理结论，不会修改支付、退款或资金事实。")} style={{ marginBottom: 16 }} />

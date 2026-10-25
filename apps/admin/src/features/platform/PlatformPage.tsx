@@ -1,7 +1,8 @@
-import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@rental-os/shared";
 import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { App } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -39,6 +40,9 @@ export function PlatformPage() {
   const organizations = useQuery({ queryKey: ["platform-organizations"], queryFn: api.organizations });
   const users = useQuery({ queryKey: ["platform-users"], queryFn: api.users });
   const roles = useQuery({ queryKey: ["platform-roles"], queryFn: api.roles });
+  const userFilter = useListFilter(users.data, { fields: row => [row.account, row.displayName, row.phone], status: row => row.isActive ? "active" : "disabled" });
+  const organizationFilter = useListFilter(organizations.data, { fields: row => [row.name, row.code] });
+  const roleFilter = useListFilter(roles.data, { fields: row => [row.name, row.code] });
   const permissions = useQuery({ queryKey: ["platform-permissions"], queryFn: api.permissionTree });
   const audit = useQuery({ queryKey: ["platform-audit"], queryFn: api.auditLogs });
   const rules = useQuery({ queryKey: ["system-rules"], queryFn: api.systemRules });
@@ -107,14 +111,14 @@ export function PlatformPage() {
 
   return (
     <>
-      <PageHeader title={t("平台配置")} description={t("管理组织、账号、角色权限、审计与系统参数。数据范围仍由后端 API 强制执行。")} />
+      <PageHeader title={t("平台配置")} />
       <QueryState loading={loading} error={error}>
-        <Card className="tabbed-workspace">
+        <ListSection>
           <Tabs className="standalone-tabs" activeKey={activeKey} onChange={setActiveKey} items={[
             {
               key: "users",
               label: `${t("账号")} (${users.data?.length ?? 0})`,
-              children: <><div className="table-toolbar"><Typography.Text type="secondary">{t("账号通过组织、角色和数据范围共同决定可见数据。")}</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openUser()}>{t("新增账号")}</Button></div><Table<SystemUserRow> rowKey="id" dataSource={users.data ?? []} scroll={{ x: 1080 }} columns={[
+              children: <><Table<SystemUserRow> toolbar={<><ListFilters filter={userFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openUser()}>{t("新增账号")}</Button></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isFetching} dataSource={userFilter.rows} pagination={userFilter.pagination} scroll={{ x: 1080 }} columns={[
                 { title: t("账号"), render: (_, record) => <><b>{record.account}</b><br /><span className="muted">{record.displayName}</span></> },
                 { title: t("组织"), dataIndex: "organizationName", render: (value) => value ?? t("未分配") },
                 { title: t("角色"), dataIndex: "roleNames", render: (values: string[]) => values.join("、") || t("未分配") },
@@ -127,7 +131,7 @@ export function PlatformPage() {
             {
               key: "organizations",
               label: `${t("组织")} (${organizations.data?.length ?? 0})`,
-              children: <><div className="table-toolbar"><Typography.Text type="secondary">{t("组织层级用于承载营运中心、门店和履约网点的数据范围。")}</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openOrganization()}>{t("新增组织")}</Button></div><Table<OrganizationSummary> rowKey="id" dataSource={organizations.data ?? []} columns={[
+              children: <><Table<OrganizationSummary> toolbar={<><ListFilters filter={organizationFilter} placeholder="组织名称或编码" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openOrganization()}>{t("新增组织")}</Button></>} rowKey="id" onRefresh={() => organizations.refetch()} loading={organizations.isFetching} dataSource={organizationFilter.rows} pagination={organizationFilter.pagination} columns={[
                 { title: t("组织"), render: (_, record) => <><b>{record.name}</b><br /><span className="muted">{record.code}</span></> },
                 { title: t("类型"), dataIndex: "type", render: (value) => <Tag>{t(String(value))}</Tag> },
                 { title: t("上级组织"), dataIndex: "parentId", render: (value) => organizations.data?.find((item) => item.id === value)?.name ?? t("根组织") },
@@ -138,7 +142,7 @@ export function PlatformPage() {
             {
               key: "roles",
               label: `${t("角色权限")} (${roles.data?.length ?? 0})`,
-              children: <><div className="table-toolbar"><Typography.Text type="secondary">{t("权限控制功能入口，数据范围控制可见组织或本人数据。")}</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button></div><Table<SystemRoleRow> rowKey="id" dataSource={roles.data ?? []} scroll={{ x: 1080 }} columns={[
+              children: <><Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 1080 }} columns={[
                 { title: t("角色"), render: (_, record) => <><b>{record.name}</b><br /><span className="muted">{record.code}</span></> },
                 { title: t("作用域"), dataIndex: "scope", render: (value) => <Tag>{t(String(value))}</Tag> },
                 { title: t("数据范围"), dataIndex: "dataScope", render: (value) => <Tag color="blue">{t(String(value))}</Tag> },
@@ -151,7 +155,7 @@ export function PlatformPage() {
             {
               key: "audit",
               label: `${t("审计日志")} (${audit.data?.total ?? 0})`,
-              children: <Table rowKey="id" dataSource={audit.data?.rows ?? []} scroll={{ x: 1000 }} columns={[
+              children: <Table rowKey="id" onRefresh={() => audit.refetch()} loading={audit.isFetching} dataSource={audit.data?.rows ?? []} scroll={{ x: 1000 }} columns={[
                 { title: t("时间"), dataIndex: "createdAt" },
                 { title: t("动作"), dataIndex: "action", render: (value) => <Tag>{t(String(value))}</Tag> },
                 { title: t("操作人"), dataIndex: "operator" },
@@ -173,7 +177,7 @@ export function PlatformPage() {
               </Form>}</QueryState>
             }
           ]} />
-        </Card>
+        </ListSection>
       </QueryState>
 
       <Drawer title={editingOrganization ? t("编辑组织") : t("新增组织")} open={editor === "organization"} size={500} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={organizationForm} pending={saveOrganization.isPending} onSave={(values) => saveOrganization.mutateAsync({ ...values, id: editingOrganization?.id, operator })} />}>

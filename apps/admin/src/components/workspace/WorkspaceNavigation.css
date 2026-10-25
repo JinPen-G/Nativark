@@ -1,0 +1,32 @@
+/* Animate UI stack: enter from one viewport below; old page sinks to .94/.6.
+   Only the scrollable workspace is named. Header and sidebar remain still. */
+.app-content[data-workspace-page-transition] { view-transition-name: rental-workspace-page; }
+:root[data-workspace-navigation]::view-transition { pointer-events: none; }
+:root[data-workspace-navigation]::view-transition-old(root) { display: none; }
+:root[data-workspace-navigation]::view-transition-new(root) { animation: none; }
+:root[data-workspace-navigation]::view-transition-group(rental-workspace-page) { animation: none; overflow: clip; }
+:root[data-workspace-navigation]::view-transition-image-pair(rental-workspace-page) {
+  isolation: isolate;
+  overflow: clip;
+  border-radius: 0 0 max(0px, calc(var(--rental-ui-radius-lg) - 1px)) max(0px, calc(var(--rental-ui-radius-lg) - 1px));
+}
+:root[data-workspace-navigation]::view-transition-old(rental-workspace-page),
+:root[data-workspace-navigation]::view-transition-new(rental-workspace-page) {
+  height: 100%;
+  mix-blend-mode: normal;
+  background: var(--surface);
+  animation-duration: var(--rental-navigation-duration);
+  animation-timing-function: var(--rental-navigation-easing);
+  animation-fill-mode: both;
+}
+:root[data-workspace-navigation]::view-transition-old(rental-workspace-page) { animation-name: rental-page-stack-out; }
+:root[data-workspace-navigation]::view-transition-new(rental-workspace-page) { animation-name: rental-page-stack-in; }
+@keyframes rental-page-stack-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes rental-page-stack-out { from { transform: none; opacity: 1; } to { transform: scale(var(--rental-navigation-retreat-scale)); opacity: var(--rental-navigation-retreat-opacity); } }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-workspace-navigation]::view-transition-old(rental-workspace-page),
+  :root[data-workspace-navigation]::view-transition-new(rental-workspace-page) { animation: none; }
+}
+@media (max-width: 767px) {
+  :root[data-workspace-navigation]::view-transition-image-pair(rental-workspace-page) { border-radius: 0; }
+}

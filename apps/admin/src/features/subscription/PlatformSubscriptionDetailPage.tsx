@@ -1,7 +1,7 @@
 import { Card, Descriptions, Space, Tag } from "antd";
-import { App, Empty, Modal } from "@/components/ui";
+import { ListSection, App, Empty, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
-import { Alert, Table } from "@/components/ui";
+import { Alert, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
@@ -29,11 +29,11 @@ export function PlatformSubscriptionDetailPage() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const query = useQuery({ queryKey: ["subscription", "platform-detail", id], queryFn: () => subscriptionApi.platformDetail(id), enabled: Boolean(id) });
-  return <PageHeader title="租户订阅详情" description="查看并直接办理该租户的订阅、功能授权和申请；订阅操作不解除安全冻结。"
+  return <PageHeader title="租户订阅详情" description={t("订阅操作不会解除安全冻结。")}
     extra={<Button onClick={() => navigate(APP_ROUTES.platformSubscriptions.path)}>{t("返回列表")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error || !query.data ? <Alert type="error" showIcon message={t("租户订阅详情加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
-        : <DetailBody key={id} data={query.data} tenantId={id} />}
+        : <TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><DetailBody key={id} data={query.data} tenantId={id} /></TableRefreshProvider>}
     </QueryState>} />;
 }
 
@@ -61,8 +61,8 @@ function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId
   const requestColumns: ColumnsType<SubscriptionRequestRecord> = [
     { title: t("申请编号 / 类型"), key: "type", render: (_, row) => <Space orientation="vertical" size={0}><span>{row.id}</span><span>{t(REQUEST_TYPE_LABEL[row.type])}</span></Space> },
     { title: t("状态"), key: "status", render: (_, row) => <Tag color={REQUEST_STATUS_TONE[row.status]}>{t(REQUEST_STATUS_LABEL[row.status])}</Tag> },
-    { title: t("提交时间"), key: "submitted", render: (_, row) => formatSubscriptionDate(row.submittedAt, overview.timeZone) },
-    { title: t("办理金额 / 期间"), key: "handled", render: (_, row) => `${formatMoney(row.handledAmount)} · ${row.periodText || t("尚未登记")}` },
+    { title: t("提交时间"), key: "submitted", render: (_, row) => formatSubscriptionDate(row.submittedAt, overview.timeZone, t) },
+    { title: t("办理金额 / 期间"), key: "handled", render: (_, row) => `${t(formatMoney(row.handledAmount))} · ${row.periodText || t("尚未登记")}` },
     { title: t("操作"), key: "action", render: (_, row) => <Space wrap>
       <Button type="link" onClick={() => setDetails(row.id)}>{t("详情")}</Button>
       {row.status === SubscriptionRequestStatus.Pending && <>
@@ -79,23 +79,23 @@ function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId
       <Descriptions column={{ xs: 1, md: 2 }} size="small" colon={false} items={[
         { key: "plan", label: t("当前套餐"), children: <Tag color={overview.plan === SubscriptionPlan.Pro ? "gold" : "default"}>{t(PLAN_LABEL[overview.plan])}</Tag> },
         { key: "status", label: t("服务状态"), children: t(SERVICE_STATUS_LABEL[overview.serviceStatus]) },
-        { key: "period", label: t("统一起止 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone)}` },
+        { key: "period", label: t("统一起止 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone, t)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone, t)}` },
         { key: "amount", label: t("本期确认金额"), children: t(formatMoney(overview.currentAmount)) },
-        { key: "next", label: t("待生效套餐"), children: overview.next ? `${t(PLAN_LABEL[overview.next.plan])} · ${formatSubscriptionDate(overview.next.effectiveAt, overview.timeZone)}` : t("无") }
+        { key: "next", label: t("待生效套餐"), children: overview.next ? `${t(PLAN_LABEL[overview.next.plan])} · ${formatSubscriptionDate(overview.next.effectiveAt, overview.timeZone, t)}` : t("无") }
       ]} />
     </Card>
     <Card id="subscription-action" size="small" title={t("直接办理")} extra={selectedRequest && <Button onClick={() => setSelectedRequest(undefined)}>{t("取消关联申请")}</Button>}>
       {!selectedStillPending ? <Alert type="warning" message={t("所选申请已不再待处理，请取消关联并查看最新记录")} /> : <PlatformSubscriptionActionForm key={selectedRequest?.id ?? "direct"} tenantId={tenantId} overview={overview} standardPricing={data.standardPricing} request={selectedRequest} onSaved={() => setSelectedRequest(undefined)} />}
     </Card>
-    <Card size="small" title={t("额外功能授权")}>
-      <Alert type="info" showIcon style={{ marginBottom: 12 }} message={t("仅可对已上线 / 受控试点功能向当前租户授权，不要求整体升级，不改变期限。公共下放在功能目录中维护；撤销须记录原因并保护既有业务。")} />
+    <ListSection title={t("额外功能授权")}>
+      <Alert type="info" showIcon  message={t("仅可对已上线 / 受控试点功能向当前租户授权，不要求整体升级，不改变期限。公共下放在功能目录中维护；撤销须记录原因并保护既有业务。")} />
       <Table<SubscriptionFeatureEntitlement> rowKey="code" size="small" columns={entitlementColumns} dataSource={entitlements} pagination={{ pageSize: 20, hideOnSinglePage: true }} scroll={{ x: 700 }} />
-    </Card>
-    <Card size="small" title={t("申请与线下收款记录")}>
+    </ListSection>
+    <ListSection title={t("申请与线下收款记录")}>
       <Table<SubscriptionRequestRecord> rowKey="id" size="small" columns={requestColumns} dataSource={requests} pagination={{ pageSize: 10, hideOnSinglePage: true }} scroll={{ x: 850 }} />
-    </Card>
+    </ListSection>
     <Card size="small" title={t("订阅变更记录")}>
-      {!changeLog.length ? <Empty description={t("暂无变更记录")} /> : <Descriptions column={1} items={changeLog.map((entry) => ({ key: entry.id, label: `${entry.action} · ${formatSubscriptionDate(entry.effectiveAt, overview.timeZone)}`, children: `${entry.beforeText ?? "—"} → ${entry.afterText ?? "—"}${entry.reason ? ` · ${entry.reason}` : ""}${entry.internalNote ? ` · 平台内部：${entry.internalNote}` : ""}` }))} />}
+      {!changeLog.length ? <Empty description={t("暂无变更记录")} /> : <Descriptions column={1} items={changeLog.map((entry) => ({ key: entry.id, label: `${entry.action} · ${formatSubscriptionDate(entry.effectiveAt, overview.timeZone, t)}`, children: `${entry.beforeText ?? "—"} → ${entry.afterText ?? "—"}${entry.reason ? ` · ${entry.reason}` : ""}${entry.internalNote ? ` · 平台内部：${entry.internalNote}` : ""}` }))} />}
     </Card>
     {grant && <TenantFeatureGrantModal open mode={grant.mode} tenantId={tenantId} feature={grant.feature} expectedRevision={grant.revision} onClose={() => setGrant(null)} />}
     {handling && <RequestHandlingModal tenantId={tenantId} {...handling} onClose={() => setHandling(null)} />}

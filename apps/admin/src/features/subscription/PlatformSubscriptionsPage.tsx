@@ -1,6 +1,6 @@
-import { PlusOutlined } from "@ant-design/icons";
-import { Card, Space, Tag } from "antd";
-import { Modal } from "@/components/ui";
+import { PlusOutlined } from "@/components/ui/icons";
+import { Space, Tag } from "antd";
+import { ListSection, ListFilterItem, Modal } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { SearchField, Select } from "@/components/ui";
@@ -40,23 +40,18 @@ export function PlatformSubscriptionsPage() {
     { title: t("租户"), key: "tenant", render: (_, row) => `${row.tenantName}（${row.tenantCode}）` },
     { title: t("当前套餐"), dataIndex: "plan", key: "plan", render: (value: SubscriptionPlan) => <Tag color={value === SubscriptionPlan.Pro ? "gold" : "default"}>{t(PLAN_LABEL[value])}</Tag> },
     { title: t("服务状态"), dataIndex: "serviceStatus", key: "status", render: (value: SubscriptionServiceStatus) => t(SERVICE_STATUS_LABEL[value]) },
-    { title: t("统一截止"), key: "endAt", render: (_, row) => formatSubscriptionDate(row.endAt, row.timeZone) },
-    { title: t("待生效"), key: "next", render: (_, row) => row.next ? `${t(PLAN_LABEL[row.next.plan])} · ${formatSubscriptionDate(row.next.effectiveAt, row.timeZone)}` : t("—") },
+    { title: t("统一截止"), key: "endAt", render: (_, row) => formatSubscriptionDate(row.endAt, row.timeZone, t) },
+    { title: t("待生效"), key: "next", render: (_, row) => row.next ? `${t(PLAN_LABEL[row.next.plan])} · ${formatSubscriptionDate(row.next.effectiveAt, row.timeZone, t)}` : t("—") },
     { title: t("操作"), key: "action", render: (_, row) => <Button type="link" onClick={() => openDetail(row.tenantId)}>{t("详情 / 办理")}</Button> }
   ];
   return <>
-    <PageHeader title="租户订阅" description="按版本、状态、到期范围与租户筛选；进入详情直接开通、升级、续期、临时延长、下期降级与功能授权。"
+    <PageHeader title="租户订阅"
       extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setTenantId(undefined); setSelecting(true); }}>{t("直接为租户开通")}</Button>}
       view={<Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <Space wrap>
-          <Segmented value={plan} onChange={(value) => { setPlan(String(value)); resetPage(); }} options={[{ value: "all", label: t("全部") }, { value: "standard", label: t("基础版") }, { value: "pro", label: "PRO" }]} />
-          <Select style={{ minWidth: 160 }} placeholder={t("服务状态")} allowClear value={serviceStatus} onChange={(value) => { setServiceStatus(value); resetPage(); }} options={Object.values(SubscriptionServiceStatus).map((value) => ({ value, label: t(SERVICE_STATUS_LABEL[value]) }))} />
-          <Select style={{ minWidth: 160 }} placeholder={t("到期范围")} allowClear value={dueWithin} onChange={(value) => { setDueWithin(value); resetPage(); }} options={[{ value: "7", label: t("7 天内到期") }, { value: "30", label: t("30 天内到期") }, { value: "expired", label: t("已过期") }]} />
-          <SearchField label={t("搜索租户订阅")} style={{ minWidth: 220 }} placeholder={t("搜索租户名称 / 编码")} onSearch={(value) => { setKeyword(value); resetPage(); }} />
-        </Space>
+
         <QueryState loading={query.isLoading}>
           {query.error ? <Alert type="error" showIcon message={t("租户订阅列表加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
-            : <Card size="small" styles={{ body: { padding: 0 } }}><Table<TenantSubscriptionOverview> rowKey="tenantId" columns={columns} dataSource={query.data?.items ?? []} loading={query.isFetching} scroll={{ x: 900 }} pagination={{ current: query.data?.page ?? pagination.page, pageSize: query.data?.pageSize ?? pagination.pageSize, total: query.data?.total ?? 0, showSizeChanger: true, onChange: (page, pageSize) => setPagination({ page: pageSize === pagination.pageSize ? page : 1, pageSize }) }} /></Card>}
+            : <ListSection controls={<><Segmented value={plan} onChange={(value) => { setPlan(String(value)); resetPage(); }} options={[{ value: "all", label: t("全部") }, { value: "standard", label: t("基础版") }, { value: "pro", label: "PRO" }]} /><Select style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("服务状态")} allowClear value={serviceStatus} onChange={(value) => { setServiceStatus(value); resetPage(); }} options={Object.values(SubscriptionServiceStatus).map((value) => ({ value, label: t(SERVICE_STATUS_LABEL[value]) }))} /><ListFilterItem width="selectWide" label={t("到期范围")} active={Boolean(dueWithin)}><Select style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("到期范围")} allowClear value={dueWithin} onChange={(value) => { setDueWithin(value); resetPage(); }} options={[{ value: "7", label: t("7 天内到期") }, { value: "30", label: t("30 天内到期") }, { value: "expired", label: t("已过期") }]} /></ListFilterItem><SearchField label={t("搜索租户订阅")} style={{ minWidth: "min(100%, var(--rental-control-width-search))" }} placeholder={t("搜索租户名称 / 编码")} onSearch={(value) => { setKeyword(value); resetPage(); }} /></>}><Table<TenantSubscriptionOverview> rowKey="tenantId" columns={columns} onRefresh={() => query.refetch()} dataSource={query.data?.items ?? []} loading={query.isFetching} scroll={{ x: 900 }} pagination={{ current: query.data?.page ?? pagination.page, pageSize: query.data?.pageSize ?? pagination.pageSize, total: query.data?.total ?? 0, showSizeChanger: true, onChange: (page, pageSize) => setPagination({ page: pageSize === pagination.pageSize ? page : 1, pageSize }) }} /></ListSection>}
         </QueryState>
       </Space>} />
     <Modal open={selecting} title={t("选择要办理的租户")} okText={t("进入详情 / 办理")} okButtonProps={{ disabled: !tenantId || tenants.isError }} onCancel={() => setSelecting(false)} onOk={() => tenantId && openDetail(tenantId)}>

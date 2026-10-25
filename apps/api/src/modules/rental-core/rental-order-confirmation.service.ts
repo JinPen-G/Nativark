@@ -331,6 +331,12 @@ export class RentalOrderConfirmationService {
           lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
         }, tx, quote.ruleSnapshot);
 
+        // The number belongs to this creation transaction, not to preparation
+        // or a process-local count. Hooks and all persisted snapshots see it.
+        order.orderNo = await this.coreFacts.allocateOrderNumber(
+          tenantId, order.createdAt, context.settings?.calendar?.timeZone, tx
+        );
+
         // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
         // 前面的订单、订单行和库存预占会随同一事务整体回滚。
         //

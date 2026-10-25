@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
 import { getArcPalette } from "./arcTokens";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminRadii, type AdminRadiusGroups } from "@/app/designTokens";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
 import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
 
 export type AppearanceMode = "default" | "dark" | "compact";
@@ -239,6 +239,7 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
   // 三组独立圆角：容器（卡片/弹窗/抽屉/表格）、按钮（含分段/页签/选中菜单）、输入（录入控件）。
   // 全局基准取按钮组，容器走 borderRadiusLG，输入走各录入组件 token；圆形/胶囊保形不受此影响。
   const { container, button, input } = resolveAdminRadii(radii);
+  const inputRadii = resolveAdminInputRadii(input);
   const radiusXs = Math.max(4, Math.round(button * 0.5));
   const radiusSm = Math.max(4, Math.round(button * 0.75));
   const algorithm = mode === "dark"
@@ -279,7 +280,10 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
       fontFamily: ADMIN_FONT_FAMILY,
       fontSize: ADMIN_TYPOGRAPHY.body.size,
       lineHeight: ADMIN_TYPOGRAPHY.body.lineHeight / ADMIN_TYPOGRAPHY.body.size,
-      fontWeightStrong: ADMIN_TYPOGRAPHY.sectionTitle.weight
+      fontWeightStrong: ADMIN_TYPOGRAPHY.sectionTitle.weight,
+      controlHeight: ADMIN_CONTROL_HEIGHT.default,
+      controlHeightSM: ADMIN_CONTROL_HEIGHT.small,
+      controlHeightLG: ADMIN_CONTROL_HEIGHT.large
     },
     components: {
       Layout: {
@@ -309,16 +313,15 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
         bodyPadding: 24
       },
       // 录入控件（输入组）独立圆角：与按钮/容器分档，表单里输入框可单独设方/圆。
-      Input: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
-      InputNumber: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
-      Select: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
-      DatePicker: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
-      Cascader: { borderRadius: input },
-      TreeSelect: { borderRadius: input },
-      Mentions: { borderRadius: input },
-      // 工具条上的按钮偏矮，压不住 18px 的页面标题；32 → 36 只动按钮，
-      // 输入框与选择器仍按全局 controlHeight，避免整站密度跟着变。
-      Button: { controlHeight: 36, borderRadius: button, borderRadiusLG: button, borderRadiusSM: Math.max(4, Math.round(button * 0.75)) },
+      Input: { ...inputRadii },
+      InputNumber: { ...inputRadii },
+      Select: { ...inputRadii },
+      DatePicker: { ...inputRadii },
+      Cascader: { ...inputRadii },
+      TreeSelect: { ...inputRadii },
+      Mentions: { ...inputRadii },
+      // Same scale as UIArc, including explicit small/large and fallback links.
+      Button: { paddingInline: ADMIN_CONTROL_PADDING.default, paddingInlineSM: ADMIN_CONTROL_PADDING.small, paddingInlineLG: ADMIN_CONTROL_PADDING.large, borderRadius: button, borderRadiusLG: button, borderRadiusSM: Math.max(4, Math.round(button * 0.75)) },
       Table: {
         cellPaddingBlock: 12,
         cellPaddingInline: 8,

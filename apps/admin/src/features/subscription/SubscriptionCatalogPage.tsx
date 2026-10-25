@@ -1,6 +1,7 @@
-import { PlusOutlined } from "@ant-design/icons";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { PlusOutlined } from "@/components/ui/icons";
 import { Card, Descriptions, Space, Tag } from "antd";
-import { Alert, Table } from "@/components/ui";
+import { ListSection, Alert, Table } from "@/components/ui";
 import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
@@ -22,6 +23,7 @@ export function SubscriptionCatalogPage() {
   const { t } = useLocale();
   const prices = useQuery({ queryKey: ["subscription", "standard-prices"], queryFn: subscriptionApi.standardPrices });
   const catalog = useQuery({ queryKey: ["subscription", "feature-catalog"], queryFn: subscriptionApi.featureCatalog });
+  const featureFilter = useListFilter(catalog.data, { fields: row => [row.name, row.code, row.module] });
   const [priceModal, setPriceModal] = useState<{ open: boolean; plan: SubscriptionPlan | null; current: StandardPlanPricing | null }>({ open: false, plan: null, current: null });
   const [catalogModal, setCatalogModal] = useState<{ open: boolean; entry: SubscriptionFeatureCatalogEntry | null }>({ open: false, entry: null });
 
@@ -40,7 +42,6 @@ export function SubscriptionCatalogPage() {
   return (
     <PageHeader
       title="功能目录与定价"
-      description="维护可销售功能目录与上线状态、公共下放归属，以及基础版 / PRO 标准年费；价格未发布显示「价格待公布」。"
       view={
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Card size="small" title={t("标准套餐价")}>
@@ -56,11 +57,11 @@ export function SubscriptionCatalogPage() {
                 })} />}
           </Card>
 
-          <Card size="small" title={t("功能目录")} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCatalogModal({ open: true, entry: null })}>{t("新增功能")}</Button>}>
+          <ListSection title={t("功能目录")} controls={<ListFilters filter={featureFilter} placeholder="功能、模块或编码" />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCatalogModal({ open: true, entry: null })}>{t("新增功能")}</Button>}>
             {catalog.isLoading ? <LoadingState />
               : catalog.error ? <Alert type="error" showIcon message={t("功能目录加载失败")} description={<Button size="small" onClick={() => catalog.refetch()}>{t("重试")}</Button>} />
-              : <Table<SubscriptionFeatureCatalogEntry> rowKey="code" size="small" columns={columns} dataSource={catalog.data ?? []} pagination={{ pageSize: 20, hideOnSinglePage: true }} />}
-          </Card>
+              : <Table<SubscriptionFeatureCatalogEntry> rowKey="code" size="small" columns={columns} onRefresh={() => catalog.refetch()} loading={catalog.isFetching} dataSource={featureFilter.rows} pagination={featureFilter.pagination} />}
+          </ListSection>
 
           {priceModal.open && <StandardPriceModal open plan={priceModal.plan} current={priceModal.current} onClose={() => setPriceModal({ open: false, plan: null, current: null })} />}
           {catalogModal.open && <FeatureCatalogModal open entry={catalogModal.entry} onClose={() => setCatalogModal({ open: false, entry: null })} />}

@@ -1,8 +1,9 @@
-import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
+import { catalogCards } from "./catalogCards";
+import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@/components/ui/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { App, Empty } from "@/components/ui";
+import { ListSection, App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -17,6 +18,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
+import { catalogCapabilities } from "@/features/listCapabilities";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
 const cameraEquipmentTypeLabels: Record<string, [string, string]> = {
@@ -146,11 +148,13 @@ export function CatalogPage() {
 
   return (
     <>
-      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录")} description={locale === "en-US" ? "Maintain product models, shared specifications, and inventory modes for this category. Commercial pricing groups and individual assets are managed separately." : presentation?.itemGroupDescription ?? "按经营品类维护产品型号、共享规格和库存形态；商业定价分组与具体资产在各自页面维护。"} note={{ title: `${itemGroupLabel}${t("是厂商产品主档，不是定价分组")}`, description: locale === "en-US" ? `This page stores manufacturer, brand, model, and shared specifications. ${t(profile.data?.terminology.identifierLabel ?? "资产编号")} and other per-asset information are maintained in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理")}”; customer-facing commercial groups are created in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组") }”.` : `这里保存厂商、品牌、型号和共享规格；${profile.data?.terminology.identifierLabel ?? "资产编号"}等单件信息在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”登记，面向客户的商业分组在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组"}”建立。` }} extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{locale === "en-US" ? `${t("新增")} ${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`}</Button> : undefined} />
-      <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space style={{ marginBottom: 16 }}><SearchField label={t("搜索商品型号")} placeholder={t("搜索编码、名称或规格")} value={keyword} onValueChange={setKeyword} style={{ width: 300 }} /></Space>
+      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录")} note={{ title: `${itemGroupLabel}${t("是厂商产品主档，不是定价分组")}`, description: locale === "en-US" ? `This page stores manufacturer, brand, model, and shared specifications. ${t(profile.data?.terminology.identifierLabel ?? "资产编号")} and other per-asset information are maintained in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理")}”; customer-facing commercial groups are created in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组") }”.` : `这里保存厂商、品牌、型号和共享规格；${profile.data?.terminology.identifierLabel ?? "资产编号"}等单件信息在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”登记，面向客户的商业分组在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组"}”建立。` }} extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{locale === "en-US" ? `${t("新增")} ${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`}</Button> : undefined} />
+      <ListSection controls={<><SearchField label={t("搜索商品型号")} placeholder={t("搜索编码、名称或规格")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
+
         <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error}>
-          <Table<RentalItemGroup> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
+          <Table<RentalItemGroup> rowKey="id" onRefresh={() => groups.refetch()} loading={groups.isFetching} dataSource={rows} scroll={{ x: 960 }}
+            {...catalogCapabilities(t, groupFields, () => queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] }), category?.supportedInventoryModes ?? [], presentation?.fixedInventoryMode, presentation?.fixedUnit)}
+            cardView={catalogCards({ t, fields: groupFields, summaryFields, pricingGroups: pricingGroups.data ?? [], canManage, edit: openEditor, risk: row => riskLevelLabels(String(row.attributes.securityRiskLevel ?? ""), locale, t) })} columns={[
             { title: t("照片"), width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },
             { title: itemGroupLabel, fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("商品风控等级"), width: 120, render: (_, row) => {
@@ -169,13 +173,13 @@ export function CatalogPage() {
             { title: t("操作"), fixed: "right", render: (_, row) => canManage ? <Button type="link" onClick={() => openEditor(row)}>{t("编辑")}</Button> : "-" }
           ]} />
         </QueryState>
-      </Card>
+      </ListSection>
 
       <Drawer title={editing ? `${t("编辑")}${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })} />}>
         <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
           <Card size="small" title={`${itemGroupLabel}${t("照片")}`} style={{ marginBottom: 16 }}>
             <Typography.Paragraph type="secondary">{t("上传型号的标准展示图，第一张作为列表封面；具体资产的实拍、状态和损伤照片在资产管理中维护。")}</Typography.Paragraph>
-            {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="processing" style={{ position: "absolute", left: 6, top: 6 }}>{t("封面")}</Tag>}<Button danger size="small" shape="circle" icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
+            {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="processing" style={{ position: "absolute", left: 6, top: 6 }}>{t("封面")}</Tag>}<Button danger size="small" shape="circle" aria-label={t("删除图片")} icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
             <Upload
               accept="image/jpeg,image/png,image/webp"
               multiple
@@ -207,7 +211,7 @@ export function CatalogPage() {
           </Card>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
             <Card size="small" title={t("套装组成")} style={{ marginBottom: 16 }}>
-              <Form.List name="bundleComponents">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Row gutter={8} key={field.key}><Col span={9}><Form.Item {...field} name={[field.name, "itemGroupId"]} rules={[{ required: true }]}><Select placeholder={t("选择组成商品")} options={(groups.data ?? []).filter((item) => item.id !== editing?.id && item.inventoryMode !== RentalInventoryMode.Bundle).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} placeholder={t("数量")} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item {...field} name={[field.name, "substitutionGroup"]}><Input placeholder={t("替代组编码")} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "optional"]} valuePropName="checked"><Switch checkedChildren={t("候选")} unCheckedChildren={t("默认")} /></Form.Item></Col><Col span={2}><Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Col></Row>)}<Alert type="info" showIcon title={t("替代组规则")} description={t("同一替代组必须配置一个默认组成和至少一个替代候选；订单确认后、配货前可以在组内替换。")} /><Button block type="dashed" onClick={() => add({ quantity: 1, optional: false })} icon={<PlusOutlined />}>{t("增加组成项")}</Button></Space>}</Form.List>
+              <Form.List name="bundleComponents">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Row gutter={8} key={field.key}><Col span={9}><Form.Item {...field} name={[field.name, "itemGroupId"]} rules={[{ required: true }]}><Select placeholder={t("选择组成商品")} options={(groups.data ?? []).filter((item) => item.id !== editing?.id && item.inventoryMode !== RentalInventoryMode.Bundle).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} placeholder={t("数量")} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item {...field} name={[field.name, "substitutionGroup"]}><Input placeholder={t("替代组编码")} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "optional"]} valuePropName="checked"><Switch checkedChildren={t("候选")} unCheckedChildren={t("默认")} /></Form.Item></Col><Col span={2}><Button danger type="text" aria-label={t("移除组成项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Col></Row>)}<Alert type="info" showIcon title={t("替代组规则")} description={t("同一替代组必须配置一个默认组成和至少一个替代候选；订单确认后、配货前可以在组内替换。")} /><Button block type="dashed" onClick={() => add({ quantity: 1, optional: false })} icon={<PlusOutlined />}>{t("增加组成项")}</Button></Space>}</Form.List>
             </Card>
           )}</Form.Item>
           <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>

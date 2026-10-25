@@ -294,6 +294,25 @@ void (async () => {
     console.log("  PASS 自助注册：资料状态以锁后行为准");
   }
 
+  // Create-only imports use the same lock and do not activate or rewrite an existing member.
+  {
+    const { prisma, memberships, locks } = build({ registrationMode: "automatic" });
+    const initial = await memberships.registerPersonal("tenant-a", { name: "Original", phone: "13800000019", channel: "admin" }, "op");
+    assert.equal(initial.skipped, undefined);
+    prisma.tables.memberships[0].status = "pending_activation";
+    const before = JSON.stringify(prisma.tables);
+    const result = await memberships.registerPersonal("tenant-a", { name: "Replacement", phone: "13800000019", channel: "admin", onlyNew: true, directApprove: true, temporaryPassword: "NoChange123" }, "op", true, true);
+    assert.equal(result.skipped, true);
+    assert.equal(result.membershipStatus, "pending_activation");
+    assert.equal(JSON.stringify(prisma.tables), before, "duplicate import must preserve all profiles, member status, reviews and credentials");
+    assert.ok(locks.length >= 2, "duplicate decision still passes the original customer lock");
+    await assert.rejects(() => memberships.registerPersonal("tenant-a", { name: "n", phone: "13800000020", channel: "app", onlyNew: true }), /仅新增模式只用于后台导入/u);
+    const created = await memberships.registerPersonal("tenant-a", { name: "New", phone: "13800000021", channel: "admin", onlyNew: true }, "op");
+    assert.equal(created.skipped, undefined);
+    assert.ok(created.customerId);
+    console.log("  PASS create-only import: duplicates skipped without writes; new membership keeps original policy");
+  }
+
   console.log("统一注册流程专项全部通过");
 })().catch((error) => {
   console.error(error);

@@ -1,0 +1,46 @@
+.stack { display: flex; flex-direction: column; gap: var(--rental-layout-section-gap); min-width: 0; }
+.overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, var(--rental-detail-summary-width)); gap: var(--space-5); padding-block: 0 var(--space-4); border-bottom: 1px solid var(--border); }
+.identity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.customer { font-size: var(--rental-typography-section-title-size); font-weight: var(--rental-typography-section-title-weight); color: var(--foreground); }
+.secondary { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.plan { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+.planItem { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.label { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.date { color: var(--foreground); font-size: var(--rental-typography-section-title-size); font-weight: var(--rental-typography-panel-title-weight); line-height: var(--rental-typography-section-title-line-height); font-variant-numeric: tabular-nums; }
+.location { overflow-wrap: anywhere; }
+.address { margin-top: var(--space-3); overflow-wrap: anywhere; }
+.balance { display: flex; flex-direction: column; gap: var(--space-2); padding-inline-start: var(--space-5); border-inline-start: 1px solid var(--border); min-width: 0; }
+.balanceTop { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
+.money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.heroMoney { color: var(--foreground); font-size: var(--rental-typography-metric-size); font-weight: var(--rental-typography-metric-weight); line-height: var(--rental-typography-metric-line-height); }
+.balanceFacts, .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
+.balanceFacts > div, .facts > div { min-width: 0; }
+.balanceFacts dt, .facts dt { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.balanceFacts dd, .facts dd { margin: 0; color: var(--foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.actions:empty { display: none; }
+.attention { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); padding-block: var(--space-2); }
+.attention:empty { display: none; }
+.attention button { color: var(--warning); }
+.account { display: grid; grid-template-columns: minmax(0, var(--rental-detail-account-label-width)) minmax(0, 1fr); gap: var(--space-4); padding-block: var(--space-4); border-bottom: 1px solid var(--border); }
+.account:first-child { padding-top: 0; }
+.accountName { margin: 0 0 var(--space-1); color: var(--foreground); font-size: var(--rental-typography-panel-title-size); font-weight: var(--rental-typography-panel-title-weight); line-height: var(--rental-typography-panel-title-line-height); }
+.account .facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.accountActions { grid-column: 2; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.accountActions:empty { display: none; }
+.snapshot { padding-block: var(--space-2); }
+.snapshot .facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.note { margin: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.assistant > section > h2 { display: none; }
+@media (max-width: 1023px) {
+  .overview { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .balance { border-inline-start: 0; padding-inline-start: 0; border-top: 1px solid var(--border); padding-top: var(--space-3); }
+  .balanceFacts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .account { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .accountActions { grid-column: 1; }
+}
+@media (max-width: 639px) {
+  .plan { gap: var(--space-3); }
+  .balanceFacts, .account .facts, .snapshot .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .money { white-space: normal; overflow-wrap: anywhere; }
+}

@@ -1215,6 +1215,9 @@ export class UpdateRentalServiceOccurrenceDto implements UpdateRentalServiceOccu
  * 每个成员都带装饰器：whitelist 会剥离没装饰器的字段，`validate-dto-coverage.cjs` 会挡。
  */
 export class ListRentalOrdersQueryDto implements RentalOrderListQuery {
+  @IsOptional() @IsString() @MaxLength(256)
+  sort?: string;
+
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1_000_000)
   page?: number;
 

@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@/components/ui/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
@@ -86,7 +86,7 @@ export function CategoryTab({
       <Alert
         type="info"
         showIcon
-        title={`${t(category.name)} · ${t("模型")} ${category.version}`}
+        title={t(category.name)}
         description={t("经营品类创建后固定；租户只能在品类支持的计价、履约、库存、预授权和资质能力内配置。")}
       />
       <Row gutter={[16, 16]}>

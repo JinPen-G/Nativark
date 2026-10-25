@@ -1,22 +1,26 @@
-import { SaveButton } from "@/components/ui";
+import { CustomerPreview } from "@/features/membership/CustomerPreview";
+import { ListFilters, useListFilter } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
 import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
 import { CUSTOMER_GENDERS, CUSTOMER_GENDER_LABELS, CUSTOMER_SOURCE_CHANNELS, CUSTOMER_SOURCE_CHANNEL_LABELS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Tag } from "antd";
+import { Space, Tag } from "antd";
 import { App, Radio } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, Drawer, Select, Tooltip } from "@/components/ui";
-import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { customerApi } from "@/api/customer";
+import { personalImport } from "@/features/listCapabilities";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
-import { CustomerProfileDrawer } from "./CustomerProfileDrawer";
+import { CustomerProfileDetails } from "./CustomerProfileDetails";
 import { QualificationTypesEditor } from "./QualificationTypesPage";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
 
@@ -36,6 +40,8 @@ export function PersonalMembershipPage() {
   const { message } = App.useApp();
   const { t } = useLocale();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { customerId } = useParams<{ customerId: string }>();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const currentWorkspaceId = useAuthStore((state) => state.currentWorkspaceId);
@@ -49,12 +55,14 @@ export function PersonalMembershipPage() {
   const canGrant = hasTenantMembershipPermission("rental-os:member:plan:manage");
   // 证件类型是当前经营空间的业务配置，不可由租户会员管理权限代替空间配置权。
   const canManageTypes = Boolean(currentWorkspaceId) && (hasPermission("rental-os:qualification-type:manage") || hasPermission("rental-os:member:manage"));
-  const [selected, setSelected] = useState<PersonalMembershipMember>(); const [profileTarget, setProfileTarget] = useState<PersonalMembershipMember>(); const [drawer, setDrawer] = useState<"create" | "edit" | "password" | "qualification" | "types" | "grant">(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
+  const [selected, setSelected] = useState<PersonalMembershipMember>(); const [drawer, setDrawer] = useState<"create" | "edit" | "password" | "qualification" | "types" | "grant">(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [statusTarget, setStatusTarget] = useState<PersonalMembershipMember>(); const [statusScope, setStatusScope] = useState<"account" | "membership">();
   const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<SubmitCustomerQualificationRequest>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();
   const statusValue = Form.useWatch("status", statusForm); const acknowledgedManualChecks = Form.useWatch("acknowledgedManualChecks", statusForm);
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
   const members = useQuery({ queryKey: ["membership-personal"], queryFn: membershipApi.personal, enabled: canView });
+  const detailMember = members.data?.find(member => member.customerId === customerId);
+  const memberFilter = useListFilter(members.data, { fields: row => [row.name, row.email, row.phoneMasked], status: row => row.membershipStatus });
   const types = useQuery({ queryKey: ["membership-qualification-options", currentWorkspaceId], queryFn: membershipApi.qualificationOptions, enabled: Boolean(currentWorkspaceId) && drawer === "qualification" && canManage });
   const settings = useQuery({ queryKey: ["membership-registration-settings"], queryFn: membershipApi.registrationSettings, enabled: canView });
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans, enabled: canGrant && drawer === "grant" });
@@ -99,16 +107,22 @@ export function PersonalMembershipPage() {
   const openCreate = () => { form.resetFields(); setSelected(undefined); setDrawer("create"); };
   const openEdit = (member: PersonalMembershipMember) => { form.resetFields(); form.setFieldsValue({ name: member.name, phone: "", email: member.email, gender: member.gender, birthday: member.birthday, sourceChannel: member.sourceChannel, region: member.region }); setSelected(member); setDrawer("edit"); };
   const openStatus = (member: PersonalMembershipMember, scope: "account" | "membership") => { setStatusTarget(member); setStatusScope(scope); statusForm.resetFields(); };
+  useEffect(() => {
+    setDrawer(undefined); setSelected(undefined); setStatusTarget(undefined); setStatusScope(undefined); setRevokeTarget(undefined);
+  }, [customerId]);
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员")} description={t("需要租户级会员查看或管理权限，且数据范围为全部。")} />;
 
   return <QueryState loading={members.isLoading || settings.isLoading} error={members.error ?? settings.error}>
-    <PageHeader title={t("个人会员管理")} description={t("租户统一会员：主档、账号、状态与资质资料共享。")} extra={<Space wrap><Tooltip title={t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}><Radio.Group size="small" value={settings.data?.registrationMode} disabled={!canManage} onChange={(event) => saveMode.mutate(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} /></Tooltip><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
-    <Alert type="info" showIcon title={t("租户统一会员")} description={t("个人主档、账号、会员状态、注册策略与资质审核在租户内共享；切换经营空间仍显示同一份名单。暂停、退出或注销会员会影响租户全部空间，不是只影响当前空间。证件类型和下单资质要求仍由当前空间配置。")} style={{ marginBottom: 16 }} />
-    <Card><Table<PersonalMembershipMember> rowKey="customerId" dataSource={members.data ?? []} pagination={{ pageSize: 20 }} columns={[
-      { title: t("会员"), render: (_, row) => <Space orientation="vertical" size={0}><b>{row.name}</b><span>{row.phoneMasked}</span></Space> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
+    {!customerId && <>
+    <PageHeader title={t("个人会员管理")} description={t("会员资料在租户内共享；状态变更影响全部空间。")} extra={<Space wrap><Tooltip title={t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}><Radio.Group size="small" value={settings.data?.registrationMode} disabled={!canManage} onChange={(event) => saveMode.mutate(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} /></Tooltip><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
+
+    <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember>
+      importConfig={personalImport(t, refresh, settings.data?.supportsOnlyNewImport === true)}
+      exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
+      { title: t("会员"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.name} type="personal" levelName={row.levelName} phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
       { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus])}</Tag> }, { title: t("证件"), render: (_, row) => row.qualifications.length ? row.qualifications.map((item) => <Tag key={item.id} color={qualificationStatus[item.status]?.color}>{item.qualificationType} · {t(qualificationStatus[item.status]?.text ?? item.status)}</Tag>) : "—" },
       { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() }, { title: t("操作"), render: (_, row) => <Space wrap>
-        <Button type="link" disabled={!canView} onClick={() => { setSelected(row); setProfileTarget(row); }}>{t("查看资料")}</Button>
+        <Button type="link" disabled={!canView} onClick={() => navigate(`/membership/personal/${encodeURIComponent(row.customerId)}`)}>{t("查看资料")}</Button>
         {!row.account.provisioned && <Tooltip title={canManageAccount ? undefined : t("需要租户会员账号管理权限")}><Button type="link" disabled={!canManageAccount} loading={ensureAccount.isPending} onClick={() => ensureAccount.mutate(row.customerId)}>{t("开通账号")}</Button></Tooltip>}
         <Button type="link" disabled={!canManageAccount || !row.account.provisioned || row.account.status === "closed"} onClick={() => { setSelected(row); form.resetFields(); setDrawer("password"); }}>{t("密码")}</Button>
         <Button type="link" disabled={(!canManageAccount && !canClose) || !row.account.provisioned || row.account.status === "closed"} onClick={() => openStatus(row, "account")}>{t("账号状态")}</Button>
@@ -116,18 +130,19 @@ export function PersonalMembershipPage() {
         <Button type="link" disabled={!canManage || !currentWorkspaceId} onClick={() => { setSelected(row); qualificationForm.resetFields(); setDrawer("qualification"); }}>{t("提交证件")}</Button>
         <Button type="link" disabled={!canGrant} onClick={() => { setSelected(row); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
       </Space> }
-    ]} /></Card>
-    <CustomerProfileDrawer
-      open={Boolean(profileTarget)}
-      customerId={profileTarget?.customerId}
-      canManage={canManage}
-      canView={canView}
-      canReveal={canReveal}
+    ]} /></ListSection>
+    </>}
+    {customerId && <CustomerProfileDetails key={customerId}
+      customerId={customerId} canManage={canManage && Boolean(detailMember)} canView={canView} canReveal={canReveal}
       canViewOrders={hasTenantMembershipPermission("rental-os:order:view")}
-      onClose={() => setProfileTarget(undefined)}
-      onEdit={() => { if (profileTarget) { setSelected(profileTarget); setProfileTarget(undefined); openEdit(profileTarget); } }}
-      onQualification={() => { if (profileTarget) { setSelected(profileTarget); setProfileTarget(undefined); qualificationForm.resetFields(); setDrawer("qualification"); } }}
-    />
+      onClose={() => navigate("/membership/personal")}
+      onEdit={() => detailMember && openEdit(detailMember)}
+      onQualification={() => { if (detailMember) { setSelected(detailMember); qualificationForm.resetFields(); setDrawer("qualification"); } }}
+      actions={detailMember && <>
+        <Button disabled={(!canManage && !canRiskAction && !canClose) || detailMember.membershipStatus === "closed"} onClick={() => openStatus(detailMember, "membership")}>{t("会员状态")}</Button>
+        <Button disabled={!canGrant} onClick={() => { setSelected(detailMember); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
+      </>}
+    />}
     <Drawer title={drawer === "create" ? t("新增个人会员") : drawer === "edit" ? t("编辑个人会员") : drawer === "password" ? t("设置临时密码") : drawer === "qualification" ? t("提交品类证件") : drawer === "grant" ? t("授予会员方案") : t("证件类型配置")} size={520} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
       {(drawer === "create" || drawer === "edit" || drawer === "password") && <Form layout="vertical" form={form} disabled={drawer === "password" ? !canManageAccount : !canManage} onFinish={(values) => drawer === "create" ? canManage && create.mutate(values) : drawer === "edit" ? canManage && edit.mutate(values) : canManageAccount && password.mutate(values)}>
         {drawer !== "password" && <><Form.Item label={t("姓名")} name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label={t("手机号")} name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? t("留空则保持现有手机号") : undefined} /></Form.Item><Form.Item label={t("邮箱")} name="email"><Input /></Form.Item><Form.Item label={t("性别")} name="gender"><Select allowClear options={CUSTOMER_GENDERS.map((value) => ({ value, label: t(CUSTOMER_GENDER_LABELS[value]) }))} /></Form.Item><Form.Item label={t("生日")} name="birthday"><Input placeholder="YYYY-MM-DD" /></Form.Item><Form.Item label={t("来源渠道")} name="sourceChannel"><Select allowClear options={CUSTOMER_SOURCE_CHANNELS.map((value) => ({ value, label: t(CUSTOMER_SOURCE_CHANNEL_LABELS[value]) }))} /></Form.Item><Form.Item label={t("常驻城市")} name="region"><Input placeholder={t("如 上海")} /></Form.Item><Form.Item label={t("证件号")} name="identityNo"><Input placeholder={t("仅保存脱敏展示值")} /></Form.Item></>}
@@ -146,8 +161,8 @@ export function PersonalMembershipPage() {
           <Form.Item label={t("附件引用")} name="evidenceRef" extra={t("仅填写文件服务返回的不可变引用，不填写本地路径或 URL")}><Input /></Form.Item>
           <SaveButton disabled={!canManage} label={t("提交审核")} form={qualificationForm} pending={submitQualification.isPending} onSave={async values => { const operation = canManage && submitQualification.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
-        <Card size="small" title={t("提交与审核历史")} style={{ marginTop: 20 }}>
-          <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isLoading} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
+        <ListSection title={t("提交与审核历史")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+          <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isFetching} onRefresh={() => qualificationHistory.refetch()} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
             { title: t("证件"), dataIndex: "qualificationType" },
             { title: t("编号"), dataIndex: "referenceNoMasked", render: (value) => value ?? "—" },
             { title: t("证件状态"), render: (_, row) => <Tag color={qualificationStatus[row.qualificationStatus]?.color}>{t(qualificationStatus[row.qualificationStatus]?.text ?? row.qualificationStatus)}</Tag> },
@@ -158,7 +173,7 @@ export function PersonalMembershipPage() {
             { title: t("审核意见"), dataIndex: "reviewReason", render: (value) => value ?? "—" },
             { title: t("附件引用"), dataIndex: "evidenceRef", render: (value) => value ?? "—" }
           ]} />
-        </Card>
+        </ListSection>
       </QueryState>}
       {drawer === "grant" && <QueryState loading={plans.isLoading || assignments.isLoading || scopeOptions.isLoading} error={plans.error ?? assignments.error ?? scopeOptions.error}>
         <Form form={grantForm} layout="vertical" disabled={!canGrant} onFinish={(values) => canGrant && grant.mutate(values)}>
@@ -169,15 +184,15 @@ export function PersonalMembershipPage() {
           <Form.Item label={t("授予原因")} name="reason" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={2} /></Form.Item>
           <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
-        <Card size="small" title={t("当前方案授予记录")} style={{ marginTop: 20 }}>
-          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
+        <ListSection title={t("当前方案授予记录")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
             { title: t("方案"), render: (_, row) => row.snapshot.planName },
             { title: t("权益适用范围"), render: (_, row) => <MembershipBenefitScopeSummary benefits={row.snapshot.benefits} options={scopeOptions.data} /> },
             { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 16).replace("T", " ")} ~ ${row.effectiveTo?.slice(0, 16).replace("T", " ") ?? t("长期")}` },
             { title: t("状态"), render: (_, row) => <Tag color={row.status === "active" ? "success" : row.status === "expired" ? "warning" : "default"}>{row.status === "active" ? t("有效") : row.status === "expired" ? t("已过期") : t("已撤销")}</Tag> },
             { title: t("操作"), render: (_, row) => row.status === "active" && <Button type="link" disabled={!canGrant} onClick={() => { setRevokeTarget(row); revokeForm.resetFields(); }}>{t("撤销")}</Button> },
           ]} />
-        </Card>
+        </ListSection>
       </QueryState>}
       {drawer === "types" && <QualificationTypesEditor />}
     </Drawer>

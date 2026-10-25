@@ -8,6 +8,7 @@ import { useLocale } from "./locale";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
 import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
+import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
@@ -64,7 +65,7 @@ function RouteAccess({ route, children }: { route: AppRouteDefinition; children:
   const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
   if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission)) {
-    return <Result status="403" title={t("无权访问")} subTitle={t("当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。")} />;
+    return <Result status="403" title={t("无权访问")} subTitle={t("当前账号无访问权限，或经营品类暂不支持此功能。")} />;
   }
   return <>{children}</>;
 }
@@ -102,6 +103,7 @@ function ProtectedRoutes() {
        */}
       <AppShell key={workspaceScopeKey}>
         <Suspense fallback={<PageLoader />}>
+          <WorkspaceRouteReady>
           <Routes>
             <Route path="/" element={<DefaultRoute />} />
             <Route path={APP_ROUTES.workbench.path} element={guard(APP_ROUTES.workbench, <WorkbenchPage />)} />
@@ -112,9 +114,12 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.itemGroups.path} element={guard(APP_ROUTES.itemGroups, <CatalogPage />)} />
             <Route path={APP_ROUTES.assets.path} element={guard(APP_ROUTES.assets, <AssetWorkspacePage />)} />
             <Route path={APP_ROUTES.workOrders.path} element={guard(APP_ROUTES.workOrders, <MaintenanceWorkOrdersPage />)} />
+            <Route path={APP_ROUTES.workOrderDetail.path} element={guard(APP_ROUTES.workOrderDetail, <MaintenanceWorkOrdersPage />)} />
             <Route path={APP_ROUTES.locations.path} element={guard(APP_ROUTES.locations, <LocationPage />)} />
             <Route path={APP_ROUTES.pricingGroups.path} element={guard(APP_ROUTES.pricingGroups, <PricingGroupPage />)} />
             <Route path={APP_ROUTES.pricing.path} element={guard(APP_ROUTES.pricing, <RentalCommercialPage section="pricing" />)} />
+            <Route path={APP_ROUTES.pricingVersions.path} element={guard(APP_ROUTES.pricingVersions, <RentalCommercialPage section="pricing" />)} />
+            <Route path={APP_ROUTES.pricingVersionDetail.path} element={guard(APP_ROUTES.pricingVersionDetail, <RentalCommercialPage section="pricing" />)} />
             <Route path={APP_ROUTES.discounts.path} element={guard(APP_ROUTES.discounts, <RentalCommercialPage section="discounts" />)} />
             <Route path={APP_ROUTES.coupons.path} element={guard(APP_ROUTES.coupons, <CouponPage />)} />
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
@@ -127,13 +132,16 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
             <Route path={APP_ROUTES.appearance.path} element={guard(APP_ROUTES.appearance, <AppearancePage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
+            <Route path={APP_ROUTES.paymentReconciliationDetail.path} element={guard(APP_ROUTES.paymentReconciliationDetail, <PaymentReconciliationPage />)} />
             <Route path={APP_ROUTES.subscription.path} element={guard(APP_ROUTES.subscription, <TenantSubscriptionPage />)} />
             <Route path={APP_ROUTES.subscriptionPro.path} element={guard(APP_ROUTES.subscriptionPro, <SubscriptionProPage />)} />
             <Route path={APP_ROUTES.subscriptionRequestDetail.path} element={guard(APP_ROUTES.subscriptionRequestDetail, <SubscriptionRequestDetailPage />)} />
             <Route path={APP_ROUTES.qualificationTypes.path} element={guard(APP_ROUTES.qualificationTypes, <QualificationTypesPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
             <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
+            <Route path={APP_ROUTES.personalMemberDetail.path} element={guard(APP_ROUTES.personalMemberDetail, <PersonalMembershipPage />)} />
             <Route path={APP_ROUTES.corporateMembers.path} element={guard(APP_ROUTES.corporateMembers, <CorporateMembershipPage />)} />
+            <Route path={APP_ROUTES.corporateMemberDetail.path} element={guard(APP_ROUTES.corporateMemberDetail, <CorporateMembershipPage />)} />
             <Route path={APP_ROUTES.membershipPlans.path} element={guard(APP_ROUTES.membershipPlans, <MembershipPlanPage />)} />
             <Route path={APP_ROUTES.membershipRewards.path} element={guard(APP_ROUTES.membershipRewards, <MembershipRewardsPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
@@ -173,6 +181,7 @@ function ProtectedRoutes() {
             {["/platform-governance", "/file-assets", "/async-jobs"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformTools.path} replace />} />)}
             <Route path="*" element={<DefaultRoute />} />
           </Routes>
+          </WorkspaceRouteReady>
         </Suspense>
       </AppShell>
     </RequireAuth>

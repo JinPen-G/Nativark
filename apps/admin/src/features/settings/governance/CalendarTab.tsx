@@ -1,4 +1,4 @@
-import { SaveButton } from "@/components/ui";
+import { ListSection, SaveButton } from "@/components/ui";
 import type {
   RentalCalendarDay,
   RentalCalendarVersionSummary,
@@ -61,7 +61,7 @@ const previewFieldLabels: Record<string, string> = {
  */
 export function CalendarTab({ permissions }: { permissions: GovernancePermissions }) {
   const { message } = App.useApp();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { canManagePrice, canEditCalendar, canPublishCalendar, canViewCalendarHistory, canSeeCalendar } = permissions;
@@ -267,7 +267,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
     <>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <div className="table-toolbar">
-          <Space>
+          <Space wrap>
             <Select
               value={year}
               onChange={setYear}
@@ -275,7 +275,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 currentYear - 1,
                 currentYear,
                 currentYear + 1,
-              ].map((value) => ({ value, label: `${value} ${t("年")}` }))}
+              ].map((value) => ({ value, label: locale === "en-US" ? String(value) : `${value} ${t("年")}` }))}
             />
             <Tag
               color={
@@ -290,7 +290,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               {calendar.data?.sourceName ?? t("未引用官方来源")}
             </Typography.Text>
           </Space>
-          <Space>
+          <Space wrap>
             {/* 需求 4.5.9：默认月历视图，全年逐日长列表仅作为可选视图保留。 */}
             <Switch
               checkedChildren={t("列表")}
@@ -408,11 +408,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           />
         )}
         {calendarListView && (
-        <Card className="data-panel" title={t("全年逐日列表（可选视图）")}>
+        <ListSection title={t("全年日历")}>
           <Table<RentalCalendarDay>
             rowKey="date"
             size="small"
-            dataSource={calendar.data?.days ?? []}
+            onRefresh={() => calendar.refetch()} loading={calendar.isFetching} dataSource={calendar.data?.days ?? []}
             pagination={{ pageSize: 31, showSizeChanger: false }}
             columns={[
               { title: t("日期"), dataIndex: "date" },
@@ -509,7 +509,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               },
             ]}
           />
-        </Card>
+        </ListSection>
         )}
         {/* PRICE-02A（需求 4.5.9）：范围覆盖/移除的统一抽屉（预览 → 确认 → 原子应用）。 */}
         <CalendarRangeModal
@@ -661,7 +661,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <Table
               rowKey="id"
               size="small"
-              dataSource={officialSourceVersions.data ?? []}
+              onRefresh={() => officialSourceVersions.refetch()} loading={officialSourceVersions.isFetching} dataSource={officialSourceVersions.data ?? []}
               pagination={false}
               locale={{ emptyText: `${t("平台尚未登记")} ${year} ${t("年度的官方来源版本，请联系 SaaS 平台管理员")}` }}
               columns={[
@@ -762,7 +762,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       <Table
                         rowKey="date"
                         size="small"
-                        dataSource={publishPreview.data.dates}
+                        onRefresh={() => publishPreview.refetch()} loading={publishPreview.isFetching} dataSource={publishPreview.data.dates}
                         pagination={{ pageSize: 6, showSizeChanger: false }}
                         columns={[
                           { title: t("日期"), dataIndex: "date", width: 110 },
@@ -852,7 +852,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <Table<RentalCalendarVersionSummary>
               rowKey="version"
               size="small"
-              dataSource={calendarVersions.data ?? []}
+              onRefresh={() => calendarVersions.refetch()} loading={calendarVersions.isFetching} dataSource={calendarVersions.data ?? []}
               pagination={false}
               onRow={(row) => ({ onClick: () => setHistoryVersion(row.version) })}
               rowClassName={(row) => (row.version === historyVersion ? "ant-table-row-selected" : "")}
@@ -930,15 +930,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             />
           </QueryState>
           {historyVersion && (
-            <Card
-              className="data-panel"
-              title={`v${historyVersion} ${t("差异与覆盖审计")}`}
-              extra={
+            <ListSection title={`v${historyVersion} ${t("差异与覆盖审计")}`} extra={
                 <Button size="small" onClick={() => setHistoryVersion(undefined)}>
                   {t("收起")}
                 </Button>
-              }
-            >
+              }>
               <QueryState loading={calendarVersionDetail.isLoading} error={calendarVersionDetail.error}>
                 {calendarVersionDetail.data && (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -982,8 +978,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 <Table
                   rowKey={(row) => `${row.date}-${row.action}-${row.at}`}
                   size="small"
-                  style={{ marginTop: 12 }}
-                  dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
+
+                  onRefresh={() => calendarAudits.refetch()} loading={calendarAudits.isFetching} dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
                   pagination={{ pageSize: 8, showSizeChanger: false }}
                   locale={{ emptyText: t("该版本没有人工覆盖调整") }}
                   columns={[
@@ -1017,7 +1013,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   ]}
                 />
               </QueryState>
-            </Card>
+            </ListSection>
           )}
         </Space>
       </Drawer>

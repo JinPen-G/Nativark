@@ -1,4 +1,5 @@
-import { DownloadOutlined, ReloadOutlined } from "@ant-design/icons";
+import { CustomerPreview } from "@/features/membership/CustomerPreview";
+import { DownloadOutlined, ReloadOutlined } from "@/components/ui/icons";
 import type {
   RentalWorkspaceCustomerBreakdownRow,
   RentalWorkspaceLocationBreakdownRow,
@@ -8,8 +9,8 @@ import type {
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
-import { App } from "@/components/ui";
-import { Alert, DatePicker, Table } from "@/components/ui";
+import { ListSection, App } from "@/components/ui";
+import { Alert, DatePicker, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button } from "@/components/ui";
@@ -82,7 +83,6 @@ export function WorkspaceOperationReportPage() {
   });
 
   const data = report.data;
-  const itemLabel = t(profile.data?.terminology.itemLabel ?? "租赁标的");
 
   /**
    * 导出走同一组筛选。
@@ -111,7 +111,6 @@ export function WorkspaceOperationReportPage() {
     <>
       <PageHeader
         title={t("经营报表")}
-        description={`${t("当前经营空间的")} ${itemLabel}${t("订单、收入、优惠、异常、库存与地点客户口径。指标定义四个品类一致，仅标题使用品类术语。")}`}
         view={
           <Space wrap>
             <DatePicker.RangePicker
@@ -126,7 +125,7 @@ export function WorkspaceOperationReportPage() {
             <Select
               allowClear
               placeholder={t("履约地点")}
-              style={{ minWidth: 180 }}
+              style={{ minWidth: "min(100%, var(--rental-control-width-select))" }}
               value={locationId}
               onChange={(value) => setLocationId(value)}
               options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))}
@@ -134,7 +133,7 @@ export function WorkspaceOperationReportPage() {
             <Select
               allowClear
               placeholder={t("客户类型")}
-              style={{ minWidth: 130 }}
+              style={{ minWidth: "min(100%, var(--rental-control-width-select))" }}
               value={customerType}
               onChange={(value) => setCustomerType(value)}
               options={[{ value: "personal", label: t("个人客户") }, { value: "corporate", label: t("企业客户") }]}
@@ -142,7 +141,7 @@ export function WorkspaceOperationReportPage() {
             <Input
               allowClear
               placeholder={t("客户 id")}
-              style={{ width: 200 }}
+              style={{ width: "var(--rental-control-width-field)" }}
               value={customerId}
               onChange={(event) => setCustomerId(event.target.value)}
             />
@@ -162,7 +161,7 @@ export function WorkspaceOperationReportPage() {
         }
       />
       <QueryState loading={report.isLoading} error={report.error}>
-        {data && <ReportBody data={data} />}
+        <TableRefreshProvider onRefresh={() => report.refetch()} busy={report.isFetching}>{data && <ReportBody data={data} />}</TableRefreshProvider>
       </QueryState>
     </>
   );
@@ -216,7 +215,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         )}
       </Card>
 
-      <Card className="data-panel" title={t("异常费用构成")} style={{ marginTop: 16 }}>
+      <ListSection title={t("异常费用构成")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
         <Table
           size="small"
           rowKey="type"
@@ -229,17 +228,17 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             { title: t("涉及订单"), align: "right", dataIndex: "orderCount" }
           ]}
         />
-        <div className="muted" style={{ marginTop: 8 }}>
+        <div className="muted" >
           {t("一张订单同时逾期与损坏时，「异常订单」按去重后的订单计，因此可能小于各类型涉及订单之和。")}
         </div>
-      </Card>
+      </ListSection>
       {/* 快照与区间必须在同一张卡里说清楚，否则「在租占比」会被当成区间利用率。 */}
       <Card className="data-panel" title={t("库存与资产（当前快照）")} style={{ marginTop: 16 }}>
         <Alert
           type="warning"
           showIcon
           title={t("这一节是读取瞬间的快照，不是区间利用率")}
-          description={data.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)}
+          description={t("缺少历史可用时长，暂不计算区间利用率。")}
           style={{ marginBottom: 12 }}
         />
         <Row gutter={[16, 16]}>
@@ -291,7 +290,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
       </Card>
       {/* 维度表分页展示：地点与客户基数可能很大，一次全渲染会把页面拖死。
           分页只是展示层的事——数字本身已由服务端聚合，不受翻页影响。 */}
-      <Card className="data-panel" title={t("地点维度")} style={{ marginTop: 16 }}>
+      <ListSection title={t("地点维度")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
         <Table<RentalWorkspaceLocationBreakdownRow>
           size="small"
           rowKey="locationId"
@@ -307,12 +306,12 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
           ]}
         />
-        <div className="muted" style={{ marginTop: 8 }}>
+        <div className="muted" >
           {t("地点名称取下单时快照；主档改名不改写历史订单，因此这里显示的是该地点订单最多的那个名称。逐行订单量与金额相加等于上方总量，可与订单明细对账。")}
         </div>
-      </Card>
+      </ListSection>
 
-      <Card className="data-panel" title={t("客户维度")} style={{ marginTop: 16 }}>
+      <ListSection title={t("客户维度")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
         <Table<RentalWorkspaceCustomerBreakdownRow>
           size="small"
           rowKey={(row) => row.customerId ?? `name:${row.customerName}`}
@@ -320,7 +319,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           locale={{ emptyText: t("当前筛选下没有订单") }}
           columns={[
-            { title: t("客户"), render: (_: unknown, row) => <><b>{row.customerName}</b><br /><span className="muted">{row.customerId ?? t("无主档 id")}</span></> },
+            { title: t("客户"), render: (_: unknown, row) => <><b><CustomerPreview customerId={row.customerId} name={row.customerName} type={row.customerType === "corporate" ? "corporate" : row.customerType === "personal" ? "personal" : undefined} snapshot /></b><br /><span className="muted">{row.customerId ?? t("无主档 id")}</span></> },
             { title: t("类型"), render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{t(row.customerType === "corporate" ? "企业" : "个人")}</Tag> },
             { title: t("订单量"), align: "right", dataIndex: "orderCount" },
             { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
@@ -329,10 +328,10 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
           ]}
         />
-        <div className="muted" style={{ marginTop: 8 }}>
+        <div className="muted" >
           {t("只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。")}
         </div>
-      </Card>
+      </ListSection>
     </>
   );
 }

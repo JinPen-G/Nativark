@@ -44,6 +44,8 @@ export class UpdateCustomerMembershipRegistrationSettingsDto implements UpdateCu
 }
 
 export class RegisterPersonalMembershipDto implements RegisterPersonalMembershipRequest {
+  @IsOptional() @IsBoolean()
+  onlyNew?: boolean;
   @IsString() @IsNotEmpty() @MaxLength(120)
   name!: string;
   @IsString() @IsNotEmpty() @MaxLength(40)

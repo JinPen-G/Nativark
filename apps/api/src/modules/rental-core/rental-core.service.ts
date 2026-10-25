@@ -2172,10 +2172,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         expiresAt: new Date(Date.now() + quote.ruleSnapshot.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
       });
     }
-    // 订单号序号取自库中该租户的订单数，迁库后不能再用内存数组长度。
-    const sequence = (await this.factStore.countOrders(tenantId)) + 1;
+    // Preparation is not a committed order. Confirmation assigns its human
+    // number under a database lock before hooks or persistence can consume it.
     const order: RentalOrder = {
-      id: orderId, tenantId, orderNo: `RC${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}${String(sequence).padStart(3, "0")}`,
+      id: orderId, tenantId, orderNo: "",
       categoryCode: state.profile.categoryCode, status: RentalCoreOrderStatus.Draft,
       categoryVersionId: quote.categoryVersionId,
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),

@@ -39,7 +39,7 @@ export function SubscriptionRequestDetailPage() {
     onError: (error) => message.error(subscriptionError(error, t("撤销失败，请联系平台")))
   });
 
-  return <PageHeader title="申请详情" description="查看申请的类型、目标、进度与真实办理结果。已办理不等于已收款或已生效，请核对办理期间。"
+  return <PageHeader title="申请详情"
     extra={<Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" showIcon message={subscriptionError(query.error, t("申请详情加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
