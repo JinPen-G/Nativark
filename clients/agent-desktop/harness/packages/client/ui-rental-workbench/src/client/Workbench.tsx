@@ -53,9 +53,16 @@ function CatalogPreview({ catalog, busy, readCatalog, discardCatalog, t }: Pick<
         {catalog.inspection && <p>{t('catalogInspectedRoute')}: {catalog.inspection.selection.model} · {catalog.inspection.protocol} · {catalog.inspection.destination.baseUrl}<br />{t('catalogInspectionBoundary')}</p>}
         {catalog.result && <>
           <p>{t('catalogObserved')} <time dateTime={catalog.result.observedAt}>{catalog.result.observedAt}</time></p>
+          <p>{t('catalogPolicyRevision')}: {catalog.result.policyRevision} · {t('catalogExpires')}: <time dateTime={catalog.result.expiresAt}>{catalog.result.expiresAt}</time></p>
           <p>{t(catalog.result.truncated ? 'catalogPartial' : catalog.result.items.length ? 'catalogReady' : 'catalogEmpty')}</p>
           <ul>{catalog.result.items.map(item => <li key={item.reference}><span>{item.reference}</span><span>{item.categoryCode} · {t(item.status)}</span></li>)}</ul>
         </>}
+        {catalog.material && <details>
+          <summary>{t('catalogMaterial')}</summary>
+          <p>{t('catalogMaterialBoundary')}</p>
+          <pre className={css.material}>{JSON.stringify(JSON.parse(catalog.material.content), null, 2)}</pre>
+          <p>{t('catalogMaterialHash')}: <code>{catalog.material.contentHash}</code></p>
+        </details>}
       </div>
     </details>
 }

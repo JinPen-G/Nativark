@@ -49,24 +49,26 @@ Harness 自有 pnpm workspace 与 lockfile，Rental OS 根工程使用 npm works
 
 当前通路为工作台侧栏“受控目录预览” → 私有Host实际模型准备检查 → 受限原生桥 → 原后台 HTTP → [显式服务模块](../../apps/api/src/modules/ai-native/desktop-business/desktop-business.module.ts) → 原 Auth / Guard / ALS 与有界商品 reader → 模型路由再次检查。它只返回目录引用、注册品类和启停状态，不返回名称、编码、库存、价格或个人资料，不发起模型生成、库存预占或业务写入。结果不写聊天历史，最长展示30秒且不超过原业务事实期限；身份 / 空间 / 页面失效或查询 / 模型输入变化即清除。
 
-工作台不再手填Base URL：填写本次要检查的已配置Provider和模型ID，由 `catalogForModel({ selection, limit })` 经封闭 `rental:catalog-for-model` IPC取得原Host `llm.prepareCall()` 的适配器初始路由。两次准备的模型、端点、协议及准备参数指纹必须一致，均不得过期，仍须服务器当前政策允许该目的地。`preparationVersion` 只由准备配置、能力、重试和路由事实求指纹，不混入观察时间、密钥或宣称数据库配置修订。Host查询4秒截止，壳层控制5秒截止，原目录15秒截止，正常总等待最多25秒；新路径最多并发2次检查，不自动发起下一次查询。桥缺失或适配器无法解析时拒绝，不回退旧人工目的地桥；旧 `catalog` 仅保留已有人工预览兼容，不授予模型调用许可。
+工作台不再手填Base URL：填写本次要检查的已配置Provider和模型ID，由 `catalogForModel({ selection, limit })` 经封闭 `rental:catalog-for-model` IPC取得原Host `llm.prepareCall()` 的适配器初始路由。两次准备的模型、端点、协议及准备参数指纹必须一致，均不得过期；原目录请求携带精确 `modelRoute`，服务器当前政策必须同时允许目的地、模型与协议，响应也须绑定同一路由。`preparationVersion` 只由准备配置、能力、重试和路由事实求指纹，不混入观察时间、密钥或宣称数据库配置修订。Host查询4秒截止，壳层控制5秒截止，原目录15秒截止，正常总等待最多25秒；新路径最多并发2次检查，不自动发起下一次查询。桥缺失或适配器无法解析时拒绝，不回退旧人工目的地桥；旧 `catalog` 仅保留已有人工预览兼容，不授予模型调用许可。
 
 以下 POST 接口统一在 `/api/ai-native/desktop-business/` 下；字段从 [shared 合同](../../packages/shared/src/agent-desktop-business.ts) 和 [OpenAPI](../../apps/api/src/contracts/ai-desktop-business-schemas.ts)读取。身份由服务器当前会话确定，body 中 binding 只用于核对，不授权。
 
 | 后缀 | 作用与边界 |
 | --- | --- |
-| `catalog` | 严格请求 ID / binding / limit / destination；原商品读权、当前政策及审计必须通过。最多50条；人工输入仅在本机按封闭语法解析，未指定数量时预览上限10条。 |
+| `catalog` | 严格请求 ID / binding / limit / destination，可选 `modelRoute` 为精确Provider / 地址 / 模型 / 协议。存在时须匹配当前政策的 `modelRoutes`，响应原样绑定；缺字段只可原人工预览，不能转换为获准模型结果。原商品读权、当前政策及审计必须通过。最多50条；人工输入仅在本机按封闭语法解析，未指定数量时预览上限10条。 |
 | `policy` | 当前配置管理者读取本空间政策；无记录为 `not_configured`，不自动启用。 |
-| `policy/change` | 人类管理者用原 `operationKey`、预期修订和完整政策做 CAS；政策限定工具、目的地、数量及期限，不是模型配置或企业订阅。 |
+| `policy/change` | 人类管理者用原 `operationKey`、预期修订和完整政策做 CAS；限定工具、目的地、可选精确 `modelRoutes`、数量及期限，不是模型配置或企业订阅。每条模型许可须属于目的地白名单，不支持通配符。 |
 | `policy/operation` | 当前管理权限下读取本人原保存收据；`not_observed` 不证明回滚，`AI_RESULT_UNKNOWN` 不换键重做。 |
 
-政策沿原系统配置管理权限，商品查询沿原业务权限，两者不能互相替代。SQL仓储和原业务审计使用当前空间；读取后复核身份和政策，审计未持久化则不返回投影。新增迁移仅定义政策 / 原保存收据，不安装默认许可；本轮未迁移数据库，缺表时拒绝。原“AI 服务设置”页已接入人类政策编辑：先读取当前修订，再明确保存启停、最多50条、UTC期限及获准目的地；不开放模型 Key 或任意工具。
+政策沿原系统配置管理权限，商品查询沿原业务权限，两者不能互相替代。SQL仓储和原业务审计使用当前空间；读取后复核身份和政策，审计未持久化则不返回投影。现有JSON政策表保存精确许可，未新增结构迁移或默认许可；本轮未迁移数据库，缺表时拒绝。原“AI 服务设置”页先读取当前修订，再明确保存启停、最多50条、UTC期限、最多16个目的地与32条精确模型许可；不开放模型 Key 或任意工具。旧JSON与原收据缺 `modelRoutes` 时保留原形和幂等载荷，不补猜默认模型；缺失或空列表均不授权模型绑定预览。
 
 编辑器在发送前用当前账号 / 租户 / 空间分区的 `sessionStorage` 保存原操作编号和预期修订，不保存政策正文或凭据。应答不明后阻止新保存，页面重载继续只读核对原编号；`not_observed` 仍待核对，不自动重做。历史保存确认后另读当前政策，不能把旧收据当现行配置。恢复存储不可用时不发新保存；整窗关闭后的恢复引用不作保证，原服务端收据仍保留。
 
 目录输入目前只支持“查看商品目录”“查看前5条商品目录”和对应的有限英文语法，完整匹配后只向原业务桥提交数量与目的地，不传原文；额外客户信息、价格、库存条件、附加指令或超量请求均要求澄清，不调用模型做脱敏。默认10条是预览上限，不是业务默认值；切身份 / 空间重新建立输入区。
 
-模型检查输出只包含本次selection、协议、去凭据HTTPS初始目的地、`preparationVersion`、观察 / 到期时间及 `source=prepared_initial_route`、`execution=not_dispatched`。当前支持直接Messages适配器，以及显式非空API Key的标准OpenAI Responses / Completions、Anthropic Messages适配；SDK账号切换到Codex、隐式认证、其他协议及带用户名 / 密码 / 查询参数的URL保持不可用。目的地只读实际准备快照，不采信Provider目录默认地址或预览请求手填URL。请求配置和初始目的地在准备时固定；pi-ai同时固定显式Key覆盖值，Messages沿原连接快照的认证口解析，不把密钥带到渲染器。现政策核对工具 / Provider / BaseURL，协议只作变更检测，不由此新增模型或协议的外发授权。
+模型检查输出只包含本次selection、协议、去凭据HTTPS初始目的地、`preparationVersion`、观察 / 到期时间及 `source=prepared_initial_route`、`execution=not_dispatched`。当前支持直接Messages适配器，以及显式非空API Key的标准OpenAI Responses / Completions、Anthropic Messages适配；SDK账号切换到Codex、隐式认证、其他协议及带用户名 / 密码 / 查询参数的URL保持不可用。目的地只读实际准备快照，不采信Provider目录默认地址或预览请求手填URL。请求配置和初始目的地在准备时固定；pi-ai同时固定显式Key覆盖值，Messages沿原连接快照的认证口解析，不把密钥带到渲染器。精确模型政策只是当前预览条件，不放开真正的模型发送。
+
+返回的 `material` 是 `purpose=human_preview / modelRequest=not_sent` 的封闭JSON内容与SHA-256；外层原目录保留actor / scope / 政策修订与hash / 配置版本 / 请求号及初始路由。内容仅含本次 `item_1` 等序号引用、受控品类 / 启停枚举、查询 / 到期时间、配置hash和结果覆盖 / 缺项；内部对象编号、个人身份、原始文本、Provider地址、商品名 / 编码、库存与价格不进入内容。壳层生成，工作台复核规范内容和SHA后显示；指纹不是签名、执行依据或收据。结果最多30秒，在条件编辑、观察到的身份变化或本次准备变化时撤回；尚无服务端失权即时广播。仅存临时界面状态，不入聊天 / 摘要 / 文件，不实现30天 / 7天留存制度，也不能据此宣称完整历史隔离。旧Host / Web若缺新字段严格拒绝，不降级绕过精确许可。
 
 这是本地Host对实际准备调用的观察，不是服务端远程可信证明、普通聊天所选模型的声明、最终重定向 / 文件目标证明或可复用派发许可；也不能证明旧调用未发送、允许释放占用或重做unknown。`execution=not_dispatched` 仅说明本检查未进入流 / 派发入口，不是宿主其他调用的全局结论。准备可能解析已有凭据及供应商自有元数据，不等于模型生成。此处未发送事实，也未复用检查对象执行模型。尚缺最终模型外发控制、完整输入隐私 / 历史归属、片段保留及累计业务限额；不得把预览结果直接注入普通聊天、Shell、插件或模型。后续真实调用须重新经同一准备 / 投影 / 当前政策与执行门，不以此次观察代替。
 

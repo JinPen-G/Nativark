@@ -4,11 +4,12 @@ import { parseRentalDesktopBusinessPolicy } from '@rental-os/shared';
 import { desktopBusinessPolicyApi } from '@/api/desktopBusiness';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { useLocale } from '@/app/locale';
-import { ActionButton, Alert, Button, Form, Input, SaveButton, Switch } from '@/components/ui';
+import { ActionButton, Alert, Button, Form, Input, SaveButton, Select, Switch } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { DesktopPolicySession } from './desktop-policy-session';
 
-interface Values { enabled: boolean; maxRows: number; expiresAt: string; destinations: Array<{ provider: string; baseUrl: string }> }
+interface Values { enabled: boolean; maxRows: number; expiresAt: string; destinations: Array<{ provider: string; baseUrl: string }>;
+  modelRoutes: Array<{ provider: string; baseUrl: string; model: string; protocol: string }> }
 const messages = {
   idle: '本地业务默认不开放。这里只管理当前经营空间的人工目录预览许可，不配置模型 Key、不开放模型自动工具或建单。',
   saved: '政策已保存。请重新读取当前政策；这不代表模型已连接或业务 Agent 已启用。',
@@ -44,8 +45,8 @@ function DesktopBusinessPolicyEditor({ identity }: { identity: string }) {
   useEffect(() => { session.activate(); void session.load().catch(() => undefined); return () => session.dispose(); }, [session]);
   useEffect(() => {
     if (!state.policy) { form.resetFields(); return; }
-    form.setFieldsValue(state.policy.state === 'configured' ? state.policy.policy
-      : { enabled: false, maxRows: 10, expiresAt: '', destinations: [{ provider: '', baseUrl: '' }] });
+    form.setFieldsValue(state.policy.state === 'configured' ? { ...state.policy.policy, modelRoutes: state.policy.policy.modelRoutes ?? [] }
+      : { enabled: false, maxRows: 10, expiresAt: '', destinations: [{ provider: '', baseUrl: '' }], modelRoutes: [] });
   }, [state.policy, form]);
   const save = async (values: Values) => session.save(parseRentalDesktopBusinessPolicy({ ...values,
     toolCodes: values.enabled ? ['rental.catalog.search'] : [] }));
@@ -74,7 +75,19 @@ function DesktopBusinessPolicyEditor({ identity }: { identity: string }) {
           </div>)}
           <Button disabled={blocked || fields.length >= 16} onClick={() => add({ provider: '', baseUrl: '' })}>{t('添加获准目的地')}</Button>
         </>}</Form.List>
-        <p>{t('目的地白名单不证明模型当前连接，也不授予用户超出原业务权限的数据。未配置、停用或过期均拒绝读取。')}</p>
+        <Form.List name="modelRoutes">{(fields, { add, remove }) => <>
+          {fields.map(field => <div key={field.key} className="panel-toolbar">
+            <Form.Item name={[field.name, 'provider']} label={t('精确模型的 Provider')} rules={[{ required: true }]}><Input maxLength={128} /></Form.Item>
+            <Form.Item name={[field.name, 'baseUrl']} label={t('精确模型的 HTTPS Base URL')} rules={[{ required: true }]}><Input maxLength={2048} /></Form.Item>
+            <Form.Item name={[field.name, 'model']} label={t('获准模型 ID')} rules={[{ required: true }]}><Input maxLength={256} /></Form.Item>
+            <Form.Item name={[field.name, 'protocol']} label={t('获准协议')} rules={[{ required: true }]}><Select options={[
+              { value: 'openai-responses', label: 'OpenAI Responses' }, { value: 'openai-completions', label: 'OpenAI Chat Completions' },
+              { value: 'anthropic-messages', label: 'Anthropic Messages' }]} /></Form.Item>
+            <Button disabled={blocked} onClick={() => remove(field.name)}>{t('移除模型许可')}</Button>
+          </div>)}
+          <Button disabled={blocked || fields.length >= 32} onClick={() => add({ provider: '', baseUrl: '', model: '', protocol: undefined })}>{t('添加精确模型许可')}</Button>
+        </>}</Form.List>
+        <p>{t('模型预览需同时匹配目的地和精确模型、协议；空列表不授权任何模型，不支持通配符。旧目的地许可仅保留原人工预览。这里不开放模型发送、工具执行或建单。')}</p>
         <SaveButton form={form} label={t('保存本地业务政策')} disabled={blocked} onSave={save} />
       </Form>
     </>}

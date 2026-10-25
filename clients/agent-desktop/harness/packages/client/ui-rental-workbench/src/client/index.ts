@@ -16,13 +16,13 @@ export const inject = ['slots', 'layout', 'locale']
 export function apply(ctx: Context): void {
   const bridge = (globalThis as typeof globalThis & { rentalDesktop?: RentalDesktopBridge }).rentalDesktop
   if (bridge?.protocolVersion !== RENTAL_DESKTOP_PROTOCOL_VERSION) return
-  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null, inspection: null } })
+  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null, inspection: null, material: null } })
   let catalogGeneration = 0
   let catalogExpiry: ReturnType<typeof setTimeout> | undefined
   const clearCatalog = () => {
     catalogGeneration++
     clearTimeout(catalogExpiry)
-    state.update(value => { value.catalog = { busy: false, failed: false, result: null, inspection: null } })
+    state.update(value => { value.catalog = { busy: false, failed: false, result: null, inspection: null, material: null } })
   }
   let noticeSequence = 0
   const panel = 'rental-business' as MainPanelId
@@ -57,6 +57,7 @@ export function apply(ctx: Context): void {
   }
   const request = (command: RentalDesktopCommand) => {
     if (disposed || state.getSnapshot().busy || state.getSnapshot().snapshot?.session.status !== 'ready') return
+    if (command.kind === 'logout' || command.kind === 'switch-workspace') clearCatalog()
     state.update(value => { value.busy = true; value.failed = false })
     void bridge.request(command).then(() => {
       if (!disposed) state.update(value => { value.busy = false; value.notice = { sequence: ++noticeSequence, ok: true } })
@@ -93,17 +94,21 @@ export function apply(ctx: Context): void {
       void Promise.resolve().then(() => {
         if (!bridge.catalogForModel) throw new Error('AI_RESOURCE_UNAVAILABLE')
         return bridge.catalogForModel(input)
-      }).then(value => {
+      }).then(async value => {
         if (disposed || generation !== catalogGeneration) return
-        const { catalog: result, inspection } = parseRentalDesktopModelCatalogResult(value)
+        const { catalog: result, inspection, material } = parseRentalDesktopModelCatalogResult(value)
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(material.content))
+        if (disposed || generation !== catalogGeneration) return
+        if ([...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('') !== material.contentHash)
+          throw new Error('AI_RESOURCE_UNAVAILABLE')
         const session = state.getSnapshot().snapshot?.session
         if (session?.status !== 'ready' || result.binding.actorId !== session.actorId || result.binding.tenantId !== session.tenantId
           || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()
           || JSON.stringify(inspection.selection) !== JSON.stringify(input.selection)) throw new Error('AI_SCOPE_CHANGED')
-        state.update(draft => { draft.catalog = { busy: false, failed: false, result, inspection } })
+        state.update(draft => { draft.catalog = { busy: false, failed: false, result, inspection, material } })
         catalogExpiry = setTimeout(clearCatalog, Math.max(0, Date.parse(result.expiresAt) - Date.now()))
       }).catch(() => {
-        if (!disposed && generation === catalogGeneration) state.update(value => { value.catalog = { busy: false, failed: true, result: null, inspection: null } })
+        if (!disposed && generation === catalogGeneration) state.update(value => { value.catalog = { busy: false, failed: true, result: null, inspection: null, material: null } })
       })
     },
     measure: element => {

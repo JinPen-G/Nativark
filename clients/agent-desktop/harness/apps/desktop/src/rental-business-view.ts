@@ -6,6 +6,7 @@ import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopCommand, parseRentalDesktopBounds,
   parseRentalDesktopCatalogQuery, parseRentalDesktopCatalogResult,
   parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult, parseRentalDesktopModelInspection,
+  projectRentalDesktopCatalogMaterial,
   type RentalDesktopModelSelection,
   type RentalDesktopCatalogResult, type RentalDesktopCatalogRequest,
   type RentalDesktopSnapshot, type RentalDesktopSession, type RentalDesktopBounds, type RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
@@ -84,6 +85,7 @@ export class RentalBusinessView {
           || current.currentWorkspaceId !== pending.request.binding.workspaceId || result.requestId !== pending.request.id
           || JSON.stringify(result.binding) !== JSON.stringify(pending.request.binding)
           || JSON.stringify(result.destination) !== JSON.stringify(pending.request.query.destination)
+          || JSON.stringify(result.modelRoute ?? null) !== JSON.stringify(pending.request.query.modelRoute ?? null)
           || result.items.length > pending.request.query.limit || Date.parse(result.expiresAt) <= Date.now()) throw Error()
         pending.resolve(result)
       } catch { pending.reject(new Error('AI_RESOURCE_UNAVAILABLE')) }
@@ -327,13 +329,17 @@ export class RentalBusinessView {
     try {
       const first = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
       if (JSON.stringify(first.selection) !== JSON.stringify(input.selection) || Date.parse(first.expiresAt) <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
-      const catalog = await this.readCatalog({ limit: input.limit, destination: first.destination }); current()
+      const modelRoute = { ...first.destination, model: first.selection.model, protocol: first.protocol }
+      const catalog = await this.readCatalog({ limit: input.limit, destination: first.destination, modelRoute }); current()
       const last = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
       if (JSON.stringify(last.selection) !== JSON.stringify(input.selection) || JSON.stringify(first.destination) !== JSON.stringify(last.destination)
         || first.protocol !== last.protocol || first.preparationVersion !== last.preparationVersion
         || Date.parse(first.expiresAt) <= Date.now() || Date.parse(last.expiresAt) <= Date.now()
         || Date.parse(catalog.expiresAt) <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
-      return parseRentalDesktopModelCatalogResult({ catalog: { ...catalog, expiresAt: new Date(Math.min(Date.parse(catalog.expiresAt), Date.parse(last.expiresAt))).toISOString() }, inspection: last })
+      const bounded = { ...catalog, expiresAt: new Date(Math.min(Date.parse(catalog.expiresAt), Date.parse(last.expiresAt))).toISOString() }
+      const content = projectRentalDesktopCatalogMaterial(bounded)
+      return parseRentalDesktopModelCatalogResult({ catalog: bounded, inspection: last,
+        material: { content, contentHash: createHash('sha256').update(content).digest('hex'), purpose: 'human_preview', modelRequest: 'not_sent' } })
     } finally { this.modelReads-- }
   }
   private readCatalog(value: unknown): Promise<RentalDesktopCatalogResult> {

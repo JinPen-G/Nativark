@@ -1,4 +1,4 @@
-/** Current Auth/Guard/ALS -> explicit tenant policy -> bounded existing catalog -> minimal local-model projection. */
+/** Current Auth/Guard/ALS -> exact workspace policy -> bounded existing catalog for human preview. No model dispatch. */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { RentalCategoryCode, RENTAL_DESKTOP_BUSINESS_VERSION, parseRentalDesktopBusinessPolicy,
@@ -94,6 +94,8 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
           || Date.parse(policy.policy.expiresAt) <= clock().getTime()) throw fail('AI_RESOURCE_UNAVAILABLE');
         if (input.query.limit > policy.policy.maxRows || !policy.policy.destinations.some(destination => requestFingerprint(destination) === requestFingerprint(input.query.destination)))
           throw fail('AI_ACCESS_DENIED');
+        if (input.query.modelRoute && !policy.policy.modelRoutes?.some(route => requestFingerprint(route) === requestFingerprint(input.query.modelRoute)))
+          throw fail('AI_ACCESS_DENIED');
         await revalidate();
         const authority = new AiBusinessReadRouteAuthority(dependencies.guard, credentials, clock);
         return authority.withRead('catalog', { limit: input.query.limit }, async authorized => {
@@ -118,6 +120,7 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
           binding, policyRevision: policy.revision, policyHash: requestFingerprint(policy), observedAt,
           expiresAt: new Date(Math.min(Date.parse(policy.policy.expiresAt), Date.parse(observedAt) + 60_000)).toISOString(),
           configurationVersion: facts.configurationVersion, source: facts.source, destination: input.query.destination,
+          ...input.query.modelRoute ? { modelRoute: input.query.modelRoute } : {},
           items: facts.items.map(item => ({ reference: `catalog:${item.id}`, categoryCode: item.categoryCode, status: item.status })),
           truncated: facts.truncated, omittedFields: ['name', 'code', 'unit', 'availability', 'price'], execution: 'read_only' });
         // Reuse durable business audit before disclosure; never log names, raw input, credentials or model content.
@@ -125,7 +128,8 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
           dependencies.audit.record({ tenantId: binding.tenantId, userId: binding.actorId, action: 'ai.desktop.catalog.preview',
             targetType: 'rental.catalog.search', targetId: input.id, requireSuccess: true,
             metadata: { policyRevision: result.policyRevision, policyHash: result.policyHash, configurationVersion: result.configurationVersion,
-              observedAt, rowCount: result.items.length, truncated: result.truncated, modelRequest: 'not_sent' } }));
+              observedAt, rowCount: result.items.length, truncated: result.truncated, modelRequest: 'not_sent',
+              ...input.query.modelRoute ? { modelRouteHash: requestFingerprint(input.query.modelRoute) } : {} } }));
         assertActive(); await verifyPolicy();
         if (Date.parse(result.expiresAt) <= clock().getTime()) throw fail('AI_RESOURCE_UNAVAILABLE');
         return result;

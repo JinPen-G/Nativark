@@ -1,5 +1,5 @@
 /** Non-secret UI projection and callback shares; the native-view owner handles IPC. */
-import type { RentalDesktopBounds, RentalDesktopSnapshot, RentalDesktopModelCatalogQuery, RentalDesktopCatalogResult, RentalDesktopModelInspection } from '@rental-os/shared/agent-desktop'
+import type { RentalDesktopBounds, RentalDesktopSnapshot, RentalDesktopModelCatalogQuery, RentalDesktopCatalogResult, RentalDesktopModelInspection, RentalDesktopCatalogMaterial } from '@rental-os/shared/agent-desktop'
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RentalWorkbenchKey } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -9,7 +9,7 @@ export interface WorkbenchState {
   busy: boolean
   failed: boolean
   notice: { sequence: number; ok: boolean } | null
-  catalog: { busy: boolean; failed: boolean; result: RentalDesktopCatalogResult | null; inspection: RentalDesktopModelInspection | null }
+  catalog: { busy: boolean; failed: boolean; result: RentalDesktopCatalogResult | null; inspection: RentalDesktopModelInspection | null; material: RentalDesktopCatalogMaterial | null }
 }
 export interface WorkbenchInjected {
   hooks: { business: HostObservable<WorkbenchState>; workMode: HostObservable<'ai' | 'traditional'> }

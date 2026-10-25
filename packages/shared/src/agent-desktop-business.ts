@@ -6,11 +6,14 @@ export const RENTAL_DESKTOP_BUSINESS_HTTP = {
 } as const;
 export interface RentalDesktopModelDestination { provider: string; baseUrl: string }
 export interface RentalDesktopModelSelection { provider: string; model: string }
+export type RentalDesktopModelProtocol = 'openai-responses' | 'openai-completions' | 'anthropic-messages';
+/** Exact permission target; no wildcard, provider defaults or implicit protocol migration. */
+export interface RentalDesktopModelRoute extends RentalDesktopModelDestination { model: string; protocol: RentalDesktopModelProtocol }
 /** Local Host observation of a real prepared call; not dispatch admission or a final network/redirect attestation. */
 export interface RentalDesktopModelInspection {
   selection: RentalDesktopModelSelection;
   destination: RentalDesktopModelDestination;
-  protocol: 'openai-responses' | 'openai-completions' | 'anthropic-messages';
+  protocol: RentalDesktopModelProtocol;
   preparationVersion: string;
   observedAt: string;
   expiresAt: string;
@@ -18,11 +21,18 @@ export interface RentalDesktopModelInspection {
   execution: 'not_dispatched';
 }
 export interface RentalDesktopModelCatalogQuery { selection: RentalDesktopModelSelection; limit: number }
-export interface RentalDesktopModelCatalogResult { catalog: RentalDesktopCatalogResult; inspection: RentalDesktopModelInspection }
+export interface RentalDesktopCatalogMaterial {
+  content: string;
+  contentHash: string;
+  purpose: 'human_preview';
+  modelRequest: 'not_sent';
+}
+export interface RentalDesktopModelCatalogResult { catalog: RentalDesktopCatalogResult; inspection: RentalDesktopModelInspection; material: RentalDesktopCatalogMaterial }
 export interface RentalDesktopBusinessBinding { actorId: string; tenantId: string; workspaceId: string }
 export interface RentalDesktopCatalogQuery {
   limit: number;
   destination: RentalDesktopModelDestination;
+  modelRoute?: RentalDesktopModelRoute;
 }
 export interface RentalDesktopCatalogRequest {
   id: string;
@@ -40,6 +50,7 @@ export interface RentalDesktopCatalogResult {
   configurationVersion: string;
   source: 'persisted_workspace_configuration';
   destination: RentalDesktopModelDestination;
+  modelRoute?: RentalDesktopModelRoute;
   items: Array<{ reference: string; categoryCode: string; status: 'enabled' | 'disabled' }>;
   truncated: boolean;
   omittedFields: readonly ['name', 'code', 'unit', 'availability', 'price'];
@@ -49,6 +60,8 @@ export interface RentalDesktopBusinessPolicy {
   enabled: boolean;
   toolCodes: Array<'rental.catalog.search'>;
   destinations: RentalDesktopModelDestination[];
+  /** Absent legacy configuration or an empty list grants no model-bound preview. */
+  modelRoutes?: RentalDesktopModelRoute[];
   maxRows: number;
   expiresAt: string;
 }
@@ -131,6 +144,14 @@ export function parseRentalDesktopModelSelection(value: unknown): RentalDesktopM
   if (typeof row.model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(row.model)) throw new Error('Invalid model selection');
   return { provider: word(row.provider, 128), model: row.model };
 }
+export function parseRentalDesktopModelRoute(value: unknown): RentalDesktopModelRoute {
+  const row = record(value, ['provider', 'baseUrl', 'model', 'protocol']);
+  const destination = parseRentalDesktopDestination({ provider: row.provider, baseUrl: row.baseUrl });
+  const selection = parseRentalDesktopModelSelection({ provider: row.provider, model: row.model });
+  if (typeof row.protocol !== 'string' || !['openai-responses', 'openai-completions', 'anthropic-messages'].includes(row.protocol))
+    throw new Error('Invalid model protocol');
+  return { ...destination, model: selection.model, protocol: row.protocol as RentalDesktopModelProtocol };
+}
 export function parseRentalDesktopModelInspection(value: unknown): RentalDesktopModelInspection {
   const row = record(value, ['selection', 'destination', 'protocol', 'preparationVersion', 'observedAt', 'expiresAt', 'source', 'execution']);
   const selection = parseRentalDesktopModelSelection(row.selection), destination = parseRentalDesktopDestination(row.destination);
@@ -148,32 +169,49 @@ export function parseRentalDesktopModelCatalogQuery(value: unknown): RentalDeskt
 }
 export function parseRentalDesktopModelCatalogResult(value: unknown): RentalDesktopModelCatalogResult {
   if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 65536) throw new Error('Model catalog result too large');
-  const row = record(value, ['catalog', 'inspection']), catalog = parseRentalDesktopCatalogResult(row.catalog), inspection = parseRentalDesktopModelInspection(row.inspection);
+  const row = record(value, ['catalog', 'inspection', 'material']), catalog = parseRentalDesktopCatalogResult(row.catalog), inspection = parseRentalDesktopModelInspection(row.inspection);
   if (JSON.stringify(catalog.destination) !== JSON.stringify(inspection.destination) || Date.parse(catalog.expiresAt) > Date.parse(inspection.expiresAt))
     throw new Error('Model route differs from authorized catalog destination');
-  return { catalog, inspection };
+  const expectedRoute = parseRentalDesktopModelRoute({ ...inspection.destination, model: inspection.selection.model, protocol: inspection.protocol });
+  if (!catalog.modelRoute || JSON.stringify(catalog.modelRoute) !== JSON.stringify(expectedRoute)) throw new Error('Model route not authorized');
+  const material = record(row.material, ['content', 'contentHash', 'purpose', 'modelRequest']);
+  if (material.purpose !== 'human_preview' || material.modelRequest !== 'not_sent'
+    || material.content !== projectRentalDesktopCatalogMaterial(catalog)) throw new Error('Invalid catalog material');
+  return { catalog, inspection, material: { content: material.content as string, contentHash: hash(material.contentHash), purpose: 'human_preview', modelRequest: 'not_sent' } };
 }
 export function parseRentalDesktopBusinessBinding(value: unknown): RentalDesktopBusinessBinding {
   const row = record(value, ['actorId', 'tenantId', 'workspaceId']);
   return { actorId: word(row.actorId), tenantId: word(row.tenantId), workspaceId: word(row.workspaceId) };
 }
 export function parseRentalDesktopCatalogQuery(value: unknown): RentalDesktopCatalogQuery {
-  const row = record(value, ['limit', 'destination']);
-  return { limit: positive(row.limit, 50), destination: parseRentalDesktopDestination(row.destination) };
+  const row = record(value, ['limit', 'destination', 'modelRoute']), destination = parseRentalDesktopDestination(row.destination);
+  const modelRoute = 'modelRoute' in row ? parseRentalDesktopModelRoute(row.modelRoute) : undefined;
+  if (modelRoute && JSON.stringify({ provider: modelRoute.provider, baseUrl: modelRoute.baseUrl }) !== JSON.stringify(destination))
+    throw new Error('Model route differs from query destination');
+  return { limit: positive(row.limit, 50), destination, ...modelRoute ? { modelRoute } : {} };
 }
 export function parseRentalDesktopCatalogRequest(value: unknown): RentalDesktopCatalogRequest {
   const row = record(value, ['id', 'binding', 'query']);
   return { id: word(row.id, 128), binding: parseRentalDesktopBusinessBinding(row.binding), query: parseRentalDesktopCatalogQuery(row.query) };
 }
 export function parseRentalDesktopBusinessPolicy(value: unknown): RentalDesktopBusinessPolicy {
-  const row = record(value, ['enabled', 'toolCodes', 'destinations', 'maxRows', 'expiresAt']);
+  const row = record(value, ['enabled', 'toolCodes', 'destinations', 'modelRoutes', 'maxRows', 'expiresAt']);
   if (typeof row.enabled !== 'boolean' || !Array.isArray(row.toolCodes) || row.toolCodes.length > 1
     || row.toolCodes.some(code => code !== 'rental.catalog.search') || !Array.isArray(row.destinations) || row.destinations.length > 16)
     throw new Error('Invalid local business policy');
   const destinations = row.destinations.map(parseRentalDesktopDestination);
+  let modelRoutes: RentalDesktopModelRoute[] | undefined;
+  if ('modelRoutes' in row) {
+    if (!Array.isArray(row.modelRoutes) || row.modelRoutes.length > 32) throw new Error('Invalid model route policy');
+    modelRoutes = row.modelRoutes.map(parseRentalDesktopModelRoute);
+    if (new Set(modelRoutes.map(item => JSON.stringify(item))).size !== modelRoutes.length
+      || modelRoutes.some(item => !destinations.some(destination => destination.provider === item.provider && destination.baseUrl === item.baseUrl)))
+      throw new Error('Model route outside destination policy');
+  }
   if (new Set(destinations.map(item => JSON.stringify(item))).size !== destinations.length
     || (row.enabled && (!row.toolCodes.length || !destinations.length))) throw new Error('Invalid local business policy');
-  return { enabled: row.enabled, toolCodes: [...row.toolCodes], destinations, maxRows: positive(row.maxRows, 50), expiresAt: timestamp(row.expiresAt) };
+  // Preserve absent legacy fields so original operation payload hashes and receipts remain readable.
+  return { enabled: row.enabled, toolCodes: [...row.toolCodes], destinations, ...modelRoutes ? { modelRoutes } : {}, maxRows: positive(row.maxRows, 50), expiresAt: timestamp(row.expiresAt) };
 }
 /** Current policy only; a historical save receipt must never be substituted for this read. */
 export function parseRentalDesktopBusinessPolicyRead(value: unknown): RentalDesktopBusinessPolicyRead {
@@ -206,7 +244,7 @@ export function parseRentalDesktopPolicyObservation(value: unknown): RentalDeskt
 /** Only identifiers, registered categories and deterministic facts leave the business page; free text stays there. */
 export function parseRentalDesktopCatalogResult(value: unknown): RentalDesktopCatalogResult {
   const row = record(value, ['version', 'requestId', 'binding', 'policyRevision', 'policyHash', 'observedAt', 'expiresAt',
-    'configurationVersion', 'source', 'destination', 'items', 'truncated', 'omittedFields', 'execution']);
+    'configurationVersion', 'source', 'destination', 'modelRoute', 'items', 'truncated', 'omittedFields', 'execution']);
   if (row.version !== RENTAL_DESKTOP_BUSINESS_VERSION || row.source !== 'persisted_workspace_configuration'
     || row.execution !== 'read_only' || typeof row.truncated !== 'boolean' || !Array.isArray(row.items) || row.items.length > 50
     || JSON.stringify(row.omittedFields) !== JSON.stringify(['name', 'code', 'unit', 'availability', 'price'])) throw new Error('Invalid catalog projection');
@@ -216,12 +254,28 @@ export function parseRentalDesktopCatalogResult(value: unknown): RentalDesktopCa
     return { reference: word(item.reference), categoryCode: word(item.categoryCode, 64), status: item.status };
   });
   if (new Set(items.map(item => item.reference)).size !== items.length) throw new Error('Duplicate catalog reference');
+  const destination = parseRentalDesktopDestination(row.destination), modelRoute = 'modelRoute' in row ? parseRentalDesktopModelRoute(row.modelRoute) : undefined;
+  if (modelRoute && (modelRoute.provider !== destination.provider || modelRoute.baseUrl !== destination.baseUrl)) throw new Error('Invalid catalog model route');
   const result: RentalDesktopCatalogResult = { version: RENTAL_DESKTOP_BUSINESS_VERSION, requestId: word(row.requestId, 128),
     binding: parseRentalDesktopBusinessBinding(row.binding), policyRevision: positive(row.policyRevision, 2147483647), policyHash: hash(row.policyHash),
     observedAt: timestamp(row.observedAt), expiresAt: timestamp(row.expiresAt), configurationVersion: hash(row.configurationVersion),
-    source: row.source, destination: parseRentalDesktopDestination(row.destination), items, truncated: row.truncated,
+    source: row.source, destination, ...modelRoute ? { modelRoute } : {}, items, truncated: row.truncated,
     omittedFields: ['name', 'code', 'unit', 'availability', 'price'], execution: row.execution };
   if (Date.parse(result.expiresAt) <= Date.parse(result.observedAt) || new TextEncoder().encode(JSON.stringify(result)).byteLength > 65536)
     throw new Error('Invalid catalog projection bounds');
   return result;
+}
+/** Canonical minimum material for human review, never a dispatch grant. No raw text, internal IDs or identity binding enters content.
+ * @param value Original authorized catalog response; its outer binding/versions remain with the caller.
+ * @returns Stable JSON with per-response ordinal references. Re-reading never preserves those references as business authority.
+ */
+export function projectRentalDesktopCatalogMaterial(value: unknown): string {
+  const catalog = parseRentalDesktopCatalogResult(value);
+  if (!catalog.modelRoute) throw new Error('Model-bound source required');
+  // Closed projection categories, not another category configuration or pricing engine.
+  if (catalog.items.some(item => !['vehicle', 'camera', 'camping', 'construction'].includes(item.categoryCode))) throw new Error('Unprojectable catalog category');
+  return JSON.stringify({ toolCode: 'rental.catalog.search', source: catalog.source, configurationVersion: catalog.configurationVersion,
+    observedAt: catalog.observedAt, expiresAt: catalog.expiresAt,
+    items: catalog.items.map((item, index) => ({ reference: `item_${index + 1}`, categoryCode: item.categoryCode, status: item.status })),
+    coverage: catalog.truncated ? 'partial' : 'returned_page', omittedFields: catalog.omittedFields });
 }
