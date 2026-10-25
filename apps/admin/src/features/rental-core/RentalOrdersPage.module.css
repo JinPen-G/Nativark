@@ -19,6 +19,8 @@
 .error { margin-bottom: var(--space-3); }
 
 .cellStack { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.statusStack { display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-width: 0; }
+.statusStack > :not(:first-child) { font-weight: 400; color: var(--text-secondary); }
 .secondary { color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
 .orderLink { padding: 0 !important; text-align: start; white-space: normal; height: auto; min-height: 0 !important; overflow-wrap: anywhere; justify-content: flex-start; font-weight: var(--rental-typography-body-weight); font-variant-numeric: tabular-nums; }
 .identityRow { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }

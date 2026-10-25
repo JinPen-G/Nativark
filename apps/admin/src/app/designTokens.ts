@@ -55,6 +55,11 @@ export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75 } as const;
+/** Status ink and surface are paired independently of the tenant brand color. */
+export const ADMIN_STATUS_COLORS = {
+  light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },
+  dark: { success: ["#8DDBB3", "#1B3329"], warning: ["#F4CC86", "#3A2D1B"], error: ["#FFADB4", "#3E2329"], info: ["#A5C7FF", "#203149"], neutral: ["#C0C6CF", "#2C3037"] },
+} as const;
 
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u;
 

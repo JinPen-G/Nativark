@@ -1,0 +1,19 @@
+/* Shared semantic pairs for legacy tags and new status presentations. Keep
+   labels readable without relying on Ant's palette derived from the brand. */
+html[data-theme] .ant-tag[class]:not(.ant-tag-disabled) {
+  --status-ink: var(--rental-status-neutral-ink);
+  --status-surface: var(--rental-status-neutral-surface);
+  color: var(--status-ink);
+  background: var(--status-surface);
+  border-color: transparent;
+  border-radius: var(--rental-table-status-radius-max);
+  min-height: var(--rental-table-status-height);
+  padding-inline: var(--space-2);
+  font-size: var(--rental-typography-meta-size);
+  font-weight: 500;
+  line-height: calc(var(--rental-table-status-height) - 2px);
+}
+html[data-theme] .ant-tag:is(.ant-tag-success, .ant-tag-green, .ant-tag-cyan) { --status-ink: var(--rental-status-success-ink); --status-surface: var(--rental-status-success-surface); }
+html[data-theme] .ant-tag:is(.ant-tag-warning, .ant-tag-orange, .ant-tag-gold, .ant-tag-yellow, .ant-tag-volcano) { --status-ink: var(--rental-status-warning-ink); --status-surface: var(--rental-status-warning-surface); }
+html[data-theme] .ant-tag:is(.ant-tag-error, .ant-tag-red, .ant-tag-magenta) { --status-ink: var(--rental-status-error-ink); --status-surface: var(--rental-status-error-surface); }
+html[data-theme] .ant-tag:is(.ant-tag-processing, .ant-tag-blue, .ant-tag-geekblue, .ant-tag-purple) { --status-ink: var(--rental-status-info-ink); --status-surface: var(--rental-status-info-surface); }

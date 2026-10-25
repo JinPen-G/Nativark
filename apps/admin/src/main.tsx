@@ -10,6 +10,7 @@ import "./components/ui/arc-bridge.css";
 import "./components/ui/input-radius.css";
 import "./components/ui/input-colors.css";
 import "./components/ui/control-metrics.css";
+import "./components/ui/status-colors.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";

@@ -1,4 +1,4 @@
-import { resolveAdminPrimaryColor } from "./designTokens";
+import { ADMIN_STATUS_COLORS, resolveAdminPrimaryColor } from "./designTokens";
 
 /** The neutral/semantic values are the UIArc foundation's OKLCH values, converted
  * to sRGB for AntD's color algorithm. The original full palette lives in vendor/foundation.css. */
@@ -32,6 +32,10 @@ export function getArcPalette(dark: boolean, tenantColor?: string | null) {
 export function applyArcThemeTokens(root: HTMLElement, dark: boolean, tenantColor?: string | null) {
   const palette = getArcPalette(dark, tenantColor);
   root.dataset.theme = dark ? "dark" : "light";
+  for (const [tone, [ink, surface]] of Object.entries(ADMIN_STATUS_COLORS[dark ? "dark" : "light"])) {
+    root.style.setProperty(`--rental-status-${tone}-ink`, ink);
+    root.style.setProperty(`--rental-status-${tone}-surface`, surface);
+  }
   const overrides = ["--accent", "--accent-strong", "--accent-subtle", "--accent-foreground", "--control-on", "--control-glyph", "--control-thumb-on", "--control-fill"];
   overrides.forEach(name => root.style.removeProperty(name));
   delete root.dataset.tenantAccent;
