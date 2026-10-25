@@ -1,4 +1,4 @@
-import { ListSection, SaveButton } from "@/components/ui";
+import { ListFilters, ListSection, SaveButton, useListFilter } from "@/components/ui";
 import { SearchOutlined, UploadOutlined } from "@/components/ui/icons";
 import type { PaymentStatementBatchSummary, PaymentStatementLineSummary } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -44,6 +44,8 @@ export function PaymentReconciliationPage() {
     queryFn: () => rentalCoreApi.paymentStatementBatch(selectedBatchId!),
     enabled: Boolean(selectedBatchId)
   });
+  const batchFilter = useListFilter(batches.data, { fields: row => [row.fileName, t(providerLabels[row.provider] ?? row.provider)], status: row => row.status });
+  const lineFilter = useListFilter(detail.data?.lines, { fields: row => [row.merchantOrderNo, ...row.differenceCodes], status: row => row.reviewStatus });
   const importStatement = useMutation({
     mutationFn: () => {
       const file = fileList[0]?.originFileObj;
@@ -112,12 +114,12 @@ export function PaymentReconciliationPage() {
         {t("单个文件不超过 10MB、最多 10,000 行；文件应包含 kind、status、amount、currency 和商户订单号列，退款行还需商户退款单号。")}
       </Typography.Paragraph>
     </Card>
-    <ListSection title={t("对账批次")}>
+    <ListSection title={t("对账批次")} controls={<ListFilters filter={batchFilter} placeholder="文件名或支付平台" options={Object.entries(batchStatusLabels).map(([value, label]) => ({ value, label }))} />}>
       <QueryState loading={batches.isLoading} error={batches.error}>
         <Table<PaymentStatementBatchSummary>
           rowKey="id"
-          onRefresh={() => batches.refetch()} loading={batches.isFetching} dataSource={batches.data ?? []}
-          pagination={{ pageSize: 10 }}
+          onRefresh={() => batches.refetch()} loading={batches.isFetching} dataSource={batchFilter.rows}
+          pagination={batchFilter.pagination}
           locale={{ emptyText: <Empty description={t("当前经营空间还没有导入对账文件")} /> }}
           columns={[
             { title: t("平台"), dataIndex: "provider", render: (value: string) => t(providerLabels[value] ?? value) },
@@ -142,12 +144,12 @@ export function PaymentReconciliationPage() {
       ] : undefined}>
       <Alert type="warning" showIcon title={t("这里只记录处理结论，不会修改支付、退款或资金事实。")} />
       <QueryState loading={detail.isLoading} error={detail.error}>
-        {detail.data && <ListSection title={t("对账明细")}>
+        {detail.data && <ListSection title={t("对账明细")} controls={<ListFilters filter={lineFilter} placeholder="商户单号或差异编码" options={Object.entries(reviewStatusLabels).map(([value, label]) => ({ value, label }))} />}>
           <Table<PaymentStatementLineSummary>
             rowKey="id"
             size="small"
-            onRefresh={() => detail.refetch()} loading={detail.isFetching} dataSource={detail.data.lines}
-            pagination={{ defaultPageSize: 20 }}
+            onRefresh={() => detail.refetch()} loading={detail.isFetching} dataSource={lineFilter.rows}
+            pagination={lineFilter.pagination}
             scroll={{ x: 980 }}
             columns={[
               { title: t("行"), dataIndex: "rowNumber", width: 56 },

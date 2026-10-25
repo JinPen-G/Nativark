@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Card, Space, Tag, Typography } from "antd";
+import { Space, Tag } from "antd";
+import styles from "./TenantReadiness.module.css";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { CheckCircleFilled, RightOutlined, WarningFilled } from "@/components/ui/icons";
@@ -82,27 +83,25 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
               : `${t("当前缺失：")}${blockingItems.map((item) => t(item.title)).join("、")}。`
         }
       />
+      <ul className={styles.checklist}>
       {data.items.map((item) => (
-        <Card key={item.key} size="small">
-          <Space style={{ justifyContent: "space-between", width: "100%" }}>
-            <Space>
-              {item.done ? <CheckCircleFilled style={{ color: "var(--success)" }} /> : <WarningFilled style={{ color: "var(--warning)" }} />}
-              <Typography.Text strong>{item.title}</Typography.Text>
-              <Tag color={item.unavailable ? "default" : item.done ? "success" : "warning"}>
-                {item.unavailable ? t("待重试") : item.done ? t("已完成") : t("未完成")}
-              </Tag>
-              {!item.done && item.optional && !item.unavailable ? <Tag>{t("可暂缓")}</Tag> : null}
-            </Space>
+        <li key={item.key} className={styles.item}>
+          <div className={styles.indicator} data-done={item.done || undefined}>
+            {item.done ? <CheckCircleFilled role="img" aria-label={t("已完成")} /> : <WarningFilled role="img" aria-label={t("未完成")} />}
+          </div>
+          <div className={styles.copy}>
+            <div className={styles.title}><strong>{t(item.title)}</strong>
+              {!item.done && <Tag color={item.unavailable ? "default" : "warning"}>{item.unavailable ? t("待重试") : item.optional ? t("可暂缓") : t("未完成")}</Tag>}
+            </div>
+            {(item.done ? item.summary : item.missing) && <p>{t((item.done ? item.summary : item.missing)!)}</p>}
+          </div>
             <Button type="link" onClick={() => item.unavailable ? onRefresh() : navigate(item.nextHref)}>
               {item.unavailable ? t("重试") : item.done ? t("查看") : t("去配置")}
               <RightOutlined />
             </Button>
-          </Space>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
-            {item.done ? t(item.summary ?? "已完成") : t(item.missing)}
-          </Typography.Paragraph>
-        </Card>
+        </li>
       ))}
+      </ul>
       <Button onClick={onRefresh}>{t("刷新状态")}</Button>
     </Space>
   );

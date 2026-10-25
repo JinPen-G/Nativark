@@ -9,7 +9,7 @@ import type {
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
-import { ListSection, App } from "@/components/ui";
+import { ListFilterBar, ListFilterItem, ListSection, App } from "@/components/ui";
 import { Alert, DatePicker, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
@@ -112,7 +112,8 @@ export function WorkspaceOperationReportPage() {
       <PageHeader
         title={t("经营报表")}
         view={
-          <Space wrap>
+          <ListFilterBar>
+            <ListFilterItem label={t("租期范围")} active={Boolean(range?.some(Boolean))} width="dateRange" priority>
             <DatePicker.RangePicker
               allowEmpty={[true, true]}
               value={range}
@@ -122,10 +123,11 @@ export function WorkspaceOperationReportPage() {
                 { label: t("近 30 天"), value: [dayjs().add(-29, "day"), dayjs()] }
               ]}
             />
+            </ListFilterItem>
             <Select
               allowClear
               placeholder={t("履约地点")}
-              style={{ minWidth: "min(100%, var(--rental-control-width-select))" }}
+              aria-label={t("履约地点")}
               value={locationId}
               onChange={(value) => setLocationId(value)}
               options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))}
@@ -133,19 +135,21 @@ export function WorkspaceOperationReportPage() {
             <Select
               allowClear
               placeholder={t("客户类型")}
-              style={{ minWidth: "min(100%, var(--rental-control-width-select))" }}
+              aria-label={t("客户类型")}
               value={customerType}
               onChange={(value) => setCustomerType(value)}
               options={[{ value: "personal", label: t("个人客户") }, { value: "corporate", label: t("企业客户") }]}
             />
+            <ListFilterItem label={t("客户 id")} active={Boolean(customerId)}>
             <Input
               allowClear
               placeholder={t("客户 id")}
-              style={{ width: "var(--rental-control-width-field)" }}
+              aria-label={t("客户 id")}
               value={customerId}
               onChange={(event) => setCustomerId(event.target.value)}
             />
-          </Space>
+            </ListFilterItem>
+          </ListFilterBar>
         }
         note={{
           title: t("口径说明"),

@@ -1,5 +1,5 @@
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
-import { ListSection, SaveButton } from "@/components/ui";
+import { DataTableMoney, ListFilters, ListSection, SaveButton, useListFilter } from "@/components/ui";
 import { formatRentalMoney } from "@rental-os/shared";
 import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,6 +11,9 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+
+const rewardLabels: Record<string, string> = { points: "积分", balance: "营销余额", coupon: "奖励券" };
+const triggerLabels: Record<string, string> = { registration: "注册赠礼", identity_verified: "实名通过", first_order_completed: "首单完成", referral: "直接邀请补发" };
 
 /**
  * 会员激励：人工补发奖励流水、客户权益账户与奖励流水。
@@ -40,6 +43,8 @@ export function MembershipRewardsPage() {
     queryFn: () => rentalCoreApi.benefitAccounts(),
     enabled: canSeeRewards,
   });
+  const accountFilter = useListFilter(benefitAccounts.data, { fields: row => [row.customerId] });
+  const rewardFilter = useListFilter(rewards.data, { fields: row => [row.customerId, row.reason, row.idempotencyKey, t(rewardLabels[row.rewardType]), t(triggerLabels[row.triggerType])], status: row => row.status });
   // 营销余额按空间结算币种显示；经营设置的读取只对价格/规则权限开放，
   // 只有平台参数权限的账号拿不到币种时退回无币种格式，不发注定 403 的请求。
   const settings = useQuery({
@@ -120,37 +125,37 @@ export function MembershipRewardsPage() {
               <SaveButton  label={t("生成并入账")} form={rewardForm} pending={grantReward.isPending} onSave={async values => { const operation = grantReward.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
             </Form>
           </Card>
-          <ListSection title={t("客户权益账户")}>
+          <ListSection title={t("客户权益账户")} controls={<ListFilters filter={accountFilter} placeholder="客户编号" />}>
             <Table
               rowKey="customerId"
-              onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isFetching} dataSource={benefitAccounts.data ?? []}
+              onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination}
               locale={{ emptyText: t("还没有客户获得过积分、营销余额或奖励券") }}
               columns={[
                 { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },
                 { title: t("积分"), dataIndex: "pointsBalance", align: "right" },
-                { title: t("营销余额"), dataIndex: "marketingBalance", align: "right", render: (value) => formatRentalMoney(Number(value), currency) },
+                { title: t("营销余额"), dataIndex: "marketingBalance", align: "right", render: (value) => <DataTableMoney formatted={formatRentalMoney(Number(value), currency)} /> },
                 { title: t("可用奖励券"), dataIndex: "availableRewardCouponCount", align: "right" },
                 { title: t("更新时间"), dataIndex: "updatedAt" },
               ]}
             />
           </ListSection>
-          <ListSection title={t("奖励流水")}>
+          <ListSection title={t("奖励流水")} controls={<ListFilters filter={rewardFilter} placeholder="客户编号、原因或幂等键" options={[{ value: "granted", label: "已发放" }, { value: "reversed", label: "已撤销" }]} />}>
             <Table
               rowKey="id"
-              onRefresh={() => rewards.refetch()} loading={rewards.isFetching} dataSource={rewards.data ?? []}
+              onRefresh={() => rewards.refetch()} loading={rewards.isFetching} dataSource={rewardFilter.rows} pagination={rewardFilter.pagination}
               locale={{ emptyText: t("还没有奖励流水：自动事件未触发，也没有人工补发") }}
               columns={[
                 { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },
                 {
                   title: t("奖励"),
-                  render: (_, row) => `${row.rewardType} ${row.amount}`,
+                  render: (_, row) => <><span>{t(rewardLabels[row.rewardType] ?? row.rewardType)}</span>{" · "}{row.rewardType === "balance" ? <DataTableMoney formatted={formatRentalMoney(row.amount, currency)} /> : row.amount}</>,
                 },
-                { title: t("触发"), dataIndex: "triggerType" },
+                { title: t("触发"), dataIndex: "triggerType", render: value => t(triggerLabels[value] ?? value) },
                 { title: t("幂等键"), dataIndex: "idempotencyKey" },
                 {
                   title: t("状态"),
                   dataIndex: "status",
-                  render: (value) => <Tag>{value}</Tag>,
+                  render: (value) => <Tag color={value === "granted" ? "success" : "default"}>{t(value === "granted" ? "已发放" : value === "reversed" ? "已撤销" : value)}</Tag>,
                 },
                 { title: t("原因"), dataIndex: "reason" },
                 {
