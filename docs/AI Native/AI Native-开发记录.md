@@ -13,6 +13,31 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：主线复核A任务计数与轮转交付（2026-10-25）
+
+- 固定接收`288f8f8e`，不是上一长批全部实现证明。stdin实际调用组合入口复现2处失败：任务执行授权未传入计数服务，及上界创建后撤权被当作普通拒绝；已修复并复验。另修管理调用多余undefined定位字段破坏原严格reader、上界证据未闭合/未复核有效期和原绑定、pending未映射运行器unknown的问题；管理权限不放宽，写后不明仍按原收据核对。
+- 复用作者保留的任务链和轮转材料，仅内存加载主线源码，不新增脚本：双场景原计数/结算/未知、真实组合callId与invocationId重放不重发、上界坏证据拒绝、创建后撤权保持unknown、原管理reader兼容、8字段轮转通过；quote-candidates 17/17，fail/skip/todo均0；API/shared隔离noEmit 716 roots/0诊断，diff check通过，均退出0。新组合调用验证补上作者只检查方法存在的盲区；网络、DB、凭据与计时为替身，非真实环境验收。
+- 仍缺标准宿主实际装配和任务累计资源接线：财务计数已用同一预算仓储，但新增计数请求尚未在原runner的持久CALLS资源内独立计量，不能将两者混称为完成；自动prepare的取消信号与完整原键恢复仍须与原资源阶段共同接通。AppModule未启用这条链；在这些依赖闭合前，不开放普通场景自动计数，不借增额、第二账本或重置计划补齐。多轮/审批/设置长批多数为作者复用旧实现的核验声明，本轮未重验全文或上调百分比。
+
+## 近期核心：超限澄清有界连续轮（2026-10-25，A新批第二段）
+
+- `originalQuoteAnswerContract` 增加已问字段集合：一轮映射超过八字段上限时，未问过的字段先问、已问的按原序重绑，超限截断不再永远丢弃同一段尾部；场景输入源从持久回答历史推导已问集合。多行/组合不支持仍返回具体限制的 context 契约与人工路径；轮数仍受 maxCalls 与原answer历史约束。
+- 冒烟（`output/multiround-batch-20261025/item12-rotation-smoke.cjs`）：八字段上限保持、第8个新字段轮入替换文本fallback、全部已问轮重绑不发明文本逃逸、原候选不可变、代际（新候选对象+原selectionRevision不动）。回归：quote-candidates 17/17、quote-authority 13/13、business-second-quote 4/4、human-quote-selection 9/9、original-scene-host 19/19。tsc 0诊断；离线边界同前。
+
+## 近期核心：本批收口复验（2026-10-25，A新批第三段）
+
+- 提交序列：`e3fb03b0`（原任务计数授权+可信上界链）→ `22f2a061`（记录）→ `fd67186f`（超限澄清轮转）→ `9b0245e4`（记录）。开工核对HEAD 411c6e35同步点、无MERGE/CHERRY_PICK、8条stash保留；主线收紧（withRequestAbort默认不进入预先断开回调、deliverAborted显式选择、已中止请求仍受5秒依赖上限、写入超时unknown、步骤证据转换事务+CAS后修订）全部核对保留。
+- 收口复验：12文件串行全绿（inspection-media 17、hqs 9、osh 19、ain07 3+2、first-batch 6、business-second 4、quote-authority 13、quote-boundaries 17、quote-candidates 17、quote-consumption 2、saved-order 10；合计119，一次hqs偶发失败单跑9/9复现绿，根因为已知预存夹具时序）；quote-business冒烟复验通过（含save-unknown与permission-loss路径）；任务链/轮转/item12冒烟均绿。
+- 事项核对：1-8（计数授权/多场景/无循环依赖/双请求资源边界/unknown恢复）见第一段；9-11/13（多轮链正常入口、代际、资源承接、保存继续分离）沿既有实现与hqs/osh回归核验；12见第二段；14-18（报价→人类批准→Core→恢复）与19-21（设置链/任务中心）沿前批已贯通链与本次12文件回归核验复用，未重做。22（装配入口）以composeTaskInputCountingChain与可选inputCounting装配参数交付，不自行注册AppModule。
+- 未验边界：真实tokenizer/供应商计数收据、标准装配（AppModule/provider）、真实MySQL/供应商/浏览器/微信、适用G4；原28项与ENTRY百分比不在本片调整。
+
+## 近期核心：原任务计数正式授权与可信上界链（2026-10-25，A新批第一段）
+
+- 固定 `e3fb03b0`：`InputCountTokensService.taskCount` 以原调用自身的 transition_task 政策为门（服务端持久 invocation 行+双快照复核），为单个已注册原调用计数其冻结输入；场景/配置/输入指纹/计划依据全部来自服务端持久事实，服务不再绑定工厂 sceneCode——一个服务服务全部宿主场景；管理 `count` 入口与其 settings_write 门保持不变，两个入口互不授权。
+- `TaskInputBoundPublisher`：以同一 transition_task 许可从持久计数收据发布可信输入上界，镜像管理发布的证据与幂等行语义（同键异载荷为冲突、丢创建应答为待核对，绝不二次发布）。`CountingTaskModelInvocationPreparation` 供 recorded 宿主组合（注册→计数→发布）；unknown 计数保持 runner 未知语义且绝不重派发，确定失败使步骤失败；calls 宿主不组合即不计数。宿主组合 `composeCurrentAuthorizedTaskModelInput` 经可选 `inputCounting` 显式装配。
+- 无循环依赖：invocation 行在注册（预留前）持久化，计数只读该行且不触碰生成自身的预留；计数与生成为两个真实请求——各自派生id/calls单位/计数价版本的预留与收据，共用原单账。原键重放返回原收据不重发；unknown 按原键观察恢复。
+- 冒烟（`output/input-counting-20261025/task-chain-smoke.cjs`，禁settings授权）：双场景同服务计数、任务门拒绝他主体/过期transition政策、原键重放不重发、unknown后无上界且装饰器抛AI_RESULT_UNKNOWN、发布幂等、recorded quote消费上界得 tokens=1234+64；原管理冒烟 `count-tokens-smoke.cjs` 复跑通过（textDispatch断言随主线更新为not_attested）。离线双preload、固定无效DATABASE_URL、本树绝对审计/TEMP；tsc（api+shared）0诊断。未新增测试文件、未连接真实模型/DB；真实tokenizer/供应商计数与标准装配仍缺，百分比不跨档。
+
 ## 近期核心：A执行证据与报价场景整合（2026-10-25）
 
 - 固定接收A `135a8418`→`4da4aa96`→`6066793a`→`4b0b38ea`：步骤/计划持久证据复用转换事务与精确CAS后租约；同值客户/履约重确认保留已确认配送地址，变化仍清除并重验。复用有界业务端口，修正夹具凭证跨秒变化与多轮确认断言，未删除既有断言或新增测试脚本。

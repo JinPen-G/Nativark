@@ -569,8 +569,12 @@ export function composeOriginalSceneClarificationSource(input: {
         selectionRevision: '当前候选重新确认', request: '正式报价参数' };
       const missing = [...new Set([...(facts.missingFields ?? []), ...(facts.ambiguousFields ?? [])]
         .map(field => fieldLabels[field.startsWith('items.') ? 'items' : field] ?? '业务参数'))].join('、').slice(0, 70);
+      // Bounded consecutive rounds: field ids the previous rounds already
+      // offered are asked last, so mapped clarifications beyond the eight-field
+      // contract bound rotate in instead of being dropped forever.
+      const offered = new Set(basis.history.flatMap(round => round.contract.fields.map(field => field.fieldId)));
       const contract = originalQuoteAnswerContract(candidate, prepared,
-        `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`);
+        `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`, offered);
       if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) return { kind: 'not_required' as const };
       same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
       return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,

@@ -42,7 +42,7 @@ export interface CountTokensFrozenInvocation {
  * input against the invocation's registered hashes without publishing,
  * registering a new call or requiring a worker lease. */
 export interface CountTokensFrozenInputSource {
-  readFrozenCountingInput(command: Readonly<{ callId: string; scopeId: string; actorId: string }>): Promise<CountTokensFrozenInvocation>;
+  readFrozenCountingInput(command: Readonly<{ callId?: string; invocationId?: string; scopeId: string; actorId: string }>): Promise<CountTokensFrozenInvocation>;
 }
 export type CountTokensServiceDb = CountTokensReceiptDb & GatewayPricingRecordDb & Pick<PrismaClient, 'aiScope' | 'aiProviderProfile'>
   & Partial<Pick<PrismaClient, 'aiBudgetReservation'>>;
@@ -55,8 +55,15 @@ export interface InputCountTokensDependencies {
   resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport: ModelJsonTransport;
   policyOptions: ChatProtocolOptions;
-  sceneCode: string;
+  /** Management entries only. Undefined keeps them unavailable while the
+   * task-internal entry stays usable for hosts composed without a fixed
+   * management scene. */
+  sceneCode?: string;
   countingPriceVersion: string;
+  /** The formal task-internal permission for the in-task entry: the same
+   * transition_task action policy the dispatch of the original call requires.
+   * Server-composed; never a caller grant or settings whitelist. */
+  taskExecution?: { authorize(taskId: string): Promise<AiExecutionContext> };
   timeoutMs?: number;
   clock?: () => Date;
 }
@@ -86,6 +93,9 @@ const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
   return requestFingerprint(value);
 };
+/** The gate both counting entries must satisfy before any admission exists. */
+type CountingGate = { scopeId: string; actorId: string; tenantId: string; workspaceId: string;
+  recheck(): Promise<void> };
 
 export class InputCountTokensService {
   private readonly receipts;
@@ -103,8 +113,9 @@ export class InputCountTokensService {
       || !input.resolvers.tenant || typeof input.resolvers.tenant.resolve !== 'function'
       || !input.transport || typeof input.transport.post !== 'function'
       || !input.policyOptions || typeof input.policyOptions !== 'object' || Array.isArray(input.policyOptions)
-      || !callIdSchema.max(64).safeParse(input.sceneCode).success
+      || input.sceneCode !== undefined && !callIdSchema.max(64).safeParse(input.sceneCode).success
       || !callIdSchema.max(64).safeParse(input.countingPriceVersion).success
+      || input.taskExecution !== undefined && typeof input.taskExecution.authorize !== 'function'
       || input.clock !== undefined && typeof input.clock !== 'function') throw new BudgetError('UNAVAILABLE');
     this.receipts = new PrismaCountTokensReceipts(input.db);
     this.records = new PrismaGatewayPricingRecords(input.db);
@@ -148,6 +159,35 @@ export class InputCountTokensService {
     };
     await recheck();
     return { ...before, scopeId: scope.id, recheck };
+  }
+  /** The in-task gate: the ORIGINAL invocation row (persisted at registration,
+   * before any reserve) plus the same transition_task permission that may
+   * dispatch that call, re-checked after the frozen-input read and again
+   * before the provider request. No settings authority is consulted or
+   * required, and no other task's invocation can pass. */
+  private async taskGate(command: { callId?: string; invocationId?: string }): Promise<CountingGate> {
+    const current = await this.current();
+    const taskExecution = this.dependencies.taskExecution;
+    if (!taskExecution) throw new BudgetError('UNAVAILABLE');
+    const invocation = command.invocationId !== undefined
+      ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: { id: command.invocationId } })
+      : await this.dependencies.db.aiGatewayInvocation.findUnique({
+        where: { scopeId_callId: { scopeId: current.scopeId, callId: command.callId! } } });
+    if (!invocation || invocation.scopeId !== current.scopeId || invocation.actorId !== current.actorId
+      || command.callId !== undefined && invocation.callId !== command.callId
+      || command.invocationId !== undefined && invocation.id !== command.invocationId
+      || !isGatewayConfig(invocation.configuration)
+      || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
+    const before = structuredClone(await taskExecution.authorize(invocation.taskId));
+    if (identity(before) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    const after = structuredClone(await taskExecution.authorize(invocation.taskId));
+    if (identity(after) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    return { scopeId: current.scopeId, actorId: current.actorId, tenantId: current.tenantId,
+      workspaceId: current.workspaceId, recheck: async () => {
+        const latest = await this.current();
+        if (latest.scopeId !== current.scopeId || identity(latest.context) !== identity(current.context)
+          || identity(await taskExecution.authorize(invocation.taskId)) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+      } };
   }
   private association(frozen: CountTokensFrozenInvocation, countCallId: string): AiUsageAssociationDraft {
     return { requestId: countCallId, runId: frozen.invocation.runId, stepId: frozen.invocation.stepId,
@@ -222,15 +262,36 @@ export class InputCountTokensService {
   async count(value: unknown, signal?: AbortSignal): Promise<CountTokensResult> {
     const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
+    if (this.dependencies.sceneCode === undefined) throw new BudgetError('UNAVAILABLE');
+    return this.runCounting({ callId: parsed.data.callId }, signal, () => this.commandGate(), true);
+  }
+
+  /** The in-task counting entry: the frozen input of ONE registered original
+   * call, counted under the same transition_task permission that may dispatch
+   * that call. Scene, configuration, input fingerprint and plan basis come
+   * from the server-persisted invocation — never a module constant, caller
+   * field or model choice. It cannot read other tasks, publish arbitrary
+   * bounds or rates, or substitute for the management counting entry. */
+  async taskCount(value: unknown, signal?: AbortSignal): Promise<CountTokensResult> {
+    const parsed = z.object({ callId: callIdSchema.optional(), invocationId: z.string().min(1).max(36)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict()
+      .refine(item => (item.callId !== undefined) !== (item.invocationId !== undefined))
+      .safeParse(structuredClone(value));
+    if (!parsed.success) throw new BudgetError('INVALID');
+    return this.runCounting(parsed.data, signal, () => this.taskGate(parsed.data), false);
+  }
+
+  private async runCounting(command: { callId?: string; invocationId?: string }, signal: AbortSignal | undefined,
+    gate: () => Promise<CountingGate>, requireManagementScene: boolean): Promise<CountTokensResult> {
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let originalMayExist = false;
     try {
-      const gate = await life.wait(() => this.commandGate());
+      const opened = await life.wait(gate);
       const frozen = await life.wait(() => this.dependencies.frozen.readFrozenCountingInput(
-        { callId: parsed.data.callId, scopeId: gate.scopeId, actorId: gate.actorId }));
-      if (frozen.scopeId !== gate.scopeId || frozen.actorId !== gate.actorId
-        || frozen.invocation.sceneCode !== this.dependencies.sceneCode
-        || frozen.context.actor.kind !== 'user' || frozen.context.actor.userId !== gate.actorId
+        { ...command, scopeId: opened.scopeId, actorId: opened.actorId }));
+      if (frozen.scopeId !== opened.scopeId || frozen.actorId !== opened.actorId
+        || requireManagementScene && frozen.invocation.sceneCode !== this.dependencies.sceneCode
+        || frozen.context.actor.kind !== 'user' || frozen.context.actor.userId !== opened.actorId
         || frozen.context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
       const support = countTokensSupport(frozen.configuration.protocol);
       if (!support.supported) throw new BudgetError('UNAVAILABLE');
@@ -239,7 +300,7 @@ export class InputCountTokensService {
       if (Date.parse(price.evidence.validFrom) > now || Date.parse(price.evidence.expiresAt) <= now) throw new BudgetError('UNAVAILABLE');
       const replay = await this.readReplay(frozen, life, () => { originalMayExist = true; });
       if (replay) {
-        await life.wait(() => gate.recheck());
+        await life.wait(() => opened.recheck());
         return this.summary(replay.receipt, replay.admission);
       }
       const countCallId = countTokensCallId(frozen.invocation.callId);
@@ -268,14 +329,14 @@ export class InputCountTokensService {
         actorId: frozen.actorId, callId: frozen.invocation.callId, reservationId: reservation.id,
         registrationHash: frozen.invocation.registrationHash, intentHash: frozen.invocation.intentHash,
         configurationHash: frozen.invocation.configurationHash, countRequestHash: countTokensMaterialHash(material) }));
-      const outcome = await this.performCount(frozen, gate, life, material,
+      const outcome = await this.performCount(frozen, opened, life, material,
         () => this.dependencies.budget.dispatch(reservation.id, association,
           requestFingerprint({ association, phase: 'dispatch' })));
       const receipt = await life.wait(() => this.persistReceipt(frozen, association, reservation.id, outcome.state,
         outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
           : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash));
       const admission = await this.accountAdmission(receipt, association, life);
-      await life.wait(() => gate.recheck());
+      await life.wait(() => opened.recheck());
       return this.summary(receipt, admission);
     } catch (error) {
       // Once an original admission exists (or its receipt is being converged),
@@ -478,7 +539,7 @@ export class InputCountTokensService {
       maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy);
   }
 
-  private async performCount(frozen: CountTokensFrozenInvocation, gate: Awaited<ReturnType<InputCountTokensService['commandGate']>>,
+  private async performCount(frozen: CountTokensFrozenInvocation, gate: CountingGate,
     life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
     const configuration = frozen.configuration;
     const profile = await life.wait(() => this.profile(configuration, gate.tenantId));

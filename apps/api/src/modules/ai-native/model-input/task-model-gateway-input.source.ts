@@ -143,12 +143,18 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
    * The counting consumer receives the same intent/configuration the text
    * dispatch will send, so a receipt can never attest different content. */
   async readFrozenCountingInput(value: unknown) {
-    const parsed = z.object({ callId: id.max(128), scopeId: id.max(36), actorId: id }).strict().safeParse(structuredClone(value));
+    const parsed = z.object({ callId: id.max(128).optional(), invocationId: id.max(36).optional(), scopeId: id.max(36), actorId: id })
+      .strict().refine(item => (item.callId !== undefined) !== (item.invocationId !== undefined))
+      .safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (this.kind || typeof this.db.aiTaskActionInput?.findFirst !== 'function') throw unavailable();
-    const invocation = await this.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId } } });
-    if (!invocation || invocation.callId !== parsed.data.callId || invocation.scopeId !== parsed.data.scopeId
+    const invocation = parsed.data.invocationId !== undefined
+      ? await this.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId } })
+      : await this.db.aiGatewayInvocation.findUnique({
+        where: { scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId! } } });
+    if (!invocation || invocation.scopeId !== parsed.data.scopeId
+      || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId
+      || parsed.data.invocationId !== undefined && invocation.id !== parsed.data.invocationId
       || invocation.sceneCode !== this.scene.sceneCode || invocation.mode !== 'invoke') throw denied();
     const context = structuredClone(await this.execution.authorize(invocation.taskId));
     const actorId = this.narrow(context).actorId;
@@ -174,8 +180,9 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       || frozen.intent.maxOutputTokens !== invocation.maxOutputTokens
       || frozen.intent.sceneCode !== invocation.sceneCode) throw denied();
     const latest = await this.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: task.scopeId, callId: parsed.data.callId } } });
-    if (!latest || latest.registrationHash !== invocation.registrationHash || latest.intentHash !== invocation.intentHash
+      scopeId_callId: { scopeId: task.scopeId, callId: invocation.callId } } });
+    if (!latest || latest.id !== invocation.id || latest.registrationHash !== invocation.registrationHash
+      || latest.intentHash !== invocation.intentHash
       || taskModelIdentity(await this.execution.authorize(invocation.taskId)) !== taskModelIdentity(context)) throw denied();
     return { scopeId: task.scopeId, actorId, context,
       invocation: { id: invocation.id, taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId,
