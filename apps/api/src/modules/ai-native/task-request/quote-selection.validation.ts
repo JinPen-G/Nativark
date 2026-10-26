@@ -12,6 +12,8 @@ import { AI_PROPOSAL_DRAFT_SCHEMAS, AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS,
   type AiSelectedQuoteTaskResultDraft, type AiSelectedQuoteTaskCancelResponseDraft,
   type AiHumanQuoteOrderDecisionResponseDraft, type AiHumanQuoteOrderReprepareResponseDraft,
   type AiApprovalApplicationReviewDraft, type AiApprovalApplicationReceiptDraft, type AiApprovalReprepareEligibilityDraft } from '@rental-os/shared';
+import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS,
+  type AiTaskMetadataPageDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
 
 export type AiQuoteSelectionProofRequest = AiQuoteSelectionProofDraft;
@@ -33,18 +35,23 @@ type QuoteSelectionResponses = { AiQuoteSelectionSelectResponseDraft: AiQuoteSel
   AiHumanQuoteOrderReprepareResponseDraft: AiHumanQuoteOrderReprepareResponseDraft;
   AiApprovalApplicationReviewDraft: AiApprovalApplicationReviewDraft;
   AiApprovalApplicationReceiptDraft: AiApprovalApplicationReceiptDraft;
-  AiApprovalReprepareEligibilityDraft: AiApprovalReprepareEligibilityDraft };
+  AiApprovalReprepareEligibilityDraft: AiApprovalReprepareEligibilityDraft;
+  AiTaskMetadataPageDraft: AiTaskMetadataPageDraft;
+  AiTaskEventsObservationDraft: AiTaskEventPageDraft | AiTaskEventResetDraft };
 const responseNames = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionReconcileResponseDraft', 'AiQuoteSelectionReceiptDraft',
   'AiSelectedQuoteTaskRunDraft', 'AiSelectedQuoteTaskConfirmationDraft', 'AiSelectedQuoteTaskRecoveryDraft', 'AiSelectedQuoteTaskResultDraft',
   'AiSelectedQuoteTaskCancelResponseDraft', 'AiHumanQuoteOrderDecisionResponseDraft', 'AiHumanQuoteOrderReprepareResponseDraft',
-  'AiApprovalApplicationReviewDraft', 'AiApprovalApplicationReceiptDraft', 'AiApprovalReprepareEligibilityDraft'] as const;
+  'AiApprovalApplicationReviewDraft', 'AiApprovalApplicationReceiptDraft', 'AiApprovalReprepareEligibilityDraft',
+  'AiTaskMetadataPageDraft', 'AiTaskEventsObservationDraft'] as const;
 const responseDefinitions = JSON.parse(JSON.stringify({ ...AI_NATIVE_COMPONENT_SCHEMAS, ...AI_PROPOSAL_DRAFT_SCHEMAS,
   ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_CONFIRMATION_HISTORY_SCHEMAS,
+  ...AI_TASK_OBSERVATION_DRAFT_SCHEMAS, ...AI_SCENE_REQUEST_DRAFT_SCHEMAS, ...AI_TASK_INPUT_DRAFT_SCHEMAS,
   ...AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, ...AI_QUOTE_SELECTION_DRAFT_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
 const responseValidators = Object.fromEntries(responseNames.map(name => [name,
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: responseDefinitions })]));
 export function validateQuoteSelectionHttpRequest(name: string, value: unknown): unknown {
-  if (!Object.prototype.hasOwnProperty.call(AI_QUOTE_SELECTION_DRAFT_SCHEMAS, name)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  if (![AI_QUOTE_SELECTION_DRAFT_SCHEMAS, AI_TASK_OBSERVATION_DRAFT_SCHEMAS].some(schemas =>
+    Object.prototype.hasOwnProperty.call(schemas, name))) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   const copy = structuredClone(value);
   const validator = ajv.getSchema(`quote-http:${name}`) ?? ajv.compile({ $id: `quote-http:${name}`,
     $ref: `#/$defs/${name}`, $defs: responseDefinitions });

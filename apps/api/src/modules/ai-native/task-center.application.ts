@@ -27,6 +27,7 @@ import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterCo
 import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
+import { validateAiTaskObservation } from './task-contract-validation';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -263,7 +264,13 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
 export class AiTaskCenterController {
   constructor(@Inject(AI_NATIVE_TASK_CENTER_REQUESTS) private readonly center: ReturnType<typeof composeRequestBoundTaskCenter>) {}
   private respond(request: Request, value: unknown, action: keyof typeof schemas) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.center[action](request, value, signal)),
+    return respondAiScene(() => withRequestAbort(request, async signal => {
+      const result = await this.center[action](request, value, signal);
+      if (action === 'list') return validateAiTaskObservation('AiTaskMetadataPageDraft', result);
+      if (action === 'snapshot') return validateAiTaskObservation('AiTaskSnapshotDraft', result);
+      if (action === 'events') return validateAiTaskObservation('AiTaskEventsObservationDraft', result);
+      return result;
+    }),
       action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : action === 'stop' ? 'read_stop_receipt' : action === 'continue' ? 'read_original_business' : 'reconcile');
   }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.list) @HttpCode(200) @Header('Cache-Control', 'no-store')

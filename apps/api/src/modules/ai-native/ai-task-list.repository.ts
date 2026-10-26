@@ -5,7 +5,7 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.reposi
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const taskId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const statusSchema = z.enum(['queued', 'running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded', 'failed', 'unknown']);
+const statusSchema = z.enum(AI_TASK_STATUSES_DRAFT);
 const cursorPayload = z.object({ id: taskId, updatedAt: z.string().datetime({ offset: true }), status: statusSchema.optional(), sceneCode: taskId.optional() }).strict();
 const cursorSchema = z.string().max(512).refine(value => {
   try { return cursorPayload.safeParse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))).success; }
@@ -88,6 +88,7 @@ export class AiTaskListRepository {
     if (access.bindingKey !== after.bindingKey || identity(context) !== identity(current)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (!Array.isArray(rows) || rows.length > input.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length
       || rows.some(row => !taskId.safeParse(row.id).success || !Number.isInteger(row.revision) || row.revision < 1
+        || typeof row.status !== 'string' || !statusSchema.safeParse(row.status.toLowerCase()).success
         || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime())
         || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime()))) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     const page = rows.slice(0, input.limit);

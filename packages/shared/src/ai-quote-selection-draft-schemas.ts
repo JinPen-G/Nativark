@@ -38,6 +38,8 @@ const orderResult = { oneOf: [
     taskOutcome: choice('owned_by_runner'), payment: choice('not_inferred'), fulfillment: choice('not_inferred') })] };
 const reprepare = AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareReceiptDraft.oneOf!;
 export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiOriginalTaskEventsReadDraft: object({ original: ref('AiSceneRequestReadDraft'), after: {
+    type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: integer(1, 100) }),
   AiSelectedQuoteTaskRunDraft: runResult,
   AiSelectedQuoteTaskCheckpointDraft: checkpoint,
   AiSelectedQuoteTaskConfirmationDraft: { oneOf: [checkpoint, object({ state: choice('not_waiting'),
@@ -65,6 +67,11 @@ export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft>
     request: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareEligibilityRequestDraft }),
   AiHumanQuoteOrderReprepareRequestDraft: object({ selection: selectionProof,
     command: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareCommandDraft }),
+  AiHumanQuoteOrderResultReadRequestDraft: object({ selection: selectionProof, command: object({
+    taskId: { ...id(), maxLength: 36 }, proposalId: { ...id(), maxLength: 36 }, approvalId: { ...id(), maxLength: 36 }, actionId: id(),
+    proposalRevision: integer(1, 4294967294), reviewedPayloadHash: hash,
+    lease: object({ runId: { ...id(), maxLength: 36 }, holderId: id(), revision: integer(1, 4294967294),
+      fencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }) }) }),
   AiQuoteSelectionCreateDraft: selectionCreate,
   AiClarifiedQuoteSelectionRequestDraft: object({ selection: selectionCreate, clarification: object({
     original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),

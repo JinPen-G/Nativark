@@ -13,6 +13,12 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：统一任务观察与原订单读取合同（2026-10-26）
+
+- 接续`57649f61`，将事件、页/reset、快照、列表查询/页的schema移至shared单一来源，原API组件转用同一份；标准任务中心列表/快照/事件及选定报价列表/事件实际校验返回，原订单旧读取补命名输入/响应。旧phase坐标只是受核验的历史定位，不授执行lease；新消费者沿selection-only任务结果入口。
+- 六种旧OpenAPI形状逐项兼容比对通过（仅归一空required）；stdin核对大cursor字符串、reset、extra拒绝及标准Controller，原事件13/13、原订单批准/Core/历史回读1/1。列表组合首轮12/14：旧夹具用数据库不存在的Task UNKNOWN；改为WAITING_EXTERNAL并补非法查询/损坏存储拒绝，复验14/14，fail/skip/todo=0、退出0；未删除断言或新增脚本。真实DB/浏览器/供应商未验，证据`output/ain02-contract-closure-20261026/task-observation-*`、`task-list-*`及`selected-order-original-read.log`。
+- 原任务状态枚举同步用于列表输入，非法unknown查询在入库前拒绝，损坏状态输出净化为storage unavailable；不改变步骤unknown、业务待核对及取消语义。全树noEmit722 roots/0诊断，暂存版本排除其他WIP再核721 roots/0诊断，均退出0。AIN-02仍75%，下一缺口为复合场景公开响应、其余原场景接口与跨端兼容冻结。
+
 ## 近期核心：自动化政策准备与原CAS收据合同（2026-10-26）
 
 - 接续`5589ca1e`，原政策读取/预览/准备/原准备回读/审阅/原操作/提交7路接shared及OpenAPI命名合同，并在原Controller实际校验。主体/政策ID与expectedRevision成对表达；configured、prepared/stale/expired、observed、unknown、not_observed分开，不以配置保存或人类待办关闭当业务执行许可。沿用原权限、地点范围、独立主体、准备/提交grant与CAS，不开无人执行。

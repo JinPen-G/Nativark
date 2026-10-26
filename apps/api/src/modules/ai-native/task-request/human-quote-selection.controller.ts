@@ -56,11 +56,11 @@ export class AiSelectedQuoteTaskController {
   constructor(@Inject(AI_SELECTED_QUOTE_TASK_REQUESTS) private readonly tasks: ReturnType<typeof composeRequestBoundSelectedQuoteTask>) {}
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readTaskPage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.readTaskPage(request, body));
+    return respondHumanQuote(() => quoteHttpContract(taskContracts.readTaskPage, body, command => this.tasks.readTaskPage(request, command)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.readTaskEvents(request, body));
+    return respondHumanQuote(() => quoteHttpContract(taskContracts.readTaskEvents, body, command => this.tasks.readTaskEvents(request, command)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
@@ -157,7 +157,10 @@ export class AiHumanQuoteOrderController {
     return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedDecisionReceipt, body, command => this.orders.readSelectedDecisionReceipt(request, command)));
   }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedOrderResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readSelectedOrderResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedOrderResult(request, body)); }
+  readSelectedOrderResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedOrderResult, body,
+      command => this.orders.readSelectedOrderResult(request, command)), 'read_selected_order_result');
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedReprepareEligibility) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSelectedReprepareEligibility(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedReprepareEligibility, body, command => this.orders.readSelectedReprepareEligibility(request, command)));

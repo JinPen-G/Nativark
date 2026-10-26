@@ -1,5 +1,7 @@
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
 import type { SchemaObject } from "./openapi-document";
+import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { aiLeafToOpenApi30 } from './ai-leaf-openapi';
 
 const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${name}` });
 const choice = (...values: string[]): SchemaObject => ({ type: "string", enum: values });
@@ -18,12 +20,11 @@ const errorProperties = {
 const unknownError = closed({ ...errorProperties, code: choice("AI_RESULT_UNKNOWN"), retryable: { type: "boolean", enum: [false] }, nextAction: choice("reconcile") });
 const knownError = closed({ ...errorProperties, code: choice(...AI_ERROR_CODES.filter(code => code !== "AI_RESULT_UNKNOWN")), retryable: { type: "boolean" }, nextAction: choice("none", "clarify", "reconfirm", "reauthorize", "reconcile", "retry_later", "manual") });
 const positiveCursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^[1-9][0-9]*$" };
-const cursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^(0|[1-9][0-9]*)$" };
-const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCursor, taskRevision: revision, occurredAt: time };
 
 /** Shared task shapes, including the owner-only read transport. Execution and
  * state transitions still require their existing application/DB authority. */
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...Object.fromEntries(Object.entries(AI_TASK_OBSERVATION_DRAFT_SCHEMAS).map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
   AiTaskClarificationQueryDraft: closed({ taskId: { ...id(), maxLength: 36 } }),
   AiTaskClarificationAnswerDraft: closed({ submission: ref('AiTaskInputSubmissionDraft') }),
   AiTaskClarificationReceiptQueryDraft: closed({ reference: closed({ taskId: { ...id(), maxLength: 36 }, requestId: { ...id(), maxLength: 36 },
@@ -93,23 +94,6 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     closed({ allowed: { type: "boolean", enum: [true] }, nextRevision: revision }),
     closed({ allowed: { type: "boolean", enum: [false] }, reason: choice("invalid_state", "revision_conflict", "transition_denied", "unresolved_steps", "outcome_conflict") })
   ] },
-  AiTaskEventDraft: { oneOf: [
-    closed({ ...eventBase, type: choice("task.transition"), data: closed({ from: status, to: status, reason }) }),
-    closed({ ...eventBase, type: choice("step.registered"), data: closed({ stepId: id(), runId: id(), sequence: { type: "integer", minimum: 1, maximum: 4294967295 }, stepRevision: { type: "integer", enum: [1] } }) }),
-    closed({ ...eventBase, type: choice("step.changed"), data: closed({ stepId: id(), runId: id(), stepRevision: revision, status: choice(...AI_STEP_STATUSES_DRAFT), reason: choice(...AI_STEP_TRANSITION_REASONS_DRAFT) }) }),
-    closed({ ...eventBase, type: choice("task.output_ready"), data: closed({ resultId: id() }) }),
-    closed({ ...eventBase, type: choice("task.input_refreshed"), data: closed({ requestId: id(), previousRevision: revision, revision }) }),
-    closed({ ...eventBase, type: choice("access.revoked"), data: closed({ code: choice("AI_ACCESS_DENIED", "AI_SCOPE_CHANGED") }) })
-  ] },
-  AiTaskEventPageDraft: closed({ contractVersion: version, taskId: id(), events: list(ref("AiTaskEventDraft"), 100), nextCursor: cursor, hasMore: { type: "boolean" } }),
-  AiTaskSnapshotDraft: closed({ contractVersion: version, taskId: id(), revision, status,
-    sceneCode: id(), sceneVersion: id(), createdAt: time, updatedAt: time,
-    cancelRequestedAt: { ...time, nullable: true }, cursor,
-    steps: list({ type: 'object', properties: { stepId: id(), runId: id(), sequence: revision, revision,
-      status: choice(...AI_STEP_STATUSES_DRAFT), resultId: id(), kind: choice('model', 'confirmation') }, required: ['stepId', 'runId', 'sequence', 'revision', 'status'], additionalProperties: false }, 1000) }),
-  AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") }),
-  AiTaskMetadataQueryDraft: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 50 },
-    cursor: { type: 'string', maxLength: 512 }, status, sceneCode: id() }, additionalProperties: false },
   AiTaskModelSourceReferenceDraft: closed({ kind: choice('order', 'knowledge'), index: { type: 'integer', minimum: 0, maximum: 4 },
     referenceHash: { type: 'string', pattern: '^[a-f0-9]{64}$', minLength: 64, maxLength: 64 } }),
   AiTaskModelSourceQueryDraft: closed({ taskId: id(), resultId: id(), source: ref('AiTaskModelSourceReferenceDraft') }),
@@ -127,7 +111,4 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     sources: list(ref('AiTaskModelSourceReferenceDraft'), 9),
     observedAt: time, businessExecution: choice('not_inferred_from_model_result'), execution: choice('read_only_no_start_no_reconnect_side_effect') }),
     description: 'Available text only after original task, current business facts and referenced knowledge ACL/consent revalidation. Stale, unknown and failed observations return null text. No generic raw artifact or execution grant.' },
-  AiTaskMetadataPageDraft: closed({ items: list(closed({ taskId: id(), status, revision, sceneCode: id(), sceneVersion: id(),
-    createdAt: time, updatedAt: time, cancelRequestedAt: { ...time, nullable: true } }), 50),
-    nextCursor: { type: 'string', maxLength: 512, nullable: true } })
 };

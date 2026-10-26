@@ -54,6 +54,7 @@ export * from "./ai-knowledge-policy-management-draft";
 export { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from "./ai-entry-management-draft-schemas";
 export * from "./ai-entry-http-draft";
 export * from "./ai-task-recovery-draft";
+export * from "./ai-task-observation-draft-schemas";
 export * from "./ai-scene-quote-http-draft";
 export * from "./ai-client-quote-draft";
 export * from "./ai-client-entry-draft-schemas";

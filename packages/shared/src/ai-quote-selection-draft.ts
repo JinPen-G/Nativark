@@ -47,6 +47,13 @@ export interface AiHumanQuoteOrderReviewRequestDraft extends AiSelectedQuoteTask
 export interface AiHumanQuoteOrderDecisionRequestDraft extends AiSelectedQuoteTaskRequestDraft { proposal: AiApprovalApplicationDecisionDraft }
 export interface AiHumanQuoteOrderReprepareEligibilityRequestDraft extends AiSelectedQuoteTaskRequestDraft { request: AiApprovalReprepareEligibilityRequestDraft }
 export interface AiHumanQuoteOrderReprepareRequestDraft extends AiSelectedQuoteTaskRequestDraft { command: AiApprovalReprepareCommandDraft }
+/** Legacy original-result locator. Its phase coordinates must match the stored
+ * approval consumption; they never grant a lease, submission or replay. New
+ * callers should use the task result read with the selection reference only. */
+export interface AiHumanQuoteOrderResultReadRequestDraft extends AiSelectedQuoteTaskRequestDraft {
+  command: { taskId: string; proposalId: string; approvalId: string; actionId: string; proposalRevision: number;
+    reviewedPayloadHash: string; lease: { runId: string; holderId: string; revision: number; fencingToken: string } };
+}
 export type AiQuoteSelectedOrderDraft = Pick<CreateRentalOrderRequest,
   'quoteId' | 'customerId' | 'customerName' | 'contactPhone' | 'fulfillmentMode' | 'fulfillmentLocationId' | 'returnLocationId' | 'startAt' | 'endAt' | 'lines'> & {
     customerType: 'personal'; customerId: string; bookingIdentity?: { bookingIdentity: 'personal' }
@@ -90,6 +97,8 @@ export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
 /** Human decisions and runner-owned execution have separate observations.
  * A successful task or saved approval never substitutes for a Core receipt. */
 export const AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS = Object.freeze({
+  readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft' },
+  readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft' },
   start: { request: 'AiSelectedQuoteTaskRequestDraft', response: 'AiSelectedQuoteTaskRunDraft' },
   readConfirmation: { request: 'AiSelectedQuoteTaskConfirmationRequestDraft', response: 'AiSelectedQuoteTaskConfirmationDraft' },
   continueConfirmation: { request: 'AiSelectedQuoteTaskContinueRequestDraft', response: 'AiSelectedQuoteTaskRunDraft' },
@@ -98,6 +107,7 @@ export const AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS = Object.freeze({
   requestCancel: { request: 'AiSelectedQuoteTaskCancelRequestDraft', response: 'AiSelectedQuoteTaskCancelResponseDraft' }
 } as const);
 export const AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS = Object.freeze({
+  readSelectedOrderResult: { request: 'AiHumanQuoteOrderResultReadRequestDraft', response: 'AiSelectedQuoteTaskResultDraft' },
   readSelectedProposal: { request: 'AiHumanQuoteOrderReviewRequestDraft', response: 'AiApprovalApplicationReviewDraft' },
   decideSelectedProposal: { request: 'AiHumanQuoteOrderDecisionRequestDraft', response: 'AiHumanQuoteOrderDecisionResponseDraft' },
   readSelectedDecisionReceipt: { request: 'AiHumanQuoteOrderDecisionRequestDraft', response: 'AiApprovalApplicationReceiptDraft' },
