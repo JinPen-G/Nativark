@@ -14,6 +14,11 @@ import "./components/ui/status-colors.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { applyMotionPreference, isMotionReduced } from "./app/motionPreferences";
+import { MotionGlobalConfig } from "motion/react";
+
+applyMotionPreference();
+MotionGlobalConfig.skipAnimations = isMotionReduced();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

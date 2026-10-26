@@ -39,6 +39,7 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
     if (document.documentElement.getAttribute(ROOT_MARK) === owner) document.documentElement.removeAttribute(ROOT_MARK);
     if (mounted.current) setRunning(false);
   }, [owner]);
+  useEffect(() => { if (reduced) stop(); }, [reduced, stop]);
   useEffect(() => {
     mounted.current = true;
     const hide = () => { if (document.hidden) stop(); };

@@ -4,6 +4,7 @@ import { theme, type ThemeConfig } from "antd";
 import { getArcPalette } from "./arcTokens";
 import { ADMIN_STATUS_COLORS, ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
 import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
+import { isMotionReduced } from "./motionPreferences";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 export type AppearancePreference = AppearanceMode | "system";
@@ -159,7 +160,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
      *
      * 因此这条路径的行为与本文件原有的实现完全一致：只在变量落地那几帧关过渡。
      */
-    if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!document.startViewTransition || isMotionReduced()) {
       root.dataset.themeSwitching = "";
       window.clearTimeout(revealTimer.current);
       revealTimer.current = window.setTimeout(() => { delete root.dataset.themeSwitching; }, THEME_SWITCH_MS);

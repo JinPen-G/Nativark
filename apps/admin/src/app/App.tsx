@@ -1,4 +1,5 @@
 import { App as AntdApp, ConfigProvider } from "antd";
+import { Provider as AntMotionProvider } from "@rc-component/motion";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -14,12 +15,15 @@ import { applyAdminRadiusTokens, resolveAdminPrimaryColor } from "./designTokens
 import { GlobalInteractionSounds } from "@/features/sound/GlobalInteractionSounds";
 import { applyArcThemeTokens } from "./arcTokens";
 import { FeedbackProvider } from "@/components/ui/Feedback";
+import { MotionPreferenceProvider } from "./MotionPreferenceProvider";
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
 // Keep existing descendant routes; data router supplies supported SPA blockers.
 const router = createBrowserRouter([{ path: "*", element: <AppRouter /> }]);
 
 function ThemedApp() {
   const { mode } = useAppearance();
+  const reduced = usePrefersReducedMotion();
   const { locale } = useLocale();
   const tenant = useAuthStore((state) => state.tenant);
   const user = useAuthStore((state) => state.user);
@@ -32,6 +36,7 @@ function ThemedApp() {
     input: tenant?.adminInputRadius,
     legacy: tenant?.adminCornerRadius
   }), [tenant?.adminContainerRadius, tenant?.adminButtonRadius, tenant?.adminInputRadius, tenant?.adminCornerRadius]);
+  const themeConfig = createThemeConfig(mode, adminThemeColor, radiusGroups);
   useLayoutEffect(() => {
     applyAdminRadiusTokens(document.documentElement, radiusGroups);
     applyArcThemeTokens(document.documentElement, mode === "dark", adminThemeColor);
@@ -49,20 +54,24 @@ function ThemedApp() {
         const drawers = document.querySelectorAll<HTMLElement>('[data-rental-arc-drawer][data-state="open"]');
         return drawers.item(drawers.length - 1) ?? document.body;
       }}
-      theme={createThemeConfig(mode, adminThemeColor, radiusGroups)}
+      theme={themeConfig}
     >
-      <QueryClientProvider client={queryClient}>
-        <AntdApp>
-          <FeedbackProvider>
-            <GlobalInteractionSounds />
-            <BrandIconProvider><RouterProvider router={router} /></BrandIconProvider>
-          </FeedbackProvider>
-        </AntdApp>
-      </QueryClientProvider>
+      {/* A permanent compatibility provider avoids Ant's conditional motion
+          wrapper remounting forms when its theme.motion token first changes. */}
+      <AntMotionProvider motion={!reduced}>
+        <QueryClientProvider client={queryClient}>
+          <AntdApp>
+            <FeedbackProvider>
+              <GlobalInteractionSounds />
+              <BrandIconProvider><RouterProvider router={router} /></BrandIconProvider>
+            </FeedbackProvider>
+          </AntdApp>
+        </QueryClientProvider>
+      </AntMotionProvider>
     </ConfigProvider>
   );
 }
 
 export function App() {
-  return <LocaleProvider><AppearanceProvider><ThemedApp /></AppearanceProvider></LocaleProvider>;
+  return <MotionPreferenceProvider><LocaleProvider><AppearanceProvider><ThemedApp /></AppearanceProvider></LocaleProvider></MotionPreferenceProvider>;
 }

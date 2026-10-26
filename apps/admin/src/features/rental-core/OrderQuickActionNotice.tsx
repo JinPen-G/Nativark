@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { Alert } from "@/components/ui";
 import { useLocale } from "@/app/locale";
 import { ORDER_QUICK_ACTION_LABELS, parseOrderQuickAction } from "./orderQuickActions";
+import { isMotionReduced } from "@/app/motionPreferences";
 
 export function OrderQuickActionNotice({ orderId, ready }: { orderId: string; ready: boolean }) {
   const { search, key } = useLocation();
@@ -22,7 +23,7 @@ export function OrderQuickActionNotice({ orderId, ready }: { orderId: string; re
     const button = target instanceof HTMLButtonElement ? target : target.querySelector<HTMLButtonElement>("button");
     const focusTarget = button?.disabled ? container : button ?? target;
     focusTarget?.focus({ preventScroll: true });
-    target.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    target.scrollIntoView({ block: "nearest", behavior: isMotionReduced() ? "instant" : "smooth" });
   }, [action, ready, requestKey]);
   if (!action || !ready || result?.key !== requestKey) return null;
   return <Alert type={result.found ? "info" : "warning"} showIcon title={t(ORDER_QUICK_ACTION_LABELS[action])}

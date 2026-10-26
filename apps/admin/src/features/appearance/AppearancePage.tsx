@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { SoundSettingCard } from "@/features/sound/SoundSettingCard";
+import { MotionSettingCard } from "./MotionSettingCard";
 
 /** 仅按钮组允许 999 离散档，容器与输入组沿用已配置的连续范围。 */
 function AdminRadiusSlider({ name, label, tooltip, allowFull = true }: { name: string; label: string; tooltip: string; allowFull?: boolean }) {
@@ -141,6 +142,7 @@ export function AppearancePage() {
             </Card>
           </Form>
         )}
+        <MotionSettingCard />
         <SoundSettingCard />
       </Space>
     </>

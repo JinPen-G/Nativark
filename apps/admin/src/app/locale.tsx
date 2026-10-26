@@ -12,6 +12,9 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "界面动效": "Interface motion", "动效偏好": "Motion preference",
+  "完整动效": "Full", "减少动效": "Reduced",
+  "仅保存在当前浏览器，立即生效。": "Applies instantly. Saved in this browser.",
   "经营能力": "Capabilities", "版本订阅": "Subscription", "外观音效": "Appearance",
   "客户渠道": "Channels", "定价营销": "Pricing", "会员客户": "Clients",
   "账号权限": "Access", "服务渠道": "Services", "财务对账": "Finance",
