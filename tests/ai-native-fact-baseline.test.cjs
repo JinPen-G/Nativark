@@ -186,13 +186,32 @@ test("report returns current snapshot and explicit historical gaps, not historic
 });
 
 function refundHarness(fundingFails = false) {
-  let row = input.refundRow();
+  let row = input.refundRow({ revision: 1 });
   const fundingCalls = [], writes = [];
-  const table = { findFirst: async () => structuredClone(row),
-    update: async ({ data }) => { writes.push(structuredClone(data)); Object.assign(row, data); return structuredClone(row); },
+  const apply = data => {
+    writes.push(structuredClone(data));
+    const { revision, ...fields } = data;
+    Object.assign(row, fields);
+    if (revision !== undefined) row.revision = typeof revision === 'number' ? revision : row.revision + revision.increment;
+    return structuredClone(row);
+  };
+  // Match the current production delegate/CAS shape. This is still one-row
+  // execution substitution, not MySQL isolation or provider/funding evidence.
+  const matches = where => Object.entries(where).every(([key, value]) =>
+    value === undefined || (value && typeof value === 'object' && Array.isArray(value.in)
+      ? value.in.includes(row[key]) : row[key] === value));
+  const table = { findFirst: async ({ where }) => matches(where) ? structuredClone(row) : null,
+    findFirstOrThrow: async ({ where }) => {
+      assert.ok(matches(where), 'original refund must match the exact read-back scope');
+      return structuredClone(row);
+    },
+    update: async ({ where, data }) => {
+      assert.ok(matches(where), 'refund update must target the original row');
+      return apply(data);
+    },
     updateMany: async ({ where, data }) => {
-      if (where.status && !where.status.in.includes(row.status)) return { count: 0 };
-      writes.push(structuredClone(data)); Object.assign(row, data); return { count: 1 };
+      if (!matches(where)) return { count: 0 };
+      apply(data); return { count: 1 };
     } };
   // Controlled repository substitute, not evidence of MySQL locks/atomicity/idempotency.
   const prisma = { rentalPaymentRefund: table, $transaction: async callback => {

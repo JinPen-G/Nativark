@@ -1,9 +1,9 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-25；本轮接收A `288f8f8e`（主线`b0ec4afa`）与B `eaaed7ff`并修复任务计数组合/上界恢复及平台读写分权。原主线与客户端成果保留；自动计数累计资源、标准装配、知识隐私/事件余项和适用G4尚缺。原28项64.3%、ENTRY52.8%、正式0/28；未以修复数或离线绿测提高百分比。小程序/官网暂只后端接口，本地Harness独立专项不并入；当前现场见接续。
-> 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。本次整理不重估分数、不宣布整项验收。
-> 最近阶段门槛复核：2026-10-25，范围为平台/计数公共接点及A执行整合，不是28项全文重新验收。原表22项75%、3项50%、3项0%，等权64.3%；ENTRY本轮未全量重评，沿用已核实52.8%。上述阶段未新增完整门槛，百分比保持。
+> 归纳日期：2026-10-26。负责人授权全专项以充分测试和修复复验完成验收，无需真人操作/签字。AIN-01已完成测试验收并归档为100%；AIN-02恢复接续。迁移核查及旧B02克隆拒绝证据保留，完整历史支持归AIN-03；继承WIP/output及专用资源保留，未推送或生产放行。
+> 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
+> 最近阶段门槛复核：2026-10-26，AIN-01按新授权口径满足G1～G4并归档；原28项为1项100%、21项75%、3项50%、3项0%，等权65.2%，正式验收3.6%（1/28）；ENTRY仍52.8%。其余任务未因取消真人验收而自动升分，仍须完整测试和适用实测。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
 ## 查阅与证据口径
@@ -12,6 +12,28 @@
 - “代码实现”“消费者装配”“离线验证”“真实环境验收”“生产开放”分别记录，不用其中一层替代另一层。
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
+
+## 近期核心：通知设置变更公共契约（2026-10-26）
+
+- 复用原AiApprovedSettingsCurrent/ChangePreparationResult/ChangeReceipt公共schema及settingsContract，shared增加原当前设置空请求和三路HTTP元数据，OpenAPI不再用GenericObject描述当前读取/准备/原准备收据；没有通用配置写入口或新增业务规则。原Controller当前读取拒绝actor等未知输入字段，读取/原收据实际输出闭合验证，坏读响应为storage unavailable；原prepare后坏响应仍unknown→read_change_receipt，不授重试/批准或修改activeSettings。
+- 一次性stdin直接调用原AiSettingsChangeController核对空输入/夹带授权拒绝、3路OpenAPI/schema等价、extra不泄露及准备坏响应unknown，最终**2/2，cancel/skip/todo均0、退出0**；请求依赖为明确替身，不冒称原业务授权/持久化或HTTP通过。首次进程加载保留的旧shared源码旁JS使新元数据undefined，退出1；改为本树preferTsExts，旧JS未覆盖/删除。日志`output/review-claude-ab-followup-20261025/settings-change-contract{-recheck}-20261026.log`保留；API/shared既有noEmit **719 roots/0诊断、退出0**，定向diff退出0。
+- 本合同切片验证当时标准API尚未启动、原迁移链失败；后续迁移修复及真实API证据另见AIN-01原节，不回写为本片已完成HTTP验收。原settings生命周期多数已有命名schema/控制器，不重建；其余结果/事件、多态automation/order及全端冻结待补。负责人最新要求01先到100%再02，02现暂停、保持75%；本合同切片未新增测试文件/安装/生成/提交或放行生产。
+
+## 近期核心：人类报价选择公共响应契约（2026-10-26）
+
+- 负责人要求01先到100%再02；本合同切片是在01首次迁移失败后完成，未将失败算通过，但提前转02不符合该顺序。最新已纠正为迁移修复/01优先，02暂停、已有成果保留。原人类选择与澄清后交接5路复用同一shared命名请求/响应、OpenAPI和当前请求宿主；原选择/读取/核对仓储类型直接引用公共出口，不复制私有DTO。
+- `quote-selection.validation.ts`从同一closed schema建立响应验证，普通/澄清Controller都实际消费；快照后JSON wire验证、不移除extra，NaN/Infinity及不可序列化结果拒绝。保存之后坏响应为unknown，普通选择指原reconcile、澄清选择指read_clarified_selection_operation；纯读坏响应为storage unavailable，不泄露生产者内容。选择仍不批准/建单/预占，原事务/权限/CAS/幂等未改。
+- 复用原`tests/ai-native-lane-a-human-quote-selection.test.cjs`两例：实际当前请求选择/重放/读取/核对与人类审批，以及丢COMMIT应答原键核对/被改报价拒绝。新增断言涵盖5路OpenAPI引用、schema闭合/嵌套、伪造批准/订单/extra、NaN、坏写响应unknown及澄清Controller一致；Controller异常替身仅证输出校验，不是其底层业务授权证明。原审批/历史恢复断言保留，无新增测试文件。
+- 原离线preload与固定无效DB/本树绝对audit/writeRoot/TEMP/cache下stdin选例：`selection-contract-20261026.log` **2/2，fail/cancel/skip/todo均0、退出0**；既有`output/typecheck-ai-native.cjs`兼容编译器内存解析：`selection-types-20261026.log` **719 roots/0诊断/noEmit，退出0**；定向diff退出0。日志在`output/review-claude-ab-followup-20261025/`。未启动服务或真实模型/支付，不把迁移失败后的私有构建称运行验收。
+- 本片可验的命名合同/生产者消费者/关键拒绝通过；AIN-02全文仍缺原settings/automation/order多态合同完整冻结、全端成功/失效/断线/旧协议夹具与兼容升级及跨AI冻结确认，保持75%。本轮未改正式需求/任务正文、提交或推送，旧WIP/output保留。
+
+## 近期核心：报价澄清审阅、确认与原收据公共契约（2026-10-26）
+
+- 基线仍为本树 `a1fbf6a4`，本片与上一轮服务端修复均为未提交WIP；暂存区为空、无merge/cherry-pick。本地main另有16个后台相关提交，没有同步或把其版本当AI Native正式验收。按AIN-02原要求优先补可离线完成的契约缺口，不变更任务范围、依赖或G4。
+- `@rental-os/shared`正式出口提供报价候选、最终确认命令、原Core报价投影及三种响应：最终参数审阅、明确确认、原操作收据。候选同步已有企业员工/付款选择和客户地址ID，不授资格或客户地址权限；Core金额/历史版本直接复用原业务投影，不新建报价规则。OpenAPI三路改为命名闭合响应，刷新问题复用原PendingInput；标准与显式完整Controller共用嵌套输出验证。确认后坏响应返回unknown并指向原报价收据，不泄露内部字段、不证明回滚或授重试。
+- 复用 `tests/ai-native-lane-a-original-scene-host.test.cjs` 原报价完整用例，实跑修改业务参数→受权审阅→明确确认→Core保存丢应答→原键读取→同报价重放；标准/显式Controller一致，缺参和未观察到回答仍不可报价，旧协议/伪造批准/金额/来源confirmed/缺金额拒绝。shared类型虚拟消费者、所有新组件OpenAPI等价/闭合校验通过，无新增测试脚本。
+- 最终定向原用例1/1，fail/cancel/skip/todo均0、退出0；API/shared `node output/typecheck-ai-native.cjs`（兼容TypeScript内存解析）719 roots/0诊断/noEmit、退出0；沿原offline preload、固定无效DATABASE_URL、本树绝对audit/writeRoot/TEMP/TMP/cache。首次类型检查1诊断、收紧联合类型后4诊断均修复；一次测试过滤未生效实际跑19例18过1失败，失败为新断言误读API统一data包装，修正后只复验该用例通过，没有删除原断言。
+- AIN-02保持75%、原整体64.3%、ENTRY52.8%、正式0/28：本片闭合报价模型动作合同，不等于其余settings/automation/选择/订单动作的多态合同已齐；正常shared产物构建、全端兼容冻结确认、真实环境及独立验收未执行。未启服务/读.env/安装/生成/迁移/真库或模型调用，未提交/合main/推送。
 
 ## 近期核心：主线复核B平台读取与账务分权（2026-10-25）
 
@@ -474,9 +496,9 @@
 
 | 任务 | 已有实现/消费依据 | 仍需完成或验证 |
 | --- | --- | --- |
-| AIN-01 基线盘点 | 原15项工具目录、实际消费者和当前实现已重新对齐，历史证据断链修复；四品类报价/确认关闭AI对照已复验，见下节 | 目标运行环境/部署版本未验；完整选品至结算/变更人工案例、人工耗时/成功率/修正率及A27/A28全范围仍待验证 |
-| AIN-02 公共契约 | shared版本化叶子、错误/Action/事件及OpenAPI；默认模型执行/恢复/取消/输入18路现有命名响应和实际输出校验，保存回执同对象快照 | 其他多态动作及兼容宿主仍缺完整冻结；全端等价、构建/兼容和跨AI确认及独立验收未完成，不以局部18路替代全文要求 |
-| AIN-03 持久化 | 原task/run/input/phase/proposal/approval、预算、知识/记忆仓储；标准人类记忆/知识管理现实际消费原事务、确认与操作收据，模型设置追加独立服务门 | G1/G2沿原schema/仓储，G3由e46b4c76/2784aedd标准消费者及实际仓储冒烟核实，登记75%；全表空库/升级/回退、真实索引/并发及恢复验收未完成，本轮未执行迁移 |
+| AIN-01 基线盘点 | 15项工具/权限/副作用盘点、四品类参考流程；38/38基线测试、16组参考断言、已复核八条真实API/重启/A27-A28及迁移证据；测试验收已归档 | 100%；不要求真人样本/签字。原Core缺口及旧B02完整升级仍归原实现任务，不代表目录中全部能力上线 |
+| AIN-02 公共契约 | shared版本化叶子、错误/Action/事件及OpenAPI；默认模型/输入18路、报价审阅/确认/原收据、人类选择5路及通知变更3路命名合同与实际嵌套输出校验通过 | settings/automation/订单等其余多态合同、全端成功拒绝/断线/旧协议夹具、兼容升级和跨AI冻结确认仍未齐，保持75%；不以本片代全文 |
+| AIN-03 持久化 | 原task/run/input/phase/proposal/approval、预算、知识/记忆仓储；标准消费者；本轮修复迁移重复建表并完成最终227全链及局部非空数据对齐演练 | 保持原G3/75%；本轮真实迁移结果不等于全部历史版本兼容、回退、索引/并发/崩溃恢复验收，旧B02独立scope结构与全量G4仍缺 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；原结果复验当前权限与事实，身份适配新增Auth返回后的凭据关闭/token/audience核对 | 全身份/地点/撤权真实等价仍待验；执行动作仍须有效原输入，未知动作拒绝，关联requestId不是授权修订 |
 | AIN-05 Gateway | 原平台/BYOK、唯一invocation/dispatch、原账和能力验证；标准配置、原键收据及经审阅的旧配置停用替换已接，原记录保留且不导入旧明文密钥 | 可信费率/计数及完整执行依赖、真实供应商/能力；旧客户端无原键的历史保存不补造收据，不支持协议仍不可转换，管理保存不认证能力或预算 |
 | AIN-06 运行器 | 持久lease/fence、恢复/暂停/接管/取消和有界等待；原资源门累计额度；员工两轮澄清、原回答收据及从未启动/已计量释放等待的取消接回原事务 | 混合模型/业务完整消费、其他宿主/动作恢复与历史正文窗口；真实多进程/MySQL竞争和宕机未验，unknown不重派或退额 |
@@ -505,40 +527,125 @@
 
 ## AIN-01当前基线与门槛依据
 
-### 迁移原文与旧 scope 识别（2026-10-26）
+### 测试验收收口与归档（2026-10-26）
+
+- 按负责人对整个AI Native专项的最新授权，充分测试、修复复验及证据归档可到100%，无需真人验收；原业务批准/生产放行与适用真实环境证据仍保留。
+- AIN-01本次三套既有基线合跑38/38（含3项已知缺口表征，未宣称修复），四品类参考16组断言通过；双离线preload的stdin执行，日志位于`output/ain01-self-acceptance-20261026/`，无新测试脚本或本轮业务源码修改。
+- 已复核原八条真实API业务链、实际重启/A27-A28和迁移证据哈希；原构建720份源码中714份未变，六处客户端专用源码变化明确排除，未冒称当前Git HEAD已部署。823条原HTTP观察仅作请求时延参考，不作真人体验、任务SLO或真实模型成本。
+- 唯一验收归档：[AIN-01测试验收](历史归档/验收/AIN-01-测试验收.json)，记录版本、方法、源码/证据哈希及未采集指标。AIN-01的范围为盘点/参考基线，所识别的原Core问题、旧B02全历史升级和其他工具实现仍交原任务；不是全专项验收。
+- G1～G4已满足，AIN-01更新100%，整体65.2%，正式1/28；AIN-02继续既有合同收口。原API停止拒绝不绕过，原库和新克隆仅保留并登记，未称已清理。
+
+### 迁移原文与旧 scope 识别（2026-10-26，测试验收规则调整前的阶段）
 
 - `73d41307`接回原`ops:migration-status`的已应用SQL SHA-256核对及旧scope识别；缺原文、异字节、异常收据不判同步，不改checksum/resolve。后继补“已有AI迁移收据却缺scope表”拒绝，避免误当未部署。
 - 首轮异字节误放行复现退出1，修后入口替身冒烟9/9；缺表绑定另复现并相关复验通过，未把两阶段相加称最新全量。语法/diff退出0；无新测试脚本。
 - 经本轮明确授权，只在自有MySQL容器3398中新建`rental_os_e2e_legacy_scope_20261026_cbb28863`。真实SQL核查接受当前227条原迁移字节及规范scope；214张原表、21张非空AI表的读取行哈希在克隆及拒绝前后保持一致，源库未改。结果：`output/ain01-legacy-scope-20261026/result.json`。
 - 该库仅重建旧B02表结构，并复制当前迁移收据作为夹具；旧结构被拒，直接Foundation建表报1050，均不改原数据/收据。**不是原B02全历史升级成功，也未运行完整状态CLI、完整迁移部署或真实业务验收**；克隆保留，原API/库/容器未清理。
-- 旧历史布局支持属AIN-03迁移兼容余项；AIN-01已完成该风险的识别/归属登记，不新增“先实现所有遗留升级”前置。真人操作样本/指标及独立G4仍缺，AIN-01保持75%，AIN-02继续暂停。
+- 旧历史布局支持属AIN-03迁移兼容余项；AIN-01已完成该风险的识别/归属登记，不新增“先实现所有遗留升级”前置。该片当时保持75%；当前按上方新授权测试验收结论为100%，不继续沿用等待真人的旧阻塞。
 
 
-本节是现状盘点，不是新增注册表或执行授权。原`tool-baseline.ts`的`baseline-1/unavailable`保留历史初始目录；实际实现和消费者以下表为准，能调用仍须当前政策/权限/依赖。历史证据索引修正为归档路径，旧作者结果不冒充本轮实测。
+### 原口径逐条核查（本节上方已按新授权完成测试验收）
 
-核对现场：专项分支`ai/ai-native-contracts-s01-20261002`，本地主分支`46cbaf0f`；Core最近相关修复`d7a12287`、治理服务`4c5d7529`。未启动或连接运行环境，部署构建SHA、数据库迁移和生产开放状态均未核实。以下源码位置相对`apps/api/src/modules/ai-native/`，原权限候选/风险/副作用沿`tool-baseline.ts`，实际Auth/Guard、dataScope/locationScope及字段权限不能省略。
+依据为[原任务§4](<AI Native-开发任务.md#4-任务交付细则>)和[正式需求](<AI Native-需求.md>)的AIN-A27/A28及真实人工基线要求。**AIN-01没有前置任务依赖；盘点完成不要求被盘点工具全部实现，也不等待AIN-26～28、真实模型或最终试点。** 未实现、仅预览、缺依赖及未验能力的准确登记是盘点交付，不冒充这些能力的正向交付。
 
-| 原工具 | 当前实现/消费者 | 输入输出与边界、仍缺部分 |
+| 原交付/验收条款 | 本轮结论 | 证据及适用边界 |
 | --- | --- | --- |
-| rental.order.explain | `tools/business-tools.composition.ts`的order/orderExplanation；原订单请求及模型订单链 | 服务端绑定订单→状态/历史/来源；资金另验finance，缺历史不换当前依据；标准执行默认关闭 |
-| rental.catalog.search | 同一组合的catalog、`catalog-read-facts.service.ts` | schema限定ID/名称/游标/最多100条→当前持久配置及版本；必须原有界分页，不退回全表 |
-| rental.availability.check | 同一组合的availability、`availability-read-facts.service.ts` | 正式DTO/当前空间地点→观察时点可用性，不预占 |
-| membership.customer.resolve | 同一组合的membershipCandidates | 原有界个人/企业候选→脱敏ID/名称/来源，个人候选最多50；同名不自动选，tenant会员不授跨空间订单资格 |
-| rental.quote.preview | `tools/quote-route.composition.ts`、`quote-preview.service.ts` | 显式人类选择/当前正式参数→Core金额/版本/有效期；R1会保存报价，unknown只核对原操作，不锁库存 |
-| rental.order.propose | 原selected-quote/订单任务与`approval-execution/`准备链 | 固定原输入及报价→不可变提案/原收据；不是无条件通用提案工具，未批准不建单 |
-| rental.order.commit | `scenes/business-order-application.ts`→原持久审批/Core组合 | 原task/action/input/proposal/真人批准→原订单结果；R2事务/幂等，缺依赖unavailable，资金/交付不推断 |
-| rental.change.preview | `tools/order-extension-preview.service.ts`→原Core的previewExtension；business-tools、原next_steps请求及标准controller/provider已接 | 当前仅续租试算，原订单版本、原view及extend/operate权限复验；其他变更未接。无保存/预占/批准/执行，不补造价格或历史依据；未登记自动模型工具 |
-| tenant.opening.diagnose | 同一业务组合的opening/openingActions | 白名单分区/最多50问题→配置事实、来源/缺项/人工出口；未验证外部连接不画成功 |
-| tenant.config.propose | `tools/opening-action-list.service.ts`；通知设置另有正式准备/审批链 | 已支持普通字段→版本化差异候选，候选不等于发布；其他配置分区的正式持久提案/写入未齐 |
-| tenant.notifications.commit | `scenes/settings-business-consumer.composition.ts`及原settings任务宿主 | 仅原获准通知数组/字段与真人批准→Core原操作收据；R2，非所有settings通用写入，缺正式宿主依赖拒绝 |
-| membership.profile.propose | 同一业务组合的memberProfileDifference/submissionMaterial | 当前候选普通姓名差异→prepared_not_submitted；无正式资料提案端口，敏感验证仍走原流程 |
-| inspection.draft.extract | `inspection-assist/inspection-assist.composition.ts`及员工任务/历史收据宿主 | 原附件/对象/阶段/模板→候选、更正与原收据；缺正式媒体/存储依赖不可识别，不自动判责收费 |
-| operations.risks.list | 同一业务组合的risks/riskRecheck | 原有界报表查询→风险对象/时点/来源；无成本不报利润，当前库存不报历史利用率 |
-| platform.category.propose | `category-assist/category-draft.application.ts` | 正式治理DTO/版本→受权草稿/校验/review；原preview门不绕过，发布/采用仍未开放 |
+| 核对分支、目标树、Core/治理及AI配置行为 | 本轮隔离构建/迁移及原业务消费者核对通过；生产未验 | 下方720份源码/JS字节对应、client语义及227迁移哈希；最终SQL全链库与实流库checksum差异明确登记，不冒称生产部署或所有AI能力开放 |
+| 工具入口、权限、scope、输入输出、事务/副作用、幂等、验证/缺口及成熟度依据 | 通过盘点条款 | 15项目录与decorated Controller/实际权限函数核对；下表登记实际消费者和降级；目录本身无handler、不授执行 |
+| 四品类选品至结算/变更的人工参考案例 | 本轮8条原业务HTTP链及重启参考通过；真实人工指标未采集 | 下方四品类差异及原断言，实际Auth/Guard/Core/Prisma，模拟资金与合成附件；driver明确automated_not_human，不冒称真人样本 |
+| 当前事实、初始工具目录、依赖/缺陷归属；未验能力明确降级 | 通过盘点条款 | 保留初始目录与历史索引，当前实现另列；底层历史缺陷和AI未实现部分按原专项归属，不改其他专项规则 |
+| AIN-A27/A28已有可重复基线 | 本轮隔离API/DB参考基线通过 | A27四空间×两时间段原报表明确历史分母缺项且无profit/cost/historicalUtilization；A28八条原业务链与实际重启后AI任务/调用/账务/资源/Outbox记录为0。不是全部业务变体、外部支付/存储、真人或AI发布放行 |
 
-四品类人工对照复用`RENTAL_CATEGORY_DEFINITIONS`及原Core，不另造价格算法：摄影、露营、车辆、工程的现有报价保存和订单确认各1例已在本轮验证，计价/履约枚举仍取正式定义。9项现有用例通过：只产生原报价，不创建订单/预占；确认只到reserved，不推断已付款/已交付；旧AI连接入口拒绝。完整资格、取还检查、结算、变更、历史不足口径与人工指标并未由这9项覆盖。
+**历史结论（新授权前；已由上方测试验收更新）：全文结项尚未通过，AIN-01保持75%，02暂停。** 本轮补齐隔离版本的构建/迁移/默认关闭/原业务消费及重启证据；旧B02独立scope结构兼容仍未验证，实流库初版对齐checksum差异不能冒充最终字节部署。真正未交的本任务材料仍包括四品类真人操作原始样本及成功率、错误业务动作、修正/接管率、单任务成本、响应/完成耗时、取消恢复成功率，以及原G4独立验收/归档。用户不参与操作，不将该工作推回用户；但本轮只有程序化操作，不能据此生成真人指标、0成本或代签验收。停止临时API被拒，资源清理未完成；不绕过拒绝或删正在使用的库。不增加后续任务前置、不改正式需求门槛，未达到100%不继续02。
 
-门槛核对：AIN-01的G1/G2沿原目录与人工参考案例，G3由`AiOrderNextStepsService`实际消费目录、当前权限过滤和人工资源交接证明，本轮5项目录/消费者冒烟通过；证据路径检查先2 pass/1 fail，修复后3/3。因此登记75%，G4仍缺上述完整人工/目标环境及独立验收。AIN-05的G3由`500c839d`/`ebd5d479`标准执行/能力验证消费者及定向组合证明；AIN-11的G3由`bd052264`标准设置消费者及实际BudgetService/Prisma组合证明，均可登记75%，不要求等所有G4条件齐备才更新G3，也不把默认关闭当整项可用。
+### 固定核对基线
+
+- 唯一施工树：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`；分支`ai/ai-native-contracts-s01-20261002`；本轮HEAD `a1fbf6a4d6f8bd39512747429e465249fd36dcd0`，暂存区为空、无merge/cherry-pick；服务端及AIN-02合同WIP保留，未提交。
+- 本地main仅作来源核对：本次读得`032f8769faee0512ce00d92e831e77daaf4625c3`，未同步，活动main后续变化不纳入本轮基线。它不是运行环境或部署版本。
+- 目录最近相关提交`0451fa0a`，Guard `5742521d`，Core服务`30083f2e`，业务/治理服务`05e71b1f`。这四类服务/目录无本轮源码改动；Core Controller和事实仓储另有保留WIP，不能把相关提交SHA当整模块无WIP版本。
+- 历史Core集成`12bac46`实测为本树HEAD祖先（退出0）。[原2026-10-02集成记录](../历史归档/整理前快照-20261016/docs/开发任务/附件/平台租赁品类管理与版本发布专项实现记录.md)记载集成`ee5c8df`、177迁移/无drift、8条四品类两模式API链、23组前缀断言、库存单赢家及重启读回；模拟资金，不含供应商支付、全量E2E、多实例或全UI。这里只验收“已存在可引用的历史基线”，未重执行、未把旧环境或旧授权用于本轮。
+- 原AI配置的旧连接入口`PlatformService.testAiConnection`在缺真实Gateway探测装配时返回失败/unavailable，最初确定性用例通过；模型配置/预算/能力门与标准显式组合分别登记，不因配置存在认证能力。后续本轮私有构建、最终迁移及默认关闭原业务链已核验，生产开放、真实模型及其他宿主仍未核实。
+
+### 15项工具当前盘点
+
+正式初始目录：[tool-baseline.ts](../../apps/api/src/modules/ai-native/tool-baseline.ts)；当前多数事实消费者：[business-tools.composition.ts](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)。`baseline-1`全部`aiMaturity:unavailable`是保留的初始库存，不改成今日live注册表。下表的成熟度只说明实际实现：读取/试算或候选为`preview_only`；带真实持久化参与者的路径仅在当前正式授权、显式配置及可信依赖全部满足时具备`executable`实现，未提供则`unavailable`，**没有工具在本轮获生产放行**。
+
+公共授权入口为[原Guard](../../apps/api/src/common/api-auth.guard.ts)、[业务读authority](../../apps/api/src/modules/ai-native/business-read-route.authority.ts)和[订单authority](../../apps/api/src/modules/ai-native/order-route-context.authority.ts)。下表权限是原路由候选或专用动作要求，不代替audience、当前角色、owner、tenant/workspace/location/dataScope、字段和持久动作政策复验；不从模型/请求体取授权。R0受权读取无需新增业务幂等键，读后仍复验；R1/R2持久动作分别用原操作、审批和Core幂等边界，不以UI防重替代事务。
+
+| 工具；scope/风险 | 实际入口与原权限来源 | 输入→输出、事务/副作用/幂等 | 当前成熟度及缺口归属 |
+| --- | --- | --- | --- |
+| rental.order.explain；workspace/R0 | 组合order/orderExplanation→原`GET /rental/v1/orders/:id`，`order:view`；资金另验原finance字段权限 | 服务端原订单ID→状态/关联历史/来源；只读，缺历史不换当前依据 | 事实`preview_only`；模型执行显式依赖。全状态解释/真实对照属AIN-08/13 |
+| rental.catalog.search；workspace/R0 | 组合catalog→[catalog reader](../../apps/api/src/modules/ai-native/catalog-read-facts.service.ts)；原catalog view/manage或order view/create | ID/名称/游标/≤100条→当前持久配置/版本；有界分页，不全表fallback，不写库存 | `preview_only`；底层有界查询及全品类对照属AIN-08 |
+| rental.availability.check；workspace/R0 | 组合availability→原Core availability；原order operate/create | 正式DTO、当前空间/地点→观察时点可用性；不预占，无建单事务 | `preview_only`；并发库存胜者由原Core建单决定，AIN-09/15 |
+| membership.customer.resolve；tenant/R0 | 组合membershipCandidates→原booking-members/options；原order:create | 原个人/企业候选→脱敏ID/名称/来源，个人≤50；同名不选首条，无资格写入 | `preview_only`；tenant共享会员不授workspace订单资格，资格/敏感验证属原会员域及AIN-04/08/21 |
+| rental.quote.preview；workspace/R1 | [quote组合](../../apps/api/src/modules/ai-native/tools/quote-route.composition.ts)→[原报价服务](../../apps/api/src/modules/ai-native/quote-preview.service.ts)→Core quote；原order operate/create | 明确人类参数/选择→原金额、快照、版本、有效期；会保存报价，不预占/建单；原操作键关联收据，unknown不新建 | 条件性`executable`，非纯读取；完整参数/企业资格和真实等价属AIN-09 |
+| rental.order.propose；workspace/R1 | 原selected-quote任务→[批准动作准备](../../apps/api/src/modules/ai-native/approval-execution/approved-order-composition.ports.ts)；当前原任务prepare/业务权 | 原输入/报价→不可变持久提案/收据；原proposal/action/revision绑定，不创建订单 | 特定订单路径条件性`executable`；非无条件通用工具，缺依赖`unavailable`；AIN-03/07/15 |
+| rental.order.commit；workspace/R2 | [business-order application](../../apps/api/src/modules/ai-native/scenes/business-order-application.ts)→原审批/Core；原order operate/create及能力例外独立权 | 原task/action/input/proposal和真人批准→原订单；原事务锁、批准消费、幂等与通知首创边界；不推断支付/交付 | 条件性`executable`；缺原批准/宿主拒绝，真库原子性/全变体属AIN-07/15 |
+| rental.change.preview；workspace/R0 | [续租preview](../../apps/api/src/modules/ai-native/tools/order-extension-preview.service.ts)→原Core previewExtension；order:view及extend/operate | 原订单/版本及正式试算输入→原历史/现价口径；无保存/预占/批准/执行，不自动登记模型工具 | 续租`preview_only`；其他AI变更未接，不否认原Core已有换货/取消，AIN-08/09 |
+| tenant.opening.diagnose；workspace/R0 | 组合opening/openingActions→原tenantReadiness；原order:view、price:manage、user:manage或role:manage并逐分区检查 | 白名单分区、≤50问题→事实/来源/必选与可选缺项；只读，外部未验不画成功 | `preview_only`；全分区/依赖异常结构化属AIN-14和原业务域 |
+| tenant.config.propose；workspace/R1 | [opening action list](../../apps/api/src/modules/ai-native/tools/opening-action-list.service.ts)；原当前设置/分区读权，写权未授 | 已支持普通字段→当前版本差异；无verified proposal port时明确not_attempted，不假保存/发布；通知正式链另列 | 普通差异`preview_only`，通用持久提案`unavailable`；AIN-14/16 |
+| tenant.notifications.commit；workspace/R2 | [settings消费者](../../apps/api/src/modules/ai-native/scenes/settings-business-consumer.composition.ts)及原settings任务宿主；当前settings action/原管理权和真人批准 | 仅获准通知数组/字段→原Core操作收据；原审批、CAS/事务参与者及operation关联，不主动发送通知 | 特定通知路径条件性`executable`；无宿主拒绝，其他settings不套用，AIN-07/16 |
+| membership.profile.propose；tenant/R1 | [member difference](../../apps/api/src/modules/ai-native/tools/member-profile-difference.service.ts)；当前membership_candidates读权 | 原customerId/expectedName/name→姓名差异、prepared_not_submitted；实际无持久提案/批准/资料更新 | `preview_only`，正式提交`unavailable`；敏感字段原验证，AIN-16 |
+| inspection.draft.extract；workspace/R1 | [inspection组合](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)及员工任务；原员工订单/检查/文件ACL与持久动作权 | 原附件版本/hash、阶段/冻结模板→识别候选、更正/草稿/原收据；原操作绑定、模型单账及草稿CAS，不是检查批准/判责/收费 | 条件性候选持久路径，缺媒体/存储/能力为`unavailable`；真实识别/人工提交/设备属AIN-19/20 |
+| operations.risks.list；workspace/R0 | 组合risks→[diagnostic reader](../../apps/api/src/modules/ai-native/tools/diagnostic-read-facts.service.ts)和原有界报表；原report/order/maintenance及逐域/地点权 | 正式范围→风险/时点/来源；只读，当前库存标current_snapshot，无成本/历史容量分别unavailable | `preview_only`；不造利润/历史利用率，逐域全量对照属AIN-08/18 |
+| platform.category.propose；platform/R1 | [CategoryDraftApplication](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)→原治理Controller；SaaS当前治理权（创建edit）和原preview gate | 原正式DTO/code/version→受权草稿/修改/校验/review；原CAS/审计，草稿可持久；发布/采用另属R3，不在此执行 | 业务`preview_only`，生产preview关闭；高风险消费AIN-07/23，治理内核/采用依赖CAT-GOV |
+
+依赖与已知缺陷归属：AI未实现或未装配部分按上表原AIN项接续，不阻塞本盘点条款。原[事实基线测试](../../tests/ai-native-fact-baseline.test.cjs)保留KNOWN GAP：缺历史ruleSnapshot的TypeError、账户依赖失败未结构化、旧无检查快照订单读取当前模板；它们是原Core/业务历史兼容问题及AIN-08消费约束，**本轮未修、未删断言、不把缺陷表征通过当安全通过**。历史引用索引为[原evidence-index](../../tests/fixtures/ai-native/evidence-index.cjs)，仍是14工具加6事实的历史metadata索引，`measuredBusinessMetrics:not_collected`/`pending_independent_review`保留；当前15项以本节和正式目录为准。
+
+### 四品类人工参考流程与差异
+
+品类依据唯一取[shared正式定义](../../packages/shared/src/core.ts)，不另造计价算法。以下是已实现人工业务入口的可重复参考，不是本轮真人操作测量；具体数量、价格、资格与时间由相应案例的原配置/快照确定，不凭空补值。
+
+| 参考品类 | 已实现差异及核对点 |
+| --- | --- |
+| 摄影camera | 序列化/数量/套装；hour、day_24h、calendar_day、week，默认day_24h；门店/合作点/柜机/配送/寄送。配送客户地址；快门读数是交接依据，不作基础租金单位 |
+| 露营camping | 序列化/数量/耗材/套装；calendar_day、night、week，默认calendar_day；门店/合作点/仓库/配送/寄送。配送客户地址；套装完整性与清洁周转沿原配置 |
+| 车辆vehicle | 仅序列化；hour、day_24h、calendar_day、week、month、usage，默认day_24h；门店/合作点/配送。配送到租户据点；驾驶资格、里程/取还依据由原业务核验 |
+| 工程construction | 序列化/数量/套装；hour、shift、calendar_day、week、month、usage，默认shift；仓库/配送/工地交付/合作点。配送客户地址；操作资格、工时与运输沿原业务 |
+
+每类按同一原流程记录参考，差异从上述定义/实际能力读取：
+
+1. 当前空间与选品：原Auth/Guard/ALS确定workspace、地点/数据范围，原Core item-groups/pricing-groups/locations只读选型，不跨空间拼订单；保留原商品ID、计价单位、数量、时区/起止时间及履约地点。
+2. 客户/资格：原`booking-members`、`booking-members/:customerId/booking-options`及delivery-addresses核对本人/企业身份和当前空间资格；候选不等于合格，缺资格按原验证停止，不以`qualificationApproved`客户端声明替代。
+3. 计价/可用性/报价：原availability检查不预占；[RentalBusinessController.quote](../../apps/api/src/modules/rental-core/rental-business.controller.ts)→RentalBusinessService.createQuote，取得原金额/chargeLines/费率/规则/价格/有效期快照。缺规则、计价单位、历史依据拒绝，保存报价不产生订单。
+4. 开单/资金/分配：原[Core Controller](../../apps/api/src/modules/rental-core/rental-core.controller.ts)createOrder→原RentalOrderConfirmationService；order:create/operate和例外权分别核验，原幂等/库存事务创建；按原资金入口处理款项再confirm/allocate。reserved不是已付款或交付，模拟资金不等于支付供应商回调。
+5. 取还/检查：原inspection-templates按orderId读取冻结模板，`orders/:id/inspections`走原createInspection；阶段、必填字段、附件ACL/业务绑定及实际取还批次/幂等键复验。领取/归还及usage correction沿原Core，terminal拒更正，分批不凭内容hash合并不同真实归还。旧缺快照案例单列，不能将当前模板当历史证明。
+6. 结算：原settle通过原幂等事务先锁订单，再核检查异常/客户响应和funding.assertReadyToClose；寄送还需仓库实物验收证据，原Core settle取消未生效变更并保存。未裁定费用、pending退款或内部funding_pending不算清账完成；最初方法差分为摄影样本，后续八条四品类两模式链已实际完成取还/模拟资金/费用与关单，不扩称寄送、分批及全部变体验收。
+7. 变更解释：原extensions/preview及post-pickup-exchange/preview按原对象快照试算，续租original_total/incremental、换货original_order_price/replacement_current_price分开；原申请/生效/收据保持不变。历史费率缺失停止，当前价不冒充原价；AI当前仅接续租preview，不自动换货、取消、批准或重放资金。
+
+### 本轮证据与未验边界
+
+实际命令沿本树既有离线preload、`DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline`、绝对AI_OFFLINE_AUDIT/AI_OFFLINE_WRITE_ROOT/TEMP/TMP/cache及禁compile cache；加载服务另用本树lane-b-local-runtime和已安装兼容TypeScript的进程内解析，不构建shared/dist、不生成client。
+
+- `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs -`：一次性stdin只注册五个已有基线文件的选中43例，包括目录/四品类报价与确认/历史费率缺失/退款/冻结检查/关单/当前权限；[初轮日志](../../output/review-claude-ab-followup-20261025/ain01-acceptance-20261026.log)41通过、2失败、退出1。两失败是旧退款替身缺findFirstOrThrow及错误假定status.in，按当前原scope/revision CAS修正替身，未改支付源码或业务断言。
+- 同一离线`node -`仅复验这两失败例：[退款复验](../../output/review-claude-ab-followup-20261025/ain01-refund-recheck-20261026.log)2/2、退出0。准确结论为初轮41例通过加2例相关复验通过，**未重跑最新完整43/43**；两轮cancel/skip/todo均0。
+- 原`tests/rental-four-category-acceptance.test.cjs`：同一离线stdin载入已有脚本，[四品类日志](../../output/review-claude-ab-followup-20261025/ain01-four-category-20261026.log)退出0，16条续租/换货模式断言及正式目录/计价/地点/报价契约通过；原Core/business实际函数、吸收式仓储，不是真库或人工耗时。
+- 原next-steps与evidence-index选例：[目录消费者/索引日志](../../output/review-claude-ab-followup-20261025/ain01-index-handoff-20261026.log)5/5、退出0，取消/skip/todo均0。原目录只输出candidates_only/executable:false，人工交接重验当前权，撤权拒绝，不返回模型任意URL或执行回调；索引检查只证明结构/路径，不认证历史全文或真实指标。
+- A27基线确定性验证原报表的current_snapshot、分母历史缺项和不存在profit/cost/historicalUtilization；AI风险reader静态核对分别输出cost_evidence_missing和historical_available_capacity_missing。A28基线不进入AI：原报价、confirm、检查、关单、权限与四品类变更计算，加上述独立历史API/MySQL参考。满足本任务“已有可重复基线”，不扩大为本轮完整四品类HTTP/DB/履约/支付通过。
+- 拒绝审计路径`output/review-claude-ab-followup-20261025/ain01-acceptance.audit`本次实查不存在；已读preload只在拒绝时创建文件，测试内网络attempt断言通过。仅说明这些短命进程没有记录拒绝，不保证其他进程/工具已被同一守卫隔离。
+
+以上为最初离线条款复核，未启动服务或连接真实依赖。负责人随后授权独立环境采集并要求Claude自行操作，下列真实迁移尝试单独登记；其失败不覆盖上方离线通过，也不能当部署成功。此前AIN-05/11的G3不受本次复核改变，其他原任务/ENTRY不重新估分。
+
+### 授权隔离补证与真实迁移阻塞（2026-10-26）
+
+- 本轮自行新建仅本轮所有的`rental-os-ain01-cm4gff`容器，复用本机已有mysql:8.4镜像（pull=never），MySQL仅映射127.0.0.1:3397；目标库`rental_os_e2e_ain01_20261026_cm4gff`。原`e2e-database-ownership.cjs`预检查不存在后CREATE，无共享库或已有容器凭据读取；临时口令不入报告。输出`output/ain01-real-baseline-20261026.cm4gFf/`，全部保留，不发送private-config或私有凭据文件。
+- 私有编译用已安装TypeScript5.9.3、原API/shared和seed源码及本树owner marker client，**720 roots/0诊断**，只写本轮output/build；没有构建shared/dist或generate/覆盖client。manifest登记HEAD、schema/私有client schema和226迁移哈希。两份schema哈希不同，尚未证明client/schema完整一致；manifest的sources集合因Windows路径分隔筛选为空，不能冒称已冻结全部源码，不据此作当前完整部署证明。
+- 原`tests/mysql-e2e.test.cjs`未修改，只在私有加载过程中禁.env及替换环境/启动边界，保留从新库预检到migrate deploy的原断言；API启动仍拟由preview_start管理，不由测试spawn。两次私有适配定位失败在连接前结束，日志保留；修后实际新建库并执行226条原迁移，命令`node output/ain01-real-baseline-20261026.cm4gFf/provision.cjs` **退出1**，完整结果见[真实迁移失败日志](../../output/ain01-real-baseline-20261026.cm4gFf/provision-execution.log)。
+- **真实部署阻塞：** [20261003060000_ai_task_foundation](../../apps/api/prisma/migrations/20261003060000_ai_task_foundation/migration.sql)第5行已创建ai_scopes，后续[20261003160000_ai_provider_profiles](../../apps/api/prisma/migrations/20261003160000_ai_provider_profiles/migration.sql)第2行再次CREATE同表，Prisma P3018/MySQL1050。原Foundation还有现有scope结构约束，不能仅IF NOT EXISTS蒙混迁移语义。迁移历史未改、未resolve/标已应用或跳过；原链部署修复归AIN-03，AIN-01当前如实盘点并保留失败证据。
+- migrate deploy失败后没有执行drift/第二次deploy/Seed/API启动/四品类HTTP/重启采样，因此**没有真实业务成功率/人工耗时/成本数字**。原e2e finally因私有保留所有权适配仍打印旧清理文案，不能信该文案认定清理；后续明确实查失败库仍存在，核本轮container label/固定HEAD所有权，删除本轮库并SELECT确认0，再stop/remove本轮容器、列表确认不存在，见[清理结果](../../output/ain01-real-baseline-20261026.cm4gFf/cleanup-result.json)。原rental-os-mysql/redis仍运行，未修改。
+- 本轮确实连接了新临时MySQL并执行原迁移，不再沿用“全程离线”的描述。未读.env、未安装/拉镜像、未启动API/浏览器或调用外部模型/支付/对象存储，未提交/合main/推送。用户不参与采样，代理操作和脚本自动化不能记为真实人工样本；全文G4不满足，AIN-01保持75%，只将已获证据的条款验收通过。
+
+### 迁移修复、隔离实流与当前未验项（2026-10-26）
+
+- **修复范围与历史保全：** 负责人最新要求先修迁移、01到100%再02。本轮例外只去除`20261003160000_ai_provider_profiles`重复ai_scopes定义，复用原Foundation的canonical key、CHECK、索引及RESTRICT关系；Foundation未改。原SQL完整保存在[历史原文](历史归档/迁移原文/20261026/20261003160000_ai_provider_profiles.sql)，原SHA256 `0566abcc9f1e63838a4ff0801cf234800c0ab8a6987041a2d55fe57a91ada099`，修后SHA256 `1224e59c7147cfb971d0471b03eef8923b8cb9131c3901061c350ff58418ea15`。未DROP业务表/列/行、IF NOT EXISTS掩盖结构、resolve/标已应用或改数据库checksum；旧已应用版本不得拿新文件直接覆盖其历史，需另行授权兼容升级。
+- **最终前向SQL：** [20261026100000_ai_migration_contract_alignment](../../apps/api/prisma/migrations/20261026100000_ai_migration_contract_alignment/migration.sql)，SHA256 `b13f046ee4cb28aa7eb25432a942e279d032539c395d699f58a441efa01b4a26`。22条同列FK各在单个ALTER原子替换，原引用列/父表/删除语义保留，更新动作依当前schema；取消插入默认值但不改既有owner数据。原B03两例新增跨文件去重、scope CHECK及22条同列原子配对断言：[静态结果](../../output/ain01-migration-repair-20261026.YMvW0q/migration-static-final.log) **2/2、0 fail/cancel/skip/todo、退出0**。
+- **全新最终链：** 新自有容器`rental-os-ain01-ymvw0q`，已有mysql:8.4/pull=never、127.0.0.1:3398；只本轮专用库。`node output/ain01-migration-repair-20261026.YMvW0q/fresh-chain.cjs`在`rental_os_e2e_upgrade_20261026_ymvw0q`预检不存在后CREATE，最终227条迁移全量及第二次部署均**退出0**；[全链日志](../../output/ain01-migration-repair-20261026.YMvW0q/fresh-chain-1.log)、[重复部署无pending](../../output/ain01-migration-repair-20261026.YMvW0q/fresh-chain-2.log)、[结构diff为空](../../output/ain01-migration-repair-20261026.YMvW0q/fresh-chain-diff.log)。最终SQL checksum与文件完全一致。第一次四分钟部署超时留部分DDL及未完成收据，核确切自有空库、无会话后才重建，不据超时声称回滚或resolve。
+- **非空数据升级：** 最初对齐在双Seed后的实流库上验证214表哈希一致，但当时SQL是分离DROP/ADD。最终原子版另外在新专用`rental_os_e2e_alignment_20261026_ymvw0q`复制本轮业务数据（不复制migration收据），重建旧FK/默认值并插入合成scope/task/run/UNKNOWN step、禁用Profile/未验证能力、知识/ACL/记忆、原金融预算/账、Gateway收据及累计CALLS记录；`node output/ain01-migration-repair-20261026.YMvW0q/upgrade-data.cjs resume`最终 **退出0**，214表完整内容哈希相等、21张AI表非空、六位金额/unknown/owner归属及scope CHECK保留，见[最终日志](../../output/ain01-migration-repair-20261026.YMvW0q/alignment-nonempty-original-owner.log)和[脱敏汇总](../../output/ain01-migration-repair-20261026.YMvW0q/alignment-nonempty-result.json)。这只是最终对齐DDL夹具，不是旧B02独立scope全历史升级；首次导入timeout/查询ENOBUFS、跨行FK解析/默认表达式语法和合成step漏errorCode失败已分别核现场并只修私有mechanics/夹具，未放宽产品CHECK。旧记忆默认值按原迁移`user/legacy-unavailable`复验，不造历史owner授权。
+- **运行构建核对：** 本轮按已有离线generate隔离方案生成output/client，不覆盖共享或既有client/dist；client与当前schema仅忽略generator及@@级属性顺序后语义相等。修Windows路径筛选；`node output/ain01-migration-repair-20261026.YMvW0q/build.cjs manifest-only` **720 roots/0诊断、退出0**，重发编译器输出仅在内存逐份比较现有720份JS字节，不重写正在运行的产物；[最终字节结果](../../output/ain01-migration-repair-20261026.YMvW0q/final-build-byte-parity.log)、[manifest](../../output/ain01-migration-repair-20261026.YMvW0q/build-manifest.json)记720源码/JS、227迁移及schema哈希。旧manifest保全；TypeScript用已安装5.9.3，不安装/降级依赖。
+- **原业务HTTP参考：** 原Seed执行两次均退出0；API从私有main走实际AppModule/Auth/Guard/Core/Prisma，唯一preview_start管理，Browser禁用时未绕过。`node output/ain01-migration-repair-20261026.YMvW0q/drive.cjs`复用原`mysql-e2e.test.cjs`§8和四品类两模式断言，仅替换.env/环境/lifecycle及重启断点，不改原期望；[实流14组结果](../../output/ain01-migration-repair-20261026.YMvW0q/api-baseline.log) **退出0**。八条链覆盖正式会员/资格、报价建单、模拟资金、冻结取还检查、调价/续租/后单库存竞争/重放、原换货及结算；库存赢家6条续租/2条后单，原每组一赢家断言通过。不是全量E2E、企业/全部时间单位/寄送分批、支付供应商或对象上传验收。
+- **真实重启与A27/A28：** preview_stop旧API后preview_start新实例，`node output/ain01-migration-repair-20261026.YMvW0q/drive.cjs restart`复用原791～811行深比较，八单completed/effectiveEndAt、完整续租和换货、rate/rule/price/rentalAmount原快照、落表仅一次全部**退出0**，见[重启结果](../../output/ain01-migration-repair-20261026.YMvW0q/restart-baseline.log)。本轮固定临时authSecret且重新登录，不冒称重启自动撤销旧token。一次性stdin实跑四空间×两时期报表，原历史分母缺项明确且无profit/cost/historicalUtilization；实流主库AI任务、调用、admission、金融收据、资源charge、Outbox均0，见[A27/A28结果](../../output/ain01-migration-repair-20261026.YMvW0q/a27-a28-live-result.json)，**退出0**。API错误日志无server error。
+- **版本分层及未完成：** 实流主库`rental_os_e2e_ain01_20261026_ymvw0q`已227条，但alignment收据hash为初版`ebfb056005cac7d44dc4eedb40223c3dc5d4bbe42e6c491962babd64406853f9`，不是最终原子版；结构一致并不替代字节部署一致，未改checksum。最终SQL的全新链/非空DDL证据另列，不能混为同一部署。旧B02独立scope结构有数据兼容、真人指标、独立G4仍未完成；http-measurements.jsonl明确`existing_e2e_automated_not_human`，不推成本0或真人成功率。AIN-01保持75%、正式0/28，02继续暂停，不将全部可执行自动化冒充全文100%。
+- **当前资源与权限阻塞：** 最后停止当前API的preview_stop被权限层拒绝，没有用kill/其他会话/替代工具绕过，没有删除API仍用的库或容器。当前server `55ee0afa-8f92-4295-8043-0aac271b1413` /3998、自有容器及上述三专用库、初始化bootstrap库仍在；原rental-os-mysql/redis未动。全部output/日志/私有口令文件保留且不发送，不读.env、不安装/外联模型/支付/存储、不提交/合main/推送/生产启用。清理须在允许停止后核label/会话及确切所有权再执行，当前不能标已清理。
 
 ## ENTRY 增量实施摘要
 
