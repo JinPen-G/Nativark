@@ -6,6 +6,13 @@ import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, typ
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from './original-request.validation';
 import { HttpException } from '@nestjs/common';
+import { AI_PROPOSAL_DRAFT_SCHEMAS, AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS,
+  AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_CONFIRMATION_HISTORY_SCHEMAS,
+  type AiSelectedQuoteTaskRunDraft, type AiSelectedQuoteTaskConfirmationDraft, type AiSelectedQuoteTaskRecoveryDraft,
+  type AiSelectedQuoteTaskResultDraft, type AiSelectedQuoteTaskCancelResponseDraft,
+  type AiHumanQuoteOrderDecisionResponseDraft, type AiHumanQuoteOrderReprepareResponseDraft,
+  type AiApprovalApplicationReviewDraft, type AiApprovalApplicationReceiptDraft, type AiApprovalReprepareEligibilityDraft } from '@rental-os/shared';
+import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
 
 export type AiQuoteSelectionProofRequest = AiQuoteSelectionProofDraft;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
@@ -16,12 +23,34 @@ const proof = ajv.compile<AiQuoteSelectionProofRequest>(AI_QUOTE_SELECTION_DRAFT
 const clarified = ajv.compile<AiClarifiedQuoteSelectionRequestDraft>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiClarifiedQuoteSelectionRequestDraft);
 type QuoteSelectionResponses = { AiQuoteSelectionSelectResponseDraft: AiQuoteSelectionSelectResponseDraft;
   AiQuoteSelectionReconcileResponseDraft: AiQuoteSelectionReconcileResponseDraft;
-  AiQuoteSelectionReceiptDraft: AiQuoteSelectionReceiptDraft };
-const responseNames = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionReconcileResponseDraft', 'AiQuoteSelectionReceiptDraft'] as const;
-const responseDefinitions = JSON.parse(JSON.stringify(Object.fromEntries(responseNames
-  .map(name => [name, AI_QUOTE_SELECTION_DRAFT_SCHEMAS[name]]))).replaceAll('#/components/schemas/', '#/$defs/'));
+  AiQuoteSelectionReceiptDraft: AiQuoteSelectionReceiptDraft;
+  AiSelectedQuoteTaskRunDraft: AiSelectedQuoteTaskRunDraft;
+  AiSelectedQuoteTaskConfirmationDraft: AiSelectedQuoteTaskConfirmationDraft;
+  AiSelectedQuoteTaskRecoveryDraft: AiSelectedQuoteTaskRecoveryDraft;
+  AiSelectedQuoteTaskResultDraft: AiSelectedQuoteTaskResultDraft;
+  AiSelectedQuoteTaskCancelResponseDraft: AiSelectedQuoteTaskCancelResponseDraft;
+  AiHumanQuoteOrderDecisionResponseDraft: AiHumanQuoteOrderDecisionResponseDraft;
+  AiHumanQuoteOrderReprepareResponseDraft: AiHumanQuoteOrderReprepareResponseDraft;
+  AiApprovalApplicationReviewDraft: AiApprovalApplicationReviewDraft;
+  AiApprovalApplicationReceiptDraft: AiApprovalApplicationReceiptDraft;
+  AiApprovalReprepareEligibilityDraft: AiApprovalReprepareEligibilityDraft };
+const responseNames = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionReconcileResponseDraft', 'AiQuoteSelectionReceiptDraft',
+  'AiSelectedQuoteTaskRunDraft', 'AiSelectedQuoteTaskConfirmationDraft', 'AiSelectedQuoteTaskRecoveryDraft', 'AiSelectedQuoteTaskResultDraft',
+  'AiSelectedQuoteTaskCancelResponseDraft', 'AiHumanQuoteOrderDecisionResponseDraft', 'AiHumanQuoteOrderReprepareResponseDraft',
+  'AiApprovalApplicationReviewDraft', 'AiApprovalApplicationReceiptDraft', 'AiApprovalReprepareEligibilityDraft'] as const;
+const responseDefinitions = JSON.parse(JSON.stringify({ ...AI_NATIVE_COMPONENT_SCHEMAS, ...AI_PROPOSAL_DRAFT_SCHEMAS,
+  ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_CONFIRMATION_HISTORY_SCHEMAS,
+  ...AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, ...AI_QUOTE_SELECTION_DRAFT_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
 const responseValidators = Object.fromEntries(responseNames.map(name => [name,
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: responseDefinitions })]));
+export function validateQuoteSelectionHttpRequest(name: string, value: unknown): unknown {
+  if (!Object.prototype.hasOwnProperty.call(AI_QUOTE_SELECTION_DRAFT_SCHEMAS, name)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const copy = structuredClone(value);
+  const validator = ajv.getSchema(`quote-http:${name}`) ?? ajv.compile({ $id: `quote-http:${name}`,
+    $ref: `#/$defs/${name}`, $defs: responseDefinitions });
+  if (!validator(copy) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 65536) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  return freezeOriginalInput(copy);
+}
 /** A malformed saved-selection reply may follow COMMIT; only the original
  * selection command can observe it. Validation does not strip extra fields. */
 export function validateQuoteSelectionResponse<K extends keyof QuoteSelectionResponses>(name: K, value: unknown, mayHaveCommitted = false): QuoteSelectionResponses[K] {

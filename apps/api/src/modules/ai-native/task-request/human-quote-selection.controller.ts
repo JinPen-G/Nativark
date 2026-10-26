@@ -1,8 +1,9 @@
 import type { IncomingMessage } from 'node:http';
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT,
-  AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
-import { parseClarifiedQuoteSelection, validateQuoteSelectionResponse } from './quote-selection.validation';
+  AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS as taskContracts,
+  AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS as approvalContracts } from '@rental-os/shared';
+import { parseClarifiedQuoteSelection, validateQuoteSelectionResponse, validateQuoteSelectionHttpRequest } from './quote-selection.validation';
 import type { composeClarifiedQuoteSelectionRequests, composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
@@ -36,6 +37,11 @@ export class AiClarifiedQuoteSelectionController {
 }
 
 type QuoteTaskHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+async function quoteHttpContract(contract: { request: string; response: Parameters<typeof validateQuoteSelectionResponse>[0] },
+  body: unknown, work: (command: unknown) => Promise<unknown>, writing = false) {
+  const command = validateQuoteSelectionHttpRequest(contract.request, body);
+  return validateQuoteSelectionResponse(contract.response, await work(command), writing);
+}
 async function runQuoteTask<T>(request: QuoteTaskHttpRequest, work: (signal: AbortSignal) => Promise<T>) {
   const controller = new AbortController(), abort = () => controller.abort();
   const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
@@ -58,19 +64,23 @@ export class AiSelectedQuoteTaskController {
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.start(request, body, signal)));
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(taskContracts.start, body,
+      command => this.tasks.start(request, command, signal), true)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readConfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.readConfirmation(request, body));
+    return respondHumanQuote(() => quoteHttpContract(taskContracts.readConfirmation, body,
+      command => this.tasks.readConfirmation(request, command)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.continueConfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continueConfirmation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.continueConfirmation(request, body, signal)));
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(taskContracts.continueConfirmation, body,
+      command => this.tasks.continueConfirmation(request, command, signal), true)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcile(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.reconcile(request, body, signal)));
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(taskContracts.reconcile, body,
+      command => this.tasks.reconcile(request, command, signal), true)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readScene) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -78,11 +88,11 @@ export class AiSelectedQuoteTaskController {
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.readResult(request, body));
+    return respondHumanQuote(() => quoteHttpContract(taskContracts.readResult, body, command => this.tasks.readResult(request, command)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.requestCancel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.requestCancel(request, body));
+    return respondHumanQuote(() => quoteHttpContract(taskContracts.requestCancel, body, command => this.tasks.requestCancel(request, command), true));
   }
 }
 
@@ -134,17 +144,31 @@ export class AiHumanQuoteOrderController {
   constructor(@Inject(AI_HUMAN_QUOTE_ORDER_REQUESTS)
     private readonly orders: ReturnType<typeof composeRequestBoundHumanQuoteOrder>) {}
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedProposal) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedProposal(request, body)); }
+  readSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedProposal, body, command => this.orders.readSelectedProposal(request, command)));
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.decideSelectedProposal) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  decideSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.decideSelectedProposal(request, body), 'read_decision_receipt'); }
+  decideSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.decideSelectedProposal, body,
+      command => this.orders.decideSelectedProposal(request, command), true), 'read_decision_receipt');
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedDecisionReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readSelectedDecisionReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedDecisionReceipt(request, body)); }
+  readSelectedDecisionReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedDecisionReceipt, body, command => this.orders.readSelectedDecisionReceipt(request, command)));
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedOrderResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSelectedOrderResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedOrderResult(request, body)); }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedReprepareEligibility) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readSelectedReprepareEligibility(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedReprepareEligibility(request, body)); }
+  readSelectedReprepareEligibility(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedReprepareEligibility, body, command => this.orders.readSelectedReprepareEligibility(request, command)));
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.reprepareSelectedProposal) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reprepareSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.reprepareSelectedProposal(request, body), 'read_reprepare_receipt'); }
+  reprepareSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.reprepareSelectedProposal, body,
+      command => this.orders.reprepareSelectedProposal(request, command), true), 'read_reprepare_receipt');
+  }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedReprepareReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readSelectedReprepareReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondHumanQuote(() => this.orders.readSelectedReprepareReceipt(request, body)); }
+  readSelectedReprepareReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedReprepareReceipt, body, command => this.orders.readSelectedReprepareReceipt(request, command)));
+  }
 }

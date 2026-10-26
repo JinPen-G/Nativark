@@ -13,7 +13,8 @@ import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } f
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
   AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
-  AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS } from '@rental-os/shared';
+  AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS,
+  AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS, AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
@@ -2355,7 +2356,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(name)
         ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
       summary: 'Same current owner/original input and exact persisted Core quote selection. Selection is not approval; only the existing runner consumes a real human approval through the original Core transaction. New actions require the server quote-order host/limits and current persisted policies. Disabled execution still permits original selection/approval/order receipt reads; unknown is never a new quote/order. No model, stock/payment success claim or second runtime. Response is draft-polymorphic.',
-      requestSchema: 'GenericObject', responseSchema: 'GenericObject' }))),
+      requestSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT
+        ? AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS[name as keyof typeof AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS]
+        : AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS[name as keyof typeof AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS])?.request ?? 'GenericObject',
+      responseSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT
+        ? AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS[name as keyof typeof AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS]
+        : AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS[name as keyof typeof AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS])?.response ?? 'GenericObject' }))),
   { method: 'post', path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders}`,
     tag: 'AI Native', operationId: 'readAiOrderCandidates', authRequired: true, permissions: ['rental-os:order:view'],
     summary: 'Bounded current Core order page under current Guard/ALS, workspace, data and location scope. Only minimal order facts; no model call, task creation, financial totals or stock reservation. Time filters mean rental-interval overlap, not today-created or pickup/return due.',
