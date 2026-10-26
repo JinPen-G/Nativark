@@ -56,7 +56,7 @@ export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75 } as const;
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
-export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 1, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
+export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
 export const ADMIN_STATUS_COLORS = {
   light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },
