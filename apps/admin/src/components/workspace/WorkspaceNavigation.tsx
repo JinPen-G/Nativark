@@ -114,6 +114,8 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
         navigate(target);
         await committed;
       });
+      // Interrupting a superseded navigation rejects ready even when finished is handled.
+      void transition.ready.catch(() => {});
       capture.current = transition;
       // Slow modules/errors must never hold the document's rendering lock.
       deadline.current = window.setTimeout(() => { if (generation.current === version) stop(); }, 2000);

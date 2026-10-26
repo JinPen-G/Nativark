@@ -36,9 +36,9 @@
   height: var(--rental-sidebar-menu-height);
   font-size: var(--rental-typography-body-size);
   line-height: var(--rental-typography-body-line-height);
-  transition-property: background-color, color;
-  transition-duration: var(--animate-ui-sidebar-color-duration, 200ms);
-  transition-timing-function: var(--animate-ui-sidebar-color-easing, ease);
+  transition-property: width, height, padding, background-color, color;
+  transition-duration: var(--animate-ui-sidebar-duration), var(--animate-ui-sidebar-duration), var(--animate-ui-sidebar-duration), var(--animate-ui-sidebar-color-duration, 200ms), var(--animate-ui-sidebar-color-duration, 200ms);
+  transition-timing-function: var(--animate-ui-sidebar-easing), var(--animate-ui-sidebar-easing), var(--animate-ui-sidebar-easing), var(--animate-ui-sidebar-color-easing, ease), var(--animate-ui-sidebar-color-easing, ease);
 }
 .rental-sidebar-colors [data-sidebar="menu-sub"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="menu-button"] > svg:first-child { width: var(--rental-sidebar-icon-size); height: var(--rental-sidebar-icon-size); }
@@ -48,3 +48,5 @@
   color: var(--rental-sidebar-selected-ink);
 }
 .rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] > svg { color: inherit; }
+
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="group-label"] { margin-top: calc(-1 * var(--rental-sidebar-group-label-height)); }
