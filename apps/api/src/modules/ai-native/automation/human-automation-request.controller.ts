@@ -1,7 +1,8 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from '@rental-os/shared';
-import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -14,8 +15,9 @@ import { withRequestAbort } from '../scenes/request-abort';
 const eventTaskAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(eventTaskAjv);
 const validEventTask = eventTaskAjv.compile(AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS.AiAutomationEventTaskResponseDraft);
-const reviewDefinitions = JSON.parse(JSON.stringify(AI_AUTOMATION_REVIEW_HTTP_SCHEMAS).replaceAll('#/components/schemas/', '#/$defs/'));
-const reviewValidators = Object.fromEntries(Object.keys(reviewDefinitions).map(name => [name,
+const reviewDefinitions = JSON.parse(JSON.stringify({ ...AI_NATIVE_COMPONENT_SCHEMAS,
+  ...AI_EVENTS_DRAFT_SCHEMAS, ...AI_AUTOMATION_REVIEW_HTTP_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
+const reviewValidators = Object.fromEntries(Object.keys(AI_AUTOMATION_REVIEW_HTTP_SCHEMAS).map(name => [name,
   eventTaskAjv.compile({ $ref: `#/$defs/${name}`, $defs: reviewDefinitions })]));
 
 abstract class HumanAutomationController {
@@ -30,9 +32,10 @@ abstract class HumanAutomationController {
       if (contract) {
         try { const copy = structuredClone(result); if (reviewValidators[contract.response](copy)) return copy; }
         catch { /* Do not expose raw internal material or validation diagnostics. */ }
-        // Only human metadata writes may have committed; malformed reads are
-        // unavailable, never empty success or evidence that no operation exists.
-        throw new AutomationError(action === 'close' || action === 'feedback' ? 'result_unknown' : 'unavailable');
+        // Candidate reads may expire an outbox marker. Treat their damaged
+        // acknowledgements like other metadata writes, without retry permission.
+        throw new AutomationError(['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'close', 'feedback'].includes(action)
+          ? 'result_unknown' : 'unavailable');
       }
       if (action !== 'createEventTask') return result;
       // Metadata writes can already have committed. A bad reply is unknown,
