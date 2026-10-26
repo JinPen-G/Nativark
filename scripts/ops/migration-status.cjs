@@ -43,11 +43,12 @@ function verifyAppliedMigrationBytes(target) {
     if (actual !== row.checksum) throw new Error(`已应用迁移与本地 SQL 字节不一致：${row.name}；保留原收据，先在克隆库核对升级方案，不自动 resolve 或重写 checksum`);
   }
   log(`  ✓ ${rows.length} 条已应用迁移的 SQL 字节与原收据一致`);
+  return seen;
 }
 
 /** Recognise the old standalone B02 shape without reading business rows. Passing
  * this narrow guard is not a full schema diff, data upgrade or acceptance. */
-function verifyAiScopeShape(target) {
+function verifyAiScopeShape(target, scopeExpected = false) {
   const raw = sql(target, `SELECT JSON_OBJECT(
     'tables', (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_scopes'),
     'legacyColumns', (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_scopes' AND COLUMN_NAME = 'updatedAt'),
@@ -56,7 +57,10 @@ function verifyAiScopeShape(target) {
   const state = JSON.parse(raw);
   if (!state || ![state.tables, state.legacyColumns, state.legacyIndexes, state.shapeGuards]
     .every(value => Number.isSafeInteger(value) && value >= 0)) throw new Error("AI scope 结构无法核实");
-  if (state.tables === 0) return; // No AI scope has been deployed yet.
+  if (state.tables === 0) {
+    if (scopeExpected) throw new Error("已有 AI 迁移收据但缺失 scope 表，不能判为未部署或已同步");
+    return; // No AI scope has been deployed yet.
+  }
   if (state.tables !== 1 || state.legacyColumns !== 0 || state.legacyIndexes !== 0 || state.shapeGuards !== 1)
     throw new Error("AI scope 存在旧 B02 结构或缺少已启用的 shape CHECK；必须另行核对非空数据升级，不能据迁移名称判为兼容。不会改写 scopeKey、归属或旧行");
   log("  ✓ 未发现旧 B02 scope 结构标记，shape CHECK 已启用（不替代完整 drift/数据验证）");
@@ -89,8 +93,9 @@ void (() => {
   if (validate.status !== 0) fail("Prisma schema 校验失败；先修 schema，再谈迁移与恢复");
 
   try {
-    verifyAppliedMigrationBytes(target);
-    verifyAiScopeShape(target);
+    const applied = verifyAppliedMigrationBytes(target);
+    verifyAiScopeShape(target, applied.has("20261003060000_ai_task_foundation")
+      || applied.has("20261003160000_ai_provider_profiles"));
   } catch (error) {
     fail(error instanceof Error ? error.message : "迁移兼容核查失败", [target.password]);
     return;
