@@ -35,7 +35,7 @@ export const ADMIN_TABLE_COLUMN_WIDTH = {
 /** Shared shell spacing, derived from the existing foundation scale. Never
  * compensate for the breadcrumb/title gap in individual business pages. */
 export const ADMIN_LAYOUT_SPACING = {
-  contextHeight: 40,
+  contextHeight: 48,
   pageTop: "0px",
   headerContent: "var(--space-2)",
   tabsContent: "var(--space-2)",
