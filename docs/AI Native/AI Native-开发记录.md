@@ -13,6 +13,11 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：自动化政策准备与原CAS收据合同（2026-10-26）
+
+- 接续`5589ca1e`，原政策读取/预览/准备/原准备回读/审阅/原操作/提交7路接shared及OpenAPI命名合同，并在原Controller实际校验。主体/政策ID与expectedRevision成对表达；configured、prepared/stale/expired、observed、unknown、not_observed分开，不以配置保存或人类待办关闭当业务执行许可。沿用原权限、地点范围、独立主体、准备/提交grant与CAS，不开无人执行。
+- 既有原政策受权准备/CAS冲突/丢应答核对1/1，fail/skip/todo=0、退出0；stdin核对7路等价、夹带actor拒绝、损坏提交回复unknown与原键unknown保持，通过；API/shared noEmit721 roots/0诊断、退出0。证据`output/ain02-contract-closure-20261026/automation-policy-*`；无新增测试脚本，无真实DB/模型/服务操作。AIN-02仍需复合场景/旧读接口及全端兼容冻结，不上调百分比。
+
 ## 近期核心：事件候选、不可变输入与任务回读合同（2026-10-26）
 
 - 接续`ba553415`，原automation候选读取/准备/有界批处理、输入准备/读取、任务创建/原创建回读7类接回同一shared/OpenAPI及Controller，operator/staff共28路均有命名合同。ready必须有原事件材料、延期重试必须有时间、未观测与unknown不能生成任务成功；候选读取可能更新过期标记，坏回复按可能已写处理，不授重试。

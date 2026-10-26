@@ -4,6 +4,7 @@ import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
@@ -2326,8 +2327,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
     method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
-    summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Draft-polymorphic response, not a frozen full protocol.',
-    requestSchema: 'GenericObject', responseSchema: 'GenericObject' })),
+    summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Named closed contracts distinguish current configuration, preview, prepared/stale/expired metadata and the original commit receipt.',
+    requestSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].request,
+    responseSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].response })),
   ...Object.entries(AI_SCENE_MODEL_HTTP_DRAFT).filter(([name]) => /Settings/u.test(name)).map(([name, action]) => ({
     method: 'post' as const, path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
     operationId: `originalNotificationSettings_${name}`, permissions: ['rental-os:price:manage'],
