@@ -1,13 +1,15 @@
 # 后台工作区表面与页面入场
 
-这是现有后台的有限共享层，负责左侧导航引发的页面层叠切换，以及已有页面的单次淡入。外层 Card 与材质 class 已取消，不重新给搜索和表格套容器。
+这是后台的共享连续交互层，负责左侧导航层叠、普通路由入场和状态内容更换。外层 Card 与材质 class 已取消，不重新给搜索和表格套容器。
 
 ## 使用与职责
 
 - `GlassWorkspace.module.css` 的 `surface`：保留为未启用参考，不被订单页引用；不得为了用上材质重新给搜索和表格套容器。订单页间距直接复用 foundation 的 `--space-*`。
-- `WorkspaceNavigation`：只由 AppShell 左侧导航触发。新页面从内容区下方覆入，旧页面缩至0.94并淡至0.6，500ms，沿Animate UI stack的resize曲线；参数由ADMIN_NAVIGATION_MOTION维护。侧栏、顶部栏保持稳定，详情跳转、内部Tab、筛选和排序不触发。
+- `WorkspaceNavigation`：AppShell左侧导航使用stack，新页面从内容区下方覆入，旧页面缩至0.94并淡至0.6，500ms，沿Animate UI stack的resize曲线；参数由ADMIN_NAVIGATION_MOTION维护。详情、返回和其他普通路由在就绪后短淡入；内部Tab、筛选和排序不触发路由层动效。侧栏与顶部栏保持稳定。
 - `WorkspaceRouteReady`：在原Suspense内报告目标路由已提交，避免把懒加载占位当作目的页面。使用浏览器快照，只有一份活跃React页面，不复制旧表单、查询或事件。
-- `PageEnter`：固定版本 Animate UI Fade 的一次页面入场。层叠导航时跳过淡入，避免双重入场；首次进入等原有场景保持现状。不能按筛选/分页/请求状态改变 key。
+- `PageEnter`：保留固定版本Animate UI Fade；在WorkspaceNavigation内统一抑制，由工作区负责入场，避免双重淡入。不能按筛选/分页/请求状态改变key。
+- `ContentTransition` / `useContentTransition`：使用已安装Animate UI 2.3.0的fade token与tempo API，200ms；起始透明度由ADMIN_CONTENT_MOTION维护。只在明确的内容状态变化后播放，保持节点、表单和焦点的原所有权，不复制退出树、不设key、不改变定位上下文。层叠或父层淡入时跳过；中断、减少动态及卸载恢复原透明度并清除标记。
+- QueryState负责loading/error/ready；外置页签传transitionKey。列表/卡片共享内容层；原Tabs、卡片预览和Motiq不叠同职责动画。多选浮栏使用原Animate UI Slide与8px短位移、200ms淡入淡出，退出即inert；导入/批量确认保留Modal关闭周期，完成后再卸载。
 - 原 UIArc 控件及动效仍走 `@/components/ui`；不在这里重复实现或包装相同动效。
 - 动效偏好由外观页的“跟随系统 / 完整动效 / 减少动效”控制，默认跟随系统，当前浏览器保存、立即生效。`motionPreferences` 是唯一解析入口；构建适配统一原组件的偏好 hook 和 CSS 媒体规则，vendor 源码不改。减少动效直接导航并释放快照；切回完整动效恢复原参数，不重挂业务页。
 
@@ -31,4 +33,4 @@ Solid Glass 的边缘光照思路来自固定提交的 `src/solid-glass.css`，�
 
 ## 核验边界
 
-2026-10-25在用户登录的真实Chrome中核对运营概览→会员方案→器材型号。捕获到stack进入/退出关键帧，顶部栏与侧栏边界一致，结束后inert及标记已清除。证据见`output/playwright/workspace-stack-*`。完整连续点击、移动端与减少动态浏览器复核未完成：独立窗口随后关闭，重启被工具策略拒绝；已按用户选择请求打开内置浏览器。静态/类型检查不替代这些交互验收。未保存业务表单、安装依赖或部署。
+2026-10-26在用户登录的真实Chrome中逐页打开当前账号的28个租户入口并截图，核对切换收尾、横向溢出及锁定残留；详情进入/返回覆盖订单、个人会员、企业会员，库存与业务规则外置页签均观测到内容过渡。列表/卡片连续切换保留选择，多选浮栏与导入/批量确认退出生命周期已核查。动态偏好切换保留未提交的搜索文字和节点；跟随系统减少动态时无快照、淡入和锁定残留，明确完整动效可覆盖系统偏好；390px库存无页面横向溢出。未执行导入、停用等业务命令。证据位于`output/playwright/admin-motion-review/`及同级定向检查记录。SaaS专属页面和Electron运行时未做浏览器验收；共享接入的静态检查不能替代这些验收。未安装依赖、保存业务配置或部署。
