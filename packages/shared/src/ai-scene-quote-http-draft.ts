@@ -133,8 +133,37 @@ const previewResponse = { oneOf: [
 ] };
 const operation = { original: ref('AiSceneRequestReceiptDraft'), receipt: observedAnswer, result: ref('AiCoreQuotePreviewResultDraft'),
   orderApproval: choice('not_granted'), inventoryReservation: choice('not_attempted') };
+const originalOperation = { original: operation.original, result: operation.result,
+  orderApproval: operation.orderApproval, inventoryReservation: operation.inventoryReservation };
+const comparison = object({ status: choice('compared'), previousQuoteId: id(), currentQuoteId: id(),
+  inputChanges: object({ items: { type: 'boolean' }, quantity: { type: 'boolean' }, period: { type: 'boolean' },
+    location: choice('not_projected_in_quote_display') }),
+  coreAmounts: object({ payableChanged: { type: 'boolean' }, receivableChanged: { type: 'boolean' }, currencyChanged: { type: 'boolean' },
+    arithmetic: choice('not_recomputed_by_ai_layer') }), validity: object({ previous: leafTime, current: leafTime }),
+  approvalReuse: choice('forbidden_new_quote_requires_new_confirmation') });
+/** Original-input quote APIs differ from clarified-answer APIs. Their receipt
+ * is the original request, never a model answer or an order approval. */
+export const AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS = Object.freeze({
+  quoteReview: { request: 'AiSceneRequestReadDraft', response: 'AiOriginalQuoteReviewResponseDraft' },
+  quoteConfirm: { request: 'AiSceneQuoteConfirmDraft', response: 'AiOriginalQuoteConfirmResponseDraft' },
+  quoteReceipt: { request: 'AiSceneQuoteReceiptReadDraft', response: 'AiOriginalQuoteReceiptResponseDraft' },
+  compareOriginalQuotes: { request: 'AiSceneOriginalQuotesCompareDraft', response: 'AiOriginalQuotesCompareResponseDraft' }
+} as const);
 
 export const AI_SCENE_QUOTE_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiOriginalQuoteReviewResponseDraft: object({ original: operation.original, facts: preparation, sources,
+    materialHash: hash, humanSelection: choice('not_attested'), quotePersistence: choice('not_attempted'),
+    orderApproval: choice('not_granted'), execution: choice('not_attempted') }),
+  AiOriginalQuoteConfirmResponseDraft: object({ ...originalOperation, observation: choice('explicit_quote_request') }),
+  AiOriginalQuoteReceiptResponseDraft: object({ ...originalOperation, observation: choice('original_operation_only'),
+    selection: choice('historical_not_current_confirmation') }),
+  AiOriginalQuotesCompareResponseDraft: { oneOf: [
+    object({ status: choice('unavailable_original_quote'), previous: ref('AiOriginalQuoteReceiptResponseDraft'),
+      current: ref('AiOriginalQuoteReceiptResponseDraft'), comparison: { type: 'null' }, retryable: booleanFalse,
+      nextAction: choice('read_original_quote_receipt'), quotation: choice('not_attempted'), orderApproval: choice('not_granted') }),
+    object({ status: choice('compared'), previous: ref('AiOriginalQuoteReceiptResponseDraft'), current: ref('AiOriginalQuoteReceiptResponseDraft'),
+      comparison, quotation: choice('not_attempted'), inventoryReservation: choice('not_attempted'), orderApproval: choice('not_granted'),
+      approvalReuse: choice('forbidden_new_quote_requires_new_confirmation') })] },
   AiCoreQuotePreviewResultDraft: previewResponse,
   AiSceneQuotePreparationDraft: preparation,
   AiSceneQuoteInputSourcesDraft: sources,
@@ -200,3 +229,19 @@ export type AiSceneModelQuoteConfirmResponseDraft = { receipt: ObservedAnswer; p
 export type AiSceneModelQuoteReceiptResponseDraft = { receipt: UnobservedAnswer; quotation: 'unavailable' }
   | { original: AiSceneRequestReceiptDraft; receipt: ObservedAnswer; result: AiCoreQuotePreviewResultDraft;
       observation: 'original_clarified_quote_operation_only'; orderApproval: 'not_granted'; inventoryReservation: 'not_attempted' };
+export interface AiOriginalQuoteReviewResponseDraft { original: AiSceneRequestReceiptDraft; facts: AiSceneQuotePreparationDraft;
+  sources: AiSceneQuoteInputSourcesDraft; materialHash: string; humanSelection: 'not_attested'; quotePersistence: 'not_attempted';
+  orderApproval: 'not_granted'; execution: 'not_attempted' }
+type OriginalQuoteOperation = { original: AiSceneRequestReceiptDraft; result: AiCoreQuotePreviewResultDraft;
+  orderApproval: 'not_granted'; inventoryReservation: 'not_attempted' };
+export type AiOriginalQuoteConfirmResponseDraft = OriginalQuoteOperation & { observation: 'explicit_quote_request' };
+export type AiOriginalQuoteReceiptResponseDraft = OriginalQuoteOperation & { observation: 'original_operation_only'; selection: 'historical_not_current_confirmation' };
+export interface AiOriginalQuotesComparisonDraft { status: 'compared'; previousQuoteId: string; currentQuoteId: string;
+  inputChanges: { items: boolean; quantity: boolean; period: boolean; location: 'not_projected_in_quote_display' };
+  coreAmounts: { payableChanged: boolean; receivableChanged: boolean; currencyChanged: boolean; arithmetic: 'not_recomputed_by_ai_layer' };
+  validity: { previous: string; current: string }; approvalReuse: 'forbidden_new_quote_requires_new_confirmation' }
+export type AiOriginalQuotesCompareResponseDraft = { previous: AiOriginalQuoteReceiptResponseDraft; current: AiOriginalQuoteReceiptResponseDraft;
+  quotation: 'not_attempted'; orderApproval: 'not_granted' } & (
+  | { status: 'unavailable_original_quote'; comparison: null; retryable: false; nextAction: 'read_original_quote_receipt' }
+  | { status: 'compared'; comparison: AiOriginalQuotesComparisonDraft; inventoryReservation: 'not_attempted';
+      approvalReuse: 'forbidden_new_quote_requires_new_confirmation' });

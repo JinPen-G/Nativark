@@ -12,7 +12,9 @@ import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
   AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS,
   type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
-  type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft } from '@rental-os/shared';
+  type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
+  type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft,
+  type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
@@ -71,7 +73,9 @@ const quoteDefinitions = JSON.parse(JSON.stringify({ ...AI_SCENE_QUOTE_HTTP_SCHE
 }).replaceAll('#/components/schemas/', '#/$defs/'));
 type QuoteResponses = { AiSceneModelQuotePreparationResponseDraft: AiSceneModelQuotePreparationResponseDraft;
   AiSceneModelQuoteConfirmResponseDraft: AiSceneModelQuoteConfirmResponseDraft;
-  AiSceneModelQuoteReceiptResponseDraft: AiSceneModelQuoteReceiptResponseDraft };
+  AiSceneModelQuoteReceiptResponseDraft: AiSceneModelQuoteReceiptResponseDraft;
+  AiOriginalQuoteReviewResponseDraft: AiOriginalQuoteReviewResponseDraft; AiOriginalQuoteConfirmResponseDraft: AiOriginalQuoteConfirmResponseDraft;
+  AiOriginalQuoteReceiptResponseDraft: AiOriginalQuoteReceiptResponseDraft; AiOriginalQuotesCompareResponseDraft: AiOriginalQuotesCompareResponseDraft };
 const quoteValidators = Object.fromEntries(Object.keys(AI_SCENE_QUOTE_HTTP_SCHEMAS).map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: quoteDefinitions })]));
 const requestResponseNames = [...new Set(Object.values(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(contract => contract.response))];
@@ -262,19 +266,23 @@ export class AiOriginalScenesController {
   /** Read current preparation for the stored original request, never quote creation. */
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
   quoteReview(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, signal => this.scenes.reviewQuote(request, body, signal)));
+    return this.respond(() => withRequestAbort(request, async signal =>
+      validateAiSceneQuoteResponse('AiOriginalQuoteReviewResponseDraft', await this.scenes.reviewQuote(request, body, signal))));
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm) @HttpCode(200) @Header('Cache-Control', 'no-store')
   quoteConfirm(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, signal => this.scenes.confirmQuote(request, body, signal)), 'read_original_quote_receipt');
+    return this.respond(() => withRequestAbort(request, async signal =>
+      validateAiSceneQuoteResponse('AiOriginalQuoteConfirmResponseDraft', await this.scenes.confirmQuote(request, body, signal), true)), 'read_original_quote_receipt');
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   quoteReceipt(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, signal => this.scenes.readQuoteReceipt(request, body, signal)));
+    return this.respond(() => withRequestAbort(request, async signal =>
+      validateAiSceneQuoteResponse('AiOriginalQuoteReceiptResponseDraft', await this.scenes.readQuoteReceipt(request, body, signal))));
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes) @HttpCode(200) @Header('Cache-Control', 'no-store')
   compareOriginalQuotes(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, signal => this.scenes.compareOriginalQuotes(request, body, signal)));
+    return this.respond(() => withRequestAbort(request, async signal =>
+      validateAiSceneQuoteResponse('AiOriginalQuotesCompareResponseDraft', await this.scenes.compareOriginalQuotes(request, body, signal))));
   }
 }
 
