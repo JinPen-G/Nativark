@@ -18,6 +18,9 @@ import { Separator } from "./animate-sidebar/runtime/separator";
 import { NativeAccountMenu } from "./animate-sidebar/NativeAccountMenu";
 import { NativeWorkspaceSwitcher } from "./animate-sidebar/NativeWorkspaceSwitcher";
 import { NativeNavigation } from "./animate-sidebar/NativeNavigation";
+import { OperatorProvider } from "@/features/ai-operator/OperatorContext";
+import { AiOperatorNavigation, OperatorModeSwitch } from "@/features/ai-operator/AiOperatorNavigation";
+import "@/features/ai-operator/ai-operator.css";
 import "./animate-sidebar/animate-sidebar.css";
 import "./animate-sidebar/sidebar-adapter.css";
 
@@ -26,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
   // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
   return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
-    <ShellContents>{children}</ShellContents>
+    <OperatorProvider><ShellContents>{children}</ShellContents></OperatorProvider>
   </SidebarProvider></div></div></TooltipProvider>;
 }
 
@@ -40,6 +43,10 @@ function ShellContents({ children }: { children: ReactNode }) {
   const hasPermission = useAuthStore(s => s.hasPermission), hasCapability = useAuthStore(s => s.hasCapability);
   const hasTenantMembershipPermission = useAuthStore(s => s.hasTenantMembershipPermission);
   const currentWorkspaceId = useAuthStore(s => s.currentWorkspaceId);
+  const aiMode = location.pathname === APP_ROUTES.aiOperator.path;
+  const canUseOperator = canAccessRoute(APP_ROUTES.aiOperator, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission);
+  const lastAdminPath = useRef("/workbench");
+  useEffect(() => { if (!aiMode) lastAdminPath.current = location.pathname + location.search; }, [aiMode, location.pathname, location.search]);
   const categoryProfile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
@@ -90,7 +97,10 @@ function ShellContents({ children }: { children: ReactNode }) {
       <SidebarHeader><NativeWorkspaceSwitcher />
         <SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")} placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
       </SidebarHeader>
-      <SidebarContent ref={navRef}><NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} /></SidebarContent>
+      <SidebarContent ref={navRef}>
+        {canUseOperator && <OperatorModeSwitch ai={aiMode} onChange={next => { setQuery(""); navigation.fromSidebar(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(`${route.path}/`)) ? lastAdminPath.current : routes[0]?.path ?? "/"); }} />}
+        {aiMode ? <AiOperatorNavigation query={query} /> : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} />}
+      </SidebarContent>
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
     </Sidebar>
     <SidebarInset className="app-workspace min-h-0">
@@ -104,7 +114,7 @@ function ShellContents({ children }: { children: ReactNode }) {
           <Tooltip title={t("通知入口预留，暂未接入")}><Button type="text" size="small" className="workspace-notifications" aria-label={t("通知")} aria-disabled="true" icon={<Bell size={19} strokeWidth={1.75} />} /></Tooltip>
         </div>
       </header>
-      <div ref={contentRef} className="app-content" data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>
+      <div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>
     </SidebarInset>
     <SubscriptionExpiryFloatingCard />
   </>;

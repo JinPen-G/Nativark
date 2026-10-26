@@ -3,6 +3,7 @@ import { useLocale } from "@/app/locale";
 
 /** Localize upstream chrome without changing vendor motion or document/file contents. */
 const chrome: Record<string, string> = {
+  "Attach files": "添加附件", "Send": "发送", "Sent": "已发送", "Add reaction": "添加回应", "Reactions": "回应", "Yesterday": "昨天", "Jump to latest": "跳到最新消息",
   "Weak": "弱", "Fair": "一般", "Good": "良好", "Strong": "强", "Too short": "过短",
   "Success": "成功", "Info": "提示", "Warning": "警告", "Error": "错误", "In progress": "处理中",
   "Choose country": "选择国家或地区", "Search countries": "搜索国家或地区", "Suggested": "推荐", "All countries": "所有国家或地区",
@@ -41,7 +42,7 @@ export function ArcLocale({ children }: { children: ReactNode }) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const parent = text.parentElement;
-        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel']")) continue;
+        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel'], .operator-messages [class*='day'], .operator-messages [data-status]")) continue;
         const original = text.textContent ?? "";
         const next = localize(original);
         if (next !== text.textContent) text.textContent = next;

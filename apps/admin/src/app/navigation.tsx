@@ -27,6 +27,7 @@ export interface AppNavigationSection {
 }
 
 export const APP_ROUTES = {
+  aiOperator: { path: "/ai-operator", label: "AI运营官", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view", "rental-core:maintenance:view", "rental-os:member:view", "system:integration:manage"], audience: "tenant", icon: <FundOutlined /> },
   // 工作台既承载经营指标，也承载订单/维护待办。维护人员没有报表或订单数据权限时，
   // 仍应能进入页面查看自己的工单待办；页面内部会继续按数据权限隐藏订单和金额指标。
   workbench: { path: "/workbench", label: "运营概览", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
@@ -155,8 +156,17 @@ export function canAccessRoute(
   categoryCode: RentalCategoryCode | undefined,
   isSaasAdmin: boolean,
   hasTenantMembershipPermission: (permission?: string) => boolean = () => false
-) {
+): boolean {
   if ((route.audience === "saas") !== isSaasAdmin) return false;
+  // This frontend entry grants no business authority. Reuse each capability's
+  // existing page gate, including tenant-wide membership scope, rather than
+  // accidentally excluding price-only or membership-only operators.
+  if (route.path === APP_ROUTES.aiOperator.path) {
+    return [APP_ROUTES.workbench, APP_ROUTES.orders, APP_ROUTES.locations, APP_ROUTES.assets,
+      APP_ROUTES.personalMembers, APP_ROUTES.pricingGroups, APP_ROUTES.paymentReconciliation,
+      APP_ROUTES.rentalSettings, APP_ROUTES.operationReport].some(entry => canAccessRoute(entry,
+        hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission));
+  }
   const supportsCategory = !route.categories || Boolean(categoryCode && route.categories.includes(categoryCode));
   const permissionCheck = route.scope === "tenant-membership" ? hasTenantMembershipPermission : hasPermission;
   const supportsPermission = permissionCheck(route.permission) || Boolean(route.legacyPermissions?.some((permission) => permissionCheck(permission)));
