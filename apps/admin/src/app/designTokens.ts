@@ -36,7 +36,7 @@ export const ADMIN_TABLE_COLUMN_WIDTH = {
  * compensate for the breadcrumb/title gap in individual business pages. */
 export const ADMIN_LAYOUT_SPACING = {
   contextHeight: 48,
-  pageTop: "0px",
+  pageTop: "var(--space-2)",
   headerContent: "var(--space-2)",
   tabsContent: "var(--space-2)",
   listToolbar: "var(--space-2)",
