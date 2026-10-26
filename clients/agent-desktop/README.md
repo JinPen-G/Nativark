@@ -49,7 +49,7 @@ Harness 自有 pnpm workspace 与 lockfile，Rental OS 根工程使用 npm works
 
 当前通路为工作台侧栏“受控目录预览” → 私有Host实际模型准备检查 → 受限原生桥 → 原后台 HTTP → [显式服务模块](../../apps/api/src/modules/ai-native/desktop-business/desktop-business.module.ts) → 原 Auth / Guard / ALS 与有界商品 reader → 模型路由再次检查。它只返回目录引用、注册品类和启停状态，不返回名称、编码、库存、价格或个人资料，不发起模型生成、库存预占或业务写入。结果不写聊天历史，最长展示30秒且不超过原业务事实期限；身份 / 空间 / 页面失效或查询 / 模型输入变化即清除。
 
-工作台不再手填Base URL：填写本次要检查的已配置Provider和模型ID，由 `catalogForModel({ selection, limit })` 经封闭 `rental:catalog-for-model` IPC取得原Host `llm.prepareCall()` 的适配器初始路由。两次准备的模型、端点、协议及准备参数指纹必须一致，均不得过期；原目录请求携带精确 `modelRoute`，服务器当前政策必须同时允许目的地、模型与协议，响应也须绑定同一路由。`preparationVersion` 只由准备配置、能力、重试和路由事实求指纹，不混入观察时间、密钥或宣称数据库配置修订。Host查询4秒截止，壳层控制5秒截止，原目录15秒截止，正常总等待最多25秒；新路径最多并发2次检查，不自动发起下一次查询。桥缺失或适配器无法解析时拒绝，不回退旧人工目的地桥；旧 `catalog` 仅保留已有人工预览兼容，不授予模型调用许可。
+工作台不再手填Base URL：填写本次要检查的已配置Provider和模型ID，由 `catalogForModel({ selection, limit })` 经封闭 `rental:catalog-for-model` IPC取得原Host `llm.prepareCall()` 的适配器初始路由。两次准备的模型、端点、协议及准备参数指纹必须一致，均不得过期；原目录请求携带精确 `modelRoute`，服务器当前政策必须同时允许目的地、模型与协议，响应也须绑定同一路由。`preparationVersion` 只由准备配置、能力、重试和路由事实求指纹，不混入观察时间、密钥或宣称数据库配置修订。Host查询4秒截止，壳层控制5秒截止，原目录15秒截止，原生准备与读取正常总等待最多25秒；工作台另设15秒待取截止、显示前复核5秒截止。新路径最多并发2次模型检查；人工预览不自动重新生成，展示复核按下述短期机制续查。桥缺失或适配器无法解析时拒绝，不回退旧人工目的地桥；旧 `catalog` 仅保留已有人工预览兼容，不授予模型调用许可。
 
 以下 POST 接口统一在 `/api/ai-native/desktop-business/` 下；字段从 [shared 合同](../../packages/shared/src/agent-desktop-business.ts) 和 [OpenAPI](../../apps/api/src/contracts/ai-desktop-business-schemas.ts)读取。身份由服务器当前会话确定，body 中 binding 只用于核对，不授权。
 
