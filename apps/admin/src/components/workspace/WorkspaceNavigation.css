@@ -1,6 +1,7 @@
 /* Animate UI stack: enter from one viewport below; old page sinks to .94/.6.
    Only the scrollable workspace is named. Header and sidebar remain still. */
 .app-content[data-workspace-page-transition] { view-transition-name: rental-workspace-page; }
+:root[data-workspace-navigation] [data-content-transition] { opacity: 1 !important; }
 /* Keep the shell live: a root snapshot still consumes hit testing in Chrome,
    even with pointer-events disabled on the transition pseudo-elements. */
 :root[data-workspace-navigation] { view-transition-name: none; }
@@ -26,10 +27,8 @@
 :root[data-workspace-navigation]::view-transition-new(rental-workspace-page) { animation-name: rental-page-stack-in; }
 @keyframes rental-page-stack-in { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes rental-page-stack-out { from { transform: none; opacity: 1; } to { transform: scale(var(--rental-navigation-retreat-scale)); opacity: var(--rental-navigation-retreat-opacity); } }
-@media (prefers-reduced-motion: reduce) {
-  :root[data-workspace-navigation]::view-transition-old(rental-workspace-page),
-  :root[data-workspace-navigation]::view-transition-new(rental-workspace-page) { animation: none; }
-}
+:root[data-reduced-motion="true"][data-workspace-navigation]::view-transition-old(rental-workspace-page),
+:root[data-reduced-motion="true"][data-workspace-navigation]::view-transition-new(rental-workspace-page) { animation: none; }
 @media (max-width: 767px) {
   :root[data-workspace-navigation]::view-transition-image-pair(rental-workspace-page) { border-radius: 0; }
 }

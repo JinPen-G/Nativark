@@ -2,11 +2,12 @@
  * retain another page's forms, effects or business requests. Stack geometry is
  * adapted from Animate UI PageTransition (source/permission in sources.json).
  */
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useReducedMotion } from "motion/react";
 import { pickInteractionSound, playInteractionSound } from "@/features/sound/soundService";
 import "./WorkspaceNavigation.css";
+import { useContentTransition } from "./ContentTransition";
 
 const NavigationContext = createContext({ suppressPageEnter: false, ready: (_path: string) => {} });
 export const WorkspaceNavigationProvider = NavigationContext.Provider;
@@ -27,7 +28,8 @@ const ROOT_MARK = "data-workspace-navigation";
 export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>, sidebar?: RefObject<HTMLElement | null>) {
   const navigate = useNavigate(), { pathname } = useLocation(), reduced = useReducedMotion();
   const owner = useId();
-  const [running, setRunning] = useState(false);
+  const enter = useContentTransition();
+  const enteredPath = useRef<string | null>(null);
   const mounted = useRef(true), generation = useRef(0), navigationRequest = useRef(0);
   const capture = useRef<Capture | null>(null), pending = useRef<Pending | null>(null);
   const restore = useRef<(() => void) | null>(null), deadline = useRef<number | undefined>(undefined);
@@ -38,7 +40,6 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
     window.clearTimeout(deadline.current); deadline.current = undefined;
     restore.current?.(); restore.current = null;
     if (document.documentElement.getAttribute(ROOT_MARK) === owner) document.documentElement.removeAttribute(ROOT_MARK);
-    if (mounted.current) setRunning(false);
   }, [owner]);
   useEffect(() => { if (reduced) stop(); }, [reduced, stop]);
   useEffect(() => {
@@ -79,12 +80,23 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
 
   const ready = useCallback((path: string) => {
     const waiting = pending.current;
-    if (!waiting) return;
+    if (!waiting) {
+      if (enteredPath.current !== path) {
+        enteredPath.current = path;
+        enter(container.current);
+      }
+      return;
+    }
     if (path === waiting.target) {
+      enteredPath.current = path;
       container.current?.scrollTo({ top: 0, left: 0 });
       waiting.release(); pending.current = null;
-    } else if (path !== waiting.from) stop(); // Redirect/another navigation wins.
-  }, [container, stop]);
+    } else if (path !== waiting.from) {
+      stop(); // Redirect/another navigation wins.
+      enteredPath.current = path;
+      enter(container.current);
+    }
+  }, [container, enter, stop]);
 
   const fromSidebar = useCallback((target: string) => {
     const request = ++navigationRequest.current;
@@ -104,7 +116,6 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
     node.setAttribute("data-workspace-page-transition", "");
     root.setAttribute(ROOT_MARK, owner);
     restore.current = () => { node.inert = wasInert; node.removeAttribute("data-workspace-page-transition"); };
-    setRunning(true);
     const committed = new Promise<void>(release => { pending.current = { target, from: pathname, release }; });
     try {
       const transition = document.startViewTransition(async () => {
@@ -125,5 +136,6 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
     }
   }, [container, navigate, owner, pathname, reduced, stop]);
 
-  return { fromSidebar, context: useMemo(() => ({ suppressPageEnter: running, ready }), [running, ready]) };
+  // The workspace owns every route entrance; legacy page wrappers must not fade again.
+  return { fromSidebar, context: useMemo(() => ({ suppressPageEnter: true, ready }), [ready]) };
 }

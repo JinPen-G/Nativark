@@ -15,6 +15,7 @@ import { Button } from "../Button";
 import { ADMIN_LOADING_METRICS } from "@/app/designTokens";
 import { TableSkeletonCell } from "../../loading/LoadingSkeleton";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion, type HTMLMotionProps } from "motion/react";
+import { motionTokens as animateMotion, useTempoTransition } from "@animate-ui/react/utils/motion";
 import { DataTableAnnouncements, DataTableCellMotion, MOTIQ_TABLE_MOTION } from "./DataTableMotion";
 import styles from "./DataTable.module.css";
 
@@ -110,6 +111,7 @@ export function DataTable<T>({ table, caption, busy, loading, empty, footer, ani
 }) {
   const { t } = useLocale();
   const reduced = useReducedMotion();
+  const expandedTransition = useTempoTransition(animateMotion.transition.fade);
   const suppress = !animated || Boolean(reduced);
   const rows = table.getRowModel().rows;
   const columns = table.getVisibleLeafColumns();
@@ -151,7 +153,9 @@ export function DataTable<T>({ table, caption, busy, loading, empty, footer, ani
               {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...pinningStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />
               </td>; })}
-            </motion.tr>, row.getIsExpanded() && renderExpanded ? <tr key={`${row.id}-detail`} className={styles.expandedRow}><td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}><div className={styles.emptyContent}>{empty}</div></td></tr>}
+            </motion.tr>, row.getIsExpanded() && renderExpanded ? <motion.tr key={`${row.id}-detail`} className={styles.expandedRow}
+              initial={suppress ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={suppress ? { duration: 0 } : expandedTransition}>
+              <td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></motion.tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}><div className={styles.emptyContent}>{empty}</div></td></tr>}
           </AnimatePresence>}
         </tbody></LayoutGroup>
       </table>

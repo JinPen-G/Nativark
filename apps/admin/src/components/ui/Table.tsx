@@ -23,6 +23,7 @@ import { useDataTableSelection } from "./data-table/DataTableSelection";
 import { ListCards, ListSelectionBar, ListTransferTools, ListViewSwitch, type ListBatchAction, type ListCard } from "./data-table/ListCapabilities";
 import type { ListExport, ListImport } from "./data-table/listTransfer";
 import capabilityStyles from "./data-table/ListCapabilities.module.css";
+import { ContentTransition } from "../workspace/ContentTransition";
 
 export type BusinessTableProps<T extends object> = TableProps<T> & {
   /** Refetch this table's real source; omit for local form/snapshot previews. */
@@ -233,7 +234,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
       hideColumns={Boolean(props.cardView && view === "cards")} extra={<>
         <ListTransferTools config={exportConfig} rows={remote ? pageRows : table.getPrePaginationRowModel().rows.map(row => row.original)} busy={loading} importConfig={props.importConfig} />
       </>} trailingExtra={props.cardView && <ListViewSwitch value={view} onChange={setView} />} />
-    {props.cardView && view === "cards" && source.length > 0 ? <><ListCards key={identity} rows={pageRows} config={props.cardView} busy={loading} canSelect={row => !selectionConfig?.getCheckboxProps?.(row)?.disabled} getKey={row => String(getKey(row, source.indexOf(row)))} selected={new Set(Object.keys(selectedState).filter(key => selectedState[key]))}
+    <ContentTransition value={view}>{props.cardView && view === "cards" && source.length > 0 ? <><ListCards key={identity} rows={pageRows} config={props.cardView} busy={loading} canSelect={row => !selectionConfig?.getCheckboxProps?.(row)?.disabled} getKey={row => String(getKey(row, source.indexOf(row)))} selected={new Set(Object.keys(selectedState).filter(key => selectedState[key]))}
       onSelect={selectable ? (row, checked) => { const id = String(getKey(row, source.indexOf(row))); if (!selectionConfig?.getCheckboxProps?.(row)?.disabled) updateSelection({ ...selectedState, [id]: checked }); } : undefined} />{pager}</> :
     <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0}
       empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.scroll?.x === true ? undefined : props.scroll?.x}
@@ -249,7 +250,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
         return { ...attributes, style: { textAlign: column?.align, ...attributes.style }, className: [column?.className, attributes.className].filter(Boolean).join(" ") };
       }}
       renderExpanded={props.expandable?.expandedRowRender ? row => props.expandable!.expandedRowRender!(row.original, row.index, 0, row.getIsExpanded()) : undefined}
-      footer={pager} /></ListControlsContext.Provider></ListHeadingContext.Provider>}
+      footer={pager} /></ListControlsContext.Provider></ListHeadingContext.Provider>}</ContentTransition>
     <ListSelectionBar key={identity} rows={selectedRows} clear={() => updateSelection({})} onSelectPage={() => table.toggleAllPageRowsSelected(true)} config={exportConfig} actions={props.batchActions} busy={loading} />
     {props.footer?.(pageRows)}
   </div>;

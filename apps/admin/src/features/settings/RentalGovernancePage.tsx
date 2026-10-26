@@ -178,6 +178,7 @@ export function RentalGovernancePage() {
         items={localizedTabs.map(({ key, label, icon }) => ({ key, label, icon }))}
       />
       <QueryState
+        transitionKey={tab}
         loading={settings.isLoading || profile.isLoading}
         error={settings.error || profile.error}
       >

@@ -1,5 +1,5 @@
 /** Optional list capabilities. Domain pages choose fields and legal actions; this layer never invents writes. */
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Grid2X2, Rows3, X } from "lucide-react";
 import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
@@ -12,6 +12,11 @@ import { Segmented } from "../Segmented";
 import { CSV_LIMITS, ListPreflightError, downloadCsv, exportRows, importRecords, type ListExport, type ListImport } from "./listTransfer";
 import styles from "./ListCapabilities.module.css";
 import { RecordCard, type RecordCardConfig } from "./RecordCard";
+import { AnimatePresence, usePresence } from "motion/react";
+import { Slide } from "@animate-ui/react/primitives/effects/slide";
+import { motionTokens, useTempoTransition } from "@animate-ui/react/utils/motion";
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
+import { ADMIN_CONTENT_MOTION } from "@/app/designTokens";
 
 export function listIdentity() {
   const state = useAuthStore.getState();
@@ -36,11 +41,12 @@ function requestError(error: unknown) {
 export function ListTransferTools<T>({ config, rows, busy, importConfig }: { config?: ListExport<T>; rows: T[]; busy?: boolean; importConfig?: ListImport<unknown> }) {
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
+  const [importMounted, setImportMounted] = useState(false);
   if (!config && !importConfig) return null;
   return <div className={styles.tools}>
-    {importConfig && <Button size="small" disabled={busy || !importConfig.allowed()} aria-label={t("导入")} title={t("导入")} icon={<AnimatedIcon name="upload" />} onClick={() => setOpen(true)}><span className={styles.transferLabel}>{t("导入")}</span></Button>}
+    {importConfig && <Button size="small" disabled={busy || !importConfig.allowed()} aria-label={t("导入")} title={t("导入")} icon={<AnimatedIcon name="upload" />} onClick={() => { setImportMounted(true); setOpen(true); }}><span className={styles.transferLabel}>{t("导入")}</span></Button>}
     {config && <Button size="small" disabled={busy || !rows.length} aria-label={t(config.scope === "page" ? "导出本页" : "导出")} title={t(config.scope === "page" ? "导出当前页" : "导出筛选结果")} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}><span className={styles.transferLabel}>{t(config.scope === "page" ? "导出本页" : "导出")}</span></Button>}
-    {importConfig && open && <ListImportDialog key={listIdentity()} config={importConfig} onClose={() => setOpen(false)} />}
+    {importConfig && importMounted && <ListImportDialog key={listIdentity()} open={open} config={importConfig} onClose={() => setOpen(false)} onClosed={() => setImportMounted(false)} />}
   </div>;
 }
 
@@ -56,7 +62,7 @@ export function ListCards<T>({ rows, config, getKey, selected, onSelect, busy, c
     selected={selected?.has(getKey(row)) ?? false} disabled={busy || canSelect?.(row) === false} onSelect={onSelect ? checked => onSelect(row, checked) : undefined} />)}</div>;
 }
 
-function ListImportDialog({ config, onClose }: { config: ListImport<unknown>; onClose: () => void }) {
+function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImport<unknown>; onClose: () => void; onClosed: () => void; open: boolean }) {
   const { t } = useLocale();
   const [identity] = useState(listIdentity);
   const [items, setItems] = useState<Array<Outcome & { value?: unknown }>>([]);
@@ -109,7 +115,7 @@ function ListImportDialog({ config, onClose }: { config: ListImport<unknown>; on
     } catch (issue) { setError(t(issue instanceof Error ? issue.message : "操作失败")); }
     finally { locked.current = false; setBusy(false); }
   }
-  return <Modal open title={t("导入资料")} onCancel={() => { if (!busy) onClose(); }} closable={!busy} maskClosable={!busy} keyboard={!busy} footer={<>
+  return <Modal open={open} afterClose={onClosed} title={t("导入资料")} onCancel={() => { if (!busy) onClose(); }} closable={!busy} maskClosable={!busy} keyboard={!busy} footer={<>
     <Button disabled={busy} onClick={onClose}>{t("关闭")}</Button>
     {finished ? <Button onClick={() => downloadCsv(`${config.filename}-${t("导入结果")}`, [["row", "key", "status", "error"], ...items.map(item => [item.row, item.name, t(labels[item.status]), item.error ?? ""])])}>{t("下载结果")}</Button>
       : <Button type="primary" loading={busy} disabled={!allowed() || !items.some(item => item.status === "ready") || items.some(item => item.status === "invalid")} onClick={() => void submit()}>{t("确认导入")}</Button>}
@@ -127,9 +133,23 @@ function ListImportDialog({ config, onClose }: { config: ListImport<unknown>; on
   </Modal>;
 }
 
+function SelectionBarSurface({ children, barRef, label }: { children: ReactNode; barRef: Ref<HTMLDivElement>; label: string }) {
+  const [present, remove] = usePresence();
+  const reduced = usePrefersReducedMotion();
+  const transition = useTempoTransition(motionTokens.transition.fade);
+  useEffect(() => { if (!present && reduced) remove?.(); }, [present, reduced, remove]);
+  return <Slide ref={barRef} direction="up" offset={ADMIN_CONTENT_MOTION.selectionOffset} data-list-selection-bar="" className={styles.bar}
+    transition={transition}
+    animate={present ? "visible" : "hidden"}
+    onAnimationComplete={definition => { if (!present && definition === "hidden") remove?.(); }}
+    variants={{ hidden: { opacity: 0, y: reduced ? 0 : ADMIN_CONTENT_MOTION.selectionOffset }, visible: { opacity: 1, y: 0 } }}
+    inert={!present || undefined} aria-hidden={!present || undefined} role="region" aria-label={label}>{children}</Slide>;
+}
+
 export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, onSelectPage }: { rows: T[]; clear: () => void; config?: ListExport<T>; actions?: ListBatchAction<T>[]; busy?: boolean; onSelectPage?: () => void }) {
   const { t } = useLocale();
   const [action, setAction] = useState<ListBatchAction<T>>(), [reason, setReason] = useState("");
+  const [actionOpen, setActionOpen] = useState(false);
   const [actionRows, setActionRows] = useState<T[]>([]);
   const [running, setRunning] = useState(false), [results, setResults] = useState<Outcome[]>([]);
   const locked = useRef(false);
@@ -169,16 +189,15 @@ export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, o
       if (identity === listIdentity() && action.allowed()) await action.onComplete();
     } finally { locked.current = false; setRunning(false); }
   }
-  if (!rows.length && !action) return null;
   return <>
-    {!!rows.length && <div ref={barRef} data-list-selection-bar="" className={styles.bar} role="region" aria-label={t("批量操作")}><span role="status">{t("已选择")} {rows.length}</span>
+    <AnimatePresence initial={false}>{!!rows.length && <SelectionBarSurface key="selection" barRef={barRef} label={t("批量操作")}><span role="status">{t("已选择")} {rows.length}</span>
       {onSelectPage && <Button type="text" size="small" disabled={busy || running} onClick={onSelectPage}>{t("选择当前页")}</Button>}
       {config && <Button size="small" disabled={busy || running} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}>{t("导出所选")}</Button>}
-      {actions.filter(item => item.allowed()).map(item => <Button key={item.key} size="small" danger={item.danger} disabled={busy || running || !rows.some(item.eligible)} onClick={() => { setAction(item); setActionRows([...rows]); setReason(""); setResults([]); }}>{t(item.label)}</Button>)}
+      {actions.filter(item => item.allowed()).map(item => <Button key={item.key} size="small" danger={item.danger} disabled={busy || running || !rows.some(item.eligible)} onClick={() => { setAction(item); setActionOpen(true); setActionRows([...rows]); setReason(""); setResults([]); }}>{t(item.label)}</Button>)}
       <Button type="text" size="small" disabled={running} aria-label={t("清除选择")} icon={<X size={16} aria-hidden="true" />} onClick={clear} />
-    </div>}
-    {action && <Modal open title={t(action.label)} closable={!running} maskClosable={!running} keyboard={!running} onCancel={() => { if (!running) setAction(undefined); }} footer={<>
-      <Button disabled={running} onClick={() => setAction(undefined)}>{t("关闭")}</Button>
+    </SelectionBarSurface>}</AnimatePresence>
+    {action && <Modal open={actionOpen} afterClose={() => setAction(undefined)} title={t(action.label)} closable={!running} maskClosable={!running} keyboard={!running} onCancel={() => { if (!running) setActionOpen(false); }} footer={<>
+      <Button disabled={running} onClick={() => setActionOpen(false)}>{t("关闭")}</Button>
       {!!results.length && <Button disabled={running} onClick={() => downloadCsv(t("批量操作结果"), [["row", "key", "status", "error"], ...results.map(item => [item.row, item.name, t(labels[item.status]), item.error ?? ""])])}>{t("下载结果")}</Button>}
       {!results.length && <Button type="primary" danger={action.danger} loading={running} disabled={!action.allowed() || !actionRows.some(action.eligible) || action.reason && !reason.trim()} onClick={() => void execute().catch(() => setResults([{ row: 0, name: "", status: "failed", error: t("刷新失败，请重试") }]))}>{t("确认")}</Button>}
     </>}><div className={styles.importBody}><div>{t("符合条件")} {actionRows.filter(action.eligible).length} / {actionRows.length}</div>

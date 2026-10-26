@@ -54,6 +54,8 @@ export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 240, bulkMaxWidth: 
 export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
+/** Small live-content changes use Animate UI's fade timing; never remount forms. */
+export const ADMIN_CONTENT_MOTION = { changedOpacity: .76, selectionOffset: 8 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75 } as const;
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
 export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;

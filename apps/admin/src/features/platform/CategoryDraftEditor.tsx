@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { Card, InputNumber, Space } from "antd";
 import { Form, ActionButton } from "@/components/ui";
 import { Collapse } from "@/components/ui";
@@ -173,7 +174,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
     <UnsavedChangesGuard dirty={hasUnsavedInput} busy={busy} />
     <Alert type="info" showIcon title={t("每个页签只保存自己的草稿；保存不会发布或改变经营空间。已发布版本只读。")} />
     <Tabs activeKey={section} onChange={(key) => { if (!busy) guarded(() => { const next = key as CategoryDraftSection; setSection(next); setValues(project(version, next)); setDirty(false); setReason(""); setErrors([]); }); }} items={CATEGORY_DRAFT_SECTIONS.map((key) => ({ key, label: t(titles[key]) }))} />
-    <Form layout="vertical">{Object.entries(values).map(([key, value]) => <ValueEditor key={key} name={key} value={value} change={(next) => { setValues((current) => ({ ...current, [key]: next })); setDirty(true); }} disabled={!canEdit} />)}</Form>
+    <ContentTransition value={section}><Form layout="vertical">{Object.entries(values).map(([key, value]) => <ValueEditor key={key} name={key} value={value} change={(next) => { setValues((current) => ({ ...current, [key]: next })); setDirty(true); }} disabled={!canEdit} />)}</Form></ContentTransition>
     {errors.length > 0 && <Alert type="error" title={t("配置校验未通过")} description={errors.join("；")} />}
     <Space wrap>
       {(editable || canPublish) && version.status === "draft" && <Input aria-label={t("变更原因")} placeholder={t("变更原因")} value={reason} onChange={(event) => setReason(event.target.value)} disabled={busy} maxLength={512} />}

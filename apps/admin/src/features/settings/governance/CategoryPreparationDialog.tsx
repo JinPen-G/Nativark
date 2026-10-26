@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { categoryPreparationApi, type CategoryPreparationOperation } from "@/api/categoryPreparation";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { useAuthStore } from "@/features/auth/authStore";
 import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "@/app/categoryGovernancePreview";
@@ -89,7 +90,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
             {(!preview.data.validation.valid || preview.data.stale) && <Alert type="warning" showIcon title={t("预备资料需补齐或重新核对")} description={preview.data.validation.errors.join("；")} />}
             {!preview.data.businessCompatibility.valid && <Alert type="warning" showIcon title={t("经营配置尚不兼容目标版本")} description={preview.data.businessCompatibility.blockers.map((row) => `${row.id}: ${row.message}`).join("；")} />}
             <Tabs className="standalone-tabs" activeKey={tab} items={[{ key: "item_group", label: t("型号资料") }, { key: "asset", label: t("资产资料") }, { key: "capabilities", label: t("能力配置") }]} onChange={(key) => { setTab(key); if (key !== "capabilities") setScope(key as typeof scope); setEntityId(undefined); }} />
-            {tab === "capabilities" ? <>
+            <ContentTransition value={tab}>{tab === "capabilities" ? <>
               <Typography.Text type="secondary">{t("准备配置不会改变当前营业；新增必选能力须明确选择准备启用，仅在采用成功时生效。")}</Typography.Text>
               {preparationCapabilityDefinitions(preview.data).map((definition) => {
                 const draft = capabilityDrafts[definition.code];
@@ -140,7 +141,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
               </Space>;
             })}
             {!rows.length && <Typography.Text type="secondary">{t("暂无需要准备的资料")}</Typography.Text>}
-            </>}
+            </>}</ContentTransition>
             <Input.TextArea aria-label={t("准备原因")} placeholder={t("准备原因")} value={reason} maxLength={512} disabled={loading} onChange={(event) => { setReason(event.target.value); setDirty(true); }} />
             <Space wrap>
               <Button disabled={loading} onClick={() => guarded(() => { void preview.refetch(); })}>{t("重新读取并核对")}</Button>
