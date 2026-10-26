@@ -42,9 +42,15 @@
 }
 .rental-sidebar-colors [data-sidebar="menu-sub"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="menu-button"] > svg:first-child { width: var(--rental-sidebar-icon-size); height: var(--rental-sidebar-icon-size); }
-/* The route marker stays put while the pointer/focus moves to another item. */
+/* One native controlled surface glides on selection; pointer/focus only gets neutral feedback. */
+.rental-sidebar-route-highlight {
+  background: var(--rental-sidebar-selected-bg);
+  border-radius: var(--rental-ui-radius-button);
+  pointer-events: none;
+}
+.rental-sidebar-sub-highlight { translate: -1px; }
 .rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] {
-  background-color: var(--rental-sidebar-selected-bg);
+  background-color: transparent;
   color: var(--rental-sidebar-selected-ink);
 }
 .rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] > svg { color: inherit; }

@@ -10,11 +10,11 @@
 
 侧栏与圆角内容面板背后的背景共用 `--rental-sidebar-surface`，去除重复分隔边框。菜单和高亮/搜索/浮层分别复用按钮/输入框/容器圆角，头像保持圆形；空间下拉保留原图标槽，以品类 SVG 表达空间，顶部品牌 Logo 不变。
 
-源码默认宽度为 16rem / 3rem / 18rem；后台由 `ADMIN_SIDEBAR_METRICS` 统一适配为 240px 展开、48px 收起，36px 主/子菜单行高、2px 行间距、24px 分组名、18px 图标。移动端保留原 Sheet 规则。顶部收缩按钮 28px、品牌/头像 32px、空间/账号入口 48px 保持原尺寸。用户弹窗保留 min-w-56、对齐与 4px 偏移，不另加宽高。
+源码默认宽度为 16rem / 3rem / 18rem；后台由 `ADMIN_SIDEBAR_METRICS` 统一适配为 240px 展开、48px 收起，32px 主/子菜单行高、1px 行间距、24px 分组名、18px 图标。移动端保留原 Sheet 规则。顶部收缩按钮 28px、品牌/头像 32px、空间/账号入口 48px 保持原尺寸。用户弹窗保留 min-w-56、对齐与 4px 偏移，不另加宽高。
 
 ## 状态与交互
 
-Provider 使用公开的 `animateOnHover=false`，避免焦点/展开项与新悬停项争抢浮动高亮；原收缩和浮层动效保留。当前路由以 `data-active` / `aria-current` 表达，账户主色与对比文字色通过根节点语义 token 接入，不能被本地参考配色覆盖。悬停只改变中性底色，不移动选中态。
+Provider 使用公开的 `animateOnHover=false`，避免焦点/展开项与新悬停项争抢浮动高亮；原收缩和浮层动效保留。当前路由以 `data-active` / `aria-current` 表达，账户主色与对比文字色通过根节点语义 token 接入，不能被本地参考配色覆盖。选中背景使用原 Animate UI `effects/highlight` 的受控 parent 模式，沿当前授权路由平滑移动，保留原生 highlight 弹簧与减少动态支持；hover/click 均关闭，悬停和焦点不改选中状态。当前分组关闭或侧栏收起时，背景移至所属分类；搜索无当前项时隐藏高亮。子项背景跟随原链接的 -1px 位移，避免错位。
 
 页面入口使用 `data-sound="page"`，分类使用 `press`，统一由现有 GlobalInteractionSounds 处理；快照捕获期间的可信点击回放单独调用同一偏好门控，合成点击不再次播放。切换音效开关和动态偏好不修改业务记录。
 

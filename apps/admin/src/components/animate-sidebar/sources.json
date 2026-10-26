@@ -2,7 +2,7 @@
   "repository": "https://github.com/imskyleen/animate-ui",
   "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
   "page": "https://animate-ui.com/docs/primitives/base-ui/sidebar",
-  "adaptations": "Native example shell and Base UI components: imports, localization/accessibility labels and isolated portal/theme scopes only; sizes/classes/motion unchanged. Business navigation is separate. sidebar-adapter.css applies shared app radius, Chinese row geometry and account accent tokens. The public animateOnHover=false option keeps route selection stable; source collapse and overlay motion remain intact. Preserved runtime classes and motion are unchanged.",
+  "adaptations": "Native example shell and Base UI components: imports, localization/accessibility labels and isolated portal/theme scopes only; sizes/classes/motion unchanged. Business navigation is separate. sidebar-adapter.css applies shared app radius, Chinese row geometry and account accent tokens. The public animateOnHover=false option prevents hover/focus contention. The original effects/highlight controlled parent mode restores route-driven selection glide; source spring, reduced-motion, collapse and overlay motion remain intact. Preserved runtime classes and motion are unchanged.",
   "files": [
     {
       "file": "runtime/avatar.tsx",

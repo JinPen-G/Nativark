@@ -24,7 +24,7 @@ import "./animate-sidebar/sidebar-adapter.css";
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
-  // Keep the native collapse/popup motion; focused route and hovered item must not share a moving paint layer.
+  // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
   return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
     <ShellContents>{children}</ShellContents>
   </SidebarProvider></div></div></TooltipProvider>;
@@ -79,7 +79,7 @@ function ShellContents({ children }: { children: ReactNode }) {
     if (!host) return;
     let frame = 0;
     const reveal = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
-      const selected = Array.from(host.querySelectorAll<HTMLElement>('[data-active]')).find(e => e.getBoundingClientRect().height > 0);
+      const selected = Array.from(host.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"][data-active], [data-sidebar="menu-sub-button"][data-active]')).find(e => e.getBoundingClientRect().height > 0);
       if (selected) { selected.scrollIntoView({ block: "nearest" }); observer.disconnect(); }
     }); };
     const observer = new MutationObserver(reveal); observer.observe(host, {childList:true, subtree:true}); reveal();
