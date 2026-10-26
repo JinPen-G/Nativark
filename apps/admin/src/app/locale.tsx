@@ -12,6 +12,7 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "搜索菜单": "Search menus", "业务管理": "Workspace", "没有匹配的菜单": "No matching menus",
   "界面动效": "Interface motion", "动效偏好": "Motion preference",
   "完整动效": "Full", "减少动效": "Reduced",
   "仅保存在当前浏览器，立即生效。": "Applies instantly. Saved in this browser.",

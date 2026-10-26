@@ -1,0 +1,78 @@
+{
+  "repository": "https://github.com/imskyleen/animate-ui",
+  "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
+  "page": "https://animate-ui.com/docs/primitives/base-ui/sidebar",
+  "adaptations": "Native example shell and Base UI components: imports, localization/accessibility labels and isolated portal/theme scopes only; sizes/classes/motion unchanged. Business navigation is separate.",
+  "files": [
+    {
+      "file": "runtime/avatar.tsx",
+      "source": "apps/v2/components/ui/base-ui/avatar.tsx",
+      "upstreamSha256": "89d8bb28ed9f5fe529144749e8f885d45c9ab2147150def47ceabc782ebba00f",
+      "adaptedSha256": "fdcd030b0a785f82f8869903d0a5e85529507821d792e6241ee816649a911279"
+    },
+    {
+      "file": "runtime/button.tsx",
+      "source": "apps/v2/components/ui/base-ui/button.tsx",
+      "upstreamSha256": "dcde13480a8a939c31e6630f67f64c892b04eb11239afa348efb113a0eeddf1d",
+      "adaptedSha256": "f2daf0eb3a5aa0b8d673dc379db8de8ceced9d96189094973dd6dd0e7ec65bba"
+    },
+    {
+      "file": "runtime/collapsible.tsx",
+      "source": "apps/v2/components/ui/base-ui/collapsible.tsx",
+      "upstreamSha256": "c8417e56b51bb23ba3d7ad419b4837e0d93e35cf8cd6110846d2773964dc9f44",
+      "adaptedSha256": "5f491a4139fa40632d905dfbb040938ac14e776250cced3c2474c683fd1c045a"
+    },
+    {
+      "file": "runtime/dropdown-menu.tsx",
+      "source": "apps/v2/components/ui/base-ui/dropdown-menu.tsx",
+      "upstreamSha256": "33d5e7168977d3fbf2fd2d03a19c8d58166430b95fb938f5c21315f04a801bb5",
+      "adaptedSha256": "5d24f4ea8e7661855cd6f86b6fb91b9538418a0594957fdaf1e1f2f421bed39a"
+    },
+    {
+      "file": "runtime/input.tsx",
+      "source": "apps/v2/components/ui/base-ui/input.tsx",
+      "upstreamSha256": "05f7a295daa979fecd4cc50676c7c096be98787504de75a99276ee25e4f880a8",
+      "adaptedSha256": "e4e8084fb5855dd302ccf0c0ebf334f88c97e87896ad39f5902a6d43788e07fd"
+    },
+    {
+      "file": "runtime/separator.tsx",
+      "source": "apps/v2/components/ui/base-ui/separator.tsx",
+      "upstreamSha256": "b70f7440d081c879d4d55c70d76c8f8b34d72a1178c1ba70b21312b1d022d5bb",
+      "adaptedSha256": "5ac90b5ea0b91f8416dd607b96305418915ed7f343968fca5084e9587c2e41fa"
+    },
+    {
+      "file": "runtime/sheet.tsx",
+      "source": "apps/v2/components/ui/base-ui/sheet.tsx",
+      "upstreamSha256": "27cd753d3f8665f7649ef1056c0775a3bef69818d7587ccdceba768a5f51ad46",
+      "adaptedSha256": "70ddc1b5657d27d7b7657b4d25f068ecc9871a9690e31c99ea984e167608d7b8"
+    },
+    {
+      "file": "runtime/skeleton.tsx",
+      "source": "apps/v2/components/ui/base-ui/skeleton.tsx",
+      "upstreamSha256": "adbdd766b3d69e56f478bc112694035ceb265c4d56876c7a0ebf2a2c1c879791",
+      "adaptedSha256": "144c2ce403e0099393a7b80a1b384de04e0b4e0c3cb01fd300c44b6761c27df1"
+    },
+    {
+      "file": "runtime/tooltip.tsx",
+      "source": "apps/v2/components/ui/base-ui/tooltip.tsx",
+      "upstreamSha256": "b7172545eedfa7d6e50ae084c1ede6c60d408d313253c9a05d7008a4ead8a548",
+      "adaptedSha256": "77b58bf1a5f8a0a3fe8d0836340cd23788c38d218894d4d652c29f7eccfd4409"
+    },
+    {
+      "file": "runtime/sidebar.tsx",
+      "source": "apps/v2/demos/base-ui/sidebar.tsx",
+      "upstreamSha256": "8b81e46253647dd5e91a2af5c833e2605951849b2440f5bce2abdf6729f54de9",
+      "adaptedSha256": "25afa0314f4d3dd4e11c667adcfda13ef16a4cedfb5c1167ce263c93b33f1fe4"
+    },
+    {
+      "file": "runtime/panel-left.tsx",
+      "source": "apps/v2/registry/hugeicons/panel-left/index.tsx",
+      "upstreamSha256": "4f2ffab3b847ef6f6d7ec9ea9fbb8a7224931d994c025a781dbb65c024d59267",
+      "adaptedSha256": "4f2ffab3b847ef6f6d7ec9ea9fbb8a7224931d994c025a781dbb65c024d59267"
+    }
+  ],
+  "avatar": {
+    "source": "apps/v2/public/avatars/shadcn.jpg",
+    "sha256": "c080d627acdedca5ba0b7d8e30ddf4ddcc15aa56c896f67037c273233cde18c3"
+  }
+}

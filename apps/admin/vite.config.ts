@@ -2,6 +2,8 @@ import { fileURLToPath, URL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { motionPreferenceAdapter, motionPreferenceStyles } from "./config/motionPreferenceAdapter.js";
+import tailwindcss from "@tailwindcss/vite";
+import { nativeSidebarStyles } from "./config/nativeSidebarStyles.js";
 
 export default defineConfig(({ mode }) => {
   const offline = mode === "ai-offline";
@@ -11,8 +13,8 @@ export default defineConfig(({ mode }) => {
     // Explicit verification mode: never load deployment secrets or replace release artifacts.
     envDir: offline ? false : undefined,
     build: offline ? { outDir: "dist-ai-offline" } : undefined,
-    plugins: [motionPreferenceAdapter(), react()],
-    css: { postcss: { plugins: [motionPreferenceStyles()] } },
+    plugins: [motionPreferenceAdapter(), tailwindcss(), react()],
+    css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles()] } },
     resolve: {
       // Prefer source contracts over stray CommonJS build artifacts in shared/src.
       extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],

@@ -1,5 +1,6 @@
 import { useLayoutEffect, type ReactNode } from "react";
 import { MotionConfig, MotionGlobalConfig } from "motion/react";
+import { AnimateUIProvider } from "@animate-ui/react/provider";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
 export function MotionPreferenceProvider({ children }: { children: ReactNode }) {
@@ -13,6 +14,6 @@ export function MotionPreferenceProvider({ children }: { children: ReactNode }) 
   // Keep that switch stable; the shared hook and live global flag own policy,
   // so Full motion restores existing controls without remounting business forms.
   return <MotionConfig reducedMotion="never">
-    {children}
+    <AnimateUIProvider reducedMotion={reduced ? "always" : "never"}>{children}</AnimateUIProvider>
   </MotionConfig>;
 }

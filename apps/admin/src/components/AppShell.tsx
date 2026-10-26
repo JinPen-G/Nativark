@@ -1,88 +1,43 @@
-import { MenuOutlined } from "@/components/ui/icons";
-import { Breadcrumb, Layout } from "antd";
-import { Button, Drawer, Tooltip, SidebarMenu } from "@/components/ui";
-import { motion } from "motion/react";
-import { Bell, ChevronLeft, ChevronRight } from "lucide-react";
-import type { MenuProps } from "antd";
+import { Breadcrumb } from "antd";
+import { Bell } from "lucide-react";
+import { Button, Tooltip } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
-import { ADMIN_SIDEBAR_METRICS } from "@/app/designTokens";
-import { MENU_GROUP_COMPACT_EN, MENU_GROUP_ICONS, MENU_GROUP_LABELS, MENU_ROUTE_ICONS, menuRouteLabel } from "@/app/navigation-display";
-import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
-import { AccountMenu } from "./AccountMenu";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
-import { SidebarQuickEntries } from "./SidebarQuickEntries";
 import { WorkspaceClock } from "./WorkspaceClock";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
+import { Sidebar, SidebarProvider, SidebarHeader, SidebarContent, SidebarFooter, SidebarRail, SidebarTrigger, SidebarInset, SidebarInput, useSidebar } from "./animate-sidebar/runtime/sidebar";
+import { TooltipProvider } from "./animate-sidebar/runtime/tooltip";
+import { Separator } from "./animate-sidebar/runtime/separator";
+import { NativeAccountMenu } from "./animate-sidebar/NativeAccountMenu";
+import { NativeWorkspaceSwitcher } from "./animate-sidebar/NativeWorkspaceSwitcher";
+import { NativeNavigation } from "./animate-sidebar/NativeNavigation";
+import "./animate-sidebar/animate-sidebar.css";
 
-const { Sider, Content } = Layout;
-
-/**
- * 侧栏 / 抽屉的切换点。
- *
- * 刻意不用 antd 的 `Grid.useBreakpoint()`：它首帧返回空对象（`screens.lg` 为
- * `undefined`），而且实测视口变窄后没有更新，结果 768px 仍被判成桌面、抽屉永远出不来。
- * `matchMedia` 是同一件事的直接表达，首帧就有确定值，也能被直接断言。
- */
-function useMinWidth(query: string) {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    const sync = () => setMatches(mql.matches);
-    sync();
-    mql.addEventListener("change", sync);
-    return () => mql.removeEventListener("change", sync);
-  }, [query]);
-  return matches;
+/** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
+export function AppShell({ children }: { children: ReactNode }) {
+  const { mode } = useAppearance();
+  return <TooltipProvider><SidebarProvider className={`rental-animate-scope h-svh${mode === "dark" ? " dark" : ""}`}>
+    <ShellContents>{children}</ShellContents>
+  </SidebarProvider></TooltipProvider>;
 }
 
-/**
- * 侧栏的响应式分档：
- * - 1200px 及以上默认展开完整侧栏；
- * - 768px～1199px 保留桌面布局，但默认收起为图标栏；
- * - 768px 以下才使用移动端抽屉。
- */
-const DESKTOP_MIN_WIDTH = "(min-width: 768px)";
-const WIDE_DESKTOP_MIN_WIDTH = "(min-width: 1200px)";
-
-export function AppShell({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(() => !window.matchMedia(WIDE_DESKTOP_MIN_WIDTH).matches);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  // One visible selection across fixed entries and business routes, including shared preview destinations.
-  const [fixedSelection, setFixedSelection] = useState<string>();
-  const navRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+function ShellContents({ children }: { children: ReactNode }) {
+  const { state, openMobile, setOpenMobile } = useSidebar();
+  const [query, setQuery] = useState("");
+  const navRef = useRef<HTMLDivElement>(null), contentRef = useRef<HTMLDivElement>(null);
   const navigation = useWorkspaceNavigation(contentRef, navRef);
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { t, locale } = useLocale();
-  const { mode } = useAppearance();
-  const isDesktop = useMinWidth(DESKTOP_MIN_WIDTH);
-  const isWideDesktop = useMinWidth(WIDE_DESKTOP_MIN_WIDTH);
-  const tenant = useAuthStore((state) => state.tenant);
-  const user = useAuthStore((state) => state.user);
-  const hasPermission = useAuthStore((state) => state.hasPermission);
-  const hasCapability = useAuthStore((state) => state.hasCapability);
-  const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
-  const currentWorkspaceId = useAuthStore((state) => state.currentWorkspaceId);
-  /**
-   * UI-NAV-01：导航文案取自**当前经营空间**的品类档案。
-   *
-   * 复用业务页面已有的查询键，命中同一份缓存，不额外增加一次请求；
-   * 空间切换时 `switchWorkspace()` 已清空查询缓存、`ProtectedRoutes` 又以
-   * `租户:空间` 为 key 重挂本组件，因此这里会重新取数，菜单与标题
-   * 随即换成新品类的说法，不会残留上一个空间的术语。
-   *
-   * SaaS 平台账号不发这个请求：它不属于任何经营空间，租户品类档案对它没有意义，
-   * 发出去只会拿到 403 并把平台导航染上某个租户的术语。
-   */
+  const location = useLocation(), navigate = useNavigate(), { t } = useLocale();
+  const tenant = useAuthStore(s => s.tenant), user = useAuthStore(s => s.user);
+  const hasPermission = useAuthStore(s => s.hasPermission), hasCapability = useAuthStore(s => s.hasCapability);
+  const hasTenantMembershipPermission = useAuthStore(s => s.hasTenantMembershipPermission);
+  const currentWorkspaceId = useAuthStore(s => s.currentWorkspaceId);
   const categoryProfile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
@@ -95,29 +50,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     ...section,
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission))
   })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, hasTenantMembershipPermission, tenant?.categoryCode, terminology, user]);
-  const homePath = sections[0]?.routes[0]?.path ?? "/";
-  // Tenant overview when authorized; platform/restricted users retain an accessible destination.
-  const overviewPath = canAccessRoute(APP_ROUTES.workbench, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission)
-    ? APP_ROUTES.workbench.path : homePath;
-  const activeFixedKey = location.pathname === overviewPath ? fixedSelection : undefined;
-  useEffect(() => { if (location.pathname !== overviewPath) setFixedSelection(undefined); }, [location.pathname, overviewPath]);
-  /**
-   * 展开态：一级是**不可点的分组标题**，二级直接铺开（`type: "group"`）。
-   *
-   * 收起态：一级换成图标＋短名称的父项，二级收进原生悬浮子菜单。
-   * 保留原业务归属与键盘操作，不将所有功能挤成无名称的图标。
-   *
-   * 收起判据传参而不是直接读 `collapsed`：抽屉里永远是展开态，两处必须一致，
-   * 否则抽屉会拿到收起态的结构。
-   */
-  const buildMenuItems = (isCollapsed: boolean): MenuProps["items"] => sections.map((section) => {
-    const children = section.routes.map((route) => ({ key: route.path,
-      icon: MENU_ROUTE_ICONS[route.path] ? <AnimatedIcon name={MENU_ROUTE_ICONS[route.path]} /> : route.icon,
-      label: t(menuRouteLabel(route.path, route.label)) }));
-    return isCollapsed
-      ? { key: section.key, icon: MENU_GROUP_ICONS[section.key] ? <AnimatedIcon name={MENU_GROUP_ICONS[section.key]} /> : section.icon, label: locale === "en-US" && MENU_GROUP_COMPACT_EN[section.key] ? MENU_GROUP_COMPACT_EN[section.key] : t(MENU_GROUP_LABELS[section.key] ?? section.label), children }
-      : { type: "group" as const, key: section.key, label: t(MENU_GROUP_LABELS[section.key] ?? section.label), children };
-  });
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
     const route = routes.find((entry) => entry.path === location.pathname)
@@ -139,134 +71,39 @@ export function AppShell({ children }: { children: ReactNode }) {
     ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: t(detailRoute.label) }] : []),
   ];
 
-  // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
-  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
-
-  // 进入真正的移动端时交给抽屉；回到窄桌面时自动恢复图标栏，避免把移动端状态带回桌面。
-  // 从窄桌面恢复到宽桌面时自动展开；宽桌面内的手动收起不会因普通重渲染被覆盖。
-  useEffect(() => {
-    if (!isDesktop) {
-      setCollapsed(false);
-      return;
-    }
-    setCollapsed(!isWideDesktop);
-  }, [isDesktop, isWideDesktop]);
-  /**
-   * 刷新后把选中项滚进视野。
-   *
-   * 侧栏是独立滚动容器，重新挂载时 scrollTop 归零；二级全部常显后菜单远超一屏，
-   * 靠后的选中项会停在可视区外，看起来像"选中态丢了"。
-   * `block: "nearest"` 只在确实不可见时滚动，因此点击菜单这种本来就可见的场景不会跳动。
-   * 依赖里带上 `sections`：权限与品类档案是异步到的，菜单变长后位置会重排。
-   */
+  useEffect(() => { setOpenMobile(false); }, [location.pathname, setOpenMobile]);
   useEffect(() => {
     const host = navRef.current;
     if (!host) return;
     let frame = 0;
-    // Menu mounts expanded children after the collapse state commits. Wait for
-    // the actual selected item rather than scrolling the outgoing submenu.
-    const reveal = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const selector = collapsed && !drawerOpen ? ".ant-menu-submenu-selected, .ant-menu-item-selected" : ".ant-menu-item-selected";
-        const selected = Array.from(host.querySelectorAll<HTMLElement>(selector)).find(item => item.getBoundingClientRect().height > 0);
-        if (selected) { selected.scrollIntoView({ block: "nearest" }); observer.disconnect(); }
-      });
-    };
-    const observer = new MutationObserver(reveal);
-    observer.observe(host, { childList: true, subtree: true });
-    reveal();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [selectedKey, sections, drawerOpen, collapsed]);
-  /**
-   * 侧栏内容抽成一个渲染函数：常驻侧栏与窄屏抽屉必须是同一份导航，
-   * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。
-   */
-  const renderSider = (inDrawer = false) => (
-    <div id={inDrawer ? undefined : "workspace-sidebar"} className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}
-      style={{ "--sidebar-compact-height": `${ADMIN_SIDEBAR_METRICS.collapsedItemHeight}px`, "--sidebar-compact-icon": `${ADMIN_SIDEBAR_METRICS.collapsedIconSize}px`, "--sidebar-compact-label": `${ADMIN_SIDEBAR_METRICS.collapsedLabelSize}px` } as import("react").CSSProperties}>
-      <div className="sider-workspace"><WorkspaceSwitcher collapsed={collapsed && !inDrawer} /></div>
-      <SidebarQuickEntries collapsed={collapsed && !inDrawer} selectedKey={activeFixedKey}
-        onNavigate={key => { setFixedSelection(key); navigation.fromSidebar(overviewPath); setDrawerOpen(false); }} />
-
-      <motion.div layoutScroll className="sider-nav" ref={navRef}>
-        <SidebarMenu
-          mode="inline"
-          inlineCollapsed={collapsed && !inDrawer}
-          selectedKeys={activeFixedKey ? [] : [selectedKey]}
-          items={buildMenuItems(collapsed && !inDrawer)}
-          onClick={({ key }) => { if (String(key).startsWith("/")) { setFixedSelection(undefined); navigation.fromSidebar(String(key)); } }}
-        />
-      </motion.div>
-
-      <div className="sider-account">
-        <AccountMenu collapsed={collapsed && !inDrawer} />
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="app-frame-stage">
-      <Layout className="app-shell">
-        {isDesktop ? (
-          <Sider
-            className="app-sider"
-            width={ADMIN_SIDEBAR_METRICS.expandedWidth}
-            collapsedWidth={ADMIN_SIDEBAR_METRICS.collapsedWidth}
-            trigger={null}
-            collapsible
-            collapsed={collapsed}
-            theme={mode === "dark" ? "dark" : "light"}
-          >
-            {renderSider()}
-            <Tooltip title={collapsed ? t("展开导航") : t("收起导航")}>
-              <Button type="default" size="small" shape="circle" className="sider-edge-toggle"
-                aria-label={collapsed ? t("展开导航") : t("收起导航")}
-                aria-expanded={!collapsed} aria-controls="workspace-sidebar"
-                icon={collapsed ? <ChevronRight size={15} aria-hidden="true" /> : <ChevronLeft size={15} aria-hidden="true" />}
-                onClick={() => setCollapsed(value => !value)} />
-            </Tooltip>
-          </Sider>
-        ) : (
-          <>
-            <Button
-              className="sider-drawer-trigger"
-              type="text"
-              aria-label={t("打开导航")}
-              icon={<MenuOutlined />}
-              onClick={() => setDrawerOpen(true)}
-            />
-            <Drawer
-              className="sider-drawer"
-              placement="left"
-              size={272}
-              open={drawerOpen}
-              destroyOnHidden
-              closable={false}
-              styles={{ body: { padding: 0 } }}
-              onClose={() => setDrawerOpen(false)}
-            >
-              {renderSider(true)}
-            </Drawer>
-          </>
-        )}
-
-        <Layout className="app-workspace">
-          <header className="workspace-context">
-            <div className="workspace-context-location">
-              <Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} />
-            </div>
-            <div className="workspace-context-actions"><WorkspaceClock />
-              <Tooltip title={t("通知入口预留，暂未接入")}>
-                <Button type="text" size="small" className="workspace-notifications" aria-label={t("通知")} aria-disabled="true" icon={<Bell size={19} strokeWidth={1.75} />} />
-              </Tooltip>
-            </div>
-          </header>
-          <Content ref={contentRef} className="app-content"><main className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></main></Content>
-        </Layout>
-      </Layout>
-      {/* SUB-02 §5.4 到期提醒：全局左下角浮窗，随各页常驻（无数据/平台账号时自渲染为空）。 */}
-      <SubscriptionExpiryFloatingCard />
-    </div>
-  );
+    const reveal = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
+      const selected = Array.from(host.querySelectorAll<HTMLElement>('[data-active]')).find(e => e.getBoundingClientRect().height > 0);
+      if (selected) { selected.scrollIntoView({ block: "nearest" }); observer.disconnect(); }
+    }); };
+    const observer = new MutationObserver(reveal); observer.observe(host, {childList:true, subtree:true}); reveal();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [selectedKey, sections, state, openMobile]);
+  return <>
+    <Sidebar collapsible="icon" className="rental-sidebar-colors">
+      <SidebarHeader><NativeWorkspaceSwitcher />
+        <SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")} placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
+      </SidebarHeader>
+      <SidebarContent ref={navRef}><NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} /></SidebarContent>
+      <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
+    </Sidebar>
+    <SidebarInset className="h-svh min-h-0">
+      <header className="rental-sidebar-colors native-workspace-context flex h-16 shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing) group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+        <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
+          <SidebarTrigger className="-ml-1" aria-label={t(state === "collapsed" ? "展开导航" : "收起导航")} />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+          <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
+        </div>
+        <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
+          <Tooltip title={t("通知入口预留，暂未接入")}><Button type="text" size="small" className="workspace-notifications" aria-label={t("通知")} aria-disabled="true" icon={<Bell size={19} strokeWidth={1.75} />} /></Tooltip>
+        </div>
+      </header>
+      <div ref={contentRef} className="app-content" data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>
+    </SidebarInset>
+    <SubscriptionExpiryFloatingCard />
+  </>;
 }
