@@ -1,0 +1,106 @@
+{
+  "source": "Animate UI official Hugeicons registry",
+  "retrieved": "2026-10-26",
+  "license": "../LICENSE.md",
+  "adaptations": "Icon engine import only; host gates motion through the shared preference.",
+  "files": [
+    {
+      "file": "chart-column.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-chart-column.json",
+      "source": "registry/hugeicons/chart-column/index.tsx",
+      "upstreamSha256": "c569b1cd21b123f333fe4eb1d1b5fecc73abc675622982d0e20b408612e04b7e",
+      "adaptedSha256": "833677bd2e0573b7b6596f1bae24063ba5d210fdc4c491bc573a0503d7df050b"
+    },
+    {
+      "file": "clipboard-list.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-clipboard-list.json",
+      "source": "registry/hugeicons/clipboard-list/index.tsx",
+      "upstreamSha256": "12e65b27bfaeccc635b96b1b35f36d7512d561646bcd7044d9f2789165f95fe1",
+      "adaptedSha256": "30857039e991303278082cfa4f797596577bbbbc5888f08f83d3fc7791f7ce5b"
+    },
+    {
+      "file": "clock-01.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-clock-01.json",
+      "source": "registry/hugeicons/clock-01/index.tsx",
+      "upstreamSha256": "937bd48dda9e699266639b73dc0f3d506a3866ce108be3af94bec47a4cc5f087",
+      "adaptedSha256": "13b346995a827731406488b5633b9d696bf12946a9a6d534065dedb7b97cab96"
+    },
+    {
+      "file": "credit-card.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-credit-card.json",
+      "source": "registry/hugeicons/credit-card/index.tsx",
+      "upstreamSha256": "36882bc419deda6ab22878293d206d7e512a12b1d79372b26743bb5c96e087dc",
+      "adaptedSha256": "a777c70d08e60abab39293f3976971e9ab6fe8ff774e332a29ec612d08c53110"
+    },
+    {
+      "file": "folder-open.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-folder-open.json",
+      "source": "registry/hugeicons/folder-open/index.tsx",
+      "upstreamSha256": "fe8a78da9070dfc4a9ec5245dd7750689fa4f557b6d8019a2c2cc5c8367851ae",
+      "adaptedSha256": "58f9d90840948909d5dd9f302196de2ee1fd4b48b7cd64d8631c02bced5970f3"
+    },
+    {
+      "file": "layers-01.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-layers-01.json",
+      "source": "registry/hugeicons/layers-01/index.tsx",
+      "upstreamSha256": "fa5131e9bc584a1479de69e90b90f125eb03af67f683203d2e2818b09ce7b388",
+      "adaptedSha256": "ee6774c8b3a1845f62a538fc312ff9a8346603be8444eb7d6a8c84f8aeb7227b"
+    },
+    {
+      "file": "layout-dashboard.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-layout-dashboard.json",
+      "source": "registry/hugeicons/layout-dashboard/index.tsx",
+      "upstreamSha256": "b79efb8af013d2f923ac722f7331fdf60b40acb6d7ad4d7b09d5ec518a0a1226",
+      "adaptedSha256": "0b636861e91f9cba6d3e17e9a4afcf5b8e7575cbe5de5cdd4ae942ae78ad106c"
+    },
+    {
+      "file": "plug-zap.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-plug-zap.json",
+      "source": "registry/hugeicons/plug-zap/index.tsx",
+      "upstreamSha256": "b732457a91166a1654f0dfaaebae4cea7d97fb61bb1220f5c9b7ff499bcc9f1b",
+      "adaptedSha256": "4b5d1a08a9fd5f1bcbd9ad23af300a22e683c63288163197c7537af2f4f4b1e2"
+    },
+    {
+      "file": "search-01.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-search-01.json",
+      "source": "registry/hugeicons/search-01/index.tsx",
+      "upstreamSha256": "350929fe55a9b24eca433b09355e80bcc11ab28c96e091ba9a875c591ca2f7fb",
+      "adaptedSha256": "1038a4763b64e540f384e9810797d1e18ddccf95eb3da11fba87e1baa6dcaacc"
+    },
+    {
+      "file": "settings-02.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-settings-02.json",
+      "source": "registry/hugeicons/settings-02/index.tsx",
+      "upstreamSha256": "9004aecdf3d805ce3fd157a2c1d842b1a16ecb59fe6659417d63b4133af118b7",
+      "adaptedSha256": "823a312bf1f8ca4ed33aa56663ff8f411df924cc677d22893626337bcc342e93"
+    },
+    {
+      "file": "shield-check.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-shield-check.json",
+      "source": "registry/hugeicons/shield-check/index.tsx",
+      "upstreamSha256": "7a7e55e0007678061559325d18c71aec7252becf2434d1e609f64da1b85bc00f",
+      "adaptedSha256": "e086be1236b4b92ddc6a7f43b1e5111383436cd46bd40625b6feebeb7950d966"
+    },
+    {
+      "file": "sparkles.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-sparkles.json",
+      "source": "registry/hugeicons/sparkles/index.tsx",
+      "upstreamSha256": "f9e95240f47ec3c1833bf953f9b18972554413a7bf818704a0c739ff4efed075",
+      "adaptedSha256": "9337964a53a62a5fd824cd3755311e651be008a829cb34dbbe43858fc4e5756a"
+    },
+    {
+      "file": "users.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-users.json",
+      "source": "registry/hugeicons/users/index.tsx",
+      "upstreamSha256": "dd8e3214c7061d97510f1e5fefdcc0851900adf1469bcf6da4fe8e86dfbfcb8c",
+      "adaptedSha256": "90918e2ca2507c7b38dbb1a46eac03f116bf621ea5a062bc6ff372fb66142699"
+    },
+    {
+      "file": "wallet.tsx",
+      "url": "https://animate-ui.com/r/icons-hugeicons-wallet.json",
+      "source": "registry/hugeicons/wallet/index.tsx",
+      "upstreamSha256": "32844d6186303440721c5df3a4416584c6a4740498fad3f672d51d3bd6f02a73",
+      "adaptedSha256": "c2e8a157d79f2e4748659397d8a52d2cb83a829492d79afa98ef5968e3c2eaa6"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowRight01Icon, CreditCardIcon, DashboardSquare01Icon, Invoice01Icon, Layers01Icon, Settings01Icon, UserGroupIcon, CheckmarkBadge01Icon, CommandIcon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AppNavigationSection } from "@/app/navigation";
 import { MENU_GROUP_LABELS, menuRouteLabel } from "@/app/navigation-display";
 import { useLocale } from "@/app/locale";
@@ -8,10 +8,11 @@ import { Highlight, HighlightItem } from "@animate-ui/react/primitives/effects/h
 import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, useSidebar } from "./runtime/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./runtime/collapsible";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
+import { AnimatedIcon, type AnimatedIconName } from "../ui/AnimatedIcon";
 
-const groupIcons = { overview: DashboardSquare01Icon, transactions: Invoice01Icon, inventory: Layers01Icon,
-  commercial: CreditCardIcon, customers: UserGroupIcon, "operations-foundation": Settings01Icon,
-  "account-access": CheckmarkBadge01Icon, "service-channels": CommandIcon, "finance-reconciliation": Invoice01Icon };
+const groupIcons: Record<string, AnimatedIconName> = { overview: "dashboard", transactions: "orders", inventory: "inventory",
+  commercial: "pricing", customers: "customers", "operations-foundation": "rules",
+  "account-access": "access", "service-channels": "plugins", "finance-reconciliation": "finance" };
 
 export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
   sections: AppNavigationSection[]; selectedKey: string; query: string; onNavigate: (path: string) => void;
@@ -34,7 +35,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
     containerClassName="rental-sidebar-navigation" className="rental-sidebar-route-highlight">
     {overview && <SidebarGroup><SidebarGroupLabel>{t(overview.label)}</SidebarGroupLabel><SidebarMenu>
       {overview.routes.map(route => <SidebarMenuItem key={route.path}><HighlightItem value={route.path} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined} isActive={selectedKey === route.path} tooltip={t(route.label)} onClick={() => onNavigate(route.path)}>
-        <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} /><span>{t(menuRouteLabel(route.path, route.label))}</span>
+        <AnimatedIcon name={route.path === "/workbench" ? "dashboard" : "report"} /><span>{t(menuRouteLabel(route.path, route.label))}</span>
       </SidebarMenuButton></div></HighlightItem></SidebarMenuItem>)}
     </SidebarMenu></SidebarGroup>}
     {visible.some(s => s.key !== "overview") && <SidebarGroup><SidebarGroupLabel>{t("业务管理")}</SidebarGroupLabel><SidebarMenu>
@@ -46,7 +47,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
           onOpenChange={open => setPopupGroup(current => open ? section.key : current === section.key ? null : current)}>
           <SidebarMenuItem><HighlightItem value={`group:${section.key}`} asChild><div className="rental-sidebar-route-target">
             <DropdownMenuTrigger aria-label={label} data-sound="press" render={<SidebarMenuButton isActive={active} />}>
-              <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
+              <AnimatedIcon name={groupIcons[section.key] ?? "rules"} />
             </DropdownMenuTrigger>
           </div></HighlightItem></SidebarMenuItem>
           <DropdownMenuContent className="rental-sidebar-submenu" side="right" align="start" sideOffset={8} aria-label={label}>
@@ -65,7 +66,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
             {/* Measure the trigger row only, never the still-exiting submenu. */}
             <HighlightItem value={`group:${section.key}`} asChild><div className="rental-sidebar-route-target">
               <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={label} isActive={active && !expanded} />}>
-                <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
+                <AnimatedIcon name={groupIcons[section.key] ?? "rules"} />
                 <span>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
                 <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="ml-auto transition-transform duration-350 ease-[cubic-bezier(0.215,0.61,0.355,1)] group-data-open/collapsible:rotate-90" />
               </CollapsibleTrigger>

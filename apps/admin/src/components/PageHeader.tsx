@@ -7,6 +7,8 @@ import { findRouteByPath } from "@/app/navigation";
 import { resolveAdminBrandName } from "@/app/branding";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
+import { AnimatedIcon } from "./ui/AnimatedIcon";
+import { routeIconName } from "@/app/navigation-icons";
 
 /**
  * 页头统一拥有标题到首个 Tab/筛选/内容的间距，页面不能再叠加空白。
@@ -41,9 +43,9 @@ export function PageHeader({ title, description, view, extra, note }: {
     <div className="page-header">
       <div className="page-toolbar" aria-label={locale === "en-US" ? `${translatedTitle} · ${t("页面操作")}` : `${title}页面操作`}>
         <div className="page-heading">
-          <div className="page-title-row">
+          <div className="page-title-row" data-icon-hover="">
             {/* 图标取自路由注册表，和侧栏菜单同一个符号；页面不各自传图标，避免两处长歪。 */}
-            {icon && <span className="page-title-icon">{icon}</span>}
+            {icon && <span className="page-title-icon"><AnimatedIcon name={routeIconName(location.pathname)} /></span>}
             <h1 className="page-title">{translatedTitle}</h1>
             {note && (
               <InfoPopover

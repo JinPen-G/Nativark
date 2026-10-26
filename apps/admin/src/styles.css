@@ -544,9 +544,10 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
   flex: none;
   margin-right: 8px;
   color: var(--rental-color-text-secondary);
-  font-size: var(--rental-typography-panel-title-size);
+  font-size: var(--rental-icon-title-size);
 }
 .page-title-row .ant-btn { color: var(--rental-color-text-quaternary); }
+.page-title-icon > .rental-animated-icon { font-size: inherit; }
 .page-title-row .ant-btn:hover { color: var(--rental-color-text-secondary); }
 .page-title {
   margin: 0;

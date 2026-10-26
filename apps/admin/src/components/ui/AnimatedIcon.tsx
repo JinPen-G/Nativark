@@ -14,11 +14,27 @@ import { Layers } from "./animated-icons/layers";
 import { RefreshCw } from "./animated-icons/refresh-cw";
 import { Download } from "./animated-icons/download";
 import { Upload } from "./animated-icons/upload";
+import { LayoutDashboard } from "./animated-icons/hugeicons/layout-dashboard";
+import { ChartColumn as HugeChart } from "./animated-icons/hugeicons/chart-column";
+import { ClipboardList } from "./animated-icons/hugeicons/clipboard-list";
+import { CreditCard } from "./animated-icons/hugeicons/credit-card";
+import { Layers01 } from "./animated-icons/hugeicons/layers-01";
+import { Users as HugeUsers } from "./animated-icons/hugeicons/users";
+import { Settings02 } from "./animated-icons/hugeicons/settings-02";
+import { ShieldCheck as HugeShield } from "./animated-icons/hugeicons/shield-check";
+import { PlugZap } from "./animated-icons/hugeicons/plug-zap";
+import { Wallet as HugeWallet } from "./animated-icons/hugeicons/wallet";
+import { FolderOpen } from "./animated-icons/hugeicons/folder-open";
+import { Clock01 } from "./animated-icons/hugeicons/clock-01";
+import { Sparkles } from "./animated-icons/hugeicons/sparkles";
 
 const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: ChartColumn,
   file: FileText, tag: Tag, users: Users, settings: Settings,
   shield: ShieldCheck, wallet: Wallet, layers: Layers, refresh: RefreshCw,
-  download: Download, upload: Upload };
+  download: Download, upload: Upload, dashboard: LayoutDashboard, report: HugeChart,
+  orders: ClipboardList, pricing: CreditCard, inventory: Layers01, customers: HugeUsers,
+  rules: Settings02, access: HugeShield, plugins: PlugZap, finance: HugeWallet,
+  folder: FolderOpen, schedule: Clock01, ai: Sparkles };
 export type AnimatedIconName = keyof typeof icons;
 
 /** Original Animate UI paths/variants; the host owns only interaction and accessibility.
@@ -30,7 +46,7 @@ export function AnimatedIcon({ name, busy = false, className, style, ...props }:
   const [focused, setFocused] = useState(false);
   const reduced = usePrefersReducedMotion();
   useEffect(() => {
-    const target = ref.current?.closest<HTMLElement>("button, a, .ant-menu-submenu-title, .ant-menu-item, [role=button]");
+    const target = ref.current?.closest<HTMLElement>("button, a, .ant-menu-submenu-title, .ant-menu-item, [role=button], [data-icon-hover]");
     if (!target) return;
     const enter = () => { if (!target.matches(":disabled, [aria-disabled=true]")) setHovered(true); };
     const leave = () => setHovered(false);
