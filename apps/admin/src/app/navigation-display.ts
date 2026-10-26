@@ -10,7 +10,7 @@ const routeLabels: Record<string, string> = {
   "/platform/official-calendars": "公共日历", "/platform/subscription-catalog": "功能定价",
 };
 export function menuRouteLabel(path: string, label: string) {
-  if (path === "/rental/assets") return label.replace("资产与", "");
+  if (path === "/rental/assets") return label === "资产与库存" ? "资产库存" : label.replace("资产与", "");
   // Shorten only a redundant conjunction; never truncate a category noun.
   return routeLabels[path] ?? label;
 }
@@ -18,15 +18,19 @@ export const MENU_GROUP_LABELS: Record<string, string> = {
   commercial: "定价营销", customers: "会员客户", "account-access": "账号权限",
   "service-channels": "服务渠道", "finance-reconciliation": "财务对账",
 };
+export const MENU_GROUP_COMPACT_EN: Record<string, string> = {
+  overview: "Overview", transactions: "Rentals", inventory: "Inventory", "operations-foundation": "Setup",
+  "platform-rental-core": "Core", "platform-management": "Platform",
+};
 export const MENU_GROUP_ICONS: Record<string, AnimatedIconName> = {
-  "platform-rental-core": "layers", overview: "chart", transactions: "file", inventory: "camera",
+  "platform-rental-core": "layers", overview: "chart", transactions: "file", inventory: "blocks",
   commercial: "tag", customers: "users", "operations-foundation": "settings",
   "account-access": "shield", "service-channels": "blocks", "finance-reconciliation": "wallet",
   "platform-management": "settings",
 };
 export const MENU_ROUTE_ICONS: Record<string, AnimatedIconName> = {
   "/workbench": "chart", "/reports/operations": "chart", "/rental/orders": "file",
-  "/rental/item-groups": "camera", "/rental/assets": "layers", "/rental/work-orders": "settings",
+  "/rental/item-groups": "blocks", "/rental/assets": "layers", "/rental/work-orders": "settings",
   "/rental/locations": "house", "/rental/pricing-groups": "tag", "/rental/pricing": "chart",
   "/rental/discounts": "tag", "/rental/coupons": "tag", "/rental/services": "shield",
   "/membership/personal": "users", "/membership/corporate": "users", "/membership/reviews": "shield",

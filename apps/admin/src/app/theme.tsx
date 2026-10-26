@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
 import { getArcPalette } from "./arcTokens";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
+import { ADMIN_STATUS_COLORS, ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
 import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
 
 export type AppearanceMode = "default" | "dark" | "compact";
@@ -260,13 +260,17 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
     cssVar: { key: "rental-os", prefix: "rental" },
     token: {
       colorPrimary: primaryColor,
-      colorInfo: primaryColor,
+      colorInfo: ADMIN_STATUS_COLORS[mode === "dark" ? "dark" : "light"].info[0],
       // Link、文字按钮和主按钮必须使用同一品牌色；hover/active 色阶交给
       // antd 根据这个主色生成，保留深浅主题下的可见反馈。
       colorLink: primaryColor,
-      colorSuccess: palette.success,
-      colorWarning: palette.warning,
-      colorError: palette.danger,
+      // Supply complete pairs: algorithm-derived pastel aliases can otherwise
+      // turn into muddy green/grey in compatibility notices and status dots.
+      ...Object.fromEntries(Object.entries({ Success: "success", Warning: "warning", Error: "error", Info: "info" } as const).flatMap(([name, tone]) => {
+        const [ink, surface] = ADMIN_STATUS_COLORS[mode === "dark" ? "dark" : "light"][tone];
+        return [[`color${name}`, ink], [`color${name}Text`, ink], [`color${name}TextActive`, ink], [`color${name}TextHover`, ink],
+          [`color${name}Bg`, surface], [`color${name}BgHover`, surface], [`color${name}Border`, surface]];
+      })),
       colorBgLayout: palette.background,
       colorBgContainer: palette.surface,
       colorBgElevated: palette.raised,

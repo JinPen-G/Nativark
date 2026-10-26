@@ -39,6 +39,7 @@ body {
   line-height: var(--rental-typography-body-line-height);
 }
 button, input, textarea, select { font: inherit; }
+.rental-animated-icon { font-size: var(--rental-icon-control-size); line-height: 1; }
 
 .app-frame-stage {
   height: 100vh;
@@ -276,6 +277,8 @@ button, input, textarea, select { font: inherit; }
 /* Compact rail keeps the same business groups and native submenu/keyboard engine.
    Scope to direct rail items so popup children keep their normal horizontal rows. */
 .sider-shell.is-collapsed :is(.sider-nav, .sider-quick-nav) .ant-menu-inline-collapsed { width: 100%; }
+.sider-shell.is-collapsed .sider-nav { scrollbar-gutter: stable both-edges; }
+.sider-shell.is-collapsed .sider-nav .ant-menu { padding-inline: 0; }
 .sider-shell.is-collapsed .ant-menu-inline-collapsed > :is(.ant-menu-item, .ant-menu-submenu) { width: 100%; margin-inline: 0; }
 .sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-item,
 .sider-shell.is-collapsed .ant-menu-inline-collapsed > .ant-menu-submenu > .ant-menu-submenu-title {

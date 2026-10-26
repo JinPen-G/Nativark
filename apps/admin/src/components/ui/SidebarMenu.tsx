@@ -1,15 +1,8 @@
 import { Menu, type MenuProps } from "antd";
 import { LayoutGroup, motion } from "motion/react";
-import { useId, useSyncExternalStore } from "react";
+import { useId } from "react";
 import { motionTokens } from "@/lib/motion-tokens";
-
-const reducedQuery = "(prefers-reduced-motion: reduce)";
-function subscribeReducedMotion(notify: () => void) {
-  const media = window.matchMedia(reducedQuery);
-  media.addEventListener("change", notify);
-  return () => media.removeEventListener("change", notify);
-}
-const readReducedMotion = () => window.matchMedia(reducedQuery).matches;
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
 /** UIArc library-sidebar: shared layout pill + spring.morph.
  * Keep Ant's route/keyboard/submenu engine, including collapsed popup menus.
@@ -17,7 +10,7 @@ const readReducedMotion = () => window.matchMedia(reducedQuery).matches;
  */
 export function SidebarMenu(props: MenuProps) {
   const id = useId();
-  const reduce = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
+  const reduce = usePrefersReducedMotion();
   const decorate = (items: MenuProps["items"]): MenuProps["items"] => items?.map(item => {
     if (!item || item.type === "divider") return item;
     if ("children" in item) return { ...item, children: decorate(item.children) ?? [] };

@@ -20,6 +20,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
+import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 
 /**
  * REPORT-01A/01B：当前经营空间经营报表。
@@ -207,7 +208,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         {data.statusBreakdown.length ? (
           <Space wrap>
             {data.statusBreakdown.map((row) => (
-              <Tag key={row.status} color={row.status === RentalCoreOrderStatus.Cancelled ? "default" : "processing"}>
+              <Tag key={row.status} color={orderStatusTagColor(row.status)}>
                 {t(statusLabels[row.status] ?? row.status)}：{row.count}
               </Tag>
             ))}
@@ -259,7 +260,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             <Space wrap style={{ marginTop: 8 }}>
               {assets.statusBreakdown.length
                 ? assets.statusBreakdown.map((row) => (
-                    <Tag key={row.status}>{t(assetStatusLabels[row.status] ?? row.status)}：{row.count}</Tag>
+                    <Tag key={row.status} color={row.status === "available" ? "success" : ["inspection", "maintenance"].includes(row.status) ? "warning" : row.status === "disabled" ? "default" : "processing"}>{t(assetStatusLabels[row.status] ?? row.status)}：{row.count}</Tag>
                   ))
                 : <span className="muted">{t("当前经营空间尚无序列化资产")}</span>}
             </Space>

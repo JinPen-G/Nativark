@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
-import { useReducedMotion } from "motion/react";
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { House } from "./animated-icons/house";
 import { MessageSquare } from "./animated-icons/message-square";
 import { Blocks } from "./animated-icons/blocks";
 import { ChartColumn } from "./animated-icons/chart-column";
 import { FileText } from "./animated-icons/file-text";
-import { Camera } from "./animated-icons/camera";
 import { Tag } from "./animated-icons/tag";
 import { Users } from "./animated-icons/users";
 import { Settings } from "./animated-icons/settings";
@@ -15,12 +14,11 @@ import { Layers } from "./animated-icons/layers";
 import { RefreshCw } from "./animated-icons/refresh-cw";
 import { Download } from "./animated-icons/download";
 import { Upload } from "./animated-icons/upload";
-import { Bell } from "./animated-icons/bell";
 
 const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: ChartColumn,
-  file: FileText, camera: Camera, tag: Tag, users: Users, settings: Settings,
+  file: FileText, tag: Tag, users: Users, settings: Settings,
   shield: ShieldCheck, wallet: Wallet, layers: Layers, refresh: RefreshCw,
-  download: Download, upload: Upload, bell: Bell };
+  download: Download, upload: Upload };
 export type AnimatedIconName = keyof typeof icons;
 
 /** Original Animate UI paths/variants; the host owns only interaction and accessibility.
@@ -30,7 +28,7 @@ export function AnimatedIcon({ name, busy = false, className, style, ...props }:
   const ref = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
   useEffect(() => {
     const target = ref.current?.closest<HTMLElement>("button, a, .ant-menu-submenu-title, .ant-menu-item, [role=button]");
     if (!target) return;

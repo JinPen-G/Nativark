@@ -41,12 +41,6 @@
       "adaptedSha256": "4bb06e8dc41911ac87cbd481da411eacaad1beb5c5907b35be9a3d1974516f2a"
     },
     {
-      "file": "camera.tsx",
-      "source": "apps/v2/registry/icons/camera/index.tsx",
-      "upstreamSha256": "fec5544cd9f8e6127a705cb41fef214428b5a76ba85f182471ef3a602b89005d",
-      "adaptedSha256": "27650a3194498baeef76a8fb94aa4c6bebddf3094a7345fbd1195c691845d40c"
-    },
-    {
       "file": "tag.tsx",
       "source": "apps/v2/registry/icons/tag/index.tsx",
       "upstreamSha256": "8b225a44418f29cdb8155277d4180793d1f906ecc6a2a30aa6aa246c6677be4f",
@@ -99,12 +93,6 @@
       "source": "apps/v2/registry/icons/upload/index.tsx",
       "upstreamSha256": "c22b63a90c60e424bb862167747f496b982385424cebd4a89952fe2f790821e2",
       "adaptedSha256": "fec8b5afe3f02d3b0f79a566674f8a543ac9e48e75bfac3f23a6434af62c43b3"
-    },
-    {
-      "file": "bell.tsx",
-      "source": "apps/v2/registry/icons/bell/index.tsx",
-      "upstreamSha256": "1849d4a882d214908cad0fc8f14446234da687080f5de06afd1a4faf70ee031f",
-      "adaptedSha256": "4fa7a13ad0632d1d1888d23de113b553af175160ae349fef97ad6d7933c287d5"
     }
   ]
 }

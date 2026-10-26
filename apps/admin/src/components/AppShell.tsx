@@ -11,7 +11,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { ADMIN_SIDEBAR_METRICS } from "@/app/designTokens";
-import { MENU_GROUP_ICONS, MENU_GROUP_LABELS, MENU_ROUTE_ICONS, menuRouteLabel } from "@/app/navigation-display";
+import { MENU_GROUP_COMPACT_EN, MENU_GROUP_ICONS, MENU_GROUP_LABELS, MENU_ROUTE_ICONS, menuRouteLabel } from "@/app/navigation-display";
 import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigation = useWorkspaceNavigation(contentRef, navRef);
   const location = useLocation();
   const navigate = useNavigate();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { mode } = useAppearance();
   const isDesktop = useMinWidth(DESKTOP_MIN_WIDTH);
   const isWideDesktop = useMinWidth(WIDE_DESKTOP_MIN_WIDTH);
@@ -115,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       icon: MENU_ROUTE_ICONS[route.path] ? <AnimatedIcon name={MENU_ROUTE_ICONS[route.path]} /> : route.icon,
       label: t(menuRouteLabel(route.path, route.label)) }));
     return isCollapsed
-      ? { key: section.key, icon: MENU_GROUP_ICONS[section.key] ? <AnimatedIcon name={MENU_GROUP_ICONS[section.key]} /> : section.icon, label: t(MENU_GROUP_LABELS[section.key] ?? section.label), children }
+      ? { key: section.key, icon: MENU_GROUP_ICONS[section.key] ? <AnimatedIcon name={MENU_GROUP_ICONS[section.key]} /> : section.icon, label: locale === "en-US" && MENU_GROUP_COMPACT_EN[section.key] ? MENU_GROUP_COMPACT_EN[section.key] : t(MENU_GROUP_LABELS[section.key] ?? section.label), children }
       : { type: "group" as const, key: section.key, label: t(MENU_GROUP_LABELS[section.key] ?? section.label), children };
   });
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);

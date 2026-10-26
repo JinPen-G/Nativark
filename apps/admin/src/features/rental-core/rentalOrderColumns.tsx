@@ -13,18 +13,12 @@ import styles from "./RentalOrdersPage.module.css";
 import { RentalOrderRowActions } from "./RentalOrderRowActions";
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import type { OrderActionPermissions } from "./orderQuickActions";
+import { orderStatusTone } from "./orderStatusSemantics";
+export { orderStatusTone } from "./orderStatusSemantics";
 
 export const orderStatusLabels: Record<string, string> = { draft: "软预占", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待交付", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已关闭", cancelled: "已取消", no_show: "已爽约" };
 
 // Domain semantics, not the demo's fictional active/queued/failed status machine.
-export function orderStatusTone(status: string) {
-  if (status === "completed") return "success";
-  if (["pickup_overdue", "return_inspection", "settling", "no_show"].includes(status)) return "warning";
-  if (status === "renting") return "active";
-  if (["reserved", "ready_for_pickup"].includes(status)) return "info";
-  return "neutral";
-}
-
 const orderStatusIcons: Record<string, LucideIcon> = {
   draft: CircleDashed, reserved: CalendarCheck2, pickup_overdue: ClockAlert,
   ready_for_pickup: PackageCheck, renting: Timer, return_inspection: ClipboardCheck,

@@ -22,6 +22,7 @@ import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, ConfirmAction, DataTableStatus, Drawer, Tabs } from "@/components/ui";
 import { detailStatusLabels } from "@/features/rental-core/orderDetailPresentation";
+import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 import type { UploadFile, UploadProps } from "antd";
 import type { ReactNode } from "react";
 import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";
@@ -72,7 +73,10 @@ const statusLabel: Record<string, string> = {
   pending_activation: "待激活", claimed: "可用", locked: "已锁定", redeemed: "已核销", expired: "已过期", void: "已作废",
   granted: "已发放", reversed: "已冲正", approved: "已通过", rejected: "已驳回", pending: "待审核"
 };
-const statusColor = (value: string) => value === "approved" || value === "active" || value === "granted" || value === "claimed" ? "success" : value === "reversed" || value === "void" || value === "closed" ? "default" : value === "rejected" ? "error" : "warning";
+const statusColor = (value: string) => Object.hasOwn(detailStatusLabels, value) ? orderStatusTagColor(value)
+  : ["approved", "active", "granted", "claimed"].includes(value) ? "success"
+  : ["rejected", "risk_restricted"].includes(value) ? "error"
+  : ["pending", "pending_activation", "suspended", "expired"].includes(value) ? "warning" : "default";
 const relationLabel: Record<string, string> = { customer: "订单客户", contract_subject: "签约主体", payer: "付款主体", user: "使用人", booking_identity: "预约身份" };
 
 function ProfileSummary({ overview }: { overview: CustomerProfileOverview }) {
