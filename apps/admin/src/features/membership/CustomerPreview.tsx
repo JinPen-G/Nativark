@@ -43,7 +43,7 @@ export function CustomerPreview({ children, ...facts }: Props) {
   if (!facts.customerId || !facts.name.trim() || facts.name === "—") return <>{children ?? facts.name ?? "—"}</>;
   return <HoverCard key={`${scope}:${facts.customerId}`} className={styles.surface} side={narrow ? "bottom" : "right"} content={<CustomerPreviewContent facts={facts} scope={scope} allowed={Boolean(allowed && tenantId && user)} />}>
     <Button type="button" variant="secondary" size="sm" className={styles.trigger} aria-label={`${t("预览客户资料")} ${facts.name}`}>
-      <span className={`${avatarStyles.avatar} ${avatarStyles.sm}`} aria-hidden="true">{facts.type === "corporate" ? <Building2 size={16} /> : facts.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join("")}</span>
+      <span className={`${avatarStyles.avatar} ${avatarStyles.sm} ${styles.avatar}`} aria-hidden="true">{facts.type === "corporate" ? <Building2 size={16} /> : facts.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join("")}</span>
       <span className={styles.name} data-customer-preview-name="">{children ?? facts.name}</span>
     </Button>
   </HoverCard>;

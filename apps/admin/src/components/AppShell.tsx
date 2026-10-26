@@ -94,7 +94,7 @@ function ShellContents({ children }: { children: ReactNode }) {
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
     </Sidebar>
     <SidebarInset className="app-workspace min-h-0">
-      <header className="rental-sidebar-colors native-workspace-context flex h-16 shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing) group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+      <header className="rental-sidebar-colors native-workspace-context flex shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing)">
         <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
           <SidebarTrigger className="-ml-1" aria-label={t(state === "collapsed" ? "展开导航" : "收起导航")} />
           <Separator orientation="vertical" className="mr-2 h-4" />

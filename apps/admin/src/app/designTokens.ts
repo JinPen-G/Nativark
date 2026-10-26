@@ -35,7 +35,8 @@ export const ADMIN_TABLE_COLUMN_WIDTH = {
 /** Shared shell spacing, derived from the existing foundation scale. Never
  * compensate for the breadcrumb/title gap in individual business pages. */
 export const ADMIN_LAYOUT_SPACING = {
-  pageTop: "var(--space-1)",
+  contextHeight: 40,
+  pageTop: "0px",
   headerContent: "var(--space-2)",
   tabsContent: "var(--space-2)",
   listToolbar: "var(--space-2)",
@@ -193,6 +194,7 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-choice-text-selected": ADMIN_CHOICE_STYLE.selectedText,
     "--rental-choice-weight": String(ADMIN_CHOICE_STYLE.weight),
     "--rental-layout-page-top-gap": ADMIN_LAYOUT_SPACING.pageTop,
+    "--rental-layout-context-height": px(ADMIN_LAYOUT_SPACING.contextHeight),
     "--rental-layout-header-content-gap": ADMIN_LAYOUT_SPACING.headerContent,
     "--rental-layout-tabs-content-gap": ADMIN_LAYOUT_SPACING.tabsContent,
     "--rental-layout-list-toolbar-gap": ADMIN_LAYOUT_SPACING.listToolbar,
