@@ -5,6 +5,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useReducedMotion } from "motion/react";
+import { pickInteractionSound, playInteractionSound } from "@/features/sound/soundService";
 import "./WorkspaceNavigation.css";
 
 const NavigationContext = createContext({ suppressPageEnter: false, ready: (_path: string) => {} });
@@ -64,7 +65,13 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
         return !node.matches('[aria-disabled="true"], .ant-menu-item-disabled') && rect.width > 0 && rect.height > 0
           && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
       });
-      if (item) { event.preventDefault(); event.stopPropagation(); item.click(); }
+      if (item) {
+        event.preventDefault(); event.stopPropagation();
+        // The original trusted click targets <html>; its replay is synthetic and
+        // correctly ignored by GlobalInteractionSounds. Emit once via the same preference gate.
+        if (event.isTrusted) void playInteractionSound(pickInteractionSound(item));
+        item.click();
+      }
     };
     document.addEventListener("click", replayShellClick, true);
     return () => document.removeEventListener("click", replayShellClick, true);

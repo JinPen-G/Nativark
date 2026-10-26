@@ -20,3 +20,31 @@
 .rental-sidebar-colors [data-sidebar="brand-mark"] { border-radius: var(--rental-ui-radius-container); }
 .rental-sidebar-colors [data-sidebar="brand-mark"] img { border-radius: inherit; }
 .rental-sidebar-colors [data-sidebar="workspace-icon"] { border-radius: var(--rental-ui-radius-sm); }
+
+/* Resolve account accent before the reference palette shadows --accent locally. */
+:root {
+  --rental-sidebar-selected-bg: var(--accent);
+  --rental-sidebar-selected-ink: var(--accent-foreground);
+}
+.rental-sidebar-colors { --sidebar-ring: var(--rental-sidebar-selected-bg); }
+/* Chinese labels use the shared control height and one compact spacing rhythm. */
+.rental-sidebar-colors [data-sidebar="content"] { gap: var(--rental-sidebar-menu-gap); }
+.rental-sidebar-colors [data-sidebar="menu"] { gap: var(--rental-sidebar-menu-gap); }
+.rental-sidebar-colors [data-sidebar="group-label"] { height: var(--rental-sidebar-group-label-height); }
+.rental-sidebar-colors [data-sidebar="menu-button"][data-size="default"],
+.rental-sidebar-colors [data-sidebar="menu-sub-button"] {
+  height: var(--rental-sidebar-menu-height);
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
+  transition-property: background-color, color;
+  transition-duration: var(--animate-ui-sidebar-color-duration, 200ms);
+  transition-timing-function: var(--animate-ui-sidebar-color-easing, ease);
+}
+.rental-sidebar-colors [data-sidebar="menu-sub"] { gap: var(--rental-sidebar-menu-gap); }
+.rental-sidebar-colors [data-sidebar="menu-button"] > svg:first-child { width: var(--rental-sidebar-icon-size); height: var(--rental-sidebar-icon-size); }
+/* The route marker stays put while the pointer/focus moves to another item. */
+.rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] {
+  background-color: var(--rental-sidebar-selected-bg);
+  color: var(--rental-sidebar-selected-ink);
+}
+.rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] > svg { color: inherit; }

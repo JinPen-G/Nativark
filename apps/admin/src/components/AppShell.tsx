@@ -2,7 +2,7 @@ import { Breadcrumb } from "antd";
 import { Bell } from "lucide-react";
 import { Button, Tooltip } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -24,7 +24,8 @@ import "./animate-sidebar/sidebar-adapter.css";
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
-  return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
+  // Keep the native collapse/popup motion; focused route and hovered item must not share a moving paint layer.
+  return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
     <ShellContents>{children}</ShellContents>
   </SidebarProvider></div></div></TooltipProvider>;
 }

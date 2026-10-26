@@ -55,8 +55,8 @@ export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75 } as const;
-/** Native Animate UI sidebar geometry; runtime/sidebar.tsx retains the original rem constants. */
-export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 256, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 28, triggerSize: 28, avatarSize: 32 } as const;
+/** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
+export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 36, submenuHeight: 36, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32 } as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
 export const ADMIN_STATUS_COLORS = {
   light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },
@@ -232,6 +232,9 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-list-card-min-width": px(ADMIN_LIST_CAPABILITY_METRICS.cardMinWidth),
     "--rental-hover-card-native-radius": px(ARC_DEFAULT_RADII.container),
     "--rental-record-card-media-height": px(ADMIN_RECORD_CARD_METRICS.mediaHeight),
+    ...Object.fromEntries(Object.entries(ADMIN_SIDEBAR_METRICS).map(([role, value]) => [
+      `--rental-sidebar-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, px(value),
+    ])),
     "--rental-navigation-duration": `${ADMIN_NAVIGATION_MOTION.durationMs}ms`,
     "--rental-navigation-easing": ADMIN_NAVIGATION_MOTION.easing,
     "--rental-navigation-retreat-scale": String(ADMIN_NAVIGATION_MOTION.retreatScale),
