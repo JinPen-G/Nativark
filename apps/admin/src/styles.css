@@ -513,7 +513,7 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
   background: transparent;
 }
 .workspace-context-location { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-3); }
-.native-workspace-context { height: var(--rental-layout-context-height); }
+.native-workspace-context { height: var(--rental-layout-context-height); padding-block-start: var(--rental-layout-context-optical-inset); }
 :is(.workspace-context, .native-workspace-context) .ant-breadcrumb { min-width: 0; max-width: 100%; overflow: hidden; }
 :is(.workspace-context, .native-workspace-context) .ant-breadcrumb ol { flex-wrap: nowrap; white-space: nowrap; }
 :is(.workspace-context, .native-workspace-context) .ant-breadcrumb li:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }

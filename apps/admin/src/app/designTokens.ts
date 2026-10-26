@@ -36,7 +36,8 @@ export const ADMIN_TABLE_COLUMN_WIDTH = {
  * compensate for the breadcrumb/title gap in individual business pages. */
 export const ADMIN_LAYOUT_SPACING = {
   contextHeight: 48,
-  pageTop: "var(--space-2)",
+  contextOpticalInset: "var(--space-1)",
+  pageTop: "0px",
   headerContent: "var(--space-2)",
   tabsContent: "var(--space-2)",
   listToolbar: "var(--space-2)",
@@ -195,6 +196,7 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-choice-weight": String(ADMIN_CHOICE_STYLE.weight),
     "--rental-layout-page-top-gap": ADMIN_LAYOUT_SPACING.pageTop,
     "--rental-layout-context-height": px(ADMIN_LAYOUT_SPACING.contextHeight),
+    "--rental-layout-context-optical-inset": ADMIN_LAYOUT_SPACING.contextOpticalInset,
     "--rental-layout-header-content-gap": ADMIN_LAYOUT_SPACING.headerContent,
     "--rental-layout-tabs-content-gap": ADMIN_LAYOUT_SPACING.tabsContent,
     "--rental-layout-list-toolbar-gap": ADMIN_LAYOUT_SPACING.listToolbar,
