@@ -1,5 +1,6 @@
-import { useNativeSidebarScope } from "../scope"
 "use client"
+
+import { useNativeSidebarScope } from "../scope"
 
 import * as React from "react"
 import { Dialog as SheetPrimitive } from "@animate-ui/react/primitives/base-ui/dialog"

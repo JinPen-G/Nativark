@@ -1,5 +1,6 @@
-import { useNativeSidebarScope } from "../scope"
 "use client"
+
+import { useNativeSidebarScope } from "../scope"
 
 import { Tooltip as TooltipPrimitive } from "@animate-ui/react/primitives/base-ui/tooltip"
 import { cn } from "cn"

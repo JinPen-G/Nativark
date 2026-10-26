@@ -16,7 +16,11 @@ export function nativeSidebarStyles() {
     root.walkAtRules("layer", layer => { if (layer.nodes) layer.replaceWith(...layer.nodes); else layer.remove(); });
     root.walkRules(rule => {
       if (rule.parent?.type === "atrule" && /keyframes$/.test(rule.parent.name)) return;
-      rule.selectors = rule.selectors.flatMap(selector => selector.includes(":scope") ? [selector] : [selector, `:scope:is(${selector})`]);
+      rule.selectors = rule.selectors.flatMap(original => {
+        // @scope excludes its own root from implicit ancestor matching.
+        const selector = original.replace(/\.dark(?=\s)/g, ":is(.dark, :scope.dark)");
+        return [selector, selector.startsWith(".") ? `:scope${selector}` : `:scope:is(${selector})`];
+      });
     });
     const nodes = [...root.nodes]; root.removeAll();
     root.append(...properties, new AtRule({ name: "scope", params: "(.rental-animate-scope) to ([data-admin-content])", nodes }));

@@ -55,8 +55,8 @@ export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75 } as const;
-/** Desktop side navigation; mobile continues to use the full drawer. */
-export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 220, collapsedWidth: 80, collapsedItemHeight: 60, collapsedIconSize: 24, collapsedLabelSize: 11 } as const;
+/** Native Animate UI sidebar geometry; runtime/sidebar.tsx retains the original rem constants. */
+export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 256, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 28, triggerSize: 28, avatarSize: 32 } as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
 export const ADMIN_STATUS_COLORS = {
   light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },

@@ -260,7 +260,7 @@ forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retire
   [appearanceSwitcher, '切换外观主题', "theme switcher"],
   [loginPage, 'login-frame', "compact framed login composition"],
   [pageHeader, 'page-toolbar', "optional business-owned view and action toolbar"],
-  [shell, 'app-frame-stage', "compact framed dashboard shell"],
+  [shell, '<SidebarProvider', "native Animate UI sidebar shell"],
   [styles, 'padding: 6px', "narrow browser-edge breathing room"],
   [styles, 'border-radius: 14px', "rounded application frame"],
   [shell, '<Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems}', "plain contextual breadcrumb"],
