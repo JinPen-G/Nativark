@@ -505,6 +505,14 @@
 
 ## AIN-01当前基线与门槛依据
 
+### 迁移原文与旧 scope 识别（2026-10-26）
+
+- 已接回原 `ops:migration-status`：逐条比对已应用迁移的原始 SHA-256；缺原文、异字节、重复或损坏收据、未初始化库均拒绝判为同步。只查询迁移和结构元数据，不改 checksum、不 resolve、不重放 DDL。
+- 识别旧 B02 的 scope 列/索引和缺失或未启用的 shape CHECK，明确转交非空升级核查；通过此窄检查不代表完整 drift 或历史数据兼容。
+- 原入口误接受异字节的 stdin 复现退出1；修后实际入口以 SQL/Prisma 进程替身冒烟9 pass/0 fail/skip/todo，语法与 diff 检查退出0。证据：`output/review-claude-ab-followup-20261025/ain01-migration-observation-20261026.json`；未新增测试脚本，未连接真实数据库或执行迁移。
+- 本片不承接上轮真库结论为本轮实测；旧 B02 非空升级、真人基线与独立 G4 仍缺，AIN-01保持75%，AIN-02继续暂停。
+
+
 本节是现状盘点，不是新增注册表或执行授权。原`tool-baseline.ts`的`baseline-1/unavailable`保留历史初始目录；实际实现和消费者以下表为准，能调用仍须当前政策/权限/依赖。历史证据索引修正为归档路径，旧作者结果不冒充本轮实测。
 
 核对现场：专项分支`ai/ai-native-contracts-s01-20261002`，本地主分支`46cbaf0f`；Core最近相关修复`d7a12287`、治理服务`4c5d7529`。未启动或连接运行环境，部署构建SHA、数据库迁移和生产开放状态均未核实。以下源码位置相对`apps/api/src/modules/ai-native/`，原权限候选/风险/副作用沿`tool-baseline.ts`，实际Auth/Guard、dataScope/locationScope及字段权限不能省略。
