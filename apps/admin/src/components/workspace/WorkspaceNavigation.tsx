@@ -60,7 +60,7 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
         || document.documentElement.getAttribute(ROOT_MARK) !== owner) return;
       const bounds = host.getBoundingClientRect();
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return;
-      const item = Array.from(host.querySelectorAll<HTMLElement>('[data-route], [role="menuitem"]')).find(node => {
+      const item = Array.from(host.querySelectorAll<HTMLElement>('[data-route], [role="menuitem"], [data-sidebar="menu-button"][aria-haspopup="menu"]')).find(node => {
         const rect = node.getBoundingClientRect();
         return !node.matches('[aria-disabled="true"], .ant-menu-item-disabled') && rect.width > 0 && rect.height > 0
           && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;

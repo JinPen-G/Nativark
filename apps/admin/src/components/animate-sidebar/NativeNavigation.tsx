@@ -1,12 +1,13 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowRight01Icon, CreditCardIcon, DashboardSquare01Icon, Invoice01Icon, Layers01Icon, Settings01Icon, UserGroupIcon, CheckmarkBadge01Icon, CommandIcon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, CreditCardIcon, DashboardSquare01Icon, Invoice01Icon, Layers01Icon, Settings01Icon, UserGroupIcon, CheckmarkBadge01Icon, CommandIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import type { AppNavigationSection } from "@/app/navigation";
 import { MENU_GROUP_LABELS, menuRouteLabel } from "@/app/navigation-display";
 import { useLocale } from "@/app/locale";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Highlight, HighlightItem } from "@animate-ui/react/primitives/effects/highlight";
 import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton, useSidebar } from "./runtime/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./runtime/collapsible";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
 
 const groupIcons = { overview: DashboardSquare01Icon, transactions: Invoice01Icon, inventory: Layers01Icon,
   commercial: CreditCardIcon, customers: UserGroupIcon, "operations-foundation": Settings01Icon,
@@ -15,12 +16,14 @@ const groupIcons = { overview: DashboardSquare01Icon, transactions: Invoice01Ico
 export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
   sections: AppNavigationSection[]; selectedKey: string; query: string; onNavigate: (path: string) => void;
 }) {
-  const { t } = useLocale(), { state, isMobile, setOpen } = useSidebar();
+  const { t } = useLocale(), { state, isMobile } = useSidebar();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [popupGroup, setPopupGroup] = useState<string | null>(null);
   const keyword = query.trim().toLocaleLowerCase();
   const visible = sections.map(section => ({ ...section, routes: section.routes.filter(route => !keyword ||
     [route.label, menuRouteLabel(route.path, route.label), t(route.label), t(menuRouteLabel(route.path, route.label))].some(label => label.toLocaleLowerCase().includes(keyword))) })).filter(s => s.routes.length);
   const collapsed = !isMobile && state === "collapsed";
+  useEffect(() => { setPopupGroup(null); }, [collapsed, selectedKey, keyword]);
   const overview = visible.find(s => s.key === "overview");
   const isExpanded = (section: AppNavigationSection) => Boolean(keyword || (openGroups[section.key] ?? section.routes.some(route => selectedKey === route.path)));
   const selectedSection = visible.find(section => section.routes.some(route => route.path === selectedKey));
@@ -38,10 +41,28 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
       {visible.filter(s => s.key !== "overview").map(section => {
         const active = section.routes.some(route => selectedKey === route.path);
         const expanded = isExpanded(section);
-        return <Collapsible key={section.key} open={expanded} onOpenChange={open => setOpenGroups(groups => ({ ...groups, [section.key]: collapsed ? true : open }))} className="group/collapsible rental-menu-group">
+        const label = t(MENU_GROUP_LABELS[section.key] ?? section.label);
+        if (collapsed) return <DropdownMenu key={section.key} modal={false} open={popupGroup === section.key}
+          onOpenChange={open => setPopupGroup(current => open ? section.key : current === section.key ? null : current)}>
           <HighlightItem value={`group:${section.key}`} asChild><SidebarMenuItem>
-            <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={t(MENU_GROUP_LABELS[section.key] ?? section.label)} isActive={active && (collapsed || !expanded)} />}
-              onClick={() => { if (collapsed) setOpen(true); }}>
+            <DropdownMenuTrigger aria-label={label} data-sound="press" render={<SidebarMenuButton isActive={active} />}>
+              <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
+            </DropdownMenuTrigger>
+          </SidebarMenuItem></HighlightItem>
+          <DropdownMenuContent className="rental-sidebar-submenu" side="right" align="start" sideOffset={8} aria-label={label}>
+            <DropdownMenuGroup><DropdownMenuLabel>{label}</DropdownMenuLabel>
+              {section.routes.map(route => <DropdownMenuItem key={route.path} render={<a href={route.path} />}
+                data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined}
+                onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setPopupGroup(null); onNavigate(route.path); }}>
+                <span>{t(menuRouteLabel(route.path, route.label))}</span>
+                {selectedKey === route.path && <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />}
+              </DropdownMenuItem>)}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>;
+        return <Collapsible key={section.key} open={expanded} onOpenChange={open => setOpenGroups(groups => ({ ...groups, [section.key]: open }))} className="group/collapsible rental-menu-group">
+          <HighlightItem value={`group:${section.key}`} asChild><SidebarMenuItem>
+            <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={label} isActive={active && !expanded} />}>
               <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
               <span>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
               <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="ml-auto transition-transform duration-350 ease-[cubic-bezier(0.215,0.61,0.355,1)] group-data-open/collapsible:rotate-90" />

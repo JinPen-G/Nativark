@@ -56,3 +56,16 @@
 .rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"])[data-active] > svg { color: inherit; }
 
 .native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="group-label"] { margin-top: calc(-1 * var(--rental-sidebar-group-label-height)); }
+/* 18px icons must center in the native 32px button, without the old 8px inset/gap. */
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-sidebar-navigation [data-sidebar="menu-button"] {
+  justify-content: center;
+  column-gap: 0;
+  padding-inline: 0 !important;
+}
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-sidebar-navigation [data-sidebar="menu-button"] > span { max-width: 0; }
+.rental-sidebar-colors [data-slot="dropdown-menu-content"].rental-sidebar-submenu {
+  width: max-content;
+  min-width: var(--rental-sidebar-submenu-min-width);
+  max-width: var(--available-width);
+}
+.rental-sidebar-submenu [data-slot="dropdown-menu-item"] { min-height: var(--rental-sidebar-menu-height); justify-content: space-between; }
