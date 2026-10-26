@@ -10,7 +10,9 @@ import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalScen
   composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
-  AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, type AiOriginalOpeningReadSourceDraft } from '@rental-os/shared';
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS,
+  type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
+  type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
@@ -63,6 +65,33 @@ type RecoveryResponse = 'AiTaskRecoverySnapshot' | 'AiSceneModelExecutionDraft'
   | 'AiSceneModelContinueAnswerResponseDraft' | 'AiTaskInputReceiptObservationDraft';
 const recoveryValidators = Object.fromEntries([...Object.keys(AI_TASK_RECOVERY_HTTP_SCHEMAS), 'AiTaskInputReceiptObservationDraft'].map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: recoveryDefinitions })]));
+const quoteDefinitions = JSON.parse(JSON.stringify({ ...AI_SCENE_QUOTE_HTTP_SCHEMAS,
+  AiSceneRequestReceiptDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReceiptDraft,
+  AiSceneQuoteCandidateDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneQuoteCandidateDraft
+}).replaceAll('#/components/schemas/', '#/$defs/'));
+type QuoteResponses = { AiSceneModelQuotePreparationResponseDraft: AiSceneModelQuotePreparationResponseDraft;
+  AiSceneModelQuoteConfirmResponseDraft: AiSceneModelQuoteConfirmResponseDraft;
+  AiSceneModelQuoteReceiptResponseDraft: AiSceneModelQuoteReceiptResponseDraft };
+const quoteValidators = Object.fromEntries(Object.keys(AI_SCENE_QUOTE_HTTP_SCHEMAS).map(name => [name,
+  openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: quoteDefinitions })]));
+/** Undefined optional producer fields are omitted just as on the JSON wire;
+ * every remaining nested field is validated, never stripped to make it pass.
+ * A bad confirmation reply may follow a committed Core quote, so it is unknown. */
+export function validateAiSceneQuoteResponse<K extends keyof QuoteResponses>(name: K, value: unknown, mayHaveExecuted = false): QuoteResponses[K] {
+  try {
+    const snapshot = structuredClone(value);
+    // JSON would silently turn NaN/Infinity into null, which is valid for a
+    // missing formal fingerprint but cannot certify a malformed producer value.
+    const finite = (item: unknown): boolean => typeof item === 'number' ? Number.isFinite(item)
+      : item && typeof item === 'object' ? Object.values(item).every(finite) : true;
+    if (finite(snapshot)) {
+      const wire = JSON.parse(JSON.stringify(snapshot));
+      if (quoteValidators[name]?.(wire)) return wire as QuoteResponses[K];
+    }
+  } catch { /* malformed replies must not expose their content */ }
+  if (mayHaveExecuted) throw new HttpException({ code: 'AI_RESULT_UNKNOWN', retryable: false }, 409);
+  throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+}
 /** Validate only the owned wire projection. An invalid post-execution reply is
  * unknown, never a retry/rollback claim; never serialize internal error details. */
 export function validateAiModelRecoveryResponse<T>(name: RecoveryResponse, value: T, mayHaveExecuted = false): T {
@@ -333,7 +362,8 @@ export class AiOriginalQuoteModelExecutionController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.refreshInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   refreshInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.refreshInput(request, body), 'read_input');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelPendingInputDraft',
+      await this.model.refreshInput(request, body), true), 'read_input');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -372,15 +402,18 @@ export class AiOriginalQuoteModelExecutionController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readQuotePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readQuotePreparation(request, body), 'read_answer');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuotePreparationResponseDraft',
+      await this.model.readQuotePreparation(request, body)), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote) @HttpCode(200) @Header('Cache-Control', 'no-store')
   confirmClarifiedQuote(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.confirmClarifiedQuote(request, body), 'read_clarified_quote_receipt');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuoteConfirmResponseDraft',
+      await this.model.confirmClarifiedQuote(request, body), true), 'read_clarified_quote_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readClarifiedQuoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readClarifiedQuoteReceipt(request, body), 'read_clarified_quote_receipt');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuoteReceiptResponseDraft',
+      await this.model.readClarifiedQuoteReceipt(request, body)), 'read_clarified_quote_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readExecution) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readExecution(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -408,7 +441,8 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
    * input, never resume/reconcile execution or resubmit a stale refresh. */
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.refreshInput)
   refreshInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.refreshInput(request, body), 'read_input');
+    return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelPendingInputDraft',
+      await this.model.refreshInput(request, body), true), 'read_input');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume)
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
@@ -420,15 +454,18 @@ export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecove
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation)
   readQuotePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readQuotePreparation(request, body), 'read_answer');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuotePreparationResponseDraft',
+      await this.model.readQuotePreparation(request, body)), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote)
   confirmClarifiedQuote(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.confirmClarifiedQuote(request, body), 'read_clarified_quote_receipt');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuoteConfirmResponseDraft',
+      await this.model.confirmClarifiedQuote(request, body), true), 'read_clarified_quote_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt)
   readClarifiedQuoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readClarifiedQuoteReceipt(request, body), 'read_clarified_quote_receipt');
+    return respondAiScene(async () => validateAiSceneQuoteResponse('AiSceneModelQuoteReceiptResponseDraft',
+      await this.model.readClarifiedQuoteReceipt(request, body)), 'read_clarified_quote_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile)
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

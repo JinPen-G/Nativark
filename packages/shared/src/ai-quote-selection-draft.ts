@@ -56,6 +56,28 @@ export interface AiQuoteSelectionReadDraft {
   originalInputRef: string;
   selectionId: string;
 }
+/** Saved selection, not a task execution or approval receipt. Replaying only
+ * observes the same original operation and never replaces its order payload. */
+export interface AiQuoteSelectionSelectResponseDraft {
+  receipt: AiQuoteSelectionReceiptDraft;
+  replayed: boolean;
+}
+export type AiQuoteSelectionReconcileResponseDraft =
+  | { state: 'not_observed'; retryable: false }
+  | { state: 'observed'; receipt: AiQuoteSelectionReceiptDraft; retryable: false };
+
+/** Named HTTP contracts for the original selection and clarified handoff.
+ * No route or permission is enabled by publishing these schema names. */
+export const AI_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
+  select: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionSelectResponseDraft' },
+  read: { request: 'AiQuoteSelectionReadDraft', response: 'AiQuoteSelectionReceiptDraft' },
+  reconcile: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
+} as const);
+export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
+  select: { request: 'AiClarifiedQuoteSelectionRequestDraft', response: 'AiQuoteSelectionSelectResponseDraft' },
+  readOperation: { request: 'AiClarifiedQuoteSelectionRequestDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
+} as const);
+
 export interface AiQuoteSelectionReceiptDraft {
   draftVersion: typeof AI_QUOTE_SELECTION_DRAFT_VERSION;
   selectionId: string;

@@ -3,7 +3,7 @@ import { RENTAL_FULFILLMENT_MODES } from './core';
 import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from './ai-approval-application-draft-schemas';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from './ai-scene-request-draft';
-import { leafClosed as object, leafEnum as choice, leafId as id, leafText as text, leafInt as integer, leafList as list, leafTime, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
+import { leafClosed as object, leafEnum as choice, leafId as id, leafText as text, leafInt as integer, leafList as list, leafTime, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 const version = choice(AI_QUOTE_SELECTION_DRAFT_VERSION), uuid = { type: 'string', format: 'uuid' };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
@@ -35,6 +35,10 @@ export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft>
   AiClarifiedQuoteSelectionRequestDraft: object({ selection: selectionCreate, clarification: object({
     original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),
     submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }) }),
+  AiQuoteSelectionSelectResponseDraft: object({ receipt: ref('AiQuoteSelectionReceiptDraft'), replayed: { type: 'boolean' } }),
+  AiQuoteSelectionReconcileResponseDraft: { oneOf: [
+    object({ state: choice('not_observed'), retryable: { type: 'boolean', const: false } }),
+    object({ state: choice('observed'), receipt: ref('AiQuoteSelectionReceiptDraft'), retryable: { type: 'boolean', const: false } })] },
   AiQuoteSelectionReadDraft: object(reference),
   AiQuoteSelectionProofRequest: selectionProof,
   AiQuoteSelectionReceiptDraft: object({ ...reference, selectionKey: { ...id(), maxLength: 128 }, revision: integer(1, 4294967294),

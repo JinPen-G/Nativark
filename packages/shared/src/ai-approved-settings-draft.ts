@@ -1,5 +1,6 @@
 import type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDraft, AiApprovalRecordDraft } from './ai-proposal-draft';
-import type { AiTaskEventDraft, AiTaskStatusDraft } from './ai-task-draft';
+import type { AiTaskEventDraft, AiTaskStatusDraft, AiTaskSnapshotDraft, AiTaskEventPageDraft, AiTaskEventResetDraft } from './ai-task-draft';
+import type { AiTaskConfirmationHistoryDraft } from './ai-task-confirmation-history-draft';
 import type { AiTaskRunnerOutcomeDraft, AiTaskRecoverySnapshot } from './ai-task-recovery-draft';
 
 export const AI_APPROVED_SETTINGS_DRAFT_VERSION = 'ain-approved-settings-draft-1' as const;
@@ -10,6 +11,14 @@ export interface AiApprovedSettingsChangePrepareDraft {
   notifications: { enabledEvents: string[]; editableChannels: Array<'sms' | 'app_push' | 'wechat' | 'email'> };
 }
 export interface AiApprovedSettingsChangeReceiptReadDraft { changeKey: string; }
+export type AiApprovedSettingsCurrentReadDraft = Readonly<Record<string, never>>;
+/** Existing notification-change routes only. Naming the wire contract never
+ * authorizes a proposal, active settings update or task execution. */
+export const AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS = Object.freeze({
+  readCurrentSettings: { request: 'AiApprovedSettingsCurrentReadDraft', response: 'AiApprovedSettingsCurrentDraft' },
+  prepareOriginalSettingsChange: { request: 'AiApprovedSettingsChangePrepareDraft', response: 'AiApprovedSettingsChangePreparationResultDraft' },
+  readOriginalSettingsChange: { request: 'AiApprovedSettingsChangeReceiptReadDraft', response: 'AiApprovedSettingsChangeReceiptDraft' }
+} as const);
 /** Only the current notification projection, never secrets or execution proof. */
 export interface AiApprovedSettingsCurrentDraft {
   settingsRevision: number;
@@ -85,6 +94,27 @@ export type AiApprovedSettingsTaskCancelResponseDraft = {
 export interface AiApprovedSettingsTaskEventsReadDraft extends AiApprovedSettingsTaskCreationDraft {
   after: string; limit: number;
 }
+/** Owner-authorized observations only. Missing evidence never permits execution. */
+export interface AiApprovedSettingsTaskResultDraft {
+  snapshot: AiTaskRecoverySnapshot; operation: AiApprovedSettingsOperationReceiptDraft | null;
+  businessOutcome: 'committed' | 'unknown' | 'not_observed';
+  originalOperation: 'original_task_step_key_read' | 'no_registered_step';
+  execution: 'not_invoked'; automaticRetry: false;
+}
+export type AiApprovedSettingsTaskConfirmationReadDraft =
+  | { state: 'not_waiting'; snapshot: AiTaskSnapshotDraft; history: AiTaskConfirmationHistoryDraft | null;
+      execution: 'not_attested'; continuation: 'not_invoked' }
+  | { state: 'waiting_confirmation'; checkpoint: AiApprovedSettingsTaskCheckpointDraft; reference: AiApprovedSettingsReferenceDraft;
+      review: AiApprovedSettingsReviewDraft; decision: AiApprovedSettingsDecisionReceiptDraft;
+      execution: 'not_attested'; continuation: 'not_invoked' };
+export type AiApprovedSettingsTaskSnapshotDraft = AiTaskSnapshotDraft;
+export type AiApprovedSettingsTaskEventsDraft = AiTaskEventPageDraft | AiTaskEventResetDraft;
+export const AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS = Object.freeze({
+  readOriginalSettingsResult: { request: 'AiApprovedSettingsTaskCreationDraft', response: 'AiApprovedSettingsTaskResultDraft' },
+  readOriginalSettingsConfirmation: { request: 'AiApprovedSettingsTaskCreationDraft', response: 'AiApprovedSettingsTaskConfirmationReadDraft' },
+  readOriginalSettingsSnapshot: { request: 'AiApprovedSettingsTaskCreationDraft', response: 'AiTaskSnapshotDraft' },
+  readOriginalSettingsEvents: { request: 'AiApprovedSettingsTaskEventsReadDraft', response: 'AiApprovedSettingsTaskEventsDraft' }
+} as const);
 /** Selects a server-registered action template, never permissions or an approval. */
 export interface AiApprovedSettingsTaskPolicyReadDraft extends AiApprovedSettingsTaskCreationDraft { operation: string; }
 export interface AiApprovedSettingsTaskPolicyConfigureDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number | null; }

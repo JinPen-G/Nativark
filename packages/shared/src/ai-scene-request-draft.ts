@@ -10,6 +10,10 @@ import type { AiTaskInputSubmissionDraft, AiTaskInputReceiptReferenceDraft } fro
 export type AiSceneModelAnswerQueryDraft = { original: { draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION; inputRef: string } } & (
   { submission: AiTaskInputSubmissionDraft; reference?: never } |
   { reference: AiTaskInputReceiptReferenceDraft; submission?: never });
+/** Human confirmation of the final reviewed parameters, not order approval. */
+export type AiSceneModelQuoteConfirmDraft = AiSceneModelAnswerQueryDraft & {
+  selectionRevision: string; inputFingerprint: string; confirmQuote: true;
+};
 
 export const AI_SCENE_REQUEST_DRAFT_VERSION = 'ain-scene-request-draft-1' as const;
 export const AI_SCENE_REQUEST_MAX_BYTES = 32768;
@@ -19,6 +23,9 @@ export interface AiSceneQuoteCandidate {
   customerType: 'personal' | 'corporate';
   customerId?: string;
   customerName?: string;
+  bookingIdentity?: { bookingIdentity: 'personal' } | { bookingIdentity: 'enterprise_employee';
+    corporateCustomerId?: string; enterpriseContractAndPayer?: boolean };
+  deliveryAddressId?: string;
   items?: Array<{ productName?: string; itemGroupId?: string; quantity: number; pricingUnit?: typeof RENTAL_PRICING_UNIT_CODES[number]; usageQuantity?: number }>;
   start?: string;
   end?: string;

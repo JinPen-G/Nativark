@@ -34,6 +34,7 @@ const cancelObservation = { taskId: id(36), expectedRevision: taskRevision,
   absenceSemantics: literal('not_observed_is_not_proof_of_uncommitted') };
 
 export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
+  AiApprovedSettingsCurrentReadDraft: object({}),
   AiApprovedSettingsChangePrepareDraft: object({ changeKey: id(128), baseRevision: revision, expiresAt: time,
     notifications: object({ enabledEvents: stringArray, editableChannels: channels }) }),
   AiApprovedSettingsChangeReceiptReadDraft: object({ changeKey: id(128) }),
@@ -78,6 +79,23 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
         'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE'] }, nextAction: literal('read_original_task'), retryable: literal(false) })] } }),
   AiApprovedSettingsTaskEventsReadDraft: object({ creationKey: id(128), changeKey: id(128),
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
+  AiApprovedSettingsTaskResultDraft: { oneOf: [
+    object({ snapshot: ref('AiTaskRecoverySnapshot'), operation: ref('AiApprovedSettingsOperationReceiptDraft'),
+      businessOutcome: literal('committed'), originalOperation: literal('original_task_step_key_read'),
+      execution: literal('not_invoked'), automaticRetry: literal(false) }),
+    object({ snapshot: ref('AiTaskRecoverySnapshot'), operation: { type: 'null' },
+      businessOutcome: { enum: ['unknown', 'not_observed'] },
+      originalOperation: { enum: ['original_task_step_key_read', 'no_registered_step'] },
+      execution: literal('not_invoked'), automaticRetry: literal(false) })] },
+  AiApprovedSettingsTaskConfirmationReadDraft: { oneOf: [
+    object({ state: literal('not_waiting'), snapshot: ref('AiTaskSnapshotDraft'),
+      history: { oneOf: [ref('AiTaskConfirmationHistoryDraft'), { type: 'null' }] },
+      execution: literal('not_attested'), continuation: literal('not_invoked') }),
+    object({ state: literal('waiting_confirmation'), checkpoint: ref('AiApprovedSettingsTaskCheckpointDraft'),
+      reference: ref('AiApprovedSettingsReferenceDraft'), review: ref('AiApprovedSettingsReviewDraft'),
+      decision: ref('AiApprovedSettingsDecisionReceiptDraft'),
+      execution: literal('not_attested'), continuation: literal('not_invoked') })] },
+  AiApprovedSettingsTaskEventsDraft: { oneOf: [ref('AiTaskEventPageDraft'), ref('AiTaskEventResetDraft')] },
   AiApprovedSettingsTaskCancellationDraft: object({ creationKey: id(128), changeKey: id(128),
     expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293 } }),
   AiApprovedSettingsTaskPolicyReadDraft: object({ creationKey: id(128), changeKey: id(128), operation: id() }),

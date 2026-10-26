@@ -3,6 +3,7 @@ import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
@@ -10,7 +11,9 @@ import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
-import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
+  AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
+  AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
@@ -2012,6 +2015,10 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 /** Existing settings lifecycle: names publish the actual request/response,
  * not permission to execute or proof of a committed business transaction. */
 const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
+  ...Object.fromEntries(Object.entries(AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS)
+    .map(([name, contract]) => [name, [contract.request, contract.response] as const])),
+  ...Object.fromEntries(Object.entries(AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS)
+    .map(([name, contract]) => [name, [contract.request, contract.response] as const])),
   createSettingsTask: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreatedDraft'],
   readSettingsTaskCreation: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreationReadDraft'],
   requestOriginalSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationResultDraft'],
@@ -2310,9 +2317,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view', 'rental-os:finance:reconcile'],
     summary: action === 'createEventTask'
       ? 'Explicit original event to candidate, immutable input and idempotent Task metadata, under current human resource rights and the server-selected automation policy/subject/budget. Unknown input stops before task creation; recover by reviews/for-event and the original input/creation readers. No run, worker, model, approval, notification, refund or business action is started. Named closed request/response; defaults remain disabled.'
-      : 'Original human audience/tenant/workspace/location and event source are revalidated. Metadata preparation/close is not business resolution or execution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action. Response remains draft-polymorphic.',
-    requestSchema: action === 'createEventTask' ? 'AiAutomationEventTaskRequestDraft' : 'GenericObject',
-    responseSchema: action === 'createEventTask' ? 'AiAutomationEventTaskResponseDraft' : 'GenericObject' }))),
+      : 'Original human audience/tenant/workspace/location and event source are revalidated. Review reads, bounded discovery and human close/feedback use named closed contracts; a review closure is never business resolution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action. Candidate/input/creation outcomes remain separately draft-polymorphic.',
+    requestSchema: action === 'createEventTask' ? 'AiAutomationEventTaskRequestDraft'
+      : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.request ?? 'GenericObject',
+    responseSchema: action === 'createEventTask' ? 'AiAutomationEventTaskResponseDraft'
+      : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.response ?? 'GenericObject' }))),
   ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
     method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
@@ -2324,13 +2333,22 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Creation, human decision, cancellation and task-policy mutation propagate HTTP abandonment into request credential closure; it never proves rollback. Unknown requires original change/task/decision/operation observation. Named metadata, execution, checkpoint, decision, recovery and cancellation responses are closed; remaining generic outcomes are not frozen. Runner success is not an original Core receipt.',
     requestSchema: SETTINGS_TASK_CONTRACTS[name]?.[0] ?? 'GenericObject',
     responseSchema: SETTINGS_TASK_CONTRACTS[name]?.[1] ?? 'GenericObject' })),
-  ...Object.entries(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
-    method: 'post' as const, path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
-    operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
+  ...Object.entries(AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
     permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
-    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Lost replies read the same original selection key/payload only.',
-    requestSchema: 'AiClarifiedQuoteSelectionRequestDraft', responseSchema: 'GenericObject' })),
-  ...[AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT].flatMap(contract =>
+    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...Object.entries(AI_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}${AI_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_QUOTE_SELECTION_HTTP_CONTRACTS]
+      ? `/${AI_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_QUOTE_SELECTION_HTTP_CONTRACTS]}` : ''}`,
+    tag: 'AI Native', operationId: `originalSelectedQuote_${name}_quote-selections`, authRequired: true,
+    permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: 'Current original owner and exact Core quote under the original Guard and persistent selection transaction. Select is not approval, plan publication, stock reservation or order creation. Named closed responses distinguish a saved selection from an unobserved original key; absence never authorizes retry. Malformed post-selection delivery is unknown and must be read by the original selection command.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...[AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT].flatMap(contract =>
     Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
       method: 'post' as const, path: `/api/${contract.basePath}${action ? `/${action}` : ''}`, tag: 'AI Native',
       operationId: `originalSelectedQuote_${name}_${contract.basePath.split('/').at(-1)}`,
@@ -2532,10 +2550,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readExecution ? 'AiTaskRecoverySnapshot'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reconcile ? 'AiSceneModelReconcileResponseDraft'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.requestCancel ? 'AiSceneModelCancelResponseDraft'
-      : action === AI_SCENE_MODEL_HTTP_DRAFT.recover || action === AI_SCENE_MODEL_HTTP_DRAFT.takeover
-        ? 'AiSceneModelExecutionDraft' : 'GenericObject',
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation ? 'AiSceneModelQuotePreparationResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote ? 'AiSceneModelQuoteConfirmResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt ? 'AiSceneModelQuoteReceiptResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.refreshInput ? 'AiSceneModelPendingInputDraft'
+      : 'AiSceneModelExecutionDraft',
     permissions: ['rental-os:order:create'], authRequired: true,
-    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. Start/recover/reconcile/takeover/cancel/execution have named closed response contracts; other polymorphic actions remain GenericObject. Recovery never redispatches unknown calls.' })),
+    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. All quote execution/input/review/confirmation/original-receipt actions have named closed responses. The review carries current guarded parameters and unconfirmed field provenance; a malformed post-confirmation reply remains unknown and is read by its original clarified-quote receipt. Recovery never redispatches unknown calls.' })),
   ...([
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
       cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },

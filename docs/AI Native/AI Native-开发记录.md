@@ -13,6 +13,12 @@
 - 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
+## 近期核心：原结果、人工待办与账据契约收口（2026-10-26）
+
+- 在`f939355c`后接续AIN-02，保全并收口既有报价澄清/人类选择/通知准备合同WIP；新增通知原结果、审批等待/历史、快照与事件4路命名响应，复用原任务事件/恢复/审批schema并接回Controller。自动化operator/staff的待办读取、按事件查阅、队列、关闭、反馈、原操作6类共12路接同一shared/OpenAPI及运行校验；关闭待办不是业务解决，unknown不授重试。
+- 首轮stdin复现原settings读取仍为GenericObject（退出1）；修后定向Controller/schema冒烟3/3、原自动化受权服务/持久化替身组合3/3、既有人类选择/审批/Core/历史核对9/9，均fail/skip/todo=0、退出0。当前全树API/shared noEmit为720 roots/0诊断；内存排除其他WIP再核暂存版本719 roots/0诊断，均退出0。证据在`output/ain02-contract-closure-20261026/`，无新增测试脚本、无共享生成物改动；Controller注入端口与DB为替身，不称真实HTTP/数据库验收。
+- 本阶段兼容方式为沿用原路径/字段/版本，补足命名合同并拒绝未知输入或损坏输出；读取损坏不可用，可能已提交的写回复损坏保留unknown。AIN-02仍75%：剩余automation候选/输入/任务创建/政策、选定报价到订单的多态公开响应及全端兼容冻结；未因本片数量上调百分比。客户端/Harness、计数/资源/知识/迁移WIP继续保留，不夹带提交。
+
 ## 近期核心：通知设置变更公共契约（2026-10-26）
 
 - 复用原AiApprovedSettingsCurrent/ChangePreparationResult/ChangeReceipt公共schema及settingsContract，shared增加原当前设置空请求和三路HTTP元数据，OpenAPI不再用GenericObject描述当前读取/准备/原准备收据；没有通用配置写入口或新增业务规则。原Controller当前读取拒绝actor等未知输入字段，读取/原收据实际输出闭合验证，坏读响应为storage unavailable；原prepare后坏响应仍unknown→read_change_receipt，不授重试/批准或修改activeSettings。

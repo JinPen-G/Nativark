@@ -10,7 +10,8 @@ import { AI_TASK_CONFIRMATION_HISTORY_SCHEMAS } from "@rental-os/shared";
 import { AI_KNOWLEDGE_CONSUMPTION_HTTP_SCHEMAS } from "@rental-os/shared";
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from "@rental-os/shared";
 import { AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from "@rental-os/shared";
-import { AI_COUNTING_HTTP_SCHEMAS } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_SCHEMAS } from "@rental-os/shared";
+import { AI_COUNTING_HTTP_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS } from '@rental-os/shared';
 
 /** Draft components only. Publication is not route registration, authorization or activation. */
 export const AI_LEAF_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {};
@@ -20,7 +21,10 @@ const countingRefs = (value: unknown): unknown => Array.isArray(value) ? value.m
 for (const [name, schema] of Object.entries(AI_COUNTING_HTTP_SCHEMAS)) {
   AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(countingRefs(schema), name);
 }
-for (const [name, schema] of Object.entries(AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS)) {
+for (const [name, schema] of Object.entries({ ...AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS, ...AI_AUTOMATION_REVIEW_HTTP_SCHEMAS })) {
+  AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
+}
+for (const [name, schema] of Object.entries(AI_SCENE_QUOTE_HTTP_SCHEMAS)) {
   AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
 }
 for (const [name, schema] of Object.entries(AI_TASK_RECOVERY_HTTP_SCHEMAS)) {

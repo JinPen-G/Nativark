@@ -2,7 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT,
   AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
-import { parseClarifiedQuoteSelection } from './quote-selection.validation';
+import { parseClarifiedQuoteSelection, validateQuoteSelectionResponse } from './quote-selection.validation';
 import type { composeClarifiedQuoteSelectionRequests, composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
@@ -19,16 +19,18 @@ export class AiClarifiedQuoteSelectionController {
     private readonly selections: ReturnType<typeof composeClarifiedQuoteSelectionRequests>) {}
   @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.select) @HttpCode(200) @Header('Cache-Control', 'no-store')
   select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => {
+    return respondHumanQuote(async () => {
       const command = parseClarifiedQuoteSelection(body);
-      return this.selections.select(request, command.selection, command.clarification);
+      return validateQuoteSelectionResponse('AiQuoteSelectionSelectResponseDraft',
+        await this.selections.select(request, command.selection, command.clarification), true);
     }, 'read_clarified_selection_operation');
   }
   @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.readOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOperation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => {
+    return respondHumanQuote(async () => {
       const command = parseClarifiedQuoteSelection(body);
-      return this.selections.readOperation(request, command.selection, command.clarification);
+      return validateQuoteSelectionResponse('AiQuoteSelectionReconcileResponseDraft',
+        await this.selections.readOperation(request, command.selection, command.clarification));
     });
   }
 }
@@ -88,7 +90,9 @@ export class AiSelectedQuoteTaskController {
 async function respondHumanQuote<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
   catch (error) {
-    const code = error instanceof Error && 'code' in error ? error.code : undefined;
+    const payload = error instanceof HttpException ? error.getResponse() : null;
+    const code = payload && typeof payload === 'object' && 'code' in payload ? payload.code
+      : error instanceof Error && 'code' in error ? error.code : undefined;
     const statuses: Record<string, number> = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403,
       AI_SCOPE_CHANGED: 403, AI_RESOURCE_UNAVAILABLE: 404, AI_REVISION_CONFLICT: 409,
       AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 };
@@ -107,11 +111,20 @@ export class AiHumanQuoteSelectionController {
   constructor(@Inject(AI_HUMAN_QUOTE_SELECTION_REQUESTS) private readonly selections: ReturnType<typeof composeRequestBoundQuoteSelections>) {}
   private readonly respond = respondHumanQuote;
   @Post() @HttpCode(200) @Header('Cache-Control', 'no-store')
-  select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.select(request, body)); }
+  select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => validateQuoteSelectionResponse('AiQuoteSelectionSelectResponseDraft',
+      await this.selections.select(request, body), true));
+  }
   @Post('read') @HttpCode(200) @Header('Cache-Control', 'no-store')
-  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.read(request, body)); }
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => validateQuoteSelectionResponse('AiQuoteSelectionReceiptDraft',
+      await this.selections.read(request, body)));
+  }
   @Post('reconcile') @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reconcile(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.reconcile(request, body)); }
+  reconcile(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => validateQuoteSelectionResponse('AiQuoteSelectionReconcileResponseDraft',
+      await this.selections.reconcile(request, body)));
+  }
 }
 
 /** Explicit human consumer. No lease claim, selected-input publication or

@@ -91,19 +91,23 @@ export class AiSettingsTaskReadController {
   constructor(@Inject(AI_SETTINGS_TASK_READ_REQUESTS) private readonly reads: ReturnType<typeof composeRequestBoundSettingsTaskReads>) {}
   @Post(routes.readOriginalSettingsResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.reads.readResult(request, body), 'read_original_settings_result');
+    return respondAiScene(async () => settingsContract('AiApprovedSettingsTaskResultDraft',
+      await this.reads.readResult(request, body), true), 'read_original_settings_result');
   }
   @Post(routes.readOriginalSettingsConfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.reads.readConfirmation(request, body), 'read_settings_task_creation');
+    return respondAiScene(async () => settingsContract('AiApprovedSettingsTaskConfirmationReadDraft',
+      await this.reads.readConfirmation(request, body), true), 'read_settings_task_creation');
   }
   @Post(routes.readOriginalSettingsSnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.reads.readSnapshot(request, body), 'read_settings_task_creation');
+    return respondAiScene(async () => settingsContract('AiTaskSnapshotDraft',
+      await this.reads.readSnapshot(request, body), true), 'read_settings_task_creation');
   }
   @Post(routes.readOriginalSettingsEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.reads.readEvents(request, body), 'read_settings_task_creation');
+    return respondAiScene(async () => settingsContract('AiApprovedSettingsTaskEventsDraft',
+      await this.reads.readEvents(request, body), true), 'read_settings_task_creation');
   }
 }
 @Controller(routes.basePath)
@@ -124,7 +128,14 @@ export class AiSettingsChangeController {
     }, 'read_change_receipt');
   }
   @Post(routes.readCurrentSettings) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readCurrent(@Req() request: AiSceneHttpRequest) { return this.respond(() => this.changes.readCurrent(request)); }
+  readCurrent(@Req() request: AiSceneHttpRequest, @Body() body: unknown = {}) {
+    return this.respond(async () => {
+      settingsContract('AiApprovedSettingsCurrentReadDraft', body);
+      const reply = await this.changes.readCurrent(request);
+      try { return settingsContract('AiApprovedSettingsCurrentDraft', reply, true); }
+      catch { return invalidSettingsResponse(false); }
+    });
+  }
   @Post(routes.prepareOriginalSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepare(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return this.respond(async () => {
@@ -138,7 +149,13 @@ export class AiSettingsChangeController {
     });
   }
   @Post(routes.readOriginalSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.changes.readReceipt(request, body)); }
+  readReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const reply = await this.changes.readReceipt(request, body);
+      try { return settingsContract('AiApprovedSettingsChangeReceiptDraft', reply, true); }
+      catch { return invalidSettingsResponse(false); }
+    });
+  }
 }
 /** Original receipt selects the owned task; the body cannot supply permissions,
  * holder, limits, plan or approval. Configuration remains a guarded CAS action. */

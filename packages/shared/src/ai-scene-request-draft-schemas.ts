@@ -9,6 +9,9 @@ import { leafClosed as object, leafEnum as choice, leafId as id, leafText as tex
 const uuid = { type: 'string', format: 'uuid' };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
 const candidate = object({ customerType: choice('personal', 'corporate'), customerId: text(), customerName: text(),
+  bookingIdentity: { oneOf: [object({ bookingIdentity: choice('personal') }),
+    object({ bookingIdentity: choice('enterprise_employee'), corporateCustomerId: id(), enterpriseContractAndPayer: { type: 'boolean' } }, ['bookingIdentity'])] },
+  deliveryAddressId: id(),
   items: list(object({ productName: text(), itemGroupId: id(), quantity: integer(1, 10000), pricingUnit: choice(...RENTAL_PRICING_UNIT_CODES),
     usageQuantity: { type: 'number', minimum: 0, maximum: 1000000 } }, ['quantity']), 50, 1),
   start: text(80), end: text(80), fulfillmentMode: choice(...RENTAL_FULFILLMENT_MODES), locationName: text(), returnLocationName: text(),
@@ -43,6 +46,7 @@ const budgetSummary = { taskId: text(36), observedAt: leafTime, invocationLimit:
   basis: choice('persisted_budget_records_not_provider_invoice'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
   businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') };
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneQuoteCandidateDraft: candidate,
   AiTaskBudgetUsageSummaryDraft: { oneOf: [
     object({ ...budgetSummary, state: choice('limit_exceeded'), coverage: choice('not_computed') }),
     object({ ...budgetSummary, state: choice('observed'), coverage: choice('all_registered_invocations'),

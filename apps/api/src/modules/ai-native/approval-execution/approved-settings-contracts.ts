@@ -9,16 +9,24 @@ import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, typ
   type AiApprovedSettingsReadOperationDraft, type AiApprovedSettingsPayloadDraft, type AiApprovedSettingsReviewDraft,
   type AiApprovedSettingsChangeReviewDraft, type AiApprovedSettingsOperationReceiptDraft, type AiApprovedSettingsOperationResultDraft,
   type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '@rental-os/shared';
-import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsChangeReceiptDraft,
+import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsCurrentReadDraft, AiApprovedSettingsChangeReceiptDraft,
   AiApprovedSettingsChangePreparationResultDraft, AiApprovedSettingsTaskCreatedDraft, AiApprovedSettingsTaskCreationReadDraft,
   AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft,
   AiApprovedSettingsTaskRunDraft, AiApprovedSettingsTaskCheckpointDraft, AiApprovedSettingsTaskRecoveryDraft,
   AiApprovedSettingsTaskCancelResponseDraft, AiApprovedSettingsTaskPolicyMutationDraft,
   AiApprovedSettingsTaskPolicyOperationDraft, AiApprovedSettingsTaskPolicyReadResultDraft } from '@rental-os/shared';
-import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_CONFIRMATION_HISTORY_SCHEMAS } from '@rental-os/shared';
+import type { AiApprovedSettingsTaskResultDraft, AiApprovedSettingsTaskConfirmationReadDraft,
+  AiApprovedSettingsTaskEventsDraft, AiTaskSnapshotDraft } from '@rental-os/shared';
+import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from '../../../contracts/ai-task-draft-schemas';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiApprovedSettingsTaskResultDraft: AiApprovedSettingsTaskResultDraft;
+  AiApprovedSettingsTaskConfirmationReadDraft: AiApprovedSettingsTaskConfirmationReadDraft;
+  AiApprovedSettingsTaskEventsDraft: AiApprovedSettingsTaskEventsDraft;
+  AiTaskSnapshotDraft: AiTaskSnapshotDraft;
+  AiApprovedSettingsCurrentReadDraft: AiApprovedSettingsCurrentReadDraft;
   AiApprovedSettingsTaskPolicyMutationDraft: AiApprovedSettingsTaskPolicyMutationDraft;
   AiApprovedSettingsTaskPolicyReadResultDraft: AiApprovedSettingsTaskPolicyReadResultDraft;
   AiApprovedSettingsTaskPolicyOperationDraft: AiApprovedSettingsTaskPolicyOperationDraft;
@@ -49,12 +57,13 @@ type Contracts = {
 };
 const ajv = new Ajv({ strict: true, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
 ajv.addFormat('date-time', value => z.string().datetime({ offset: true }).safeParse(value).success);
-const definitions = JSON.parse(JSON.stringify({ AiPlatformScope: AI_NATIVE_COMPONENT_SCHEMAS.AiPlatformScope,
+const definitions = JSON.parse(JSON.stringify({ ...AI_NATIVE_COMPONENT_SCHEMAS, ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
+  ...AI_TASK_CONFIRMATION_HISTORY_SCHEMAS, AiPlatformScope: AI_NATIVE_COMPONENT_SCHEMAS.AiPlatformScope,
   AiTenantScope: AI_NATIVE_COMPONENT_SCHEMAS.AiTenantScope, AiWorkspaceScope: AI_NATIVE_COMPONENT_SCHEMAS.AiWorkspaceScope,
   AiTaskRecoverySnapshot: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiTaskRecoverySnapshot,
   AiTaskRunnerOutcomeDraft: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiTaskRunnerOutcomeDraft,
   ...AI_PROPOSAL_DRAFT_SCHEMAS, ...AI_APPROVED_SETTINGS_DRAFT_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
-const validators = Object.fromEntries(Object.keys(AI_APPROVED_SETTINGS_DRAFT_SCHEMAS).map(name => [name,
+const validators = Object.fromEntries([...Object.keys(AI_APPROVED_SETTINGS_DRAFT_SCHEMAS), 'AiTaskSnapshotDraft'].map(name => [name,
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: definitions })])) as Record<keyof Contracts, ValidateFunction>;
 export function settingsContract<K extends keyof Contracts>(name: K, value: unknown, output = false): Contracts[K] {
   const copy = structuredClone(value);

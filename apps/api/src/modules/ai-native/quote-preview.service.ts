@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpException } from '@nestjs/common';
-import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1,
+  type AiCoreQuotePreviewResultDraft, type AiCoreQuotePreviewFailureDraft } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
@@ -60,32 +61,10 @@ const chargeLineSchema = z.object({
   amount: z.number().finite().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
   sourceId: z.string().max(191).optional(), sourceVersion: z.string().max(191).optional(), detail: z.string().max(2000).optional()
 });
-export type AiQuotePreviewFailure = "missing_input" | "ambiguous" | "out_of_stock" | "qualification_required" | "expired" | "unavailable";
-export type AiQuotePreviewResult = {
-  contractVersion: "ain-09-quote-preview-draft-1";
-  requestId: string;
-  observedAt: string;
-  scope: Extract<AiExecutionContext["scope"], { kind: "workspace" }>;
-  status: "quoted" | AiQuotePreviewFailure;
-  missingFields?: string[];
-  message?: string;
-  /** Local effect evidence, not dispatch/approval or inventory ownership. */
-  quotePersistence?: 'saved' | 'unknown';
-  nextAction?: 'reconcile';
-  retryable?: false;
-  quote?: {
-    id: string; quoteNo: string; currency?: string; chargeLines: RentalQuoteSnapshotV1["chargeLines"];
-    rentalAmount: number; discountAmount: number; couponAmount: number; serviceAmount: number; fulfillmentAmount: number;
-    depositAmount: number; preAuthAmount: number; payableAmount: number; receivableAmount: number;
-    pricingPlanVersion: string; priceVersionId?: string; priceVersion?: string; ruleVersion: string; calendarVersion?: string;
-    expiresAt: string; createdAt: string; timeZone?: string; reservation: "not_reserved";
-    period: { startAt: string; endAt: string };
-    lineUnits: Array<{ itemGroupId?: string; pricingUnit?: RentalQuoteRequest['lines'][number]['pricingUnit']; quantity: number; usageQuantity?: number }>;
-    promotionEvidence: Array<{ code: string; sourceId?: string; sourceVersion?: string }>;
-    promotionVersionCoverage: 'charge_line_references_only';
-    roundingEvidence: 'not_projected';
-  };
-};
+// Retain the original service import names; the wire projection has one public
+// contract, shared with its HTTP/OpenAPI consumers rather than a private DTO.
+export type AiQuotePreviewFailure = AiCoreQuotePreviewFailureDraft;
+export type AiQuotePreviewResult = AiCoreQuotePreviewResultDraft;
 
 export interface AiQuotePreviewAuthority {
   withQuote<T>(input: RentalQuoteRequest, consume: (context: AiExecutionContext) => Promise<T>): Promise<T>;
@@ -279,7 +258,7 @@ export class AiQuotePreviewService {
     } };
   }
 
-  private failure(context: AiExecutionContext, status: AiQuotePreviewFailure, message: string): AiQuotePreviewResult {
+  private failure(context: AiExecutionContext, status: AiQuotePreviewFailure, message: string): Extract<AiQuotePreviewResult, { quote?: never }> {
     return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: this.now(), scope: context.scope as Extract<AiExecutionContext["scope"], { kind: "workspace" }>, status, message };
   }
   private classify(error: unknown): AiQuotePreviewFailure {
