@@ -223,6 +223,31 @@ export interface AiSceneRecoveryStepDraft {
   resultAvailable: boolean;
   nextAction: 'reconcile_original_action' | 'read_authorized_result' | 'runner_owned';
 }
+export interface AiSceneCreatedTaskDraft { taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean }
+export type AiSceneRequestCreationResponseDraft = { receipt: AiSceneRequestReceiptDraft; model: 'not_called' } & (
+  | { stage: 'existing_request'; task: AiSceneTaskReceiptDraft }
+  | { stage: 'task_metadata_created'; task: AiSceneCreatedTaskDraft; plan: 'not_started' }
+  | { stage: 'request_stored'; creation: { retryable: false } & (
+      | { code: 'AI_STORAGE_UNAVAILABLE'; state: 'requires_reconciliation' }
+      | { code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT'; state: 'blocked' }) });
+export interface AiSceneRequestReadResponseDraft { receipt: AiSceneRequestReceiptDraft; request: AiSceneRequestBody }
+export type AiSceneRequestReconcileResponseDraft = { state: 'not_observed'; retryable: false }
+  | { state: 'observed'; receipt: AiSceneRequestReceiptDraft; task: AiSceneTaskReceiptDraft };
+export type AiSceneRequestRecoveryDraft =
+  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'not_observed' }>; nextAction: 'reconcile_request_or_explicit_create_task'; automaticExecution: false }
+  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'observed' }>; steps: AiSceneRecoveryStepDraft[]; hasMore: boolean; automaticExecution: false;
+      nextAction: 'host_plan_handoff' | 'existing_runner_recovery'; observedResults: 'preserved_even_if_task_cancelled'; snapshot: 'bounded_sequential_read' };
+/** Original request/Task metadata only, not dispatch or business execution.
+ * Status 201 preserves the existing Nest POST transport, including its reads. */
+export const AI_SCENE_REQUEST_HTTP_CONTRACTS = Object.freeze({
+  create: { request: 'AiSceneRequestCreateDraft', response: 'AiSceneRequestCreationResponseDraft', successStatus: 201 },
+  reissue: { request: 'AiSceneRequestReissueDraft', response: 'AiSceneRequestCreationResponseDraft', successStatus: 201 },
+  read: { request: 'AiSceneRequestReadDraft', response: 'AiSceneRequestReadResponseDraft', successStatus: 201 },
+  reconcile: { request: 'AiSceneRequestCreateDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
+  reconcileReissue: { request: 'AiSceneRequestReissueDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
+  createTask: { request: 'AiSceneRequestReadDraft', response: 'AiSceneCreatedTaskDraft', successStatus: 201 },
+  recovery: { request: 'AiSceneRequestReadDraft', response: 'AiSceneRequestRecoveryDraft', successStatus: 201 }
+} as const);
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',

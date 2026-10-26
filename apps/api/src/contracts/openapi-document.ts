@@ -6,6 +6,7 @@ import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_SCENE_REQUEST_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
@@ -73,6 +74,7 @@ export interface ContractOperation {
   authRequired?: boolean;
   requestSchema?: string | SchemaObject;
   responseSchema?: string | SchemaObject;
+  successStatus?: 200 | 201;
   parameters?: ParameterObject[];
   rawResponseContentType?: string;
   rateLimited?: boolean;
@@ -165,7 +167,7 @@ function operation(config: ContractOperation) {
     "x-requiredPermissions": config.permissions,
     "x-permissionMode": config.permissions.length > 0 ? "any" : "none",
     responses: {
-      "200": {
+      [String(config.successStatus ?? 200)]: {
         description: "Success",
         content: {
           [responseContentType]: { schema: responseSchema }
@@ -2148,9 +2150,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Original staff/order/location and stage action authorization is rechecked. Manual work and recognition require separate server opt-ins; exact original receipts remain readable. Recognition results are candidate evidence only, not field adoption or Core submission. An unknown write is observed by its original key, never automatically resent. Wire payload remains the existing draft; GenericObject does not certify full schema coverage.',
     requestSchema: 'GenericObject', responseSchema: 'GenericObject'
   })),
-  { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
-    summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write. Preparation is bounded and disconnect closes request credentials; a write acknowledgement timeout is unknown and must be observed by the same original request key, never recreated.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...Object.entries(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]
+      ? `/${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]}` : ''}`,
+    tag: 'AI Native', operationId: name === 'create' ? 'createOriginalOrderFactsRequest'
+      : name === 'read' || name === 'recovery' ? `readOriginalOrderFacts_${name}`
+        : name === 'reconcile' ? 'reconcileOriginalOrderFactsRequest' : `originalSceneRequest_${name}`,
+    permissions: ['rental-os:order:view'], requestSchema: contract.request, responseSchema: contract.response,
+    successStatus: contract.successStatus,
+    summary: 'Original current-owner scene request and Task metadata only, under existing resource Guard, scene policy and entitlement. Stored request, created metadata, original key observation and recovery are separate closed results; none invokes a model, approves an action or proves a Core effect. Reissue has its own original-key observation. Unknown never authorizes new-key creation. Existing POST success status is preserved.' })),
   ...([
     ['observeUpload', 'ObserveUploadRequestDraft', 'ObserveUploadResponseDraft'],
     ['observeRevisionUpload', 'ObserveRevisionUploadRequestDraft', 'ObserveUploadResponseDraft'],
@@ -2383,13 +2391,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: write ? 'Explicit human confirmation of the immutable original quote inputs. Original Core pricing/persistence only; no stock reservation, order approval, order creation or model call. Unknown is observed by its original quote receipt, never recreated.'
       : 'Current original-owner quote preparation or exact Core receipt. Historical receipt and current admissibility are separate; no quotation, inventory reservation, approval or new execution.',
     requestSchema, responseSchema: 'GenericObject' })),
-  ...(['read', 'material', 'recovery'] as const).map(action => ({ method: 'post' as const,
+  ...(['material'] as const).map(action => ({ method: 'post' as const,
     path: `/api/ai-native/scene-requests/${action}`, tag: 'AI Native', operationId: `readOriginalOrderFacts_${action}`,
     summary: 'Read the exact original owner-bound request/current authorized facts with bounded dependency waits and request-local cancellation; no worker, new run, approval or model invocation. A closed observation is not evidence of rollback or unused budget.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestReadDraft' })),
-  { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
-    summary: 'Observe the exact original request key after an uncertain acknowledgement, using bounded current authorization and no write/retry. Absence or an interrupted observation is not permission to create another request.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
   ...([
     ['start', 'AiSceneOrderReadReferenceDraft'], ['recover', 'AiSceneOrderReadReferenceDraft'],
     ['readPreparation', 'AiSceneOrderReadReferenceDraft'], ['resumePrepared', 'AiSceneOrderReadReferenceDraft'],

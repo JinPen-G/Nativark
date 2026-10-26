@@ -8,7 +8,7 @@ import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalScen
   composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeRequestBoundOriginalTaskRecoveryReaders,
   composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
-import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
+import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
   AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS,
   type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
@@ -74,6 +74,18 @@ type QuoteResponses = { AiSceneModelQuotePreparationResponseDraft: AiSceneModelQ
   AiSceneModelQuoteReceiptResponseDraft: AiSceneModelQuoteReceiptResponseDraft };
 const quoteValidators = Object.fromEntries(Object.keys(AI_SCENE_QUOTE_HTTP_SCHEMAS).map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: quoteDefinitions })]));
+const requestResponseNames = [...new Set(Object.values(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(contract => contract.response))];
+const requestResponseDefinitions = JSON.parse(JSON.stringify(Object.fromEntries([...requestResponseNames,
+  'AiSceneRequestReceiptDraft', 'AiSceneTaskReceiptDraft', 'AiSceneRequestBodyDraft'].map(name => [name,
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS[name]]))).replaceAll('#/components/schemas/', '#/$defs/'));
+const requestResponseValidators = Object.fromEntries(requestResponseNames.map(name => [name,
+  openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: requestResponseDefinitions })]));
+function validateSceneRequestResponse<T>(name: typeof requestResponseNames[number], value: T, writing = false): T {
+  try { const copy = structuredClone(value); if (requestResponseValidators[name](copy)) return copy; }
+  catch { /* internal material never substitutes for a damaged public receipt */ }
+  if (writing) throw new HttpException({ code: 'AI_RESULT_UNKNOWN', retryable: false }, 409);
+  throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+}
 /** Undefined optional producer fields are omitted just as on the JSON wire;
  * every remaining nested field is validated, never stripped to make it pass.
  * A bad confirmation reply may follow a committed Core quote, so it is unknown. */
@@ -206,11 +218,11 @@ export class AiOriginalScenesController {
   /** Bound the original request, not its durable task. Body/auth snapshots
    * precede all waits; interruption is never proof that a write rolled back. */
   private call<T>(request: SceneRunHttpRequest, body: unknown,
-    consume: (current: AiSceneHttpRequest, command: unknown, signal: AbortSignal) => Promise<T>) {
+    consume: (current: AiSceneHttpRequest, command: unknown, signal: AbortSignal) => Promise<T>, unknownAction = 'reconcile') {
     return this.respond(() => {
       const current = { headers: { authorization: request?.headers?.authorization } }, command = structuredClone(body);
       return withRequestAbort(request, signal => consume(current, command, signal), { maxWaitMs: 15000 });
-    });
+    }, unknownAction);
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders) @HttpCode(200) @Header('Cache-Control', 'no-store')
   queryOrders(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
@@ -225,21 +237,28 @@ export class AiOriginalScenesController {
     });
   }
   @Post() @Header('Cache-Control', 'no-store')
-  create(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.create(current, command, signal)); }
+  create(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestCreationResponseDraft', await this.scenes.create(current, command, signal), true)); }
   @Post('read') @Header('Cache-Control', 'no-store')
-  read(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.read(current, command, signal)); }
+  read(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestReadResponseDraft', await this.scenes.read(current, command, signal))); }
   @Post('reissue') @Header('Cache-Control', 'no-store')
-  reissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reissue(current, command, signal)); }
+  reissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestCreationResponseDraft', await this.scenes.reissue(current, command, signal), true), 'reconcile_reissue'); }
   @Post('reconcile') @Header('Cache-Control', 'no-store')
-  reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reconcile(current, command, signal)); }
+  reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestReconcileResponseDraft', await this.scenes.reconcile(current, command, signal))); }
   @Post('reconcile-reissue') @Header('Cache-Control', 'no-store')
-  reconcileReissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.reconcileReissue(current, command, signal)); }
+  reconcileReissue(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestReconcileResponseDraft', await this.scenes.reconcileReissue(current, command, signal))); }
   @Post('create-task') @Header('Cache-Control', 'no-store')
-  createTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.createTask(current, command, signal)); }
+  createTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneCreatedTaskDraft', await this.scenes.createTask(current, command, signal), true), 'recovery'); }
   @Post('material') @Header('Cache-Control', 'no-store')
   material(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.prepareTaskMaterial(current, command, signal)); }
   @Post('recovery') @Header('Cache-Control', 'no-store')
-  recovery(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.readRecovery(current, command, signal)); }
+  recovery(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
+    validateSceneRequestResponse('AiSceneRequestRecoveryDraft', await this.scenes.readRecovery(current, command, signal))); }
   /** Read current preparation for the stored original request, never quote creation. */
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
   quoteReview(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

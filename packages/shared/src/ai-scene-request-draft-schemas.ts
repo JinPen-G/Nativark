@@ -46,6 +46,23 @@ const budgetSummary = { taskId: text(36), observedAt: leafTime, invocationLimit:
   basis: choice('persisted_budget_records_not_provider_invoice'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
   businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') };
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneRequestBodyDraft: { oneOf: inputs.map(input => object(input)) },
+  AiSceneCreatedTaskDraft: object({ taskId: uuid, runId: uuid, status: choice(...AI_TASK_STATUSES_DRAFT),
+    revision: integer(1, 4294967295), replayed: { type: 'boolean' } }),
+  AiSceneRequestCreationResponseDraft: { oneOf: [
+    object({ stage: choice('existing_request'), receipt: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' },
+      task: { $ref: '#/components/schemas/AiSceneTaskReceiptDraft' }, model: choice('not_called') }),
+    object({ stage: choice('task_metadata_created'), receipt: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' },
+      task: { $ref: '#/components/schemas/AiSceneCreatedTaskDraft' }, plan: choice('not_started'), model: choice('not_called') }),
+    object({ stage: choice('request_stored'), receipt: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' }, model: choice('not_called'),
+      creation: { oneOf: [object({ code: choice('AI_STORAGE_UNAVAILABLE'), state: choice('requires_reconciliation'), retryable: { type: 'boolean', const: false } }),
+        object({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT'),
+          state: choice('blocked'), retryable: { type: 'boolean', const: false } })] } })] },
+  AiSceneRequestReadResponseDraft: object({ receipt: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' },
+    request: { $ref: '#/components/schemas/AiSceneRequestBodyDraft' } }),
+  AiSceneRequestReconcileResponseDraft: { oneOf: [noTask,
+    object({ state: choice('observed'), receipt: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' },
+      task: { $ref: '#/components/schemas/AiSceneTaskReceiptDraft' } })] },
   AiSceneQuoteCandidateDraft: candidate,
   AiTaskBudgetUsageSummaryDraft: { oneOf: [
     object({ ...budgetSummary, state: choice('limit_exceeded'), coverage: choice('not_computed') }),
