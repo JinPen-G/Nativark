@@ -2,7 +2,7 @@
   "repository": "https://github.com/imskyleen/animate-ui",
   "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
   "page": "https://animate-ui.com/docs/primitives/base-ui/sidebar",
-  "adaptations": "Native example shell and Base UI components: imports, localization/accessibility labels and isolated portal/theme scopes only; sizes/classes/motion unchanged. Business navigation is separate.",
+  "adaptations": "Native example shell and Base UI components: imports, localization/accessibility labels and isolated portal/theme scopes only; sizes/classes/motion unchanged. Business navigation is separate. sidebar-adapter.css applies shared app radius tokens and the existing framed shell without editing preserved runtime classes or motion.",
   "files": [
     {
       "file": "runtime/avatar.tsx",

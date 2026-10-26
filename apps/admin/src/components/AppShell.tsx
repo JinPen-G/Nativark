@@ -19,13 +19,14 @@ import { NativeAccountMenu } from "./animate-sidebar/NativeAccountMenu";
 import { NativeWorkspaceSwitcher } from "./animate-sidebar/NativeWorkspaceSwitcher";
 import { NativeNavigation } from "./animate-sidebar/NativeNavigation";
 import "./animate-sidebar/animate-sidebar.css";
+import "./animate-sidebar/sidebar-adapter.css";
 
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
-  return <TooltipProvider><SidebarProvider className={`rental-animate-scope h-svh${mode === "dark" ? " dark" : ""}`}>
+  return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
     <ShellContents>{children}</ShellContents>
-  </SidebarProvider></TooltipProvider>;
+  </SidebarProvider></div></div></TooltipProvider>;
 }
 
 function ShellContents({ children }: { children: ReactNode }) {
@@ -91,7 +92,7 @@ function ShellContents({ children }: { children: ReactNode }) {
       <SidebarContent ref={navRef}><NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} /></SidebarContent>
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
     </Sidebar>
-    <SidebarInset className="h-svh min-h-0">
+    <SidebarInset className="app-workspace min-h-0">
       <header className="rental-sidebar-colors native-workspace-context flex h-16 shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing) group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
         <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
           <SidebarTrigger className="-ml-1" aria-label={t(state === "collapsed" ? "展开导航" : "收起导航")} />

@@ -55,6 +55,13 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-bg-layout);
   box-shadow: 0 2px 12px rgba(0, 0, 0, .1);
 }
+/* Keep the established rounded admin frame around the native sidebar.
+   Its positioned container follows the frame, while menus/sheets still portal to body. */
+.native-admin-shell [data-slot="sidebar-wrapper"] [data-slot="sidebar-container"] {
+  position: absolute;
+  height: 100%;
+  border-inline-width: 0;
+}
 /* Sidebar: tenant/workspace → search/fixed entries → scrollable business menu → account. */
 .sider-shell {
   display: flex;

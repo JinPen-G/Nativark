@@ -1,0 +1,22 @@
+/* One theme-aware surface behind the sidebar and rounded workspace. */
+:root { --rental-sidebar-surface: oklch(0.985 0 0); }
+:root[data-theme="dark"] { --rental-sidebar-surface: oklch(0.205 0 0); }
+.native-admin-shell { background: var(--rental-sidebar-surface); }
+.rental-sidebar-colors { --sidebar: var(--rental-sidebar-surface); }
+/* App geometry roles only; preserved source classes, sizes and motion stay native. */
+.rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"], [data-slot="sidebar-trigger"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"]) {
+  border-radius: var(--rental-ui-radius-button);
+}
+/* Native highlights cache the measured corner; keep a live token after preference changes. */
+.rental-sidebar-colors [data-slot="trigger-highlight"] { border-radius: var(--rental-ui-radius-button) !important; }
+.rental-sidebar-colors [data-slot="sidebar-input"] { border-radius: var(--rental-ui-radius-input); }
+.rental-sidebar-colors :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="tooltip-content"]) {
+  border-radius: var(--rental-ui-radius-container);
+}
+.rental-sidebar-colors[data-mobile="true"] {
+  border-start-end-radius: var(--rental-ui-radius-container);
+  border-end-end-radius: var(--rental-ui-radius-container);
+}
+.rental-sidebar-colors [data-sidebar="brand-mark"] { border-radius: var(--rental-ui-radius-container); }
+.rental-sidebar-colors [data-sidebar="brand-mark"] img { border-radius: inherit; }
+.rental-sidebar-colors [data-sidebar="workspace-icon"] { border-radius: var(--rental-ui-radius-sm); }
