@@ -33,9 +33,9 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
   return <Highlight mode="parent" controlledItems value={selectedValue} enabled={selectedValue !== null} hover={false} click={false}
     containerClassName="rental-sidebar-navigation" className="rental-sidebar-route-highlight">
     {overview && <SidebarGroup><SidebarGroupLabel>{t(overview.label)}</SidebarGroupLabel><SidebarMenu>
-      {overview.routes.map(route => <HighlightItem key={route.path} value={route.path} asChild><SidebarMenuItem><SidebarMenuButton data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined} isActive={selectedKey === route.path} tooltip={t(route.label)} onClick={() => onNavigate(route.path)}>
+      {overview.routes.map(route => <SidebarMenuItem key={route.path}><HighlightItem value={route.path} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined} isActive={selectedKey === route.path} tooltip={t(route.label)} onClick={() => onNavigate(route.path)}>
         <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} /><span>{t(menuRouteLabel(route.path, route.label))}</span>
-      </SidebarMenuButton></SidebarMenuItem></HighlightItem>)}
+      </SidebarMenuButton></div></HighlightItem></SidebarMenuItem>)}
     </SidebarMenu></SidebarGroup>}
     {visible.some(s => s.key !== "overview") && <SidebarGroup><SidebarGroupLabel>{t("业务管理")}</SidebarGroupLabel><SidebarMenu>
       {visible.filter(s => s.key !== "overview").map(section => {
@@ -44,11 +44,11 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
         const label = t(MENU_GROUP_LABELS[section.key] ?? section.label);
         if (collapsed) return <DropdownMenu key={section.key} modal={false} open={popupGroup === section.key}
           onOpenChange={open => setPopupGroup(current => open ? section.key : current === section.key ? null : current)}>
-          <HighlightItem value={`group:${section.key}`} asChild><SidebarMenuItem>
+          <SidebarMenuItem><HighlightItem value={`group:${section.key}`} asChild><div className="rental-sidebar-route-target">
             <DropdownMenuTrigger aria-label={label} data-sound="press" render={<SidebarMenuButton isActive={active} />}>
               <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
             </DropdownMenuTrigger>
-          </SidebarMenuItem></HighlightItem>
+          </div></HighlightItem></SidebarMenuItem>
           <DropdownMenuContent className="rental-sidebar-submenu" side="right" align="start" sideOffset={8} aria-label={label}>
             <DropdownMenuGroup><DropdownMenuLabel>{label}</DropdownMenuLabel>
               {section.routes.map(route => <DropdownMenuItem key={route.path} render={<a href={route.path} />}
@@ -61,19 +61,22 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
           </DropdownMenuContent>
         </DropdownMenu>;
         return <Collapsible key={section.key} open={expanded} onOpenChange={open => setOpenGroups(groups => ({ ...groups, [section.key]: open }))} className="group/collapsible rental-menu-group">
-          <HighlightItem value={`group:${section.key}`} asChild><SidebarMenuItem>
-            <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={label} isActive={active && !expanded} />}>
-              <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
-              <span>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
-              <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="ml-auto transition-transform duration-350 ease-[cubic-bezier(0.215,0.61,0.355,1)] group-data-open/collapsible:rotate-90" />
-            </CollapsibleTrigger>
+          <SidebarMenuItem>
+            {/* Measure the trigger row only, never the still-exiting submenu. */}
+            <HighlightItem value={`group:${section.key}`} asChild><div className="rental-sidebar-route-target">
+              <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={label} isActive={active && !expanded} />}>
+                <HugeiconsIcon icon={groupIcons[section.key as keyof typeof groupIcons] ?? Settings01Icon} strokeWidth={2} />
+                <span>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
+                <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="ml-auto transition-transform duration-350 ease-[cubic-bezier(0.215,0.61,0.355,1)] group-data-open/collapsible:rotate-90" />
+              </CollapsibleTrigger>
+            </div></HighlightItem>
             <CollapsibleContent><SidebarMenuSub>{section.routes.map(route => <HighlightItem key={route.path} value={route.path} activeClassName="rental-sidebar-sub-highlight" asChild><SidebarMenuSubItem>
               <SidebarMenuSubButton data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined} isActive={selectedKey === route.path} render={<a href={route.path} />}
                 onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate(route.path); }}>
                 <span>{t(menuRouteLabel(route.path, route.label))}</span>
               </SidebarMenuSubButton>
             </SidebarMenuSubItem></HighlightItem>)}</SidebarMenuSub></CollapsibleContent>
-          </SidebarMenuItem></HighlightItem>
+          </SidebarMenuItem>
         </Collapsible>;
       })}
     </SidebarMenu></SidebarGroup>}
