@@ -5,8 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { RentalDesktopBridge, RentalDesktopSnapshot, RentalDesktopCommand } from '@rental-os/shared/agent-desktop'
-import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult, parseRentalDesktopCatalogSourcesResult } from '@rental-os/shared/agent-desktop'
+import type { RentalDesktopBridge, RentalDesktopSnapshot, RentalDesktopCommand, RentalDesktopModelCatalogResult } from '@rental-os/shared/agent-desktop'
+import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult, parseRentalDesktopCatalogSourcesResult, parseRentalDesktopCatalogCheckResult } from '@rental-os/shared/agent-desktop'
 import { WorkbenchContext, WorkbenchNavigation, WorkbenchMain, WorkbenchToast } from './Workbench.tsx'
 import type { WorkbenchInjected, WorkbenchState } from './contract.ts'
 import { zh, en } from './locales.ts'
@@ -19,15 +19,19 @@ export function apply(ctx: Context): void {
   const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { busy: false, failed: false, result: null, inspection: null, material: null }, sources: { busy: false, failed: false, result: null } })
   let catalogGeneration = 0
   let catalogExpiry: ReturnType<typeof setTimeout> | undefined
+  let catalogRenewal: ReturnType<typeof setTimeout> | undefined
   const clearCatalog = () => {
     catalogGeneration++
     clearTimeout(catalogExpiry)
+    clearTimeout(catalogRenewal)
     state.update(value => { value.catalog = { busy: false, failed: false, result: null, inspection: null, material: null } })
   }
   let sourcesGeneration = 0
   let sourcesExpiry: ReturnType<typeof setTimeout> | undefined
+  let sourcesRenewal: ReturnType<typeof setTimeout> | undefined
+  let sourcesDeadline = 0
   const clearSources = () => {
-    sourcesGeneration++; clearTimeout(sourcesExpiry)
+    sourcesGeneration++; clearTimeout(sourcesExpiry); clearTimeout(sourcesRenewal); sourcesDeadline = 0
     state.update(value => { value.sources = { busy: false, failed: false, result: null } })
   }
   let noticeSequence = 0
@@ -73,9 +77,52 @@ export function apply(ctx: Context): void {
     })
   }
   const revision = () => state.getSnapshot().snapshot?.revision ?? 0
+  const checkCatalog = async (value: RentalDesktopModelCatalogResult, generation: number) => {
+    if (!bridge.checkCatalogForModel) throw new Error('AI_RESOURCE_UNAVAILABLE')
+    const { catalog, inspection } = value
+    const check = parseRentalDesktopCatalogCheckResult(await bridge.checkCatalogForModel({ previewRequestId: catalog.requestId,
+      selection: inspection.selection, preparationVersion: inspection.preparationVersion }))
+    if (disposed || generation !== catalogGeneration) return false
+    if (document.hidden || check.previewRequestId !== catalog.requestId || check.sourceObservedAt !== catalog.observedAt
+      || JSON.stringify(check.binding) !== JSON.stringify(catalog.binding) || check.configurationVersion !== catalog.configurationVersion
+      || check.policyHash !== catalog.policyHash || check.policyRevision !== catalog.policyRevision
+      || JSON.stringify(check.modelRoute) !== JSON.stringify(catalog.modelRoute) || Date.parse(check.expiresAt) <= Date.now()
+      || Date.parse(check.observedAt) > Date.now()) throw new Error('AI_SCOPE_CHANGED')
+    const deadline = Math.min(Date.parse(check.expiresAt), Date.parse(catalog.expiresAt), Date.parse(inspection.expiresAt))
+    if (deadline <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
+    clearTimeout(catalogExpiry); clearTimeout(catalogRenewal)
+    // The expiry timer is independent of a stuck renewal. Renewals cannot extend the original observation.
+    catalogExpiry = setTimeout(clearCatalog, deadline - Date.now())
+    if (deadline - Date.now() > 1000) catalogRenewal = setTimeout(() => {
+      void checkCatalog(value, generation).catch(() => {
+        if (!disposed && generation === catalogGeneration) { clearCatalog(); clearSources() }
+      })
+    }, Math.min(3000, deadline - Date.now() - 1000))
+    return true
+  }
+  const readSources = (generation: number) => {
+    if (!bridge.catalogSources) return Promise.reject(new Error('AI_RESOURCE_UNAVAILABLE'))
+    return bridge.catalogSources({ limit: 10 }).then(value => {
+      if (disposed || generation !== sourcesGeneration) return
+      const result = parseRentalDesktopCatalogSourcesResult(value), session = state.getSnapshot().snapshot?.session
+      if (document.hidden || session?.status !== 'ready' || result.binding.actorId !== session.actorId || result.binding.tenantId !== session.tenantId
+        || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()) throw new Error('AI_SCOPE_CHANGED')
+      if (!sourcesDeadline) sourcesDeadline = Date.parse(result.expiresAt)
+      const deadline = Math.min(sourcesDeadline, Date.parse(result.expiresAt), Date.now() + 5000)
+      if (deadline <= Date.now()) throw new Error('AI_RESOURCE_UNAVAILABLE')
+      state.update(draft => { draft.sources = { busy: false, failed: false, result: { ...result,
+        expiresAt: new Date(Math.min(sourcesDeadline, Date.parse(result.expiresAt))).toISOString() } } })
+      clearTimeout(sourcesExpiry); clearTimeout(sourcesRenewal)
+      sourcesExpiry = setTimeout(clearSources, deadline - Date.now())
+      if (deadline - Date.now() > 1000) sourcesRenewal = setTimeout(() => { void readSources(generation).catch(() => {
+        if (!disposed && generation === sourcesGeneration) { clearCatalog(); clearSources() }
+      }) }, Math.min(3000, deadline - Date.now() - 1000))
+    })
+  }
   const props: WorkbenchInjected = {
     hooks: { business: state, workMode },
     changeMode: mode => {
+      clearCatalog(); clearSources()
       state.update(value => { value.failed = false })
       if (mode === 'traditional' && workMode.getSnapshot() === 'ai') aiPanel = ctx.layout.panelInfo.getSnapshot().activePanelId
       try { ctx.layout.selectPanel(mode === 'ai' ? aiPanel : panel) }
@@ -93,17 +140,10 @@ export function apply(ctx: Context): void {
       if (disposed || before.busy || before.sources.busy || before.snapshot?.session.status !== 'ready') return
       clearSources(); const generation = sourcesGeneration
       state.update(value => { value.sources.busy = true })
-      void Promise.resolve().then(() => {
-        if (!bridge.catalogSources) throw new Error('AI_RESOURCE_UNAVAILABLE')
-        return bridge.catalogSources({ limit: 10 })
-      }).then(value => {
-        if (disposed || generation !== sourcesGeneration) return
-        const result = parseRentalDesktopCatalogSourcesResult(value), session = state.getSnapshot().snapshot?.session
-        if (session?.status !== 'ready' || result.binding.actorId !== session.actorId || result.binding.tenantId !== session.tenantId
-          || result.binding.workspaceId !== session.currentWorkspaceId || Date.parse(result.expiresAt) <= Date.now()) throw new Error('AI_SCOPE_CHANGED')
-        state.update(draft => { draft.sources = { busy: false, failed: false, result } })
-        sourcesExpiry = setTimeout(clearSources, Math.max(0, Date.parse(result.expiresAt) - Date.now()))
-      }).catch(() => { if (!disposed && generation === sourcesGeneration) { clearCatalog(); state.update(value => { value.sources = { busy: false, failed: true, result: null } }) } })
+      sourcesExpiry = setTimeout(clearSources, 5000)
+      void Promise.resolve().then(() => readSources(generation)).catch(() => { if (!disposed && generation === sourcesGeneration) {
+        clearCatalog(); clearSources(); state.update(value => { value.sources.failed = true })
+      } })
     },
     readCatalog: query => {
       const before = state.getSnapshot()
@@ -114,6 +154,7 @@ export function apply(ctx: Context): void {
       try { input = parseRentalDesktopModelCatalogQuery(query) }
       catch { state.update(value => { value.catalog.failed = true }); return }
       state.update(value => { value.catalog.busy = true })
+      catalogExpiry = setTimeout(clearCatalog, 15000)
       // Human-only preview; the native Host resolves the prepared route. Never fall back to a hand-entered URL.
       void Promise.resolve().then(() => {
         if (!bridge.catalogForModel) throw new Error('AI_RESOURCE_UNAVAILABLE')
@@ -131,8 +172,10 @@ export function apply(ctx: Context): void {
           || JSON.stringify(result.reopenedFrom ? { auditId: result.reopenedFrom.auditId, requestId: result.reopenedFrom.requestId } : null)
             !== JSON.stringify(input.sourceRef ?? null)
           || JSON.stringify(inspection.selection) !== JSON.stringify(input.selection)) throw new Error('AI_SCOPE_CHANGED')
+        clearTimeout(catalogExpiry)
+        catalogExpiry = setTimeout(clearCatalog, 5000)
+        if (!await checkCatalog({ catalog: result, inspection, material }, generation) || disposed || generation !== catalogGeneration) return
         state.update(draft => { draft.catalog = { busy: false, failed: false, result, inspection, material } })
-        catalogExpiry = setTimeout(clearCatalog, Math.max(0, Date.parse(result.expiresAt) - Date.now()))
       }).catch(() => {
         if (!disposed && generation === catalogGeneration) { clearSources(); state.update(value => { value.catalog = { busy: false, failed: true, result: null, inspection: null, material: null } }) }
       })
@@ -154,11 +197,20 @@ export function apply(ctx: Context): void {
   ctx.effect(() => bridge.subscribe(accept), 'rental: session projection')
   ctx.effect(() => () => {
     disposed = true
-    catalogGeneration++; clearTimeout(catalogExpiry)
-    sourcesGeneration++; clearTimeout(sourcesExpiry)
+    clearCatalog(); clearSources()
     if (workMode.getSnapshot() === 'traditional') ctx.layout.selectPanel(null)
     void bridge.present({ mode: 'ai', bounds: null }).catch(() => undefined)
   }, 'rental: native presentation')
+  ctx.effect(() => {
+    const clear = () => { clearCatalog(); clearSources() }
+    const visibility = () => { if (document.hidden) clear() }
+    window.addEventListener('blur', clear); window.addEventListener('pagehide', clear)
+    document.addEventListener('visibilitychange', visibility)
+    return () => {
+      clear(); window.removeEventListener('blur', clear); window.removeEventListener('pagehide', clear)
+      document.removeEventListener('visibilitychange', visibility)
+    }
+  }, 'rental: withdraw inactive business material')
   ctx.effect(() => ctx.locale.register('rental-workbench', { zh, en }), 'rental: dictionaries')
   ctx.slots.inject('sidebar.rental.context', () => ctx.slots.register({ name: 'sidebar.rental.context', locale: 'rental-workbench', inject: () => props }, WorkbenchContext))
   ctx.slots.inject('sidebar.rental.navigation', () => ctx.slots.register({ name: 'sidebar.rental.navigation', locale: 'rental-workbench', inject: () => props }, WorkbenchNavigation))

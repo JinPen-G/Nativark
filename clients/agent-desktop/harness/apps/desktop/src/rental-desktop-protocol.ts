@@ -5,4 +5,5 @@ export const RENTAL_IPC = {
   catalog: 'rental:catalog', catalogRequest: 'rental:catalog-request', catalogComplete: 'rental:catalog-complete',
   catalogForModel: 'rental:catalog-for-model',
   catalogSources: 'rental:catalog-sources',
+  catalogCheck: 'rental:catalog-check',
 } as const

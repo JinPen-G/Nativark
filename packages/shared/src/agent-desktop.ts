@@ -1,7 +1,8 @@
 /** Desktop business-view protocol. Carries display/navigation data, never credentials or business execution authority. */
 export * from './agent-desktop-business';
 import type { RentalDesktopCatalogQuery, RentalDesktopCatalogResult, RentalDesktopCatalogReply,
-  RentalDesktopModelCatalogQuery, RentalDesktopModelCatalogResult, RentalDesktopBusinessReadRequest, RentalDesktopCatalogSourcesResult } from './agent-desktop-business';
+  RentalDesktopModelCatalogQuery, RentalDesktopModelCatalogResult, RentalDesktopBusinessReadRequest, RentalDesktopCatalogSourcesResult,
+  RentalDesktopCatalogCheck, RentalDesktopCatalogCheckResult } from './agent-desktop-business';
 export const RENTAL_DESKTOP_PROTOCOL_VERSION = 1 as const;
 
 export interface RentalDesktopMenuItem { id: string; path: string; label: string }
@@ -51,6 +52,8 @@ export interface RentalDesktopBridge {
   catalogForModel?(query: RentalDesktopModelCatalogQuery): Promise<RentalDesktopModelCatalogResult>;
   /** Current-authorized source references only; never old catalog bodies or automatic re-execution. */
   catalogSources?(query: { limit: number }): Promise<RentalDesktopCatalogSourcesResult>;
+  /** Recheck current original permissions, policy/configuration and Host preparation; never extends the original observation lifetime. */
+  checkCatalogForModel?(query: RentalDesktopCatalogCheck): Promise<RentalDesktopCatalogCheckResult>;
 }
 export interface RentalAdminDesktopBridge {
   protocolVersion: typeof RENTAL_DESKTOP_PROTOCOL_VERSION;

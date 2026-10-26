@@ -33,6 +33,8 @@ export class AiDesktopBusinessController {
   catalog(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'catalog'); }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources) @HttpCode(200) @Header('Cache-Control', 'no-store')
   sources(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'readCatalogSources'); }
+  @Post(RENTAL_DESKTOP_BUSINESS_HTTP.catalogCheck) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  check(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'checkCatalog'); }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.policy) @HttpCode(200) @Header('Cache-Control', 'no-store')
   policy(@Req() request: Request, @Body() body: unknown) { return this.call(request, body, 'readPolicy'); }
   @Post(RENTAL_DESKTOP_BUSINESS_HTTP.savePolicy) @HttpCode(200) @Header('Cache-Control', 'no-store')

@@ -56,4 +56,21 @@ export class PrismaDesktopCatalogSourceRepository {
     if (source.state !== 'reference' || source.requestId !== ref.requestId) throw unavailable();
     return source;
   }
+  /** Resolve the exact preview request, not the most recent audit. Duplicate records cannot establish one observation. */
+  async preview(value: RentalDesktopBusinessBinding, requestId: string, hash: string, time: Date) {
+    const binding = structuredClone(value), now = new Date(time);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(requestId) || !/^[a-f0-9]{64}$/u.test(hash)) throw unavailable();
+    const rows = structuredClone(await this.db.operationLog.findMany({ where: { ...bounds(binding, now),
+      detail: { path: '$.targetId', equals: requestId } }, select, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 2 }));
+    if (rows.length !== 1) throw unavailable();
+    const source = read(rows[0]!, binding, hash, now);
+    if (source.state !== 'reference' || source.requestId !== requestId || now.getTime() >= Date.parse(source.observedAt) + 30000) throw unavailable();
+    const detail = rows[0]!.detail;
+    const metadata = detail && typeof detail === 'object' && !Array.isArray(detail) && 'metadata' in detail ? detail.metadata : undefined;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || !('rowCount' in metadata) || !('truncated' in metadata)
+      || typeof metadata.rowCount !== 'number' || !Number.isInteger(metadata.rowCount) || metadata.rowCount < 0
+      || metadata.rowCount > source.query.limit || typeof metadata.truncated !== 'boolean'
+      || (metadata.truncated && metadata.rowCount !== source.query.limit)) throw unavailable();
+    return { ...source, rowCount: metadata.rowCount, truncated: metadata.truncated };
+  }
 }

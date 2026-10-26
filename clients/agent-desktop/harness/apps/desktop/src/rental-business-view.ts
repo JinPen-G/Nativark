@@ -8,6 +8,7 @@ import { RENTAL_DESKTOP_PROTOCOL_VERSION, parseRentalDesktopSession, parseRental
   parseRentalDesktopModelCatalogQuery, parseRentalDesktopModelCatalogResult, parseRentalDesktopModelInspection,
   projectRentalDesktopCatalogMaterial,
   parseRentalDesktopCatalogSourcesQuery, parseRentalDesktopCatalogSourcesResult,
+  parseRentalDesktopCatalogCheck, parseRentalDesktopCatalogCheckQuery, parseRentalDesktopCatalogCheckResult,
   type RentalDesktopBusinessReadRequest, type RentalDesktopBusinessReadResult,
   type RentalDesktopModelSelection,
   type RentalDesktopCatalogResult,
@@ -66,6 +67,7 @@ export class RentalBusinessView {
     ipcMain.handle(RENTAL_IPC.catalog, (event, value: unknown) => { this.assertApplication(event); return this.readCatalog(value) })
     ipcMain.handle(RENTAL_IPC.catalogForModel, (event, value: unknown) => { this.assertApplication(event); return this.readCatalogForModel(value) })
     ipcMain.handle(RENTAL_IPC.catalogSources, (event, value: unknown) => { this.assertApplication(event); return this.readBusiness(value, 'sources').then(parseRentalDesktopCatalogSourcesResult) })
+    ipcMain.handle(RENTAL_IPC.catalogCheck, (event, value: unknown) => { this.assertApplication(event); return this.checkCatalogForModel(value) })
     ipcMain.handle(RENTAL_IPC.catalogComplete, (event, envelope: unknown) => {
       const value = this.adminMessage(event, envelope)
       if (!value || typeof value !== 'object' || Array.isArray(value) || !('id' in value) || typeof value.id !== 'string'
@@ -81,8 +83,9 @@ export class RentalBusinessView {
             ? value.code : 'AI_RESOURCE_UNAVAILABLE'
           pending.reject(new Error(code)); return
         }
-        const result = 'kind' in pending.request ? parseRentalDesktopCatalogSourcesResult('result' in value ? value.result : undefined)
-          : parseRentalDesktopCatalogResult('result' in value ? value.result : undefined)
+        const body = 'result' in value ? value.result : undefined
+        const result = !('kind' in pending.request) ? parseRentalDesktopCatalogResult(body)
+          : pending.request.kind === 'catalog_sources' ? parseRentalDesktopCatalogSourcesResult(body) : parseRentalDesktopCatalogCheckResult(body)
         const current = this.snapshot.session
         if (pending.document !== this.document || this.disposed || this.pending || this.unknownCommand || current.status !== 'ready' || current.audience !== 'tenant'
           || current.actorId !== pending.request.binding.actorId || current.tenantId !== pending.request.binding.tenantId
@@ -93,7 +96,10 @@ export class RentalBusinessView {
             || JSON.stringify(result.modelRoute ?? null) !== JSON.stringify(pending.request.query.modelRoute ?? null)
             || JSON.stringify(result.reopenedFrom ? { auditId: result.reopenedFrom.auditId, requestId: result.reopenedFrom.requestId } : null)
               !== JSON.stringify(pending.request.query.sourceRef ?? null)))
-          || result.items.length > pending.request.query.limit || Date.parse(result.expiresAt) <= Date.now()) throw Error()
+          || ('kind' in pending.request && pending.request.kind === 'catalog_check'
+            ? result.execution !== 'display_check_only' || result.previewRequestId !== pending.request.query.previewRequestId
+            : !('limit' in pending.request.query) || !('items' in result) || result.items.length > pending.request.query.limit)
+          || Date.parse(result.expiresAt) <= Date.now()) throw Error()
         pending.resolve(result)
       } catch { pending.reject(new Error('AI_RESOURCE_UNAVAILABLE')) }
     })
@@ -353,7 +359,31 @@ export class RentalBusinessView {
   private readCatalog(value: unknown): Promise<RentalDesktopCatalogResult> {
     return this.readBusiness(value, 'catalog').then(parseRentalDesktopCatalogResult)
   }
-  private readBusiness(value: unknown, kind: 'catalog' | 'sources'): Promise<RentalDesktopBusinessReadResult> {
+  private async checkCatalogForModel(value: unknown) {
+    const input = parseRentalDesktopCatalogCheck(value), document = this.document, before = this.snapshot.session, inspect = this.inspectModel
+    if (!inspect || this.disposed || this.pending || this.unknownCommand || !document || before.status !== 'ready'
+      || before.audience !== 'tenant' || !before.currentWorkspaceId || this.modelReads >= 2) throw new Error('AI_RESOURCE_UNAVAILABLE')
+    const identity = JSON.stringify(before)
+    const current = () => {
+      if (this.disposed || this.pending || this.unknownCommand || this.document !== document || JSON.stringify(this.snapshot.session) !== identity)
+        throw new Error('AI_SCOPE_CHANGED')
+    }
+    this.modelReads++
+    try {
+      const first = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
+      if (JSON.stringify(first.selection) !== JSON.stringify(input.selection) || first.preparationVersion !== input.preparationVersion
+        || Date.parse(first.expiresAt) <= Date.now()) throw new Error('AI_SCOPE_CHANGED')
+      const result = parseRentalDesktopCatalogCheckResult(await this.readBusiness({ previewRequestId: input.previewRequestId }, 'check')); current()
+      const last = parseRentalDesktopModelInspection(await inspect(input.selection)); current()
+      if (JSON.stringify(last.selection) !== JSON.stringify(input.selection) || last.preparationVersion !== input.preparationVersion
+        || JSON.stringify(first.destination) !== JSON.stringify(last.destination) || first.protocol !== last.protocol
+        || JSON.stringify(result.modelRoute) !== JSON.stringify({ ...last.destination, model: last.selection.model, protocol: last.protocol })
+        || Date.parse(last.expiresAt) <= Date.now() || Date.parse(first.expiresAt) <= Date.now() || Date.parse(result.expiresAt) <= Date.now())
+        throw new Error('AI_SCOPE_CHANGED')
+      return result
+    } finally { this.modelReads-- }
+  }
+  private readBusiness(value: unknown, kind: 'catalog' | 'sources' | 'check'): Promise<RentalDesktopBusinessReadResult> {
     const current = this.snapshot.session
     const document = this.document, view = this.view
     if (!document || !view || view.webContents.isDestroyed() || this.disposed || this.pending || this.unknownCommand
@@ -362,7 +392,8 @@ export class RentalBusinessView {
     const binding = { actorId: current.actorId, tenantId: current.tenantId, workspaceId: current.currentWorkspaceId }
     const request: RentalDesktopBusinessReadRequest = kind === 'sources'
       ? { kind: 'catalog_sources', id: randomUUID(), query: parseRentalDesktopCatalogSourcesQuery(value), binding }
-      : { id: randomUUID(), query: parseRentalDesktopCatalogQuery(value), binding }
+      : kind === 'check' ? { kind: 'catalog_check', id: randomUUID(), query: parseRentalDesktopCatalogCheckQuery(value), binding }
+        : { id: randomUUID(), query: parseRentalDesktopCatalogQuery(value), binding }
     return new Promise<RentalDesktopBusinessReadResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (!this.catalogReads.delete(request.id)) return
@@ -503,6 +534,6 @@ export class RentalBusinessView {
     this.disposed = true; this.close()
     for (const waiter of this.waiters) waiter.reject(new Error('Business view disposed')); this.waiters.clear()
     for (const channel of [RENTAL_IPC.connect, RENTAL_IPC.read, RENTAL_IPC.report, RENTAL_IPC.complete, RENTAL_IPC.request, RENTAL_IPC.present, RENTAL_IPC.retry,
-      RENTAL_IPC.catalog, RENTAL_IPC.catalogComplete, RENTAL_IPC.catalogForModel, RENTAL_IPC.catalogSources]) ipcMain.removeHandler(channel)
+      RENTAL_IPC.catalog, RENTAL_IPC.catalogComplete, RENTAL_IPC.catalogForModel, RENTAL_IPC.catalogSources, RENTAL_IPC.catalogCheck]) ipcMain.removeHandler(channel)
   }
 }

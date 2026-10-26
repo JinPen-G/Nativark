@@ -1,7 +1,7 @@
 /** Closed business-page transport. The original HTTP client alone owns Rental OS credentials. */
 import { RENTAL_DESKTOP_BUSINESS_HTTP, parseRentalDesktopBusinessReadRequest, parseRentalDesktopCatalogResult, parseRentalDesktopCatalogSourcesResult,
   parseRentalDesktopBusinessPolicyRead, parseRentalDesktopPolicySave, parseRentalDesktopPolicySaved,
-  parseRentalDesktopPolicyObservation, type RentalDesktopPolicySave, type RentalDesktopBusinessReadRequest } from '@rental-os/shared';
+  parseRentalDesktopPolicyObservation, parseRentalDesktopCatalogCheckResult, type RentalDesktopPolicySave, type RentalDesktopBusinessReadRequest } from '@rental-os/shared';
 import type { ApiResult } from '@rental-os/shared';
 import { http } from './http';
 
@@ -16,10 +16,12 @@ export const desktopBusinessPolicyApi = Object.freeze({
 export async function readDesktopBusinessCatalog(value: RentalDesktopBusinessReadRequest, signal: AbortSignal) {
   const input = parseRentalDesktopBusinessReadRequest(value);
   try {
-    const action = 'kind' in input ? RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources : RENTAL_DESKTOP_BUSINESS_HTTP.catalog;
+    const action = !('kind' in input) ? RENTAL_DESKTOP_BUSINESS_HTTP.catalog
+      : input.kind === 'catalog_sources' ? RENTAL_DESKTOP_BUSINESS_HTTP.catalogSources : RENTAL_DESKTOP_BUSINESS_HTTP.catalogCheck;
     const result = await http.request<ApiResult<unknown>>({ method: 'POST', url: `/${RENTAL_DESKTOP_BUSINESS_HTTP.basePath}/${action}`,
       data: input, signal });
-    return 'kind' in input ? parseRentalDesktopCatalogSourcesResult(result.data.data) : parseRentalDesktopCatalogResult(result.data.data);
+    return !('kind' in input) ? parseRentalDesktopCatalogResult(result.data.data)
+      : input.kind === 'catalog_sources' ? parseRentalDesktopCatalogSourcesResult(result.data.data) : parseRentalDesktopCatalogCheckResult(result.data.data);
   } catch (error) {
     const code = error && typeof error === 'object' && 'response' in error
       ? (error.response as { data?: { code?: unknown } } | undefined)?.data?.code : undefined;

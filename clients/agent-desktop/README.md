@@ -53,10 +53,13 @@ Harness 自有 pnpm workspace 与 lockfile，Rental OS 根工程使用 npm works
 
 以下 POST 接口统一在 `/api/ai-native/desktop-business/` 下；字段从 [shared 合同](../../packages/shared/src/agent-desktop-business.ts) 和 [OpenAPI](../../apps/api/src/contracts/ai-desktop-business-schemas.ts)读取。身份由服务器当前会话确定，body 中 binding 只用于核对，不授权。
 
+材料显示前须通过新增的`checkCatalogForModel`：原生桥在当前Auth / Guard / ALS、原审计、政策和Core原商品页复核前后再次检查真实Host准备。Core配置指纹针对返回页，因此按原数量读取并比较覆盖，不以一条商品代替原页。展示期间每3秒复核，每次最多5秒且不延长原观察30秒；来源页同期按原受权入口刷新，但不延长首次60秒。旧桥缺少复核能力就不展示材料。复核失败 / 卡住、失焦、隐藏、切模式或scope变化清除并停止续查，返回后须人主动重新读取；迟到应答不恢复旧内容。计时器仅控制展示，不是可信累计资源，也不是即时撤权广播或最终外发许可；不触发模型、批准、库存或业务写入。
+
 | 后缀 | 作用与边界 |
 | --- | --- |
 | `catalog` | 严格请求 ID / binding / limit / destination，可选 `modelRoute` 为精确Provider / 地址 / 模型 / 协议。存在时须匹配当前政策的 `modelRoutes`，响应原样绑定；缺字段只可原人工预览，不能转换为获准模型结果。原商品读权、当前政策及审计必须通过。最多50条；人工输入仅在本机按封闭语法解析，未指定数量时预览上限10条。 |
 | `catalog/sources` | `kind=catalog_sources`、请求号、binding及1至10条上限。沿当前原商品读权读取本人本空间近30天的原审计引用，查询按时间 / ID排序并最多探测limit+1条，引用页60秒到期。只返回封闭原条件和版本，无旧业务正文；无来源绑定的旧记录明确不可恢复。停用新预览不阻断独立当前读权下的来源观察。 |
+| `catalog/check` | `kind=catalog_check`、请求号、binding和原`previewRequestId`。精确查本人本空间原审计，最多读取2行排除重复；复核当前原商品读权、政策和原有界商品页的配置指纹及覆盖。仅返回最长5秒的展示复核结果，不返回商品正文，不延长原观察30秒上限，不授予派发或执行权。 |
 | `policy` | 当前配置管理者读取本空间政策；无记录为 `not_configured`，不自动启用。 |
 | `policy/change` | 人类管理者用原 `operationKey`、预期修订和完整政策做 CAS；限定工具、目的地、可选精确 `modelRoutes`、数量及期限，不是模型配置或企业订阅。每条模型许可须属于目的地白名单，不支持通配符。 |
 | `policy/operation` | 当前管理权限下读取本人原保存收据；`not_observed` 不证明回滚，`AI_RESULT_UNKNOWN` 不换键重做。 |

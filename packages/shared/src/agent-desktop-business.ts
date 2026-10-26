@@ -2,7 +2,7 @@
 export const RENTAL_DESKTOP_BUSINESS_VERSION = 1 as const;
 export const RENTAL_DESKTOP_BUSINESS_HTTP = {
   basePath: 'ai-native/desktop-business', catalog: 'catalog', policy: 'policy',
-  savePolicy: 'policy/change', policyOperation: 'policy/operation', catalogSources: 'catalog/sources'
+  savePolicy: 'policy/change', policyOperation: 'policy/operation', catalogSources: 'catalog/sources', catalogCheck: 'catalog/check'
 } as const;
 export interface RentalDesktopModelDestination { provider: string; baseUrl: string }
 export interface RentalDesktopModelSelection { provider: string; model: string }
@@ -53,8 +53,21 @@ export interface RentalDesktopCatalogSourcesResult {
   version: typeof RENTAL_DESKTOP_BUSINESS_VERSION; requestId: string; binding: RentalDesktopBusinessBinding;
   observedAt: string; expiresAt: string; items: RentalDesktopCatalogSource[]; truncated: boolean; execution: 'references_only';
 }
-export type RentalDesktopBusinessReadRequest = RentalDesktopCatalogRequest | RentalDesktopCatalogSourcesRequest;
-export type RentalDesktopBusinessReadResult = RentalDesktopCatalogResult | RentalDesktopCatalogSourcesResult;
+/** A short display lease for an original audit observation, never model or business execution permission. */
+export interface RentalDesktopCatalogCheck {
+  previewRequestId: string; selection: RentalDesktopModelSelection; preparationVersion: string;
+}
+export interface RentalDesktopCatalogCheckRequest {
+  kind: 'catalog_check'; id: string; binding: RentalDesktopBusinessBinding; query: { previewRequestId: string };
+}
+export interface RentalDesktopCatalogCheckResult {
+  version: typeof RENTAL_DESKTOP_BUSINESS_VERSION; requestId: string; binding: RentalDesktopBusinessBinding;
+  previewRequestId: string; sourceObservedAt: string; observedAt: string; expiresAt: string;
+  configurationVersion: string; policyRevision: number; policyHash: string; modelRoute: RentalDesktopModelRoute;
+  execution: 'display_check_only';
+}
+export type RentalDesktopBusinessReadRequest = RentalDesktopCatalogRequest | RentalDesktopCatalogSourcesRequest | RentalDesktopCatalogCheckRequest;
+export type RentalDesktopBusinessReadResult = RentalDesktopCatalogResult | RentalDesktopCatalogSourcesResult | RentalDesktopCatalogCheckResult;
 export interface RentalDesktopCatalogResult {
   version: typeof RENTAL_DESKTOP_BUSINESS_VERSION;
   requestId: string;
@@ -217,9 +230,29 @@ export function parseRentalDesktopCatalogSourceRef(value: unknown): RentalDeskto
 export function parseRentalDesktopCatalogSourcesQuery(value: unknown): { limit: number } {
   const row = record(value, ['limit']); return { limit: positive(row.limit, 10) };
 }
+export function parseRentalDesktopCatalogCheckQuery(value: unknown): { previewRequestId: string } {
+  const row = record(value, ['previewRequestId']); return { previewRequestId: word(row.previewRequestId, 128) };
+}
+export function parseRentalDesktopCatalogCheck(value: unknown): RentalDesktopCatalogCheck {
+  const row = record(value, ['previewRequestId', 'selection', 'preparationVersion']);
+  return { previewRequestId: word(row.previewRequestId, 128), selection: parseRentalDesktopModelSelection(row.selection), preparationVersion: hash(row.preparationVersion) };
+}
+export function parseRentalDesktopCatalogCheckResult(value: unknown): RentalDesktopCatalogCheckResult {
+  const row = record(value, ['version', 'requestId', 'binding', 'previewRequestId', 'sourceObservedAt', 'observedAt', 'expiresAt',
+    'configurationVersion', 'policyRevision', 'policyHash', 'modelRoute', 'execution']);
+  const sourceObservedAt = timestamp(row.sourceObservedAt), observedAt = timestamp(row.observedAt), expiresAt = timestamp(row.expiresAt);
+  if (row.version !== RENTAL_DESKTOP_BUSINESS_VERSION || row.execution !== 'display_check_only'
+    || Date.parse(sourceObservedAt) > Date.parse(observedAt) || Date.parse(expiresAt) <= Date.parse(observedAt)
+    || Date.parse(expiresAt) - Date.parse(observedAt) > 5000 || Date.parse(expiresAt) - Date.parse(sourceObservedAt) > 30000)
+    throw new Error('Invalid display lease');
+  return { version: RENTAL_DESKTOP_BUSINESS_VERSION, requestId: word(row.requestId, 128), binding: parseRentalDesktopBusinessBinding(row.binding),
+    previewRequestId: word(row.previewRequestId, 128), sourceObservedAt, observedAt, expiresAt, configurationVersion: hash(row.configurationVersion),
+    policyRevision: positive(row.policyRevision, 2147483647), policyHash: hash(row.policyHash), modelRoute: parseRentalDesktopModelRoute(row.modelRoute), execution: 'display_check_only' };
+}
 export function parseRentalDesktopBusinessReadRequest(value: unknown): RentalDesktopBusinessReadRequest {
   if (value && typeof value === 'object' && 'kind' in value) {
     const row = record(value, ['kind', 'id', 'binding', 'query']);
+    if (row.kind === 'catalog_check') return { kind: 'catalog_check', id: word(row.id, 128), binding: parseRentalDesktopBusinessBinding(row.binding), query: parseRentalDesktopCatalogCheckQuery(row.query) };
     if (row.kind !== 'catalog_sources') throw new Error('Unknown business read');
     return { kind: 'catalog_sources', id: word(row.id, 128), binding: parseRentalDesktopBusinessBinding(row.binding), query: parseRentalDesktopCatalogSourcesQuery(row.query) };
   }

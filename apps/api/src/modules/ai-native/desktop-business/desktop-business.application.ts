@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { RentalCategoryCode, RENTAL_DESKTOP_BUSINESS_VERSION, parseRentalDesktopBusinessPolicy,
   parseRentalDesktopCatalogRequest, parseRentalDesktopCatalogResult, parseRentalDesktopBusinessReadRequest,
-  parseRentalDesktopCatalogSourcesResult, type RentalDesktopBusinessBinding } from '@rental-os/shared';
+  parseRentalDesktopCatalogSourcesResult, parseRentalDesktopCatalogCheckResult, type RentalDesktopBusinessBinding } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
@@ -39,7 +39,7 @@ const fail = (code: ConstructorParameters<typeof DesktopBusinessError>[0]) => ne
 export function composeDesktopBusinessApplication(dependencies: DesktopBusinessDependencies) {
   if (typeof dependencies.audit?.record !== 'function') throw fail('AI_RESOURCE_UNAVAILABLE');
   const clock = dependencies.clock ?? (() => new Date());
-  const call = async (request: DesktopBusinessRequest, value: unknown, action: 'catalog' | 'sources' | 'policy' | 'change' | 'operation', signal?: AbortSignal) => {
+  const call = async (request: DesktopBusinessRequest, value: unknown, action: 'catalog' | 'sources' | 'check' | 'policy' | 'change' | 'operation', signal?: AbortSignal) => {
     const authorization = bearer.safeParse(request?.headers?.authorization);
     if (!authorization.success) throw fail('AI_ACCESS_DENIED');
     let command: unknown;
@@ -68,6 +68,43 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
         };
         const configuration = new TenantModelConfigurationAuthority(dependencies.guard, credentials, identity);
         const manage = async () => { assertActive(); await configuration.authorize(binding, 'manage'); await revalidate(); };
+        if (action === 'check') {
+          let input;
+          try { input = parseRentalDesktopBusinessReadRequest(command); } catch { throw fail('AI_INVALID_INPUT'); }
+          if (!('kind' in input) || input.kind !== 'catalog_check') throw fail('AI_INVALID_INPUT');
+          if (requestFingerprint(input.binding) !== requestFingerprint(binding)) throw fail('AI_SCOPE_CHANGED');
+          if (!dependencies.sources) throw fail('AI_RESOURCE_UNAVAILABLE');
+          const authority = new AiBusinessReadRouteAuthority(dependencies.guard, credentials, clock);
+          return authority.withRead('catalog', { limit: 1 }, async authorized => {
+            if (authorized.actor.kind !== 'user' || authorized.actor.userId !== binding.actorId || authorized.scope.kind !== 'workspace'
+              || authorized.scope.tenantId !== binding.tenantId || authorized.scope.workspaceId !== binding.workspaceId) throw fail('AI_SCOPE_CHANGED');
+            const source = await dependencies.sources!.preview(binding, input.query.previewRequestId, originalIdentityHash(authorized), clock());
+            const verify = async () => {
+              const current = await dependencies.policies.read(binding); assertActive();
+              if (current.state !== 'configured' || !current.policy.enabled || !current.policy.toolCodes.includes('rental.catalog.search')
+                || current.revision !== source.policyRevision || requestFingerprint(current) !== source.policyHash
+                || Date.parse(current.policy.expiresAt) <= clock().getTime()) throw fail('AI_SCOPE_CHANGED');
+              await revalidate(); return current;
+            };
+            const policy = await verify();
+            // Core hashes the returned page, not the entire workspace. Reuse the original bounded
+            // query and check coverage; a one-row probe cannot validate a different-sized page.
+            const facts = await new AiCatalogReadFactsService(dependencies.core, authority, clock).read({ limit: source.query.limit }, authorized);
+            if (facts.configurationVersion !== source.configurationVersion || facts.items.length !== source.rowCount || facts.truncated !== source.truncated)
+              throw fail('AI_REVISION_CONFLICT');
+            await verify();
+            await runWithRequestIdentity({ tenantId: binding.tenantId, workspaceId: binding.workspaceId, userId: binding.actorId }, () =>
+              dependencies.audit.record({ tenantId: binding.tenantId, userId: binding.actorId, action: 'ai.desktop.catalog.check',
+                targetType: 'rental.catalog.search', targetId: input.query.previewRequestId, requireSuccess: true, metadata: { modelRequest: 'not_sent' } }));
+            assertActive(); await verify();
+            const observedAt = clock().toISOString();
+            return parseRentalDesktopCatalogCheckResult({ version: RENTAL_DESKTOP_BUSINESS_VERSION, requestId: input.id, binding,
+              previewRequestId: source.requestId, sourceObservedAt: source.observedAt, observedAt,
+              expiresAt: new Date(Math.min(Date.parse(observedAt) + 5000, Date.parse(source.observedAt) + 30000, Date.parse(policy.policy.expiresAt))).toISOString(),
+              configurationVersion: source.configurationVersion, policyRevision: source.policyRevision, policyHash: source.policyHash,
+              modelRoute: source.query.modelRoute, execution: 'display_check_only' });
+          });
+        }
         if (action === 'sources') {
           let input;
           try { input = parseRentalDesktopBusinessReadRequest(command); } catch { throw fail('AI_INVALID_INPUT'); }
@@ -182,6 +219,7 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
   return Object.freeze({
     catalog: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'catalog', signal),
     readCatalogSources: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'sources', signal),
+    checkCatalog: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'check', signal),
     readPolicy: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'policy', signal),
     changePolicy: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'change', signal),
     readPolicyOperation: (request: DesktopBusinessRequest, value: unknown, signal?: AbortSignal) => call(request, value, 'operation', signal)
