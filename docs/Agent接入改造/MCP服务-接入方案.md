@@ -176,7 +176,7 @@ Rental Harness ─ 受限原生桥 / 隔离业务 Web ────────�
 
 建议使用成熟 OAuth 授权服务器实现并接原 Rental 身份，不手写密码交换协议，不引入另一套用户账号。现有 Auth 尚未核实具备 OAuth AS；AS 选型、原身份适配和 grant 持久化是实施前置，不以 `resolveAccessContext` 能读 Bearer 就宣称已支持 OAuth。
 
-### 5.4 应用登记与兼容方式
+### 5.5 应用登记与兼容方式
 
 | 方式 | 采用规则 |
 | --- | --- |
@@ -194,7 +194,7 @@ public client 的 ID 和 CIMD 不能密码学证明“当前进程一定是官�
 
 回调只接受登记规则允许的 HTTPS 或符合原生 OAuth 规范的 loopback；精确校验 scheme、host、path，动态端口只按标准原生 loopback 例外实现，不能通配任意主机或路径。实际客户端版本报告的回调先进入管理登记，再做联调。
 
-### 5.5 Token 与原业务身份的衔接
+### 5.6 Token 与原业务身份的衔接
 
 MCP resource server 验证自己的 issuer、audience / resource、expiry、grant、client 和 scope，不接受模型 Key、后台 cookie、任意平台 API token 或另一 resource 的 token。不透传 MCP token 给原业务 HTTP，也不拿管理员服务账号代所有人执行。
 
