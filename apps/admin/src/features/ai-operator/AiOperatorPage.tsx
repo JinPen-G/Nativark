@@ -1,21 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Download, PanelRightClose, PanelRightOpen, Plus, Square, X } from "lucide-react";
+import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, X } from "lucide-react";
 import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
-import { ChatThread, ChatComposer } from "@/registry/components/chat-thread/chat-thread";
+import { AiChat } from "./archive/ai-chat/AiChat";
+import { AgentRun } from "./archive/agent-run/AgentRun";
+import { BrandMark } from "./archive/shared/BrandMark";
+import { OPERATOR_MODELS } from "./demo-response";
 import { ResizablePanels, ResizablePanel } from "@/registry/components/resizable-panels/resizable-panels";
-import { Accordion } from "@/registry/components/accordion/accordion";
 import { Card } from "@/registry/components/card/card";
 import { useOperator, type OperatorTask } from "./OperatorContext";
 import { OPERATOR_CAPABILITIES, type OperatorArtifact } from "./capabilities";
-import { ADMIN_DEFAULT_MARK, resolveAdminBrandName } from "@/app/branding";
+import { resolveAdminBrandName } from "@/app/branding";
 import { useAuthStore } from "@/features/auth/authStore";
 import "./ai-operator.css";
+import "./archive-adapter.css";
 
-const participants = [{ id: "me", name: "我" }, { id: "agent", name: "AI运营官", avatar: ADMIN_DEFAULT_MARK }];
-const steps = ["确定演示场景与信息范围", "整理示例资料与呈现方式", "生成可核对的示例结果"];
 const frequencyLabels = { daily: "每天", weekdays: "工作日", weekly: "每周一" };
 function useNarrow() {
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 1050px)").matches);
@@ -46,28 +47,19 @@ function OperatorChat() {
     if (separator && narrow && !collapsed) separator.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     if (!narrow) setMobileOpen(false);
   }, [narrow]);
-  const thread = operator.active;
   return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label="AI运营官对话">
-    <header className="operator-chat-header">
-      <div className="operator-chat-title" data-icon-hover=""><AnimatedIcon name={operator.capability.icon} /><div><h1>{operator.capability.name}</h1><span>前端演示 · 未连接模型与业务数据</span></div></div>
-      <Button icon={workOpen && !narrow ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />} aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork}>{workOpen && !narrow ? "收起工作区" : "工作区"}</Button>
-    </header>
     <div className="operator-split" ref={split}>
       <ResizablePanels label="对话与Agent工作区" onLayoutChange={sizes => setWorkOpen(sizes[1] > 1)}>
         <ResizablePanel id="operator-conversation" label="聊天区" defaultSize={60} minSize={340}>
-          <div className="operator-chat-pane">
-            <div className="operator-messages">
-              {!thread.messages.length ? <div className="operator-welcome"><span className="operator-welcome-icon"><AnimatedIcon name="ai" /></span><h2>把经营待办交给AI运营官</h2><p>{operator.capability.description}</p>
-                <Button disabled={!operator.enabled} onClick={() => operator.send({ text: operator.capability.prompt, files: [] })}>{operator.capability.prompt}</Button>
-                <span className="operator-caption">先体验对话、过程和结果，实际执行能力后续接入。</span>
-              </div> : <ChatThread participants={participants} currentUserId="me" messages={thread.messages} composer={false} reactions={[]} locale="zh-CN" label="经营对话记录" />}
-            </div>
-            {thread.messages.length > 0 && <div className="operator-process" aria-label="可见演示步骤"><Accordion defaultOpen={-1} items={[{ title: thread.running ? "正在演示处理流程" : thread.step === 3 ? "示例结果已就绪" : "演示已停止", content: <ol>{steps.map((step, index) => <li key={step} data-complete={thread.step > index}><span>{thread.step > index ? <Check size={15} /> : index + 1}</span>{step}</li>)}</ol> }]} /></div>}
-            <div className="operator-composer-wrap">
-              <div className="operator-composer-meta"><span>{operator.enabled ? "附件仅在本地展示文件名" : "请先在插件页启用此能力"}</span><span>{thread.running ? <Button size="small" icon={<Square size={12} />} onClick={operator.cancel}>停止演示</Button> : "演示模式"}</span></div>
-              <ChatComposer key={thread.id} disabled={thread.running || !operator.enabled} onSend={draft => operator.send(draft)} placeholder="说出你的经营目标…" allowAttachments />
-            </div>
-          </div>
+          <AiChat className="operator-archive-chat"
+            store={{ chats: operator.chats, setChats: operator.setChats, activeId: operator.activeId, objectUrls: operator.objectUrls, setActiveId: operator.selectConversation }}
+            respond={operator.respond} autoPlay={false} models={OPERATOR_MODELS} defaultModel="everyday"
+            disabled={!operator.enabled} greeting={operator.capability.description} placeholder="说出经营目标，或继续补充要求…"
+            suggestions={[{ label: operator.capability.prompt, icon: "activity" }]}
+            onNewChat={() => operator.createConversation(operator.capability.id)}
+            queuedPrompt={operator.queuedPrompt} onQueuedPromptUsed={() => operator.setQueuedPrompt(null)}
+            headerActions={<Button type="text" aria-label={workOpen && !narrow ? "收起工作区" : "打开工作区"} icon={workOpen && !narrow ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />} aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork} />}
+          />
         </ResizablePanel>
         <ResizablePanel id="operator-work" label="Agent工作区" defaultSize={40} minSize={310} maxSize={720} collapsible defaultCollapsed={narrow}>
           {!narrow && <WorkArea />}
@@ -87,8 +79,9 @@ function WorkArea() {
   function download() { if (!artifact) return; const url = URL.createObjectURL(new Blob([printable], { type: "text/plain;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${artifact.title}-示例.txt`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice("已下载示例结果"); }
   return <section className="operator-work-area" aria-label="Agent工作区">
     <header><span><AnimatedIcon name="folder" /> Agent 工作区</span><span className="operator-demo-tag">示例</span></header>
-    <ContentTransition value={`${thread.id}:${thread.step}`} className="operator-work-body">
-      {artifact ? <ArtifactView artifact={artifact} /> : <div className="operator-work-empty"><AnimatedIcon name={thread.running ? "schedule" : "folder"} /><h2>{thread.running ? "正在准备示例结果" : "结果会出现在这里"}</h2><p>{thread.running ? steps[Math.min(thread.step, 2)] : "对话中整理的报价、清单和经营摘要，可在这里核对。"}</p>{thread.running && <progress value={thread.step} max={3} aria-label="演示进度" />}</div>}
+    <ContentTransition value={`${thread.id}:${artifact ? "result" : thread.run ? "run" : "empty"}`} className="operator-work-body">
+      {artifact ? <ArtifactView artifact={artifact} /> : thread.run ? <div className="operator-run-host"><AgentRun key={thread.runId} task={`${operator.capability.name} · 执行过程`} model={{ name: thread.runModel?.name ?? "日常助手", mark: <BrandMark brand={thread.runModel?.brand ?? "openai"} size={14} /> }} run={thread.run} autoPlay={false} activityOnly /></div> : <div className="operator-work-empty"><AnimatedIcon name="folder" /><h2>结果会出现在这里</h2><p>运行时展示资料与工具步骤，完成后在这里核对结果。</p></div>}
+
     </ContentTransition>
     <footer className="operator-work-footer">
       {artifact && <><div className="operator-result-tools"><Button size="small" icon={<Copy size={14} />} onClick={copy}>复制</Button><Button size="small" icon={<Download size={14} />} onClick={download}>下载</Button></div>

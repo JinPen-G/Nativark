@@ -1,14 +1,15 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { ChatDraft, ChatMessage } from "@/registry/components/chat-thread/chat-thread";
+import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { fromMessages, visibleMessages, type ChatConversation, type ChatRespond, type ChatModel } from "./archive/ai-chat/chat-state";
+import type { AgentRunState } from "./archive/agent-run/agent-run-state";
+import { OPERATOR_MODELS, demoAnswer, demoPause, demoResources, demoSteps, demoTool } from "./demo-response";
 import { APP_ROUTES, canAccessRoute } from "@/app/navigation";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OPERATOR_CAPABILITIES, exampleArtifact, type OperatorArtifact } from "./capabilities";
 
 export type OperatorView = "chat" | "plugins" | "automations";
-export interface Conversation { id: string; capabilityId: string; title: string; messages: ChatMessage[]; artifact?: OperatorArtifact; step: number; running: boolean; receipt?: string }
+interface ThreadDetails { capabilityId: string; artifact?: OperatorArtifact; step: number; running: boolean; receipt?: string; run?: AgentRunState; runId?: string; runModel?: ChatModel }
 export interface OperatorTask { id: string; name: string; capabilityId: string; frequency: "daily" | "weekdays" | "weekly"; time: string; prompt: string; enabled: boolean }
 const id = () => crypto.randomUUID();
-const newThread = (capabilityId = "brief"): Conversation => ({ id: id(), capabilityId, title: "新对话", messages: [], step: 0, running: false });
 function useOperatorState() {
   const auth = useAuthStore();
   const permitted = OPERATOR_CAPABILITIES.filter(capability => {
@@ -17,54 +18,95 @@ function useOperatorState() {
   });
   const [disabled, setDisabled] = useState<string[]>([]);
   const available = permitted.filter(item => !disabled.includes(item.id));
-  const [threads, setThreads] = useState<Conversation[]>(() => [newThread(permitted[0]?.id)]);
-  const [activeId, setActiveId] = useState(threads[0].id);
+  const [chats, setChats] = useState<ChatConversation[]>(() => [fromMessages(id(), "新对话", [], "今天"),
+    ...permitted.slice(1, 4).map(item => fromMessages(`demo-history-${item.id}`, `${item.name} · 示例对话`, [
+      { id: id(), role: "user", content: item.prompt },
+      { id: id(), role: "assistant", content: demoAnswer(item), model: OPERATOR_MODELS[0], reasoning: "本地示例：整理资料、核对规则与生成结果；未读取真实业务数据。", thoughtFor: 1,
+        tools: [demoTool(item, 1, "done"), demoTool(item, 2, "done")], sources: demoResources(item), status: "done" },
+    ], "示例对话"))]);
+  const [activeId, setActiveId] = useState(chats[0].id);
+  const [details, setDetails] = useState<Record<string, ThreadDetails>>(() => Object.fromEntries(chats.map((chat, index) => {
+    const selected = index ? permitted[index] : permitted[0];
+    return [chat.id, { capabilityId: selected?.id ?? "brief", running: false, step: index ? 4 : 0, ...(index && selected ? { artifact: exampleArtifact(selected) } : {}) }];
+  })));
   const [view, setView] = useState<OperatorView>("chat");
   const [tasks, setTasks] = useState<OperatorTask[]>([]);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const generation = useRef(0), alive = useRef(true);
+  const [queuedPrompt, setQueuedPrompt] = useState<{ id: string; text: string; chatId: string } | null>(null);
+  const request = useRef<AbortController | null>(null), generation = useRef(0);
+  const alive = useRef(true), objectUrls = useRef<string[]>([]), demoFailures = useRef(new Set<string>());
+  const threads = chats.map(chat => ({ ...chat, messages: visibleMessages(chat), ...(details[chat.id] ?? { capabilityId: permitted[0]?.id ?? "brief", running: false, step: 0 }) }));
   const threadsRef = useRef(threads); threadsRef.current = threads;
   const active = threads.find(thread => thread.id === activeId) ?? threads[0];
   const capability = OPERATOR_CAPABILITIES.find(item => item.id === active.capabilityId) ?? OPERATOR_CAPABILITIES[0];
   const enabled = available.some(item => item.id === active.capabilityId);
-  const patch = (threadId: string, update: (thread: Conversation) => Conversation) => setThreads(previous => previous.map(thread => thread.id === threadId ? update(thread) : thread));
-  function cancel() {
-    generation.current++;
-    timers.current.forEach(clearTimeout); timers.current = [];
-    setThreads(previous => previous.map(thread => thread.running ? { ...thread, running: false,
-      messages: [...thread.messages, { id: id(), authorId: "agent", createdAt: Date.now(), text: "演示已停止。你可以调整要求后重新发送。" }] } : thread));
-  }
-  useEffect(() => { alive.current = true; return () => { alive.current = false; generation.current++; timers.current.forEach(clearTimeout); }; }, []);
+  const patch = useCallback((threadId: string, update: (thread: ThreadDetails) => ThreadDetails) => {
+    setDetails(previous => ({ ...previous, [threadId]: update(previous[threadId] ?? { capabilityId: "brief", running: false, step: 0 }) }));
+  }, []);
+  function cancel() { generation.current++; request.current?.abort(); request.current = null; }
+  useEffect(() => { alive.current = true; return () => { alive.current = false; request.current?.abort(); objectUrls.current.forEach(url => URL.revokeObjectURL(url)); }; }, []);
   function createConversation(capabilityId = available[0]?.id ?? permitted[0]?.id ?? "brief") {
-    cancel(); const thread = newThread(capabilityId);
-    setThreads(previous => [thread, ...previous].slice(0, 20)); setActiveId(thread.id); setView("chat");
-    return thread.id;
+    cancel(); const threadId = id();
+    setChats(previous => [fromMessages(threadId, "新对话", [], "今天"), ...previous].slice(0, 20));
+    patch(threadId, () => ({ capabilityId, running: false, step: 0 }));
+    setActiveId(threadId); setView("chat"); return threadId;
   }
   function selectConversation(threadId: string) { if (activeId !== threadId) cancel(); setActiveId(threadId); setView("chat"); }
   function chooseCapability(capabilityId: string) {
     const previous = threadsRef.current.find(thread => thread.capabilityId === capabilityId);
     if (previous) selectConversation(previous.id); else createConversation(capabilityId);
   }
-  function send(draft: ChatDraft, threadId = activeId, capabilityId = active.capabilityId) {
-    if ((!draft.text.trim() && !draft.files.length) || !available.some(item => item.id === capabilityId)) return;
-    cancel(); const token = generation.current;
-    const selected = OPERATOR_CAPABILITIES.find(item => item.id === capabilityId)!;
-    patch(threadId, thread => ({ ...thread, title: draft.text.trim().slice(0, 18) || "附件演示", artifact: undefined, receipt: undefined, running: true, step: 0,
-      messages: [...thread.messages, { id: id(), authorId: "me", createdAt: Date.now(), text: draft.text,
-        attachments: draft.files.map(file => ({ id: id(), name: file.name, kind: "file", size: file.size })) },
-      { id: id(), authorId: "agent", createdAt: Date.now(), text: `我会演示如何整理「${selected.name}」的结果。当前未连接模型或业务数据${draft.files.length ? "；附件仅显示文件名，不会上传或解析" : ""}。` }] }));
-    [400, 900, 1500].forEach((delay, index) => timers.current.push(setTimeout(() => {
-      if (!alive.current || token !== generation.current) return;
-      patch(threadId, thread => ({ ...thread, step: index + 1, running: index !== 2,
-        ...(index === 2 ? { artifact: exampleArtifact(selected), messages: [...thread.messages,
-          { id: id(), authorId: "agent", createdAt: Date.now(), text: `「${exampleArtifact(selected).title}」已在工作区展示。你可以核对示例结果，或继续提出要求。` }] } : {}) }));
-    }, delay)));
-  }
+  const respond: ChatRespond = async function* (messages, { signal, model, chatId }) {
+    const threadId = chatId ?? activeId;
+    const selectedThread = threadsRef.current.find(thread => thread.id === threadId);
+    const selected = OPERATOR_CAPABILITIES.find(item => item.id === selectedThread?.capabilityId) ?? capability;
+    if (!available.some(item => item.id === selected.id)) { yield { type: "error", message: "请先在插件页启用此能力。" }; return; }
+    cancel(); const token = generation.current, abort = new AbortController(); request.current = abort;
+    const stop = () => abort.abort(); signal.addEventListener("abort", stop, { once: true }); if (signal.aborted) abort.abort();
+    const spec = demoSteps(selected), started = performance.now(), runId = id();
+    const current = () => alive.current && token === generation.current && !abort.signal.aborted;
+    const publish = (index: number, complete = false) => {
+      if (!current()) return;
+      const steps = spec.slice(0, index + 1).map((step, i) => ({ ...step, status: i < index || complete ? "done" as const : "running" as const, durationMs: i < index || complete ? 900 : undefined, ...(step.progress ? { progress: { ...step.progress, value: complete || i < index ? step.progress.total : 1 } } : {}) }));
+      patch(threadId, previous => ({ ...previous, step: index, running: !complete, runModel: model, run: { status: complete ? "done" : "working", elapsedMs: performance.now() - started, steps } }));
+    };
+    const prompt = messages.filter(message => message.role === "user").at(-1)?.content ?? selected.name;
+    setChats(previous => previous.map(chat => chat.id === threadId ? { ...chat, title: prompt.slice(0, 26) || "附件演示" } : chat));
+    patch(threadId, previous => ({ ...previous, running: true, artifact: undefined, receipt: undefined, runId }));
+    try {
+      publish(0);
+      yield { type: "reasoning", delta: `本地执行摘要：确定${selected.name}的资料范围，读取示例记录，核对关联规则，再整理可核对的结果。` };
+      await demoPause(700, abort.signal);
+      yield { type: "reasoning-end", seconds: 1 };
+      for (const index of [1, 2, 3]) {
+        publish(index);
+        if (index < 3) yield { type: "tool", tool: demoTool(selected, index, "running") };
+        await demoPause(950, abort.signal);
+        const failureKey = `${threadId}:${prompt}`;
+        if (index === 1 && /\[error\]|模拟失败/.test(prompt) && !demoFailures.current.has(failureKey)) {
+          demoFailures.current.add(failureKey);
+          yield { type: "tool", tool: { ...demoTool(selected, index, "error"), summary: "模拟读取失败", output: "本地演示：点击重试可重新运行，没有请求真实服务。" } };
+          throw new Error("示例读取失败。可点击重试，继续体验本地流程。");
+        }
+        if (index < 3) yield { type: "tool", tool: demoTool(selected, index, "done") };
+      }
+      yield { type: "sources", sources: demoResources(selected) };
+      for (const chunk of demoAnswer(selected).match(/.{1,14}/gs) ?? []) {
+        await demoPause(28, abort.signal); yield { type: "text", delta: chunk };
+      }
+      if (current()) { publish(3, true); patch(threadId, previous => ({ ...previous, artifact: exampleArtifact(selected) })); }
+    } finally {
+      signal.removeEventListener("abort", stop);
+      if (alive.current && request.current === abort) request.current = null;
+      // Only this run may finish its workspace. A newer run owns subsequent updates.
+      if (alive.current) {
+        patch(threadId, previous => previous.runId === runId && previous.running ? { ...previous, running: false, run: previous.run ? { ...previous.run, status: "stopped", steps: previous.run.steps.map(step => step.status === "running" ? { ...step, status: "rejected", doneVerb: "已停止" } : step) } : undefined } : previous);
+      }
+    }
+  };
   function runTask(task: OperatorTask) {
     if (!available.some(item => item.id === task.capabilityId)) return;
-    const threadId = createConversation(task.capabilityId);
-    // State updates are queued in order; the local demo targets the newly created thread explicitly.
-    send({ text: task.prompt, files: [] }, threadId, task.capabilityId);
+    const chatId = createConversation(task.capabilityId);
+    setQueuedPrompt({ id: id(), text: task.prompt, chatId });
   }
   function confirm() {
     if (!active.artifact || active.running) return;
@@ -74,7 +116,7 @@ function useOperatorState() {
     if (!next && active.capabilityId === capabilityId) cancel();
     setDisabled(previous => next ? previous.filter(value => value !== capabilityId) : [...new Set([...previous, capabilityId])]);
   }
-  return { permitted, available, disabled, togglePlugin, threads, active, capability, enabled, view, setView, createConversation, selectConversation, chooseCapability, send, cancel, confirm, tasks, setTasks, runTask };
+  return { permitted, available, disabled, togglePlugin, chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, threads, active, capability, enabled, view, setView, createConversation, selectConversation, chooseCapability, cancel, confirm, tasks, setTasks, runTask };
 }
 type OperatorState = ReturnType<typeof useOperatorState>;
 const OperatorContext = createContext<OperatorState | null>(null);
