@@ -1,7 +1,6 @@
 /* Product adaptation only. Chat, composer, split interaction and card surfaces are original UIArc components. */
 .operator-mode-switch { padding: var(--space-1) var(--space-2) var(--space-2); }
 .operator-mode-expanded .arc-segmented { width: 100%; }
-.operator-mode-expanded [role="radiogroup"] { width: 100%; }
 .operator-mode-collapsed { display: none; }
 [data-slot="sidebar"][data-collapsible="icon"] .operator-mode-expanded { display: none; }
 [data-slot="sidebar"][data-collapsible="icon"] .operator-mode-collapsed { display: flex; justify-content: center; }

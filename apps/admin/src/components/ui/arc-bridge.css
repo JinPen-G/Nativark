@@ -27,6 +27,10 @@
   background: var(--accent); border-color: var(--accent); color: var(--accent-foreground);
 }
 .arc-segmented-block > div { width: 100%; }
+/* Block sizing applies to the original inner track and options, not just its frame. */
+.arc-segmented-block > [role="group"] { display: flex; }
+.arc-segmented-block > [role="group"] > div { flex: 1; }
+.arc-segmented-block > [role="group"] > div > button { display: flex; flex: 1 1 0; align-items: center; justify-content: center; min-width: 0; padding-inline: var(--space-2); }
 /* Layout-only integration: tabs with externally rendered content and tabs owning
  * panels share one spacing role. Outgoing popLayout panels keep their source origin. */
 .rental-tabs-navigation { margin-block-end: var(--rental-layout-tabs-content-gap); }
