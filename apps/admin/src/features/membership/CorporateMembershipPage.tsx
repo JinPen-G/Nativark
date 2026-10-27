@@ -275,7 +275,7 @@ export function CorporateMembershipPage() {
         </> },
         { key: "invoice", label: t("开票资料"), disabled: !selected, children: <QueryState loading={invoiceProfiles.isLoading} error={invoiceProfiles.error}>
           <ListSection controls={<Button disabled={!canManage} onClick={() => openInvoice()}>{t("新增开票资料")}</Button>}>
-          <Table<CustomerCorporateInvoiceProfile> rowKey="id" size="small" onRefresh={() => invoiceProfiles.refetch()} loading={invoiceProfiles.isFetching} dataSource={invoiceProfiles.data ?? []} pagination={false} scroll={{ x: 720 }} columns={[
+          <Table<CustomerCorporateInvoiceProfile> rowKey="id" size="small" onRefresh={() => invoiceProfiles.refetch()} loading={invoiceProfiles.isLoading} refreshing={invoiceProfiles.isFetching} dataSource={invoiceProfiles.data ?? []} pagination={false} scroll={{ x: 720 }} columns={[
             { title: t("开票抬头"), dataIndex: "title" },
             { title: t("类型"), render: (_, row) => row.invoiceType === "vat_special" ? t("增值税专用发票") : t("增值税普通发票") },
             { title: t("税号"), dataIndex: "taxNo" },
@@ -303,7 +303,7 @@ export function CorporateMembershipPage() {
         </QueryState> },
         { key: "contracts", label: t("企业合同"), disabled: !selected, children: <QueryState loading={contracts.isLoading} error={contracts.error}>
           <ListSection controls={<Button disabled={!canManage} onClick={() => openContract()}>{t("新增合同")}</Button>}>
-          <Table<CustomerCorporateContract> rowKey="id" size="small" onRefresh={() => contracts.refetch()} loading={contracts.isFetching} dataSource={contracts.data ?? []} pagination={false} scroll={{ x: 760 }} columns={[
+          <Table<CustomerCorporateContract> rowKey="id" size="small" onRefresh={() => contracts.refetch()} loading={contracts.isLoading} refreshing={contracts.isFetching} dataSource={contracts.data ?? []} pagination={false} scroll={{ x: 760 }} columns={[
             { title: t("合同编号"), dataIndex: "contractNo" }, { title: t("合同名称"), dataIndex: "name" },
             { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 10)} ~ ${row.effectiveTo?.slice(0, 10) ?? t("长期")}` },
             { title: t("状态"), dataIndex: "status" },
@@ -344,7 +344,7 @@ export function CorporateMembershipPage() {
           <Form.Item name="reason" label={t("说明")}><Input.TextArea rows={2} /></Form.Item>
           <SaveButton disabled={!canEmployeeManage} label={t("添加/更新成员")} form={employeeForm} pending={saveEmployee.isPending} onSave={async values => { const operation = canEmployeeManage && saveEmployee.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form></Card>}
-        <ListSection title={t("管理员与员工")} extra={canEmployeeManage && <Button type="primary" disabled={selected?.membershipStatus !== "active"} onClick={() => { employeeForm.resetFields(); setEmployeeEditorOpen(true); }}>{t("添加/更新成员")}</Button>}><Table<CustomerCorporateMembership> rowKey="id" size="small" loading={employees.isFetching} onRefresh={() => employees.refetch()} dataSource={employees.data ?? []} pagination={false} columns={[
+        <ListSection title={t("管理员与员工")} extra={canEmployeeManage && <Button type="primary" disabled={selected?.membershipStatus !== "active"} onClick={() => { employeeForm.resetFields(); setEmployeeEditorOpen(true); }}>{t("添加/更新成员")}</Button>}><Table<CustomerCorporateMembership> rowKey="id" size="small" loading={employees.isLoading} refreshing={employees.isFetching} onRefresh={() => employees.refetch()} dataSource={employees.data ?? []} pagination={false} columns={[
           { title: t("个人会员"), dataIndex: "personalCustomerName", render: (_, row) => <CustomerPreview customerId={row.personalCustomerId} name={row.personalCustomerName ?? "—"} type="personal" /> },
           { title: t("角色"), dataIndex: "role", render: (value) => value === "admin" ? t("企业管理员") : t("企业员工") },
           { title: t("部门"), dataIndex: "department", render: (value) => value ?? "—" },
@@ -372,7 +372,7 @@ export function CorporateMembershipPage() {
               {creditAccount.data.availableAmount < 0 && <Alert type="error" showIcon title={t("当前授信敞口已超过额度，请先处理应收或授信配置。")} style={{ marginTop: 12 }} />}
             </ListSection>
             <ListSection title={t("授信账务流水")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-              <Table<CustomerCorporateCreditLedgerEntry> rowKey="id" size="small" onRefresh={() => creditLedger.refetch()} loading={creditLedger.isFetching} dataSource={creditLedger.data ?? []} pagination={{ defaultPageSize: 20 }} scroll={{ x: 960 }} columns={[
+              <Table<CustomerCorporateCreditLedgerEntry> rowKey="id" size="small" onRefresh={() => creditLedger.refetch()} loading={creditLedger.isLoading} refreshing={creditLedger.isFetching} dataSource={creditLedger.data ?? []} pagination={{ defaultPageSize: 20 }} scroll={{ x: 960 }} columns={[
                 { title: t("发生时间"), dataIndex: "occurredAt", render: (value: string) => new Date(value).toLocaleString() },
                 { title: t("业务类型"), dataIndex: "entryType", render: (value: CustomerCorporateCreditLedgerEntry["entryType"]) => t(creditEntryLabel[value]) },
                 { title: t("发生金额"), render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) => formatRentalMoney(row.amount, row.currency) },
@@ -407,7 +407,7 @@ export function CorporateMembershipPage() {
     <ListSection controls={<ListFilters filter={corporateFilter} placeholder="企业、联系人或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}>
       <Table<CorporateMembershipMember>
         importConfig={corporateImport(t, () => corporates.refetch({ throwOnError: true }))}
-        exportConfig={{ filename: t("企业会员"), fields: [{ label: t("企业"), value: row => row.corporateName }, { label: t("联系人"), value: row => row.name }, { label: t("联系电话"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => corporates.refetch()} loading={corporates.isFetching} dataSource={corporateFilter.rows} pagination={corporateFilter.pagination} columns={[
+        exportConfig={{ filename: t("企业会员"), fields: [{ label: t("企业"), value: row => row.corporateName }, { label: t("联系人"), value: row => row.name }, { label: t("联系电话"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => corporates.refetch()} loading={corporates.isLoading} refreshing={corporates.isFetching} dataSource={corporateFilter.rows} pagination={corporateFilter.pagination} columns={[
         { title: t("企业"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.corporateName ?? row.name} type="corporate" phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> },
         { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus] ?? row.membershipStatus)}</Tag> },
         { title: t("企业管理员"), dataIndex: "adminCount" },
@@ -462,7 +462,7 @@ export function CorporateMembershipPage() {
           <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <ListSection title={t("当前方案授予记录")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
+          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} refreshing={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
             { title: t("方案"), render: (_, row) => row.snapshot.planName },
             { title: t("权益适用范围"), render: (_, row) => <MembershipBenefitScopeSummary benefits={row.snapshot.benefits} options={scopeOptions.data} /> },
             { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 16).replace("T", " ")} ~ ${row.effectiveTo?.slice(0, 16).replace("T", " ") ?? t("长期")}` },

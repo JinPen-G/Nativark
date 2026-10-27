@@ -137,7 +137,7 @@ export function WorkbenchPage() {
           size="small"
           rowKey="id"
           pagination={false}
-          onRefresh={() => todos.refetch()} loading={todos.isFetching} dataSource={(todos.data?.items ?? []).slice(0, 8)}
+          onRefresh={() => todos.refetch()} loading={todos.isLoading} refreshing={todos.isFetching} dataSource={(todos.data?.items ?? []).slice(0, 8)}
           locale={{ emptyText: t("当前空间没有需要处理的待办") }}
           columns={[
             { title: t("事项"), render: (_, item) => <Space orientation="vertical" size={4} style={{ alignItems: "flex-start" }}><Tag color={todoTypeColors[item.type]}>{t(todoTypeLabels[item.type])}</Tag><Typography.Text strong>{item.title}</Typography.Text>{item.orderNo && <Typography.Text type="secondary">{item.orderNo}</Typography.Text>}</Space> },
@@ -150,7 +150,7 @@ export function WorkbenchPage() {
       </ListSection>
       {showMetrics && <div className="workspace-grid">
         {canViewOrders && <ListSection title={<span className="panel-title">{t("订单状态")} <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
-          <Table pagination={false} rowKey="status" onRefresh={() => report.refetch()} loading={report.isFetching} dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
+          <Table pagination={false} rowKey="status" onRefresh={() => report.refetch()} loading={report.isLoading} refreshing={report.isFetching} dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
             { title: t("阶段"), dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
             { title: t("订单数"), dataIndex: "count", align: "right" },
             { title: t("占比"), align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }

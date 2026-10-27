@@ -380,7 +380,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <QueryState loading={pricing.isLoading || pricingGroups.isLoading || versions.isLoading || currentPriceVersionDetail.isLoading} error={pricing.error || pricingGroups.error || versions.error || currentPriceVersionDetail.error}>
             <Table<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }>
               rowKey={(row) => `${row.group.id}:${row.rate?.unit ?? "unpriced"}`}
-              onRefresh={() => Promise.all([pricingGroups.refetch({ throwOnError: true }), versions.refetch({ throwOnError: true }), ...(currentPriceVersion ? [currentPriceVersionDetail.refetch({ throwOnError: true })] : [])])} loading={pricingGroups.isFetching || versions.isFetching || currentPriceVersionDetail.isFetching} dataSource={currentPricingRows}
+              onRefresh={() => Promise.all([pricingGroups.refetch({ throwOnError: true }), versions.refetch({ throwOnError: true }), ...(currentPriceVersion ? [currentPriceVersionDetail.refetch({ throwOnError: true })] : [])])} loading={pricingGroups.isLoading || versions.isLoading || currentPriceVersionDetail.isLoading} refreshing={pricingGroups.isFetching || versions.isFetching || currentPriceVersionDetail.isFetching} dataSource={currentPricingRows}
               columns={[
                 {
                   title: t("定价分组"),
@@ -406,7 +406,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </ListSection>
           {unpricedCount > 0 && <Alert type="warning" showIcon title={locale === "en-US" ? `${unpricedCount} legacy groups are missing base prices` : `有 ${unpricedCount} 个历史分组缺少基本价`} description={t("本页不再负责初始化。请停用该历史分组，并在定价分组页按新流程重新建立并填写基本价。")} />}
           <ListSection title={t("调价计划")}>
-            <Table rowKey="id" loading={adjustments.isFetching} onRefresh={() => adjustments.refetch()} dataSource={adjustments.data ?? []} columns={[
+            <Table rowKey="id" loading={adjustments.isLoading} refreshing={adjustments.isFetching} onRefresh={() => adjustments.refetch()} dataSource={adjustments.data ?? []} columns={[
               { title: t("计划"), render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },
               { title: t("生效时间"), render: (_, row) => row.scheduledAt ? dayjs(row.scheduledAt).format("YYYY-MM-DD HH:mm") : t("确认后立即") },
               { title: t("调整范围"), render: (_, row) => locale === "en-US" ? `${row.changes.length} price items` : `${row.changes.length} 个价格项` },
@@ -423,7 +423,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             <Table<RentalDiscountPlan>
               cardView={discountCards({ t, money, pricingGroups: pricingGroups.data ?? [], customerLabel: key => t(customerScopeLabels[key] ?? key), edit: editDiscount })} exportConfig={{ filename: t("优惠方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("状态"), value: row => row.status }] }}
               rowKey="id"
-              onRefresh={() => discounts.refetch()} loading={discounts.isFetching} dataSource={discountFilter.rows} pagination={discountFilter.pagination}
+              onRefresh={() => discounts.refetch()} loading={discounts.isLoading} refreshing={discounts.isFetching} dataSource={discountFilter.rows} pagination={discountFilter.pagination}
               columns={[
                 {
                   title: t("方案"),
@@ -482,7 +482,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             <Table<RentalValueAddedService>
               cardView={serviceCards({ t, money, serviceLabel: key => t(serviceTypeLabels[key] ?? key), billingLabel: key => t(billingUnitLabels[key] ?? key), edit: editService, capacity: setCapacityService })} exportConfig={{ filename: t("增值服务"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("类型"), value: row => t(serviceTypeLabels[row.serviceType] ?? row.serviceType) }, { label: t("状态"), value: row => row.status }] }}
               rowKey="id"
-              onRefresh={() => services.refetch()} loading={services.isFetching} dataSource={serviceFilter.rows} pagination={serviceFilter.pagination}
+              onRefresh={() => services.refetch()} loading={services.isLoading} refreshing={services.isFetching} dataSource={serviceFilter.rows} pagination={serviceFilter.pagination}
               columns={[
                 {
                   title: t("服务"),
@@ -610,7 +610,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       </>}
       {versionsOpen && <RecordDetailLayout title={t("空间价格版本")} onBack={() => navigate("/rental/pricing")}><QueryState loading={versions.isLoading} error={versions.error}><ListSection>
 
-        <Table rowKey="id" loading={versions.isFetching} onRefresh={() => versions.refetch()} dataSource={versions.data?.rows ?? []} columns={[
+        <Table rowKey="id" loading={versions.isLoading} refreshing={versions.isFetching} onRefresh={() => versions.refetch()} dataSource={versions.data?.rows ?? []} columns={[
           { title: t("版本"), dataIndex: "version" },
           { title: t("生效时间"), dataIndex: "effectiveFrom", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
           { title: t("价格条目"), dataIndex: "rateCount", render: (value) => locale === "en-US" ? `${value} items` : `${value} 条` },
@@ -629,7 +629,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <Table
           toolbarNote={<span className="muted">{versionSequence && versionSequence > 1 ? (locale === "en-US" ? `Compared with v${versionSequence - 1}` : `对比 v${versionSequence - 1}`) : t("首个价格版本")}</span>}
           rowKey={pricingRateKey}
-          loading={versionDetail.isFetching || previousVersion.isFetching}
+          loading={versionDetail.isLoading || previousVersion.isLoading} refreshing={versionDetail.isFetching || previousVersion.isFetching}
           onRefresh={() => Promise.all([versionDetail.refetch({ throwOnError: true }), ...(versionSequence && versionSequence > 1 ? [previousVersion.refetch({ throwOnError: true })] : [])])} dataSource={versionDetail.data?.rates ?? []}
           columns={[
             { title: t("定价分组"), render: (_, row) => `${row.pricingGroupCode ?? row.itemGroupCode} · ${row.pricingGroupName ?? row.itemGroupName}` },
@@ -884,7 +884,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <QueryState loading={capacities.isLoading} error={capacities.error}>
           <Table<RentalServiceCapacity>
             rowKey="id"
-            onRefresh={() => capacities.refetch()} loading={capacities.isFetching} dataSource={capacities.data ?? []}
+            onRefresh={() => capacities.refetch()} loading={capacities.isLoading} refreshing={capacities.isFetching} dataSource={capacities.data ?? []}
             columns={[
               { title: t("地点"), dataIndex: "locationId", render: (value) => locations.data?.find((row) => row.id === value)?.name ?? value },
               { title: t("开始"), dataIndex: "windowStart", render: (value) => dayjs(value).format("YYYY-MM-DD HH:mm") },

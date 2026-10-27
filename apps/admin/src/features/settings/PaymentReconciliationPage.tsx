@@ -118,7 +118,7 @@ export function PaymentReconciliationPage() {
       <QueryState loading={batches.isLoading} error={batches.error} onRetry={() => batches.refetch({ throwOnError: true })}>
         <Table<PaymentStatementBatchSummary>
           rowKey="id"
-          onRefresh={() => batches.refetch()} loading={batches.isFetching} dataSource={batchFilter.rows}
+          onRefresh={() => batches.refetch()} loading={batches.isLoading} refreshing={batches.isFetching} dataSource={batchFilter.rows}
           pagination={batchFilter.pagination}
           locale={{ emptyText: <Empty description={t("当前经营空间还没有导入对账文件")} /> }}
           columns={[
@@ -148,7 +148,7 @@ export function PaymentReconciliationPage() {
           <Table<PaymentStatementLineSummary>
             rowKey="id"
             size="small"
-            onRefresh={() => detail.refetch()} loading={detail.isFetching} dataSource={lineFilter.rows}
+            onRefresh={() => detail.refetch()} loading={detail.isLoading} refreshing={detail.isFetching} dataSource={lineFilter.rows}
             pagination={lineFilter.pagination}
             scroll={{ x: 980 }}
             columns={[

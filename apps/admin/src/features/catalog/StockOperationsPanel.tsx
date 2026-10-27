@@ -87,7 +87,7 @@ export function StockOperationsPanel({
     <ListSection title={<Space><HistoryOutlined />{t("库存流水")}</Space>} extra={canManage && <Button icon={<PlusOutlined />} onClick={openEditor}>{t("新增库存作业")}</Button>} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
       <Table<RentalStockLedgerEntry>
         rowKey="id"
-        loading={ledger.isFetching}
+        loading={ledger.isLoading} refreshing={ledger.isFetching}
         onRefresh={() => ledger.refetch()} dataSource={ledger.data ?? []}
         pagination={{ pageSize: 8 }}
         scroll={{ x: 1200 }}

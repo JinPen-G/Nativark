@@ -145,7 +145,7 @@ export function MembershipPlanPage() {
 
     {scopeOptions.error && <Alert type="error" showIcon title={t("适用范围名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
     <ListSection controls={<ListFilters filter={planFilter} placeholder="方案名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }, { value: "draft", label: "草稿" }]} />}>
-      <Table<CustomerMembershipPlan> rowKey="id" onRefresh={() => plans.refetch()} loading={plans.isFetching} dataSource={planFilter.rows} pagination={planFilter.pagination} scroll={{ x: 1100 }}
+      <Table<CustomerMembershipPlan> rowKey="id" onRefresh={() => plans.refetch()} loading={plans.isLoading} refreshing={plans.isFetching} dataSource={planFilter.rows} pagination={planFilter.pagination} scroll={{ x: 1100 }}
         exportConfig={{ filename: t("会员方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("方案"), value: row => row.name }, { label: t("适用会员"), value: row => t(row.targetType === "corporate" ? "企业会员" : "个人会员") }, { label: t("版本"), value: row => row.currentVersion?.version }, { label: t("状态"), value: row => t(row.status === "active" ? "已启用" : row.status === "disabled" ? "已停用" : "草稿") }] }}
         batchActions={planBatchActions(refresh)}
         cardView={membershipPlanCards({ t, options: scopeOptions.data, canManage, canPublish, publishing: publish.isPending, edit: open, history: setHistoryPlan, publish: row => { if (row.currentVersion?.status === "draft" && canPublish) publish.mutate({ planId: row.id, versionId: row.currentVersion.id }); } })} columns={[

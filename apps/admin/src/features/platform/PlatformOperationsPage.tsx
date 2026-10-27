@@ -55,7 +55,7 @@ export function PlatformOperationsPage() {
           {
             key: "capabilities",
             label: t("集成能力"),
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="capability" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.capabilities ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="capability" onRefresh={() => infra.refetch()} loading={infra.isLoading} refreshing={infra.isFetching} dataSource={infra.data?.capabilities ?? []} columns={[
               { title: t("能力"), render: (_, record) => <><b>{t(capabilityLabels[record.capability] ?? record.name)}</b><br /><span className="muted">{record.provider}</span></> },
               { title: t("模式"), dataIndex: "mode", render: (value) => <Tag color={value === "real" ? "success" : value === "mock" ? "blue" : "default"}>{value}</Tag> },
               { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value)}</Tag> },
@@ -67,7 +67,7 @@ export function PlatformOperationsPage() {
           {
             key: "files",
             label: `${t("文件")} (${infra.data?.files.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.files ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isLoading} refreshing={infra.isFetching} dataSource={infra.data?.files ?? []} columns={[
               { title: t("文件"), render: (_, record) => <><b>{record.fileName}</b><br /><span className="muted">{record.mimeType}</span></> },
               { title: t("业务模块"), dataIndex: "businessModule" },
               { title: t("业务类型"), dataIndex: "businessType" },
@@ -80,7 +80,7 @@ export function PlatformOperationsPage() {
           {
             key: "notifications",
             label: `${t("通知日志")} (${infra.data?.notificationLogs.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.notificationLogs ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isLoading} refreshing={infra.isFetching} dataSource={infra.data?.notificationLogs ?? []} columns={[
               { title: t("模板 / 业务"), render: (_, record) => <><b>{record.templateCode ?? t("自定义")}</b><br /><span className="muted">{record.businessType} · {record.businessId ?? "—"}</span></> },
               { title: t("接收方"), render: (_, record) => `${record.targetName ?? record.targetType} ${record.targetMasked ?? ""}` },
               { title: t("渠道"), dataIndex: "channels", render: (values: string[]) => <Space>{values.map((value) => <Tag key={value}>{t(value)}</Tag>)}</Space> },
@@ -92,7 +92,7 @@ export function PlatformOperationsPage() {
           {
             key: "jobs",
             label: `${t("异步任务")} (${infra.data?.jobs.length ?? 0})`,
-            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isFetching} dataSource={infra.data?.jobs ?? []} columns={[
+            children: <QueryState loading={infra.isLoading} error={infra.error}><Table rowKey="id" onRefresh={() => infra.refetch()} loading={infra.isLoading} refreshing={infra.isFetching} dataSource={infra.data?.jobs ?? []} columns={[
               { title: t("任务类型"), dataIndex: "jobType", render: (value, record) => <><b>{value}</b><br /><span className="muted">{record.businessType ?? t("平台")} · {record.businessId ?? "—"}</span></> },
               { title: t("计划时间"), dataIndex: "scheduledAt", render: (value) => value ?? t("立即") },
               { title: t("尝试次数"), render: (_, record) => `${record.attempt} / ${record.maxAttempts}` },

@@ -33,13 +33,14 @@ the full reserved catalog/helper files are not bundled.
 
 ## Data and selection contract
 
-- `DataTable animated` is opt-in; only orders currently enables it.
+- `DataTable animated` is opt-in; orders and the shared business-table adapter enable it.
+  The adapter tracks only explicit scalar `dataIndex` facts; render-only columns are not guessed.
 - Stable order IDs retain row/cell identity. Page/filter/scope changes reset motion history;
   sorting retains matching row identity for repositioning, but resets change announcements.
 - Explicit column `meta.motion.value` fingerprints facts. Locale switches, selection and
   the reminder clock do not count as data edits. Hidden columns remain available.
-- Loading uses four skeleton rows with the upstream pulse; refresh preserves old rows and
-  shows a pulsing indeterminate line, never fake percentage or simulated success.
+- First loading uses skeleton rows. Same-query background refresh keeps rows visible;
+  only blocking loads or placeholder rows use the existing table overlay. No simulated feed.
 - Currency display continues using the business formatter. Animated intermediate numbers
   are visual only; the exact current amount remains screen-reader-readable. A currency change
   resets the numeric context; missing/non-finite amounts are not animated as zero.
@@ -50,7 +51,7 @@ the full reserved catalog/helper files are not bundled.
   The header selects/deselects **this page only**. Off-page counts come from the ID map, not
   TanStack's current-page selected row model. No unqueried “select all results” is implied.
 - Selection is in-memory for this mounted page, not a saved view or authorization grant.
-  Identity/tenant/workspace changes clear it. Refresh/error/placeholder rows cannot be newly
+  Identity/tenant/workspace changes clear it. Blocking loads/error/placeholder rows cannot be newly
   selected; clearing an existing selection remains possible. No batch mutation is invented.
 
 Validation uses the existing order-list offline test, type/static checks and ai-offline build.

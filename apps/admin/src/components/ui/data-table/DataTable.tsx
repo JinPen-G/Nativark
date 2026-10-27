@@ -98,8 +98,10 @@ function CellContent<T>({ cell, animated, paused }: { cell: Cell<T, unknown>; an
     renderNumber={config.renderNumber ? formatted => config.renderNumber!(formatted, row) : undefined} paused={paused}>{content}</DataTableCellMotion>;
 }
 
-export function DataTable<T>({ table, caption, busy, loading, empty, footer, animated = false, motionScope = "", compactHeader = false, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
+export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, footer, animated = false, motionScope = "", compactHeader = false, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
   table: TanstackTable<T>; caption: string; busy?: boolean; loading?: boolean;
+  /** Background revalidation is not placeholder data or a blocking load. */
+  refreshing?: boolean;
   empty: ReactNode; footer?: ReactNode; animated?: boolean;
   /** Reset motion history on page/filter/scope changes; placeholder data is paused by busy. */
   motionScope?: string;
@@ -134,7 +136,7 @@ export function DataTable<T>({ table, caption, busy, loading, empty, footer, ani
       <TableSkeletonCell columnId={column.id} />
     </td>)}
   </tr>);
-  return <div className={styles.root} data-compact-header={compactHeader || undefined} aria-busy={busy || loading || undefined}>
+  return <div className={styles.root} data-compact-header={compactHeader || undefined} aria-busy={busy || loading || refreshing || undefined}>
     {animated && <DataTableAnnouncements table={table} scope={JSON.stringify([motionScope, table.getState().sorting])} paused={Boolean(busy)} />}
     <div className={styles.viewport}>
     <div className={styles.scroll} style={{ maxHeight }} data-scroll-y={maxHeight != null || undefined} tabIndex={0} role="region" aria-label={caption}>

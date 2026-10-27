@@ -285,7 +285,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           <Table<RentalRuleVersion>
             rowKey="id"
             pagination={false}
-            onRefresh={() => rules.refetch()} loading={rules.isFetching} dataSource={rules.data ?? []}
+            onRefresh={() => rules.refetch()} loading={rules.isLoading} refreshing={rules.isFetching} dataSource={rules.data ?? []}
             columns={[
               { title: t("版本"), dataIndex: "version" },
               {
@@ -368,7 +368,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               rowKey="id"
               size="small"
               pagination={false}
-              onRefresh={() => ruleAudits.refetch()} loading={ruleAudits.isFetching} dataSource={ruleAudits.data ?? []}
+              onRefresh={() => ruleAudits.refetch()} loading={ruleAudits.isLoading} refreshing={ruleAudits.isFetching} dataSource={ruleAudits.data ?? []}
               columns={[
                 { title: t("版本"), dataIndex: "version" },
                 {

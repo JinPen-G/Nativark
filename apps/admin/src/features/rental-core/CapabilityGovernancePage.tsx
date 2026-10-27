@@ -236,7 +236,7 @@ export function CapabilityGovernancePage() {
         <ListSection>
           <Table<WorkspaceCapabilityView>
             rowKey={(row) => row.definition.code}
-            onRefresh={() => overview.refetch()} loading={overview.isFetching} dataSource={data?.capabilities ?? []}
+            onRefresh={() => overview.refetch()} loading={overview.isLoading} refreshing={overview.isFetching} dataSource={data?.capabilities ?? []}
             scroll={{ x: 1280 }}
             columns={[
               {
@@ -356,7 +356,7 @@ export function CapabilityGovernancePage() {
         <QueryState loading={audits.isLoading} error={audits.error}>
           <Table
             rowKey={(row) => `${row.code}:${row.at}:${row.action}`}
-            onRefresh={() => audits.refetch()} loading={audits.isFetching} dataSource={audits.data ?? []}
+            onRefresh={() => audits.refetch()} loading={audits.isLoading} refreshing={audits.isFetching} dataSource={audits.data ?? []}
             columns={[
               { title: t("时间"), dataIndex: "at" },
               { title: t("能力"), dataIndex: "code" },

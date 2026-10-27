@@ -129,7 +129,7 @@ export function MembershipRewardsPage() {
           <ListSection title={t("客户权益账户")} controls={<ListFilters filter={accountFilter} placeholder="客户编号" />}>
             <Table
               rowKey="customerId"
-              onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination}
+              onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isLoading} refreshing={benefitAccounts.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination}
               locale={{ emptyText: t("还没有客户获得过积分、营销余额或奖励券") }}
               columns={[
                 { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },
@@ -143,7 +143,7 @@ export function MembershipRewardsPage() {
           <ListSection title={t("奖励流水")} controls={<ListFilters filter={rewardFilter} placeholder="客户编号、原因或幂等键" options={[{ value: "granted", label: "已发放" }, { value: "reversed", label: "已撤销" }]} />}>
             <Table
               rowKey="id"
-              onRefresh={() => rewards.refetch()} loading={rewards.isFetching} dataSource={rewardFilter.rows} pagination={rewardFilter.pagination}
+              onRefresh={() => rewards.refetch()} loading={rewards.isLoading} refreshing={rewards.isFetching} dataSource={rewardFilter.rows} pagination={rewardFilter.pagination}
               locale={{ emptyText: t("还没有奖励流水：自动事件未触发，也没有人工补发") }}
               columns={[
                 { title: t("客户"), dataIndex: "customerId", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerId} /> },

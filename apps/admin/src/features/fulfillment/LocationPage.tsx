@@ -65,7 +65,7 @@ export function LocationPage() {
       <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点")} note={{ title: `${t(category?.name ?? "当前品类")}${t("履约网络")}`, description: t("自营机构与合作商是经营主体；门店、仓库、自提柜、取还点和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。") }} extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>{t("新增经营主体")}</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增履约地点")}</Button></Space> : undefined} />
       <ListSection title={t("经营主体")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
         <QueryState loading={operators.isLoading} error={operators.error}>
-          <Table<RentalFulfillmentOperator> rowKey="id" onRefresh={() => operators.refetch()} loading={operators.isFetching} dataSource={operators.data ?? []} pagination={false}
+          <Table<RentalFulfillmentOperator> rowKey="id" onRefresh={() => operators.refetch()} loading={operators.isLoading} refreshing={operators.isFetching} dataSource={operators.data ?? []} pagination={false}
             {...operatorCapabilities(t, () => Promise.all([operators.refetch({ throwOnError: true }), locations.refetch({ throwOnError: true })]))} columns={[
             { title: t("主体"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("经营方式"), dataIndex: "type", render: (value) => <Tag color={value === "partner" ? "purple" : "blue"}>{t(value === "partner" ? "合作商" : "自营")}</Tag> },
@@ -79,7 +79,7 @@ export function LocationPage() {
       <ListSection controls={<><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
 
           <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
-          <Table<RentalFulfillmentLocation> cardView={locationCards({ t, typeLabels: locationTypeLabels, capabilityLabels, canManage, edit: openEditor })} rowKey="id" onRefresh={() => locations.refetch()} loading={locations.isFetching} dataSource={rows} scroll={{ x: 960 }}
+          <Table<RentalFulfillmentLocation> cardView={locationCards({ t, typeLabels: locationTypeLabels, capabilityLabels, canManage, edit: openEditor })} rowKey="id" onRefresh={() => locations.refetch()} loading={locations.isLoading} refreshing={locations.isFetching} dataSource={rows} scroll={{ x: 960 }}
             {...locationCapabilities(t, category?.businessModel.locationTypes ?? [], () => locations.refetch({ throwOnError: true }))} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("归属组织"), render: (_, row) => row.organizationId ? organizationNames.get(row.organizationId) ?? t("已关联组织") : t("未分配") },

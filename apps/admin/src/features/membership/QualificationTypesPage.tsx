@@ -48,7 +48,7 @@ export function QualificationTypesEditor() {
       </Space>
     </Form>
     </Card>
-    <Table exportConfig={{ filename: t("证件类型"), fields: [{ label: t("名称"), value: row => row.name }, { label: t("编码"), value: row => row.code }, { label: t("下单要求"), value: row => t(row.requiredForBooking ? "必需" : "可选") }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }] }} rowKey="id" size="small" style={{ marginTop: "var(--rental-layout-section-gap)" }} onRefresh={() => types.refetch()} loading={types.isFetching} dataSource={types.data ?? []} pagination={false} columns={[
+    <Table exportConfig={{ filename: t("证件类型"), fields: [{ label: t("名称"), value: row => row.name }, { label: t("编码"), value: row => row.code }, { label: t("下单要求"), value: row => t(row.requiredForBooking ? "必需" : "可选") }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }] }} rowKey="id" size="small" style={{ marginTop: "var(--rental-layout-section-gap)" }} onRefresh={() => types.refetch()} loading={types.isLoading} refreshing={types.isFetching} dataSource={types.data ?? []} pagination={false} columns={[
       { title: t("名称"), dataIndex: "name" }, { title: t("编码"), dataIndex: "code" },
       { title: t("下单要求"), render: (_, row) => row.requiredForBooking ? t("必需") : t("可选") },
       { title: t("状态"), dataIndex: "status", render: value => value === "enabled" ? t("已启用") : t("已停用") }

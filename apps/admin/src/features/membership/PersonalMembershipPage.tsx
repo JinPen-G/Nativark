@@ -119,7 +119,7 @@ export function PersonalMembershipPage() {
 
     <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember>
       importConfig={personalImport(t, refresh, settings.data?.supportsOnlyNewImport === true)}
-      exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
+      exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isLoading} refreshing={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
       { title: t("会员"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.name} type="personal" levelName={row.levelName} phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
       { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus])}</Tag> }, { title: t("证件"), render: (_, row) => row.qualifications.length ? row.qualifications.map((item) => <Tag key={item.id} color={qualificationStatus[item.status]?.color}>{item.qualificationType} · {t(qualificationStatus[item.status]?.text ?? item.status)}</Tag>) : "—" },
       { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() },
@@ -163,7 +163,7 @@ export function PersonalMembershipPage() {
           <SaveButton disabled={!canManage} label={t("提交审核")} form={qualificationForm} pending={submitQualification.isPending} onSave={async values => { const operation = canManage && submitQualification.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <ListSection title={t("提交与审核历史")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-          <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isFetching} onRefresh={() => qualificationHistory.refetch()} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
+          <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isLoading} refreshing={qualificationHistory.isFetching} onRefresh={() => qualificationHistory.refetch()} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
             { title: t("证件"), dataIndex: "qualificationType" },
             { title: t("编号"), dataIndex: "referenceNoMasked", render: (value) => value ?? "—" },
             { title: t("证件状态"), render: (_, row) => <Tag color={qualificationStatus[row.qualificationStatus]?.color}>{t(qualificationStatus[row.qualificationStatus]?.text ?? row.qualificationStatus)}</Tag> },
@@ -186,7 +186,7 @@ export function PersonalMembershipPage() {
           <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <ListSection title={t("当前方案授予记录")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
+          <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} refreshing={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
             { title: t("方案"), render: (_, row) => row.snapshot.planName },
             { title: t("权益适用范围"), render: (_, row) => <MembershipBenefitScopeSummary benefits={row.snapshot.benefits} options={scopeOptions.data} /> },
             { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 16).replace("T", " ")} ~ ${row.effectiveTo?.slice(0, 16).replace("T", " ") ?? t("长期")}` },

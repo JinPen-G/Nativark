@@ -203,7 +203,7 @@ export function TenantManagementPage() {
           /></>}>
           <Table<TenantSummary>
             rowKey="tenantId"
-            onRefresh={() => tenants.refetch()} loading={tenants.isFetching} dataSource={tenantFilter.rows} pagination={tenantFilter.pagination}
+            onRefresh={() => tenants.refetch()} loading={tenants.isLoading} refreshing={tenants.isFetching} dataSource={tenantFilter.rows} pagination={tenantFilter.pagination}
             scroll={{ x: 1120 }}
             columns={[
               { title: t("租户"), fixed: "left", width: 230, render: (_, row) => <><b>{row.tenantName}</b><br /><span className="muted">{row.tenantCode}</span></> },
@@ -271,7 +271,7 @@ export function TenantManagementPage() {
           <Table<BusinessWorkspace>
             rowKey="id"
             pagination={false}
-            onRefresh={() => workspaces.refetch()} loading={workspaces.isFetching} dataSource={workspaces.data ?? []}
+            onRefresh={() => workspaces.refetch()} loading={workspaces.isLoading} refreshing={workspaces.isFetching} dataSource={workspaces.data ?? []}
             columns={[
               { title: t("空间"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
               { title: t("经营品类"), width: 150, render: (_, row) => t(categoryNames.get(row.categoryCode) ?? row.categoryCode) },

@@ -108,7 +108,7 @@ export function OfficialCalendarSourcePage() {
           <Table<OfficialCalendarSource>
             rowKey="id"
             size="small"
-            onRefresh={() => sources.refetch()} loading={sources.isFetching} dataSource={sourceFilter.rows}
+            onRefresh={() => sources.refetch()} loading={sources.isLoading} refreshing={sources.isFetching} dataSource={sourceFilter.rows}
             pagination={false}
             expandable={{
               expandedRowKeys: expanded ? [expanded] : [],
@@ -118,7 +118,7 @@ export function OfficialCalendarSourcePage() {
                   <Table
                     rowKey="id"
                     size="small"
-                    onRefresh={() => versions.refetch()} loading={versions.isFetching} dataSource={versions.data ?? []}
+                    onRefresh={() => versions.refetch()} loading={versions.isLoading} refreshing={versions.isFetching} dataSource={versions.data ?? []}
                     pagination={false}
                     locale={{ emptyText: t("该来源尚未登记任何年度版本") }}
                     columns={[

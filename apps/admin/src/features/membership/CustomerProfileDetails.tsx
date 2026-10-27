@@ -397,7 +397,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
         </Card>}
         <ListSection title={t("核验历史")}>
           <QueryState loading={identityVerifications.isLoading} error={identityVerifications.error}>
-            {identityVerifications.data?.length ? <Table<CustomerIdentityVerificationSummary> size="small" rowKey="id" onRefresh={() => identityVerifications.refetch()} loading={identityVerifications.isFetching} dataSource={identityVerifications.data} pagination={{ defaultPageSize: 20 }} scroll={{ x: 800 }} columns={[
+            {identityVerifications.data?.length ? <Table<CustomerIdentityVerificationSummary> size="small" rowKey="id" onRefresh={() => identityVerifications.refetch()} loading={identityVerifications.isLoading} refreshing={identityVerifications.isFetching} dataSource={identityVerifications.data} pagination={{ defaultPageSize: 20 }} scroll={{ x: 800 }} columns={[
               { title: t("证件类型"), dataIndex: "credentialType" },
               { title: t("结论"), dataIndex: "result", render: (value) => <Tag color={value === "verified" ? "success" : value === "revoked" ? "default" : "error"}>{t(value === "verified" ? "已认证" : value === "revoked" ? "已撤销" : "未通过")}</Tag> },
               { title: t("核验人"), dataIndex: "reviewerName" },

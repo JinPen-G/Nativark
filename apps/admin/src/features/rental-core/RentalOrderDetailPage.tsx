@@ -836,7 +836,7 @@ export function RentalOrderDetailPage() {
           title={t("裁定只决定应收金额；批准退款表示应收已核减、等待实际退款，实际收退款仍要在下方资金区按资金权限单独办理。")}
 
         />
-        {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} onRefresh={() => order.refetch()} loading={order.isFetching} dataSource={feeReviews} columns={[
+        {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} onRefresh={() => order.refetch()} loading={order.isLoading} refreshing={order.isFetching} dataSource={feeReviews} columns={[
           { title: t("类型"), dataIndex: "type", render: (value) => t(FEE_REVIEW_TYPE_LABELS[value as RentalOrderFeeReview["type"]] ?? String(value)) },
           { title: t("来源"), render: () => t("订单费用审核") },
           { title: t("建议金额"), dataIndex: "suggestedAmount", render: (value) => money(Number(value)) },
@@ -872,7 +872,7 @@ export function RentalOrderDetailPage() {
 }} /> : <p className={detailStyles.note}>{t("当前账号无资金查看权限")}</p>}
 </div> },
     { key: "inspection", label: <span>{t("检查与处置")}{pendingInspectionCount > 0 ? ' · ' + pendingInspectionCount : ''}</span>, children: <div className={detailStyles.stack}><QueryState loading={inspections.isLoading} error={inspections.error}>{inspections.data?.length ? <ListSection title={t("检查、使用量与异常审核")}><Space orientation="vertical" style={{ width: "100%" }} size={16}>
-        {(inspections.data ?? []).some(record => Boolean(record.usageReadings?.length)) && <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
+        {(inspections.data ?? []).some(record => Boolean(record.usageReadings?.length)) && <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isLoading} refreshing={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
           { title: t("阶段"), dataIndex: "stage", render: (value) => value === "pickup" ? t("领取基线") : t("归还读数") },
           { title: t("读数字段"), dataIndex: "fieldCode" },
           { title: t("领取基线"), dataIndex: "baseline", render: (value) => value ?? "-" },
@@ -888,13 +888,13 @@ export function RentalOrderDetailPage() {
              setUsageCorrection({ inspectionId: row.inspectionId, fieldCode: row.fieldCode, stage: row.stage, current: row.current, baseline: row.baseline });
            }}>{t("修正读数")}</Button> : "-" }
         ]} />}
-        <Table rowKey="id" size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={inspections.data ?? []} columns={[
+        <Table rowKey="id" size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isLoading} refreshing={inspections.isFetching} dataSource={inspections.data ?? []} columns={[
           { title: t("检查记录"), render: (_, row) => row.stage === "pickup" ? t("领取检查") : t("归还检查") },
           { title: t("照片/证据引用"), dataIndex: "attachments", render: (value: string[]) => value?.length ? <Space size={[4, 4]} wrap>{value.map((ref) => <Tag key={ref}>{ref}</Tag>)}</Space> : <Typography.Text type="secondary">{t("未登记")}</Typography.Text> },
           { title: t("操作人"), dataIndex: "operator" },
           { title: t("时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleString() }
         ]} />
-        {(inspections.data ?? []).some(record => record.exceptions.length > 0) && <Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
+        {(inspections.data ?? []).some(record => record.exceptions.length > 0) && <Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isLoading} refreshing={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
           { title: t("阶段"), dataIndex: "stage", render: (value) => value === "pickup" ? t("领取") : t("归还") },
           { title: t("异常"), render: (_, row) => <>{row.code} · {row.description}<br /><Typography.Text type="secondary">{row.allocationId ? `${t("关联分配：")}${row.allocationId}` : t("本批全部归还资源")}</Typography.Text></> },
           { title: t("建议费用"), dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
@@ -917,7 +917,7 @@ export function RentalOrderDetailPage() {
       </Space></ListSection> : <ListSection title={t("检查记录")} extra={<Button onClick={() => void inspections.refetch()}>{t("刷新记录")}</Button>}><p className={detailStyles.note}>{t("尚未登记检查记录")}</p></ListSection>}</QueryState>{relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
         <ListSection title={t("归还处置与养护工单")}>
           {relatedWorkOrders.data?.length ? (
-            <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} onRefresh={() => relatedWorkOrders.refetch()} loading={relatedWorkOrders.isFetching} dataSource={relatedWorkOrders.data} columns={[
+            <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} onRefresh={() => relatedWorkOrders.refetch()} loading={relatedWorkOrders.isLoading} refreshing={relatedWorkOrders.isFetching} dataSource={relatedWorkOrders.data} columns={[
               { title: t("工单号"), dataIndex: "workNo", width: 190 },
               { title: t("类型"), dataIndex: "type", width: 110, render: (value) => t(String(value)) },
               { title: t("状态"), dataIndex: "status", width: 110, render: (value) => { const status = WORK_ORDER_STATUS_LABELS[value] ?? { label: value, color: "default" }; return <Tag color={status.color}>{t(status.label)}</Tag>; } },
@@ -930,7 +930,7 @@ export function RentalOrderDetailPage() {
           {relatedDispositions.data?.length ? (
             <>
               <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{t("归还处置（周转/隔离）：")}</Typography.Paragraph>
-              <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} onRefresh={() => relatedDispositions.refetch()} loading={relatedDispositions.isFetching} dataSource={relatedDispositions.data} columns={[
+              <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} onRefresh={() => relatedDispositions.refetch()} loading={relatedDispositions.isLoading} refreshing={relatedDispositions.isFetching} dataSource={relatedDispositions.data} columns={[
                 { title: t("归还批次"), dataIndex: "returnBatchKey", ellipsis: true },
                 { title: t("数量"), dataIndex: "quantity", width: 70 },
                 { title: t("状态"), dataIndex: "status", width: 110, render: (value) => ({ buffered: <Tag color="orange">{t("周转缓冲")}</Tag>, blocked: <Tag color="red">{t("异常隔离")}</Tag>, restored: <Tag color="success">{t("已恢复")}</Tag>, written_off: <Tag>{t("已核销")}</Tag> }[value as string] ?? String(value)) },
@@ -945,7 +945,7 @@ export function RentalOrderDetailPage() {
     { key: "records", label: t("记录与单据"), children: <div className={detailStyles.stack}>
       {Boolean(extensions.data?.length) && <ListSection title={t("续租记录")}>
         <Alert type="info" showIcon title={order.data.ruleSnapshot?.extension?.pricingMode === "original_total" ? t("按原价格重算完整租期，只补差价") : t("新增时段单独计费")} description={t("续租方式以本单规则快照为准；须检查后续占用及缓冲，原始账单保留。缓冲只占库存，不计租金。")}  />
-        <Table<RentalOrderExtension> rowKey="id" size="small" pagination={false} onRefresh={() => extensions.refetch()} loading={extensions.isFetching} dataSource={extensions.data ?? []} columns={[
+        <Table<RentalOrderExtension> rowKey="id" size="small" pagination={false} onRefresh={() => extensions.refetch()} loading={extensions.isLoading} refreshing={extensions.isFetching} dataSource={extensions.data ?? []} columns={[
           { title: t("次序"), dataIndex: "sequence", width: 72 },
           { title: t("延长期间"), render: (_, row) => <>{dayjs(row.originalEndAt).format("YYYY-MM-DD HH:mm")} → {dayjs(row.newEndAt).format("YYYY-MM-DD HH:mm")}</> },
           { title: t("租金差额"), align: "right", render: (_, row) => money(row.rentalAmount) },
@@ -958,7 +958,7 @@ export function RentalOrderDetailPage() {
           { title: t("操作"), align: "right", render: (_, row) => row.status === "pending_payment" ? <Button type="link" loading={payExtension.isPending} onClick={() => payExtension.mutate(row.id)}>{t("确认补款")}</Button> : row.pricingSnapshot?.refundReview?.status === "pending" && canReviewFees ? <Button type="link" onClick={() => { setExtensionRefundReview(row); extensionRefundForm.setFieldsValue({ decision: "approved", reason: "" }); }}>{t("审核退款差额")}</Button> : "—" }
         ]} />
       </ListSection>}{Boolean(changes.data?.length) && <ListSection title={t("订单变更记录")} extra={<Tag color="processing">{t("原订单与原报价快照保留")}</Tag>}>
-        <Table rowKey="id" size="small" pagination={false} onRefresh={() => changes.refetch()} loading={changes.isFetching} dataSource={changes.data ?? []} columns={[
+        <Table rowKey="id" size="small" pagination={false} onRefresh={() => changes.refetch()} loading={changes.isLoading} refreshing={changes.isFetching} dataSource={changes.data ?? []} columns={[
           { title: t("时间"), dataIndex: "appliedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
           { title: t("变更"), render: (_, row) => t(row.type === "resume_pickup" ? "待确认爽约恢复领取" : row.type === "post_pickup_exchange" ? "取货后换货" : row.type === "service_cancel" ? "取货前取消服务" : "取货前整行部分取消") },
           { title: t("取消商品"), render: (_, row) => (("lineIds" in row.request ? row.request.lineIds ?? [] : []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join(locale === "en-US" ? ", " : "、")) },

@@ -77,6 +77,8 @@ export function RentalOrdersPage() {
   const pendingFeeCount = useQuery({ queryKey: ["rental-core", "orders", { pendingFeeOnly: true, pageSize: 1 }], queryFn: () => rentalCoreApi.orderPage({ pendingFeeOnly: true, pageSize: 1 }) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const rows = orders.data?.items ?? EMPTY_ORDERS;
+  // Only a first load or another page's placeholder blocks existing controls.
+  const waitingForRows = orders.isLoading || orders.isPlaceholderData;
   const total = orders.data?.total ?? 0;
   const exportConfig: ListExport<RentalOrder> = { filename: t("租赁订单"), scope: "page", fields: [
     { label: t("订单号"), value: row => row.orderNo }, { label: t("使用人"), value: row => row.membershipSnapshot?.personalCustomerName ?? row.customerName },
@@ -95,16 +97,16 @@ export function RentalOrdersPage() {
     fulfillment: t("取还地点"), security: t("押金 / 预授权"), quoteNo: t("报价快照"), actions: t("操作"),
   }), [t, itemLabel, pickupLabel, returnLabel]);
   const columns = useMemo(() => [
-    dataTableSelectionColumn<RentalOrder>({ label: order => `${t("选择订单")} ${order.orderNo}`, disabled: orders.isFetching || orders.isError }),
+    dataTableSelectionColumn<RentalOrder>({ label: order => `${t("选择订单")} ${order.orderNo}`, disabled: waitingForRows || orders.isError }),
     ...rentalOrderColumns({ t, locale, now, permissions, pickupLabel, returnLabel, navigate, labels: columnLabels }),
-  ], [t, locale, now, permissions, pickupLabel, returnLabel, navigate, columnLabels, orders.isFetching, orders.isError]);
+  ], [t, locale, now, permissions, pickupLabel, returnLabel, navigate, columnLabels, waitingForRows, orders.isError]);
   const table = useReactTable({
     data: rows, columns, getRowId: order => order.id, getCoreRowModel: getCoreRowModel(),
     manualSorting: true, manualPagination: true, enableMultiSort: true,
     // Item disclosure belongs to the stable row ID, not remounted cell components.
     // The reminder clock/refresh must not collapse an operator's open item summary.
     getRowCanExpand: row => row.original.lines.length > 1, autoResetExpanded: false,
-    enableRowSelection: !orders.isFetching && !orders.isError,
+    enableRowSelection: !waitingForRows && !orders.isError,
     state: { sorting, columnVisibility, rowSelection }, onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     onSortingChange: updater => { setSorting(updater); setPage(1); },
@@ -125,7 +127,7 @@ export function RentalOrdersPage() {
   return <PageEnter className={styles.page}>
     <PageHeader title="租赁订单" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>{t("新建订单")}</Button>} />
       <div className={styles.filters} role="region" aria-label={t("订单筛选")}>
-        <DataTableToolbar extra={<ListTransferTools config={exportConfig} rows={rows} busy={orders.isFetching || orders.isError} />} table={table} label={id => columnLabels[id] ?? id} onRefresh={() => orders.refetch()} busy={orders.isFetching} keyboardShortcut controls={<>
+        <DataTableToolbar extra={<ListTransferTools config={exportConfig} rows={rows} busy={waitingForRows || orders.isError} />} table={table} label={id => columnLabels[id] ?? id} onRefresh={() => orders.refetch()} busy={waitingForRows} keyboardShortcut controls={<>
             <Segmented aria-label={t("分配进度")} value={assignment} onChange={applyFilter(setAssignment)} options={localizedAssignmentFilterOptions} />
             <SearchField label={t("搜索订单")} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onValueChange={(value) => { setKeywordInput(value); if (!value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} />
           <ListFilterItem label={t("租期范围")} active={Boolean(period?.some(Boolean))} width="dateRange" priority>
@@ -160,12 +162,12 @@ export function RentalOrdersPage() {
       {orders.isError && <Alert className={styles.error} type="error" showIcon title={t("订单读取失败")} description={t("筛选条件已保留，请重试读取。")}
         action={<Button onClick={() => void orders.refetch()}>{t("重试")}</Button>} />}
       {(!orders.isError || rows.length > 0) &&
-        <DataTable compactHeader table={table} caption={t("租赁订单")} busy={orders.isFetching} loading={orders.isLoading} animated
+        <DataTable compactHeader table={table} caption={t("租赁订单")} busy={orders.isPlaceholderData} refreshing={orders.isFetching} loading={orders.isLoading} animated
           motionScope={JSON.stringify([selectionScope, page, pageSize, assignment, keyword, status, query.from, query.to, pendingFeeOnly])}
           empty={t(hasFilters ? "没有符合筛选条件的订单" : "暂无订单")}
-          footer={<><Pagination current={page} pageSize={pageSize} total={total} showSizeChanger disabled={orders.isFetching}
+          footer={<><Pagination current={page} pageSize={pageSize} total={total} showSizeChanger disabled={waitingForRows}
             showTotal={(count) => t(count === 1 ? "共 1 单" : "共 {count} 单", { count })}
             onChange={(nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); }} /></>} />}
-    <ListSelectionBar key={selectionScope} rows={rows.filter(row => rowSelection[row.id])} clear={() => setRowSelection({})} onSelectPage={() => table.toggleAllPageRowsSelected(true)} config={exportConfig} busy={orders.isFetching || orders.isError} />
+    <ListSelectionBar key={selectionScope} rows={rows.filter(row => rowSelection[row.id])} clear={() => setRowSelection({})} onSelectPage={() => table.toggleAllPageRowsSelected(true)} config={exportConfig} busy={waitingForRows || orders.isError} />
   </PageEnter>;
 }

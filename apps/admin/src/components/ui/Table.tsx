@@ -26,6 +26,8 @@ import capabilityStyles from "./data-table/ListCapabilities.module.css";
 import { ContentTransition } from "../workspace/ContentTransition";
 
 export type BusinessTableProps<T extends object> = TableProps<T> & {
+  /** Same-query revalidation keeps rows and local drafts mounted and visible. */
+  refreshing?: boolean;
   /** Refetch this table's real source; omit for local form/snapshot previews. */
   onRefresh?: (() => unknown) | null;
   caption?: string;
@@ -93,13 +95,14 @@ export function Table<T extends object>(props: BusinessTableProps<T>) {
   const toolbarHeading = useListHeading();
   const inherited = props.onRefresh === undefined;
   const resolved = { ...props, columns, toolbarHeading, toolbar: props.toolbar ?? controls, onRefresh: (inherited ? reader.onRefresh : props.onRefresh) ?? undefined,
-    loading: props.loading ?? (inherited ? reader.busy : false) };
+    refreshing: props.refreshing ?? (inherited ? reader.busy : false) };
   const selection = props.rowSelection;
   const incompatibleSelection = selection && (selection.type === "radio" || selection.onSelect || selection.onSelectAll || selection.onSelectInvert || selection.onSelectNone || selection.selections || selection.renderCell || selection.columnTitle || selection.onCell || selection.checkStrictly === false);
   const incompatible = incompatibleSelection || props.components || props.summary || props.children ||
     props.columns?.some(column => "children" in column || column.filters || column.filterDropdown) ||
     props.dataSource?.some(row => Array.isArray((row as Record<string, unknown>).children));
-  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><AntTable<T> {...props} columns={columns} /></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
+  const { refreshing: _refreshing, ...fallbackProps } = props;
+  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><AntTable<T> {...fallbackProps} columns={columns} /></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
 }
 Table.listToolbarHost = true;
 
@@ -161,7 +164,11 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
       minSize: column.minWidth ?? ADMIN_TABLE_METRICS.columnMinWidth, enableSorting: canSort, enableHiding: index !== 0 && !action,
       sortUndefined: "last", sortingFn: compare ? (a, b) => compare(a.original, b.original, "ascend") : "auto",
       header: BusinessHeader, cell: BusinessCell,
-      meta: { cellAlign: "middle", business: { label, render: (row, rowIndex) => {
+      meta: { cellAlign: "middle", motion: !action && column.dataIndex != null ? { value: row => {
+        // Track explicit scalar facts, never rendered nodes, clocks or whole row objects.
+        const value = readTableValue(row, column.dataIndex);
+        return value == null || typeof value === "string" || typeof value === "number" ? value : undefined;
+      } } : undefined, business: { label, render: (row, rowIndex) => {
         const value = readTableValue(row, column.dataIndex);
         const rendered = column.render ? column.render(value, row, rowIndex) : value;
         return rendered && typeof rendered === "object" && !isValidElement(rendered) && !Array.isArray(rendered) && "children" in rendered
@@ -236,7 +243,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
       </>} trailingExtra={props.cardView && <ListViewSwitch value={view} onChange={setView} />} />
     <ContentTransition value={view}>{props.cardView && view === "cards" && source.length > 0 ? <><ListCards key={identity} rows={pageRows} config={props.cardView} busy={loading} canSelect={row => !selectionConfig?.getCheckboxProps?.(row)?.disabled} getKey={row => String(getKey(row, source.indexOf(row)))} selected={new Set(Object.keys(selectedState).filter(key => selectedState[key]))}
       onSelect={selectable ? (row, checked) => { const id = String(getKey(row, source.indexOf(row))); if (!selectionConfig?.getCheckboxProps?.(row)?.disabled) updateSelection({ ...selectedState, [id]: checked }); } : undefined} />{pager}</> :
-    <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0}
+    <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0} refreshing={props.refreshing}
       empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.scroll?.x === true ? undefined : props.scroll?.x}
       showHeader={props.showHeader} animated motionScope=""
       rowProps={row => {

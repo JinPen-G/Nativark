@@ -412,7 +412,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Table<RentalCalendarDay>
             rowKey="date"
             size="small"
-            onRefresh={() => calendar.refetch()} loading={calendar.isFetching} dataSource={calendar.data?.days ?? []}
+            onRefresh={() => calendar.refetch()} loading={calendar.isLoading} refreshing={calendar.isFetching} dataSource={calendar.data?.days ?? []}
             pagination={{ pageSize: 31, showSizeChanger: false }}
             columns={[
               { title: t("日期"), dataIndex: "date" },
@@ -661,7 +661,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <Table
               rowKey="id"
               size="small"
-              onRefresh={() => officialSourceVersions.refetch()} loading={officialSourceVersions.isFetching} dataSource={officialSourceVersions.data ?? []}
+              onRefresh={() => officialSourceVersions.refetch()} loading={officialSourceVersions.isLoading} refreshing={officialSourceVersions.isFetching} dataSource={officialSourceVersions.data ?? []}
               pagination={false}
               locale={{ emptyText: `${t("平台尚未登记")} ${year} ${t("年度的官方来源版本，请联系 SaaS 平台管理员")}` }}
               columns={[
@@ -762,7 +762,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       <Table
                         rowKey="date"
                         size="small"
-                        onRefresh={() => publishPreview.refetch()} loading={publishPreview.isFetching} dataSource={publishPreview.data.dates}
+                        onRefresh={() => publishPreview.refetch()} loading={publishPreview.isLoading} refreshing={publishPreview.isFetching} dataSource={publishPreview.data.dates}
                         pagination={{ pageSize: 6, showSizeChanger: false }}
                         columns={[
                           { title: t("日期"), dataIndex: "date", width: 110 },
@@ -852,7 +852,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <Table<RentalCalendarVersionSummary>
               rowKey="version"
               size="small"
-              onRefresh={() => calendarVersions.refetch()} loading={calendarVersions.isFetching} dataSource={calendarVersions.data ?? []}
+              onRefresh={() => calendarVersions.refetch()} loading={calendarVersions.isLoading} refreshing={calendarVersions.isFetching} dataSource={calendarVersions.data ?? []}
               pagination={false}
               onRow={(row) => ({ onClick: () => setHistoryVersion(row.version) })}
               rowClassName={(row) => (row.version === historyVersion ? "ant-table-row-selected" : "")}
@@ -979,7 +979,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   rowKey={(row) => `${row.date}-${row.action}-${row.at}`}
                   size="small"
 
-                  onRefresh={() => calendarAudits.refetch()} loading={calendarAudits.isFetching} dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
+                  onRefresh={() => calendarAudits.refetch()} loading={calendarAudits.isLoading} refreshing={calendarAudits.isFetching} dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
                   pagination={{ pageSize: 8, showSizeChanger: false }}
                   locale={{ emptyText: t("该版本没有人工覆盖调整") }}
                   columns={[

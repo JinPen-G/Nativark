@@ -178,7 +178,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         </>}>
           <Table<RentalNotificationTemplateV1>
             rowKey="id"
-            onRefresh={() => templates.refetch()} loading={templates.isFetching} dataSource={templates.data ?? []}
+            onRefresh={() => templates.refetch()} loading={templates.isLoading} refreshing={templates.isFetching} dataSource={templates.data ?? []}
             columns={[
               {
                 title: "模板",
@@ -226,7 +226,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         <ListSection title="通知记录">
           <Table
             rowKey="id"
-            onRefresh={() => logs.refetch()} loading={logs.isFetching} dataSource={logs.data ?? []}
+            onRefresh={() => logs.refetch()} loading={logs.isLoading} refreshing={logs.isFetching} dataSource={logs.data ?? []}
             columns={[
               { title: "事件", dataIndex: "eventCode", render: (value: string) => eventLabel(value) },
               {

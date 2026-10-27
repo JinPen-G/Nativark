@@ -60,7 +60,7 @@ export function SubscriptionCatalogPage() {
           <ListSection title={t("功能目录")} controls={<ListFilters filter={featureFilter} placeholder="功能、模块或编码" />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCatalogModal({ open: true, entry: null })}>{t("新增功能")}</Button>}>
             {catalog.isLoading ? <LoadingState />
               : catalog.error ? <Alert type="error" showIcon message={t("功能目录加载失败")} description={<Button size="small" onClick={() => catalog.refetch()}>{t("重试")}</Button>} />
-              : <Table<SubscriptionFeatureCatalogEntry> rowKey="code" size="small" columns={columns} onRefresh={() => catalog.refetch()} loading={catalog.isFetching} dataSource={featureFilter.rows} pagination={featureFilter.pagination} />}
+              : <Table<SubscriptionFeatureCatalogEntry> rowKey="code" size="small" columns={columns} onRefresh={() => catalog.refetch()} loading={catalog.isLoading} refreshing={catalog.isFetching} dataSource={featureFilter.rows} pagination={featureFilter.pagination} />}
           </ListSection>
 
           {priceModal.open && <StandardPriceModal open plan={priceModal.plan} current={priceModal.current} onClose={() => setPriceModal({ open: false, plan: null, current: null })} />}
