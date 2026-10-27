@@ -20,6 +20,7 @@ export type AiChatProps = {
   className?: string; style?: CSSProperties;
   store?: { chats: ChatConversation[]; setChats: Dispatch<SetStateAction<ChatConversation[]>>; activeId: string; objectUrls?: { current: string[] }; setActiveId: (id: string) => void };
   headerActions?: ReactNode; disabled?: boolean;
+  historyConversationIds?: readonly string[];
   queuedPrompt?: { id: string; text: string; chatId: string } | null;
   onQueuedPromptUsed?: () => void;
 };
@@ -81,7 +82,7 @@ const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, on
   </article>;
 });
 
-export function AiChat({ respond, initialMessages, history, models = demoModels, defaultModel, title, autoPlay = !respond && !initialMessages && !history, suggestions = defaultSuggestions, greeting = 'What are we working on?', placeholder = 'Ask anything', onFeedback, onModelChange, onNewChat, className = '', style, store, headerActions, disabled = false, queuedPrompt, onQueuedPromptUsed }: AiChatProps) {
+export function AiChat({ respond, initialMessages, history, models = demoModels, defaultModel, title, autoPlay = !respond && !initialMessages && !history, suggestions = defaultSuggestions, greeting = 'What are we working on?', placeholder = 'Ask anything', onFeedback, onModelChange, onNewChat, className = '', style, store, headerActions, disabled = false, queuedPrompt, onQueuedPromptUsed, historyConversationIds }: AiChatProps) {
   const availableModels = models.length ? models : demoModels;
   const [localChats, setLocalChats] = useState<ChatConversation[]>(() => {
     if (initialMessages) return [fromMessages('initial', title ?? 'Conversation', initialMessages), ...(history ?? []).map(item => fromMessages(item.id, item.title, item.messages, item.group))];
@@ -92,6 +93,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
   });
   const [localActiveId, setLocalActiveId] = useState<string | null>(() => initialMessages ? 'initial' : respond ? history?.[0]?.id ?? null : (history ?? demoHistory)[0]?.id ?? null);
   const chats = store ? store.chats : localChats;
+  const historyChats = historyConversationIds ? chats.filter(chat => historyConversationIds.includes(chat.id)) : chats;
   const setChats = store?.setChats ?? setLocalChats;
   const activeId = store ? store.activeId : localActiveId;
   const setActiveId = (id: string | null) => { if (store) { if (id) store.setActiveId(id); } else setLocalActiveId(id); };
@@ -289,7 +291,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
   }}>
     <header className="chat-header">
       <div className="chat-menu-anchor" data-chat-menu="chats"><button ref={chatsButton} className="chat-title-button" aria-label={`最近对话，当前：${chat?.title ?? '新对话'}`} aria-expanded={menu === 'chats'} aria-haspopup="menu" aria-controls={menu === 'chats' ? menuId : undefined} onClick={() => setMenu(menu === 'chats' ? null : 'chats')}><span>{chat?.title ?? '新对话'}</span><ChevronDown size={13} /></button>
-        {menu === 'chats' && <div id={menuId} className="chat-menu chat-history-menu" role="menu" aria-label="最近对话" onKeyDown={menuKeys}><button role="menuitem" onClick={() => switchChat(null)}><SquarePen size={16} />新对话</button><div className="chat-menu-divider" role="separator" />{[...new Set(chats.map(item => item.group ?? '今天'))].map(group => <div role="group" aria-label={group} key={group}><span className="chat-menu-label">{group}</span>{chats.filter(item => (item.group ?? '今天') === group).map(item => <button type="button" key={item.id} role="menuitemradio" aria-checked={item.id === activeId} onClick={() => switchChat(item.id)}><span>{item.title}</span>{item.id === activeId && <Check size={14} />}</button>)}</div>)}</div>}
+        {menu === 'chats' && <div id={menuId} className="chat-menu chat-history-menu" role="menu" aria-label="最近对话" onKeyDown={menuKeys}><button role="menuitem" onClick={() => switchChat(null)}><SquarePen size={16} />新对话</button><div className="chat-menu-divider" role="separator" />{[...new Set(historyChats.map(item => item.group ?? '今天'))].map(group => <div role="group" aria-label={group} key={group}><span className="chat-menu-label">{group}</span>{historyChats.filter(item => (item.group ?? '今天') === group).map(item => <button type="button" key={item.id} role="menuitemradio" aria-checked={item.id === activeId} onClick={() => switchChat(item.id)}><span>{item.title}</span>{item.id === activeId && <Check size={14} />}</button>)}</div>)}</div>}
       </div>
       <div className="chat-header-end">{headerActions}<button className="chat-icon" aria-label="新对话" title="新对话" onClick={() => switchChat(null)}><SquarePen size={18} /></button></div>
     </header>

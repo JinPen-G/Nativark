@@ -53,8 +53,9 @@ function OperatorChat() {
         <ResizablePanel id="operator-conversation" label="聊天区" defaultSize={60} minSize={340}>
           <AiChat className="operator-archive-chat"
             store={{ chats: operator.chats, setChats: operator.setChats, activeId: operator.activeId, objectUrls: operator.objectUrls, setActiveId: operator.selectConversation }}
+            historyConversationIds={operator.capabilityThreads.map(thread => thread.id)}
             respond={operator.respond} autoPlay={false} models={OPERATOR_MODELS} defaultModel="everyday"
-            disabled={!operator.enabled} greeting={operator.capability.description} placeholder="说出经营目标，或继续补充要求…"
+            disabled={!operator.enabled} greeting={operator.capability.description} placeholder={`描述${operator.capability.name}相关的工作，或继续补充要求…`}
             suggestions={[{ label: operator.capability.prompt, icon: "activity" }]}
             onNewChat={() => operator.createConversation(operator.capability.id)}
             queuedPrompt={operator.queuedPrompt} onQueuedPromptUsed={() => operator.setQueuedPrompt(null)}

@@ -19,12 +19,13 @@ function useOperatorState() {
   const [disabled, setDisabled] = useState<string[]>([]);
   const available = permitted.filter(item => !disabled.includes(item.id));
   const [chats, setChats] = useState<ChatConversation[]>(() => [fromMessages(id(), "新对话", [], "今天"),
-    ...permitted.slice(1, 4).map(item => fromMessages(`demo-history-${item.id}`, `${item.name} · 示例对话`, [
+    ...permitted.slice(1, 4).map(item => fromMessages(`demo-history-${item.id}`, `${exampleArtifact(item).title}（示例）`, [
       { id: id(), role: "user", content: item.prompt },
       { id: id(), role: "assistant", content: demoAnswer(item), model: OPERATOR_MODELS[0], reasoning: "本地示例：整理资料、核对规则与生成结果；未读取真实业务数据。", thoughtFor: 1,
         tools: [demoTool(item, 1, "done"), demoTool(item, 2, "done")], sources: demoResources(item), status: "done" },
     ], "示例对话"))]);
   const [activeId, setActiveId] = useState(chats[0].id);
+  const lastConversation = useRef(new Map<string, string>([[permitted[0]?.id ?? "brief", chats[0].id]]));
   const [details, setDetails] = useState<Record<string, ThreadDetails>>(() => Object.fromEntries(chats.map((chat, index) => {
     const selected = index ? permitted[index] : permitted[0];
     return [chat.id, { capabilityId: selected?.id ?? "brief", running: false, step: index ? 4 : 0, ...(index && selected ? { artifact: exampleArtifact(selected) } : {}) }];
@@ -38,27 +39,45 @@ function useOperatorState() {
   const threadsRef = useRef(threads); threadsRef.current = threads;
   const active = threads.find(thread => thread.id === activeId) ?? threads[0];
   const capability = OPERATOR_CAPABILITIES.find(item => item.id === active.capabilityId) ?? OPERATOR_CAPABILITIES[0];
+  const capabilityThreads = threads.filter(thread => thread.capabilityId === capability.id);
   const enabled = available.some(item => item.id === active.capabilityId);
   const patch = useCallback((threadId: string, update: (thread: ThreadDetails) => ThreadDetails) => {
     setDetails(previous => ({ ...previous, [threadId]: update(previous[threadId] ?? { capabilityId: "brief", running: false, step: 0 }) }));
   }, []);
   function cancel() { generation.current++; request.current?.abort(); request.current = null; }
   useEffect(() => { alive.current = true; return () => { alive.current = false; request.current?.abort(); objectUrls.current.forEach(url => URL.revokeObjectURL(url)); }; }, []);
-  function createConversation(capabilityId = available[0]?.id ?? permitted[0]?.id ?? "brief") {
+  function createConversation(capabilityId = capability.id) {
+    if (!available.some(item => item.id === capabilityId)) return activeId;
     cancel(); const threadId = id();
-    setChats(previous => [fromMessages(threadId, "新对话", [], "今天"), ...previous].slice(0, 20));
+    setChats(previous => [fromMessages(threadId, "新对话", [], "今天"), ...previous]);
     patch(threadId, () => ({ capabilityId, running: false, step: 0 }));
+    lastConversation.current.set(capabilityId, threadId);
     setActiveId(threadId); setView("chat"); return threadId;
   }
-  function selectConversation(threadId: string) { if (activeId !== threadId) cancel(); setActiveId(threadId); setView("chat"); }
+  function activateConversation(threadId: string, capabilityId: string) {
+    if (activeId !== threadId) cancel();
+    lastConversation.current.set(capabilityId, threadId);
+    setActiveId(threadId); setView("chat");
+  }
+  function selectConversation(threadId: string) {
+    const target = threadsRef.current.find(thread => thread.id === threadId);
+    if (!target || target.capabilityId !== capability.id || !available.some(item => item.id === target.capabilityId)) return;
+    activateConversation(threadId, target.capabilityId);
+  }
   function chooseCapability(capabilityId: string) {
-    const previous = threadsRef.current.find(thread => thread.capabilityId === capabilityId);
-    if (previous) selectConversation(previous.id); else createConversation(capabilityId);
+    if (!available.some(item => item.id === capabilityId)) return;
+    const remembered = lastConversation.current.get(capabilityId);
+    const previous = threadsRef.current.find(thread => thread.id === remembered && thread.capabilityId === capabilityId)
+      ?? threadsRef.current.find(thread => thread.capabilityId === capabilityId);
+    if (previous) activateConversation(previous.id, capabilityId); else createConversation(capabilityId);
   }
   const respond: ChatRespond = async function* (messages, { signal, model, chatId }) {
     const threadId = chatId ?? activeId;
     const selectedThread = threadsRef.current.find(thread => thread.id === threadId);
-    const selected = OPERATOR_CAPABILITIES.find(item => item.id === selectedThread?.capabilityId) ?? capability;
+    if (!selectedThread || selectedThread.capabilityId !== capability.id || threadId !== activeId) {
+      yield { type: "error", message: "请在当前能力下选择对话后再发送。" }; return;
+    }
+    const selected = capability;
     if (!available.some(item => item.id === selected.id)) { yield { type: "error", message: "请先在插件页启用此能力。" }; return; }
     cancel(); const token = generation.current, abort = new AbortController(); request.current = abort;
     const stop = () => abort.abort(); signal.addEventListener("abort", stop, { once: true }); if (signal.aborted) abort.abort();
@@ -116,7 +135,7 @@ function useOperatorState() {
     if (!next && active.capabilityId === capabilityId) cancel();
     setDisabled(previous => next ? previous.filter(value => value !== capabilityId) : [...new Set([...previous, capabilityId])]);
   }
-  return { permitted, available, disabled, togglePlugin, chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, threads, active, capability, enabled, view, setView, createConversation, selectConversation, chooseCapability, cancel, confirm, tasks, setTasks, runTask };
+  return { permitted, available, disabled, togglePlugin, chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, capabilityThreads, threads, active, capability, enabled, view, setView, createConversation, selectConversation, chooseCapability, cancel, confirm, tasks, setTasks, runTask };
 }
 type OperatorState = ReturnType<typeof useOperatorState>;
 const OperatorContext = createContext<OperatorState | null>(null);

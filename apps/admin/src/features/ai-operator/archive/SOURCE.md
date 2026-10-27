@@ -12,7 +12,7 @@ AI chat 为归档作者独立完成的实现；Agent run 保留公开归档 CSS 
 
 | 文件 | 必要适配 |
 | --- | --- |
-| AiChat.tsx | 原聊天状态可由租户 shell 托管，保留原分支算法；增加顶栏工作区入口；模型菜单移入两层输入框；本地化；接入共享动态偏好；附件对象URL由 shell 统一释放 |
+| AiChat.tsx | 原聊天状态可由租户 shell 托管，保留原分支算法；增加当前能力会话范围筛选与顶栏工作区入口；模型菜单移入两层输入框；本地化；接入共享动态偏好；附件对象URL由 shell 统一释放 |
 | chat-state.ts | responder options 增加可选 chatId，用于隔离并发/过期运行 |
 | chat-demo.ts | 去掉 `.ts` 导入后缀以兼容项目 TS 配置；原默认示例保留作来源资料，业务页面显式传入自己的本地 responder/history/models，不显示原编码示例 |
 | ChatMarkdown.tsx / ToolCall.tsx | 仅本地化可见按钮和提示，Markdown、引用、来源卡片和工具面板保持原实现 |
