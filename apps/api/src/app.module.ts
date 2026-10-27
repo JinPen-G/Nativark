@@ -41,6 +41,8 @@ import { CustomerCorporateService } from "./modules/platform/customer-corporate.
 import { CustomerCorporateSettlementService } from "./modules/platform/customer-corporate-settlement.service";
 import { MembershipController } from "./modules/platform/membership.controller";
 import { MembershipService } from "./modules/platform/membership.service";
+import { CustomerAvatarController } from "./modules/platform/customer-avatar.controller";
+import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
 import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
@@ -195,6 +197,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     CategoryGovernanceController,
     CategoryAdoptionPreparationController,
     MembershipController,
+    CustomerAvatarController,
     RentalCoreController,
     RentalBusinessController,
     OfficialCalendarSourceController,
@@ -262,6 +265,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     CustomerCorporateService,
     CustomerCorporateSettlementService,
     MembershipService,
+    CustomerAvatarService,
     OperationLogService,
     RentalCoreService,
     RentalCategoryResolver,

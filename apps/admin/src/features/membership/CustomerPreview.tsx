@@ -10,6 +10,7 @@ import { customerApi } from "@/api/customer";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import styles from "./CustomerPreview.module.css";
+import { CustomerAvatar } from "./CustomerAvatar";
 
 export interface CustomerPreviewFacts {
   name: string;
@@ -43,7 +44,7 @@ export function CustomerPreview({ children, ...facts }: Props) {
   if (!facts.customerId || !facts.name.trim() || facts.name === "—") return <>{children ?? facts.name ?? "—"}</>;
   return <HoverCard key={`${scope}:${facts.customerId}`} className={styles.surface} side={narrow ? "bottom" : "right"} content={<CustomerPreviewContent facts={facts} scope={scope} allowed={Boolean(allowed && tenantId && user)} />}>
     <Button type="button" variant="secondary" size="sm" className={styles.trigger} aria-label={`${t("预览客户资料")} ${facts.name}`}>
-      <span className={`${avatarStyles.avatar} ${avatarStyles.sm} ${styles.avatar}`} aria-hidden="true">{facts.type === "corporate" ? <Building2 size={16} /> : facts.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join("")}</span>
+      <span className={`${avatarStyles.avatar} ${avatarStyles.sm} ${styles.avatar}`} aria-hidden="true"><CustomerAvatar customerId={facts.customerId} scope={scope} allowed={Boolean(allowed&&tenantId&&user)} fallback={facts.type === "corporate" ? <Building2 size={16} /> : facts.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase()).join("")} /></span>
       <span className={styles.name} data-customer-preview-name="">{children ?? facts.name}</span>
     </Button>
   </HoverCard>;
@@ -68,7 +69,7 @@ function CustomerPreviewContent({ facts, scope, allowed }: { facts: Props; scope
   const member = Boolean(displayed.membershipStatus || displayed.levelName);
   const updatedAt = displayed.updatedAt && dayjs(displayed.updatedAt).isValid() ? dayjs(displayed.updatedAt).format("MM-DD HH:mm") : undefined;
   return <div className={styles.content} data-customer-preview-content="">
-    <HoverCardProfile name={displayed.name} avatar={displayed.type === "corporate" ? <Building2 aria-hidden="true" /> : undefined}
+    <HoverCardProfile name={displayed.name} avatar={<CustomerAvatar customerId={facts.customerId} scope={scope} allowed={allowed} fallback={displayed.type === "corporate" ? <Building2 aria-hidden="true" /> : displayed.name.slice(0,1)} />}
       role={displayed.type ? t(displayed.type === "corporate" ? member ? "企业会员" : "企业客户" : member ? "个人会员" : "个人客户") : undefined}
       bio={[displayed.phoneMasked ? `${t("联系电话")} ${displayed.phoneMasked}` : undefined, displayed.region, displayed.companyName].filter(Boolean).join(" · ") || undefined}
       stats={[

@@ -2184,6 +2184,8 @@ model CustomerProfile {
   birthday             DateTime? @db.Date
   sourceChannel        String?   @db.VarChar(32)
   region               String?   @db.VarChar(64)
+  /// Opaque server-owned avatar key. Never an arbitrary URL or a client-provided path.
+  avatarStorageKey     String?   @db.VarChar(191)
   /// 后台账号创建该共享主档时的审计归属；客户端自助注册与历史数据为空。
   createdByUserId      String?  @db.VarChar(191)
   createdInWorkspaceId String?  @db.VarChar(191)
