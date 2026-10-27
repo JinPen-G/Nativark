@@ -11,8 +11,9 @@ export type GatewayStreamEvent = { kind: 'text_delta'; delta: string } | { kind:
  * or carried in provider messages; only validated terminal counters enter it. */
 export type GatewayUsageRecorder = (usage: ModelUsage) => Promise<void>;
 export interface UnifiedGatewayTransport {
-  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder): Promise<GatewayInvocationResult>;
-  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder): AsyncIterable<GatewayStreamEvent>;
+  inputBoundHash?(request: ModelProtocolRequest, route: ProviderRouteDecision, streaming: boolean): string | undefined;
+  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string): Promise<GatewayInvocationResult>;
+  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string): AsyncIterable<GatewayStreamEvent>;
 }
 export interface GatewayInvocationObservation {
   call: import('./gateway-accounting.ports').GatewayAccountingCall;
@@ -31,7 +32,17 @@ export interface GatewayBudgetDenialObservation {
   call: import('./gateway-accounting.ports').GatewayAccountingCall;
   code: 'BUDGET_UNAVAILABLE';
 }
-export interface UnifiedGatewayAudit { append(entry: { callId: string; /** Null for explicit SaaS/platform calls (no tenant attribution). */ tenantId: string | null; workspaceId: string | null; event: string; status: string; detail?: string }): Promise<void>;
+export interface GatewayAuditPreparation {
+  context: GatewayContext; callId: string; intentHash: string; requestHash: string;
+  configurationHash: string; mode: 'invoke' | 'stream';
+  /** Trusted routing snapshot; configurationHash hashes this profile, not the
+   * invocation's public configuration reference. Never model/request input. */
+  profile?: ProviderRouteDecision['profile'];
+}
+export interface UnifiedGatewayAudit {
+  /** Acknowledged durable intent before admission/claim/reserve. Does not grant dispatch. */
+  prepare?(value: GatewayAuditPreparation, signal?: AbortSignal): Promise<void>;
+  append(entry: { callId: string; /** Null for explicit SaaS/platform calls (no tenant attribution). */ tenantId: string | null; workspaceId: string | null; event: string; status: string; detail?: string }): Promise<void>;
   budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void>; }
 export interface UnifiedGatewayRoutingPort {
   resolve(context: Readonly<GatewayContext>, requested: readonly import('./provider-profile.ports').AiProfileCapability[]): Promise<import('./gateway-routing.service').GatewayRoutingResolution>;

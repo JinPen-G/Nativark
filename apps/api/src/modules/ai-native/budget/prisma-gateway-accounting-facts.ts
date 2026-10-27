@@ -20,7 +20,7 @@ const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const workspaceContextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
 const platformContextSchema = z.object({ actorId: id }).strict();
 const callSchema = z.object({ context: z.union([workspaceContextSchema, platformContextSchema]), binding: dispatchBindingSchema,
-  request: z.object({ callId: id.max(128), model: z.string().min(1).max(256), maxOutputTokens: z.number().int().min(1).max(32768), intentHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), expiresAt: z.date() }).strict();
+  request: z.object({ callId: id.max(128), model: z.string().min(1).max(256), maxOutputTokens: z.number().int().min(1).max(32768), intentHash: z.string().regex(/^[a-f0-9]{64}$/), countRequestHash: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict(), expiresAt: z.date() }).strict();
 const usageSchema = modelUsageSchema;
 export interface GatewayActualUsagePricing {
   quantity(record: Readonly<BudgetRecord>, usage: Readonly<ModelUsage>): Promise<AiUsageQuantityDraft>;

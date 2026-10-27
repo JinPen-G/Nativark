@@ -4,13 +4,15 @@ import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@dee
 import type { RentalWorkbenchKey } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
+/** Local display state only; withdrawal never asserts remote cancellation or audit deletion. */
+export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'cleared' | 'inactive' | 'changed' | 'expired' | 'failed'
 export interface WorkbenchState {
   snapshot: RentalDesktopSnapshot | null
   busy: boolean
   failed: boolean
   notice: { sequence: number; ok: boolean } | null
-  catalog: { busy: boolean; failed: boolean; result: RentalDesktopCatalogResult | null; inspection: RentalDesktopModelInspection | null; material: RentalDesktopCatalogMaterial | null }
-  sources: { busy: boolean; failed: boolean; result: RentalDesktopCatalogSourcesResult | null }
+  catalog: { status: PreviewStatus; result: RentalDesktopCatalogResult | null; inspection: RentalDesktopModelInspection | null; material: RentalDesktopCatalogMaterial | null }
+  sources: { status: PreviewStatus; result: RentalDesktopCatalogSourcesResult | null }
 }
 export interface WorkbenchInjected {
   hooks: { business: HostObservable<WorkbenchState>; workMode: HostObservable<'ai' | 'traditional'> }
@@ -22,7 +24,10 @@ export interface WorkbenchInjected {
   dismissNotice(): void
   readCatalog(query: RentalDesktopModelCatalogQuery): void
   discardCatalog(): void
+  clearMaterials(): void
   readSources(): void
+  /** Own a disclosure's display lifetime. Closing or releasing it withdraws current material and sources. */
+  observePreview(element: HTMLDetailsElement, kind: 'catalog' | 'sources'): () => void
   measure(element: HTMLElement): () => void
 }
 declare module '@deepseek-ai/dsh-client-ui-slots' {

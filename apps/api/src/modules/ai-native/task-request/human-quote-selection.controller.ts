@@ -4,6 +4,7 @@ import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELE
   AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS as taskContracts,
   AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS as approvalContracts } from '@rental-os/shared';
 import { parseClarifiedQuoteSelection, validateQuoteSelectionResponse, validateQuoteSelectionHttpRequest } from './quote-selection.validation';
+import { validateAiTaskSceneObservation } from '../scenes/scene-observation-contracts';
 import type { composeClarifiedQuoteSelectionRequests, composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
@@ -84,7 +85,7 @@ export class AiSelectedQuoteTaskController {
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readScene) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondHumanQuote(() => this.tasks.readScene(request, body));
+    return respondHumanQuote(async () => validateAiTaskSceneObservation(await this.tasks.readScene(request, body)));
   }
   @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {

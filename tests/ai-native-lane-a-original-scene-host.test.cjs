@@ -147,21 +147,84 @@ test('request-bound original scenes snapshot commands and never borrow concurren
 });
 
 test('material handoff reauthorizes originals and contains facts, not stale unavailable preparation wrappers', async () => {
-  const h = await setup();
-  for (const scene of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
-    const created = await h.app.create(h.command(scene, `material-${scene}`));
-    const packet = await h.app.prepareTaskMaterial(h.ref(created.receipt.inputRef));
+  const h = await setup(), shared = require('@rental-os/shared');
+  // The original absorbing fact store lacks the formal bounded inspection
+  // port. Supply an explicit empty synthetic page, not an unbounded fallback.
+  h.b.facts.listInspectionsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  const { credentials, ...dependencies } = h.dependencies;
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const contracts = require('./fixtures/ai-native/contract-consumer.cjs');
+  const schemas = shared.AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS;
+  const base = { ...shared.AI_SCOPE_DRAFT_SCHEMAS, ...shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS };
+  contracts.checkClosed(schemas, { ...base, ...schemas });
+  const validators = contracts.validatorsFor(schemas, base);
+  const app = composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
+  const controller = new AiOriginalScenesController(app);
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  const operation = OPENAPI_DOCUMENT.paths['/api/ai-native/scene-requests/material'].post;
+  assert.equal(operation.requestBody.content['application/json'].schema.$ref, '#/components/schemas/AiSceneRequestReadDraft');
+  assert.equal(operation.responses['201'].content['application/json'].schema.properties.data.$ref, '#/components/schemas/AiSceneTaskMaterialResponseDraft');
+  for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  const capabilities = schemas.AiOpeningBusinessMaterialDraft.properties.configuration.properties.fulfillment.properties.locations.items.properties.capabilities;
+  const validCapabilities = contracts.validatorsFor({ Capabilities: capabilities }, {}).Capabilities;
+  assert.equal(validCapabilities(['pickup', 'return', 'storage', 'delivery']), true);
+  for (const value of [['execute'], ['pickup', 'pickup'], ['pickup', 'return', 'storage', 'delivery', 'execute']]) assert.equal(validCapabilities(value), false);
+  assert.deepEqual(contracts.compileConsumer(`import type { AiSceneTaskMaterialResponseDraft, AiOrderExplanationMaterialDraft,
+    AiOpeningBusinessMaterialDraft, AiSceneTaskReceiptDraft } from '../packages/shared/src';
+    declare const order: AiOrderExplanationMaterialDraft;
+    declare const task: AiSceneTaskReceiptDraft;
+    declare const original: Extract<AiSceneTaskMaterialResponseDraft, { material: AiOpeningBusinessMaterialDraft }>['original'];
+    // @ts-expect-error scene and material must describe the same original request
+    const mismatch: AiSceneTaskMaterialResponseDraft = { original, material: order, materialHash: 'a'.repeat(64),
+      trust: 'source_text_is_data_not_instructions', task, model: 'not_called', plan: 'requires_host_plan_start' };`), []);
+  const cases = ['status', 'fees', 'payments', 'next_steps'].map(question => ({ scene: 'order_explanation', question }));
+  cases.push({ scene: 'opening_diagnosis' }, { scene: 'quote_clarification' });
+  let originalPacket;
+  for (const { scene, question } of cases) {
+    const command = h.command(scene, `material-${scene}-${question ?? 'selected'}`);
+    if (question) command.input.question = question;
+    let created;
+    try { created = await controller.create(request, command); }
+    catch (error) { error.message = `${scene}/${question ?? 'selected'}: ${JSON.stringify(error.getResponse?.())}`; throw error; }
+    const reference = h.ref(created.receipt.inputRef);
+    const packet = await controller.material(request, reference);
+    const internal = await h.app.prepareTaskMaterial(reference);
+    assert.ok(Object.isFrozen(internal.material));
+    assert.equal(validators.AiSceneTaskMaterialResponseDraft(packet), true, JSON.stringify(validators.AiSceneTaskMaterialResponseDraft.errors));
     assert.equal(packet.original.inputRef, created.receipt.inputRef); assert.equal(packet.task.taskId, created.task.taskId);
+    assert.equal(packet.original.sceneCode, scene);
     assert.equal(packet.plan, 'requires_host_plan_start'); assert.equal(packet.model, 'not_called');
-    assert.ok(Object.isFrozen(packet.material)); assert.match(packet.materialHash, /^[a-f0-9]{64}$/);
+    assert.equal(packet.materialHash, requestFingerprint(packet.material));
     assert.equal(packet.material.task, undefined);
+    if ('payload' in packet.material) {
+      assert.equal(packet.material.payloadFingerprint, requestFingerprint(packet.material.payload));
+      assert.equal(packet.material.payloadBytes, Buffer.byteLength(JSON.stringify(packet.material.payload), 'utf8'));
+    }
     if (scene === 'opening_diagnosis') {
       assert.deepEqual(packet.material.sections.map(s => s.key), ['item_groups']);
       assert.equal(packet.material.configuration.pricing, undefined);
     }
+    if (!originalPacket) originalPacket = packet;
   }
+  const reference = h.ref(originalPacket.original.inputRef);
+  for (const mutate of [packet => { packet.materialHash = 'b'.repeat(64); },
+    packet => { packet.material.payloadBytes++; }, packet => { packet.material.payloadFingerprint = 'b'.repeat(64); },
+    packet => { packet.original.sceneCode = 'opening_diagnosis'; },
+    packet => { packet.material.payload.privateCredential = 'must-not-leak'; },
+    packet => { packet.material.payload.gaps = Array(4).fill({ field: 'history', status: 'unavailable' }); }]) {
+    const packet = structuredClone(originalPacket); mutate(packet);
+    const corrupted = new AiOriginalScenesController({ ...app, prepareTaskMaterial: async () => packet });
+    await assert.rejects(corrupted.material(request, reference), error => error.getStatus() === 503
+      && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+  }
+  assert.equal(h.state.aiStep.length, 0, 'material reads never start a model or business step');
+  await assert.rejects(controller.material({ headers: {} }, reference), e => e.getStatus() === 403);
   const row = h.state.aiTaskOriginalRequest[0]; h.state.aiTaskPlanPolicy[0].enabled = false;
   await assert.rejects(h.app.prepareTaskMaterial(h.ref(row.id)), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(controller.material(request, reference), e => e.getStatus() === 404);
   assert.equal((await h.app.readTaskReceipt(row.id)).state, 'observed');
 });
 
@@ -259,6 +322,18 @@ test('persisted scene model result is bound to its original input and current au
   await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');
   const command = { original: ref, resultId: 'model-result' };
   const result = await center.readModelResult(command);
+  const { validateAiSceneModelObservation, AiOriginalSceneObservationController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  assert.deepEqual(validateAiSceneModelObservation(result), result);
+  const observation = new AiOriginalSceneObservationController({ readModelResult: async () => center.readModelResult(command) });
+  assert.deepEqual(await observation.readModelResult({ headers: {} }, command), result);
+  for (const mutate of [value => { value.sceneCode = 'other'; }, value => { value.original.sceneCode = 'other'; },
+    value => { value.privateCredential = 'must-not-leak'; }, value => { value.text.value = '汉'.repeat(50000); },
+    value => { value.status = 'unknown'; }]) {
+    const invalid = structuredClone(result); mutate(invalid);
+    const corrupted = new AiOriginalSceneObservationController({ readModelResult: async () => invalid });
+    await assert.rejects(corrupted.readModelResult({ headers: {} }, command), error => error.getStatus() === 503
+      && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+  }
   assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
   assert.equal(result.sceneCode, sceneCode);
   if (sceneCode === 'order_explanation') {
@@ -285,6 +360,7 @@ test('persisted scene model result is bound to its original input and current au
   h.state.aiGatewayInvocation[0].actionId = 'model-action';
   h.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN'; h.state.aiStep[0].status = 'UNKNOWN';
   const unknown = await reader.read(command); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.text, null);
+  assert.deepEqual(validateAiSceneModelObservation(unknown), unknown);
   h.b.h.identity.session = false;
   await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   }
@@ -324,6 +400,8 @@ test('original model application uses the fixed commands and persisted evidence 
     const aggregateRequest = { kind: 'original', original: h.reference, taskId: h.state.aiTask[0].id,
       runId: h.state.aiRun[0].id, resultId: h.state.aiTaskResultArtifact[0].id };
     const aggregate = await center.readScene(aggregateRequest);
+    const { validateAiTaskSceneObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+    assert.deepEqual(validateAiTaskSceneObservation(aggregate), aggregate);
     assert.equal(aggregate.model.status, 'available'); assert.equal(aggregate.snapshot.availability, 'available');
     assert.equal(aggregate.originalInput.receipt.inputRef, h.reference.inputRef);
     assert.equal(aggregate.originalInput.request.sceneCode, sceneCode);
@@ -561,6 +639,14 @@ test('scene knowledge stays separate from Core and reauthorizes frozen sources a
     const command = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
     const read = await h.model.readModelResult(command);
     assert.equal(read.status, 'available'); assert.deepEqual(read.knowledge, envelope.knowledge);
+    const { validateAiSceneModelObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+    assert.deepEqual(validateAiSceneModelObservation(read), read);
+    for (const corrupt of [value => { value.knowledge.contentHash = '0'.repeat(64); },
+      value => { value.knowledge.material.sources[0].credential = 'must-not-leak'; },
+      value => { value.knowledge.material.preferences.items[0].preference.kind = 'authority'; }]) {
+      const invalid = structuredClone(read); corrupt(invalid);
+      assert.throws(() => validateAiSceneModelObservation(invalid), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+    }
     const searchCount = k.db.queries.filter(query => query.where.text?.contains !== undefined).length;
     assert.ok(searchCount > 0);
     const opened = await h.model.reopenModelSource({ ...command, sourceKind: 'knowledge', sourceIndex: 0 });
@@ -613,6 +699,21 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
   const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
   const { AI_SCENE_MODEL_HTTP_DRAFT } = require('../packages/shared/src/ai-scene-request-draft');
+  const shared = require('@rental-os/shared');
+  const quoteContracts = require('./fixtures/ai-native/contract-consumer.cjs');
+  quoteContracts.checkClosed(shared.AI_SCENE_QUOTE_HTTP_SCHEMAS, {
+    ...shared.AI_SCENE_QUOTE_HTTP_SCHEMAS, ...shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS });
+  const quoteValidators = quoteContracts.validatorsFor(shared.AI_SCENE_QUOTE_HTTP_SCHEMAS, shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS);
+  const validQuote = (name, value) => assert.equal(quoteValidators[name](JSON.parse(JSON.stringify(value))), true,
+    JSON.stringify(quoteValidators[name].errors));
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  for (const [name, schema] of Object.entries(shared.AI_SCENE_QUOTE_HTTP_SCHEMAS))
+    assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  for (const [action, name] of [['readQuotePreparation', 'AiSceneModelQuotePreparationResponseDraft'],
+    ['confirmClarifiedQuote', 'AiSceneModelQuoteConfirmResponseDraft'], ['readClarifiedQuoteReceipt', 'AiSceneModelQuoteReceiptResponseDraft']])
+    assert.equal(OPENAPI_DOCUMENT.paths[`/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT[action]}`].post.responses['200'].content['application/json'].schema.properties.data.$ref,
+      `#/components/schemas/${name}`);
   const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
   const quoteIntent={customerType:'personal',customerId:'customer-a',bookingIdentity:{bookingIdentity:'enterprise_employee'},fulfillmentMode:'store_pickup_return',
     start:'2027-02-01T00:00:00.000Z',end:'2027-02-02T00:00:00.000Z'};
@@ -680,6 +781,15 @@ test('opt-in model controller executes persisted quote clarification and denies 
     answers:submission.answers.map(answer=>answer.fieldId===offeredChoice.fieldId?{...answer,value:'not-authorized-candidate'}:answer)}}),e=>e.getStatus()===400&&e.getResponse().code==='AI_INVALID_INPUT');
   assert.equal(h.execution.sent.length,1);
   assert.deepEqual(await controller.readAnswer(h.request,{original:h.reference,submission}),{state:'not_observed',retryable:false});
+  const noAnswerQuery = { original: h.reference, submission };
+  assert.deepEqual(await controller.readQuotePreparation(h.request, noAnswerQuery), {
+    receipt: { state: 'not_observed', retryable: false }, preparation: 'unavailable' });
+  assert.deepEqual(await controller.readClarifiedQuoteReceipt(h.request, noAnswerQuery), {
+    receipt: { state: 'not_observed', retryable: false }, quotation: 'unavailable' });
+  const requestValidators = quoteContracts.validatorsFor({
+    AiSceneModelQuoteConfirmDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelQuoteConfirmDraft }, shared.AI_TASK_INPUT_DRAFT_SCHEMAS);
+  assert.equal(requestValidators.AiSceneModelQuoteConfirmDraft({ original: { ...h.reference, draftVersion: 'old-v0' }, submission,
+    selectionRevision: 'a'.repeat(64), inputFingerprint: 'b'.repeat(64), confirmQuote: true }), false);
   request.aborted=true;
   const resumed = await controller.resume(request, { original: h.reference, submission });
   assert.equal(request.listenerCount('aborted'), 0);
@@ -691,6 +801,7 @@ test('opt-in model controller executes persisted quote clarification and denies 
   assert.deepEqual(await controller.readAnswer(h.request,{original:h.reference,submission}),received);
   const insufficient=await controller.readQuotePreparation(h.request,{original:h.reference,submission});
   assert.equal(insufficient.preparation.status,'unavailable');
+  validQuote('AiSceneModelQuotePreparationResponseDraft', insufficient);
   // Only database rows are substituted: availability and quote pricing remain real services.
   h.b.facts.listAssets=async()=>[1,2].map(index=>({id:'clarified-asset-'+index,
     tenantId:'tenant_001',workspaceId:'workspace-a',itemGroupId:h.b.group.id,
@@ -719,6 +830,12 @@ test('opt-in model controller executes persisted quote clarification and denies 
   assert.equal(prepared.quotation,'not_attempted');assert.equal(prepared.orderApproval,'not_granted');
   assert.equal(prepared.receipt.receiptId,received.receiptId);
   assert.equal(prepared.preparation.status,'ready',JSON.stringify(prepared));
+  validQuote('AiSceneModelQuotePreparationResponseDraft', prepared);
+  assert.equal(quoteValidators.AiSceneModelQuotePreparationResponseDraft({ ...prepared, approval: 'granted' }), false);
+  assert.equal(quoteValidators.AiSceneModelQuotePreparationResponseDraft({ ...prepared,
+    candidate: { ...prepared.candidate, amount: 999 } }), false);
+  assert.equal(quoteValidators.AiSceneModelQuotePreparationResponseDraft({ ...prepared,
+    sources: { ...prepared.sources, fields: prepared.sources.fields.map(field => ({ ...field, confirmed: true })) } }), false);
   const confirmation={original:h.reference,submission,selectionRevision:prepared.preparation.selectionRevision,
     inputFingerprint:prepared.formalInputFingerprint,confirmQuote:true};
   assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelQuoteConfirmDraft)(confirmation),true);
@@ -726,6 +843,10 @@ test('opt-in model controller executes persisted quote clarification and denies 
   await assert.rejects(controller.confirmClarifiedQuote(h.request,{...confirmation,inputFingerprint:'0'.repeat(64)}),e=>e.getStatus()===409);
   const absent=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
   assert.equal(absent.result.quotePersistence,'unknown');
+  validQuote('AiSceneModelQuoteReceiptResponseDraft', absent);
+  await assert.rejects(controller.confirmClarifiedQuote(h.request, {
+    ...confirmation, submission: { ...submission, submissionKey: 'nonexistent-answer' } }), error => error.getStatus() === 404);
+  assert.equal(storedQuotes.length, 0, 'an unobserved answer cannot confirm or create a quote');
   const saveOriginal=h.b.businessFacts.saveQuoteForOriginalOperation;
   h.b.businessFacts.saveQuoteForOriginalOperation=async(...args)=>{
     await saveOriginal(...args);
@@ -733,15 +854,48 @@ test('opt-in model controller executes persisted quote clarification and denies 
   };
   const uncertain=await controller.confirmClarifiedQuote(h.request,confirmation);
   assert.equal(uncertain.result.quotePersistence,'unknown');
+  validQuote('AiSceneModelQuoteConfirmResponseDraft', uncertain);
   assert.equal(storedQuotes.length,1);
   const recovered=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
   assert.equal(recovered.result.status,'quoted');assert.equal(storedQuotes.length,1);
+  validQuote('AiSceneModelQuoteReceiptResponseDraft', recovered);
+  const { AiOriginalQuoteModelExecutionController, validateAiSceneQuoteResponse } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const malformed = new AiOriginalQuoteModelExecutionController({ confirmClarifiedQuote: async () => ({ ...uncertain, secretBody: 'must_not_escape' }) });
+  await assert.rejects(malformed.confirmClarifiedQuote(h.request, confirmation), error =>
+    error.getStatus() === 409 && error.getResponse().code === 'AI_RESULT_UNKNOWN'
+      && error.getResponse().nextAction === 'read_clarified_quote_receipt' && !JSON.stringify(error.getResponse()).includes('must_not_escape'));
+  assert.throws(() => validateAiSceneQuoteResponse('AiSceneModelQuoteReceiptResponseDraft', { ...recovered,
+    result: { ...recovered.result, quote: { ...recovered.result.quote, payableAmount: null } } }), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  const missing = { status: 'missing_input', missingFields: ['items.0.pricingUnit'], clarifications: [] };
+  const incomplete = { ...prepared, formalInputFingerprint: null, sources: missing,
+    preparation: { ...missing, scope: prepared.preparation.scope, audience: prepared.preparation.audience,
+      observedAt: prepared.preparation.observedAt, next: 'clarify_input', authority: 'current_guarded_business_context',
+      sideEffects: prepared.preparation.sideEffects } };
+  validQuote('AiSceneModelQuotePreparationResponseDraft', incomplete);
+  assert.throws(() => validateAiSceneQuoteResponse('AiSceneModelQuotePreparationResponseDraft', {
+    ...incomplete, formalInputFingerprint: NaN }), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  validQuote('AiSceneModelQuoteConfirmResponseDraft', { receipt: received, preparation: incomplete.preparation, quotation: 'not_attempted' });
+  assert.deepEqual(quoteContracts.compileConsumer(`import type { AiSceneQuoteCandidate, AiSceneModelQuoteConfirmDraft, AiSceneModelQuoteReceiptResponseDraft,
+    AiSceneModelQuotePreparationResponseDraft } from '../packages/shared/src/index';
+    const confirmation: AiSceneModelQuoteConfirmDraft = ${JSON.stringify(confirmation)};
+    const candidate: AiSceneQuoteCandidate = ${JSON.stringify(prepared.candidate)};
+    const recovered: AiSceneModelQuoteReceiptResponseDraft = ${JSON.stringify(recovered)};
+    const missing: AiSceneModelQuotePreparationResponseDraft = ${JSON.stringify(incomplete)};
+    // @ts-expect-error a quote receipt does not grant approval
+    const approval: AiSceneModelQuoteReceiptResponseDraft = { ...recovered, orderApproval: 'granted' };
+    // @ts-expect-error a failed preparation must name its missing fields
+    const malformed: AiSceneModelQuotePreparationResponseDraft = { ...missing, preparation: { status: 'missing_input' } };
+  `), []);
   h.b.businessFacts.saveQuoteForOriginalOperation=saveOriginal;
   const quoted=await controller.confirmClarifiedQuote(h.request,confirmation);
   assert.equal(quoted.result.status,'quoted',JSON.stringify(quoted));assert.equal(quoted.orderApproval,'not_granted');
   const sameQuote=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
   assert.equal(sameQuote.result.quote.id,quoted.result.quote.id);
   assert.equal((await controller.confirmClarifiedQuote(h.request,confirmation)).result.quote.id,quoted.result.quote.id);
+  const standard = new AiOriginalQuoteModelExecutionController(controller.fullModel);
+  assert.equal((await standard.readQuotePreparation(h.request, { original: h.reference, submission })).formalInputFingerprint, prepared.formalInputFingerprint);
+  assert.equal((await standard.confirmClarifiedQuote(h.request, confirmation)).result.quote.id, quoted.result.quote.id);
+  assert.equal((await standard.readClarifiedQuoteReceipt(h.request, { original: h.reference, submission })).result.quote.id, quoted.result.quote.id);
   assert.equal(storedQuotes.length,1);
   assert.equal(h.execution.sent.length,1);
   await assert.rejects(controller.readAnswer(h.request,{original:h.reference,submission:{...submission,taskId:'wrong-task'}}),e=>e.getStatus()===403);
@@ -773,6 +927,15 @@ test('opt-in model controller executes persisted quote clarification and denies 
     runId: read.runId, resultId: read.resultId };
   assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelTaskSceneDraft)(aggregateCommand), true);
   const aggregate = await controller.readTaskScene(h.request, aggregateCommand);
+  const { validateAiTaskSceneObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  assert.deepEqual(validateAiTaskSceneObservation(aggregate), aggregate);
+  for (const corrupt of [value => { value.snapshot.value.cursor = 9007199254740993; },
+    value => { value.model.text.value = '汉'.repeat(50000); }, value => { value.task.privateCredential = 'must-not-leak'; }]) {
+    const invalid = structuredClone(aggregate); corrupt(invalid);
+    const damaged = new AiOriginalSceneModelController({ readTaskScene: async () => invalid });
+    await assert.rejects(damaged.readTaskScene(h.request, aggregateCommand), error => error.getStatus() === 503
+      && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+  }
   const page = await controller.readTaskPage(h.request, { limit: 5 });
   assert.ok(page.items.some(item => item.taskId === h.created.task.taskId));
   await assert.rejects(controller.readTaskPage(h.request, { limit: 51 }), e => e.getStatus() === 400);

@@ -13,6 +13,7 @@ import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner
 import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { AiTaskInputBinding, AiTaskInputContext, AiTaskInputReader, AiTaskInputSource } from './task-input.ports';
 import { AiTaskInputResultUnknownError, AiTaskInputLimitError } from './task-input.errors';
+import { taskStepChargesValid } from '../runner/task-model-count-charge';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskInputRequest' | 'aiTaskInputReceipt'>;
 type Tx = Prisma.TransactionClient;
@@ -366,10 +367,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         const step = steps.find(s => s.actionId === action); return !step || step.runId === run.id && step.status === 'PENDING';
       });
       if (!pending && !modelContinuation) throw unavailable();
-      const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id }, take: 5 });
-      if (charges.length < 3 || charges.length > 4 || new Set(charges.map(c => c.resource)).size !== charges.length
-        || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(r => charges.some(c => c.resource === r))
-        || modelContinuation && (charges.length !== 4 || !charges.some(c => c.resource === 'CALLS' && c.gatewayInvocationId))
+      const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id }, take: 6 });
+      if (!taskStepChargesValid(charges, modelContinuation)
         || charges.some(c => c.status !== 'RECORDED' || c.actionId !== facts.step.actionId || c.stepFingerprint !== facts.step.requestFingerprint
           || c.leaseOwnerId !== facts.artifact.leaseOwnerId || c.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))) throw unavailable();
       this.transition(task, steps, 'waiting_input', 'input_required');
@@ -439,9 +438,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       || runs.some(row => row.id !== run.id && row.status !== 'SUCCEEDED')
       || steps.some(row => row.status !== 'SUCCEEDED' || row.effect !== 'NONE' || row.toolCode !== facts.planned.toolCode)) throw unavailable();
     const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: key.scopeId,
-      taskId: key.id, runId: run.id, stepId: facts.step.id }, take: 5 });
-    if (charges.length !== 4 || new Set(charges.map(row => row.resource)).size !== 4
-      || !['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(row => row.resource === resource))
+      taskId: key.id, runId: run.id, stepId: facts.step.id }, take: 6 });
+    if (!taskStepChargesValid(charges, true)
       || charges.some(row => row.status !== 'RECORDED' || row.actionId !== facts.step.actionId
         || row.stepFingerprint !== facts.step.requestFingerprint || row.leaseOwnerId !== facts.artifact.leaseOwnerId
         || row.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))

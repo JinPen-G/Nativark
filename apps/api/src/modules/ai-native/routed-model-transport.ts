@@ -66,6 +66,15 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       this.adapters.set(adapter.provider, adapter);
     }
   }
+  inputBoundHash(request: ModelProtocolRequest, route: ProviderRouteDecision, streaming: boolean) {
+    const adapter = this.adapters.get(route.profile.protocol);
+    if (!adapter?.inputBoundHash) return undefined;
+    try { return adapter.inputBoundHash(structuredClone(request), streaming); }
+    catch (error) {
+      if (error instanceof ModelGatewayError && error.code === 'CAPABILITY_UNSUPPORTED') return undefined;
+      throw error;
+    }
+  }
   private cancelled(signal: AbortSignal) { if (signal.aborted) throw new ModelGatewayError('CANCELLED'); }
   private async prepare(value: GatewayContext, requestValue: ModelProtocolRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean) {
     const parsedContext = routedContextSchema.safeParse(value), parsedRequest = modelProtocolRequestSchema.safeParse(requestValue);
@@ -120,22 +129,22 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   private rejectSecret(value: unknown, credential: string) {
     if (JSON.stringify(value)?.includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
-  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder) {
+  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
     try {
       const prepared = await this.prepare(context, request, route, signal, false);
       // Adapter-owned objects must not change while accounting or authorization awaits.
-      const result = structuredClone(await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl }));
+      const result = structuredClone(await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl }));
       if (result.usage) await recordUsage?.(structuredClone(result.usage));
       this.cancelled(signal); this.rejectSecret(result, prepared.connection.credential);
       await prepared.recheck();
       return { ...structuredClone(result) };
     } catch (error) { throw this.safeError(error); }
   }
-  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder) {
+  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;
-      for await (const value of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
+      for await (const value of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
         const event = structuredClone(value);
         if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
         this.cancelled(signal);

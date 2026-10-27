@@ -5,7 +5,7 @@ import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desk
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
@@ -2154,7 +2154,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     method: 'post' as const, path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]
       ? `/${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]}` : ''}`,
     tag: 'AI Native', operationId: name === 'create' ? 'createOriginalOrderFactsRequest'
-      : name === 'read' || name === 'recovery' ? `readOriginalOrderFacts_${name}`
+      : name === 'read' || name === 'recovery' || name === 'material' ? `readOriginalOrderFacts_${name}`
         : name === 'reconcile' ? 'reconcileOriginalOrderFactsRequest' : `originalSceneRequest_${name}`,
     permissions: ['rental-os:order:view'], requestSchema: contract.request, responseSchema: contract.response,
     successStatus: contract.successStatus,
@@ -2389,10 +2389,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : 'Current original-owner quote preparation or exact Core receipt. Historical receipt and current admissibility are separate; no quotation, inventory reservation, approval or new execution.',
     requestSchema: AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS[action].request,
     responseSchema: AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS[action].response })),
-  ...(['material'] as const).map(action => ({ method: 'post' as const,
-    path: `/api/ai-native/scene-requests/${action}`, tag: 'AI Native', operationId: `readOriginalOrderFacts_${action}`,
-    summary: 'Read the exact original owner-bound request/current authorized facts with bounded dependency waits and request-local cancellation; no worker, new run, approval or model invocation. A closed observation is not evidence of rollback or unused budget.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestReadDraft' })),
   ...([
     ['start', 'AiSceneOrderReadReferenceDraft'], ['recover', 'AiSceneOrderReadReferenceDraft'],
     ['readPreparation', 'AiSceneOrderReadReferenceDraft'], ['resumePrepared', 'AiSceneOrderReadReferenceDraft'],
@@ -2569,14 +2565,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ['rental-os:order:create'], authRequired: true,
     summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. All quote execution/input/review/confirmation/original-receipt actions have named closed responses. The review carries current guarded parameters and unconfirmed field provenance; a malformed post-confirmation reply remains unknown and is read by its original clarified-quote receipt. Recovery never redispatches unknown calls.' })),
   ...([
-    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
-      cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
-      sceneCode: { type: 'string', maxLength: 191 } }, [], false)],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
-      after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['original', 'after', 'limit'], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.request],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage, 'AiSceneTaskUsageReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance, 'AiSceneTaskPerformanceReadDraft'],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene, 'AiSceneModelTaskSceneDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.readInput, 'AiSceneRequestReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' }, runId: { type: 'string', minLength: 1, maxLength: 191 } }, ['original', 'runId'], false)],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
@@ -2586,12 +2579,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, 'AiSceneModelCancelDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt, 'AiSceneModelCancelDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelAnswerQueryDraft'],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, 'AiSceneModelResultReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, 'AiSceneModelSourceReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, 'AiSceneOpeningModelSourceReadDraft'],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
-    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readModelResult ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot ? 'AiSceneModelRecoverySnapshotReadResponse'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readInput ? 'AiSceneModelPendingInputDraft'
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readAnswer ? 'AiTaskInputReceiptObservationDraft' : undefined,

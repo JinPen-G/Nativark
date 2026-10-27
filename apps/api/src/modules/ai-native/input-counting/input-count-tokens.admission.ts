@@ -150,8 +150,8 @@ export class InputCountTokensAuthorizationSource implements BudgetAuthorizationS
 export class InputCountTokensCallPricing implements BudgetQuotePort {
   constructor(private readonly db: CountTokensAdmissionDb & Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy'>,
     private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
-    private readonly countingPriceVersion: string, private readonly clock: () => Date = () => new Date()) {
-    if (!code.max(64).safeParse(countingPriceVersion).success) throw new BudgetError('UNAVAILABLE');
+    private readonly countingPriceVersion: string | undefined, private readonly clock: () => Date = () => new Date()) {
+    if (countingPriceVersion !== undefined && !code.max(64).safeParse(countingPriceVersion).success) throw new BudgetError('UNAVAILABLE');
   }
   private async current() {
     const current = structuredClone(await this.scopes.resolveCurrent());
@@ -162,6 +162,7 @@ export class InputCountTokensCallPricing implements BudgetQuotePort {
     return { ...current, gateway };
   }
   async quote(value: Readonly<BudgetReserveCommand>, grantValue: Readonly<BudgetGrant>): Promise<BudgetQuote> {
+    if (!this.countingPriceVersion) throw new BudgetError('UNAVAILABLE');
     const command = structuredClone(value), grant = structuredClone(grantValue), before = await this.current();
     if (!grant.entitled || identity(grant.context) !== identity(before.context)
       || command.association.priceVersion !== this.countingPriceVersion
@@ -212,8 +213,17 @@ export class InputCountTokensEvidence implements BudgetEvidencePort {
   }
   private async reservation(record: Readonly<BudgetRecord>) {
     const row = await this.reservationDb.aiBudgetReservation.findUnique({ where: { id: record.id } });
-    if (!row || row.scopeId !== record.scopeId || row.scopeKind !== record.scopeKind
-      || row.actorId !== record.actorId || row.callId !== record.callId) throw new BudgetError('FORBIDDEN');
+    const association = record.association;
+    if (!row || row.id !== record.id || row.scopeId !== record.scopeId || row.scopeKind !== 'WORKSPACE'
+      || record.scopeKind !== 'WORKSPACE' || association.scope.kind !== 'workspace'
+      || row.actorId !== record.actorId || row.callId !== record.callId || row.sceneCode !== record.sceneCode
+      || row.tenantId !== association.scope.tenantId || row.workspaceId !== association.scope.workspaceId
+      || row.requestId !== association.requestId || row.idempotencyKey !== association.idempotencyKey
+      || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId
+      || row.priceVersion !== association.priceVersion || row.unitKind !== 'calls'
+      || record.reserved.unit !== 'calls' || record.reserved.value !== 1 || row.reservedCalls !== 1
+      || !isGatewayConfig(association.config) || row.configurationHash !== requestFingerprint(association.config)
+      || row.configRevision !== association.config.configRevision) throw new BudgetError('FORBIDDEN');
     return row;
   }
   async dispatch(record: Readonly<BudgetRecord>): Promise<'not_dispatched' | 'dispatched' | 'unknown'> {
@@ -221,15 +231,44 @@ export class InputCountTokensEvidence implements BudgetEvidencePort {
     return row.dispatchState === 'not_dispatched' ? 'not_dispatched' : row.dispatchState === 'unknown' ? 'unknown' : 'dispatched';
   }
   async usage(record: Readonly<BudgetRecord>, evidenceRef: string, _reconcile: boolean): Promise<BudgetUsageEvidence> {
-    if (!code.max(191).safeParse(evidenceRef).success) throw new BudgetError('INVALID');
-    const receipt = await this.receipts.read(evidenceRef);
-    // Both observed and definite-failure receipts attest the one real external
-    // call the admission reserved; 'unknown' stays unsettled by design.
-    if (!['observed', 'failed'].includes(receipt.state) || receipt.countCallId !== record.callId
-      || receipt.actorId !== record.actorId || receipt.admission.reservationId !== record.id)
-      throw new BudgetError('UNAVAILABLE');
+    if (!hash64.safeParse(evidenceRef).success) throw new BudgetError('INVALID');
+    const read = async () => {
+      const row = await this.reservation(record), receipt = await this.receipts.read(evidenceRef);
+      const invocation = await this.reservationDb.aiGatewayInvocation.findFirst({ where: {
+        scopeId: row.scopeId, stepId: row.stepId, id: receipt.invocationId }, select: {
+        id: true, scopeId: true, taskId: true, runId: true, stepId: true, actionId: true, actorId: true,
+        callId: true, configuration: true, configurationHash: true, registrationHash: true,
+        intentHash: true, priceVersion: true, maxOutputTokens: true, sceneCode: true } });
+      // A terminal label alone is not usage evidence. Bind the original count
+      // claim, reservation and immutable generation registration; expiry/new
+      // pricing are irrelevant to accounting for an already observed request.
+      if (!['observed', 'failed'].includes(receipt.state) || !invocation
+        || !['dispatched', 'completed', 'unknown'].includes(row.dispatchState)
+        || row.status === 'released' || receipt.scopeId !== row.scopeId
+        || receipt.tenantId !== row.tenantId || receipt.workspaceId !== row.workspaceId
+        || receipt.countCallId !== row.callId || receipt.actorId !== row.actorId
+        || receipt.admission.reservationId !== row.id || receipt.admission.sceneCode !== row.sceneCode
+        || invocation.id !== receipt.invocationId || invocation.scopeId !== row.scopeId
+        || invocation.actorId !== row.actorId || invocation.runId !== row.runId
+        || invocation.stepId !== row.stepId || invocation.actionId !== row.actionId
+        || receipt.callId !== invocation.callId || countTokensCallId(invocation.callId) !== row.callId
+        || countTokensSceneCode(invocation.sceneCode) !== row.sceneCode || receipt.sceneCode !== invocation.sceneCode
+        || receipt.registrationHash !== invocation.registrationHash || receipt.intentHash !== invocation.intentHash
+        || receipt.configurationHash !== invocation.configurationHash || receipt.priceVersion !== invocation.priceVersion
+        || receipt.maxOutputTokens !== invocation.maxOutputTokens || !isGatewayConfig(invocation.configuration)
+        || requestFingerprint(invocation.configuration) !== row.configurationHash
+        || receipt.model !== invocation.configuration.model || receipt.protocol !== invocation.configuration.protocol
+        || !await this.receipts.hasDispatchClaim({ tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
+          actorId: receipt.actorId, callId: receipt.callId, reservationId: row.id,
+          registrationHash: receipt.registrationHash, intentHash: receipt.intentHash,
+          configurationHash: receipt.configurationHash, countRequestHash: receipt.countRequestHash }))
+        throw new BudgetError('UNAVAILABLE');
+      return { receipt, invocation };
+    };
+    const before = await read(), after = await read();
+    if (requestFingerprint(before) !== requestFingerprint(after)) throw new BudgetError('PENDING_RECONCILIATION');
     return { quantity: { unit: 'calls' as const, value: 1 },
-      ...(receipt.inputTokens !== undefined ? { inputTokens: receipt.inputTokens } : {}),
-      evidenceHash: countTokensReceiptDocumentHash(receipt) };
+      ...(before.receipt.inputTokens !== undefined ? { inputTokens: before.receipt.inputTokens } : {}),
+      evidenceHash: countTokensReceiptDocumentHash(before.receipt) };
   }
 }

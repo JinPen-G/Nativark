@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";
@@ -37,7 +37,7 @@ import {
   type RentalWorkOrderStatus
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
-import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod } from "./rental-occupancy";
@@ -451,7 +451,8 @@ function toWorkOrder(row: any): RentalWorkOrder {
  */
 @Injectable()
 export class RentalCoreFactRepository implements RentalCoreFactStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
 
   /* ---------- 订单聚合 ---------- */
 
@@ -2366,7 +2367,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         createdAt: new Date(record.createdAt)
       }
     });
-    await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId: record.tenantId, workspaceId }, record.id);
+    await this.failureEvents?.inspection?.(tx, { tenantId: record.tenantId, workspaceId }, record.id);
   }
 
   async correctInspectionUsage(
@@ -2431,7 +2432,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       where: { id: inspectionId, tenantId, workspaceId, orderId, revision: row.revision },
       data: { results: results as Prisma.InputJsonValue, revision: { increment: 1 } }
     });
-    await new PrismaBusinessFailureOutbox().inspection(client, { tenantId, workspaceId }, inspectionId);
+    await this.failureEvents?.inspection?.(client, { tenantId, workspaceId }, inspectionId);
     return this.toInspectionRecord(updated);
   }
 

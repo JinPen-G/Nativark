@@ -20,8 +20,12 @@ function load(relative, bindings = {}, replacements = []) {
     exported.push(name);
     return `${kind} ${name}`;
   });
-  source = stripTypeScriptTypes(source, { mode: "transform" });
-  const scope = { module: { exports: {} }, require, URL, TextEncoder, Event, console, process,
+  source = relative.endsWith(".tsx")
+    ? require(path.join(root, "clients/agent-desktop/harness/node_modules/typescript")).transpileModule(source, {
+      compilerOptions: { target: "ES2022", module: "CommonJS", jsx: "React" }
+    }).outputText
+    : stripTypeScriptTypes(source, { mode: "transform" });
+  const scope = { module: { exports: {} }, exports: {}, require, URL, TextEncoder, Event, console, process,
     loadDependency: name => load(path.join(path.dirname(relative), `${name}.ts`)), ...bindings };
   vm.runInNewContext(`${source}\nmodule.exports = {...module.exports, ${exported.join(",")}};`, scope, { filename: relative });
   return scope.module.exports;
@@ -215,4 +219,212 @@ test("native owner rejects stale documents, locks unknown commands, hides expire
     const waiting = f.controller.waitUntilReady(); f.controller.dispose(); await assert.rejects(waiting);
     assert.equal(f.handlers.size, 0); assert.equal(view.webContents.dead, true); assert.equal(f.browser.listenerCount("will-download"), 0);
   } finally { f.controller.dispose(); }
+});
+
+const harness = path.join(root, "clients/agent-desktop/harness");
+const workbench = "clients/agent-desktop/harness/packages/client/ui-rental-workbench/src/client/";
+const harnessRequire = require("node:module").createRequire(path.join(harness, "node_modules/.pnpm/node_modules/react/package.json"));
+const { createHash } = require("node:crypto");
+function workbenchFixture() {
+  const { JSDOM } = require(path.join(harness, "node_modules/jsdom"));
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const { window } = dom, { document } = window;
+  let focused = true, hidden = false, now = Date.parse("2026-10-27T10:00:00Z"), timerId = 0;
+  Object.defineProperty(document, "hidden", { get: () => hidden });
+  document.hasFocus = () => focused;
+  class Clock extends Date { static now() { return now; } }
+  const timers = new Map(), effects = [], registrations = new Map(), modeListeners = new Set();
+  const store = load("clients/agent-desktop/harness/packages/client/store/src/index.ts", {
+    createStore: harnessRequire("zustand/vanilla").createStore,
+    subscribeWithSelector: harnessRequire("zustand/middleware").subscribeWithSelector,
+    shallow: harnessRequire("zustand/shallow").shallow, ...harnessRequire("immer"), queueMicrotask
+  }, [[/^import \{[\s\S]*?\} from '[^']+'$/gm, ""]]);
+  let currentPanel = null, accept, props, catalogHandler, checkHandler, sourcesHandler;
+  const calls = { catalog: 0, checks: 0, sources: 0 };
+  const selection = { provider: "local", model: "model" }, binding = { actorId: "a", tenantId: "t", workspaceId: "w1" };
+  const destination = { provider: selection.provider, baseUrl: "https://model.invalid/v1/" };
+  const modelRoute = { ...destination, model: selection.model, protocol: "openai-completions" };
+  const hash = "a".repeat(64), iso = time => new Date(time).toISOString();
+  const observation = now;
+  const result = () => {
+    const catalog = { version: 1, requestId: "preview-1", binding, policyRevision: 1, policyHash: hash,
+      observedAt: iso(observation), expiresAt: iso(observation + 30000), configurationVersion: hash,
+      source: "persisted_workspace_configuration", destination, modelRoute,
+      items: [{ reference: "catalog-ref-1", categoryCode: "camera", status: "enabled" }], truncated: false,
+      omittedFields: ["name", "code", "unit", "availability", "price"], execution: "read_only" };
+    const content = shared.projectRentalDesktopCatalogMaterial(catalog);
+    return { catalog, inspection: { selection, destination, protocol: modelRoute.protocol, preparationVersion: hash,
+      observedAt: iso(observation), expiresAt: iso(observation + 30000), source: "prepared_initial_route", execution: "not_dispatched" },
+      material: { content, contentHash: createHash("sha256").update(content).digest("hex"), purpose: "human_preview", modelRequest: "not_sent" } };
+  };
+  const check = () => ({ version: 1, requestId: "check-1", binding, previewRequestId: "preview-1", sourceObservedAt: iso(observation),
+    observedAt: iso(now), expiresAt: iso(Math.min(now + 5000, observation + 30000)), configurationVersion: hash,
+    policyRevision: 1, policyHash: hash, modelRoute, execution: "display_check_only" });
+  const sourceResult = () => ({ version: 1, requestId: "sources-1", binding, observedAt: iso(now), expiresAt: iso(now + 60000),
+    items: [{ state: "reference", auditId: "audit-1", requestId: "preview-1", observedAt: iso(observation), sourceExpiresAt: iso(observation + 86400000),
+      query: { limit: 10, destination, modelRoute }, configurationVersion: hash, policyRevision: 1, policyHash: hash }], truncated: false, execution: "references_only" });
+  const bridge = { protocolVersion: 1, read: async () => ({ protocolVersion: 1, revision: 1, session: sample() }),
+    subscribe: fn => { accept = fn; return () => { accept = undefined; }; }, present: async () => {}, request: async () => {}, retry: async () => {},
+    catalogForModel: query => {
+      calls.catalog++;
+      if (catalogHandler) return catalogHandler(query);
+      const response = result();
+      if (query.sourceRef) response.catalog.reopenedFrom = { ...query.sourceRef, observedAt: iso(observation), configurationVersion: hash };
+      return Promise.resolve(response);
+    },
+    checkCatalogForModel: query => { calls.checks++; return checkHandler ? checkHandler(query) : Promise.resolve(check()); },
+    catalogSources: () => { calls.sources++; return sourcesHandler ? sourcesHandler() : Promise.resolve(sourceResult()); } };
+  const ctx = { layout: { panelInfo: { getSnapshot: () => ({ activePanelId: currentPanel }),
+    subscribe: fn => { modeListeners.add(fn); return () => modeListeners.delete(fn); } },
+    selectPanel: value => { currentPanel = value; for (const fn of modeListeners) fn(); } },
+    locale: { register: () => () => {} }, effect: fn => { effects.push(fn()); },
+    slots: { inject: (_name, fn) => { effects.push(fn()); }, register: (options, component) => {
+      props = options.inject(); registrations.set(options.name, component); return () => registrations.delete(options.name);
+    } } };
+  const locale = load(`${workbench}locales.ts`);
+  const plugin = load(`${workbench}index.ts`, { ...shared, ...store, ...locale, document, window, MutationObserver: window.MutationObserver, rentalDesktop: bridge, Date: Clock,
+    crypto: { subtle: { digest: async (_algorithm, bytes) => Uint8Array.from(createHash("sha256").update(bytes).digest()).buffer } },
+    WorkbenchContext: {}, WorkbenchNavigation: {}, WorkbenchMain: {}, WorkbenchToast: {},
+    setTimeout: (fn, ms) => { const id = ++timerId; timers.set(id, { fn, at: now + ms }); return id; }, clearTimeout: id => timers.delete(id)
+  }, [[/^import \{[^}]*\} from '[^']+'$/gm, ""]]);
+  plugin.apply(ctx);
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const mount = () => {
+    const catalog = document.createElement("details"), sources = document.createElement("details");
+    catalog.open = sources.open = true; catalog.append(sources); document.body.append(catalog);
+    const releaseCatalog = props.observePreview(catalog, "catalog"), releaseSources = props.observePreview(sources, "sources");
+    return { catalog, sources, close: element => { element.open = false; element.dispatchEvent(new window.Event("toggle")); },
+      dispose: () => { releaseSources(); releaseCatalog(); catalog.remove(); } };
+  };
+  return { dom, window, document, props, locale, calls, selection, result, check, sourceResult, mount, flush,
+    state: () => props.hooks.business.getSnapshot(), timers,
+    setCatalog: fn => { catalogHandler = fn; }, setCheck: fn => { checkHandler = fn; }, setSources: fn => { sourcesHandler = fn; },
+    accept: session => accept({ protocolVersion: 1, revision: 2, session }), mode: ctx.layout.selectPanel,
+    blur: () => { focused = false; window.dispatchEvent(new window.Event("blur")); },
+    hide: () => { hidden = true; document.dispatchEvent(new window.Event("visibilitychange")); },
+    advance: async ms => {
+      const end = now + ms;
+      for (;;) {
+        const due = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        now = due[1].at; timers.delete(due[0]); due[1].fn(); await flush();
+      }
+      now = end; await flush();
+    },
+    dispose: () => { for (const cleanup of effects.reverse()) cleanup?.(); dom.window.close(); }
+  };
+}
+
+test("workbench withdraws closed, collapsed, inactive and changed previews without reviving late reads", async () => {
+  for (const action of ["close", "rapid-reopen", "collapse", "sources", "clear", "blur", "hidden", "mode", "scope", "dispose"]) {
+    const f = workbenchFixture();
+    try {
+      await f.flush(); const view = f.mount();
+      f.props.readSources(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush();
+      assert.equal(f.state().catalog.status, "ready", action); assert.equal(f.state().sources.status, "ready", action);
+      const pending = deferred(); f.setCheck(() => pending.promise);
+      await f.advance(3000); assert.equal(f.calls.checks, 2);
+      if (action === "close") view.close(view.catalog);
+      else if (action === "rapid-reopen") { view.catalog.open = false; view.catalog.open = true; await f.flush(); }
+      else if (action === "collapse") view.dispose();
+      else if (action === "sources") view.close(view.sources);
+      else if (action === "clear") f.props.clearMaterials();
+      else if (action === "blur") f.blur();
+      else if (action === "hidden") f.hide();
+      else if (action === "mode") f.mode("rental-business");
+      else if (action === "scope") f.accept({ ...sample(), currentWorkspaceId: "w2" });
+      else f.dispose();
+      const status = f.state().catalog.status;
+      assert.ok(["inactive", "cleared", "changed"].includes(status), action);
+      assert.equal(f.state().catalog.result, null); assert.equal(f.state().catalog.material, null);
+      assert.equal(f.state().sources.result, null); assert.equal(f.timers.size, 0);
+      pending.resolve(f.check()); await f.flush(); await f.advance(10000);
+      assert.equal(f.state().catalog.status, status); assert.equal(f.timers.size, 0);
+      const count = f.calls.catalog;
+      f.props.readCatalog({ selection: f.selection, limit: 10, sourceRef: { auditId: "audit-1", requestId: "preview-1" } });
+      await f.flush(); assert.equal(f.calls.catalog, count, "discarded references cannot restart a read");
+      view.dispose();
+    } finally { if (action !== "dispose") f.dispose(); }
+  }
+  for (const kind of ["catalog", "sources"]) {
+    const f = workbenchFixture();
+    try {
+      await f.flush(); const view = f.mount(), pending = deferred();
+      if (kind === "catalog") { f.setCatalog(() => pending.promise); f.props.readCatalog({ selection: f.selection, limit: 10 }); }
+      else { f.setSources(() => pending.promise); f.props.readSources(); }
+      await f.flush(); view.dispose();
+      const reopened = f.mount(); pending.resolve(kind === "catalog" ? f.result() : f.sourceResult()); await f.flush();
+      assert.equal(f.state()[kind].result, null); assert.equal(f.state()[kind].status, "inactive");
+      assert.equal(f.calls[kind], 1); assert.equal(f.calls.checks, 0); reopened.dispose();
+    } finally { f.dispose(); }
+  }
+});
+
+test("workbench expiry and failed checks keep explicit states and never extend original display deadlines", async () => {
+  const f = workbenchFixture();
+  try {
+    await f.flush(); f.mount(); f.props.readSources(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush();
+    const sourceDeadline = f.state().sources.result.expiresAt;
+    await f.advance(30000);
+    assert.equal(f.state().catalog.status, "expired"); assert.equal(f.state().catalog.material, null);
+    assert.equal(f.state().sources.result.expiresAt, sourceDeadline);
+    await f.advance(30000); assert.equal(f.state().sources.status, "expired"); assert.equal(f.timers.size, 0);
+  } finally { f.dispose(); }
+  for (const failure of ["stuck", "denied"]) {
+    const f = workbenchFixture();
+    try {
+      await f.flush(); f.mount(); f.props.readSources(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush();
+      f.setCheck(() => failure === "denied" ? Promise.reject(new Error("denied")) : deferred().promise);
+      await f.advance(5000);
+      assert.equal(f.state().catalog.status, failure === "denied" ? "failed" : "expired");
+      assert.equal(f.state().catalog.material, null);
+      if (failure === "denied") { assert.equal(f.state().sources.status, "failed"); assert.equal(f.timers.size, 0); }
+    } finally { f.dispose(); }
+  }
+});
+
+test("workbench presentation clears on real component unmount and offers localized manual clearing", async () => {
+  const f = workbenchFixture(), React = harnessRequire("react"), { createRoot } = harnessRequire("react-dom/client");
+  const { act } = React;
+  const previous = new Map(["window", "document", "IS_REACT_ACT_ENVIRONMENT"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const [key, value] of Object.entries({ window: f.window, document: f.document, IS_REACT_ACT_ENVIRONMENT: true }))
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+  const container = f.document.createElement("div"); f.document.body.append(container); const renderer = createRoot(container);
+  const primitive = (tag, omit = []) => ({ children, ...props }) => {
+    for (const key of omit) delete props[key];
+    return React.createElement(tag, props, children);
+  };
+  const { WorkbenchContext } = load(`${workbench}Workbench.tsx`, { React, ...React, ...shared,
+    Button: primitive("button", ["variant"]), Input: primitive("input"), Menu: () => null, SegmentedControl: () => null,
+    Tooltip: ({ children }) => children, Toast: () => null, IconWarningOutlineRegular: () => null, IconChevronDownOutlineRegular: () => null,
+    css: {} }, [[/^import \{[^}]*\} from '[^']+'$/gm, ""], [/^import css from '[^']+'$/gm, ""]]);
+  const render = async wide => { await act(async () => {
+    renderer.render(React.createElement(WorkbenchContext, { ...f.props, wide,
+      useBusiness: select => select(f.state()), useWorkMode: select => select("ai"), t: key => f.locale.zh[key] })); await f.flush();
+  }); };
+  try {
+    await f.flush(); await render(true);
+    const open = () => { for (const element of container.querySelectorAll("details")) {
+      element.open = true; element.dispatchEvent(new f.window.Event("toggle"));
+    } };
+    open(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush(); await render(true);
+    assert.match(container.textContent, /catalog-ref-1/);
+    await render(false); assert.equal(f.state().catalog.status, "inactive"); assert.equal(f.timers.size, 0);
+    await render(true); assert.doesNotMatch(container.textContent, /catalog-ref-1/); assert.match(container.textContent, /预览已撤回/);
+    assert.ok([...container.querySelectorAll("input")].every(input => input.value === "")); assert.equal(f.calls.catalog, 1);
+    open(); f.props.readSources(); await f.flush(); await render(true);
+    const reopen = [...container.querySelectorAll("button")].find(button => button.textContent === f.locale.zh.catalogReopenSource);
+    assert.ok(reopen); await act(async () => { reopen.click(); await f.flush(); }); await render(true);
+    assert.equal(f.state().catalog.result.reopenedFrom.auditId, "audit-1");
+    assert.equal(container.querySelector("input").value, "show first 10 products");
+    const clear = [...container.querySelectorAll("button")].find(button => button.textContent === f.locale.zh.catalogClear);
+    assert.ok(clear); await act(async () => clear.click()); await render(true);
+    assert.equal(f.state().catalog.material, null); assert.equal(f.state().sources.result, null); assert.equal(f.timers.size, 0);
+    assert.match(container.textContent, /当前预览已清除/); assert.match(container.textContent, /不删除正式业务记录/);
+    assert.equal(f.state().catalog.status, "cleared");
+    assert.ok([...container.querySelectorAll("input")].every(input => input.value === ""));
+  } finally {
+    await act(async () => renderer.unmount()); f.dispose();
+    for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
+  }
 });

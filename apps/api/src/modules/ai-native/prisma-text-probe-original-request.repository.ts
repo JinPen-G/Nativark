@@ -185,7 +185,25 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (row.contentHash !== this.hash(binding)) throw unavailable();
     return { context: after.context, owner: after.owner, sceneVersion: row.sceneVersion,
       inputRef: row.id, inputRevision: row.revision, inputHash: row.contentHash, expiresAt: row.expiresAt.toISOString(),
-      command: structuredClone(value.command), preparationHash: value.preparationHash, priceVersion: value.priceVersion };
+      command: structuredClone(value.command), preparationHash: value.preparationHash, priceVersion: value.priceVersion,
+      sceneCode: TEXT_PROBE_SCENE as 'ai.capability.text', registrationRef: value.registrationRef,
+      limits: structuredClone(value.limits) };
+  }
+  async readHistorical(inputRef: string) {
+    if (!id.max(36).safeParse(inputRef).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.historicalAccess();
+    const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...before.owner, id: inputRef,
+      contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
+    if (!row || row.id !== inputRef) throw unavailable();
+    const original = await this.readHistoricalOriginal(row.requestKey);
+    const after = await this.historicalAccess();
+    if (!original || original.inputRef !== inputRef || after.binding !== before.binding
+      || requestFingerprint(after.owner) !== requestFingerprint(before.owner)
+      || requestFingerprint(original.owner) !== requestFingerprint(before.owner)) throw denied();
+    return { context: original.context, sceneCode: original.sceneCode, sceneVersion: original.sceneVersion,
+      inputRef: original.inputRef, inputRevision: original.inputRevision, inputHash: original.inputHash,
+      command: original.command, registrationRef: original.registrationRef, priceVersion: original.priceVersion,
+      limits: original.limits };
   }
   async readOriginal(requestKey: string) {
     if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

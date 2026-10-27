@@ -433,11 +433,16 @@ export class AiTaskRunner {
           activeResourceTicket = resourceTicket;
         }
         if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), workMs(), 'step_start'), ref);
-        if (!reconcile && !continuing && resourceTicket && this.deps.resources?.beforeExecute) {
-          resourceTicket = structuredClone(await this.callWriteBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), workMs(), 'model_resource_reserve'));
+        const measuredPreparation = !reconcile && !continuing && resourceTicket?.modelPending === true
+          && typeof this.deps.resources?.beforeExecute === 'function' && typeof this.deps.effects.executePrepared === 'function';
+        if (!reconcile && !continuing && !measuredPreparation && resourceTicket && this.deps.resources?.beforeExecute) {
+          resourceTicket = structuredClone(await this.callBounded(child => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease), child), workMs(), 'model_resource_reserve', signal).catch(error => {
+            if (error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            throw error;
+          }));
           activeResourceTicket = resourceTicket;
         }
-        if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+        if (resourceTicket?.modelPending && !measuredPreparation) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         if (!this.deps.resources) legacyCalls++;
         let result: AiTaskRunnerEffectResult;
         try {
@@ -448,7 +453,11 @@ export class AiTaskRunner {
           const raw = await this.callBounded(signal => continuing
             ? this.deps.effects.continueConfirmation!(structuredClone(stepPlan), signal, structuredClone(lease), structuredClone(continuation!))
             : reconcile ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
-              : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)),
+              : measuredPreparation ? this.deps.effects.executePrepared!(structuredClone(stepPlan), signal, structuredClone(lease), async () => {
+                resourceTicket = structuredClone(await this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease), signal));
+                activeResourceTicket = resourceTicket;
+                if (resourceTicket.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+              }) : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)),
           Math.min(plan.limits.maxStepMs, remaining, continuing ? continuation!.remainingActiveMs : plan.limits.maxStepMs),
           reconcile ? 'reconcile' : 'execute', signal);
           result = boundedResult(structuredClone(raw), plan.limits.maxOutputBytes - outputBytes);

@@ -1,7 +1,7 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Inject, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
-import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import {
   RentalCoreOrderStatus,
   type RentalOrderChangePreview,
@@ -216,7 +216,8 @@ export class RentalCoreController {
     private readonly documents: RentalDocumentService,
     private readonly operationLogs: OperationLogService,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
@@ -2669,7 +2670,7 @@ export class RentalCoreController {
         });
         await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
           data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
-        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
+        await this.failureEvents?.inspection?.(tx, { tenantId, workspaceId }, inspectionId);
         return { order: approved.order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {
@@ -2735,7 +2736,7 @@ export class RentalCoreController {
         });
         await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
           data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
-        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
+        await this.failureEvents?.inspection?.(tx, { tenantId, workspaceId }, inspectionId);
         return { order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {
@@ -2822,7 +2823,7 @@ export class RentalCoreController {
         delete exception.customerRespondedAt;
         await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
           data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
-        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
+        await this.failureEvents?.inspection?.(tx, { tenantId, workspaceId }, inspectionId);
         return { order: adjusted.order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {

@@ -722,26 +722,48 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (session.provider === "local_mock" && process.env.NODE_ENV === "production") {
       throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
     }
-    if (session.provider !== "local_mock") {
+    // Knowledge completion proves existence/type/length through its bounded,
+    // DNS-pinned bytes read below, not a separate ambient HEAD connection.
+    if (session.provider !== "local_mock" && !knowledgeInput) {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
       if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
       const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
       if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
     }
+    let knowledgeContentHash: string | undefined;
+    if (knowledgeInput) {
+      if (!this.knowledgeFiles?.readUploadContentHash) throw new ServiceUnavailableException('知识上传正文证据未配置');
+      knowledgeContentHash = await this.knowledgeFiles.readUploadContentHash(tenantId, asset.id, owner!);
+      if (!/^[a-f0-9]{64}$/u.test(knowledgeContentHash)) throw new ConflictException('知识上传正文证据不可用');
+    }
     const metadata = {
       ...((asset.metadata ?? {}) as JsonRecord),
       completedAt: new Date().toISOString(),
+      ...(knowledgeContentHash ? { knowledgeContentHash } : {}),
       ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
     };
     const updated = await this.prisma.$transaction(async (tx) => {
-      if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+      if (knowledgeInput) {
+        await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+        const [currentAsset, currentSession] = await Promise.all([
+          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
+          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
+        ]);
+        const stable = (row: unknown) => JSON.stringify(row);
+        if (stable(currentAsset) !== stable(asset) || stable(currentSession) !== stable(session))
+          throw new ConflictException('知识上传绑定在读取正文后已变化');
+      }
       const sessionClaim = await tx.fileUploadSession.updateMany({
-        where: { id: session.id, tenantId, status: "pending_upload" },
+        where: { id: session.id, tenantId, status: "pending_upload",
+          ...(knowledgeInput ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
+            provider: asset.storageProvider, storageKey: asset.storageKey } : {}) },
         data: { status: "completed", completedAt: new Date(), failureReason: null }
       });
       if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
       const assetClaim = await tx.fileAsset.updateMany({
-        where: { id: asset.id, tenantId, status: "pending_upload" },
+        where: { id: asset.id, tenantId, status: "pending_upload",
+          ...(knowledgeInput ? { updatedAt: asset.updatedAt, storageProvider: asset.storageProvider,
+            storageKey: asset.storageKey, uploadedBy: asset.uploadedBy } : {}) },
         data: { status: "active", metadata: metadata as Prisma.InputJsonValue }
       });
       if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");

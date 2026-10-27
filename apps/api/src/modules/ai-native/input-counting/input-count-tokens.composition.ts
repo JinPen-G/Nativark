@@ -23,6 +23,7 @@ import { CountingTaskModelInvocationPreparation, TaskCountingGateSource, TaskInp
 import { InputCountTokensService, type CountTokensFrozenInputSource } from './input-count-tokens.service';
 import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, type CountTokensReceiptDb } from './input-count-tokens.receipt';
 import { countTokensSupport } from './count-tokens.protocol';
+import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
 
 /** Trusted source behind publishInputBound: reads the persisted provider count
  * receipt and binds it to the exact invocation/price the caller presents. The
@@ -45,7 +46,7 @@ export class CountTokensGatewayPricingEvidenceSource implements GatewayPricingEv
   }>): Promise<unknown> {
     const parsed = /^count-tokens:([a-f0-9]{64})$/u.exec(reference);
     const principal = gatewayBudgetPrincipal(context);
-    if (!parsed || context.audience !== 'operator' || principal.actorKind !== 'USER') throw new BudgetError('FORBIDDEN');
+    if (!parsed || !['operator', 'staff'].includes(context.audience) || principal.actorKind !== 'USER') throw new BudgetError('FORBIDDEN');
     const receipt = await this.receipts.read(parsed[1]);
     const scope = context.scope as { kind: string; tenantId?: string; workspaceId?: string };
     if (receipt.state !== 'observed' || receipt.tenantId !== scope.tenantId || receipt.workspaceId !== scope.workspaceId
@@ -74,8 +75,8 @@ export class CountTokensGatewayPricingEvidenceSource implements GatewayPricingEv
 
 export interface InputCountTokensCompositionDependencies extends PersistedTaskAuthorizationDependencies {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  frozen: CountTokensFrozenInputSource;
-  resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
+  frozen?: CountTokensFrozenInputSource;
+  resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
   /** Must match the original task gateway adapter registration so a counted
    * tool schema is the schema the dispatch will send. */
@@ -84,13 +85,14 @@ export interface InputCountTokensCompositionDependencies extends PersistedTaskAu
    * in-task counting entry derives the scene from the persisted invocation. */
   sceneCode?: string;
   taskExecution?: TaskCountingGateSource;
-  countingPriceVersion: string;
+  countingPriceVersion?: string;
   priceDelegate?: Pick<GatewayPricingEvidenceSource, 'readPrice'>;
   timeoutMs?: number;
 }
 export function composeInputCountTokensService(input: InputCountTokensCompositionDependencies) {
-  if (!input?.frozen || typeof input.frozen.readFrozenCountingInput !== 'function'
-    || !input.resolvers?.platform || !input.resolvers.tenant) throw new BudgetError('UNAVAILABLE');
+  if (!input || input.frozen !== undefined && typeof input.frozen.readFrozenCountingInput !== 'function'
+    || input.resolvers !== undefined && (typeof input.resolvers.platform?.resolve !== 'function'
+      || typeof input.resolvers.tenant?.resolve !== 'function')) throw new BudgetError('UNAVAILABLE');
   const clock = input.clock ?? (() => new Date());
   const authorization = new InputCountTokensAuthorizationSource(input, input.db);
   const quotes = new InputCountTokensCallPricing(input.db, authorization.scopes, input.countingPriceVersion, clock);
@@ -99,8 +101,10 @@ export function composeInputCountTokensService(input: InputCountTokensCompositio
     authorization, quotes, evidence, clock });
   const service = new InputCountTokensService({ db: input.db, scopes: authorization.scopes, authorization, budget,
     frozen: input.frozen, resolvers: input.resolvers,
-    transport: input.transport ?? createNativeModelEgressTransport(),
-    policyOptions: input.policyOptions ?? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } },
+    // Receipt-only hosts need no connection/codec/price for a new call.
+    // Missing execution dependencies are validated only after no receipt exists.
+    transport: input.transport ?? (input.resolvers ? createNativeModelEgressTransport() : undefined),
+    policyOptions: input.policyOptions ?? (input.frozen ? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } } : undefined),
     sceneCode: input.sceneCode, countingPriceVersion: input.countingPriceVersion,
     ...(input.taskExecution ? { taskExecution: input.taskExecution } : {}),
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), clock });
@@ -140,7 +144,8 @@ export function composeInputCountingPricing(input: InputCountTokensCompositionDe
 /** The in-task counting chain for recorded model hosts: the formal
  * task-internal permission (the same transition_task policy that may dispatch
  * the original call) authorizes counting the registered frozen input and
- * publishing its trusted input bound BEFORE the recorded budget reserve.
+ * publishing its trusted input bound after both task CALLS reserves and BEFORE
+ * generation's financial reserve.
  * Multi-scene by construction — the scene, configuration, input fingerprint
  * and plan basis come from the server-persisted invocation of each host; the
  * management counting entry, its settings_write gate and this chain stay
@@ -158,9 +163,9 @@ export function composeTaskInputCountingChain(input: TaskInputCountingChainDepen
   const chain = { taskCount: (command: unknown, signal?: AbortSignal) => counting.service.taskCount(command, signal),
     publish: (command: unknown, signal?: AbortSignal) => publisher.publish(command, signal) };
   return Object.freeze({ ...counting, publisher, chain,
-    /** Wraps the host's invocation preparation: register → count → publish.
+    /** Registration stays separate from the budgeted count → publish stage.
      * Providing it is the recorded host's explicit server decision; a calls
      * host composes without it and never counts. */
-    preparation: (inner: { prepare(step: unknown, lease: unknown): Promise<{ invocationId: string }> }) =>
+    preparation: (inner: AiTaskModelInvocationPreparation): AiTaskModelInvocationPreparation =>
       new CountingTaskModelInvocationPreparation(inner, chain) });
 }

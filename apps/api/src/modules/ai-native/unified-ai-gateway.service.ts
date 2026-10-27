@@ -118,6 +118,7 @@ export class UnifiedAiGatewayService {
 
   private assertBudget() {
     const budget = this.ports.budget;
+    if (typeof this.ports.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     if ([budget?.reserve, budget?.dispatch, budget?.recordUsage, budget?.settle, budget?.abandon]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   }
@@ -219,6 +220,13 @@ export class UnifiedAiGatewayService {
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      // Persist readiness before admission/claim/reserve. No presence-only gate.
+      const preparation = { context: structuredClone(context), callId: request.callId,
+        intentHash: intentBinding?.intentHash ?? hash, requestHash: hash,
+        configurationHash: requestFingerprint(route.profile), profile: structuredClone(route.profile), mode: 'invoke' as const };
+      if (this.ports.audit.prepare) await life.wait(() => this.ports.audit.prepare!(preparation, life.controller.signal));
+      else await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context),
+        event: 'ai.invoke.prepared', status: 'prepared', detail: requestFingerprint(preparation) }));
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
       binding = { scope: structuredClone(scope) as AiDispatchBinding['scope'], id: admission.id, actorId: context.actorId,
@@ -229,7 +237,8 @@ export class UnifiedAiGatewayService {
         else admissionId = admission.id;
       }));
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
-        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
+          countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), false) } };
       const call = structuredClone(budgetCall);
       const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
@@ -245,7 +254,7 @@ export class UnifiedAiGatewayService {
       dispatched = true;
       const recordUsage = this.usageRecorder(call, usage.id);
       const transportStarted = performance.now();
-      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)
+      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)
         .then(async value => {
           // Pin the returned payload before receipt persistence yields to its owner.
           const result = structuredClone(value);
@@ -318,6 +327,13 @@ export class UnifiedAiGatewayService {
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      // Persist readiness before admission/claim/reserve. No presence-only gate.
+      const preparation = { context: structuredClone(context), callId: request.callId,
+        intentHash: intentBinding?.intentHash ?? hash, requestHash: hash,
+        configurationHash: requestFingerprint(route.profile), profile: structuredClone(route.profile), mode: 'stream' as const };
+      if (this.ports.audit.prepare) await life.wait(() => this.ports.audit.prepare!(preparation, life.controller.signal));
+      else await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context),
+        event: 'ai.stream.prepared', status: 'prepared', detail: requestFingerprint(preparation) }));
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
       binding = { scope: structuredClone(scope) as AiDispatchBinding['scope'], id: admission.id, actorId: context.actorId,
@@ -328,7 +344,8 @@ export class UnifiedAiGatewayService {
         else admissionId = admission.id;
       }));
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
-        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
+          countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), true) } };
       const call = structuredClone(budgetCall);
       const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
@@ -347,7 +364,7 @@ export class UnifiedAiGatewayService {
       const transportStarted = performance.now();
       let firstText: number | null = null;
       let result: GatewayInvocationResult | undefined;
-      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage)[Symbol.asyncIterator]();
+      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)[Symbol.asyncIterator]();
       while (true) {
         const item = await life.wait(() => iterator!.next().then(async value => {
           const item = structuredClone(value);

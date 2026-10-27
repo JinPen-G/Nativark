@@ -1,6 +1,6 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
-require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
+require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022", lib: ["es2022"] } });
 const { ModelEgressTransport } = require("../apps/api/src/modules/ai-native/model-egress.transport"), { publicModelAddress } = require("../apps/api/src/modules/ai-native/model-egress-policy"), { harness } = require("./fixtures/ai-native/model-egress.cjs");
 const fail = (operation, code) => assert.rejects(operation, error => error.code === code);
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -66,6 +66,27 @@ test("S04 DNS error, nonfinite clock, response header overflow and gzip fail clo
   const clock = harness({ dependencies: { now: () => NaN } }); await fail(() => new ModelEgressTransport(clock.dependencies).post(clock.input), "CONFIG_INVALID");
   for (const override of [{ headers: { "content-encoding": "gzip" } }, { rawHeaders: ["x", "a".repeat(16384)] }]) {
     const x = harness(override); await fail(() => new ModelEgressTransport(x.dependencies).post(x.input), "INVALID_RESPONSE");
+  }
+});
+const signedGet = x => ({ url: 'https://synthetic.example.test/bucket/document.txt',
+  headers: { Authorization: `AWS4-HMAC-SHA256 Credential=synthetic/20261025/region/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${'a'.repeat(64)}`,
+    'x-amz-date': '20261025T000000Z', 'x-amz-content-sha256': 'b'.repeat(64) }, signal: x.input.signal, maxResponseBytes: 8 });
+test('signed knowledge GET pins actual socket DNS, retains TLS and bounds exact raw bytes', async () => {
+  const bytes = Buffer.from('文档'), x = harness({ chunks: [bytes], headers: { 'content-type': 'text/plain', 'content-length': String(bytes.length) },
+    rawHeaders: ['Content-Type', 'text/plain', 'Content-Length', String(bytes.length)] });
+  const result = await new ModelEgressTransport(x.dependencies).get(signedGet(x));
+  assert.deepEqual(result.bytes, bytes); assert.equal(result.headers['content-length'], String(bytes.length));
+  const options = x.state.options[0]; assert.equal(options.method, 'GET'); assert.equal(options.rejectUnauthorized, true);
+  assert.equal(options.servername, options.hostname); assert.equal(options.agent, false);
+  assert.equal(options.headers['Content-Length'], undefined); assert.equal(x.state.requests[0].body, undefined);
+  assert.equal(x.state.dns.length, 1);
+});
+test('signed knowledge GET refuses mixed/private DNS, redirects and mismatched length without retry', async () => {
+  for (const overrides of [{ addresses: [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }] },
+    { status: 302 }, { chunks: [Buffer.from('abc')], headers: { 'content-type': 'text/plain', 'content-length': '2' },
+      rawHeaders: ['Content-Type', 'text/plain', 'Content-Length', '2'] }]) {
+    const x = harness(overrides); await assert.rejects(() => new ModelEgressTransport(x.dependencies).get(signedGet(x)));
+    assert.ok(x.state.requests.length <= 1); assert.equal(x.state.timers.size, 0);
   }
 });
 test("S04 body stall cancellation cleans both resources and deadline", async () => {

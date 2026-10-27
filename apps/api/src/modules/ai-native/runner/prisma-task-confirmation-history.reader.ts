@@ -16,7 +16,7 @@ const revision = z.number().int().min(1).max(4294967295);
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const validDate = (value: Date) => value instanceof Date && Number.isFinite(value.getTime());
-const eventSchema = z.object({ data: z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT), to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.string() }).strict(),
+export const aiTaskConfirmationEventSchema = z.object({ data: z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT), to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.string() }).strict(),
   initiator: z.object({ kind: z.literal('worker'), id: z.string().min(1).max(191), actorKind: z.string(), actorId: z.string() }).strict(),
   confirmation: z.object({ checkpointRef: id, phaseId: id }).passthrough() }).passthrough();
 
@@ -101,7 +101,7 @@ export class PrismaTaskConfirmationHistoryReader {
       const approvals = [];
       let continuation: z.infer<typeof aiTaskResumedConfirmationSchema>['confirmation'] | undefined;
       for (const event of events) {
-        const envelope = eventSchema.parse(structuredClone(event.payload)), meta = envelope.confirmation;
+        const envelope = aiTaskConfirmationEventSchema.parse(structuredClone(event.payload)), meta = envelope.confirmation;
         const resumed = envelope.data.from === 'waiting_confirmation' && envelope.data.to === 'running' && envelope.data.reason === 'resume';
         const paused = envelope.data.from === 'running' && envelope.data.to === 'waiting_confirmation' && envelope.data.reason === 'confirmation_required';
         if (event.scopeId !== key.scopeId || event.taskId !== task.id || event.type !== 'task.transition' || !revision.safeParse(event.taskRevision).success

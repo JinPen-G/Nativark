@@ -50,10 +50,15 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
   execute(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease) {
     return this.runEffect(plan, signal, lease);
   }
+  executePrepared(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease, prepare: () => Promise<void>) {
+    if (typeof prepare !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    return this.runEffect(plan, signal, lease, undefined, prepare);
+  }
   continueConfirmation(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease, continuation: AiTaskRunnerConfirmationContinuation) {
     return this.runEffect(plan, signal, lease, structuredClone(continuation));
   }
-  private async runEffect(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease, continuation?: AiTaskRunnerConfirmationContinuation) {
+  private async runEffect(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease,
+    continuation?: AiTaskRunnerConfirmationContinuation, prepare?: () => Promise<void>) {
     const binding = await this.step(plan, lease);
     const inputRef = binding.step.inputRef;
     if (!inputRef) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
@@ -66,6 +71,7 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
       || !['rental.order.commit', 'tenant.notifications.commit'].includes(binding.plan.toolCode))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     if (continuation && (phase !== 'confirmation' || continuation.stepId !== binding.step.id
       || continuation.stepRevision !== binding.step.revision)) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    if (prepare && (phase || binding.plan.operation !== 'external_unknown')) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     return this.evidence.capture(binding.lease, binding.step.id, signal, async () => {
       const clarifications = this.inputs ? structuredClone(await this.inputs.readForStep(binding.lease, binding.plan.registrationRef)) : undefined;
       if (signal.aborted) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
@@ -77,7 +83,7 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
       return execute({ taskId: binding.lease.taskId, runId: binding.lease.runId, stepId: binding.step.id,
         actionId: binding.step.actionId, inputRef, fingerprint: binding.step.requestFingerprint,
         lease: structuredClone(binding.lease), ...(clarifications ? { clarifications } : {}) }, signal);
-    }, continuation ?? phase);
+    }, continuation ?? phase, prepare);
   }
   async reconcile(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease) {
     if (signal.aborted) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');

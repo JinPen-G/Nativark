@@ -1,5 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req, Res } from '@nestjs/common';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ServerResponse } from 'node:http';
+import { withRequestAbort, type AiRequestAbortSource, AiRequestWaitError } from '../scenes/request-abort';
 import { AI_PLATFORM_CAPABILITY_HTTP_DRAFT as routes } from '@rental-os/shared';
 import { PlatformCapabilityProbeRequestFactory,
   type PlatformCapabilityProbeHttpRequest } from './platform-capability-probe-request.factory';
@@ -7,10 +8,10 @@ import { textProbeTaskCreationKey } from '../text-capability-probe-task.composit
 import { projectPlatformProbeHttp, validatePlatformProbeHttp, type PlatformProbeHttpAction } from './platform-capability-http.contract';
 
 export const PLATFORM_CAPABILITY_PROBE_REQUESTS = Symbol('PLATFORM_CAPABILITY_PROBE_REQUESTS');
-type Request = PlatformCapabilityProbeHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+type Request = PlatformCapabilityProbeHttpRequest & AiRequestAbortSource;
 type Response = Pick<ServerResponse, 'once' | 'removeListener' | 'writableFinished' | 'destroyed'>;
 
-type Method = Exclude<keyof ReturnType<PlatformCapabilityProbeRequestFactory['open']>, 'close'>;
+type Method = Exclude<keyof ReturnType<PlatformCapabilityProbeRequestFactory['open']>, 'close' | 'readOriginalLocator' | 'readExecutableOriginal'>;
 const unknownRead: Record<Method, string> = { prepareOriginal: 'readOriginal', readOriginal: 'readOriginal',
   createTask: 'readTask', readCreation: 'readTask', start: 'reconcile', inspect: 'inspect', requestCancellation: 'inspect',
   reconcile: 'reconcile', readCapabilityReceipt: 'readHistory', readHistory: 'readHistory',
@@ -40,49 +41,41 @@ export class PlatformCapabilityProbeController {
     return (async () => {
       let current: ReturnType<PlatformCapabilityProbeRequestFactory['open']> | undefined;
       let mutationReturned = false;
-      const controller = new AbortController(), abort = () => controller.abort();
-      const onResponseClose = () => { if (!response?.writableFinished) abort(); };
-      const responds = (method === 'start' || method === 'reconcile') && response
-        && typeof response.once === 'function' && typeof response.removeListener === 'function';
-      const listens = (method === 'start' || method === 'reconcile') && typeof request?.once === 'function'
-        && typeof request?.removeListener === 'function';
       try {
         const action = publicActions[method];
         if (!action || Buffer.byteLength(JSON.stringify(body) ?? '') > 65536 || !validatePlatformProbeHttp(action, 'request', body))
           throw Object.assign(new Error('AI_INVALID_INPUT'), { code: 'AI_INVALID_INPUT' });
         const command = structuredClone(body) as { requestKey: string; expectedRevision?: number };
-        if (request?.aborted) abort();
-        else if (listens) request.once!('aborted', abort);
-        if (responds) {
-          if (response.destroyed) onResponseClose();
-          else response.once('close', onResponseClose);
-        }
+        return await withRequestAbort({ ...request, res: response ?? request.res,
+          once: request.once?.bind(request), removeListener: request.removeListener?.bind(request) }, async signal => {
         current = this.requests.open(request);
         const operation = (current as Record<string, (...args: unknown[]) => unknown>)[method];
         if (typeof operation !== 'function') throw Object.assign(new Error('AI_INVALID_INPUT'), { code: 'AI_INVALID_INPUT' });
         let internal: unknown = command;
         if (['createTask', 'readCreation', 'start', 'inspect', 'requestCancellation', 'reconcile', 'readCapabilityReceipt'].includes(method)) {
-          const original = await current.readOriginal({ requestKey: command.requestKey });
+          const original = ['createTask', 'start'].includes(method)
+            ? await current.readExecutableOriginal({ requestKey: command.requestKey }, signal)
+            : await current.readOriginalLocator({ requestKey: command.requestKey }, signal);
           if (original.state !== 'stored') throw Object.assign(new Error('AI_RESOURCE_UNAVAILABLE'), { code: 'AI_RESOURCE_UNAVAILABLE' });
           internal = { creationKey: textProbeTaskCreationKey(command.requestKey), inputRef: original.inputRef,
             ...(method === 'requestCancellation' ? { expectedRevision: command.expectedRevision } : {}) };
         }
-        const result = await (operation as (v: unknown, s?: AbortSignal) => Promise<unknown>)(internal, controller.signal);
+        const result = await (operation as (v: unknown, s?: AbortSignal) => Promise<unknown>)(internal, signal);
         mutationReturned = ['prepareOriginal', 'createTask', 'start', 'requestCancellation', 'reconcile', 'readCapabilityReceipt', 'releaseUnsent', 'reconcileAccounting'].includes(method);
         const projected = projectPlatformProbeHttp(action, command.requestKey, result);
         if (Buffer.byteLength(JSON.stringify(projected)) > 262144 || !validatePlatformProbeHttp(action, 'response', projected))
           throw Object.assign(new Error('AI_STORAGE_UNAVAILABLE'), { code: 'AI_STORAGE_UNAVAILABLE' });
         return projected;
+        }, { maxWaitMs: ['start', 'reconcile'].includes(method) ? 120000 : 15000 });
       } catch (error) {
-        const raw = error instanceof Error && 'code' in error ? error.code : undefined;
+        const raw = error instanceof AiRequestWaitError && error.code === 'AI_RESOURCE_UNAVAILABLE'
+          ? 'AI_RESOURCE_UNAVAILABLE' : error instanceof Error && 'code' in error ? error.code : undefined;
         const mapped = typeof raw === 'string' && Object.prototype.hasOwnProperty.call(gatewayCodes, raw) ? gatewayCodes[raw] : raw;
         const code = mutationReturned ? 'AI_RESULT_UNKNOWN' : typeof mapped === 'string' && Object.prototype.hasOwnProperty.call(statuses, mapped) ? mapped as keyof typeof statuses : 'AI_STORAGE_UNAVAILABLE';
         throw new HttpException({ code, retryable: false,
           ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownRead[method] } : {}) }, statuses[code]);
       } finally {
         current?.close();
-        if (listens) request.removeListener!('aborted', abort);
-        if (responds) response.removeListener('close', onResponseClose);
       }
     })();
   }

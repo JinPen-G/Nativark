@@ -38,7 +38,7 @@ const eventSelect = { scopeId: true, taskId: true, cursor: true, taskRevision: t
 type EventRow = Prisma.AiTaskEventGetPayload<{ select: typeof eventSelect }>;
 
 /** Decode only declared wire fields. The internal audit envelope never leaves this function. */
-function wireEvent(row: EventRow): AiTaskEventDraft {
+export function projectAiTaskWireEvent(row: EventRow): AiTaskEventDraft {
   if (!revision.safeParse(row.taskRevision).success || !(row.occurredAt instanceof Date) || !Number.isFinite(row.occurredAt.getTime())) {
     throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
   }
@@ -144,7 +144,7 @@ export class AiTaskEventRepository {
         }
         // We cannot invent missing history. Explicit retained-prefix watermarks belong to the future retention policy.
         if (rows.length === 0 && after < task.eventCursor) return { contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, status: "reset_required", reason: "cursor_expired" };
-        const events = rows.slice(0, input.limit).map(wireEvent);
+        const events = rows.slice(0, input.limit).map(projectAiTaskWireEvent);
         const page: AiTaskEventPageDraft = {
           contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, events,
           nextCursor: events.at(-1)?.cursor ?? input.after, hasMore: rows.length > input.limit

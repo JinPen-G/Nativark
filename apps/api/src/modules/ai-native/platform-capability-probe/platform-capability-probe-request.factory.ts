@@ -74,29 +74,40 @@ export class PlatformCapabilityProbeRequestFactory {
     };
     return Object.freeze({
       close() { authorization = undefined; },
-      prepareOriginal: (value: unknown) => { const command = structuredClone(value); return guard(() => composed.workflow.publishOriginal(command), true); },
-      readOriginal: (value: unknown) => guard(() => composed.workflow.readOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''))),
-      createTask: (value: unknown) => { const command = structuredClone(value); return guard(() => composed.workflow.createTask(command), true); },
-      readCreation: (value: unknown) => guard(() => composed.workflow.readCreation(value)),
+      readOriginalLocator: (value: unknown, signal?: AbortSignal) => guard(async () => {
+        const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? '');
+        const original = await composed.workflow.readOriginalLocator(key);
+        return original ? { state: 'stored' as const, inputRef: original.inputRef, inputHash: original.inputHash }
+          : { state: 'not_found' as const };
+      }, false, false, signal),
+      prepareOriginal: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.publishOriginal(command), true, false, signal); },
+      readExecutableOriginal: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? '')), false, false, signal),
+      readOriginal: (value: unknown, signal?: AbortSignal) => guard(async () => {
+        const original = await composed.workflow.readOriginalLocator(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''));
+        return original ? { state: 'stored' as const, inputRef: original.inputRef, inputHash: original.inputHash }
+          : { state: 'not_found' as const };
+      }, false, false, signal),
+      createTask: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.createTask(command), true, false, signal); },
+      readCreation: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readCreation(value), false, false, signal),
       start: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.startOriginal(command, signal), true, true, signal); },
-      inspect: (value: unknown) => guard(() => composed.workflow.inspectOriginal(value)),
-      requestCancellation: (value: unknown) => { const command = structuredClone(value); return guard(() => composed.workflow.requestCancellationOriginal(command), true); },
+      inspect: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.inspectOriginal(value), false, false, signal),
+      requestCancellation: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.requestCancellationOriginal(command), true, false, signal); },
       reconcile: (value: unknown, signal?: AbortSignal) => { const command = structuredClone(value); return guard(() => composed.workflow.reconcileOriginal(command, signal), true, true, signal); },
-      readCapabilityReceipt: (value: unknown) => guard(() => composed.workflow.readCapabilityReceipt(value), true),
-      readHistory: (value: unknown) => guard(() => composed.workflow.readHistoricalOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''))),
-      readTaskPolicyMutation: (value: unknown) => guard(() => composed.workflow.readTaskPolicyMutation(
+      readCapabilityReceipt: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readCapabilityReceipt(value), true, false, signal),
+      readHistory: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readHistoricalOriginal(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? '')), false, false, signal),
+      readTaskPolicyMutation: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readTaskPolicyMutation(
         String((value as { requestKey?: string }).requestKey ?? ''),
         ((value as { operation?: import('../prisma-task-action-policy.repository').AiTaskActionPolicyMutation['operation'] }).operation ?? 'configure_action_policy') as import('../prisma-task-action-policy.repository').AiTaskActionPolicyMutation['operation'],
-        (value as { expectedRevision?: number | null }).expectedRevision ?? null)),
-      readAccounting: (value: unknown) => guard(() => composed.workflow.readOriginalAccounting(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''))),
-      readAccountingOperation: (value: unknown) => guard(() => {
+        (value as { expectedRevision?: number | null }).expectedRevision ?? null), false, false, signal),
+      readAccounting: (value: unknown, signal?: AbortSignal) => guard(() => composed.workflow.readOriginalAccounting(typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? '')), false, false, signal),
+      readAccountingOperation: (value: unknown, signal?: AbortSignal) => guard(() => {
         const command = z.object({ requestKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
           operation: z.enum(['releaseUnsent', 'reconcileAccounting']) }).strict().safeParse(structuredClone(value));
         if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         return composed.workflow.readOriginalAccountingOperation(command.data.requestKey, command.data.operation);
-      }),
-      releaseUnsent: (value: unknown) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.releaseOriginalUnsent(key), true); },
-      reconcileAccounting: (value: unknown) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.reconcileOriginalAccounting(key), true); },
+      }, false, false, signal),
+      releaseUnsent: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.releaseOriginalUnsent(key), true, false, signal); },
+      reconcileAccounting: (value: unknown, signal?: AbortSignal) => { const key = typeof value === 'string' ? value : String((value as { requestKey?: string })?.requestKey ?? ''); return guard(() => composed.workflow.reconcileOriginalAccounting(key), true, false, signal); },
     });
   }
 }

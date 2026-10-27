@@ -30,6 +30,7 @@ export interface BudgetReserveCommand {
   callId: string;
   sceneCode: string;
   expiresAt: Date;
+  countRequestHash?: string;
 }
 export interface BudgetQuote {
   association: AiUsageAssociationDraft;

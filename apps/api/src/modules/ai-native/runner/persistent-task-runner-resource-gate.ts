@@ -8,9 +8,10 @@ import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceT
  */
 export interface AiTaskRunnerResourceEvidenceSource {
   charges(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ modelCall: boolean; deferredModelCall?: true; requests: readonly AiTaskExecutionChargeRequest[] }>;
-  modelCharge?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskExecutionChargeRequest>;
+  modelCharge?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal): Promise<AiTaskExecutionChargeRequest>;
+  prepareModelDispatch?(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal): Promise<readonly string[]>;
   settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<readonly AiTaskExecutionSettlementRequest[]>;
-  recoverTicket?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
+  recoverTicket?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, budget?: AiTaskExecutionBudgetPort): Promise<AiTaskRunnerResourceTicket>;
 }
 
 export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePort {
@@ -58,11 +59,12 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
     return { chargeIds, ...(plan.deferredModelCall ? { modelPending: true as const } : {}) };
   }
 
-  async beforeExecute(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+  async beforeExecute(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal) {
     ticket = structuredClone(ticket); step = structuredClone(step); lease = structuredClone(lease);
     if (!ticket.modelPending) return ticket;
     if (!this.source.modelCharge || ticket.chargeIds.length !== 3) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
-    const request = structuredClone(await this.source.modelCharge(step, lease));
+    if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+    const request = structuredClone(await this.source.modelCharge(step, lease, signal));
     if (request.resource !== 'calls' || request.amount !== 1n || request.taskId !== lease.taskId
       || request.lease.taskId !== lease.taskId || request.lease.runId !== lease.runId || request.lease.holderId !== lease.holderId
       || request.lease.revision !== lease.revision || request.lease.fencingToken !== lease.fencingToken
@@ -70,7 +72,15 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
       || ticket.chargeIds.includes(request.chargeId)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const complete = { chargeIds: [...ticket.chargeIds, request.chargeId] };
     try {
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
       if ((await this.budget.reserve(request)).replayed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      // Generation and count each reserve before any count POST. This stage
+      // owns the original working deadline, not a fresh decorator allowance.
+      const additional = await this.source.prepareModelDispatch?.(request, this.budget, signal) ?? [];
+      if (additional.length > 1 || additional.some(id => !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(id)
+        || complete.chargeIds.includes(id))) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      complete.chargeIds.push(...additional);
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
     } catch (error) { await this.markUnknown(complete, lease).catch(() => {}); throw error; }
     return complete;
   }
@@ -91,8 +101,8 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
     if (typeof this.source.recoverTicket !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     step = structuredClone(step); lease = structuredClone(lease);
     await this.budget.load(lease.taskId, lease);
-    const ticket = structuredClone(await this.source.recoverTicket(step, lease));
-    if (!ticket || !Array.isArray(ticket.chargeIds) || ticket.chargeIds.length < 3 || ticket.chargeIds.length > 4
+    const ticket = structuredClone(await this.source.recoverTicket(step, lease, this.budget));
+    if (!ticket || !Array.isArray(ticket.chargeIds) || ticket.chargeIds.length < 3 || ticket.chargeIds.length > 5
       || new Set(ticket.chargeIds).size !== ticket.chargeIds.length || ticket.chargeIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(id))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     return ticket;
   }

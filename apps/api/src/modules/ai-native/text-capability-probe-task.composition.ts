@@ -141,7 +141,7 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
     return { invocationId: prepared.invocationId };
   } };
   const transition = new PrismaTextProbeStepEvidenceAuthority(input.db, authorization.authority, source,
-    input.financialEvidence, task.priceVersion, clock);
+    input.financialEvidence, task.priceVersion, clock, input.taskScopeKind ?? 'WORKSPACE');
   const commands: AiTaskRunnerRepositoryCommandFactory = {
     async register(plan, lease) {
       if (plan.toolCode !== TEXT_CAPABILITY_PROBE_TOOL || plan.toolVersion !== AI_TOOL_DRAFT_VERSION || plan.operation !== 'external_unknown') throw unavailable();
@@ -352,6 +352,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     },
     publishOriginal: (value: unknown) => producer.originals.publish(value),
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
+    readOriginalLocator: (requestKey: string) => producer.originals.readHistoricalOriginal(requestKey),
     readOriginalCapability: (requestKey: string) => producer.originals.readOriginalCapability(requestKey),
     readOriginalPolicyExpiry: (requestKey: string) => producer.originals.readPolicyExpiry(requestKey),
     readOriginalAccounting: (requestKey: string) => originalAccounting(requestKey, 'read') as Promise<AiTextCapabilityAccountingResponseDraft>,

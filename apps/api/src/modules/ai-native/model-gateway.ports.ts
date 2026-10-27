@@ -115,6 +115,8 @@ export const modelUsageSchema = z.object({ inputTokens: usageCount, outputTokens
  * Counters survive rejected text; this does not authorize text or settlement. */
 export type ModelProtocolInvocation = Readonly<ModelProtocolRequest> & {
   signal: AbortSignal; recordUsage?: (usage: ModelUsage) => Promise<void>;
+  /** Trusted reservation's counted input binding; never sent to the provider. */
+  expectedInputBoundHash?: string;
 };
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
 export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
@@ -130,6 +132,9 @@ export interface ModelAdapter {
   readonly provider: string;
   readonly structuredSchemaHash?: string;
   readonly features: readonly ModelFeature[];
+  /** Exact input-determining wire material; absence cannot consume a provider
+   * count receipt. Server adapter only, never a caller-supplied token estimate. */
+  inputBoundHash?(input: Readonly<ModelProtocolRequest>, streaming: boolean): string;
   generate(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
   stream?(input: ModelProtocolInvocation, credential: string,

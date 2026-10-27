@@ -98,6 +98,22 @@ export function countTokensMaterialHash(material: Readonly<CountTokensMaterial>)
   return requestFingerprint({ url: `/v1${material.pathname}`, body: material.body });
 }
 
+/** Hash the actual Messages generation body by its input-determining fields.
+ * Output limits/streaming are not counted input. Uncertified output schemas or
+ * media refuse instead of silently borrowing a plain-text count receipt. */
+export function messagesGenerationInputHash(body: string) {
+  const value = JSON.parse(body) as Record<string, unknown>;
+  if (value.output_config !== undefined || !Array.isArray(value.messages)
+    || value.messages.some(message => !message || typeof message !== 'object'
+      || Array.isArray((message as { content?: unknown }).content) && (message as { content: unknown[] }).content.some(part =>
+        !part || typeof part !== 'object' || (part as { type?: unknown }).type !== 'text')))
+    throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  return countTokensMaterialHash({ pathname: '/messages/count_tokens', body: JSON.stringify({
+    model: value.model, messages: value.messages,
+    ...(value.system !== undefined ? { system: value.system } : {}),
+    ...(value.tools !== undefined ? { tools: value.tools, tool_choice: value.tool_choice } : {}) }) });
+}
+
 /** Complete the count request with the resolved connection. The material was
  * already serialized and bound before admission dispatch. */
 export function anthropicCountTokensRequest(material: Readonly<CountTokensMaterial>, baseUrl: string): CountTokensRequest {

@@ -8,15 +8,20 @@ import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalScen
   composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeRequestBoundOriginalTaskRecoveryReaders,
   composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
-import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
+import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
   AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS,
+  AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS,
   type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
   type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
   type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft,
-  type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft } from '@rental-os/shared';
+  type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft, type AiSceneTaskMaterialResponseDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { validateAiTaskObservation } from '../task-contract-validation';
+import { validateAiSceneModelObservation, validateAiTaskSceneObservation } from './scene-observation-contracts';
+export { validateAiSceneModelObservation, validateAiTaskSceneObservation } from './scene-observation-contracts';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
@@ -79,9 +84,10 @@ type QuoteResponses = { AiSceneModelQuotePreparationResponseDraft: AiSceneModelQ
 const quoteValidators = Object.fromEntries(Object.keys(AI_SCENE_QUOTE_HTTP_SCHEMAS).map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: quoteDefinitions })]));
 const requestResponseNames = [...new Set(Object.values(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(contract => contract.response))];
-const requestResponseDefinitions = JSON.parse(JSON.stringify(Object.fromEntries([...requestResponseNames,
+const requestResponseDefinitions = JSON.parse(JSON.stringify({ ...AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, ...AI_SCOPE_DRAFT_SCHEMAS,
+  ...Object.fromEntries([...requestResponseNames,
   'AiSceneRequestReceiptDraft', 'AiSceneTaskReceiptDraft', 'AiSceneRequestBodyDraft'].map(name => [name,
-  AI_SCENE_REQUEST_DRAFT_SCHEMAS[name]]))).replaceAll('#/components/schemas/', '#/$defs/'));
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS[name] ?? AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS[name]])) }).replaceAll('#/components/schemas/', '#/$defs/'));
 const requestResponseValidators = Object.fromEntries(requestResponseNames.map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: requestResponseDefinitions })]));
 function validateSceneRequestResponse<T>(name: typeof requestResponseNames[number], value: T, writing = false): T {
@@ -259,7 +265,19 @@ export class AiOriginalScenesController {
   createTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
     validateSceneRequestResponse('AiSceneCreatedTaskDraft', await this.scenes.createTask(current, command, signal), true), 'recovery'); }
   @Post('material') @Header('Cache-Control', 'no-store')
-  material(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, (current, command, signal) => this.scenes.prepareTaskMaterial(current, command, signal)); }
+  material(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) => {
+    const result = validateSceneRequestResponse('AiSceneTaskMaterialResponseDraft',
+      await this.scenes.prepareTaskMaterial(current, command, signal)) as AiSceneTaskMaterialResponseDraft;
+    const material = result.material;
+    // Hash/bytes describe exactly the emitted content, not a later formatter's
+    // replacement. This remains read provenance, never a dispatch credential.
+    if (requestFingerprint(material) !== result.materialHash || ('payload' in material
+      && (requestFingerprint(material.payload) !== material.payloadFingerprint
+        || Buffer.byteLength(JSON.stringify(material.payload), 'utf8') !== material.payloadBytes))) {
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+    return result;
+  }); }
   @Post('recovery') @Header('Cache-Control', 'no-store')
   recovery(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
     validateSceneRequestResponse('AiSceneRequestRecoveryDraft', await this.scenes.readRecovery(current, command, signal))); }
@@ -294,11 +312,13 @@ export class AiOriginalSceneObservationController {
     protected readonly observations: Omit<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'resolveAnswerContinuation'>) {}
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readTaskPage(request, body));
+    return respondAiScene(async () => validateAiTaskObservation(AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.response,
+      await this.observations.readTaskPage(request, body)));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readTaskEvents(request, body));
+    return respondAiScene(async () => validateAiTaskObservation(AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.response,
+      await this.observations.readTaskEvents(request, body)));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskUsage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -306,7 +326,7 @@ export class AiOriginalSceneObservationController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readTaskScene(request, body));
+    return respondAiScene(async () => validateAiTaskSceneObservation(await this.observations.readTaskScene(request, body)));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskPerformance(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
@@ -342,7 +362,7 @@ export class AiOriginalSceneObservationController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readModelResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readModelResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.readModelResult(request, body));
+    return respondAiScene(async () => validateAiSceneModelObservation(await this.observations.readModelResult(request, body)));
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -551,6 +571,8 @@ export class AiOriginalSceneModelController extends AiOriginalSceneModelActionsC
   cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.fullModel.cancelSettingsTask(request, body));
   }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
-  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskScene(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(async () => validateAiTaskSceneObservation(await this.fullModel.readTaskScene(request, body)));
+  }
 }

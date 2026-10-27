@@ -55,6 +55,11 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     if (!grant.entitled || identity(grant.context) !== identity(current.context) || command.callId !== command.association.requestId
       || !(grant.expiresAt instanceof Date) || grant.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
     const original = await this.evidence(current, command.callId), { invocation, proof, quantity } = original;
+    // Old receipts remain readable/accountable, but cannot admit generation
+    // without proof of the actual adapter serialization's counted material.
+    if (proof.evidence.method === 'provider_count_tokens_receipt'
+      && (!proof.evidence.countRequestHash || command.countRequestHash !== proof.evidence.countRequestHash))
+      throw new BudgetError('FORBIDDEN');
     const now = this.clock().getTime();
     for (const record of [proof.price.evidence, proof.evidence]) {
       if (!Number.isFinite(now) || Date.parse(record.validFrom) > now || Date.parse(record.expiresAt) <= now) throw new BudgetError('UNAVAILABLE');

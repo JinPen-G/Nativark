@@ -20,7 +20,8 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
     'aiApprovalConsumption', 'aiApprovedOrderSnapshot', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiTaskActionInput',
     'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy', 'aiApprovalReprepare',
     'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
-    'aiTaskInputRequest', 'aiTaskInputReceipt']) state.records[table] = [];
+    'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiDataErasure', 'aiGatewayInvocation', 'aiUsageReservation',
+    'aiBudgetReservation', 'aiInvocationAdmission']) state.records[table] = [];
   for (const row of state.records.aiBudgetPolicy) {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
@@ -34,12 +35,15 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
         executionPlan: rows('aiTaskRunPlan').find(p => p.runId === run.id) ?? null })) }
       : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
       : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
-      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
+      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null }
+      : name === 'aiTaskResultArtifact' ? { ...row, step: rows('aiStep').find(step => step.id === row.stepId) } : row;
     const project = (row, select) => !row ? null : !select ? clone(row) : Array.isArray(row) ? row.map(value => project(value, select))
       : Object.fromEntries(Object.entries(select).filter(([, rule]) => rule).map(([key, rule]) => [key, rule === true ? clone(row[key]) : project(row[key], rule.select)]));
     const db = { records: records ?? state.records,
       $queryRaw: async query => query.sql.includes('FROM ai_approval_reprepares')
-        ? clone(rows('aiApprovalReprepare').filter(row => row.scopeId === query.values[0] && row.operationKey === query.values[1])) : [],
+        ? clone(rows('aiApprovalReprepare').filter(row => row.scopeId === query.values[0] && row.operationKey === query.values[1]))
+        : query.sql.includes('FROM ai_scopes') ? rows('aiScope').filter(row => row.id === query.values[0]
+          && row.kind === 'WORKSPACE' && row.tenantId === query.values[1] && row.workspaceId === query.values[2]).map(row => ({ id: row.id })) : [],
       $executeRaw: async query => {
         assert.ok(query.sql.startsWith('INSERT INTO ai_approval_reprepares'));
         const columns = query.sql.match(/\(([^)]+)\) VALUES/u)[1].match(/`([^`]+)`/gu).map(key => key.slice(1, -1));

@@ -6,7 +6,7 @@ import type { WorkbenchState } from './contract.ts'
 import { prepareRentalDesktopCatalogInput } from '@rental-os/shared/agent-desktop'
 import css from './Workbench.module.css'
 
-export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, readSources, t }: ContextProps) {
+export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, clearMaterials, readSources, observePreview, t }: ContextProps) {
   const state = useBusiness(value => value)
   const mode = useWorkMode(value => value)
   const [open, setOpen] = useState(false)
@@ -28,28 +28,38 @@ export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, s
       <Button variant="ghost" disabled={state.busy} onClick={logout}>{t('logout')}</Button></div>
     {state.failed && <span className={css.failure} role="status">{t('unavailable')}</span>}
     {wide && session.audience === 'tenant' && session.currentWorkspaceId && <CatalogPreview key={JSON.stringify([session.actorId, session.tenantId, session.currentWorkspaceId])}
-      catalog={state.catalog} sources={state.sources} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog} readSources={readSources} t={t} />}
+      catalog={state.catalog} sources={state.sources} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog}
+      clearMaterials={clearMaterials} readSources={readSources} observePreview={observePreview} t={t} />}
   </div>
 }
 
 /** A scoped human request never enters ordinary Harness chat, session history or a model. */
-function CatalogPreview({ catalog, sources, busy, readCatalog, discardCatalog, readSources, t }: Pick<ContextProps, 'readCatalog' | 'discardCatalog' | 'readSources' | 't'> & { catalog: WorkbenchState['catalog']; sources: WorkbenchState['sources']; busy: boolean }) {
+function CatalogPreview({ catalog, sources, busy, readCatalog, discardCatalog, clearMaterials, readSources, observePreview, t }: Pick<ContextProps, 'readCatalog' | 'discardCatalog' | 'clearMaterials' | 'readSources' | 'observePreview' | 't'> & { catalog: WorkbenchState['catalog']; sources: WorkbenchState['sources']; busy: boolean }) {
   const [provider, setProvider] = useState(''), [model, setModel] = useState(''), [text, setText] = useState('')
+  const preview = useRef<HTMLDetailsElement>(null), sourcePreview = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    if (!preview.current || !sourcePreview.current) return
+    const releaseCatalog = observePreview(preview.current, 'catalog'), releaseSources = observePreview(sourcePreview.current, 'sources')
+    return () => { releaseSources(); releaseCatalog() }
+  }, [observePreview])
   const prepared = prepareRentalDesktopCatalogInput(text)
-  return <details className={css.catalog}>
+  const catalogBusy = catalog.status === 'loading', sourcesBusy = sources.status === 'loading'
+  return <details ref={preview} className={css.catalog}>
       <summary>{t('catalogPreview')}</summary>
       <p>{t('catalogBoundary')}</p>
       <form autoComplete="off" onSubmit={event => { event.preventDefault(); if (prepared.state === 'prepared') readCatalog({ limit: prepared.input.limit, selection: { provider, model } }) }}>
-        <label>{t('catalogRequest')}<Input value={text} maxLength={256} required disabled={catalog.busy} onChange={event => { setText(event.target.value); discardCatalog() }} /></label>
+        <label>{t('catalogRequest')}<Input value={text} maxLength={256} required disabled={catalogBusy} onChange={event => { setText(event.target.value); discardCatalog() }} /></label>
         <p>{t('catalogSyntax')}</p>
-        <label>{t('provider')}<Input value={provider} maxLength={128} required disabled={catalog.busy} onChange={event => { setProvider(event.target.value); discardCatalog() }} /></label>
-        <label>{t('catalogModel')}<Input value={model} maxLength={256} required disabled={catalog.busy} onChange={event => { setModel(event.target.value); discardCatalog() }} /></label>
+        <label>{t('provider')}<Input value={provider} maxLength={128} required disabled={catalogBusy} onChange={event => { setProvider(event.target.value); discardCatalog() }} /></label>
+        <label>{t('catalogModel')}<Input value={model} maxLength={256} required disabled={catalogBusy} onChange={event => { setModel(event.target.value); discardCatalog() }} /></label>
         <p role="status">{prepared.state === 'prepared' ? <>{t('catalogPreparedLimit')}: {prepared.input.limit} · {t(prepared.sources.limit === 'preview_default' ? 'catalogDefaultLimit' : 'catalogExplicitLimit')}</>
           : t(prepared.reason === 'empty' ? 'catalogInputEmpty' : 'catalogClarify')}</p>
-        <Button type="submit" variant="outline" disabled={busy || catalog.busy || prepared.state !== 'prepared'}>{t(catalog.busy ? 'catalogLoading' : 'catalogRead')}</Button>
+        <Button type="submit" variant="outline" disabled={busy || catalogBusy || prepared.state !== 'prepared'}>{t(catalogBusy ? 'catalogLoading' : 'catalogRead')}</Button>
       </form>
+      <Button type="button" variant="ghost" onClick={() => { clearMaterials(); setProvider(''); setModel(''); setText('') }}>{t('catalogClear')}</Button>
+      <p>{t('catalogClearBoundary')}</p>
       <div role="status" aria-live="polite">
-        {catalog.failed && <p>{t('catalogDenied')}</p>}
+        <PreviewStatusText status={catalog.status} failedKey="catalogDenied" t={t} />
         {catalog.inspection && <p>{t('catalogInspectedRoute')}: {catalog.inspection.selection.model} · {catalog.inspection.protocol} · {catalog.inspection.destination.baseUrl}<br />{t('catalogInspectionBoundary')}</p>}
         {catalog.result && <>
           <p>{t('catalogObserved')} <time dateTime={catalog.result.observedAt}>{catalog.result.observedAt}</time></p>
@@ -65,18 +75,18 @@ function CatalogPreview({ catalog, sources, busy, readCatalog, discardCatalog, r
           <p>{t('catalogMaterialHash')}: <code>{catalog.material.contentHash}</code></p>
         </details>}
       </div>
-      <details>
+      <details ref={sourcePreview}>
         <summary>{t('catalogSources')}</summary>
         <p>{t('catalogSourcesBoundary')}</p>
-        <Button type="button" variant="outline" disabled={busy || sources.busy} onClick={readSources}>{t(sources.busy ? 'catalogLoading' : 'catalogReadSources')}</Button>
-        {sources.failed && <p role="status">{t('catalogSourcesUnavailable')}</p>}
+        <Button type="button" variant="outline" disabled={busy || sourcesBusy} onClick={readSources}>{t(sourcesBusy ? 'catalogLoading' : 'catalogReadSources')}</Button>
+        <PreviewStatusText status={sources.status} failedKey="catalogSourcesUnavailable" t={t} />
         {sources.result && <>
           <p role="status">{t(sources.result.truncated ? 'catalogSourcesPartial' : sources.result.items.length ? 'catalogSourcesReady' : 'catalogSourcesEmpty')}</p>
           <ul>{sources.result.items.map(source => <li key={source.auditId}>
             <time dateTime={source.observedAt}>{source.observedAt}</time>
             {source.state === 'reference' ? <>
               <span>{source.query.modelRoute.model} · {source.query.modelRoute.protocol} · {t('catalogPolicyRevision')}: {source.policyRevision}</span>
-              <Button type="button" variant="outline" disabled={busy || catalog.busy || Date.parse(source.sourceExpiresAt) <= Date.now()} onClick={() => {
+              <Button type="button" variant="outline" disabled={busy || catalogBusy || Date.parse(source.sourceExpiresAt) <= Date.now()} onClick={() => {
                 const selection = { provider: source.query.modelRoute.provider, model: source.query.modelRoute.model }
                 setProvider(selection.provider); setModel(selection.model); setText(`show first ${source.query.limit} products`)
                 readCatalog({ selection, limit: source.query.limit, sourceRef: { auditId: source.auditId, requestId: source.requestId } })
@@ -86,6 +96,13 @@ function CatalogPreview({ catalog, sources, busy, readCatalog, discardCatalog, r
         </>}
       </details>
     </details>
+}
+
+function PreviewStatusText({ status, failedKey, t }: Pick<ContextProps, 't'> & { status: WorkbenchState['catalog']['status']; failedKey: 'catalogDenied' | 'catalogSourcesUnavailable' }) {
+  if (status === 'ready' || status === 'loading') return null
+  const key = status === 'failed' ? failedKey : ({ idle: 'previewIdle', cleared: 'previewCleared', inactive: 'previewInactive',
+    changed: 'previewChanged', expired: 'previewExpired' } as const)[status]
+  return <p role="status">{t(key)}</p>
 }
 
 export function WorkbenchNavigation({ wide, useBusiness, useWorkMode, navigate, t }: NavigationProps) {

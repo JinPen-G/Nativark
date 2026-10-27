@@ -239,6 +239,10 @@ test('settings normal host starts through the runner and persists an approval ch
       requests: { readHistorical: async () => { throw Error('settings uses original settings input'); } },
       readTaskReceipt: async () => { throw Error('not used'); }, readRecovery: async () => { throw Error('not used'); } } });
   const aggregatedSettings = await settingsCenter.readScene({ kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  const { validateAiTaskSceneObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  assert.deepEqual(validateAiTaskSceneObservation(aggregatedSettings), aggregatedSettings);
+  const tenantOnly = structuredClone(aggregatedSettings); tenantOnly.business.scope = { kind: 'tenant', tenantId: 'tenant-a' };
+  assert.throws(() => validateAiTaskSceneObservation(tenantOnly), error => error.code === 'AI_STORAGE_UNAVAILABLE');
   assert.equal(aggregatedSettings.business.confirmation.checkpointRef, checkpoint.id);
   assert.equal(aggregatedSettings.snapshot.availability, 'available'); assert.equal(aggregatedSettings.business.businessOutcome, 'not_observed');
   const stateBeforeRead = h.clone(h.state);
@@ -299,6 +303,7 @@ test('settings normal host starts through the runner and persists an approval ch
   const afterCommitState = h.clone(h.state);
   const recoveredScene = await controller.readTaskScene(request, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
   assert.equal(recoveredScene.business.businessOutcome, 'committed', 'reconnection discovers the original receipt without a caller operation key');
+  assert.deepEqual(validateAiTaskSceneObservation(recoveredScene), recoveredScene);
   assert.equal(recoveredScene.business.operation.receipt.operationKey, business.operation.receipt.operationKey);
   assert.deepEqual(h.clone(h.state), afterCommitState, 'receipt discovery is read-only');
   const terminal = await controller.reconcileSettingsTask(request, { taskId: 'task-a', runId: 'run-a' });

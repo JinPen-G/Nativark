@@ -3,11 +3,10 @@ import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiKnowledgeSourceDraft, type AiFactReference } from '@rental-os/shared';
 import type { KnowledgeAuthorizationPort, KnowledgeClock, KnowledgeContentPort, KnowledgeRepositoryPort, KnowledgeSearchPort } from './knowledge.ports';
 import { requiredPort, unavailable } from './knowledge-errors';
-import { authorize, documentSourceSchema, fingerprint, id, parse, parsePersisted, sameScope, scopeSchema, validateChunks, visible, persistedKnowledgeChunkSchema } from './knowledge-validation';
+import { authorize, documentSourceSchema, fingerprint, id, parse, parsePersisted, sameScope, scopeSchema, validateChunks, visible, readKnowledgeChunkEvidence } from './knowledge-validation';
 
 type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
 type ReadDb = Pick<PrismaClient, 'aiKnowledgeChunk'>;
-const chunkSchema = persistedKnowledgeChunkSchema;
 const searchSchema = z.object({
   grant: z.object({ scope: scopeSchema, actor: z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict(),
     audience: z.enum(['operator', 'staff', 'client', 'automation']), accessKey: z.string().min(1).max(256) }).strict(),
@@ -40,16 +39,20 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
   }
 
   private async rows(document: AiKnowledgeDocumentDraft, query?: string, published = true, chunkId?: string) {
+    const head = await this.repository.read(document.scope, document.documentId);
+    if (!head?.contentHash || fingerprint(head.document) !== fingerprint(document)) return unavailable();
+    const sourceHash = await this.repository.sourceContentHash?.(document.scope, document.documentId, document.documentVersion);
+    if (!sourceHash || sourceHash !== head.contentHash) return unavailable();
     // Logical chunk IDs live in persisted state, not the random database row ID.
     // Keep the scope/version relation and probe for duplicate logical IDs.
     const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document, published),
       ...(query === undefined ? {} : { text: { contains: query } }),
-      ...(chunkId === undefined ? {} : { state: { path: '$.chunkId', equals: chunkId } }) },
+      ...(chunkId === undefined ? {} : { state: { path: '$.chunk.chunkId', equals: chunkId } }) },
       take: chunkId === undefined ? 201 : 2, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
     if (!Array.isArray(rows) || rows.length > (chunkId === undefined ? 200 : 1)) return unavailable();
     let chars = 0;
     const chunks = rows.map(row => {
-      const chunk = parsePersisted(chunkSchema, row.state);
+      const chunk = readKnowledgeChunkEvidence(row.state, head.contentHash).chunk;
       if (chunkId !== undefined && chunk.chunkId !== chunkId) return unavailable();
       if (row.text !== chunk.text || !Number.isInteger(row.chunkIndex) || row.chunkIndex < 0) return unavailable();
       chars += chunk.text.length;

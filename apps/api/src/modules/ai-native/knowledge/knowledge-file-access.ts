@@ -7,5 +7,8 @@ export interface KnowledgeFileAccess {
   /** Current metadata read, never a grant for a new upload or object read. */
   authorizeUploadObservation?(tenantId: string, owner: FileBusinessOwner): Promise<void>;
   assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, target?: { documentVersion: string; expectedRevision: number }): Promise<void>;
+  /** Original pending-upload bytes only; current upload authority is mandatory.
+   * The original completion transaction persists the digest before activation. */
+  readUploadContentHash?(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<string>;
   read(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal?: AbortSignal): Promise<{ mediaType: string; bytes: Uint8Array }>;
 }

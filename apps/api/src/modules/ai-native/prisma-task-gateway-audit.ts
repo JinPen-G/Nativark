@@ -10,8 +10,9 @@ import { isGatewayConfig } from './gateway-contract-validation';
 import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import type { GatewayBudgetDenialObservation, GatewayInvocationObservation, UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { aiPersistenceScopeColumns } from './persistence-scope';
 
-type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiTask' | 'aiGatewayInvocation'
+type Db = Pick<PrismaClient, '$transaction' | 'operationLog' | 'aiScope' | 'aiTask' | 'aiGatewayInvocation'
   | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission' | 'aiBudgetReservation'>;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const entrySchema = z.object({ callId: id.max(128), tenantId: id, workspaceId: id,
@@ -50,6 +51,84 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
     this.dispatch = facts.readDispatch.bind(facts);
   }
 
+  async prepare(value: import('./unified-ai-gateway.ports').GatewayAuditPreparation, signal?: AbortSignal) {
+    const input = structuredClone(value), context = input.context, profile = input.profile;
+    if (!('tenantId' in context) || !id.max(128).safeParse(input.callId).success
+      || !['invoke', 'stream'].includes(input.mode) || !/^[a-f0-9]{64}$/u.test(input.intentHash)
+      || !/^[a-f0-9]{64}$/u.test(input.requestHash) || !/^[a-f0-9]{64}$/u.test(input.configurationHash)
+      || !profile || requestFingerprint(profile) !== input.configurationHash || !profile.enabled || profile.disabledAt !== null) throw denied();
+    const current = async () => {
+      if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+      const resolved = await this.resolve(), principal = gatewayBudgetPrincipal(resolved.context);
+      if (resolved.scope.kind !== 'WORKSPACE' || resolved.scope.tenantId !== principal.tenantId
+        || resolved.scope.workspaceId !== principal.workspaceId || principal.actorId !== context.actorId
+        || principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId) throw denied();
+      const { requestId: _request, authorizedAt: _at, ...identity } = resolved.context;
+      return { resolved, principal, hash: requestFingerprint({ identity, scope: resolved.scope }) };
+    };
+    let attempted = false;
+    try {
+      const before = await current();
+      const load = async (tx: Prisma.TransactionClient) => {
+        const task = await tx.aiTask.findFirst({ where: { id: this.taskId, scopeId: before.resolved.scope.id,
+          ownerId: before.principal.actorId, ownerKind: before.principal.actorKind, archivedAt: null } });
+        const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
+          scopeId: before.resolved.scope.id, callId: input.callId } } });
+        const audience = before.resolved.context.audience === 'client' ? 'CLIENT'
+          : before.resolved.context.audience === 'staff' ? 'STAFF' : 'OPERATOR';
+        if (!task || task.id !== this.taskId || task.scopeId !== before.resolved.scope.id || task.scopeKind !== 'WORKSPACE'
+          || task.ownerId !== before.principal.actorId || task.ownerKind !== before.principal.actorKind
+          || task.audience !== audience || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
+          || !invocation || invocation.taskId !== task.id || invocation.scopeId !== task.scopeId
+          || invocation.callId !== input.callId || invocation.actorId !== before.principal.actorId || invocation.mode !== input.mode
+          || invocation.intentHash !== input.intentHash || !isGatewayConfig(invocation.configuration)
+          || requestFingerprint(invocation.configuration) !== invocation.configurationHash
+          || invocation.configuration.configId !== profile.id || invocation.configuration.configRevision !== profile.configRevision
+          || invocation.configuration.protocol !== profile.protocol || invocation.configuration.provider !== profile.provider
+          || invocation.configuration.model !== profile.model || invocation.configuration.credentialRef !== profile.credentialRef
+          || invocation.configuration.serviceMode !== profile.serviceMode
+          || (invocation.configuration.serviceMode === 'tenant_managed' ? profile.scopeKind !== 'TENANT'
+            : profile.scopeKind !== 'PLATFORM')) throw denied();
+        const columns = aiPersistenceScopeColumns(invocation.configuration.configurationScope);
+        const owner = await tx.aiScope.findFirst({ where: { ...columns, id: profile.scopeId }, select: {
+          id: true, kind: true, scopeKey: true, tenantId: true, workspaceId: true } });
+        if (!owner || owner.id !== profile.scopeId || owner.kind !== profile.scopeKind
+          || Object.entries(columns).some(([key, value]) => owner[key as keyof typeof owner] !== value)) throw denied();
+        return { taskId: task.id, invocationId: invocation.id, registrationHash: invocation.registrationHash,
+          runId: invocation.runId, stepId: invocation.stepId, actionId: invocation.actionId,
+          stepFingerprint: invocation.stepFingerprint, configurationHash: invocation.configurationHash,
+          sceneCode: invocation.sceneCode, priceVersion: invocation.priceVersion, maxOutputTokens: invocation.maxOutputTokens };
+      };
+      const options = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 };
+      const source = await this.db.$transaction(load, options);
+      const digest = requestFingerprint({ version: 'ai-gateway-audit-intent-1', scopeId: before.resolved.scope.id,
+        invocationId: source.invocationId });
+      const auditId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+      const data = { id: auditId, tenantId: context.tenantId, workspaceId: context.workspaceId,
+        userId: before.principal.actorKind === 'USER' ? before.principal.actorId : null, action: 'ai.gateway.prepared',
+        detail: { version: 'ai-gateway-audit-intent-1', ...source, callId: input.callId, mode: input.mode,
+          intentHash: input.intentHash, requestHash: input.requestHash, profileHash: input.configurationHash,
+          observation: 'prepared_not_admitted_or_dispatched' } };
+      if ((await current()).hash !== before.hash) throw denied();
+      await this.db.$transaction(async tx => {
+        if (!isDeepStrictEqual(await load(tx), source)) throw denied();
+        const previous = await tx.operationLog.findUnique({ where: { id: auditId } });
+        const check = (row: Prisma.OperationLogGetPayload<{}> | null) => {
+          if (!row || row.id !== auditId || row.tenantId !== data.tenantId || row.workspaceId !== data.workspaceId
+            || row.userId !== data.userId || row.action !== data.action || !isDeepStrictEqual(row.detail, data.detail)) throw invalid();
+        };
+        if (previous) { check(previous); return; }
+        if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+        attempted = true;
+        check(await tx.operationLog.create({ data }));
+      }, options);
+      if ((await current()).hash !== before.hash) throw denied();
+    } catch (error) {
+      if (attempted) throw new ModelGatewayError('ACCOUNTING_PENDING');
+      if (error instanceof ModelGatewayError) throw error;
+      throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    }
+  }
   append(value: Parameters<UnifiedGatewayAudit['append']>[0]) { return this.persist(value); }
 
   /** Original budget-gate rejection only. No reservation, financial event,

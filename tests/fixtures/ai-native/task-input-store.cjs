@@ -18,6 +18,12 @@ function matches(value, where) {
     if (key === 'OR') return rule.some(r => matches(value, r));
     if (key === 'is') return matches(value, rule);
     if (key === 'in') return rule.includes(value);
+    if (key === 'notIn') return !rule.includes(value);
+    if (key === 'path') return true;
+    if (key === 'equals' && where.path) {
+      const keys = Array.isArray(where.path) ? where.path : where.path.replace(/^\$\./u, '').split('.');
+      return keys.reduce((row, field) => row?.[field], value) === rule;
+    }
     if (key === 'not') return !matches(value, rule);
     if (key === 'gt') return value !== null && value !== undefined && value > rule;
     if (key === 'lte') return value !== null && value !== undefined && value <= rule;
@@ -65,6 +71,8 @@ function createTaskInputStore(initial, constraints = {}) {
       version.scopeId === row.scopeId && version.taskId === row.taskId && version.proposalId === row.id && version.revision === row.currentRevision) ?? null;
     if (name === 'aiProposalAction') out.step = data.aiStep.find(step =>
       step.scopeId === row.scopeId && step.taskId === row.taskId && step.actionId === row.actionId) ?? null;
+    if (name === 'aiTaskResultArtifact') out.step = data.aiStep.find(step =>
+      step.scopeId === row.scopeId && step.taskId === row.taskId && step.id === row.stepId) ?? null;
     return out;
   }
   const hydrate = (row, select) => {
@@ -187,6 +195,8 @@ function createTaskInputStore(initial, constraints = {}) {
           const keys = ['tenantId', 'workspaceId', 'channel', 'principalHash', 'creationKey'];
           return clone(data.aiClientTaskInput.filter(row => keys.every((key, i) => row[key] === values[i])).slice(0, 1));
         }
+        if (text.includes('FROM ai_scopes')) return data.aiScope.filter(row => row.id === values[0]
+          && row.kind === 'WORKSPACE' && row.tenantId === values[1] && row.workspaceId === values[2]).map(row => ({ id: row.id }));
         if (!text.includes('ai_text_capability_receipts')) { trace.push('row.lock'); return []; }
         if (!Array.isArray(data.aiTextCapabilityReceipt)) throw Error('receipt table not configured');
         const rows = data.aiTextCapabilityReceipt.filter(row => text.includes('WHERE scopeId')

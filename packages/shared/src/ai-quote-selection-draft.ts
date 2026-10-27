@@ -99,6 +99,7 @@ export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
 export const AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS = Object.freeze({
   readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft' },
   readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft' },
+  readScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft' },
   start: { request: 'AiSelectedQuoteTaskRequestDraft', response: 'AiSelectedQuoteTaskRunDraft' },
   readConfirmation: { request: 'AiSelectedQuoteTaskConfirmationRequestDraft', response: 'AiSelectedQuoteTaskConfirmationDraft' },
   continueConfirmation: { request: 'AiSelectedQuoteTaskContinueRequestDraft', response: 'AiSelectedQuoteTaskRunDraft' },

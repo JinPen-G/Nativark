@@ -34,7 +34,7 @@ export interface AiStepRegistrationAuthority {
    */
   resolve(command: Readonly<AiStepRegistrationCommand>): Promise<z.infer<typeof grantSchema> & { context: AiExecutionContext }>;
   /** Existing persisted registration only. Cannot authorize an insertion. */
-  resolveOriginal?(command: Readonly<AiStepRegistrationCommand>): Promise<AiStepOriginalRegistrationGrant>;
+  resolveOriginal?(command: Readonly<AiStepRegistrationCommand>, tx?: Prisma.TransactionClient): Promise<AiStepOriginalRegistrationGrant>;
 }
 export function aiStepActionId(scope: ReturnType<typeof aiTaskAccessFromContext>['scope'], taskId: string, registrationRef: string) {
   return `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope, taskId, registrationRef })}`;
@@ -69,10 +69,10 @@ export class AiStepRegistrationRepository {
     if (!authority || typeof authority.resolve !== "function") throw denied();
   }
 
-  private async resolve(input: AiStepRegistrationCommand, originalOnly = false) {
+  private async resolve(input: AiStepRegistrationCommand, originalOnly = false, tx?: Prisma.TransactionClient) {
     try {
       const historical = originalOnly && typeof this.authority.resolveOriginal === 'function';
-      const grant = historical ? originalGrantSchema.parse(structuredClone(await this.authority.resolveOriginal!(structuredClone(input))))
+      const grant = historical ? originalGrantSchema.parse(structuredClone(await this.authority.resolveOriginal!(structuredClone(input), tx)))
         : grantSchema.parse(structuredClone(await this.authority.resolve(structuredClone(input))));
       if (!isAiStepExecutionContext(grant.context)) throw denied();
       const access = aiTaskAccessFromContext(grant.context, input.taskId, this.clock());
@@ -90,8 +90,10 @@ export class AiStepRegistrationRepository {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, initial = await this.resolve(input, existingOnly);
-    const verifyCurrent = async () => {
-      const current = await this.resolve(input, existingOnly);
+    const verifyCurrent = async (tx: Prisma.TransactionClient) => {
+      // Original evidence shares the owning read transaction. A second snapshot
+      // here can deadlock the held task/run locks or observe a different lease.
+      const current = await this.resolve(input, existingOnly, tx);
       if (current.access.bindingKey !== initial.access.bindingKey || current.digest !== initial.digest) throw denied();
       return current;
     };
@@ -104,7 +106,7 @@ export class AiStepRegistrationRepository {
         const existing = await tx.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, actionId: initial.actionId }, select: stepSelect });
         if (existing) {
           this.verifyExisting(existing, task, initial);
-          await verifyCurrent();
+          await verifyCurrent(tx);
           // A stale lease may read its original identity, but receives no fresh lease or dispatch authority.
           return { stepId: existing.id, runId: existing.runId, sequence: existing.sequence, stepRevision: existing.revision,
             taskRevision: task.revision, replayed: true as const, event: null, runRevision: null };
@@ -133,7 +135,7 @@ export class AiStepRegistrationRepository {
           data: { revision: { increment: 1 } }
         });
         if (held.count !== 1) throw conflict();
-        const current = await verifyCurrent();
+        const current = await verifyCurrent(tx);
         const live = await tx.aiRun.updateMany({
           where: { id: lease.runId, scopeId: task.scopeId, taskId: task.id, revision: lease.revision + 1,
             fencingToken: new Prisma.Decimal(lease.fencingToken), leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: current.access.now },
@@ -204,7 +206,7 @@ export class AiStepRegistrationRepository {
           || (["succeeded", "failed", "unknown"].includes(status) && !id.safeParse(row.resultRef).success)
           || (status === "unknown" && row.effect !== "POSSIBLE")
           || (status === "succeeded" && !["NONE", "COMMITTED"].includes(row.effect))) throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
-        const current = await this.resolve(registration, true);
+        const current = await this.resolve(registration, true, tx);
         if (current.digest !== initial.digest) throw denied();
         const after = await authorizeRead();
         if (after.digest !== before.digest) throw denied();

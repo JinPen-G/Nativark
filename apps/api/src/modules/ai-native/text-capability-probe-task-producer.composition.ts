@@ -30,6 +30,9 @@ export interface TextCapabilityProbeOriginalInputSource {
    * The implementation must reauthorize current identity/scope and verify the
    * stored revision/hash before returning. No caller/model fields are trusted. */
   read(inputRef: string): Promise<OriginalProbe>;
+  /** Current read authority over immutable original material, without a new
+   * configuration/plan gate. Never used to create or start work. */
+  readHistorical?(inputRef: string): Promise<OriginalProbe>;
 }
 
 export type TextCapabilityProbeTaskProducerDependencies = {
@@ -71,8 +74,8 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     }
   };
   const creation = new AiTaskCreationRepository(input.db, authority, input.clock);
-  const task = async (ref: string, result: Awaited<ReturnType<AiTaskCreationRepository['create']>>) => {
-    const original = await source.read(ref);
+  const task = async (ref: string, result: Awaited<ReturnType<AiTaskCreationRepository['create']>>, saved?: OriginalProbe) => {
+    const original = saved ?? await source.read(ref);
     return { ...result, registrationRef: original.registrationRef, command: structuredClone(original.command),
       priceVersion: original.priceVersion, limits: structuredClone(original.limits), toolCode: TEXT_CAPABILITY_PROBE_TOOL };
   };
@@ -86,9 +89,22 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     async readCreation(value: unknown) {
       const parsed = creationCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const result = await creation.readCreation({ ...parsed.data, sceneCode: probeScene.value });
+      const read = input.source.readHistorical?.bind(input.source);
+      if (!read) {
+        const result = await creation.readCreation({ ...parsed.data, sceneCode: probeScene.value });
+        if (!result.task) return result;
+        return { ...result, task: await task(parsed.data.inputRef, result.task) };
+      }
+      const original = originalSchema.parse(structuredClone(await read(parsed.data.inputRef)));
+      const reader = AiTaskCreationRepository.receiptReader(input.db, { resolve: async (sceneCode, ref) => {
+        const current = originalSchema.parse(structuredClone(await read(ref)));
+        if (sceneCode !== current.sceneCode || current.inputRef !== ref || stableBinding(current) !== stableBinding(original)) throw denied();
+        return { context: current.context as AiExecutionContext, sceneCode: current.sceneCode,
+          sceneVersion: current.sceneVersion, inputRef: ref, inputRevision: current.inputRevision, inputHash: current.inputHash };
+      } }, input.clock);
+      const result = await reader.readCreation({ ...parsed.data, sceneCode: probeScene.value });
       if (!result.task) return result;
-      return { ...result, task: await task(parsed.data.inputRef, result.task) };
+      return { ...result, task: await task(parsed.data.inputRef, result.task, original) };
     },
     creation
   });

@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
+import { taskStepChargesValid } from './task-model-count-charge';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './ai-task-runner.ports';
 
@@ -25,9 +26,8 @@ export class PrismaTaskResourceRecoverySource {
       runId: lease.runId, toolCode: step.plan.toolCode, toolVersion: step.plan.toolVersion, revision: step.registered.stepRevision }, select: { actionId: true, requestFingerprint: true, status: true } });
     if (!stored || !['UNKNOWN', 'RUNNING', 'SUCCEEDED', 'FAILED', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'].includes(stored.status)) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     const rows = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: before.scopeId, taskId: lease.taskId, runId: lease.runId,
-      stepId: step.registered.stepId, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint }, orderBy: { chargeId: 'asc' }, take: 5 });
-    const kinds = new Set(rows.map(row => row.resource));
-    if (rows.length < 3 || rows.length > 4 || kinds.size !== rows.length || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(kind => kinds.has(kind as typeof rows[number]['resource']))
+      stepId: step.registered.stepId, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint }, orderBy: { chargeId: 'asc' }, take: 6 });
+    if (!taskStepChargesValid(rows)
       || rows.some(row => !['RESERVED', 'UNKNOWN', 'RECORDED'].includes(row.status) || row.resource === 'CALLS' && !row.gatewayInvocationId)) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     const after = await this.authority.resolve(lease.taskId, lease, 'write');
     if (after.bindingKey !== before.bindingKey || after.scopeId !== before.scopeId

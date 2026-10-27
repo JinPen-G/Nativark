@@ -246,6 +246,7 @@ export const AI_SCENE_REQUEST_HTTP_CONTRACTS = Object.freeze({
   reconcile: { request: 'AiSceneRequestCreateDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
   reconcileReissue: { request: 'AiSceneRequestReissueDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
   createTask: { request: 'AiSceneRequestReadDraft', response: 'AiSceneCreatedTaskDraft', successStatus: 201 },
+  material: { request: 'AiSceneRequestReadDraft', response: 'AiSceneTaskMaterialResponseDraft', successStatus: 201 },
   recovery: { request: 'AiSceneRequestReadDraft', response: 'AiSceneRequestRecoveryDraft', successStatus: 201 }
 } as const);
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
@@ -294,6 +295,15 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   readOriginalSettingsCancellationSettlement: 'settings/original/cancel/settlement-receipt',
   decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
+} as const);
+
+/** Original model observations reuse the same metadata/event wire contracts
+ * as the task center. A list or event cursor is never execution authority. */
+export const AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS = Object.freeze({
+  readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft', successStatus: 200 },
+  readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft', successStatus: 200 },
+  readModelResult: { request: 'AiSceneModelResultReadDraft', response: 'AiSceneModelResultObservationDraft', successStatus: 200 },
+  readTaskScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft', successStatus: 200 }
 } as const);
 
 /** Separate opt-in accounting host. No model/runner routes are registered,

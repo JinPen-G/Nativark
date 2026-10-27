@@ -93,7 +93,9 @@ export class BudgetService {
   async reserve(value: BudgetReserveCommand) {
     const command = structuredClone(value);
     this.validateAssociation(command.association);
-    if (!identifier(command.callId, 128) || !identifier(command.sceneCode, 128) || !(command.expiresAt instanceof Date) || command.expiresAt <= this.now()) throw new BudgetError('INVALID');
+    if (!identifier(command.callId, 128) || !identifier(command.sceneCode, 128)
+      || command.countRequestHash !== undefined && !/^[a-f0-9]{64}$/u.test(command.countRequestHash)
+      || !(command.expiresAt instanceof Date) || command.expiresAt <= this.now()) throw new BudgetError('INVALID');
     const session = await this.session('reserve', { association: command.association });
     const quote = structuredClone(await this.quotes.quote(command, session.grant));
     if (!same(quote.association, command.association) || quote.callId !== command.callId || quote.sceneCode !== command.sceneCode

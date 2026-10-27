@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport } from './chat-completions.adapter';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { modelEgressEvidence } from './model-egress.transport';
+import { messagesGenerationInputHash } from './input-counting/count-tokens.protocol';
 import { MODEL_REQUEST_BYTES, MODEL_RESPONSE_BYTES } from './model-response-limits';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema,
@@ -310,6 +311,11 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
     // Never advertise audio just because Chat Completions supports it.
     this.images = media.data.includes('image'); this.policy = new ChatProtocolPolicy(policy);
   }
+  inputBoundHash(input: Readonly<ModelProtocolRequest>, stream: boolean) {
+    if (this.provider !== 'anthropic_messages') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    const parsed = modelProtocolRequestSchema.parse(structuredClone(input));
+    return messagesGenerationInputHash(this.body(parsed, this.policy.selected(parsed.features ?? []), stream));
+  }
   private prepare(value: ModelProtocolInvocation, credential: string, connection: Readonly<{ baseUrl: string }> | undefined, stream: boolean) {
     if (!value?.signal || typeof value.signal.addEventListener !== 'function' || typeof value.signal.removeEventListener !== 'function'
       || typeof value.signal.aborted !== 'boolean' || value.recordUsage !== undefined && typeof value.recordUsage !== 'function'
@@ -322,6 +328,8 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
     if (features.some(feature => !this.features.includes(feature)) || !stream && features.includes('streaming')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     if (input.structuredSchemaHash && (!features.includes('structuredOutput') || input.structuredSchemaHash !== this.structuredSchemaHash)) throw new ModelGatewayError('CONFIG_INVALID');
     const policy = this.policy.selected(features), body = this.body(input, policy, stream);
+    if (value.expectedInputBoundHash !== undefined && (this.provider !== 'anthropic_messages'
+      || messagesGenerationInputHash(body) !== value.expectedInputBoundHash)) throw new ModelGatewayError('CONFIG_INVALID');
     if (Buffer.byteLength(body) > MODEL_REQUEST_BYTES) throw new ModelGatewayError('INVALID_REQUEST');
     const base = normalizeTenantModelBaseUrl(connection.baseUrl);
     // Both accept a versioned base; Messages also accepts the API root. Never

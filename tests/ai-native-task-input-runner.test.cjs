@@ -82,6 +82,7 @@ test('effect-provided paused input cannot replace a persisted successful clarifi
 
 test('input wait acknowledgement cannot advance an unrelated holder', async () => {
   const h = setup(); h.deps.inputs.afterSucceeded = async (_ref, held) => ({ taskRevision: h.state.taskRevision + 1, lease: { ...held, holderId: 'other', revision: held.revision + 1 } });
-  assert.equal((await h.run(false)).status, 'unavailable');
+  await assert.rejects(() => h.run(false), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(h.trace.includes('execute:continue'), false);
+  assert.equal(h.trace.includes('release'), false);
 });

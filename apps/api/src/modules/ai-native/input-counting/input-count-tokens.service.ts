@@ -7,7 +7,7 @@
  * instead of being re-sent. Nothing here starts the text dispatch, publishes a
  * bound or refunds admission. */
 import { z } from 'zod';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiGatewayIntentDraft, AiUsageAssociationDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
@@ -30,6 +30,17 @@ import { PrismaCountTokensReceipts, countTokensOperationId, countTokensReference
   type CountTokensReceipt, type CountTokensReceiptDb } from './input-count-tokens.receipt';
 
 const callIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const countReservationSelect = { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true,
+  actorId: true, callId: true, requestId: true, idempotencyKey: true, runId: true, stepId: true, actionId: true,
+  sceneCode: true, priceVersion: true, unitKind: true, configurationHash: true, configRevision: true,
+  reservedCalls: true, reservedTokens: true, reservedMoney: true, moneyCurrency: true,
+  status: true, dispatchState: true } satisfies Prisma.AiBudgetReservationSelect;
+type CountReservation = Prisma.AiBudgetReservationGetPayload<{ select: typeof countReservationSelect }>;
+const observationInvocationSelect = { id: true, scopeId: true, actorId: true, taskId: true, runId: true,
+  stepId: true, actionId: true, callId: true, registrationHash: true, intentHash: true,
+  configurationHash: true, configuration: true, priceVersion: true, sceneCode: true,
+  maxOutputTokens: true } satisfies Prisma.AiGatewayInvocationSelect;
+type ObservationInvocation = Prisma.AiGatewayInvocationGetPayload<{ select: typeof observationInvocationSelect }>;
 export interface CountTokensFrozenInvocation {
   scopeId: string; actorId: string; context: AiExecutionContext;
   invocation: { id: string; taskId: string; runId: string; stepId: string; actionId: string; callId: string;
@@ -51,15 +62,17 @@ export interface InputCountTokensDependencies {
   scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   authorization: BudgetAuthorizationSource & { authorizeObservation?(taskId: string): Promise<AiExecutionContext> };
   budget: BudgetServiceLike;
-  frozen: CountTokensFrozenInputSource;
-  resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
-  transport: ModelJsonTransport;
-  policyOptions: ChatProtocolOptions;
+  /** New-call dependencies may be absent on an original-receipt host. Their
+   * absence never grants dispatch; execution validates them before its gate. */
+  frozen?: CountTokensFrozenInputSource;
+  resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
+  transport?: ModelJsonTransport;
+  policyOptions?: ChatProtocolOptions;
   /** Management entries only. Undefined keeps them unavailable while the
    * task-internal entry stays usable for hosts composed without a fixed
    * management scene. */
   sceneCode?: string;
-  countingPriceVersion: string;
+  countingPriceVersion?: string;
   /** The formal task-internal permission for the in-task entry: the same
    * transition_task action policy the dispatch of the original call requires.
    * Server-composed; never a caller grant or settings whitelist. */
@@ -106,20 +119,20 @@ export class InputCountTokensService {
   constructor(private readonly dependencies: InputCountTokensDependencies) {
     const input = dependencies;
     if (!input?.db || typeof input.scopes?.resolveCurrent !== 'function' || typeof input.authorization?.authorize !== 'function'
-      || !input.budget || ['reserve', 'read', 'dispatch', 'settle', 'markUnknown'].some(name =>
+      || !input.budget || ['reserve', 'read', 'dispatch', 'settle', 'reconcile', 'markUnknown'].some(name =>
         typeof input.budget[name as keyof BudgetServiceLike] !== 'function')
-      || typeof input.frozen?.readFrozenCountingInput !== 'function'
-      || !input.resolvers?.platform || typeof input.resolvers.platform.resolve !== 'function'
-      || !input.resolvers.tenant || typeof input.resolvers.tenant.resolve !== 'function'
-      || !input.transport || typeof input.transport.post !== 'function'
-      || !input.policyOptions || typeof input.policyOptions !== 'object' || Array.isArray(input.policyOptions)
+      || input.frozen !== undefined && typeof input.frozen.readFrozenCountingInput !== 'function'
+      || input.resolvers !== undefined && (typeof input.resolvers.platform?.resolve !== 'function'
+        || typeof input.resolvers.tenant?.resolve !== 'function')
+      || input.transport !== undefined && typeof input.transport.post !== 'function'
+      || input.policyOptions !== undefined && (typeof input.policyOptions !== 'object' || Array.isArray(input.policyOptions))
       || input.sceneCode !== undefined && !callIdSchema.max(64).safeParse(input.sceneCode).success
-      || !callIdSchema.max(64).safeParse(input.countingPriceVersion).success
+      || input.countingPriceVersion !== undefined && !callIdSchema.max(64).safeParse(input.countingPriceVersion).success
       || input.taskExecution !== undefined && typeof input.taskExecution.authorize !== 'function'
       || input.clock !== undefined && typeof input.clock !== 'function') throw new BudgetError('UNAVAILABLE');
     this.receipts = new PrismaCountTokensReceipts(input.db);
     this.records = new PrismaGatewayPricingRecords(input.db);
-    this.policy = new ChatProtocolPolicy(input.policyOptions);
+    this.policy = input.policyOptions === undefined ? undefined : new ChatProtocolPolicy(input.policyOptions);
     this.clock = input.clock ?? (() => new Date());
     this.timeoutMs = input.timeoutMs ?? 15000;
     if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 1000 || this.timeoutMs > 30000) throw new BudgetError('UNAVAILABLE');
@@ -190,6 +203,7 @@ export class InputCountTokensService {
       } };
   }
   private association(frozen: CountTokensFrozenInvocation, countCallId: string): AiUsageAssociationDraft {
+    if (!this.dependencies.countingPriceVersion) throw new BudgetError('UNAVAILABLE');
     return { requestId: countCallId, runId: frozen.invocation.runId, stepId: frozen.invocation.stepId,
       actionId: frozen.invocation.actionId, idempotencyKey: countCallId,
       scope: structuredClone(frozen.context.scope), config: structuredClone(frozen.configuration),
@@ -246,12 +260,16 @@ export class InputCountTokensService {
       }
       return admission('pending_reconciliation');
     }
-    if (current.status === 'settled' || current.status === 'released') return admission(current.status);
+    if (current.status === 'released') throw new BudgetError('PENDING_RECONCILIATION');
+    if (current.status === 'settled') return admission(current.status);
     // Both observed and definite-failure receipts settle the one real call the
     // admission reserved: the external request was made in either case.
     try {
-      await life.wait(() => this.dependencies.budget.settle(receipt.admission.reservationId, association,
-        requestFingerprint({ association, phase: 'settle:count-tokens' }), countTokensOperationId(receipt)));
+      const account = current.status === 'pending_reconciliation'
+        ? this.dependencies.budget.reconcile.bind(this.dependencies.budget) : this.dependencies.budget.settle.bind(this.dependencies.budget);
+      await life.wait(() => account(receipt.admission.reservationId, association,
+        requestFingerprint({ association, phase: current.status === 'pending_reconciliation' ? 'reconcile:count-tokens' : 'settle:count-tokens' }),
+        countTokensOperationId(receipt)));
     } catch (error) {
       if (!(error instanceof BudgetError && ['UNAVAILABLE', 'PENDING_RECONCILIATION', 'REVISION_CONFLICT'].includes(error.code))) throw error;
       return admission('pending_reconciliation');
@@ -262,7 +280,6 @@ export class InputCountTokensService {
   async count(value: unknown, signal?: AbortSignal): Promise<CountTokensResult> {
     const parsed = z.object({ callId: callIdSchema }).strict().safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
-    if (this.dependencies.sceneCode === undefined) throw new BudgetError('UNAVAILABLE');
     return this.runCounting({ callId: parsed.data.callId }, signal, () => this.commandGate(), true);
   }
 
@@ -286,8 +303,23 @@ export class InputCountTokensService {
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let originalMayExist = false;
     try {
+      // Original terminal evidence is independent of new execution/entitlement,
+      // current producer/price validity and the original invocation's expiry.
+      // Only absence of its original receipt permits entering the new-call gate.
+      try {
+        const original = await life.wait(() => this.originalCount(command));
+        originalMayExist = true;
+        const admission = await this.accountAdmission(original.receipt, original.association, life);
+        const latest = await life.wait(() => this.originalCount(command));
+        if (requestFingerprint(latest.receipt) !== requestFingerprint(original.receipt)
+          || identity(latest.current.context) !== identity(original.current.context)) throw new BudgetError('FORBIDDEN');
+        return this.summary(original.receipt, admission);
+      } catch (error) { if (!(error instanceof CountTokensReceiptNotFoundError)) throw error; }
+      const { frozen: frozenSource, resolvers, transport, countingPriceVersion } = this.dependencies;
+      if (!frozenSource || !resolvers || !transport || !this.policy || !countingPriceVersion
+        || requireManagementScene && this.dependencies.sceneCode === undefined) throw new BudgetError('UNAVAILABLE');
       const opened = await life.wait(gate);
-      const frozen = await life.wait(() => this.dependencies.frozen.readFrozenCountingInput(
+      const frozen = await life.wait(() => frozenSource.readFrozenCountingInput(
         { ...command, scopeId: opened.scopeId, actorId: opened.actorId }));
       if (frozen.scopeId !== opened.scopeId || frozen.actorId !== opened.actorId
         || requireManagementScene && frozen.invocation.sceneCode !== this.dependencies.sceneCode
@@ -346,14 +378,35 @@ export class InputCountTokensService {
       throw error;
     } finally { life.close(); }
   }
+  private originalCountAssociation(current: Awaited<ReturnType<InputCountTokensService['current']>>,
+    scopeId: string, invocation: ObservationInvocation, row: CountReservation): AiUsageAssociationDraft {
+    if (!isGatewayConfig(invocation.configuration) || !('tenantId' in invocation.configuration)
+      || invocation.configuration.tenantId !== current.tenantId
+      || requestFingerprint(invocation.configuration) !== invocation.configurationHash
+      || row.scopeId !== scopeId || row.scopeKind !== 'WORKSPACE'
+      || row.tenantId !== current.tenantId || row.workspaceId !== current.workspaceId
+      || row.actorId !== current.actorId || row.callId !== countTokensCallId(invocation.callId)
+      || row.requestId !== row.callId || row.idempotencyKey !== row.callId
+      || row.runId !== invocation.runId || row.stepId !== invocation.stepId || row.actionId !== invocation.actionId
+      || row.unitKind !== 'calls' || row.reservedCalls !== 1 || row.reservedTokens !== null
+      || row.reservedMoney !== null || row.moneyCurrency !== null
+      || row.sceneCode !== countTokensSceneCode(invocation.sceneCode)
+      || row.configurationHash !== invocation.configurationHash
+      || row.configRevision !== invocation.configuration.configRevision
+      || typeof row.priceVersion !== 'string' || !callIdSchema.max(64).safeParse(row.priceVersion).success)
+      throw new BudgetError('FORBIDDEN');
+    return { requestId: row.callId, runId: invocation.runId, stepId: invocation.stepId,
+      actionId: invocation.actionId, idempotencyKey: row.callId,
+      scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
+      config: invocation.configuration, priceVersion: row.priceVersion };
+  }
   /** Historical observation of one counting receipt under current read
    * authority: the original bound inputs only, never a fresh count, a text
    * dispatch, an admission refund or any ledger mutation. Missing receipts
    * report unavailable; execution shutdown does not erase a legitimately
    * recorded fact. Accepts either the original call id or the original
    * invocation id. */
-  async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics;
-    lifecycle: CountTokensLifecycle }> {
+  private async originalCount(value: unknown) {
     const parsed = z.object({ callId: callIdSchema.optional(), invocationId: z.string().min(1).max(36)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).strict().refine(item =>
       (item.callId !== undefined) !== (item.invocationId !== undefined)).safeParse(structuredClone(value));
@@ -362,10 +415,11 @@ export class InputCountTokensService {
     const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId });
     const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
     if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
+    const read = async () => {
     // Receipt first: absence is "no counting record" (unavailable), while a
     // receipt whose invocation is missing or owned by someone else is refused.
     const referenced = parsed.data.invocationId !== undefined
-      ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId } }) : null;
+      ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId }, select: observationInvocationSelect }) : null;
     if (parsed.data.invocationId !== undefined && (!referenced || referenced.id !== parsed.data.invocationId))
       throw new BudgetError('FORBIDDEN');
     const receipt = await this.receipts.read(countTokensOperationId({ tenantId: current.tenantId,
@@ -373,43 +427,50 @@ export class InputCountTokensService {
       callId: referenced !== null ? referenced.callId : parsed.data.callId as string }));
     const invocation = referenced ?? (parsed.data.callId !== undefined
       ? await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
-        scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } })
+        scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } }, select: observationInvocationSelect })
       : null);
     if (!invocation || invocation.scopeId !== scope.id || invocation.actorId !== current.actorId
       || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
-    if (receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
+    if (receipt.scopeId !== scope.id || receipt.tenantId !== current.tenantId || receipt.workspaceId !== current.workspaceId
+      || receipt.actorId !== current.actorId || receipt.callId !== invocation.callId
+      || receipt.invocationId !== invocation.id || receipt.registrationHash !== invocation.registrationHash
       || receipt.intentHash !== invocation.intentHash || receipt.configurationHash !== invocation.configurationHash
       || receipt.priceVersion !== invocation.priceVersion || receipt.sceneCode !== invocation.sceneCode
       || receipt.maxOutputTokens !== invocation.maxOutputTokens
       || receipt.countCallId !== countTokensCallId(invocation.callId)
       || !isGatewayConfig(invocation.configuration)
-      || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
+      || requestFingerprint(invocation.configuration) !== invocation.configurationHash
+      || receipt.protocol !== invocation.configuration.protocol || receipt.model !== invocation.configuration.model) throw new BudgetError('FORBIDDEN');
     if (typeof this.dependencies.db.aiBudgetReservation?.findUnique !== 'function') throw new BudgetError('UNAVAILABLE');
     const originalReservation = structuredClone(await this.dependencies.db.aiBudgetReservation.findUnique({
-      where: { id: receipt.admission.reservationId }, select: { id: true, scopeId: true, scopeKind: true,
-        tenantId: true, workspaceId: true, actorId: true, callId: true, requestId: true, idempotencyKey: true,
-        runId: true, stepId: true, actionId: true, sceneCode: true, priceVersion: true, unitKind: true,
-        configurationHash: true, configRevision: true } }));
+      where: { id: receipt.admission.reservationId }, select: countReservationSelect }));
     if (!originalReservation || originalReservation.id !== receipt.admission.reservationId
-      || originalReservation.scopeId !== scope.id || originalReservation.scopeKind !== 'WORKSPACE'
-      || originalReservation.tenantId !== current.tenantId || originalReservation.workspaceId !== current.workspaceId
-      || originalReservation.actorId !== current.actorId || originalReservation.callId !== receipt.countCallId
-      || originalReservation.requestId !== receipt.countCallId || originalReservation.idempotencyKey !== receipt.countCallId
-      || originalReservation.runId !== invocation.runId || originalReservation.stepId !== invocation.stepId
-      || originalReservation.actionId !== invocation.actionId || originalReservation.unitKind !== 'calls'
-      || originalReservation.sceneCode !== countTokensSceneCode(invocation.sceneCode)
-      || receipt.admission.sceneCode !== originalReservation.sceneCode
-      || originalReservation.configurationHash !== invocation.configurationHash
-      || originalReservation.configRevision !== invocation.configuration.configRevision
-      || typeof originalReservation.priceVersion !== 'string'
-      || !callIdSchema.max(64).safeParse(originalReservation.priceVersion).success) throw new BudgetError('FORBIDDEN');
-    const association: AiUsageAssociationDraft = { requestId: receipt.countCallId, runId: invocation.runId,
-      stepId: invocation.stepId, actionId: invocation.actionId, idempotencyKey: receipt.countCallId,
-      scope: { kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId },
-      config: invocation.configuration, priceVersion: originalReservation.priceVersion };
-    // Read-only admission observation: this entry never settles, marks unknown
-    // or releases. Convergence of a lost acknowledgement stays with count()'s
-    // original-key replay; here the ledger state is reported exactly as-is.
+      || receipt.admission.sceneCode !== originalReservation.sceneCode) throw new BudgetError('FORBIDDEN');
+    const association = this.originalCountAssociation(current, scope.id, invocation, originalReservation);
+    if (!await this.receipts.hasDispatchClaim({ tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
+      actorId: receipt.actorId, callId: receipt.callId, reservationId: originalReservation.id,
+      registrationHash: receipt.registrationHash, intentHash: receipt.intentHash,
+      configurationHash: receipt.configurationHash, countRequestHash: receipt.countRequestHash })) throw new BudgetError('UNAVAILABLE');
+    return { invocation, receipt, association, binding: requestFingerprint({
+      invocation: { id: invocation.id, scopeId: invocation.scopeId, taskId: invocation.taskId, runId: invocation.runId,
+        stepId: invocation.stepId, actionId: invocation.actionId, actorId: invocation.actorId, callId: invocation.callId,
+        registrationHash: invocation.registrationHash, intentHash: invocation.intentHash,
+        configurationHash: invocation.configurationHash, priceVersion: invocation.priceVersion,
+        sceneCode: invocation.sceneCode, maxOutputTokens: invocation.maxOutputTokens }, originalReservation, receipt }) };
+    };
+    const before = await read();
+    const authorize = this.dependencies.authorization.authorizeObservation?.bind(this.dependencies.authorization);
+    if (!authorize || identity(await authorize(before.invocation.taskId)) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    const after = await read(), latest = await this.current();
+    if (before.binding !== after.binding || latest.scopeId !== current.scopeId
+      || identity(latest.context) !== identity(current.context)
+      || identity(await authorize(before.invocation.taskId)) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    return { current, scope, ...before };
+  }
+  async readCountReceipt(value: unknown): Promise<CountTokensResult & { diagnostics: CountTokensDiagnostics;
+    lifecycle: CountTokensLifecycle }> {
+    const { current, scope, invocation, receipt, association } = await this.originalCount(value);
+    // Read-only admission observation: never settles, marks unknown or releases.
     const observedAdmission = await this.dependencies.budget.read(receipt.admission.reservationId, association);
     const admission: CountTokensAdmissionState = { reservationId: receipt.admission.reservationId,
       sceneCode: receipt.admission.sceneCode, unit: 'calls',
@@ -432,9 +493,12 @@ export class InputCountTokensService {
       && Date.parse(receipt.expiresAt) > this.clock().getTime(), bound };
     // Policy revocation during the bound read must not be hidden by an
     // unchanged identity fingerprint. This remains strictly read-only.
-    await this.dependencies.budget.read(receipt.admission.reservationId, association);
-    const after = await this.current();
-    if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
+    const latestAdmission = await this.dependencies.budget.read(receipt.admission.reservationId, association);
+    const after = await this.originalCount(value);
+    if (after.current.scopeId !== current.scopeId || identity(after.current.context) !== identity(current.context)
+      || requestFingerprint(after.receipt) !== requestFingerprint(receipt)
+      || requestFingerprint(after.association) !== requestFingerprint(association)) throw new BudgetError('FORBIDDEN');
+    if ((latestAdmission?.status ?? 'pending_reconciliation') !== admission.status) throw new BudgetError('PENDING_RECONCILIATION');
     return { ...this.summary(receipt, admission), diagnostics, lifecycle };
   }
 
@@ -451,10 +515,12 @@ export class InputCountTokensService {
     const columns = aiPersistenceScopeColumns({ kind: 'workspace', tenantId: current.tenantId, workspaceId: current.workspaceId });
     const scope = structuredClone(await this.dependencies.db.aiScope.findFirst({ where: columns }));
     if (!scope || Object.entries(columns).some(([key, item]) => scope[key as keyof typeof scope] !== item)) throw new BudgetError('FORBIDDEN');
-    const invocation = await this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
-      scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } } });
+    const readInvocation = () => this.dependencies.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: scope.id, callId: parsed.data.callId } }, select: observationInvocationSelect });
+    const invocation = await readInvocation();
     if (!invocation || invocation.scopeId !== scope.id || invocation.actorId !== current.actorId
       || invocation.callId !== parsed.data.callId || !isGatewayConfig(invocation.configuration)
+      || !('tenantId' in invocation.configuration) || invocation.configuration.tenantId !== current.tenantId
       || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
     const authorizeObservation = this.dependencies.authorization.authorizeObservation?.bind(this.dependencies.authorization);
     if (!authorizeObservation) throw new BudgetError('UNAVAILABLE');
@@ -472,19 +538,25 @@ export class InputCountTokensService {
       return { callId: invocation.callId, countCallId: receipt.countCallId,
         lifecycle: { receiptRecorded: receipt.state }, admission: result.admission, receipt: result };
     }
-    const claimed = await this.receipts.hasDispatchClaim({ tenantId: scopeFields.tenantId,
-      workspaceId: scopeFields.workspaceId, actorId: current.actorId, callId: invocation.callId });
     const countCallId = countTokensCallId(invocation.callId);
-    // The admission row is located by its own original key (workspace scope +
-    // derived count call id); its current status is reported exactly as stored.
-    const admissionRow = typeof this.dependencies.db.aiBudgetReservation?.findUnique === 'function'
-      ? structuredClone(await this.dependencies.db.aiBudgetReservation.findUnique({ where: {
+    if (typeof this.dependencies.db.aiBudgetReservation?.findUnique !== 'function') throw new BudgetError('UNAVAILABLE');
+    const reservations = this.dependencies.db.aiBudgetReservation;
+    // Bind even a receipt-free claim to the original invocation and calls-unit
+    // reservation. Missing storage or a raced linkage cannot attest no count.
+    const readState = async () => {
+      const admissionRow = structuredClone(await reservations.findUnique({ where: {
         scopeId_scopeKind_callId: { scopeId: scope.id, scopeKind: 'WORKSPACE', callId: countCallId } },
-        select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true, sceneCode: true, status: true } }))
-      : null;
-    if (admissionRow && (admissionRow.scopeId !== scope.id || admissionRow.scopeKind !== 'WORKSPACE'
-      || admissionRow.actorId !== current.actorId || admissionRow.callId !== countCallId))
-      throw new BudgetError('FORBIDDEN');
+        select: countReservationSelect }));
+      if (admissionRow) this.originalCountAssociation(current, scope.id, invocation, admissionRow);
+      const claim = await this.receipts.readDispatchClaim({ tenantId: scopeFields.tenantId,
+        workspaceId: scopeFields.workspaceId, actorId: current.actorId, callId: invocation.callId,
+        registrationHash: invocation.registrationHash, intentHash: invocation.intentHash,
+        configurationHash: invocation.configurationHash,
+        ...(admissionRow ? { reservationId: admissionRow.id } : {}) });
+      if (claim && !admissionRow) throw new BudgetError('PENDING_RECONCILIATION');
+      return { admissionRow, claim };
+    };
+    const before = await readState(), { admissionRow } = before;
     let admission: CountTokensAdmissionState | null = null;
     if (admissionRow) {
       const status: CountTokensAdmissionState['status'] | null = admissionRow.status === 'reserved'
@@ -494,8 +566,16 @@ export class InputCountTokensService {
       if (status === null) throw new BudgetError('UNAVAILABLE');
       admission = { reservationId: admissionRow.id, sceneCode: admissionRow.sceneCode, unit: 'calls', status };
     }
-    const lifecycle: CountTokensLifecycle = claimed ? 'claimed_dispatched'
+    const lifecycle: CountTokensLifecycle = before.claim ? 'claimed_dispatched'
       : admissionRow ? 'reserved' : 'not_started';
+    const latestInvocation = await readInvocation();
+    if (!latestInvocation || requestFingerprint(latestInvocation) !== requestFingerprint(invocation)) throw new BudgetError('FORBIDDEN');
+    const latestState = await readState();
+    if (requestFingerprint(latestState) !== requestFingerprint(before)) throw new BudgetError('PENDING_RECONCILIATION');
+    try {
+      await this.receipts.read(receiptId);
+      throw new BudgetError('PENDING_RECONCILIATION');
+    } catch (error) { if (!(error instanceof CountTokensReceiptNotFoundError)) throw error; }
     if (identity(await authorizeObservation(invocation.taskId)) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
     const after = await this.current();
     if (after.scopeId !== current.scopeId || identity(after.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
@@ -503,21 +583,13 @@ export class InputCountTokensService {
   }
 
   private async readReplay(frozen: CountTokensFrozenInvocation, life: GatewayDeadline, beforeAccounting: () => void = () => {}) {
-    const scope = frozen.context.scope as { tenantId: string; workspaceId: string };
-    const receiptId = countTokensOperationId({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
-      actorId: frozen.actorId, callId: frozen.invocation.callId });
-    let receipt: CountTokensReceipt;
-    try { receipt = await life.wait(() => this.receipts.read(receiptId)); } catch (error) {
-      if (error instanceof CountTokensReceiptNotFoundError) return null;
-      throw error;
-    }
-    if (receipt.tenantId !== scope.tenantId || receipt.workspaceId !== scope.workspaceId
-      || receipt.actorId !== frozen.actorId || receipt.invocationId !== frozen.invocation.id
-      || receipt.registrationHash !== frozen.invocation.registrationHash || receipt.intentHash !== frozen.invocation.intentHash
-      || receipt.configurationHash !== frozen.invocation.configurationHash || receipt.priceVersion !== frozen.invocation.priceVersion
-      || receipt.maxOutputTokens !== frozen.invocation.maxOutputTokens
-      || receipt.countCallId !== countTokensCallId(frozen.invocation.callId)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-    const association = this.association(frozen, receipt.countCallId);
+    let original: Awaited<ReturnType<InputCountTokensService['originalCount']>>;
+    try { original = await life.wait(() => this.originalCount({ invocationId: frozen.invocation.id })); }
+    catch (error) { if (error instanceof CountTokensReceiptNotFoundError) return null; throw error; }
+    const { receipt, association } = original;
+    if (receipt.invocationId !== frozen.invocation.id || receipt.registrationHash !== frozen.invocation.registrationHash
+      || receipt.intentHash !== frozen.invocation.intentHash || receipt.configurationHash !== frozen.invocation.configurationHash
+      || identity(original.current.context) !== identity(frozen.context)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
     beforeAccounting();
     const admission = await this.accountAdmission(receipt, association, life);
     return { receipt, admission };
@@ -526,6 +598,7 @@ export class InputCountTokensService {
    * body the provider will receive. Rejects unsupported combinations before
    * any admission is reserved. */
   private countMaterial(frozen: CountTokensFrozenInvocation): CountTokensMaterial {
+    if (!this.policy) throw new BudgetError('UNAVAILABLE');
     const features = [...new Set(frozen.intent.requiredFeatures.flatMap(feature =>
       feature === 'tools' ? ['tools' as const] : feature === 'structured_output' ? ['structuredOutput' as const] : []))];
     return prepareCountTokensMaterial({ callId: frozen.invocation.callId, model: frozen.configuration.model,
@@ -541,10 +614,10 @@ export class InputCountTokensService {
 
   private async performCount(frozen: CountTokensFrozenInvocation, gate: CountingGate,
     life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
-    const configuration = frozen.configuration;
+    const configuration = frozen.configuration, { resolvers, transport } = this.dependencies;
+    if (!resolvers || !transport) throw new BudgetError('UNAVAILABLE');
     const profile = await life.wait(() => this.profile(configuration, gate.tenantId));
-    const resolver = configuration.serviceMode === 'platform_managed'
-      ? this.dependencies.resolvers.platform : this.dependencies.resolvers.tenant;
+    const resolver = configuration.serviceMode === 'platform_managed' ? resolvers.platform : resolvers.tenant;
     const context = { actorId: gate.actorId, tenantId: gate.tenantId, workspaceId: gate.workspaceId };
     const connection: GatewayConnection = structuredClone(await life.wait(() => resolver.resolve(context, profile)));
     if (connection.profileFingerprint !== capabilityProfileFingerprint(profile)) throw new BudgetError('FORBIDDEN');
@@ -557,7 +630,7 @@ export class InputCountTokensService {
     await life.wait(() => gate.recheck());
     await life.wait(dispatch);
     try {
-      const response = await life.wait(() => postCountTokens(this.dependencies.transport, request,
+      const response = await life.wait(() => postCountTokens(transport, request,
         connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES));
       if (response.status === 401 || response.status === 403) return { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash };
       if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)

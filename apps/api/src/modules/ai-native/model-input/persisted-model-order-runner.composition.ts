@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { Prisma } from '@prisma/client';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -102,23 +103,23 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     ...(task.answerRegistrationRef ? [{ registrationRef: task.answerRegistrationRef,
       toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' as const }] : [])
   ];
-  const originalRegistration = async (value: Readonly<AiStepRegistrationCommand>) => {
-    const command = structuredClone(value);
+  const originalRegistration = async (value: Readonly<AiStepRegistrationCommand>, tx?: Prisma.TransactionClient) => {
+    const command = structuredClone(value), db = tx ?? input.db;
     if (command.taskId !== task.taskId || command.lease.runId !== task.runId
       || !expectedSteps.some(step => step.registrationRef === command.registrationRef)) throw denied();
     await assertOriginal();
     const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
-    const owner = await input.db.aiTask.findFirst({ where: access.where });
+    const owner = await db.aiTask.findFirst({ where: access.where });
     if (!owner) throw denied();
     const key = { scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId };
-    const saved = structuredClone(await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } }));
+    const saved = structuredClone(await db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } }));
     if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId) throw denied();
     const plan = aiTaskRunPlanSchema.parse(structuredClone(saved.payload));
     if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
       || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
-    const grant = await model.planAuthority.resolveOriginal(command);
+    const grant = await model.planAuthority.resolveOriginal(command, tx);
     await assertOriginal();
-    const latest = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+    const latest = await db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
     if (!latest || latest.scopeId !== key.scopeId || latest.taskId !== key.taskId || latest.runId !== key.runId
       || latest.planHash !== saved.planHash || latest.authorityHash !== saved.authorityHash
       || latest.policyVersion !== saved.policyVersion || requestFingerprint(latest.payload) !== saved.planHash) throw denied();

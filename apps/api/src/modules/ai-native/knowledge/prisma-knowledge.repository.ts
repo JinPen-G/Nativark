@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, persistedKnowledgeChunkSchema } from './knowledge-validation';
+import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, readKnowledgeChunkEvidence, persistedKnowledgeChunkSchema } from './knowledge-validation';
 import { fingerprint } from './knowledge-validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
@@ -47,30 +47,33 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     return this.receipt(row, value, documentId, operationId);
   }
 
-  async versions(scope: AiExecutionScope, documentId: string, limit: number) {
-    const value = workspace(scope);
-    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
-    // Version rows do not carry tenant/workspace columns themselves. Keep the
-    // scope predicate on the relation so an ID collision or a malformed
-    // delegate cannot enumerate another workspace before the head recheck.
-    const rows = await this.db.aiKnowledgeVersion.findMany({ where: {
-      documentId, document: { tenantId: value.tenantId, workspaceId: value.workspaceId },
-    }, orderBy: { version: 'asc' }, take: limit + 1,
-      include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
-    if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
-    const head = await this.read(scope, documentId);
-    if (!head || head.document.scope.kind !== 'workspace' || head.document.scope.tenantId !== value.tenantId || head.document.scope.workspaceId !== value.workspaceId) return unavailable();
-    for (const row of rows) {
-      if (!Array.isArray(row.chunks) || row.chunks.length > 200
-        || row.chunks.reduce((total, chunk) => total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
-        throw new KnowledgeError('limit_exceeded');
-      }
-    }
-    return rows.map(row => ({ version: row.version, status: row.status, contentHash: row.contentHash,
-      chunks: (row.chunks ?? []).map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) }));
+  async sourceContentHash(scope: AiExecutionScope, documentId: string, documentVersion: string) {
+    const value = workspace(scope), operationId = `source-content:${fingerprint(documentVersion)}`;
+    const proof = await this.db.aiKnowledgeOperation.findFirst({ where: { tenantId: value.tenantId,
+      workspaceId: value.workspaceId, documentId, operationId } }).catch(() => unavailable());
+    if (!proof) return null;
+    if (proof.tenantId !== value.tenantId || proof.workspaceId !== value.workspaceId || proof.documentId !== documentId
+      || proof.operationId !== operationId || proof.failure !== null && proof.failure !== undefined
+      || !/^[a-f0-9]{64}$/u.test(proof.fingerprint)) return unavailable();
+    return proof.fingerprint;
   }
 
-  /** Management enumeration never selects historical body/state columns. */
+  async versions(scope: AiExecutionScope, documentId: string, limit: number) {
+    // Enumerate scoped metadata first, then use the same source/chunk verifier
+    // as a single historical read. Do not fetch an unverified duplicate body.
+    const rows = await this.versionMetadata(scope, documentId, limit);
+    const content = [];
+    for (const row of rows) {
+      const verified = await this.versionContent(scope, documentId, row.contentHash);
+      if (verified.version !== row.version || verified.status !== row.status) return unavailable();
+      content.push(verified);
+    }
+    return content;
+  }
+
+  /** Management enumeration never selects historical body/state columns.
+   * The legacy version column named contentHash is the documentVersion label,
+   * not a bytes digest. Only sourceContentHash attests the original bytes. */
   async versionMetadata(scope: AiExecutionScope, documentId: string, limit: number) {
     const value = workspace(scope);
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
@@ -107,9 +110,11 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
       total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
       throw new KnowledgeError('limit_exceeded');
     }
+    const sourceContentHash = await this.sourceContentHash(scope, documentId, contentHash);
+    if (!sourceContentHash) return unavailable();
     const logicalIds = new Set<string>();
     for (let index = 0; index < row.chunks.length; index++) {
-      const chunk = row.chunks[index], body = parsePersisted(persistedKnowledgeChunkSchema, chunk.state);
+      const chunk = row.chunks[index], body = readKnowledgeChunkEvidence(chunk.state, sourceContentHash).chunk;
       // Historical ACL revisions may differ from the head. Keep the original
       // body revision, but never borrow another document, version or workspace.
       if (chunk.versionId !== row.id || chunk.chunkIndex !== index || chunk.text !== body.text
@@ -117,7 +122,8 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
         || !sameScope(body.scope, scope) || logicalIds.has(body.chunkId)) return unavailable();
       logicalIds.add(body.chunkId);
     }
-    return { version: row.version, status: row.status, contentHash: row.contentHash,
+    if (await this.sourceContentHash(scope, documentId, contentHash) !== sourceContentHash) return unavailable();
+    return { version: row.version, status: row.status, contentHash: row.contentHash, sourceContentHash,
       chunks: row.chunks.map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) };
   }
 
@@ -135,6 +141,9 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     input = structuredClone(input);
     input.next = parse(knowledgeRecordSchema, input.next);
     const value = workspace(input.scope);
+    // The colon namespace is not accepted by public operation IDs. Only the
+    // parser transaction below may create a source-digest receipt.
+    if (input.operation.id.startsWith('source-content:')) throw new KnowledgeError('invalid_input');
     if (input.next.document.documentId !== input.documentId || !sameScope(input.next.document.scope, input.scope)) throw new KnowledgeError('conflict');
     if (input.chunks !== undefined) {
       validateChunks(input.next.document, input.chunks);
@@ -172,7 +181,19 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
             policyVersion: AI_RETENTION_POLICY.version, targetHash, state },
             update: { state, revision: { increment: 1 } } });
         }
-        const chunks = (input.chunks ?? []).map((chunk, index) => ({ id: randomUUID(), chunkIndex: index, text: chunk.text, tokenCount: chunk.text.length, state: json(chunk) }));
+        if (input.chunks !== undefined) {
+          if (!input.next.contentHash) throw new KnowledgeError('unavailable');
+          // Existing version-key column remains compatible; the actual source
+          // digest is an immutable scoped receipt committed with the chunks.
+          const operationId = `source-content:${fingerprint(input.next.document.documentVersion)}`;
+          if (await transaction.aiKnowledgeOperation.findFirst({ where: { tenantId: value.tenantId,
+            workspaceId: value.workspaceId, documentId: input.documentId, operationId } })) throw new KnowledgeError('conflict');
+          await transaction.aiKnowledgeOperation.create({ data: { id: randomUUID(), tenantId: value.tenantId,
+            workspaceId: value.workspaceId, documentId: input.documentId, operationId, fingerprint: input.next.contentHash } });
+        }
+        const chunks = (input.chunks ?? []).map((chunk, index) => ({ id: randomUUID(), chunkIndex: index, text: chunk.text,
+          tokenCount: chunk.text.length, state: { chunk: json(chunk), sourceContentHash: input.next.contentHash!,
+            chunkHash: fingerprint(parse(persistedKnowledgeChunkSchema, chunk)) } }));
         if (input.newVersion) {
           const nextVersion = (existing?.versions[0]?.version ?? 0) + 1;
           await transaction.aiKnowledgeVersion.create({ data: { id: randomUUID(), documentId: input.documentId, version: nextVersion, status: input.next.document.publication, contentHash: input.next.document.documentVersion, chunks: { create: chunks } } });

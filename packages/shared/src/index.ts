@@ -48,6 +48,13 @@ export { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from "./ai-approved-settings-draft
 
 export * from "./ai-order-facts-draft";
 export { AI_ORDER_FACTS_DRAFT_SCHEMAS } from "./ai-order-facts-draft-schemas";
+export { AI_SCOPE_DRAFT_SCHEMAS } from './ai-scope-draft-schemas';
+export * from './ai-business-material-draft';
+export { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS } from './ai-business-material-draft-schemas';
+export * from './ai-scene-model-observation-draft';
+export { AI_SCENE_MODEL_OBSERVATION_SCHEMAS } from './ai-scene-model-observation-draft-schemas';
+export * from './ai-task-scene-observation-draft';
+export { AI_TASK_SCENE_OBSERVATION_SCHEMAS } from './ai-task-scene-observation-draft-schemas';
 export * from "./ai-entry-action-draft";
 export * from "./ai-booking-draft";
 export * from "./ai-knowledge-policy-management-draft";

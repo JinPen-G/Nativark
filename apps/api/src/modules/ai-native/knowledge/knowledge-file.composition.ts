@@ -12,6 +12,7 @@ import type { AiOriginalSceneKnowledgeOptions } from '../scenes/original-scene-k
 import { KnowledgeError } from './knowledge-errors';
 import { preferenceSchema } from './knowledge-validation';
 import { HumanKnowledgeContentErasure } from '../privacy/knowledge-content-erasure';
+import { createNativeModelEgressTransport } from '../model-egress.transport';
 
 /** Server DI only. Never serialize these request-bound producers to clients. */
 export const KNOWLEDGE_SCENE_OPTIONS = Symbol('KNOWLEDGE_SCENE_OPTIONS');
@@ -29,7 +30,7 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
   const policies = new PrismaKnowledgeActionPolicySource(input.db, () => new Date(input.clock.now()));
   const authorization = session.bind(new FormalKnowledgeAuthorizationAdapter(input.auth, input.credentials, policies.knowledge,
     () => new Date(input.clock.now())));
-  const objects = new TenantKnowledgeObjectReader(input.db, input.integrations, input.objectIO?.transport, input.objectIO?.egress);
+  const objects = new TenantKnowledgeObjectReader(input.db, input.integrations, input.objectIO?.transport ?? createNativeModelEgressTransport(), input.objectIO?.egress);
   const access = new PrismaKnowledgeFileAccess(input.db, session, authorization, objects);
   const fileRuntime = new FileStorageRuntimeService(input.db, input.integrations, undefined, undefined, access);
   const { integrations: _integrations, objectIO: _objectIO, ...base } = input;

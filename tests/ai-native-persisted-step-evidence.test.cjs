@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', lib: ['es2022'], experimentalDecorators: true, emitDecoratorMetadata: true } });
 require('./fixtures/ai-native/local-shared.cjs');
 const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
 const { PrismaTaskStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/runner/prisma-task-step-evidence.authority');
@@ -111,7 +111,7 @@ test('probe crash marker converges to unknown without inventing a Gateway result
     mode: 'invoke', maxOutputTokens: 32, priceVersion: 'price', configuration, configurationHash: requestFingerprint(configuration),
     leaseOwnerId: h.artifact.leaseOwnerId, fencingToken: h.artifact.fencingToken };
   const db = { ...h.db, aiTaskActionInput: { findFirst: async () => h.clone(input) },
-    aiGatewayInvocation: { findFirst: async () => h.clone(invocation) },
+    aiGatewayInvocation: { findFirst: async () => h.clone(invocation), findMany: async () => [h.clone(invocation)] },
     aiGatewayAccountingReceipt: { findFirst: async () => assert.fail('unknown must not invent financial evidence') },
     aiInvocationAdmission: { findFirst: async () => assert.fail('unknown must not claim dispatch') } };
   const authority = new PrismaTextProbeStepEvidenceAuthority(db, h.taskAuthority, h.planAuthority,
@@ -123,6 +123,14 @@ test('probe crash marker converges to unknown without inventing a Gateway result
   const originalScope = input.scopeId;
   input.scopeId = 'another-scope'; await assert.rejects(transitions.transition(transition)); input.scopeId = originalScope;
   assert.equal(h.state.aiTaskEvent.length, events); assert.equal(step.status, 'RUNNING');
+  // Registration committed before the CALLS row: the same original marker
+  // still yields unresolved evidence, with no synthetic financial fact.
+  const callCharge = charges.pop(); assert.equal(callCharge.resource, 'CALLS');
+  const unresolved = await authority.resolve(transition);
+  assert.equal(unresolved.next.outcome.status, 'unknown');
+  invocation.actorId = 'other'; await assert.rejects(authority.resolve(transition));
+  invocation.actorId = h.control.context.actor.userId;
+  assert.equal(h.state.aiTaskEvent.length, events); charges.push(callCharge);
   const result = await transitions.transition(transition);
   assert.equal(result.event.data.status, 'unknown');
   assert.equal(h.state.aiStep[0].status, 'UNKNOWN');

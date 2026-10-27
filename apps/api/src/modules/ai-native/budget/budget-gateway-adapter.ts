@@ -24,6 +24,8 @@ export { isPlatformGatewayContext } from '../model-gateway.ports';
 
 export interface GatewayBudgetReserveRequest {
   callId: string; model: string; maxOutputTokens: number; intentHash: string;
+  /** Computed from the actual server adapter's generation serialization. */
+  countRequestHash?: string;
 }
 export interface BudgetGatewayBindingSource {
   resolveForReserve(context: Readonly<BudgetGatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
@@ -90,7 +92,8 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
       association: structuredClone(binding.association),
       callId: request.callId,
       sceneCode: binding.sceneCode,
-      expiresAt: new Date(binding.expiresAt)
+      expiresAt: new Date(binding.expiresAt),
+      ...(request.countRequestHash !== undefined ? { countRequestHash: request.countRequestHash } : {})
     });
     if (!same(record.association, binding.association) || record.callId !== request.callId || record.sceneCode !== binding.sceneCode) throw new BudgetError('FORBIDDEN');
     return record.id;

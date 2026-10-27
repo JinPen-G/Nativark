@@ -4,6 +4,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepTransitionAuthority, AiStepTransitionCommand, AiStepTransitionGrant } from '../ai-step-transition.repository';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
+import { taskStepChargesValid } from './task-model-count-charge';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge'>;
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -120,9 +121,8 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
         || (startedMarker ? artifact.contentHash !== requestFingerprint({}) || artifact.outputBytes !== 0n || artifact.activeMs !== 0n
           : BigInt(bytes) !== artifact.outputBytes)
         || bytes > plan.limits.maxOutputBytes || artifact.activeMs < 0n || artifact.activeMs > BigInt(plan.limits.maxStepMs)) throw denied();
-      const charges = await db.aiTaskExecutionCharge.findMany({ where: { ...key, stepId: step.id }, take: 5 });
-      if (charges.length < 3 || charges.length > 4 || new Set(charges.map(c => c.resource)).size !== charges.length
-        || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(r => charges.some(c => c.resource === r))
+      const charges = await db.aiTaskExecutionCharge.findMany({ where: { ...key, stepId: step.id }, take: 6 });
+      if (!taskStepChargesValid(charges)
         || charges.some(c => c.scopeId !== key.scopeId || c.taskId !== key.taskId || c.runId !== key.runId || c.stepId !== step.id
           || c.actionId !== step.actionId || c.stepFingerprint !== step.requestFingerprint || c.leaseOwnerId !== artifact.leaseOwnerId
           || c.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0) || !['RESERVED', 'RECORDED', 'UNKNOWN'].includes(c.status)

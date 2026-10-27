@@ -34,6 +34,31 @@ export class ModelEgressTransport implements ModelJsonTransport {
   async post(input: Parameters<ModelJsonTransport["post"]>[0]): Promise<{ status: number; body: string }> {
     return this.performPost(input);
   }
+  /** Signed object reads share address pinning/TLS/limits, not model auth or
+   * invocation authority. No redirects, ambient credentials or GET body. */
+  async get(input: { url: string; headers: Readonly<Record<string, string>>; signal: AbortSignal; maxResponseBytes: number }) {
+    const headers = input.headers;
+    if (Object.keys(headers).length !== 3 || Object.keys(headers).some(key => !['Authorization', 'x-amz-date', 'x-amz-content-sha256'].includes(key))
+      || !/^AWS4-HMAC-SHA256 Credential=[^\s,]+, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}$/u.test(headers.Authorization ?? '')
+      || !/^[0-9]{8}T[0-9]{6}Z$/u.test(headers['x-amz-date'] ?? '')
+      || !/^[a-f0-9]{64}$/u.test(headers['x-amz-content-sha256'] ?? '')) throw new ModelGatewayError('CONFIG_INVALID');
+    let responseHeaders: Readonly<Record<string, string>> = {};
+    const chunks: Buffer[] = [];
+    const result = await this.performPost({ ...input, body: '', redirects: 'error' }, undefined,
+      bytes => chunks.push(Buffer.from(bytes)), response => {
+      const names = response.rawHeaders.filter((_value, index) => index % 2 === 0).map(name => name.toLowerCase());
+      if (['content-type', 'content-length'].some(name => names.filter(value => value === name).length !== 1))
+        throw new ModelGatewayError('INVALID_RESPONSE');
+      const type = response.headers['content-type'], length = response.headers['content-length'];
+      if (typeof type !== 'string' || typeof length !== 'string' || !/^[0-9]+$/u.test(length)
+        || !Number.isSafeInteger(Number(length)) || Number(length) > input.maxResponseBytes)
+        throw new ModelGatewayError('INVALID_RESPONSE');
+      responseHeaders = { 'content-type': type, 'content-length': length };
+    }, undefined, 'GET');
+    const bytes = Buffer.concat(chunks);
+    if (bytes.length !== Number(responseHeaders['content-length'])) throw new ModelGatewayError('INVALID_RESPONSE');
+    return { status: result.status, bytes, headers: responseHeaders };
+  }
   async *postStream(input: Parameters<ModelJsonTransport["post"]>[0]): ReturnType<NonNullable<ModelJsonTransport["postStream"]>> {
     if (!input.signal || typeof input.signal.addEventListener !== "function") throw new ModelGatewayError("CONFIG_INVALID");
     const controller = new AbortController(), queue: Array<{ kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }> = [];
@@ -81,7 +106,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
   }
   private async performPost(input: Parameters<ModelJsonTransport["post"]>[0], onHeaders?: (status: number) => void,
     onChunk?: (bytes: Uint8Array) => void, onResponse?: (response: IncomingMessage) => void,
-    onFailure?: (error: ModelGatewayError) => void): Promise<{ status: number; body: string }> {
+    onFailure?: (error: ModelGatewayError) => void, method: 'POST' | 'GET' = 'POST'): Promise<{ status: number; body: string }> {
     const url = modelEgressUrl(input.url), limit = modelByteLimit(input.maxResponseBytes);
     if (input.redirects !== "error" || typeof input.body !== "string" || Buffer.byteLength(input.body) > MODEL_REQUEST_BYTES || !input.signal || input.signal.aborted) throw new ModelGatewayError(input.signal?.aborted ? "CANCELLED" : "CONFIG_INVALID");
     const entries = Object.entries(input.headers);
@@ -91,7 +116,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
       && /^Bearer [\x21-\x7e]{1,8192}$/u.test(input.headers.Authorization ?? '');
     const messages = entries.length === 3 && Object.keys(input.headers).every(key => ['x-api-key', 'anthropic-version', 'Content-Type'].includes(key))
       && /^[\x21-\x7e]{1,8192}$/u.test(input.headers['x-api-key'] ?? '') && input.headers['anthropic-version'] === '2023-06-01';
-    if ((!bearer && !messages) || input.headers['Content-Type'] !== 'application/json'
+    if (method === 'POST' && ((!bearer && !messages) || input.headers['Content-Type'] !== 'application/json')
       || entries.some(([, value]) => typeof value !== 'string' || /[^\x20-\x7e]/u.test(value))
       || entries.reduce((n, [key, value]) => n + Buffer.byteLength(key + value), 0) > MODEL_HEADER_BYTES) throw new ModelGatewayError('CONFIG_INVALID');
     input = { ...input, headers: Object.freeze({ ...input.headers }) };
@@ -129,7 +154,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
           else callback(null, pinned.address, pinned.family);
         };
         request = this.dependencies.request({ protocol: "https:", hostname: host, port: url.port || 443, path: url.pathname,
-          method: "POST", headers: { ...input.headers, "Content-Length": Buffer.byteLength(input.body) },
+          method, headers: { ...input.headers, ...(method === 'POST' ? { "Content-Length": Buffer.byteLength(input.body) } : {}) },
           agent: false, lookup, rejectUnauthorized: true, servername: isIP(host) ? "" : host, maxHeaderSize: MODEL_HEADER_BYTES }, incoming => {
           response = incoming;
           incoming.on("error", () => finish(new ModelGatewayError("PROVIDER_FAILED")));
@@ -146,7 +171,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
         });
         request.on("error", () => finish(new ModelGatewayError("PROVIDER_FAILED")));
         if (settled || input.signal.aborted) { request.destroy(); return; }
-        request.end(input.body);
+        request.end(method === 'POST' ? input.body : undefined);
       }).catch(error => finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("CONFIG_INVALID")));
     });
   }

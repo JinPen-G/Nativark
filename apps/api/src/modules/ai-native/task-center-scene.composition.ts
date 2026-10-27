@@ -85,7 +85,7 @@ export function composeAiTaskCenterScene(input: {
   /** Original two-step model -> readonly order host; never the order writer. */
   orderFacts?: { read(value: unknown): Promise<{ taskId: string; runId: string; result: unknown }> };
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
-    requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
+    requests: Pick<OriginalScenes['requests'], 'readHistorical'> & Partial<Pick<OriginalScenes['requests'], 'readTaskLocator'>>;
   };
 }) {
   if (!input?.list || typeof input.list.readPage !== 'function' || !input.scenes
@@ -307,13 +307,17 @@ export function composeAiTaskCenterScene(input: {
         const selected = await assertSelectedProof(nested.data.selection, command.original, current);
         if (selected.runId !== command.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       }
-      const task = await readers.readTask(command.original);
-      const snapshot = await readSnapshot(current.taskId, current.revision);
-      const original = await input.scenes.requests.readHistorical(command.original);
-      const originalInput = { receipt: original.receipt, request: original.request };
-      // Explicit business reads must not force this run through the model-only
-      // clarification reader. It has a different frozen plan/input provenance.
+      // Erased scene bodies are unavailable. Explicit business reads use only
+      // the retained locator and their own selection/approval/Core authority.
       const businessOnly = !command.resultId && (command.review !== undefined || command.decision !== undefined || command.order !== undefined);
+      const locator = businessOnly && input.scenes.requests.readTaskLocator
+        ? await input.scenes.requests.readTaskLocator(command.original) : null;
+      const task = locator ? { original: locator.receipt, task: locator.task,
+        recovery: { availability: 'not_requested' as const } } : await readers.readTask(command.original);
+      const snapshot = await readSnapshot(current.taskId, current.revision);
+      const original = locator ? null : await input.scenes.requests.readHistorical(command.original);
+      const originalInput = original ? { receipt: original.receipt, request: original.request }
+        : { receipt: locator!.receipt, material: { availability: 'not_requested' as const } };
       const pendingInput = businessOnly ? { availability: 'not_requested' as const } : typeof input.input?.read === 'function'
         ? await readers.readInput({ original: command.original, taskId: current.taskId }) : { availability: 'unavailable' as const };
       const model = command.resultId ? await readers.readModelResult({ original: command.original, resultId: command.resultId })
@@ -326,7 +330,7 @@ export function composeAiTaskCenterScene(input: {
         : { availability: 'not_requested' as const };
       const business = command.order !== undefined ? await readers.readOrderResult({ original: command.original, taskId: current.taskId, reference: command.order })
         : { availability: 'not_requested' as const };
-      const orderFacts = input.orderFacts && original.request.sceneCode === 'order_explanation'
+      const orderFacts = input.orderFacts && original?.request.sceneCode === 'order_explanation'
         ? await readers.readOrderFacts(command.original) : { availability: 'not_requested' as const };
       await assertStillCurrent(command.original, current);
       return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: command.runId,
@@ -346,14 +350,16 @@ export function composeAiTaskCenterScene(input: {
   }
 
   async function readObservedTask(reference: z.infer<typeof originalRequestReferenceSchema>, expectedTaskId?: string) {
-    const original = await input.scenes.requests.readHistorical(reference);
+    const readLocator = () => input.scenes.requests.readTaskLocator
+      ? input.scenes.requests.readTaskLocator(reference) : input.scenes.requests.readHistorical(reference);
+    const original = await readLocator();
     const inputRef = z.string().parse(reference.inputRef);
     const task = await input.scenes.readTaskReceipt(inputRef);
     const identity = z.object({ taskId: z.string().min(1).max(191), runId: z.string().min(1).max(191), revision: z.number().int().nonnegative() }).safeParse(task);
     if (task.state !== 'observed' || !identity.success || (expectedTaskId && expectedTaskId !== identity.data.taskId))
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const latest = await input.scenes.readTaskReceipt(inputRef);
-    const after = await input.scenes.requests.readHistorical(reference);
+    const after = await readLocator();
     if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
       || latest.state !== 'observed' || latest.taskId !== identity.data.taskId || latest.runId !== identity.data.runId

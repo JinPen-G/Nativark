@@ -22,6 +22,7 @@ import { composeAuthorizedPersistentTaskInputRunner,
 import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract } from './original-quote-input';
+import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
@@ -554,7 +555,6 @@ export function composeOriginalSceneClarificationSource(input: {
     async resolve(binding: Readonly<AiTaskInputBinding>) {
       const command = structuredClone(binding), basis = await readClarificationBasis(command);
       if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
-      if (basis.history.length + 1 >= basis.limits.maxCalls) return { kind: 'not_required' as const };
       const candidate = applyOriginalQuoteAnswers(basis.original.request.input.candidate, basis.history);
       const prepared = await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
       const parsed = z.object({ status: z.string(),
@@ -564,6 +564,9 @@ export function composeOriginalSceneClarificationSource(input: {
       const facts = parsed.data;
       if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
       if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
+      // A completed model turn is not a completed goal while Core still needs
+      // parameters. Use the existing explicit stop/handoff, never false success.
+      if (basis.history.length + 1 >= basis.limits.maxCalls) throw new AiTaskInputLimitError();
       const fieldLabels: Record<string, string> = { items: '商品及数量', customerId: '客户明确选择', startsAt: '开始时间',
         endsAt: '结束时间', locationId: '履约地点', returnLocationId: '归还地点', fulfillmentMode: '履约方式',
         selectionRevision: '当前候选重新确认', request: '正式报价参数' };
@@ -575,7 +578,7 @@ export function composeOriginalSceneClarificationSource(input: {
       const offered = new Set(basis.history.flatMap(round => round.contract.fields.map(field => field.fieldId)));
       const contract = originalQuoteAnswerContract(candidate, prepared,
         `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`, offered);
-      if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) return { kind: 'not_required' as const };
+      if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) throw new AiTaskInputLimitError();
       same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
       return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
         expiresAt: basis.original.receipt.expiresAt, contract };

@@ -95,12 +95,13 @@ export class PrismaCountTokensReceipts {
   /** Read the persisted dispatch-claim row for one original count key. This
    * proves a claim EXISTS, never that the provider received the call; it is
    * read-only lifecycle evidence for observations. */
-  async hasDispatchClaim(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>): Promise<boolean> {
+  async readDispatchClaim(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>
+    & Partial<Pick<CountTokensReceipt, 'registrationHash' | 'intentHash' | 'configurationHash' | 'countRequestHash'> & { reservationId: string }>) {
     const binding = structuredClone(value);
     const id = createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1',
       countTokensOperationId(binding)])).digest('hex');
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
-    if (!row) return false;
+    if (!row) return null;
     const detail = countTokensReceiptFields.pick({ tenantId: true, workspaceId: true, actorId: true,
       callId: true, registrationHash: true, intentHash: true, configurationHash: true, countRequestHash: true })
       .extend({ reservationId: identifier.max(36) }).strict().safeParse(row.detail);
@@ -108,7 +109,10 @@ export class PrismaCountTokensReceipts {
       || row.tenantId !== binding.tenantId || row.workspaceId !== binding.workspaceId || row.userId !== binding.actorId
       || Object.entries(binding).some(([key, value]) => detail.data[key as keyof typeof detail.data] !== value))
       throw new BudgetError('PENDING_RECONCILIATION');
-    return true;
+    return detail.data;
+  }
+  async hasDispatchClaim(value: Parameters<PrismaCountTokensReceipts['readDispatchClaim']>[0]): Promise<boolean> {
+    return await this.readDispatchClaim(value) !== null;
   }
   async read(id: string): Promise<CountTokensReceipt> {
     if (!hash64.safeParse(id).success) throw new BudgetError('INVALID');

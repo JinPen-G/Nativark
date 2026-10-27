@@ -11,6 +11,8 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
 import { freezeOriginalInput } from './original-request.validation';
+import { AiTaskCurrentActionAuthority } from '../task-current-action.authority';
+import { PrismaTaskActionPolicySource } from '../prisma-task-action-policy.source';
 
 export interface AiOriginalRequestAccess { context: AiExecutionContext; scopeId: string }
 export interface AiOriginalRequestCreationAccess extends AiOriginalRequestAccess {
@@ -20,6 +22,9 @@ export interface AiOriginalRequestAuthority {
   current(): Promise<AiOriginalRequestAccess>;
   read(body: AiSceneRequestBody, sceneVersion: string): Promise<AiOriginalRequestAccess>;
   create(body: AiSceneRequestBody): Promise<AiOriginalRequestCreationAccess>;
+  /** Current task read policy only, for retained business locators without
+   * erased scene material. Never authorizes creation or a new effect. */
+  observeTask?(taskId: string): Promise<AiOriginalRequestAccess>;
 }
 export const originalIdentityHash = (context: AiExecutionContext) => {
   const { requestId: _request, authorizedAt: _at, ...identity } = context;
@@ -37,7 +42,9 @@ export class AiCurrentOriginalRequestAuthority implements AiOriginalRequestAutho
   private readonly scopes: AiScopeRepository;
   private readonly entitlements: PrismaSubscriptionBudgetReader;
   private readonly rules: readonly AiSceneCreationRule[];
-  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTaskPlanPolicy'>,
+  private readonly observations?: AiTaskCurrentActionAuthority;
+  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTaskPlanPolicy'>
+    & Partial<Pick<PrismaClient, 'aiTaskActionPolicy'>>,
     input: { auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
       subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
       creationRules: readonly AiSceneCreationRule[];
@@ -48,6 +55,14 @@ export class AiCurrentOriginalRequestAuthority implements AiOriginalRequestAutho
     this.scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, clock), clock);
     this.entitlements = new PrismaSubscriptionBudgetReader(db, input.subscriptions, clock);
     this.resources = input.authorizeResources;
+    if (typeof db.aiTaskActionPolicy?.findUnique === 'function') this.observations = new AiTaskCurrentActionAuthority(
+      input.auth, input.credentials, new PrismaTaskActionPolicySource({ aiTaskActionPolicy: db.aiTaskActionPolicy }, this.scopes, clock), clock);
+  }
+  async observeTask(taskId: string) {
+    if (!this.observations) throw unavailable();
+    const context = await this.observations.resolve(taskId, 'read_metadata'), current = await this.current();
+    if (originalIdentityHash(context) !== originalIdentityHash(current.context)) throw denied();
+    return current;
   }
   private readonly resources: (body: AiSceneRequestBody) => Promise<AiExecutionContext>;
   async current() {

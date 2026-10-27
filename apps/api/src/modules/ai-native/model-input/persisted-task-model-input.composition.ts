@@ -31,8 +31,8 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   /** Recorded hosts only: the in-task counting chain (count the registered
    * frozen input, publish its trusted bound) wrapped around the invocation
    * preparation. A calls host omits it and never counts. */
-  inputCounting?: { preparation(inner: { prepare(step: unknown, lease: unknown):
-    Promise<{ invocationId: string }> }): { prepare(step: unknown, lease: unknown): Promise<{ invocationId: string }> } };
+  inputCounting?: { preparation(inner: import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation):
+    import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation };
 };
 export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & TaskModelCompositionInput) {
   const authorization = composePersistedTaskAuthorization(input);

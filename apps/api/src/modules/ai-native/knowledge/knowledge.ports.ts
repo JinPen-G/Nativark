@@ -47,11 +47,15 @@ export interface KnowledgeRecord {
   document: AiKnowledgeDocumentDraft;
   revision: number;
   parseOperationId?: string;
+  /** Server SHA-256 of the first authorized bounded file read, not a version label. */
+  contentHash?: string;
   failure?: 'parse_failed' | 'unsupported' | 'invalid_text' | 'empty_text' | 'limit_exceeded' | 'index_failed';
 }
 export interface KnowledgeRepositoryPort {
   read(scope: AiExecutionScope, documentId: string): Promise<KnowledgeRecord | null>;
   operation(scope: AiExecutionScope, documentId: string, operationId: string): Promise<KnowledgeOperation | null>;
+  /** Immutable digest committed with this version's parsed chunks. */
+  sourceContentHash?(scope: AiExecutionScope, documentId: string, documentVersion: string): Promise<string | null>;
   /** Atomic CAS with immutable receipt; result_unknown requires receipt reconciliation, never a fresh operation. */
   commit(input: {
     scope: AiExecutionScope; documentId: string; expectedRevision: number;

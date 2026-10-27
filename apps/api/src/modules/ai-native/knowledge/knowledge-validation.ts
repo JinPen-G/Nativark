@@ -76,6 +76,19 @@ export function validateChunks(document: AiKnowledgeDocumentDraft, chunks: AiKno
 export const persistedKnowledgeChunkSchema: z.ZodType<AiKnowledgeChunkDraft> = documentSourceSchema.omit({ kind: true }).extend({
   draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), text: z.string().min(1).max(2000), trust: z.literal('untrusted_data')
 }).strict();
+/** Internal storage proof. Public chunk output remains the original contract;
+ * legacy rows lacking source proof are unavailable, not retroactively certified. */
+export const persistedKnowledgeChunkEvidenceSchema = z.object({
+  chunk: persistedKnowledgeChunkSchema,
+  sourceContentHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  chunkHash: z.string().regex(/^[a-f0-9]{64}$/u)
+}).strict();
+export function readKnowledgeChunkEvidence(value: unknown, expectedContentHash?: string) {
+  const stored = parsePersisted(persistedKnowledgeChunkEvidenceSchema, value);
+  if (stored.chunkHash !== fingerprint(stored.chunk)
+    || expectedContentHash !== undefined && stored.sourceContentHash !== expectedContentHash) return unavailable();
+  return stored;
+}
 
 const persistedRevision = z.number().int().min(1).max(4294967294);
 const ownerSchema = z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict();
@@ -104,7 +117,8 @@ const documentSchema = z.object({
 }).strict().refine(value => !value.validUntil || Date.parse(value.validUntil) > Date.parse(value.validFrom));
 export const knowledgeFailureSchema = z.enum(['parse_failed', 'unsupported', 'invalid_text', 'empty_text', 'limit_exceeded', 'index_failed']);
 export const knowledgeRecordSchema: z.ZodType<KnowledgeRecord> = z.object({
-  document: documentSchema, revision: persistedRevision, parseOperationId: id.optional(), failure: knowledgeFailureSchema.optional(),
+  document: documentSchema, revision: persistedRevision, parseOperationId: id.optional(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/u).optional(), failure: knowledgeFailureSchema.optional(),
   indexJob: z.object({ operationId: z.string().min(1).max(191), documentVersion: id, aclRevision: persistedRevision,
     generation: persistedRevision, kind: z.enum(['upsert', 'remove']), status: z.enum(['pending', 'completed', 'failed']) }).strict().optional()
 }).strict().refine(value => !value.indexJob || value.indexJob.documentVersion === value.document.documentVersion

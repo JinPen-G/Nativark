@@ -1,7 +1,8 @@
 /** The in-task counting chain: count the frozen input of one registered
  * original call under that call's own transition_task permission, then
  * publish the trusted input bound the recorded reservation requires —
- * before the budget reserve, never instead of it. The management counting
+ * after both task CALLS reserves and before generation's financial reserve.
+ * The management counting
  * entry and its settings_write publication stay untouched; this chain adds
  * no route, timer, second ledger or settings grant. The counting admission
  * is a separate real call (derived id, calls unit, counting price version)
@@ -17,7 +18,10 @@ import { isGatewayConfig } from '../gateway-contract-validation';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import { GatewayInputBoundNotFoundError, PrismaGatewayPricingRecords, gatewayPricingInvocationSelect } from '../budget/prisma-gateway-pricing-records';
-import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
+import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
+import { taskModelCountChargeId } from '../runner/task-model-count-charge';
+import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
+import type { AiTaskRunnerStepRef, AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
 import type { CountTokensReceiptDb } from './input-count-tokens.receipt';
 import type { CountTokensResult } from './input-count-tokens.service';
 import { countTokensOperationId, countTokensReference } from './input-count-tokens.receipt';
@@ -194,31 +198,48 @@ export class TaskInputBoundPublisher {
   }
 }
 
-/** The runner-facing consumer: after the server-owned invocation row is
- * registered and before the budget reserve, count the frozen input and
- * publish the trusted bound the recorded reservation requires. A definite
- * count failure fails the preparation; an unknown count keeps the runner's
- * own unknown semantics (never a redispatch); the original-key receipt
- * replay and the idempotent bound row make any retry observe instead of
- * re-send. The generation's own admission is untouched by this decorator. */
-export class CountingTaskModelInvocationPreparation {
-  constructor(private readonly inner: { prepare(step: unknown, lease: unknown): Promise<{ invocationId: string }> },
+/** Registers without sending. The resource gate then reserves generation and
+ * count CALLS separately before this decorator counts and publishes the frozen
+ * input bound. Unknown preserves both original charges; recovery never sends
+ * again. The count and generation keep separate financial reservations. */
+export class CountingTaskModelInvocationPreparation implements AiTaskModelInvocationPreparation {
+  constructor(private readonly inner: AiTaskModelInvocationPreparation,
     private readonly chain: { taskCount(command: unknown, signal?: AbortSignal): Promise<CountTokensResult>;
       publish: (command: unknown, signal?: AbortSignal) => Promise<unknown> }) {
     if (typeof inner?.prepare !== 'function' || typeof chain?.taskCount !== 'function'
       || typeof chain?.publish !== 'function') throw new BudgetError('UNAVAILABLE');
   }
-  async prepare(step: unknown, lease: unknown): Promise<{ invocationId: string }> {
-    const registered = await this.inner.prepare(step, lease);
+  async prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal): Promise<{ invocationId: string }> {
+    if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+    return this.inner.prepare(step, lease, signal);
+  }
+  async beforeDispatch(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal) {
+    if (request.resource !== 'calls' || request.target.kind !== 'step' || !request.target.gatewayInvocationId)
+      throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+    const snapshot = await budget.load(request.taskId, request.lease);
+    const id = taskModelCountChargeId({ scopeId: snapshot.scopeId, taskId: request.taskId, runId: request.lease.runId,
+      stepId: request.target.stepId, actionId: request.target.actionId, stepFingerprint: request.target.stepFingerprint,
+      gatewayInvocationId: request.target.gatewayInvocationId });
+    const charge = { ...request, chargeId: id };
+    let attempted = false;
     try {
-      const counted = await this.chain.taskCount({ invocationId: registered.invocationId });
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      attempted = true;
+      if ((await budget.reserve(charge)).replayed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      const counted = await this.chain.taskCount({ invocationId: request.target.gatewayInvocationId }, signal);
       // 'failed' is a settled real call (provider refusal): the step cannot
       // proceed and a retry observes the same receipt. 'unknown' stays unknown.
       if (counted.state === 'unknown') throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      await budget.record({ taskId: request.taskId, lease: request.lease, chargeId: id,
+        evidenceRef: `count:${request.target.gatewayInvocationId}` });
       if (counted.state !== 'observed') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
-      await this.chain.publish({ invocationId: registered.invocationId });
-      return registered;
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      await this.chain.publish({ invocationId: request.target.gatewayInvocationId }, signal);
+      return id;
     } catch (error) {
+      if (attempted) await budget.markUnknown({ taskId: request.taskId, lease: request.lease, chargeId: id,
+        reason: 'count_preparation_uncertain' }).catch(() => {});
       if (error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION') {
         throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
       }

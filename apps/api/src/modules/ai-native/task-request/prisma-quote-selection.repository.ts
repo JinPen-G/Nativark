@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from '@rental-os/shared';
-import { AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReceiptDraft } from '@rental-os/shared';
+import { AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReceiptDraft,
+  type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
@@ -33,13 +34,14 @@ export class PrismaQuoteSelectionRepository {
   }
   private async original(inputRef: string, taskId?: string, runId?: string, active = false) {
     const reference = { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef };
-    const original = await this.d.originals.readHistorical(reference), current = await this.identity.resolve();
-    if (original.request.sceneCode !== 'quote_clarification' || current.actor.kind !== 'user' || current.scope.kind !== 'workspace'
+    const original = active ? await this.d.originals.readHistorical(reference) : await this.d.originals.readTaskLocator(reference);
+    const current = await this.identity.resolve();
+    if (original.receipt.sceneCode !== 'quote_clarification' || current.actor.kind !== 'user' || current.scope.kind !== 'workspace'
       || originalIdentityHash(original.context) !== originalIdentityHash(current)) throw denied();
     const task = await this.d.originals.readTaskReceipt(inputRef);
     if (task.state !== 'observed' || (taskId && task.taskId !== taskId)) throw unavailable();
     if (active) {
-      await this.d.originals.resolve(original.request.sceneCode, inputRef);
+      await this.d.originals.resolve(original.receipt.sceneCode, inputRef);
       if (!['queued', 'running', 'waiting_input', 'waiting_confirmation'].includes(task.status)) throw denied();
     }
     const access = aiTaskAccessFromContext(current, task.taskId, this.clock());
@@ -49,8 +51,41 @@ export class PrismaQuoteSelectionRepository {
       // A persisted human answer may hand an unplanned successor to the order
       // host. It cannot mutate the completed model parent or invent ancestry.
       await this.d.db.$transaction(async tx => {
-        await readTaskModelRunOrigin(tx, access, { scopeId: storedTask.scopeId, taskId: task.taskId,
+        if (active || !('material' in original) || original.material !== 'erased') await readTaskModelRunOrigin(tx, access, { scopeId: storedTask.scopeId, taskId: task.taskId,
           runId, originRunId: task.runId, registrationRef: `scene-model:${inputRef}` });
+        else {
+          // A frozen human selection already attests its original ancestry.
+          // Historical business receipts need the retained relational lineage,
+          // not expired/erased model bodies or the original answers' plaintext.
+          let cursor = runId, seen = new Set<string>();
+          for (let count = 0; cursor !== task.runId; count++) {
+            if (count >= 1000 || seen.has(cursor)) throw denied();
+            seen.add(cursor);
+            const run = await tx.aiRun.findFirst({ where: { scopeId: storedTask.scopeId, taskId: task.taskId, id: cursor } });
+            if (!run || run.id !== cursor || run.scopeId !== storedTask.scopeId || run.taskId !== task.taskId
+              || run.actorKind !== access.actorKind || run.actorId !== access.actorId
+              || run.resourceOriginRunId !== task.runId || !run.inputReceiptId || run.sequence < 2) throw denied();
+            const answer = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: {
+              scopeId: storedTask.scopeId, taskId: task.taskId, id: run.inputReceiptId } } });
+            const request = answer && await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+              scopeId: storedTask.scopeId, taskId: task.taskId, id: answer.requestId } } });
+            const parent = request && await tx.aiRun.findFirst({ where: { scopeId: storedTask.scopeId, taskId: task.taskId, id: request.runId } });
+            if (!answer || answer.id !== run.inputReceiptId || answer.scopeId !== storedTask.scopeId || answer.taskId !== task.taskId
+              || answer.actorKind !== access.actorKind || answer.actorId !== access.actorId || answer.audience !== access.audience
+              || !request || request.id !== answer.requestId || request.scopeId !== storedTask.scopeId || request.taskId !== task.taskId
+              || request.status !== 'CONSUMED' || request.revision < 2 || request.createdBy !== access.actorId
+              || request.planHash !== answer.planHash || !answer.consumedAt || answer.consumedAt > request.expiresAt
+              || answer.consumedTaskRevision !== request.waitingTaskRevision + 1 || !parent || parent.id !== request.runId
+              || parent.scopeId !== storedTask.scopeId || parent.taskId !== task.taskId || parent.sequence + 1 !== run.sequence
+              || parent.actorKind !== access.actorKind || parent.actorId !== access.actorId || parent.status !== 'SUCCEEDED'
+              || (parent.sequence === 1 ? parent.id !== task.runId || parent.inputReceiptId != null || parent.resourceOriginRunId != null
+                : parent.resourceOriginRunId !== task.runId || !parent.inputReceiptId)) throw denied();
+            cursor = parent.id;
+          }
+          const root = await tx.aiRun.findFirst({ where: { scopeId: storedTask.scopeId, taskId: task.taskId, id: task.runId } });
+          if (!root || root.sequence !== 1 || root.inputReceiptId != null || root.resourceOriginRunId != null
+            || root.actorKind !== access.actorKind || root.actorId !== access.actorId) throw denied();
+        }
         const successor = await tx.aiRun.findFirst({ where: { scopeId: storedTask.scopeId, taskId: task.taskId, id: runId } });
         if (!successor || successor.actorKind !== access.actorKind || successor.actorId !== access.actorId) throw denied();
         if (active && (successor.status !== 'RUNNING' || await tx.aiRun.findFirst({ where: {
@@ -112,7 +147,7 @@ export class PrismaQuoteSelectionRepository {
       || row.authorizationBindingHash !== originalIdentityHash(current.context))) throw denied();
     return current;
   }
-  async select(value: unknown) {
+  async select(value: unknown): Promise<AiQuoteSelectionSelectResponseDraft> {
     const command = parseQuoteSelection(value), initial = await this.authorized(command, true);
     if (!['queued', 'running', 'waiting_input'].includes(initial.task.status)) throw denied();
     const data = { ...initial.owner, taskId: command.taskId, runId: command.runId, originalRequestId: command.originalInputRef,
@@ -161,7 +196,7 @@ export class PrismaQuoteSelectionRepository {
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
-  async reconcile(value: unknown) {
+  async reconcile(value: unknown): Promise<AiQuoteSelectionReconcileResponseDraft> {
     const command = parseQuoteSelection(value), current = await this.authorized(command, false);
     let row;
     try { row = await this.d.db.aiTaskQuoteSelection.findFirst({ where: { ...current.owner, selectionKey: command.selectionKey } }); }

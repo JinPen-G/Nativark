@@ -185,7 +185,7 @@ export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunner
   const first = readers[0].root;
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner({ ...input,
     planAuthority: first.source,
-    registrationAuthority: { resolveOriginal: command => first.source.resolveOriginal(command), resolve: async command => {
+    registrationAuthority: { resolveOriginal: (command, tx) => first.source.resolveOriginal(command, tx), resolve: async command => {
       const access = await first.authorization.tasks.resolveAccess(command.taskId, 'transition_task');
       const task = await input.db.aiTask.findFirst({ where: access.where });
       if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');

@@ -41,7 +41,8 @@ exports.dbFactory = function dbFactory() {
         return doc && Object.entries(where.version.document).every(([k, value]) => doc[k] === value)
           && version.documentId === where.version.documentId && version.contentHash === where.version.contentHash
           && (!where.text || row.text.includes(where.text.contains))
-          && (!where.state || (where.state.path === '$.chunkId' && row.state?.chunkId === where.state.equals));
+          && (!where.state || (where.state.path === '$.chunkId' && row.state?.chunkId === where.state.equals)
+            || (where.state.path === '$.chunk.chunkId' && row.state?.chunk?.chunkId === where.state.equals));
       }).sort((a, b) => a.chunkIndex - b.chunkIndex || a.id.localeCompare(b.id)).slice(0, take);
       const result = clone(rows); if (db.afterRead) db.afterRead(); return result;
     }
