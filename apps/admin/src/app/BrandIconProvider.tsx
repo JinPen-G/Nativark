@@ -6,7 +6,7 @@ import { useAppearance } from "./theme";
 import { ADMIN_DEFAULT_MARK, applyAdminFavicon, resolveAdminMark } from "./branding";
 import { adaptMonochromeBrandSvg, defaultAdminBrandIcon, isSvgBrandIcon, readBrandSvg, safeBrandIconUrl } from "./brandIcon";
 
-const BrandIconContext = createContext({ src: ADMIN_DEFAULT_MARK, onError: () => {} });
+const BrandIconContext = createContext({ src: ADMIN_DEFAULT_MARK, isPlatformMark: true, onError: () => {} });
 export const useAdminBrandIcon = () => useContext(BrandIconContext);
 
 export function BrandIconProvider({ children }: { children: ReactNode }) {
@@ -31,6 +31,7 @@ export function BrandIconProvider({ children }: { children: ReactNode }) {
     const original = source === ADMIN_DEFAULT_MARK || failedScope === scope ? fallback : source;
     const svg = inspection?.scope === scope && failedScope !== scope ? inspection.svg : undefined;
     return { src: svg ? adaptMonochromeBrandSvg(svg, mode === "dark") ?? original : original,
+      isPlatformMark: source === ADMIN_DEFAULT_MARK || failedScope === scope,
       onError: () => { if (source !== ADMIN_DEFAULT_MARK) setFailedScope(scope); } };
   }, [source, scope, inspection, failedScope, fallback, mode]);
   useEffect(() => applyAdminFavicon(icon.src, icon.onError), [icon]);

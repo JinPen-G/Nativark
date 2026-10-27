@@ -19,6 +19,10 @@
 }
 .rental-sidebar-colors [data-sidebar="brand-mark"] { border-radius: var(--rental-ui-radius-container); }
 .rental-sidebar-colors [data-sidebar="brand-mark"] img { border-radius: inherit; }
+/* Sidebar-only inverse trial; tenant artwork and the shared favicon source stay intact. */
+.rental-sidebar-colors [data-sidebar="brand-mark"][data-brand-inverted] { background: #000; }
+:root[data-theme="dark"] .rental-sidebar-colors [data-sidebar="brand-mark"][data-brand-inverted] { background: #fff; }
+.rental-sidebar-colors [data-sidebar="brand-mark"][data-brand-inverted] img { background: transparent; filter: invert(1); }
 .rental-sidebar-colors [data-sidebar="workspace-icon"] { border-radius: var(--rental-ui-radius-sm); }
 
 /* Resolve account accent before the reference palette shadows --accent locally. */

@@ -17,7 +17,7 @@ export function NativeWorkspaceSwitcher() {
   const navigate = useNavigate(), { toast } = useFeedback();
   const title = user?.isSaasAdmin ? "Rental OS" : tenant?.tenantName ?? t("租户");
   const subtitle = workspaces.find(w => w.id === currentId)?.name ?? t(user?.isSaasAdmin ? "平台管理面" : "尚无经营空间");
-  const content = <><div data-sidebar="brand-mark" className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"><img src={icon.src} onError={icon.onError} alt="" className="size-8 rounded-lg bg-sidebar object-contain" /></div>
+  const content = <><div data-sidebar="brand-mark" data-brand-inverted={icon.isPlatformMark || undefined} className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"><img src={icon.src} onError={icon.onError} alt="" className="size-8 rounded-lg bg-sidebar object-contain" /></div>
     <div className="grid flex-1 text-left text-sm leading-tight"><span className="truncate font-medium">{title}</span><span className="truncate text-xs">{t(subtitle)}</span></div></>;
   if (workspaces.length < 2) return <SidebarMenu><SidebarMenuItem><SidebarMenuButton size="lg" render={<div aria-label={`${title} · ${t(subtitle)}`} />}>{content}</SidebarMenuButton></SidebarMenuItem></SidebarMenu>;
   const change = async (id: string) => {
