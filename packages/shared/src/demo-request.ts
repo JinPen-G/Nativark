@@ -29,6 +29,7 @@ export interface DemoRequestRow {
 export interface DemoRequestListQuery {
   page: number;
   pageSize: number;
+  keyword?: string;
 }
 
 export interface DemoRequestPage {

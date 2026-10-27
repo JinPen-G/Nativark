@@ -38,6 +38,12 @@ export class CreateDemoRequestDto implements CreateDemoRequestInput {
 }
 
 export class DemoRequestListQueryDto implements DemoRequestListQuery {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(120)
+  keyword?: string;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)

@@ -533,6 +533,7 @@ test('human quote selection binds consumed model answers and prevents a competin
   const coreFacts=Object.assign(quoted.b.facts,{
     findOrder:async (tenant,id,tx)=> (tx??h.db).rentalOrder.findFirst({where:{tenantId:tenant,id}}),
     countOrders:async (tenant)=>(await h.db.rentalOrder.findMany({where:{tenantId:tenant}})).length,
+    allocateOrderNumber:async () => `RC260101${String((await h.db.rentalOrder.findMany({})).length + 1).padStart(4, '0')}`,
     saveOrderAggregate:async (order,_lines,tx)=>tx.rentalOrder.create({data:{...structuredClone(order),
       workspaceId:require('../apps/api/src/common/request-identity').getRequestWorkspaceId()}})});
   await h.db.rentalQuote.create({data:{id:quoted.quote.id,tenantId:quoted.quote.tenantId,

@@ -49,9 +49,14 @@ export class DemoRequestService {
 
   async list(query: DemoRequestListQueryDto): Promise<DemoRequestPage> {
     const { page, pageSize } = query;
+    const keyword = query.keyword?.trim();
+    const where: Prisma.DemoRequestWhereInput = keyword ? {
+      OR: [{ name: { contains: keyword } }, { company: { contains: keyword } }, { contactValue: { contains: keyword } }]
+    } : {};
     const [total, rows] = await this.prisma.$transaction([
-      this.prisma.demoRequest.count(),
+      this.prisma.demoRequest.count({ where }),
       this.prisma.demoRequest.findMany({
+        where,
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],

@@ -25,6 +25,8 @@ const status = (code) => (error) => error.getStatus?.() === code;
 function store() {
   const records = new Map();
   let findQuery;
+  const matching = (where) => [...records.values()].filter((row) => !where?.OR || where.OR.some((condition) =>
+    Object.entries(condition).every(([field, rule]) => String(row[field] ?? "").includes(rule.contains))));
   const prisma = {
     demoRequest: {
       async create({ data }) {
@@ -35,10 +37,10 @@ function store() {
         const row = records.get(where.requestKey);
         return row ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : null;
       },
-      async count() { return records.size; },
+      async count({ where } = {}) { return matching(where).length; },
       async findMany(query) {
         findQuery = query;
-        return [...records.values()]
+        return matching(query.where)
           .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
           .slice(query.skip, query.skip + query.take)
           .map((row) => Object.fromEntries(Object.keys(query.select).map((key) => [key, row[key]])));
@@ -139,6 +141,27 @@ test("list uses database pagination and omits request keys and hashes", async ()
   assert.equal("requestKey" in result.items[0], false);
   assert.equal("payloadHash" in result.items[0], false);
   assert.equal(typeof result.items[0].createdAt, "string");
+});
+
+test("keyword searches name, company and contact before pagination with a matching total", async () => {
+  const s = store();
+  for (const patch of [{ name: "目标客户" }, { company: "目标公司" },
+    { contactType: "wechat", contactValue: "target_123" }, { name: "其他客户" }]) {
+    await s.service.create(await validate(input(patch)));
+  }
+  const query = await validate({ keyword: " 目标 ", page: "2", pageSize: "1" }, DemoRequestListQueryDto);
+  assert.equal(query.keyword, "目标");
+  const result = await s.service.list(query);
+  assert.equal(result.total, 2);
+  assert.equal(result.items.length, 1);
+  assert.equal(s.query().skip, 1);
+  assert.deepEqual(s.query().where.OR, [
+    { name: { contains: "目标" } }, { company: { contains: "目标" } }, { contactValue: { contains: "目标" } }
+  ]);
+  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "target_123" })).total, 1);
+  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "不存在" })).total, 0);
+  assert.equal((await s.service.list({ page: 1, pageSize: 20, keyword: "  " })).total, 4);
+  await assert.rejects(validate({ keyword: "x".repeat(121) }, DemoRequestListQueryDto), status(400));
 });
 
 test("only POST submits anonymously, including case and trailing slash variants", async () => {

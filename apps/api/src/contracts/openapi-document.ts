@@ -197,6 +197,16 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_LEAF_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  RegisterPersonalMembershipRequest: objectOf({
+    name: { type: "string", minLength: 1, maxLength: 120 }, phone: { type: "string", minLength: 1, maxLength: 40 },
+    email: { type: "string", maxLength: 160 }, identityNo: { type: "string", maxLength: 80 },
+    gender: stringSchema, birthday: { type: "string", format: "date" }, sourceChannel: stringSchema, region: { type: "string", maxLength: 64 },
+    channel: { type: "string", enum: ["admin", "app"] }, temporaryPassword: { type: "string", minLength: 8, maxLength: 128, writeOnly: true },
+    directApprove: { type: "boolean" }, idempotencyKey: { type: "string", maxLength: 100 },
+    onlyNew: { type: "boolean", description: "Admin import only. Existing membership returns skipped=true under the customer business lock without changing status, profile, review or credentials." },
+  }, ["name", "phone", "channel"]),
+  RegisterPersonalMembershipResponse: objectOf({ customerId: stringSchema, membershipStatus: stringSchema, skipped: { type: "boolean" }, review: objectSchema }, ["customerId", "membershipStatus"]),
+  MembershipRegistrationSettings: objectOf({ registrationMode: { type: "string", enum: ["manual", "automatic"] }, updatedAt: { type: "string", format: "date-time" }, supportsOnlyNewImport: { type: "boolean", description: "Server supports create-only imports. Legacy servers omit this field; clients must hide that import until supported." } }, ["registrationMode"]),
   RentalOperationLockRequest: {
     oneOf: [
       { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
@@ -1954,10 +1964,10 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/rental/v1/booking-members", "RentalCore", "listBookingMembers", "List minimal tenant member summaries for authorized order creation", ["rental-os:order:create"]),
   backlogOperation("get", "/api/rental/v1/booking-members/{customerId}/booking-options", "RentalCore", "listBookingMemberOptions", "List tenant corporate identities available in the current workspace booking", ["rental-os:order:create"]),
   backlogOperation("get", "/api/rental/v1/booking-members/{customerId}/delivery-addresses", "RentalCore", "listBookingMemberDeliveryAddresses", "List a member's saved delivery addresses for authorized delivery-order creation", ["rental-os:order:create"]),
-  backlogOperation("get", "/api/membership/registration-settings", "Membership", "getMembershipRegistrationSettings", "Get tenant registration review mode", ["rental-os:member:view"]),
+  backlogOperation("get", "/api/membership/registration-settings", "Membership", "getMembershipRegistrationSettings", "Get tenant registration review mode", ["rental-os:member:view"], true, undefined, "MembershipRegistrationSettings"),
   backlogOperation("put", "/api/membership/registration-settings", "Membership", "saveMembershipRegistrationSettings", "Set current workspace registration review mode", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/membership/personal", "Membership", "listPersonalMembershipMembers", "List personal members in current workspace", ["rental-os:member:view"]),
-  backlogOperation("post", "/api/membership/personal", "Membership", "registerPersonalMembership", "Create or register a personal member in current workspace", ["rental-os:member:manage"]),
+  backlogOperation("post", "/api/membership/personal", "Membership", "registerPersonalMembership", "Register a tenant personal member; onlyNew skips existing memberships", ["rental-os:member:manage"], true, "RegisterPersonalMembershipRequest", "RegisterPersonalMembershipResponse"),
   backlogOperation("put", "/api/membership/personal/{customerId}", "Membership", "savePersonalMembership", "Edit a personal member profile in current workspace", ["rental-os:member:manage"]),
   backlogOperation("put", "/api/membership/personal/{customerId}/temporary-password", "Membership", "setMembershipTemporaryPassword", "Set a one-time temporary password without exposing stored credentials", ["rental-os:member:account-manage"]),
   backlogOperation("post", "/api/membership/personal/{customerId}/qualifications", "Membership", "submitMembershipQualification", "Submit a personal member qualification for separate review", ["rental-os:member:manage"]),
@@ -2117,7 +2127,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: "listWebsiteDemoRequests",
     summary: "SaaS administrators only: newest-first paginated website demo requests, never tenant customer data",
     permissions: ["system:demo-request:view"],
-    parameters: [queryParam("page", { type: "integer", minimum: 1, maximum: 100000 }), queryParam("pageSize", { type: "integer", minimum: 1, maximum: 100 })],
+    parameters: [queryParam("page", { type: "integer", minimum: 1, maximum: 100000 }), queryParam("pageSize", { type: "integer", minimum: 1, maximum: 100 }), queryParam("keyword", { type: "string", maxLength: 120 })],
     responseSchema: objectOf({
       items: arrayOf(objectOf({
         id: stringSchema, name: stringSchema,
@@ -2829,7 +2839,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     // ORDER-LIST-01：筛选与分页在服务端执行。不带 page/pageSize 返回纯数组（兼容旧调用方），
     // 带任一分页参数返回 { items, page, pageSize, total } 信封。空间取自会话。
     method: "get", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "listRentalCoreOrders",
-    summary: "List Rental Core orders (server-side filters; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
+    summary: "List Rental Core orders (server-side filters and sorting before pagination; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
     parameters: [
       queryParam("page", { type: "integer", minimum: 1, maximum: 1000000 }),
       queryParam("pageSize", { type: "integer", minimum: 1, maximum: 200 }),
@@ -2838,7 +2848,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       queryParam("from", { type: "string", format: "date-time" }),
       queryParam("to", { type: "string", format: "date-time" }),
       queryParam("assignment", { type: "string", enum: ["pending", "partial", "unlocked", "locked", "issue"] }),
-      queryParam("pendingFeeOnly", { type: "boolean" })
+      queryParam("pendingFeeOnly", { type: "boolean" }),
+      queryParam("sort", { type: "string", maxLength: 256, description: "Ordered unique field.asc/field.desc priorities, comma-separated, max 8. Fields: createdAt, orderNo, customerName, startAt, endAt, payableAmount, quoteNo, status. Applied before pagination with an id tie-breaker." })
     ]
   },
   {
