@@ -1,5 +1,12 @@
 /* Host tokens only; source layout, stream, branches and step disclosure are retained. */
-.operator-context-header { border-bottom: 1px solid var(--border); border-end-start-radius: var(--rental-ui-radius-container); border-end-end-radius: var(--rental-ui-radius-container); }
+.app-workspace:has(> .operator-context-header) { background: var(--rental-sidebar-surface); }
+.operator-context-header { border-bottom: 0; }
+.app-content.ai-operator-host {
+  border-block-start: 1px solid var(--border);
+  border-start-start-radius: var(--rental-ui-radius-container);
+  border-start-end-radius: var(--rental-ui-radius-container);
+  background: var(--surface);
+}
 .operator-confirmation { border-radius: var(--rental-ui-radius-container); }
 .operator-confirmation > [class*="header"] { padding: var(--space-6) var(--space-6) var(--space-2); border-bottom: 0; }
 .operator-confirmation > [class*="body"] { padding: var(--space-3) var(--space-6) var(--space-6); }
