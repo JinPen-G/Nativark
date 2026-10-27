@@ -1,10 +1,13 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict"), h = require("./fixtures/ai-native/contract-consumer.cjs"); h.blockNetwork(test);
 require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node" } });
-const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts/ai-native-schemas"), { RENTAL_CATEGORY_DEFINITIONS: definitions } = require("../packages/shared/src/core"), { AI_INSPECTION_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-inspection-draft-schemas"), f = require("./fixtures/ai-native/inspection-contracts.cjs");
-const validators = h.validatorsFor(schemas, base), examples = f.examples(definitions, h.scope);
+const { AI_NATIVE_COMPONENT_SCHEMAS: native } = require("../apps/api/src/contracts/ai-native-schemas"), { AI_TASK_INPUT_DRAFT_SCHEMAS: taskInput } = require("../packages/shared/src/ai-task-input-draft-schemas"), { RENTAL_CATEGORY_DEFINITIONS: definitions } = require("../packages/shared/src/core"), { AI_INSPECTION_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-inspection-draft-schemas"), f = require("./fixtures/ai-native/inspection-contracts.cjs");
+// Mirror the production composition (contracts/ai-leaf-components.ts): every
+// referenced leaf family is registered, so cross-family $refs resolve.
+const componentBase = { ...native, ...taskInput };
+const validators = h.validatorsFor(schemas, componentBase), examples = f.examples(definitions, h.scope);
 const yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors)), no = (n, x) => assert.equal(validators[n](x), false, n);
-test("C09 closed reference closure, no inspection submission handler", () => h.checkClosed(schemas, { ...base, ...schemas }));
+test("C09 closed reference closure, no inspection submission handler", () => h.checkClosed(schemas, { ...componentBase, ...schemas }));
 for (const [index, draft] of examples.entries()) test(`C09 existing ${definitions[index].code} field example, not template authority`, () => {
   yes("AiInspectionExtractDraft", draft);
   assert.ok(definitions[index].businessModel.defaults.inspectionFields.some(row => row.code === draft.candidates[0].fieldCode));

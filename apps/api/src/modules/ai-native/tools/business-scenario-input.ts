@@ -1,7 +1,8 @@
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 
-/** Internal business content, not a public API DTO/authority/runner plan.
+/** Seal internal business content. A selected scene projection becomes public
+ * only after its shared wire schema is checked; sealing grants no authority.
  * Send exactly payload when using payloadFingerprint. Consumers must perform
  * their own current authorization, input persistence and budget admission. */
 export function sealBusinessScenario<T>(scenario: 'order_explanation' | 'opening_diagnosis' | 'quote_clarification', value: T) {

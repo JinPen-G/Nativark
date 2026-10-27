@@ -18,7 +18,7 @@ import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -87,32 +87,54 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.clock);
   const unavailable = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner, recovery, events,
-    host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
+    host, prepare, clock: input.runnerClock, inputs: { submit: unavailable, readPending: unavailable } });
+  const bounded = async <T>(operation: (signal: AbortSignal) => Promise<T>, write: boolean, limitMs = 5000, parent?: AbortSignal) => {
+    try { return await callAiTaskRunnerDependency(operation, limitMs, 'settings_recovery', parent, input.runnerClock); }
+    catch (error) {
+      if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN')) {
+        if (write && error.code === 'AI_RESULT_UNKNOWN') throw error;
+        if (write) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      throw error;
+    }
+  };
   const recoverOriginal = async (value: unknown, confirmation: boolean, signal?: AbortSignal) => {
+    const wait = <T>(operation: (signal: AbortSignal) => Promise<T>, write: boolean, limitMs = 5000, parent = signal) =>
+      bounded(operation, write, limitMs, parent);
+    const read = <T>(operation: () => Promise<T>) => wait(operation, false);
     const keySchema = z.object({ taskId: id.max(36), runId: id.max(36) }).strict();
     const parsed = (confirmation ? keySchema.extend({ checkpointRef: id.max(36) }).strict() : keySchema).safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data;
     if (command.taskId !== task.taskId || command.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const before = structuredClone(await authorization.tasks.resolveAccess(task.taskId, confirmation ? 'claim_recovery_run' : 'read_metadata'));
-    const stored = await input.db.aiTask.findFirst({ where: before.where });
-    const run = stored && await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } });
-    if (!stored || !run || run.actorKind !== before.actorKind || run.actorId !== before.actorId
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+    const before = structuredClone(await read(() => authorization.tasks.resolveAccess(task.taskId, confirmation ? 'claim_recovery_run' : 'read_metadata')));
+    const stored = structuredClone(await read(() => input.db.aiTask.findFirst({ where: before.where })));
+    const foundRun = stored && await read(() => input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } }));
+    // Preserve Decimal exactly before the next await; structuredClone alone
+    // does not retain Prisma.Decimal methods, and shared row objects can move.
+    const run = foundRun && Object.freeze({ id: foundRun.id, taskId: foundRun.taskId, scopeId: foundRun.scopeId,
+      actorKind: foundRun.actorKind, actorId: foundRun.actorId, revision: foundRun.revision,
+      fencingToken: foundRun.fencingToken.toFixed(0) });
+    if (!stored || stored.id !== task.taskId || !run || run.id !== task.runId || run.taskId !== task.taskId
+      || run.scopeId !== stored.scopeId || run.actorKind !== before.actorKind || run.actorId !== before.actorId
       || before.scope.kind !== 'WORKSPACE' || !before.scope.tenantId || !before.scope.workspaceId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const tenantId = before.scope.tenantId, workspaceId = before.scope.workspaceId;
     // Terminal recovery is observation, not reacquisition. A committed Core
     // receipt remains a fact even if the aggregate ultimately failed/cancelled.
     // Missing receipts never attest rollback or authorize another execution.
-    const change = !confirmation ? await input.db.rentalApprovedSettingsChange.findFirst({ where: {
-      id: task.change.changeId, changeHash: task.change.changeHash, tenantId: before.scope.tenantId,
-      workspaceId: before.scope.workspaceId, actorId: before.actorId }, select: { expiresAt: true } }) : null;
+    const change = !confirmation ? await read(() => input.db.rentalApprovedSettingsChange.findFirst({ where: {
+      id: task.change.changeId, changeHash: task.change.changeHash, tenantId,
+      workspaceId, actorId: before.actorId }, select: { expiresAt: true } })) : null;
     const expired = change?.expiresAt instanceof Date && change.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime();
     // Expired input permits original observation only, never another recovery claim.
     if (!confirmation && (expired || AI_TASK_TERMINAL_STATUSES_DRAFT.some(status => status === stored.status.toLowerCase()))) {
       const key = { taskId: task.taskId, runId: task.runId };
-      const snapshot = await application.inspect(key);
-      const receipt = await settings.readCommittedChange({ taskId: task.taskId, ...task.change });
-      const latest = await application.inspect(key);
-      const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+      const snapshot = await read(() => application.inspect(key));
+      const receipt = await read(() => settings.readCommittedChange({ taskId: task.taskId, ...task.change }));
+      const latest = await read(() => application.inspect(key));
+      const after = await read(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
       if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       if (requestFingerprint(snapshot) !== requestFingerprint(latest)
         || snapshot.task.revision !== stored.revision || snapshot.run.revision !== run.revision) {
@@ -126,61 +148,88 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
         retryable: false as const, execution: 'original_result_read_no_restart' as const };
     }
     if (confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string') {
-      const receipt = await input.db.aiTaskExecutionPhaseReceipt.findFirst({ where: { scopeId: stored.scopeId,
-        taskId: task.taskId, runId: task.runId, id: command.checkpointRef, kind: 'confirmation' } });
+      const checkpointRef = command.checkpointRef;
+      const receipt = await read(() => input.db.aiTaskExecutionPhaseReceipt.findFirst({ where: { scopeId: stored.scopeId,
+        taskId: task.taskId, runId: task.runId, id: checkpointRef, kind: 'confirmation' } }));
       if (!receipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const checkpoint = await application.readConfirmation({ taskId: task.taskId, runId: task.runId, stepId: receipt.stepId });
+      const checkpoint = await read(() => application.readConfirmation({ taskId: task.taskId, runId: task.runId, stepId: receipt.stepId }));
       if (checkpoint.checkpointRef !== command.checkpointRef) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-      const decision = await settings.application.readDecisionReceipt({ draftVersion: 'ain-approved-settings-draft-1',
+      const decision = await read(() => settings.application.readDecisionReceipt({ draftVersion: 'ain-approved-settings-draft-1',
         taskId: task.taskId, proposalId: checkpoint.proposal.proposalId, proposalRevision: checkpoint.proposal.proposalRevision,
-        reviewedPayloadHash: checkpoint.proposal.reviewedPayloadHash });
+        reviewedPayloadHash: checkpoint.proposal.reviewedPayloadHash }));
       if (decision.state !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    const current = await authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run');
+    const current = await read(() => authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run'));
     if (before.bindingKey !== current.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     // Claim acknowledgement is required. A lost response never grants a lease
     // by rereading it; original-key recovery remains a separate request.
-    const lease = await authorization.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
+    const claim = Object.freeze({ taskId: task.taskId, runId: task.runId,
       holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: stored.revision,
-      expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) });
+      expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken });
+    const lease = snapshotAiTaskRunnerClaimLease(claim,
+      await wait(() => authorization.tasks.claimRecoveryRun({ ...claim }), true));
+    let cleanupSafe = true, failed = false;
     try {
-      if ((await authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run')).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      return confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string'
-        ? await application.continueConfirmation({ taskId: task.taskId, runId: task.runId, checkpointRef: command.checkpointRef }, signal)
-        : await application.reconcile({ taskId: task.taskId, runId: task.runId }, signal);
+      if ((await read(() => authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run'))).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+      // Once delegated, only the runner knows which writes were acknowledged.
+      // An unchanged lease read is not proof that an in-flight CAS cannot commit.
+      cleanupSafe = false;
+      const result = await wait(child => confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string'
+        ? application.continueConfirmation({ taskId: task.taskId, runId: task.runId, checkpointRef: command.checkpointRef }, child)
+        : application.reconcile({ taskId: task.taskId, runId: task.runId }, child), true,
+      Math.min(120000, task.limits.maxTotalMs + 10000));
+      cleanupSafe = result.kind === 'not_started';
+      return result;
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
-      const held = await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId,
-        leaseOwnerId: host.holderId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken) } });
-      if (held) {
-        const latest = await authorization.tasks.readMetadata(task.taskId);
-        await authorization.tasks.releaseRun({ taskId: task.taskId, runId: task.runId, holderId: host.holderId,
-          expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, fencingToken: lease.fencingToken });
+      if (cleanupSafe) {
+        try {
+          // Cleanup has its own finite wait, independent of the cancelled host.
+          // It may release only this acknowledged, never-delegated lease.
+          await wait(async child => {
+            const held = await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId,
+              leaseOwnerId: host.holderId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken) } });
+            if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (held) {
+              const latest = await authorization.tasks.readMetadata(task.taskId);
+              if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+              await authorization.tasks.releaseRun({ taskId: task.taskId, runId: task.runId, holderId: host.holderId,
+                expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+            }
+          }, true, 5000, new AbortController().signal);
+        } catch {
+          if (!failed) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        }
       }
     }
   };
-  const requestCancel = async (value: unknown) => {
+  const requestCancel = async (value: unknown, signal?: AbortSignal) => {
     const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
     if (!parsed.success || parsed.data.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = structuredClone(await authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
-    const receipt = await taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' });
-    const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+    const before = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false, 5000, signal));
+    const receipt = await bounded(() => taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' }), true, 5000, signal);
+    // Failure to observe after a write must not imply the cancellation was absent.
+    const after = await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true, 5000, signal);
     if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return { receipt, cancellation: 'requested_not_rollback' as const };
   };
-  const requestCancelOriginal = async (value: unknown) => {
+  const requestCancelOriginal = async (value: unknown, signal?: AbortSignal) => {
     // Persist the authorized intent first. Only an acknowledged request may
     // attempt original-run reconciliation; no new step or external dispatch.
-    const initial = structuredClone(await authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
-    const result = await requestCancel(value);
+    const initial = structuredClone(await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), false, 5000, signal));
+    const result = await requestCancel(value, signal);
     let reconciliation;
-    try { reconciliation = await recoverOriginal({ taskId: task.taskId, runId: task.runId }, false); }
+    try { reconciliation = await recoverOriginal({ taskId: task.taskId, runId: task.runId }, false, signal); }
     catch (error) {
       if (!(error instanceof AiTaskRepositoryError) || error.code === 'AI_ACCESS_DENIED' || error.code === 'AI_INVALID_INPUT') throw error;
       reconciliation = { kind: 'unavailable' as const, errorCode: error.code,
         nextAction: 'read_original_task' as const, retryable: false as const };
     }
-    if ((await authorization.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== initial.bindingKey) {
+    if ((await bounded(() => authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), true, 5000, signal)).bindingKey !== initial.bindingKey) {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     }
     return { ...result, reconciliation };
@@ -188,6 +237,7 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
+      readConfirmationHistory: application.readConfirmationHistory.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),
       continueOriginalConfirmation: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, true, signal),
       reconcileOriginal: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, false, signal),

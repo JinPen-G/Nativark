@@ -4,7 +4,15 @@ import { inspectPcmWav } from './pcm-wav';
 import { inspectBoundedImage } from './bounded-image';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
-export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
+/** Explicit SaaS/platform gateway principal, never an absent tenantId silently
+ * interpreted as platform work. Discriminate by field presence: platform
+ * contexts carry actorId only, workspace consumers keep the legacy shape. */
+export interface WorkspaceGatewayContext { tenantId: string; workspaceId: string; actorId: string; }
+export interface PlatformGatewayContext { actorId: string; }
+export type GatewayContext = WorkspaceGatewayContext | PlatformGatewayContext;
+export function isPlatformGatewayContext(value: Readonly<GatewayContext>): value is PlatformGatewayContext {
+  return !('tenantId' in value) && !('workspaceId' in value) && typeof value.actorId === 'string' && value.actorId.length > 0;
+}
 /** Content bytes, not provider tokens or the serialized HTTP envelope. Keep
  * the existing media ceiling for every ingress, including text-only calls. */
 export const GATEWAY_MAX_INPUT_BYTES = 900_000;
@@ -94,7 +102,22 @@ export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRe
   }
 });
 export type ModelProtocolRequest = z.infer<typeof modelProtocolRequestSchema>;
-export interface ModelUsage { inputTokens: number; outputTokens: number; }
+/** Original protocol counters. Cache reads/writes are part of inputTokens,
+ * not extra tokens; their rates cannot be inferred from a plain-input price. */
+export interface ModelUsage { inputTokens: number; outputTokens: number;
+  billingDetails?: { cachedInputTokens: number; cacheCreationInputTokens: number }; }
+const usageCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const modelUsageSchema = z.object({ inputTokens: usageCount, outputTokens: usageCount,
+  billingDetails: z.object({ cachedInputTokens: usageCount, cacheCreationInputTokens: usageCount }).strict().optional()
+}).strict().refine(value => !value.billingDetails || BigInt(value.billingDetails.cachedInputTokens)
+  + BigInt(value.billingDetails.cacheCreationInputTokens) <= BigInt(value.inputTokens));
+/** Trusted in-process protocol callback, excluded from serialized requests.
+ * Counters survive rejected text; this does not authorize text or settlement. */
+export type ModelProtocolInvocation = Readonly<ModelProtocolRequest> & {
+  signal: AbortSignal; recordUsage?: (usage: ModelUsage) => Promise<void>;
+  /** Trusted reservation's counted input binding; never sent to the provider. */
+  expectedInputBoundHash?: string;
+};
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
 export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
 export interface ProtocolToolCall { id: string; type: 'function'; function: { name: string; arguments: string }; }
@@ -109,10 +132,24 @@ export interface ModelAdapter {
   readonly provider: string;
   readonly structuredSchemaHash?: string;
   readonly features: readonly ModelFeature[];
-  generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  /** Exact input-determining wire material; absence cannot consume a provider
+   * count receipt. Server adapter only, never a caller-supplied token estimate. */
+  inputBoundHash?(input: Readonly<ModelProtocolRequest>, streaming: boolean): string;
+  generate(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
-  stream?(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
+  stream?(input: ModelProtocolInvocation, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
+}
+/** Local protocol support is separate from a remotely verified profile.
+ * Reject an absent implementation before admission/reservation, not after the
+ * invocation has already acquired a dispatch token and become uncertain. */
+export function modelAdapterSupportsCapabilities(adapter: ModelAdapter | undefined, capabilities: readonly string[]): boolean {
+  if (!adapter || typeof adapter.generate !== 'function' || !Array.isArray(adapter.features)) return false;
+  const features: Readonly<Record<string, ModelFeature>> = { streaming: 'streaming', tools: 'tools',
+    structured_output: 'structuredOutput', vision: 'image', audio: 'audio' };
+  return capabilities.every(capability => capability === 'text' || Object.hasOwn(features, capability)
+    && adapter.features.includes(features[capability])
+    && (capability !== 'streaming' || typeof adapter.stream === 'function'));
 }
 export interface GatewayProfile {
   enabled: boolean;

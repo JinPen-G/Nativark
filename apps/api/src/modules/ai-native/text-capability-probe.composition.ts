@@ -11,6 +11,7 @@ import { TextCapabilityProbeApplication, type TextCapabilityProbeDependencies } 
 import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.composition';
 import { PrismaGatewayCallPricing } from './budget/prisma-gateway-call-pricing';
 import { ModelGatewayError } from './model-gateway.ports';
+import type { AiTaskRunnerClock } from './runner/ai-task-runner.ports';
 
 export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthorizationDependencies, 'db'> & {
   db: PrismaClient;
@@ -19,12 +20,13 @@ export type AuthorizedTextProbeWorkflowDependencies = Omit<PersistedTaskAuthoriz
   /** Server-selected platform profile, not a request/model-supplied ID. */
   platformProfileId: string;
   pricing: TextCapabilityProbeDependencies['pricing'] | { mode: 'persisted_calls'; priceVersion: string };
-  audit: TextCapabilityProbeDependencies['audit'];
+  audit?: TextCapabilityProbeDependencies['audit'];
   protocol?: TextCapabilityProbeDependencies['protocol'];
   host: Parameters<typeof composePersistedTextProbeWorkflow>[0]['host'];
   sceneVersion: string;
   priceVersion: string;
   monotonic?: () => number;
+  runnerClock?: AiTaskRunnerClock;
 };
 
 /** Explicit request-scoped root: real current identity/configuration and Vault,

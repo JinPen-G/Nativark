@@ -1,5 +1,7 @@
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
 import type { SchemaObject } from "./openapi-document";
+import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { aiLeafToOpenApi30 } from './ai-leaf-openapi';
 
 const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${name}` });
 const choice = (...values: string[]): SchemaObject => ({ type: "string", enum: values });
@@ -18,11 +20,54 @@ const errorProperties = {
 const unknownError = closed({ ...errorProperties, code: choice("AI_RESULT_UNKNOWN"), retryable: { type: "boolean", enum: [false] }, nextAction: choice("reconcile") });
 const knownError = closed({ ...errorProperties, code: choice(...AI_ERROR_CODES.filter(code => code !== "AI_RESULT_UNKNOWN")), retryable: { type: "boolean" }, nextAction: choice("none", "clarify", "reconfirm", "reauthorize", "reconcile", "retry_later", "manual") });
 const positiveCursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^[1-9][0-9]*$" };
-const cursor: SchemaObject = { type: "string", minLength: 1, maxLength: 20, pattern: "^(0|[1-9][0-9]*)$" };
-const eventBase = { contractVersion: version, taskId: id(), cursor: positiveCursor, taskRevision: revision, occurredAt: time };
 
-/** C04只发布文档组件；没有运行路由。字段关系/状态转换/归属仍需应用和数据库校验。 */
+/** Shared task shapes, including the owner-only read transport. Execution and
+ * state transitions still require their existing application/DB authority. */
 export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...Object.fromEntries(Object.entries(AI_TASK_OBSERVATION_DRAFT_SCHEMAS).map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
+  AiTaskClarificationQueryDraft: closed({ taskId: { ...id(), maxLength: 36 } }),
+  AiTaskClarificationAnswerDraft: closed({ submission: ref('AiTaskInputSubmissionDraft') }),
+  AiTaskClarificationReceiptQueryDraft: closed({ reference: closed({ taskId: { ...id(), maxLength: 36 }, requestId: { ...id(), maxLength: 36 },
+    expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967294 }, submissionKey: id() }) }),
+  AiTaskClarificationReceiptRequestDraft: { oneOf: [ref('AiTaskClarificationAnswerDraft'), ref('AiTaskClarificationReceiptQueryDraft')] },
+  AiTaskClarificationContinueQueryDraft: { oneOf: [ref('AiTaskClarificationAnswerDraft'), ref('AiTaskClarificationReceiptQueryDraft')] },
+  AiTaskClarificationObservationDraft: closed({ taskId: { ...id(), maxLength: 36 }, input: { oneOf: [{ type: 'null' },
+    closed({ requestId: { ...id(), maxLength: 36 }, revision, expiresAt: time, contract: ref('AiTaskInputContractDraft') })] },
+    execution: choice('read_only_no_start_no_reconnect_side_effect') }),
+  AiTaskClarificationProgressDraft: closed({ taskId: { ...id(), maxLength: 36 }, requestId: { ...id(), maxLength: 36 },
+    automaticRetry: { type: 'boolean', enum: [false] }, businessExecution: choice('not_inferred_from_input'),
+    receipt: { oneOf: [closed({ state: choice('not_observed') }), closed({ state: choice('observed'),
+      receiptId: { ...id(), maxLength: 36 }, taskRevision: revision,
+      runId: { oneOf: [{ ...id(), maxLength: 36 }, { type: 'null' }] }, replayed: { oneOf: [{ type: 'boolean' }, { type: 'null' }] } })] },
+    continuation: { oneOf: [closed({ kind: choice('not_attempted') }),
+      closed({ kind: choice('not_started'), reason: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z_]+$' } }),
+      closed({ kind: choice('unavailable'), errorCode: { type: 'string', maxLength: 128, pattern: '^AI_[A-Z_]+$' } }),
+      closed({ kind: choice('run_outcome'), status: choice('succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed'),
+        stopReason: { oneOf: [choice('input_limit_reached'), { type: 'null' }] },
+        nextAction: { oneOf: [choice('manual_handoff'), { type: 'null' }] },
+        errorCode: { oneOf: [{ type: 'string', maxLength: 128, pattern: '^AI_[A-Z_]+$' }, { type: 'null' }] } })] } }),
+  AiTaskReviewQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 } }),
+  AiTaskDecisionQueryDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    proposal: ref('AiApprovalApplicationDecisionDraft') }),
+  AiTaskHumanContinueDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    checkpointRef: { type: 'string', format: 'uuid', maxLength: 36 }, expectedTaskRevision: revision, proposal: ref('AiApprovalApplicationReferenceDraft') }),
+  AiTaskHumanContinuationDraft: { oneOf: ([
+    { kind: choice('not_started'), reason: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z_]+$' } },
+    { kind: choice('run_outcome'), status: choice('succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed') }
+  ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    automaticRetry: { type: 'boolean', enum: [false] }, businessExecution: choice('read_original_receipt'), ...result })) },
+  AiTaskHumanReviewDraft: { oneOf: ['order', 'settings'].map(kind => closed({
+    taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 }, taskRevision: revision,
+    checkpointRef: { ...id(), maxLength: 36 }, kind: choice(kind),
+    review: ref(kind === 'order' ? 'AiApprovalApplicationReviewDraft' : 'AiApprovedSettingsReviewDraft'), businessExecution: choice('not_attested') })) },
+  AiTaskHumanDecisionReceiptDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    receipt: ref('AiApprovalApplicationReceiptDraft'), businessExecution: choice('not_attested') }),
+  AiTaskBusinessObservationDraft: { oneOf: ([
+    { status: choice('committed'), kind: choice('order'), order: closed({ id: id(), status: id(), quoteId: id() }) },
+    { status: choice('committed'), kind: choice('settings'), receipt: ref('AiApprovedSettingsOperationReceiptDraft') },
+    { status: choice('unknown', 'not_observed'), kind: choice('order', 'settings'), retryable: { type: 'boolean', enum: [false] } }
+  ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
+    observedAt: time, execution: choice('read_only_no_start_no_reconnect_side_effect'), payment: choice('not_inferred'), fulfillment: choice('not_inferred'), ...result })) },
   AiStepOutcomeDraft: { oneOf: [
     closed({ status: choice("pending", "cancelled"), effect: choice("none") }),
     closed({ status: choice("running"), effect: choice("none", "possible") }),
@@ -49,18 +94,21 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     closed({ allowed: { type: "boolean", enum: [true] }, nextRevision: revision }),
     closed({ allowed: { type: "boolean", enum: [false] }, reason: choice("invalid_state", "revision_conflict", "transition_denied", "unresolved_steps", "outcome_conflict") })
   ] },
-  AiTaskEventDraft: { oneOf: [
-    closed({ ...eventBase, type: choice("task.transition"), data: closed({ from: status, to: status, reason }) }),
-    closed({ ...eventBase, type: choice("step.registered"), data: closed({ stepId: id(), runId: id(), sequence: { type: "integer", minimum: 1, maximum: 4294967295 }, stepRevision: { type: "integer", enum: [1] } }) }),
-    closed({ ...eventBase, type: choice("step.changed"), data: closed({ stepId: id(), runId: id(), stepRevision: revision, status: choice(...AI_STEP_STATUSES_DRAFT), reason: choice(...AI_STEP_TRANSITION_REASONS_DRAFT) }) }),
-    closed({ ...eventBase, type: choice("task.output_ready"), data: closed({ resultId: id() }) }),
-    closed({ ...eventBase, type: choice("access.revoked"), data: closed({ code: choice("AI_ACCESS_DENIED", "AI_SCOPE_CHANGED") }) })
-  ] },
-  AiTaskEventPageDraft: closed({ contractVersion: version, taskId: id(), events: list(ref("AiTaskEventDraft"), 100), nextCursor: cursor, hasMore: { type: "boolean" } }),
-  AiTaskSnapshotDraft: closed({ contractVersion: version, taskId: id(), revision, status,
-    sceneCode: id(), sceneVersion: id(), createdAt: time, updatedAt: time,
-    cancelRequestedAt: { ...time, nullable: true }, cursor,
-    steps: list(closed({ stepId: id(), runId: id(), sequence: revision, revision,
-      status: choice(...AI_STEP_STATUSES_DRAFT) }), 1000) }),
-  AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") })
+  AiTaskModelSourceReferenceDraft: closed({ kind: choice('order', 'knowledge'), index: { type: 'integer', minimum: 0, maximum: 4 },
+    referenceHash: { type: 'string', pattern: '^[a-f0-9]{64}$', minLength: 64, maxLength: 64 } }),
+  AiTaskModelSourceQueryDraft: closed({ taskId: id(), resultId: id(), source: ref('AiTaskModelSourceReferenceDraft') }),
+  AiTaskStopQueryDraft: closed({ taskId: id(), expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967294 } }),
+  AiTaskStopObservationDraft: closed({ taskId: id(), expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967294 },
+    status: choice('observed', 'not_observed'), cancellation: choice('request_not_rollback'), automaticRetry: { type: 'boolean', enum: [false] },
+    remoteCancellation: choice('not_attested'), budgetRelease: choice('not_attempted') }),
+  AiTaskModelSourceObservationDraft: closed({ contractVersion: version, taskId: id(), runId: id(), resultId: id(),
+    source: ref('AiTaskModelSourceReferenceDraft'), observedAt: time,
+    content: closed({ format: choice('text', 'json'), value: { type: 'string', maxLength: 65536 }, trust: choice('source_data_not_instructions') }),
+    execution: choice('read_only_no_start_no_reconnect_side_effect') }),
+  AiTaskModelObservationDraft: { ...closed({ contractVersion: version, taskId: id(), runId: id(), resultId: id(),
+    sceneCode: choice('order_explanation', 'opening_diagnosis', 'quote_clarification'), status: choice('available', 'stale', 'unknown', 'failed'),
+    text: { ...closed({ value: { type: 'string', maxLength: 131072 }, trust: choice('unverified_model_text_not_execution_evidence') }), nullable: true },
+    sources: list(ref('AiTaskModelSourceReferenceDraft'), 9),
+    observedAt: time, businessExecution: choice('not_inferred_from_model_result'), execution: choice('read_only_no_start_no_reconnect_side_effect') }),
+    description: 'Available text only after original task, current business facts and referenced knowledge ACL/consent revalidation. Stale, unknown and failed observations return null text. No generic raw artifact or execution grant.' },
 };

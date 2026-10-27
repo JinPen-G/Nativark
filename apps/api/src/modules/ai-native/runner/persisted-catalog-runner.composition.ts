@@ -87,7 +87,7 @@ const readonlyHostTaskSchema = z.object({ taskId: hostResourceId.max(36), runId:
   steps: z.array(z.object({ registrationRef: hostResourceId, toolCode: z.enum(PERSISTED_READONLY_TOOLS),
     input: z.unknown() }).strict()).min(1).max(6), limits: aiTaskRunnerLimitsSchema
 }).strict().refine(task => new Set(task.steps.map(step => step.registrationRef)).size === task.steps.length
-  && task.steps.length <= task.limits.maxSteps && task.steps.length <= task.limits.maxCalls);
+  && task.steps.length <= task.limits.maxSteps);
 
 /** Normal host for existing server-created tasks. The host selects the closed
  * tool/input set from its authorized original request, never from model tool
@@ -185,7 +185,7 @@ export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunner
   const first = readers[0].root;
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner({ ...input,
     planAuthority: first.source,
-    registrationAuthority: { resolve: async command => {
+    registrationAuthority: { resolveOriginal: (command, tx) => first.source.resolveOriginal(command, tx), resolve: async command => {
       const access = await first.authorization.tasks.resolveAccess(command.taskId, 'transition_task');
       const task = await input.db.aiTask.findFirst({ where: access.where });
       if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -301,14 +301,12 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
   };
   const inputSource: AiTaskInputSource = {
     async resolve(binding) {
-      const key = { taskId: binding.taskId, runId: binding.runId, inputRef: binding.inputRef, fingerprint: binding.inputHash };
-      const stored = tool === 'rental.catalog.search' ? await source.readCatalogInput(key)
-        : tool === 'rental.availability.check' ? await source.readAvailabilityInput(key)
-          : tool === 'membership.customer.resolve' ? await source.readMembershipCandidateInput(key)
-            : tool === 'tenant.opening.diagnose' ? await source.readOpeningInput(key)
-              : tool === 'operations.risks.list' ? await source.readRiskInput(key) : await source.readOrderExplainInput(key);
+      // These closed read-only tools never request further input. Revalidate
+      // their exact original input, not permission to execute them again.
+      const stored = await source.readReadonlyResultInput({ taskId: binding.taskId, runId: binding.runId, stepId: binding.stepId });
       if (stored.registrationRef !== binding.registrationRef || binding.toolCode !== tool
-        || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw unavailable();
+        || binding.toolVersion !== AI_TOOL_DRAFT_VERSION || stored.inputRef !== binding.inputRef
+        || stored.fingerprint !== binding.inputHash) throw unavailable();
       return { kind: 'not_required' };
     },
     async validateAnswers() { throw unavailable(); }

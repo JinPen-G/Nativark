@@ -8,6 +8,7 @@ export type FailureScope = { tenantId: string; workspaceId: string };
 export interface BusinessFailureOutboxParticipant {
   notification(tx: Prisma.TransactionClient, scope: FailureScope, id: string): Promise<void>;
   refund(tx: Prisma.TransactionClient, scope: FailureScope, id: string): Promise<void>;
+  inspection?(tx: Prisma.TransactionClient, scope: FailureScope, id: string): Promise<void>;
 }
 export class BusinessFailureError extends Error {
   constructor(readonly code: 'unavailable' | 'conflict' | 'not_ready' | 'result_unknown' | 'invalid_input') { super(code); }

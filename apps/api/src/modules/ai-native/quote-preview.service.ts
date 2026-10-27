@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpException } from '@nestjs/common';
-import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1,
+  type AiCoreQuotePreviewResultDraft, type AiCoreQuotePreviewFailureDraft } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
@@ -60,32 +61,10 @@ const chargeLineSchema = z.object({
   amount: z.number().finite().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
   sourceId: z.string().max(191).optional(), sourceVersion: z.string().max(191).optional(), detail: z.string().max(2000).optional()
 });
-export type AiQuotePreviewFailure = "missing_input" | "ambiguous" | "out_of_stock" | "qualification_required" | "expired" | "unavailable";
-export type AiQuotePreviewResult = {
-  contractVersion: "ain-09-quote-preview-draft-1";
-  requestId: string;
-  observedAt: string;
-  scope: Extract<AiExecutionContext["scope"], { kind: "workspace" }>;
-  status: "quoted" | AiQuotePreviewFailure;
-  missingFields?: string[];
-  message?: string;
-  /** Local effect evidence, not dispatch/approval or inventory ownership. */
-  quotePersistence?: 'saved' | 'unknown';
-  nextAction?: 'reconcile';
-  retryable?: false;
-  quote?: {
-    id: string; quoteNo: string; currency?: string; chargeLines: RentalQuoteSnapshotV1["chargeLines"];
-    rentalAmount: number; discountAmount: number; couponAmount: number; serviceAmount: number; fulfillmentAmount: number;
-    depositAmount: number; preAuthAmount: number; payableAmount: number; receivableAmount: number;
-    pricingPlanVersion: string; priceVersionId?: string; priceVersion?: string; ruleVersion: string; calendarVersion?: string;
-    expiresAt: string; createdAt: string; timeZone?: string; reservation: "not_reserved";
-    period: { startAt: string; endAt: string };
-    lineUnits: Array<{ itemGroupId?: string; pricingUnit?: RentalQuoteRequest['lines'][number]['pricingUnit']; quantity: number; usageQuantity?: number }>;
-    promotionEvidence: Array<{ code: string; sourceId?: string; sourceVersion?: string }>;
-    promotionVersionCoverage: 'charge_line_references_only';
-    roundingEvidence: 'not_projected';
-  };
-};
+// Retain the original service import names; the wire projection has one public
+// contract, shared with its HTTP/OpenAPI consumers rather than a private DTO.
+export type AiQuotePreviewFailure = AiCoreQuotePreviewFailureDraft;
+export type AiQuotePreviewResult = AiCoreQuotePreviewResultDraft;
 
 export interface AiQuotePreviewAuthority {
   withQuote<T>(input: RentalQuoteRequest, consume: (context: AiExecutionContext) => Promise<T>): Promise<T>;
@@ -137,7 +116,17 @@ export class AiQuotePreviewService {
       || !['operator', 'staff'].includes(context.audience)) throw new ModelGatewayError('FORBIDDEN');
     if (typeof this.core.readQuoteForOriginalReference !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     const tenantId = context.scope.tenantId, key = originalQuoteKey(context, reference);
-    const stored = await this.core.readQuoteForOriginalReference(tenantId, key);
+    // Sanitize the fact-store read exactly like execute(): an infrastructure
+    // failure is a structured unknown for the original operation, never a raw
+    // business exception crossing the authentication boundary.
+    let stored: RentalQuoteSnapshotV1 | undefined;
+    try {
+      stored = await this.core.readQuoteForOriginalReference(tenantId, key);
+    } catch (error) {
+      if (error instanceof ModelGatewayError) throw error;
+      return { ...this.failure(context, 'unavailable', '原报价读取暂不可用；请稍后按原操作核对'),
+        quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+    }
     if (!stored) return { ...this.failure(context, 'unavailable', '原报价尚未观察到；不得据此重报'),
       quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
     const guardInput = structuredClone(stored.request);
@@ -148,7 +137,13 @@ export class AiQuotePreviewService {
     });
     return this.authority.withQuote(guardInput, async current => {
       if (quoteIdentityHash(current) !== quoteIdentityHash(context)) throw new ModelGatewayError('FORBIDDEN');
-      const again = await this.core.readQuoteForOriginalReference!(tenantId, key);
+      let again: RentalQuoteSnapshotV1 | undefined;
+      try { again = await this.core.readQuoteForOriginalReference!(tenantId, key); }
+      catch (error) {
+        if (error instanceof ModelGatewayError) throw error;
+        return { ...this.failure(context, 'unavailable', '原报价复验暂不可用；请稍后按原操作核对'),
+          quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+      }
       const immutable = (quote: RentalQuoteSnapshotV1) => {
         const { consumedAt: _at, consumedOrderId: _order, ...basis } = quote;
         return requestFingerprint(basis);
@@ -263,7 +258,7 @@ export class AiQuotePreviewService {
     } };
   }
 
-  private failure(context: AiExecutionContext, status: AiQuotePreviewFailure, message: string): AiQuotePreviewResult {
+  private failure(context: AiExecutionContext, status: AiQuotePreviewFailure, message: string): Extract<AiQuotePreviewResult, { quote?: never }> {
     return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: this.now(), scope: context.scope as Extract<AiExecutionContext["scope"], { kind: "workspace" }>, status, message };
   }
   private classify(error: unknown): AiQuotePreviewFailure {

@@ -50,7 +50,7 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
   if (server.enabled !== true) throw unavailable();
   const source = new InspectionRecognitionTaskApplication(server);
   const { db, auth, guard } = server.model, clock = server.model.clock ?? (() => new Date());
-  const use = (request: Request, value: unknown, mode: 'read' | 'configure' | 'clear') => {
+  const use = (request: Request, value: unknown, mode: 'read' | 'configure' | 'clear', signal?: AbortSignal) => {
     const schema = mode === 'read' ? base : mode === 'configure' ? configure : clear;
     const parsed = schema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -61,8 +61,15 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
     if (!authorization.success) throw denied();
     const currentRequest = freezeOriginalInput({ headers: { authorization: authorization.data } });
     return runWithRequestIdentity({}, async () => {
-      const credentials = { current: async () => ({ authorization: authorization.data,
-        audience: 'staff' as const, requestId }) }, requestId = randomUUID();
+      let active = true;
+      const close = () => { active = false; };
+      signal?.addEventListener('abort', close, { once: true });
+      try {
+      if (signal?.aborted) throw denied();
+      const credentials = { current: async () => {
+        if (!active || signal?.aborted) throw denied();
+        return { authorization: authorization.data, audience: 'staff' as const, requestId };
+      } }, requestId = randomUUID();
       const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(auth, credentials, clock), clock);
       const resource = new InspectionActionAuthority(guard, credentials);
       let expected: string | undefined;
@@ -70,7 +77,7 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
         const before = await scopes.resolveCurrent(), context = before.context;
         if (before.scope.kind !== 'WORKSPACE' || context.scope.kind !== 'workspace'
           || context.audience !== 'staff' || context.actor.kind !== 'user') throw denied();
-        const receipt = await source.readCreation(currentRequest, command.reference);
+        const receipt = await source.readCreation(currentRequest, command.reference, signal);
         if (receipt.state !== 'observed' || !receipt.task) throw unavailable();
         const taskId = receipt.task.taskId, runId = receipt.task.runId;
         await resource.withAction(command.reference, 'bind', async actor => {
@@ -115,14 +122,19 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
             requiredPermissions: original.permissions,
             expiresAt: new Date(Math.min(original.expiresAt.getTime(), clock().getTime() + selected.ttlMs)) },
           configure.parse(command).expectedRevision);
-      await resolve();
+      try { await resolve(); }
+      catch (error) {
+        if (mode !== 'read') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        throw error;
+      }
       return freezeOriginalInput({ result, purpose: 'original_inspection_candidate_runtime_only' as const,
         approval: 'not_granted' as const, inspectionSubmission: 'not_attempted' as const });
+      } finally { signal?.removeEventListener('abort', close); close(); }
     });
   };
-  return Object.freeze({ read: (request: Request, value: unknown) => use(request, value, 'read'),
-    configure: (request: Request, value: unknown) => use(request, value, 'configure'),
-    clear: (request: Request, value: unknown) => use(request, value, 'clear') });
+  return Object.freeze({ read: (request: Request, value: unknown, signal?: AbortSignal) => use(request, value, 'read', signal),
+    configure: (request: Request, value: unknown, signal?: AbortSignal) => use(request, value, 'configure', signal),
+    clear: (request: Request, value: unknown, signal?: AbortSignal) => use(request, value, 'clear', signal) });
 }
 
 export const AI_STAFF_INSPECTION_TASK_POLICIES = Symbol('AI_STAFF_INSPECTION_TASK_POLICIES');

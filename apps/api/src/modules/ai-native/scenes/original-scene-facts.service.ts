@@ -6,6 +6,7 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
+import { aiOrderExtensionPreviewInputSchema } from '../tools/order-extension-preview.service';
 
 const fields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
 const citationSchema = originalRequestReferenceSchema.extend({ version: z.string().min(1).max(191),
@@ -21,6 +22,23 @@ const quoteConfirmation = originalRequestReferenceSchema.extend({
 
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
+  /** Explicit human-requested preview for the original next-step question.
+   * Current extend permission is independent of the original order read. */
+  async previewOrderExtension(value: unknown) {
+    const parsed = originalRequestReferenceSchema.merge(aiOrderExtensionPreviewInputSchema).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.read(ref);
+    if (original.request.sceneCode !== 'order_explanation' || original.request.input.question !== 'next_steps') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const result = await this.tools.orderExtensionPreview(original.request.input.orderId).read({
+      expectedOrderVersion: command.expectedOrderVersion, extension: command.extension
+    }, grant.context);
+    const after = await this.requests.read(ref), current = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(grant.context) !== originalIdentityHash(current.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt, result, taskExecution: 'not_started' as const });
+  }
   /** Current, bounded candidate source for an original quote question. Page
    * references are observations, never human selection or pricing authority. */
   async readQuoteCatalog(value: unknown) {
@@ -87,14 +105,14 @@ export class AiOriginalSceneFactsService {
     }).strict().safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
-    const original = await this.requests.read(ref);
+    // Reopen the original selected source under current read permissions;
+    // expiry stops new execution, not observation of its original evidence.
+    const original = await this.requests.readHistorical(ref);
     if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    if (!original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (original.receipt.state === 'revoked' || !original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const section = freezeOriginalInput(structuredClone(await this.tools.openingSection({ key: command.key })));
-    const after = await this.requests.read(ref);
-    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    if (originalIdentityHash(before.context) !== originalIdentityHash(grant.context)
+    const after = await this.requests.readHistorical(ref);
+    if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return freezeOriginalInput({ original: original.receipt, section, execution: 'not_attempted' as const,
       proposalPersistence: 'unavailable_no_formal_section_proposal_port' as const });

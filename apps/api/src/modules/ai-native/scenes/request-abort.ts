@@ -12,6 +12,9 @@ export class AiRequestWaitError extends Error {
 /** Server-owned HTTP wait bound, not a task/lease TTL or new resource allowance. */
 export type AiRequestWaitOptions = {
   maxWaitMs?: number;
+  /** Server-only opt-in for input/runner hosts with explicit abort outcomes.
+   * Other callbacks may ignore the signal, so they must never enter by default. */
+  deliverAborted?: boolean;
   clock?: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(handle: unknown): void };
 };
 /** Body completion is not cancellation; abort never proves remote rollback.
@@ -30,8 +33,13 @@ export async function withRequestAbort<T>(request: AiRequestAbortSource, work: (
   const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
   const response = request?.res;
   const listensResponse = typeof response?.once === 'function' && typeof response?.removeListener === 'function';
-  if (request?.aborted || response?.destroyed && response.writableFinished !== true) {
-    throw new AiRequestWaitError('AI_RESOURCE_UNAVAILABLE'); // work never entered
+  // Explicitly opted-in runner/input hosts own their not-started outcomes
+  // and durable answer receipts. Other hosts retain the no-entry contract;
+  // abandonment during flight always rejects the wait.
+  const preAborted = Boolean(request?.aborted)
+    || Boolean(response?.destroyed) && response?.writableFinished !== true;
+  if (preAborted && options.deliverAborted !== true) {
+    throw new AiRequestWaitError('AI_RESOURCE_UNAVAILABLE');
   }
   return new Promise<T>((resolve, reject) => {
     let settled = false, timer: unknown, timerStarted = false;
@@ -57,7 +65,10 @@ export async function withRequestAbort<T>(request: AiRequestAbortSource, work: (
       if (listensResponse) response.once!('close', responseClosed);
       timer = clock.setTimeout(abort, maxWaitMs); timerStarted = true;
       if (settled) { cleanup(); return; }
-      if (request?.aborted || response?.destroyed && response.writableFinished !== true) { abort(); return; }
+      if (request?.aborted || response?.destroyed && response.writableFinished !== true) {
+        if (!preAborted) { abort(); return; }
+        controller.abort();
+      }
       // Attach both handlers even if the dependency later ignores interruption.
       Promise.resolve(work(controller.signal)).then(value => finish(true, value), error => finish(false, error));
     } catch (error) { finish(false, error); }

@@ -6,13 +6,14 @@ import {
   isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft, type AiTaskEventDraft
 } from '@rental-os/shared';
-import { AiTaskRepositoryError, type AiTaskRepository, type AiTaskRepositoryOperation } from '../ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository, type AiTaskRepositoryOperation } from '../ai-task.repository';
 import { evaluateAiTaskTransitionDraft, type AiTaskTransitionStateDraft } from '../task-transition-draft';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { AiTaskInputBinding, AiTaskInputContext, AiTaskInputReader, AiTaskInputSource } from './task-input.ports';
-import { AiTaskInputResultUnknownError } from './task-input.errors';
+import { AiTaskInputResultUnknownError, AiTaskInputLimitError } from './task-input.errors';
+import { taskStepChargesValid } from '../runner/task-model-count-charge';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskInputRequest' | 'aiTaskInputReceipt'>;
 type Tx = Prisma.TransactionClient;
@@ -22,6 +23,8 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const maxRevision = 4294967294, maxFence = 99999999999999999999n, maxCursor = 18446744073709551615n;
+export const taskInputReceiptReferenceSchema = z.object({ taskId: id.max(36), requestId: id.max(36),
+  expectedRevision: z.number().int().min(1).max(maxRevision), submissionKey: id }).strict();
 const continuableModel = (tool: string) => tool === AI_TEXT_MODEL_STEP_CODE || tool === AI_IMAGE_MODEL_STEP_CODE || tool === AI_AUDIO_MODEL_STEP_CODE;
 
 function requestDigest(row: Omit<AiTaskInputRequest, 'requestHash' | 'createdAt' | 'status' | 'revision'>) {
@@ -162,7 +165,17 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
    * permission substitute is supplied. All mutations remain fail closed. */
   static receiptReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
     const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, true);
-    return Object.freeze({ readSubmission: repository.readSubmission.bind(repository) });
+    return Object.freeze({ readSubmission: repository.readSubmission.bind(repository),
+      readSubmissionReference: repository.readSubmissionReference.bind(repository),
+      resolveSubmissionReference: repository.resolveSubmissionReference.bind(repository) });
+  }
+
+  /** Current questions still require their original source revalidation. This
+   * read-only surface has no plan authorizer or mutation/continuation methods. */
+  static pendingReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, source: AiTaskInputSource, clock?: () => Date) {
+    if (typeof source?.resolve !== 'function') throw unavailable();
+    const repository = new PrismaTaskInputRepository(db, tasks, undefined, source, clock, true);
+    return Object.freeze({ readPending: repository.readPending.bind(repository) });
   }
 
   /** Only the enclosing task-transition transaction may invoke this witness.
@@ -198,7 +211,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return this.transaction(work, true);
   }
   private async task(tx: Tx, taskId: string, access: Access) {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
+    if (!this.receiptOnly) await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
     const task = await tx.aiTask.findFirst({ where: access.where, include: { scope: true } });
     if (!task || task.id !== taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
       || task.audience !== access.audience || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
@@ -206,7 +219,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return task;
   }
   private async run(tx: Tx, taskId: string, scopeId: string, runId: string, access: Access, completed = false) {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
+    if (!this.receiptOnly) await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
     const run = await tx.aiRun.findFirst({ where: { id: runId, scopeId, taskId } });
     if (!run || run.id !== runId || run.scopeId !== scopeId || run.taskId !== taskId
       || run.actorId !== access.actorId || run.actorKind !== access.actorKind || !['QUEUED', 'RUNNING', ...(completed ? ['SUCCEEDED'] : [])].includes(run.status)
@@ -217,12 +230,12 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     if (run.id !== lease.runId || run.taskId !== lease.taskId || run.revision !== lease.revision || run.leaseOwnerId !== lease.holderId
       || run.fencingToken.toFixed(0) !== lease.fencingToken || !run.leaseExpiresAt || run.leaseExpiresAt <= this.clock()) throw conflict();
   }
-  private async facts(tx: Tx, scopeId: string, taskId: string, runId: string, stepId: string, lease?: AiTaskRunnerLease) {
+  private async facts(tx: Tx, scopeId: string, taskId: string, runId: string, stepId: string, lease?: AiTaskRunnerLease, observingCompletion = false) {
     const row = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId, runId } } });
     if (!row || row.scopeId !== scopeId || row.taskId !== taskId || row.runId !== runId) throw unavailable();
     const parsed = aiTaskRunPlanSchema.safeParse(row.payload);
     if (!parsed.success || parsed.data.taskId !== taskId || parsed.data.runId !== runId || requestFingerprint(parsed.data) !== row.planHash) throw denied();
-    if (lease) {
+    if (lease && !observingCompletion) {
       if (!this.plans) throw unavailable();
       const proof = structuredClone(await this.plans.authorize(structuredClone(parsed.data), structuredClone(lease)));
       if (proof?.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion || !Number.isFinite(Date.parse(proof.expiresAt))
@@ -234,6 +247,22 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const index = parsed.data.steps.findIndex(p => step.actionId === `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: access.scope, taskId, registrationRef: p.registrationRef })}`);
     const planned = parsed.data.steps[index];
     if (!planned || planned.toolCode !== step.toolCode || planned.toolVersion !== step.toolVersion) throw denied();
+    if (lease && observingCompletion) {
+      if (!this.plans) throw unavailable();
+      if (this.plans.resolveOriginal) {
+        const original = await this.plans.resolveOriginal({ taskId, registrationRef: planned.registrationRef,
+          expectedTaskRevision: (await this.task(tx, taskId, access)).revision,
+          lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } });
+        if (original.registrationAllowed !== false || original.taskId !== taskId || original.inputRef !== step.inputRef
+          || original.requestFingerprint !== step.requestFingerprint || original.toolCode !== step.toolCode
+          || original.toolVersion !== step.toolVersion || original.registrationRef !== planned.registrationRef
+          || aiTaskAccessFromContext(original.context, taskId, this.clock()).bindingKey !== access.bindingKey) throw denied();
+      } else {
+        const proof = await this.plans.authorize(structuredClone(parsed.data), structuredClone(lease));
+        if (proof.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion
+          || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.clock().getTime()) throw denied();
+      }
+    }
     const artifact = await tx.aiTaskResultArtifact.findUnique({ where: { scopeId_taskId_id: { scopeId, taskId, id: step.resultRef } } });
     if (!artifact || artifact.id !== step.resultRef || artifact.scopeId !== scopeId || artifact.taskId !== taskId || artifact.runId !== runId
       || artifact.stepId !== stepId || artifact.actionId !== step.actionId || artifact.stepFingerprint !== step.requestFingerprint
@@ -289,12 +318,26 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return this.writeTransaction(async tx => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
-      if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== ref.registered.taskRevision) throw conflict();
-      const facts = await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease);
+      if (!['RUNNING', 'WAITING_EXTERNAL'].includes(task.status) || task.cancelRequestedAt !== null
+        || task.revision !== ref.registered.taskRevision) throw conflict();
+      const facts = await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease, true);
       if (ref.registered.runId !== run.id || ref.registered.stepRevision !== facts.step.revision || requestFingerprint(ref.plan) !== requestFingerprint(facts.planned)) throw denied();
       const prior = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_runId_stepId_planHash: {
         scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id, planHash: facts.binding.planHash } } });
-      const requirement = await this.requirement(facts.binding);
+      let requirement;
+      try { requirement = await this.requirement(facts.binding); }
+      catch (error) {
+        // No write has occurred in this transaction. Return an acknowledged
+        // observation so the runner can stop and hand off the original task;
+        // never confuse a source ceiling with an uncertain write timeout.
+        if (!(error instanceof AiTaskInputLimitError)) throw error;
+        await this.access(task.id, 'read_step_terminal', before);
+        return { kind: 'input_limit_reached' as const };
+      }
+      // Reconciliation may cross an already completed prefix while the task
+      // waits for a later unknown effect. A closed source may attest that no
+      // input is needed, but that is not permission to create/resume input.
+      if (task.status !== 'RUNNING' && (prior || requirement.kind !== 'not_required')) throw conflict();
       if (prior) {
         await this.access(task.id, 'request_input', before);
         const contract = this.validateRequest(prior, facts.binding, before);
@@ -310,6 +353,9 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         if ((await this.tasks.resolveAccess(task.id, 'read_step_terminal')).bindingKey !== before.bindingKey) throw denied();
         return null;
       }
+      // An original completion can be observed with execution closed, but
+      // creating another human-input request still needs the live plan gate.
+      await this.facts(tx, task.scopeId, task.id, run.id, ref.registered.stepId, lease);
       await this.access(task.id, 'request_input', before);
       const modelContinuation = facts.planned.operation === 'external_unknown' && continuableModel(facts.planned.toolCode)
         && facts.plan.steps.length === 1;
@@ -321,10 +367,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         const step = steps.find(s => s.actionId === action); return !step || step.runId === run.id && step.status === 'PENDING';
       });
       if (!pending && !modelContinuation) throw unavailable();
-      const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id }, take: 5 });
-      if (charges.length < 3 || charges.length > 4 || new Set(charges.map(c => c.resource)).size !== charges.length
-        || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(r => charges.some(c => c.resource === r))
-        || modelContinuation && (charges.length !== 4 || !charges.some(c => c.resource === 'CALLS' && c.gatewayInvocationId))
+      const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id }, take: 6 });
+      if (!taskStepChargesValid(charges, modelContinuation)
         || charges.some(c => c.status !== 'RECORDED' || c.actionId !== facts.step.actionId || c.stepFingerprint !== facts.step.requestFingerprint
           || c.leaseOwnerId !== facts.artifact.leaseOwnerId || c.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))) throw unavailable();
       this.transition(task, steps, 'waiting_input', 'input_required');
@@ -394,9 +438,8 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       || runs.some(row => row.id !== run.id && row.status !== 'SUCCEEDED')
       || steps.some(row => row.status !== 'SUCCEEDED' || row.effect !== 'NONE' || row.toolCode !== facts.planned.toolCode)) throw unavailable();
     const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: key.scopeId,
-      taskId: key.id, runId: run.id, stepId: facts.step.id }, take: 5 });
-    if (charges.length !== 4 || new Set(charges.map(row => row.resource)).size !== 4
-      || !['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(row => row.resource === resource))
+      taskId: key.id, runId: run.id, stepId: facts.step.id }, take: 6 });
+    if (!taskStepChargesValid(charges, true)
       || charges.some(row => row.status !== 'RECORDED' || row.actionId !== facts.step.actionId
         || row.stepFingerprint !== facts.step.requestFingerprint || row.leaseOwnerId !== facts.artifact.leaseOwnerId
         || row.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))
@@ -415,7 +458,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const before = await this.access(taskId, 'read_metadata');
     return this.transaction(async tx => {
       const task = await this.task(tx, taskId, before);
-      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null) return null;
+      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null) {
+        await this.access(taskId, 'read_metadata', before);
+        return null;
+      }
       const requests = await tx.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId, waitingTaskRevision: task.revision, status: 'PENDING' }, take: 2 });
       if (requests.length !== 1) throw unavailable();
       const request = requests[0], run = await this.run(tx, taskId, task.scopeId, request.runId, before);
@@ -495,25 +541,44 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
 
   /** Exact original answer receipt, never submit/retry or latest-run selection. */
   async readSubmission(value: unknown) {
+    return (await this.observeSubmission(value, false)).observation;
+  }
+  /** Reference-only recovery never returns answers or grants continuation.
+   * The persisted payload/digest is still independently verified below. */
+  async readSubmissionReference(value: unknown) {
+    return (await this.observeSubmission(value, true)).observation;
+  }
+  /** Internal continuation material, not a public answer-reading endpoint.
+   * Resolving it grants no lease/dispatch; the original host must reauthorize. */
+  async resolveSubmissionReference(value: unknown) {
+    const result = await this.observeSubmission(value, true);
+    if (!result.submission || result.observation.state !== 'observed') throw unavailable();
+    return result;
+  }
+  private async observeSubmission(value: unknown, referenceOnly: boolean) {
     const submission = structuredClone(value);
-    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = await this.access(submission.taskId, 'read_metadata');
+    const ref = taskInputReceiptReferenceSchema.safeParse(referenceOnly ? submission : isAiTaskInputSubmissionDraft(submission)
+      ? { taskId: submission.taskId, requestId: submission.requestId, expectedRevision: submission.expectedRevision, submissionKey: submission.submissionKey } : null);
+    if (!ref.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const reference = ref.data;
+    const before = await this.access(reference.taskId, 'read_metadata');
     return this.transaction(async tx => {
-      const task = await this.task(tx, submission.taskId, before);
+      const task = await this.task(tx, reference.taskId, before);
       const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
-        scopeId: task.scopeId, taskId: task.id, id: submission.requestId } } });
-      if (!request || request.id !== submission.requestId) throw unavailable();
+        scopeId: task.scopeId, taskId: task.id, id: reference.requestId } } });
+      if (!request || request.id !== reference.requestId) throw unavailable();
       const parent = await this.run(tx, task.id, task.scopeId, request.runId, before, true);
       const facts = await this.facts(tx, task.scopeId, task.id, parent.id, request.stepId);
       this.validateRequest(request, facts.binding, before);
       await verifyQuestionHistory(tx, request);
       const stored = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_submissionKey: {
-        scopeId: task.scopeId, taskId: task.id, submissionKey: submission.submissionKey } } });
+        scopeId: task.scopeId, taskId: task.id, submissionKey: reference.submissionKey } } });
       if (!stored) {
         await this.access(task.id, 'read_metadata', before);
-        return { state: 'not_observed' as const, retryable: false as const };
+        return { observation: { state: 'not_observed' as const, retryable: false as const }, submission: null };
       }
-      const receipt = this.receipt(request, stored, before, submission);
+      if (reference.expectedRevision !== request.revision - 1 || stored.submissionKey !== reference.submissionKey) throw conflict();
+      const receipt = this.receipt(request, stored, before, referenceOnly ? undefined : submission as AiTaskInputSubmissionDraft);
       const successor = await tx.aiRun.findUnique({ where: { scopeId_taskId_inputReceiptId: {
         scopeId: task.scopeId, taskId: task.id, inputReceiptId: receipt.id } } });
       if (successor && (successor.scopeId !== task.scopeId || successor.taskId !== task.id
@@ -522,9 +587,12 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         || successor.resourceOriginRunId !== (parent.resourceOriginRunId ?? parent.id))) throw denied();
       if (facts.plan.steps.length === 1 && continuableModel(facts.planned.toolCode) && !successor) throw unavailable();
       await this.access(task.id, 'read_metadata', before);
-      return { state: 'observed' as const, retryable: false as const, taskId: task.id, requestId: request.id,
+      return { observation: { state: 'observed' as const, retryable: false as const, taskId: task.id, requestId: request.id,
         receiptId: receipt.id, taskRevision: receipt.consumedTaskRevision!, runId: successor?.id ?? parent.id,
-        execution: 'not_inferred_from_receipt' as const };
+        execution: 'not_inferred_from_receipt' as const }, submission: structuredClone({
+          draftVersion: AI_TASK_INPUT_DRAFT_VERSION, ...reference,
+          answers: receipt.answers as unknown as AiTaskInputSubmissionDraft['answers']
+        }) };
     });
   }
 

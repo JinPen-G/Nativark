@@ -21,8 +21,9 @@ const openingRequest = z.object({ requestKey: key,
 const quoteRequest = z.object({ requestKey: key, candidate: aiQuoteCandidateInputSchema }).strict();
 
 /** Internal application preflight, NOT a public DTO or creation authority.
- * Original-request persistence and scene policy are not available in this
- * baseline. It therefore never manufactures inputRef/revision/creationAllowed,
+ * Original persistence/policy belong to the original-scenes composition. This
+ * service's placeholders are preflight limitations, not an existing task's state.
+ * It therefore never manufactures inputRef/revision/creationAllowed,
  * creates a task, registers a step, or invokes a model. All business reads use
  * the existing current Guard and are revalidated before returning the packet. */
 export class AiBusinessScenePreparationService {

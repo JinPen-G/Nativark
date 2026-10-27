@@ -1,16 +1,15 @@
 import type { PrismaClient } from '@prisma/client';
-import { z } from 'zod';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import type { ModelUsage } from '../model-gateway.ports';
+import { modelUsageSchema, type ModelUsage } from '../model-gateway.ports';
 import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from './budget.ports';
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
-import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
-import { priceGatewayTokens } from './gateway-pricing-evidence';
+import { PrismaGatewayPricingRecords, gatewayPricingInvocationSelect, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
+import { priceGatewayTokens, priceGatewayTokenBound } from './gateway-pricing-evidence';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { quantityAtoms, sameUnit } from './budget-quantity';
 
@@ -18,8 +17,7 @@ const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
   return hash(value);
 };
-const usageSchema = z.object({ inputTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  outputTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict();
+const usageSchema = modelUsageSchema;
 export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayActualUsagePricing {
   private readonly records;
   private readonly bindings;
@@ -38,14 +36,15 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     return { ...current, gateway: context };
   }
   private async evidence(current: Awaited<ReturnType<PrismaGatewayRecordedPricing['current']>>, callId: string) {
-    const invocation = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } } }));
+    const invocation = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } },
+      select: gatewayPricingInvocationSelect }));
     if (!invocation || invocation.callId !== callId || invocation.scopeId !== current.scope.id || invocation.actorId !== current.gateway.actorId
       || !isGatewayConfig(invocation.configuration) || hash(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
     const proof = await this.records.bound(current.scope.id, invocation.id), b = proof.evidence;
     if (b.registrationHash !== invocation.registrationHash || b.intentHash !== invocation.intentHash
       || b.configurationHash !== invocation.configurationHash || b.priceVersion !== invocation.priceVersion
       || b.maxOutputTokens !== invocation.maxOutputTokens) throw new BudgetError('FORBIDDEN');
-    return { invocation, proof, quantity: priceGatewayTokens(proof.price.evidence, b.maxInputTokens, b.maxOutputTokens) };
+    return { invocation, proof, quantity: priceGatewayTokenBound(proof.price.evidence, b.maxInputTokens, b.maxOutputTokens) };
   }
   private async recheck(current: Awaited<ReturnType<PrismaGatewayRecordedPricing['current']>>) {
     const latest = await this.current();
@@ -56,6 +55,11 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     if (!grant.entitled || identity(grant.context) !== identity(current.context) || command.callId !== command.association.requestId
       || !(grant.expiresAt instanceof Date) || grant.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
     const original = await this.evidence(current, command.callId), { invocation, proof, quantity } = original;
+    // Old receipts remain readable/accountable, but cannot admit generation
+    // without proof of the actual adapter serialization's counted material.
+    if (proof.evidence.method === 'provider_count_tokens_receipt'
+      && (!proof.evidence.countRequestHash || command.countRequestHash !== proof.evidence.countRequestHash))
+      throw new BudgetError('FORBIDDEN');
     const now = this.clock().getTime();
     for (const record of [proof.price.evidence, proof.evidence]) {
       if (!Number.isFinite(now) || Date.parse(record.validFrom) > now || Date.parse(record.expiresAt) <= now) throw new BudgetError('UNAVAILABLE');
@@ -131,7 +135,7 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     // This method is called with usage from the original persisted dispatch
     // receipt. Truthful excess must reach the existing settlement/debt logic;
     // never clip it or pretend missing usage merely because the bound failed.
-    const actual = priceGatewayTokens(proof.price.evidence, usage.inputTokens, usage.outputTokens);
+    const actual = priceGatewayTokens(proof.price.evidence, usage.inputTokens, usage.outputTokens, usage.billingDetails);
     const again = await this.evidence(current, record.callId);
     if (again.proof.hash !== proof.hash || again.proof.price.hash !== proof.price.hash) throw new BudgetError('PENDING_RECONCILIATION');
     await this.recheck(current);

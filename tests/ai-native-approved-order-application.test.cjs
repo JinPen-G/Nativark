@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { controlledApprovedOrderHarness } = require('./fixtures/ai-native/approved-order-controlled.cjs');
 const { AI_APPROVAL_APPLICATION_DRAFT_VERSION: draftVersion } = require('../packages/shared/src/ai-approval-application-draft.ts');
 const { approvalApplicationContract, approvalApplicationError } = require('../apps/api/src/modules/ai-native/approval-execution/approval-application-contracts.ts');

@@ -6,7 +6,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
-/** Transaction completed locally; the server did not observe COMMIT's reply. */
+/** The takeover may have committed; its acknowledgement was not observed. */
 export class AiTaskTakeoverCommitUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN' as const;
   readonly retryable = false;
@@ -36,19 +36,23 @@ export class PrismaTaskTakeoverRepository {
     this.access = new AiTaskRepository(db, authority, clock);
   }
 
-  async takeover(value: unknown) {
-    const parsed = command.safeParse(value);
+  async takeover(value: unknown, signal?: AbortSignal) {
+    const active = () => { if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
+    active();
+    const parsed = command.safeParse(structuredClone(value));
     if (!parsed.success || parsed.data.holderId === parsed.data.previousHolderId
       || BigInt(parsed.data.expectedFencingToken) >= 99999999999999999999n) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const input = parsed.data;
     const initial = await this.access.resolveAccess(input.taskId, 'takeover_run');
+    active();
     if (initial.actorKind !== 'USER' || !initial.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    let callbackCompleted = false;
+    let callbackCompleted = false, writeAttempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      const acknowledgement = await this.db.$transaction(async tx => {
         const found = await tx.aiTask.findFirst({ where: initial.where, select: { id: true, scopeId: true } });
         if (!found) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${found.scopeId} AND id = ${input.taskId} FOR UPDATE`);
+        active();
         const task = await tx.aiTask.findFirst({ where: { ...initial.where, scopeId: found.scopeId,
           revision: input.expectedTaskRevision, contractVersion: AI_TASK_DRAFT_VERSION,
           status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'] }
@@ -57,6 +61,8 @@ export class PrismaTaskTakeoverRepository {
         // A plain post-lock SELECT may still use an older REPEATABLE READ
         // snapshot. A conditional no-op UPDATE verifies the current row without
         // inventing a public task revision/event for a lease-only mutation.
+        active();
+        writeAttempted = true;
         const lockedTask = await tx.aiTask.updateMany({ where: { ...initial.where, scopeId: found.scopeId,
           revision: input.expectedTaskRevision, contractVersion: AI_TASK_DRAFT_VERSION,
           status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'] }
@@ -65,6 +71,7 @@ export class PrismaTaskTakeoverRepository {
         const current = await this.access.resolveAccess(input.taskId, 'takeover_run');
         if (current.bindingKey !== initial.bindingKey
           || !await tx.aiTask.findFirst({ where: { ...current.where, scopeId: found.scopeId }, select: { id: true } })) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        active();
         const expiresAt = new Date(current.now.getTime() + input.leaseMs);
         const changed = await tx.aiRun.updateMany({ where: { id: input.runId, taskId: input.taskId, scopeId: found.scopeId,
           revision: input.expectedRunRevision, fencingToken: new Prisma.Decimal(input.expectedFencingToken),
@@ -73,6 +80,7 @@ export class PrismaTaskTakeoverRepository {
         }, data: { revision: { increment: 1 }, fencingToken: { increment: new Prisma.Decimal(1) },
           leaseOwnerId: input.holderId, leaseExpiresAt: expiresAt, authorizedAt: current.authorizedAt } });
         if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        active();
         const reference = receiptCommand.parse(Object.fromEntries(Object.keys(receiptCommand.shape).map(key => [key, input[key as keyof typeof input]])));
         await tx.operationLog.create({ data: { id: receiptId(found.scopeId, current.actorId, reference),
           tenantId: initial.scope.tenantId!, workspaceId: initial.scope.workspaceId,
@@ -87,14 +95,27 @@ export class PrismaTaskTakeoverRepository {
           } } });
         const final = await this.access.resolveAccess(input.taskId, 'takeover_run');
         if (final.bindingKey !== initial.bindingKey || expiresAt <= final.now) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        active();
         callbackCompleted = true;
         return { taskId: input.taskId, runId: input.runId, holderId: input.holderId,
           revision: input.expectedRunRevision + 1, fencingToken: (BigInt(input.expectedFencingToken) + 1n).toString(),
           expiresAt: expiresAt.toISOString(), purpose: 'recovery_only' as const };
-      });
+      }, { maxWait: 2500, timeout: 5000 });
+      // The committed fencing mutation is not undone by revocation while the
+      // commit acknowledgement was in flight. Do not disclose an execution
+      // acknowledgement under stale authority, nor label it uncommitted.
+      const after = await this.access.resolveAccess(input.taskId, 'takeover_run');
+      if (after.bindingKey !== initial.bindingKey || Date.parse(acknowledgement.expiresAt) <= after.now.getTime()) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      return acknowledgement;
     } catch (error) {
+      // Classify the commit boundary before trusting an error's public code.
+      // Even an apparent CAS/authorization error can be a lost COMMIT reply.
+      if (callbackCompleted || writeAttempted && !(error instanceof AiTaskRepositoryError)) {
+        throw new AiTaskTakeoverCommitUnknownError();
+      }
       if (error instanceof AiTaskRepositoryError) throw error;
-      if (callbackCompleted) throw new AiTaskTakeoverCommitUnknownError();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
@@ -107,7 +128,9 @@ export class PrismaTaskTakeoverRepository {
       throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     }
     if (typeof this.db.operationLog?.findFirst !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const input = parsed.data, before = await this.access.resolveAccess(input.taskId, 'takeover_run');
+    // Historical observation requires current result-read permission, not the
+    // authority to fence a worker again. Owner/scope and exact generation still bind.
+    const input = parsed.data, before = await this.access.resolveAccess(input.taskId, 'read_step_terminal');
     if (before.actorKind !== 'USER' || !before.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const task = structuredClone(await this.db.aiTask.findFirst({ where: before.where, select: { id: true, scopeId: true } }));
     if (!task || task.id !== input.taskId) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -137,7 +160,7 @@ export class PrismaTaskTakeoverRepository {
         throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       }
     }
-    const after = await this.access.resolveAccess(input.taskId, 'takeover_run');
+    const after = await this.access.resolveAccess(input.taskId, 'read_step_terminal');
     const latest = structuredClone(await this.db.operationLog.findFirst({ where }));
     if (after.bindingKey !== before.bindingKey || !await this.db.aiTask.findFirst({ where: after.where, select: { id: true } })) {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -152,7 +175,7 @@ export class PrismaTaskTakeoverRepository {
       || currentRun.revision !== observedRunRevision || !currentRun.fencingToken.equals(observedFence)) {
       throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
-    if ((await this.access.resolveAccess(input.taskId, 'takeover_run')).bindingKey !== before.bindingKey) {
+    if ((await this.access.resolveAccess(input.taskId, 'read_step_terminal')).bindingKey !== before.bindingKey) {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     }
     return Object.freeze({ taskId: input.taskId, runId: input.runId, status: row ? 'observed' as const : 'not_observed' as const,

@@ -20,6 +20,9 @@ export interface UpdateAiProviderProfile {
   expectedRevision: number; enabled?: boolean; model?: string; credentialRef?: string;
   allowedCapabilities?: readonly AiProfileCapability[]; disabledAt?: Date | null;
 }
+/** Shared ceiling for routing/probe discovery. Overflow must fail closed,
+ * never silently drop a higher-priority configured profile. */
+export const MAX_AI_PROVIDER_PROFILES = 100;
 export interface ProviderProfileRepository {
   list(scope: AiProfileScope): Promise<AiProviderProfileRecord[]>;
   get(scope: AiProfileScope, profileKey: string): Promise<AiProviderProfileRecord | null>;

@@ -20,7 +20,8 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
   protected override readonly modelStep = true;
   constructor(private readonly probeDb: Db, authority: AiTaskRepositoryAuthority, plans: AiTaskPlanEvidenceAuthority,
     private readonly financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
-    private readonly priceVersion: string, private readonly clock: () => Date = () => new Date()) {
+    private readonly priceVersion: string, private readonly clock: () => Date = () => new Date(),
+    private readonly scopeKind: 'WORKSPACE' | 'PLATFORM' = 'WORKSPACE') {
     super(probeDb, authority, plans, clock);
     if (typeof financial?.readDispatch !== 'function' || !priceVersion
       || !['aiTaskActionInput', 'aiGatewayInvocation', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission']
@@ -32,24 +33,38 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
   }
   protected override async additionalEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext) {
-    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
+    const owner = this.scopeKind === 'PLATFORM'
+      ? context.actor.kind === 'saas_admin' && context.scope.kind === 'platform' && context.audience === 'operator'
+        ? { actorId: context.actor.userId, tenantId: null, workspaceId: null } : null
+      : context.actor.kind === 'user' && context.scope.kind === 'workspace' && ['operator', 'staff'].includes(context.audience)
+        ? { actorId: context.actor.userId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId } : null;
+    if (!owner || !step.inputRef) throw denied();
     const key = { scopeId: step.scopeId, taskId: step.taskId, runId: step.runId };
     const saved = await this.probeDb.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });
     if (!saved || saved.id !== step.inputRef || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
       || saved.toolCode !== TEXT_CAPABILITY_PROBE_TOOL || saved.toolVersion !== AI_TOOL_DRAFT_VERSION
       || saved.fingerprint !== step.requestFingerprint || !(saved.expiresAt instanceof Date)
-      || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.clock()) throw denied();
+      || !Number.isFinite(saved.expiresAt.getTime()) || !artifact && saved.expiresAt <= this.clock()) throw denied();
     const command = textProbeCommandSchema.parse(saved.payload);
     const prepared = textProbeIntent(command.operationId, step.scopeId, textProbeCapability(command));
     if (requestFingerprint(command) !== step.requestFingerprint) throw denied();
     if (!artifact) return { inputRef: saved.id, inputHash: saved.fingerprint };
-    if (charges.length !== 4 || charges.filter(c => c.resource === 'CALLS').length !== 1) throw denied();
-    const call = charges.find(c => c.resource === 'CALLS')!;
-    const invocation = await this.probeDb.aiGatewayInvocation.findFirst({ where: { ...key, id: call.gatewayInvocationId!, stepId: step.id } });
-    if (!invocation || invocation.id !== call.gatewayInvocationId || invocation.scopeId !== key.scopeId
+    const startedBeforeCalls = artifact.outcome === 'RUNNING' && !artifact.completeMeasurement && charges.length === 3
+      && charges.every(c => c.gatewayInvocationId === null && c.resource !== 'CALLS');
+    if (!startedBeforeCalls && (charges.length !== 4 || charges.filter(c => c.resource === 'CALLS').length !== 1)) throw denied();
+    const call = charges.find(c => c.resource === 'CALLS');
+    // A persisted registration without an acknowledged CALLS row is still
+    // uncertain. Observe its exact binding; never register or dispatch again.
+    const registered = startedBeforeCalls ? await this.probeDb.aiGatewayInvocation.findMany({
+      where: { ...key, stepId: step.id }, take: 2 }) : [];
+    if (registered.length > 1) throw denied();
+    const invocation = startedBeforeCalls ? registered[0]
+      : await this.probeDb.aiGatewayInvocation.findFirst({ where: { ...key, id: call!.gatewayInvocationId!, stepId: step.id } });
+    if (startedBeforeCalls && !invocation) return { inputRef: saved.id, inputHash: saved.fingerprint, unresolved: true };
+    if (!invocation || !startedBeforeCalls && invocation.id !== call!.gatewayInvocationId || invocation.scopeId !== key.scopeId
       || invocation.taskId !== key.taskId || invocation.runId !== key.runId || invocation.stepId !== step.id
       || invocation.actionId !== step.actionId || invocation.stepFingerprint !== step.requestFingerprint
-      || invocation.actorId !== context.actor.userId || invocation.callId !== prepared.intent.requestId
+      || invocation.actorId !== owner.actorId || invocation.callId !== prepared.intent.requestId
       || invocation.intentHash !== prepared.intentHash || invocation.sceneCode !== TEXT_PROBE_SCENE
       || invocation.maxOutputTokens !== 32 || invocation.mode !== textProbeMode(command) || invocation.priceVersion !== this.priceVersion
       || !isGatewayConfig(invocation.configuration) || requestFingerprint(invocation.configuration) !== invocation.configurationHash
@@ -70,7 +85,7 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
     if (artifact.outcome === 'FAILED' && result.status !== 'failed') throw denied();
     const receipt = await this.probeDb.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, invocationId: invocation.id } });
     if (!receipt || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId || receipt.invocationId !== invocation.id
-      || receipt.tenantId !== context.scope.tenantId || receipt.workspaceId !== context.scope.workspaceId
+      || receipt.scopeKind !== this.scopeKind || receipt.tenantId !== owner.tenantId || receipt.workspaceId !== owner.workspaceId
       || receipt.state !== 'dispatched' || !receipt.dispatchToken) throw unavailable();
     const admission = await this.probeDb.aiInvocationAdmission.findFirst({ where: { id: receipt.admissionId,
       tenantId: receipt.tenantId, workspaceId: receipt.workspaceId, callId: invocation.callId,
@@ -80,7 +95,7 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
       || financial.state !== 'dispatched' || financial.dispatchToken !== receipt.dispatchToken
       || financial.reservationId !== receipt.reservationId || financial.requestId !== invocation.callId
       || financial.callId !== invocation.callId || financial.actorId !== invocation.actorId
-      || financial.scopeKey !== `WORKSPACE:${key.scopeId}` || financial.runId !== key.runId
+      || financial.scopeKey !== `${this.scopeKind}:${key.scopeId}` || financial.runId !== key.runId
       || financial.stepId !== step.id || financial.actionId !== step.actionId || financial.sceneCode !== TEXT_PROBE_SCENE
       || financial.priceVersion !== invocation.priceVersion || financial.configurationHash !== invocation.configurationHash) throw denied();
     return { inputRef: saved.id, inputHash: saved.fingerprint, invocationId: invocation.id,

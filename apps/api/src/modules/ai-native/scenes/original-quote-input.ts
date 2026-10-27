@@ -61,15 +61,23 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
     if (fulfillment !== undefined) {
       const mode = RENTAL_FULFILLMENT_MODES.find(value => value === fulfillment);
       if (!mode) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      // Only a mode change releases the delivery address. The reconfirmation
+      // design re-offers the current choices so a repeated same-mode answer
+      // re-binds the round; clearing it there would make a delivery candidate
+      // lose its already-confirmed address and never converge with it.
+      if (candidate.fulfillmentMode !== mode) delete candidate.deliveryAddressId;
       candidate.fulfillmentMode = mode;
-      delete candidate.deliveryAddressId;
     }
     for (const [field, property, oldName] of [['customer_selection', 'customerId', 'customerName'],
       ['pickup_location', 'locationId', 'locationName'], ['return_location', 'returnLocationId', 'returnLocationName']] as const) {
       const answer = answers.get(field);
       if (typeof answer === 'string') {
+        // Only a customer change releases the delivery address (it belongs to
+        // the selected customer); a repeated same-customer reconfirmation must
+        // keep the already-confirmed address.
+        const customerChanged = field === 'customer_selection' && candidate[property] !== answer;
         candidate[property] = answer; delete candidate[oldName];
-        if (field === 'customer_selection') delete candidate.deliveryAddressId;
+        if (customerChanged) delete candidate.deliveryAddressId;
       }
     }
     const deliveryAddress = answers.get('delivery_address_selection');
@@ -87,9 +95,12 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
 
 /** Existing shared field vocabulary only. Unsupported multi-line edits,
  * qualification changes remain the original human flow. Fulfillment choices
- * come exclusively from the current authorized Core configuration. */
+ * come exclusively from the current authorized Core configuration. When a
+ * round maps more fields than the eight-answer contract bound, fields not
+ * yet offered in previous rounds are asked first so bounded consecutive
+ * rounds converge instead of deterministically dropping the same tail. */
 export function originalQuoteAnswerContract(candidate: ReturnType<typeof applyOriginalQuoteAnswers>, preparation: unknown,
-  fallbackLabel: string): AiTaskInputContractDraft {
+  fallbackLabel: string, alreadyOffered?: ReadonlySet<string>): AiTaskInputContractDraft {
   const result = preparation as { selectionRevision?: string; clarifications?: Array<{
     field: string; candidates?: Array<{ id: string; label: string }>
   }> };
@@ -124,11 +135,19 @@ export function originalQuoteAnswerContract(candidate: ReturnType<typeof applyOr
       label: '明确商品数量', minimum: 1, maximum: AI_QUOTE_CANDIDATE_LIMITS.quantity });
   }
   const unique = fields.filter((field, index) => fields.findIndex(row => row.fieldId === field.fieldId) === index);
+  // Bounded consecutive rounds: when the cap forces a choice, fields the
+  // previous rounds have not offered yet are asked before re-offered ones, so
+  // every required confirmation is eventually asked instead of the same
+  // deterministic prefix repeating forever. Already-offered fields keep their
+  // relative order (a re-answer still re-binds the round).
+  const ordered = alreadyOffered && alreadyOffered.size
+    ? [...unique].sort((left, right) => (alreadyOffered.has(left.fieldId) ? 1 : 0) - (alreadyOffered.has(right.fieldId) ? 1 : 0))
+    : unique;
   const contract: AiTaskInputContractDraft = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
     code: unique.length ? 'original_quote_parameters' : 'original_quote_context', version: result.selectionRevision ?? '1',
     // Keep the original eight-answer bound. Business choices take priority over
     // optional free text; unsupported extra fields never use a JSON text escape.
-    fields: unique.length >= 8 ? unique.slice(0, 8) : [...unique, { fieldId: 'clarification_text', kind: 'text', required: unique.length === 0, maxLength: 2048, label: fallbackLabel }] };
+    fields: ordered.length >= 8 ? ordered.slice(0, 8) : [...ordered, { fieldId: 'clarification_text', kind: 'text', required: ordered.length === 0, maxLength: 2048, label: fallbackLabel }] };
   if (!isAiTaskInputContractDraft(contract)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   return contract;
 }

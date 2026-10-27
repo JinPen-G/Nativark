@@ -1,16 +1,18 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, AI_ERROR_CODES, isAiTaskInputSubmissionDraft, type AiErrorCode } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, AI_ERROR_CODES, isAiTaskInputSubmissionDraft, isAiTaskInputSavedReceiptDraft,
+  type AiErrorCode, type AiTaskInputSavedReceiptDraft } from '@rental-os/shared';
 import type { AiTaskEventRepository } from '../ai-task-event.repository';
 import type { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import type { AiTaskRecoverySnapshotSource } from './task-recovery-snapshot.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
-import type { AiTaskRunner, AiTaskRunnerError, AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskRunner, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClock, AiTaskRunnerOutcome } from './ai-task-runner.ports';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
+import { PrismaTaskConfirmationHistoryReader } from './prisma-task-confirmation-history.reader';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -22,6 +24,15 @@ export type AiTaskApplicationStartResult =
   | { kind: 'run_outcome'; outcome: AiTaskRunnerOutcome };
 type ContinuationErrorCode = AiErrorCode | AiTaskRepositoryError['code'] | AiTaskRunnerError['code'];
 const continuationErrorCodes: readonly ContinuationErrorCode[] = [...AI_ERROR_CODES, 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RUN_LIMIT'];
+/** A committed answer reply must name the exact submitted task/question. Take
+ * an owned snapshot before any later authorization await can mutate it. */
+export function snapshotAiTaskInputSavedReceipt(value: unknown, expected: { taskId: string; requestId: string }): AiTaskInputSavedReceiptDraft {
+  try {
+    const receipt = structuredClone(value);
+    if (isAiTaskInputSavedReceiptDraft(receipt) && receipt.taskId === expected.taskId && receipt.requestId === expected.requestId) return receipt;
+  } catch { /* A reply failure does not prove that the answer was not saved. */ }
+  throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+}
 export type AiTaskApplicationResumeResult = {
   receipt: Awaited<ReturnType<PrismaTaskInputRepository['submit']>>;
   continuation: AiTaskApplicationStartResult | { kind: 'not_started'; reason: 'receipt_replayed' } | { kind: 'unavailable'; errorCode: ContinuationErrorCode };
@@ -36,7 +47,21 @@ type Dependencies = {
   recovery: AiTaskRecoverySnapshotSource;
   events: Pick<AiTaskEventRepository, 'readPage'>;
   host: AiTaskApplicationHost;
+  clock?: AiTaskRunnerClock;
 };
+
+/** Bound application preflight too, not just the runner it eventually calls.
+ * A write timeout is unknown; a late read cannot proceed into a new dispatch. */
+export async function waitForTaskApplicationDependency<T>(operation: () => Promise<T>, write: boolean, signal?: AbortSignal, clock?: AiTaskRunnerClock): Promise<T> {
+  try { return await callAiTaskRunnerDependency(operation, 5000, 'task_application', signal, clock); }
+  catch (error) {
+    if (error instanceof AiTaskRunnerError && (error.code === 'AI_RESULT_UNKNOWN' || error.code === 'AI_RUN_LIMIT')) {
+      if (write) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    throw error;
+  }
+}
 
 export class PrismaTaskApplication {
   private readonly host: AiTaskApplicationHost;
@@ -53,9 +78,13 @@ export class PrismaTaskApplication {
     this.prepare = deps.prepare;
   }
 
-  inspect(value: unknown) { return this.deps.recovery.read(value); }
+  private wait<T>(operation: () => Promise<T>, write = false, signal?: AbortSignal) {
+    return waitForTaskApplicationDependency(operation, write, signal, this.deps.clock);
+  }
 
-  readEvents(value: unknown) { return this.deps.events.readPage(value); }
+  inspect(value: unknown) { return this.wait(() => this.deps.recovery.read(value)); }
+
+  readEvents(value: unknown) { return this.wait(() => this.deps.events.readPage(value)); }
 
   /** Read-only discovery of the original durable wait. This grants neither a
    * lease nor approval; continuation still validates the full original proof. */
@@ -63,13 +92,27 @@ export class PrismaTaskApplication {
     return PrismaTaskApplication.readConfirmation(this.deps, value);
   }
 
+  readConfirmationHistory(value: unknown) {
+    return PrismaTaskApplication.readConfirmationHistory(this.deps, value);
+  }
+
+  /** Original receipts remain observations, not a replacement for the live
+   * checkpoint/approval checks required by continueConfirmation. */
+  static readConfirmationHistory(dependencies: Pick<Dependencies, 'db' | 'tasks' | 'clock'>, value: unknown) {
+    const command = structuredClone(value);
+    return waitForTaskApplicationDependency(
+      () => new PrismaTaskConfirmationHistoryReader(dependencies.db, dependencies.tasks).read(command),
+      false, undefined, dependencies.clock);
+  }
+
   /** The same durable wait reader without constructing an execution host. */
-  static async readConfirmation(dependencies: Pick<Dependencies, 'db' | 'tasks'>, value: unknown) {
+  static async readConfirmation(dependencies: Pick<Dependencies, 'db' | 'tasks' | 'clock'>, value: unknown) {
     const parsed = requestSchema.extend({ stepId: id.max(36) }).safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const input = parsed.data;
-    const before = structuredClone(await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
-    const result = await dependencies.db.$transaction(async tx => {
+    const read = <T>(operation: () => Promise<T>) => waitForTaskApplicationDependency(operation, false, undefined, dependencies.clock);
+    const before = structuredClone(await read(() => dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal')));
+    const result = await read(() => dependencies.db.$transaction(async tx => {
       const task = await tx.aiTask.findFirst({ where: before.where });
       if (!task || task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION
         || task.status !== 'WAITING_CONFIRMATION' || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -97,14 +140,14 @@ export class PrismaTaskApplication {
         || BigInt(Buffer.byteLength(JSON.stringify(receipt.payload), 'utf8')) !== receipt.outputBytes) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return { ...input, taskRevision: revision.parse(task.revision), checkpointRef: receipt.id,
         proposal: structuredClone(payload.proposal), execution: 'not_attested' as const };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
-    const after = await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }));
+    const after = await read(() => dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
     if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const current = await dependencies.db.$transaction(tx => tx.aiTask.findFirst({ where: after.where,
-      select: { id: true, revision: true, status: true, cancelRequestedAt: true } }));
+    const current = await read(() => dependencies.db.$transaction(tx => tx.aiTask.findFirst({ where: after.where,
+      select: { id: true, revision: true, status: true, cancelRequestedAt: true } })));
     if (!current || current.id !== input.taskId || current.revision !== result.taskRevision
       || current.status !== 'WAITING_CONFIRMATION' || current.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    const final = await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    const final = await read(() => dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
     if (final.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return result;
   }
@@ -112,17 +155,19 @@ export class PrismaTaskApplication {
   readInput(value: unknown) {
     const parsed = requestSchema.pick({ taskId: true }).safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    return this.deps.inputs.readPending(parsed.data.taskId);
+    return this.wait(() => this.deps.inputs.readPending(parsed.data.taskId));
   }
 
   // Host abort suppresses continuation, not the explicitly submitted answer.
   async resume(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationResumeResult> {
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const before = structuredClone(await this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata'));
-    const receipt = await this.deps.inputs.submit(submission);
+    const before = structuredClone(await this.wait(() => this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata')));
+    const receipt = snapshotAiTaskInputSavedReceipt(await this.wait(() => this.deps.inputs.submit(submission), true), submission);
+    // The answer may already be committed. An invalid/cross-task reply cannot
+    // authorize continuation or be treated as an unsubmitted answer to retry.
     const verifyReader = async () => {
-      const current = await this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata');
+      const current = await this.wait(() => this.deps.tasks.resolveAccess(submission.taskId, 'read_metadata'), true);
       if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     };
     await verifyReader();
@@ -130,7 +175,7 @@ export class PrismaTaskApplication {
     if (signal?.aborted) return { receipt, continuation: { kind: 'not_started', reason: 'host_aborted' } };
     let continuation: AiTaskApplicationResumeResult['continuation'];
     try {
-      const runId = await this.deps.db.$transaction(async tx => {
+      const runId = await this.wait(() => this.deps.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: before.where, select: { id: true, scopeId: true } });
         if (!task || task.id !== submission.taskId) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const key = { scopeId: task.scopeId, taskId: task.id };
@@ -148,7 +193,7 @@ export class PrismaTaskApplication {
         if (successor && (successor.scopeId !== key.scopeId || successor.taskId !== key.taskId || successor.inputReceiptId !== saved.id
           || successor.actorKind !== before.actorKind || successor.actorId !== before.actorId)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return id.parse(successor?.id ?? request.runId);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }), false, signal);
       await verifyReader();
       continuation = await this.start({ taskId: receipt.taskId, runId }, signal);
     } catch (error) {
@@ -164,10 +209,10 @@ export class PrismaTaskApplication {
     const parsed = requestSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
-    const input = parsed.data, before = structuredClone(await this.deps.tasks.resolveAccess(input.taskId, 'claim_recovery_run'));
+    const input = parsed.data, before = structuredClone(await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'claim_recovery_run'), false, signal));
     let lease;
     try {
-      lease = await this.deps.db.$transaction(async tx => {
+      lease = await this.wait(() => this.deps.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: before.where, select: { id: true, scopeId: true } });
         if (!task || task.id !== input.taskId) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const run = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: input.runId },
@@ -178,13 +223,14 @@ export class PrismaTaskApplication {
         if (!/^[1-9][0-9]{0,19}$/u.test(fencingToken) || !run.fencingToken.equals(fencingToken)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         return { ...input, holderId: this.host.holderId, revision: revision.parse(run.revision), fencingToken,
           expiresAt: run.leaseExpiresAt.toISOString(), purpose: 'recovery_only' as const };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }), false, signal);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
-    const current = await this.deps.tasks.resolveAccess(input.taskId, 'claim_recovery_run');
+    const current = await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'claim_recovery_run'), false, signal);
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (!lease) return { kind: 'not_started', reason: 'recovery_lease_unavailable' };
     return { kind: 'run_outcome', outcome: await this.deps.runner.recover(lease, signal) };
   }
@@ -194,8 +240,8 @@ export class PrismaTaskApplication {
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (typeof this.deps.runner.continueConfirmation !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const input = parsed.data, before = await this.deps.tasks.resolveAccess(input.taskId, 'transition_task');
-    const candidate = await this.deps.db.$transaction(async tx => {
+    const input = parsed.data, before = structuredClone(await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'transition_task'), false, signal));
+    const candidate = await this.wait(() => this.deps.db.$transaction(async tx => {
       const task = await tx.aiTask.findFirst({ where: before.where });
       if (!task || task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       if (task.status !== 'WAITING_CONFIRMATION' || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -214,9 +260,10 @@ export class PrismaTaskApplication {
       return { taskId: task.id, stepId: step.id, expectedTaskRevision: revision.parse(task.revision),
         expectedStepRevision: revision.parse(step.revision), checkpointRef: receipt.id,
         lease: { taskId: task.id, runId: run.id, holderId: this.host.holderId, revision: revision.parse(run.revision), fencingToken, expiresAt: run.leaseExpiresAt.toISOString() } };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
-    const current = await this.deps.tasks.resolveAccess(input.taskId, 'transition_task');
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }), false, signal);
+    const current = await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'transition_task'), false, signal);
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (!candidate) return { kind: 'not_started', reason: 'confirmation_lease_unavailable' };
     return { kind: 'run_outcome', outcome: await this.deps.runner.continueConfirmation(candidate, signal) };
   }
@@ -225,10 +272,28 @@ export class PrismaTaskApplication {
     const parsed = requestSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
-    const input = parsed.data, before = structuredClone(await this.deps.tasks.resolveAccess(input.taskId, 'claim_run'));
+    let candidate;
+    try { candidate = await this.startCandidate(parsed.data, signal); }
+    catch (error) {
+      // Preflight is observation only. After delegation the same error cannot
+      // be reported as not_started: the runner may already own durable work.
+      if (signal?.aborted && error instanceof AiTaskRepositoryError && error.code === 'AI_RESOURCE_UNAVAILABLE') {
+        return { kind: 'not_started', reason: 'host_aborted' };
+      }
+      throw error;
+    }
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
+    if (candidate.kind === 'not_started') return candidate;
+    return { kind: 'run_outcome', outcome: this.prepare
+      ? await this.deps.runner.runPrepared!(candidate.claim, this.prepare, signal)
+      : await this.deps.runner.run(candidate.claim, signal) };
+  }
+
+  private async startCandidate(input: z.infer<typeof requestSchema>, signal?: AbortSignal) {
+    const before = structuredClone(await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'claim_run'), false, signal));
     let candidate;
     try {
-      candidate = await this.deps.db.$transaction(async tx => {
+      candidate = await this.wait(() => this.deps.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: before.where,
           select: { id: true, scopeId: true, revision: true, status: true, cancelRequestedAt: true, contractVersion: true } });
         if (!task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -261,18 +326,15 @@ export class PrismaTaskApplication {
         }
         return { kind: 'candidate', claim: { ...input, ...this.host, expectedTaskRevision: revision.parse(task.revision),
           expectedRunRevision: revision.parse(run.revision), expectedFencingToken: fencingToken } } as const;
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }), false, signal);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
-    const current = await this.deps.tasks.resolveAccess(input.taskId, 'claim_run');
+    const current = await this.wait(() => this.deps.tasks.resolveAccess(input.taskId, 'claim_run'), false, signal);
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
-    if (candidate.kind === 'not_started') return candidate;
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     // The read is not a lease: the original runner still claims with current authorization and CAS.
-    return { kind: 'run_outcome', outcome: this.prepare
-      ? await this.deps.runner.runPrepared!(candidate.claim, this.prepare, signal)
-      : await this.deps.runner.run(candidate.claim, signal) };
+    return candidate;
   }
 }

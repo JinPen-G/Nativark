@@ -5,7 +5,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 import { z } from 'zod';
-import { AI_QUOTE_CANDIDATE_LIMITS } from './quote-candidate-preparation.service';
+import { AI_QUOTE_CANDIDATE_LIMITS, aiQuoteCandidateInputSchema } from './quote-candidate-preparation.service';
 import type { AiQuoteCoreContextSource } from '../quote-preview.service';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 
@@ -118,6 +118,32 @@ export class AiQuoteBusinessPreparationService {
         orderCreated: false as const, approvalGranted: false as const } };
   }
 
+  /** Internal persisted-answer consumer. Answering a question may change the
+   * candidate fingerprint, so its old choice revision cannot confirm the final
+   * request. Only a revision-only block may be presented for a NEW explicit
+   * review; missing business fields/ambiguity remain blocked. Nothing is saved
+   * and the original answer/candidate is never rewritten with this revision. */
+  async reviewAnsweredParameters(value: unknown) {
+    const snapshot = aiQuoteCandidateInputSchema.parse(structuredClone(value));
+    const observed = await this.candidates.prepare(snapshot);
+    const revisionOnly = observed.status === 'missing_input' && observed.missingFields?.length === 1
+      && observed.missingFields[0] === 'selectionRevision' && !observed.ambiguousFields?.length
+      && /^[a-f0-9]{64}$/u.test(observed.selectionRevision ?? '');
+    const reviewCandidate = revisionOnly ? { ...snapshot, selectionRevision: observed.selectionRevision } : snapshot;
+    const preparation = await this.prepareUnified(reviewCandidate);
+    const sources = await this.inputSources(reviewCandidate);
+    const first = preparation as unknown as Record<string, unknown>, second = sources as unknown as Record<string, unknown>;
+    if (first.selectionRevision !== second.selectionRevision
+      || (first.request !== undefined && (second.status !== 'prepared_input_sources'
+        || requestFingerprint(first.request) !== requestFingerprint(second.request)))) throw new ModelGatewayError('CONFIG_INVALID');
+    if (first.request === undefined) {
+      const basis = (row: Record<string, unknown>) => ({ status: row.status, selectionRevision: row.selectionRevision,
+        missingFields: row.missingFields, ambiguousFields: row.ambiguousFields });
+      if (requestFingerprint(basis(first)) !== requestFingerprint(basis(second))) throw new ModelGatewayError('CONFIG_INVALID');
+    }
+    return { preparation, sources, humanConfirmation: 'required_before_preview' as const };
+  }
+
   /** Field provenance for the formal request. No inferred/model value is
    * labelled as user confirmation; the formal Core resolver remains the only
    * source allowed to normalize the final request. */
@@ -174,13 +200,6 @@ export class AiQuoteBusinessPreparationService {
       validity: { previous: a.expiresAt, current: b.expiresAt }, approvalReuse: 'forbidden_new_quote_requires_new_confirmation' as const };
   }
 
-  /** No formal order-creation handoff is owned by this lane. */
-  async commitHandoff() {
-    return { status: 'unavailable' as const, reason: 'formal_order_commit_input_port_not_exposed' as const,
-      required: ['original_request_reference', 'quote_id', 'selection_revision', 'source_versions'],
-      sideEffects: 'not_attempted' as const, orderApproval: 'not_granted' as const };
-  }
-
   async prepareInput(value: unknown, modelAvailability: 'not_requested' | 'unavailable' = 'not_requested') {
     if (!['not_requested', 'unavailable'].includes(modelAvailability)) throw new ModelGatewayError('INVALID_REQUEST');
     const facts = await this.prepare(value);
@@ -189,13 +208,5 @@ export class AiQuoteBusinessPreparationService {
       model: { status: modelAvailability, answer: 'not_generated' as const },
       gaps: ['human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'],
       execution: 'not_attempted' as const });
-  }
-
-  /** There is no original-operation key on Core.createQuote/getQuote. Never
-   * use a latest-quote lookup or retry a create to manufacture reconciliation. */
-  async reconciliationAvailability() {
-    return this.authority.withRead('quote_context', {}, async () => ({ status: 'unavailable' as const,
-      nextAction: 'reconcile' as const, retryable: false as const,
-      missingDependency: 'Core quote lookup by original operation key + request fingerprint + owner/scope' as const }));
   }
 }

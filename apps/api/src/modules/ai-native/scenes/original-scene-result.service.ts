@@ -4,7 +4,7 @@ import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
-import { parseTaskModelInput, TASK_TEXT_MODEL_TOOL, taskModelFingerprint, taskModelIdentity, taskModelPolicy } from '../model-input/task-model-input';
+import { parseTaskModelInput, TASK_TEXT_MODEL_TOOL, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
 import type { GatewayTextIntentBinding, GatewayTextIntentPolicy } from '../gateway-intent';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
@@ -12,9 +12,10 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import type { composeAiOriginalScenes } from './original-scenes.composition';
 import { continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledge, type AiOriginalSceneKnowledgeSnapshot } from './original-scene-knowledge';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
 const commandSchema = z.object({ original: originalRequestReferenceSchema,
   resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 const sourceSchema = z.object({ resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
@@ -144,11 +145,18 @@ export class AiOriginalSceneResultService {
     if (task.state !== 'observed') throw unavailable();
     const access = structuredClone(await this.tasks.resolveAccess(task.taskId, 'read_step_terminal'));
     const result = await this.results.read({ taskId: task.taskId, resultId: command.resultId });
+    const originalBinding = async (tx: Prisma.TransactionClient, row: Prisma.AiTaskGetPayload<{}>) => {
+      const saved = await readOriginalTaskModelProvenance(tx, row);
+      if (saved.inputRef !== command.original.inputRef || saved.contentHash !== original.receipt.contentHash
+        || saved.revision !== original.receipt.revision) throw denied();
+      return saved.authorizationHash;
+    };
     const provenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: access.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` });
+      return { ...await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+        originalAuthorizationHash: await originalBinding(tx, row) };
     });
     const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
       runId: result.runId, resultId: result.resultId,
@@ -181,7 +189,10 @@ export class AiOriginalSceneResultService {
           || invocation.stepFingerprint !== fingerprint || stored.fingerprint !== fingerprint || step.requestFingerprint !== fingerprint
           || invocation.intentHash !== fingerprint || invocation.mode !== input.mode || invocation.priceVersion !== input.priceVersion
           || invocation.configurationHash !== requestFingerprint(input.configuration)
-          || input.identityHash !== taskModelIdentity(original.context)) throw denied();
+          // Prove the immutable dispatch identity against its original request,
+          // not today's execute permissions. Current read rights and facts are
+          // independently checked throughout this observation.
+          || input.identityHash !== provenance.originalAuthorizationHash) throw denied();
         const gateway = result.payload;
         if (!isGatewayResult(gateway) || gateway.status !== 'completed' || gateway.usage.kind !== 'reported'
           || gateway.requestId !== invocation.callId || requestFingerprint(gateway.actual) !== invocation.configurationHash
@@ -208,11 +219,18 @@ export class AiOriginalSceneResultService {
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
       // old diagnosis after configuration/coverage or current permissions change.
+      // Observation must not require an unexpired request or new execution
+      // grant. Historical ownership and current business read access are
+      // independently rechecked before and after this read.
       const isOrder = original.request.sceneCode === 'order_explanation';
       const current = original.request.sceneCode === 'order_explanation'
         ? await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
           .prepare({ question: original.request.input.question })
-        : (await this.scenes.prepareTaskMaterial(command.original)).material;
+        : original.request.sceneCode === 'opening_diagnosis'
+          ? (await this.scenes.tools.scenes.prepareOpeningDiagnosis({ requestKey: original.receipt.requestKey,
+            ...original.request.input })).payload.materials
+          : (await this.scenes.tools.scenes.prepareQuoteClarification({ requestKey: original.receipt.requestKey,
+            ...original.request.input })).payload.materials;
       const fingerprint = isOrder ? orderFactsFingerprint
         : original.request.sceneCode === 'opening_diagnosis' ? openingFactsFingerprint : quoteFactsFingerprint;
       if (frozen.knowledge) {
@@ -239,8 +257,9 @@ export class AiOriginalSceneResultService {
     const finalProvenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: finalAccess.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return readTaskModelRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` });
+      return { ...await readTaskModelRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+        originalAuthorizationHash: await originalBinding(tx, row) };
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();

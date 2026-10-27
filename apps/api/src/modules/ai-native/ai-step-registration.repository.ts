@@ -26,11 +26,18 @@ const grantSchema = z.object({
   toolCode: stepCode, toolVersion: id, inputRef: id,
   requestFingerprint: z.string().regex(/^[0-9a-f]{64}$/u)
 }).strict();
+const originalGrantSchema = grantSchema.omit({ expiresAt: true }).extend({ registrationAllowed: z.literal(false) });
+export type AiStepOriginalRegistrationGrant = z.infer<typeof originalGrantSchema> & { context: AiExecutionContext };
 export interface AiStepRegistrationAuthority {
   /** Resolve an immutable server action-plan reference and its Core input fingerprint.
    * A model cannot mint the reference or grant. Registration is not permission to execute.
    */
   resolve(command: Readonly<AiStepRegistrationCommand>): Promise<z.infer<typeof grantSchema> & { context: AiExecutionContext }>;
+  /** Existing persisted registration only. Cannot authorize an insertion. */
+  resolveOriginal?(command: Readonly<AiStepRegistrationCommand>, tx?: Prisma.TransactionClient): Promise<AiStepOriginalRegistrationGrant>;
+}
+export function aiStepActionId(scope: ReturnType<typeof aiTaskAccessFromContext>['scope'], taskId: string, registrationRef: string) {
+  return `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope, taskId, registrationRef })}`;
 }
 const taskSelect = { id: true, scopeId: true, revision: true, eventCursor: true, status: true, contractVersion: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const stepSelect = {
@@ -40,6 +47,15 @@ const stepSelect = {
 type Step = Prisma.AiStepGetPayload<{ select: typeof stepSelect }>;
 const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
 const denied = () => new AiTaskRepositoryError("AI_ACCESS_DENIED");
+
+/** The original registration may be durable. Neither retry nor lease cleanup
+ * may infer rollback from the missing transaction acknowledgement. */
+export class AiStepRegistrationCommitUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN' as const;
+  readonly retryable = false;
+  readonly nextAction = 'reconcile' as const;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
 
 /** Creates PENDING/NONE metadata, never a business action or a dispatch permit. */
 export class AiStepRegistrationRepository {
@@ -53,16 +69,19 @@ export class AiStepRegistrationRepository {
     if (!authority || typeof authority.resolve !== "function") throw denied();
   }
 
-  private async resolve(input: AiStepRegistrationCommand) {
+  private async resolve(input: AiStepRegistrationCommand, originalOnly = false, tx?: Prisma.TransactionClient) {
     try {
-      const grant = grantSchema.parse(structuredClone(await this.authority.resolve(structuredClone(input))));
+      const historical = originalOnly && typeof this.authority.resolveOriginal === 'function';
+      const grant = historical ? originalGrantSchema.parse(structuredClone(await this.authority.resolveOriginal!(structuredClone(input), tx)))
+        : grantSchema.parse(structuredClone(await this.authority.resolve(structuredClone(input))));
       if (!isAiStepExecutionContext(grant.context)) throw denied();
       const access = aiTaskAccessFromContext(grant.context, input.taskId, this.clock());
-      if (grant.taskId !== input.taskId || grant.registrationRef !== input.registrationRef || Date.parse(grant.expiresAt) <= access.now.getTime()) throw denied();
+      if (grant.taskId !== input.taskId || grant.registrationRef !== input.registrationRef
+        || grant.registrationAllowed && Date.parse(grant.expiresAt) <= access.now.getTime()) throw denied();
       const { context, ...evidence } = grant;
       const { authorizedAt: _, requestId: __, ...authorization } = context;
       // This namespace identifies one AI logical action. It is NOT the Core business idempotency key.
-      const actionId = `ai-action-${requestFingerprint({ version: "ai-step-registration-1", scope: access.scope, taskId: input.taskId, registrationRef: input.registrationRef })}`;
+      const actionId = aiStepActionId(access.scope, input.taskId, input.registrationRef);
       return { grant, access, actionId, digest: requestFingerprint({ ...evidence, authorization }) };
     } catch { throw denied(); }
   }
@@ -70,12 +89,15 @@ export class AiStepRegistrationRepository {
   async register(value: unknown, existingOnly = false) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-    const input = parsed.data, initial = await this.resolve(input);
-    const verifyCurrent = async () => {
-      const current = await this.resolve(input);
+    const input = parsed.data, initial = await this.resolve(input, existingOnly);
+    const verifyCurrent = async (tx: Prisma.TransactionClient) => {
+      // Original evidence shares the owning read transaction. A second snapshot
+      // here can deadlock the held task/run locks or observe a different lease.
+      const current = await this.resolve(input, existingOnly, tx);
       if (current.access.bindingKey !== initial.access.bindingKey || current.digest !== initial.digest) throw denied();
       return current;
     };
+    let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.access.where, select: taskSelect });
@@ -84,7 +106,7 @@ export class AiStepRegistrationRepository {
         const existing = await tx.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, actionId: initial.actionId }, select: stepSelect });
         if (existing) {
           this.verifyExisting(existing, task, initial);
-          await verifyCurrent();
+          await verifyCurrent(tx);
           // A stale lease may read its original identity, but receives no fresh lease or dispatch authority.
           return { stepId: existing.id, runId: existing.runId, sequence: existing.sequence, stepRevision: existing.revision,
             taskRevision: task.revision, replayed: true as const, event: null, runRevision: null };
@@ -92,6 +114,7 @@ export class AiStepRegistrationRepository {
         if (existingOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (!["QUEUED", "RUNNING"].includes(task.status) || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
+        writeAttempted = true;
         const locked = await tx.aiTask.updateMany({
           where: { ...initial.access.where, scopeId: task.scopeId, revision: task.revision, status: task.status, eventCursor: task.eventCursor, cancelRequestedAt: null },
           data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
@@ -112,7 +135,7 @@ export class AiStepRegistrationRepository {
           data: { revision: { increment: 1 } }
         });
         if (held.count !== 1) throw conflict();
-        const current = await verifyCurrent();
+        const current = await verifyCurrent(tx);
         const live = await tx.aiRun.updateMany({
           where: { id: lease.runId, scopeId: task.scopeId, taskId: task.id, revision: lease.revision + 1,
             fencingToken: new Prisma.Decimal(lease.fencingToken), leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: current.access.now },
@@ -137,13 +160,16 @@ export class AiStepRegistrationRepository {
           payload: { data: event.data, registration: { reference: input.registrationRef, digest: current.digest },
             initiator: { kind: "worker", id: lease.holderId, actorKind: current.access.actorKind, actorId: current.access.actorId } }
         }, select: { cursor: true } });
+        callbackCompleted = true;
         return { stepId, runId: lease.runId, sequence, stepRevision: 1, taskRevision: task.revision + 1,
           replayed: false as const, event, runRevision: lease.revision + 1 };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
+      if (writeAttempted && callbackCompleted) throw new AiStepRegistrationCommitUnknownError();
       if (error instanceof AiTaskRepositoryError) throw error;
       // Even a uniqueness race never retries a write; an explicit caller replay reads the existing action.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw conflict();
+      if (writeAttempted) throw new AiStepRegistrationCommitUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }
@@ -153,7 +179,7 @@ export class AiStepRegistrationRepository {
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
     const { stepId, expectedStepRevision, ...registration } = input;
-    const initial = await this.resolve(registration);
+    const initial = await this.resolve(registration, true);
     const authorizeRead = async () => {
       try {
         if (!this.readAuthority) throw denied();
@@ -180,7 +206,7 @@ export class AiStepRegistrationRepository {
           || (["succeeded", "failed", "unknown"].includes(status) && !id.safeParse(row.resultRef).success)
           || (status === "unknown" && row.effect !== "POSSIBLE")
           || (status === "succeeded" && !["NONE", "COMMITTED"].includes(row.effect))) throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
-        const current = await this.resolve(registration);
+        const current = await this.resolve(registration, true, tx);
         if (current.digest !== initial.digest) throw denied();
         const after = await authorizeRead();
         if (after.digest !== before.digest) throw denied();

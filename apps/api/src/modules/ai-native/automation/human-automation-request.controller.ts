@@ -1,20 +1,52 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewError } from './human-automation-review.service';
 import { HumanAutomationRequestFactory, type HumanAutomationHttpRequest, type HumanAutomationRequestAction } from './human-automation-request.composition';
+import { withRequestAbort } from '../scenes/request-abort';
+
+const eventTaskAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(eventTaskAjv);
+const validEventTask = eventTaskAjv.compile(AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS.AiAutomationEventTaskResponseDraft);
+const reviewDefinitions = JSON.parse(JSON.stringify({ ...AI_NATIVE_COMPONENT_SCHEMAS,
+  ...AI_EVENTS_DRAFT_SCHEMAS, ...AI_AUTOMATION_REVIEW_HTTP_SCHEMAS }).replaceAll('#/components/schemas/', '#/$defs/'));
+const reviewValidators = Object.fromEntries(Object.keys(AI_AUTOMATION_REVIEW_HTTP_SCHEMAS).map(name => [name,
+  eventTaskAjv.compile({ $ref: `#/$defs/${name}`, $defs: reviewDefinitions })]));
 
 abstract class HumanAutomationController {
   protected abstract readonly audience: 'operator' | 'staff';
   constructor(protected readonly requests: HumanAutomationRequestFactory) {}
 
   private async call(request: HumanAutomationHttpRequest, action: HumanAutomationRequestAction, value: unknown) {
-    try { return await this.requests.call(request, this.audience, action, value); }
+    try {
+      const contract = AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS];
+      if (contract && !reviewValidators[contract.request](value)) throw new AutomationError('invalid_input');
+      const result = await withRequestAbort(request, signal => this.requests.call(request, this.audience, action, value, signal));
+      if (contract) {
+        try { const copy = structuredClone(result); if (reviewValidators[contract.response](copy)) return copy; }
+        catch { /* Do not expose raw internal material or validation diagnostics. */ }
+        // Candidate reads may expire an outbox marker. Treat their damaged
+        // acknowledgements like other metadata writes, without retry permission.
+        throw new AutomationError(['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'close', 'feedback'].includes(action)
+          ? 'result_unknown' : 'unavailable');
+      }
+      if (action !== 'createEventTask') return result;
+      // Metadata writes can already have committed. A bad reply is unknown,
+      // never a new task, execution grant, or safe automatic retry.
+      try { const copy = structuredClone(result); if (validEventTask(copy)) return copy; } catch { /* no raw result escapes */ }
+      throw new AutomationError('result_unknown');
+    }
     catch (error) {
       const reason = error instanceof AutomationError || error instanceof HumanAutomationReviewError || error instanceof BusinessFailureError
-        ? error.code : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input' : 'unavailable';
+        ? error.code : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input'
+          : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN' ? 'result_unknown' : 'unavailable';
       const code = reason === 'invalid_input' ? 'AI_INVALID_INPUT' : reason === 'conflict' ? 'AI_REVISION_CONFLICT'
         : reason === 'limit_reached' ? 'AI_LIMIT_REACHED' : reason === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
       // Even a failed batch may already have prepared some original candidates.
@@ -23,7 +55,7 @@ abstract class HumanAutomationController {
         nextAction: action === 'readQueue' ? 'read_review_queue'
           : action === 'close' || action === 'feedback' || action === 'operation' ? 'read_original_operation'
           : action === 'createTask' || action === 'readCreation' ? 'read_original_creation' : 'read_original_event' },
-      reason === 'invalid_input' ? 400 : reason === 'conflict' ? 409 : reason === 'limit_reached' ? 429 : 503);
+      reason === 'invalid_input' ? 400 : reason === 'conflict' || reason === 'result_unknown' ? 409 : reason === 'limit_reached' ? 429 : 503);
     }
   }
 
@@ -44,6 +76,9 @@ abstract class HumanAutomationController {
 
   @Post('tasks/create') @HttpCode(200) @Header('Cache-Control', 'no-store')
   createTask(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'createTask', value); }
+
+  @Post(AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  createEventTask(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'createEventTask', value); }
 
   @Post('tasks/read-creation') @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCreation(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'readCreation', value); }

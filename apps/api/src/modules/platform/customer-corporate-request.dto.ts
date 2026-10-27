@@ -13,6 +13,7 @@ import {
 } from "class-validator";
 import type {
   RecordCustomerCorporateCreditPaymentRequest,
+  RecordCustomerCorporateCreditMaturityRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest
@@ -88,6 +89,14 @@ export class SaveCustomerCreditDto implements SaveCustomerCreditRequest {
   @IsOptional() @IsIn(["monthly", "semi_monthly", "per_order"]) billingCycle?: "monthly" | "semi_monthly" | "per_order";
   @IsOptional() @IsIn(["active", "suspended", "revoked"]) status?: "active" | "suspended" | "revoked";
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+}
+
+export class RecordCustomerCorporateCreditMaturityDto implements RecordCustomerCorporateCreditMaturityRequest {
+  @IsString() @IsNotEmpty() @MaxLength(191) ledgerId!: string;
+  @IsISO8601() dueAt!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) basisRef!: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) idempotencyKey!: string;
 }
 
 export class RecordCustomerCorporateCreditPaymentDto implements RecordCustomerCorporateCreditPaymentRequest {

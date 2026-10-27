@@ -1,7 +1,9 @@
 /**
  * AIN-01 engineering inventory, NOT an executable tool registry or authorization.
  * Existing HTTP guards and controller checks cannot be bypassed by calling services.
- * Keep every AI adapter unavailable until AIN-02/04 and its scenario are verified.
+ * baseline-1 preserves the original closed inventory; it is NOT today's live
+ * availability. Later server compositions and current authorization decide
+ * whether an implementation may run. Never turn this catalogue into a grant.
  */
 export type AiBaselineRisk = "R0" | "R1" | "R2" | "R3";
 export type AiBaselineMaturity = "unavailable" | "preview_only" | "executable";

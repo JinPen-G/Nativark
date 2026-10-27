@@ -30,7 +30,7 @@ for (const [name, mutate] of [
     } });
   const plan = { registrationRef: command.registrationRef, operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: 'draft-1' };
   const registered = await ports.steps.register(plan, lease);
-  await assert.rejects(ports.steps.start({ plan, registered }, { ...lease, revision: registered.runRevision }), /AI_STORAGE_UNAVAILABLE/);
+  await assert.rejects(ports.steps.start({ plan, registered }, { ...lease, revision: registered.runRevision }), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(writes, 1); assert.equal(h.state.steps[0].status, 'RUNNING');
   // A rejected acknowledgement is not proof of rollback or permission to resend.
 });
@@ -51,7 +51,7 @@ for (const [name, mutate] of [
     transitions: { transition: async input => { calls++; const result = await repository.transition(input); mutate(result); return result; } } });
   await assert.rejects(port.commit({ taskId: command.taskId, taskRevision: h.state.task.revision,
     lease: { taskId: command.taskId, ...command.lease, revision: h.state.run.revision, expiresAt: h.state.run.leaseExpiresAt.toISOString() },
-    outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } }), /AI_STORAGE_UNAVAILABLE/);
+    outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } }), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(calls, 1); assert.equal(h.state.task.status, 'SUCCEEDED');
 });
 
@@ -95,7 +95,7 @@ for (const [name, mutate] of [
   ['mutated lease', (value, input) => { input.lease.holderId = 'other-worker'; input.lease.revision = 20; value.runRevision = 21; }]
 ]) test(`confirmation adapter rejects ${name} acknowledgement without retrying`, async () => {
   const h = confirmationHarness(mutate);
-  await assert.rejects(h.ports.steps.pause(h.ref, h.lease, 'confirmation', 'phase-receipt-a'), /AI_STORAGE_UNAVAILABLE/);
+  await assert.rejects(h.ports.steps.pause(h.ref, h.lease, 'confirmation', 'phase-receipt-a'), error => error.code === 'AI_RESULT_UNKNOWN');
   assert.equal(h.calls.length, 1);
 });
 

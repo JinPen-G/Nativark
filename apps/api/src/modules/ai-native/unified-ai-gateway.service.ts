@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
@@ -6,7 +7,7 @@ import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
-import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, modelUsageSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -15,9 +16,8 @@ import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
 type UnresolvedProtocolRequest = Omit<ModelProtocolRequest, 'model'> & { model?: string };
 type IntentExecutionBinding = GatewayTextIntentBinding & { intentHash: string };
-const reportedTokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const textResultSchema = z.object({
-  text: z.string(), usage: z.object({ inputTokens: reportedTokens, outputTokens: reportedTokens }).strict().optional(),
+  text: z.string(), usage: modelUsageSchema.optional(),
   toolRequests: z.array(z.never()).max(0).optional()
 }).strict();
 
@@ -88,6 +88,21 @@ export class UnifiedAiGatewayService {
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
+  private deliveryTiming(start: number, firstText: number | null = null) {
+    const duration = performance.now() - start;
+    if (!Number.isFinite(duration) || duration < 0 || firstText !== null && (firstText < 0 || firstText > duration)) {
+      throw new ModelGatewayError('INVALID_RESPONSE');
+    }
+    return { version: 'gateway-delivery-time-1' as const, transportWallMs: Math.floor(duration),
+      firstValidatedTextMs: firstText === null ? null : Math.floor(firstText) };
+  }
+
+  /** Platform calls carry no tenant/workspace attribution; the audit port
+   * records null and the platform audit implementation owns its journal. */
+  private attribution(context: Readonly<GatewayContext>): { tenantId: string | null; workspaceId: string | null } {
+    return 'tenantId' in context && 'workspaceId' in context
+      ? { tenantId: context.tenantId, workspaceId: context.workspaceId } : { tenantId: null, workspaceId: null };
+  }
   private async assertMediaCurrent(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal: AbortSignal) {
     const references = request.messages.flatMap(message => typeof message.content === 'string' ? []
       : message.content.filter(part => part.kind !== 'text').map(part => ({ kind: part.kind,
@@ -103,8 +118,44 @@ export class UnifiedAiGatewayService {
 
   private assertBudget() {
     const budget = this.ports.budget;
-    if ([budget?.reserve, budget?.dispatch, budget?.settle, budget?.abandon]
+    if (typeof this.ports.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if ([budget?.reserve, budget?.dispatch, budget?.recordUsage, budget?.settle, budget?.abandon]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
+  private async reserveBudget(call: GatewayAccountingCall, signal: AbortSignal) {
+    try { return await this.ports.budget.reserve(structuredClone(call)); }
+    catch (error) {
+      const observer = this.ports.observation?.budgetDenied ? this.ports.observation : this.ports.audit;
+      if (error instanceof ModelGatewayError && error.code === 'BUDGET_UNAVAILABLE' && observer.budgetDenied && !signal.aborted) {
+        // Observation is optional and bounded. Its absence/failure must not
+        // change a budget denial into permission, refund evidence or a retry.
+        const wait = new GatewayDeadline(1000, signal);
+        try { await wait.wait(() => observer.budgetDenied!({ call: structuredClone(call), code: 'BUDGET_UNAVAILABLE' }, wait.controller.signal)); }
+        catch { /* unrecorded observation stays unrecorded; original denial wins */ }
+        finally { wait.close(); }
+      }
+      throw error;
+    }
+  }
+
+  private usageRecorder(value: GatewayAccountingCall, reservationId: string) {
+    const call = structuredClone(value);
+    let fingerprint: string | undefined, pending: Promise<void> | undefined;
+    return (valueUsage: ModelUsage): Promise<void> => {
+      const parsed = textResultSchema.shape.usage.unwrap().safeParse(valueUsage);
+      if (!parsed.success) return Promise.reject(new ModelGatewayError('INVALID_RESPONSE'));
+      const usage = parsed.data, hash = requestFingerprint(usage);
+      if (pending) return hash === fingerprint ? pending : Promise.reject(new ModelGatewayError('INVALID_RESPONSE'));
+      fingerprint = hash;
+      // Receipt persistence has its own bounded accounting wait, independent
+      // of caller cancellation or revoked text delivery. A lost write response
+      // stays unknown: reuse this promise, never automatically write it again.
+      const receiptDeadline = new GatewayDeadline(5000);
+      pending = receiptDeadline.wait(() => this.ports.budget.recordUsage(structuredClone(call), reservationId, usage))
+        .finally(() => receiptDeadline.close());
+      return pending;
+    };
   }
 
   private input(request: ModelRequest): ModelRequest {
@@ -169,6 +220,13 @@ export class UnifiedAiGatewayService {
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      // Persist readiness before admission/claim/reserve. No presence-only gate.
+      const preparation = { context: structuredClone(context), callId: request.callId,
+        intentHash: intentBinding?.intentHash ?? hash, requestHash: hash,
+        configurationHash: requestFingerprint(route.profile), profile: structuredClone(route.profile), mode: 'invoke' as const };
+      if (this.ports.audit.prepare) await life.wait(() => this.ports.audit.prepare!(preparation, life.controller.signal));
+      else await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context),
+        event: 'ai.invoke.prepared', status: 'prepared', detail: requestFingerprint(preparation) }));
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
       binding = { scope: structuredClone(scope) as AiDispatchBinding['scope'], id: admission.id, actorId: context.actorId,
@@ -179,26 +237,37 @@ export class UnifiedAiGatewayService {
         else admissionId = admission.id;
       }));
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
-        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
+          countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), false) } };
       const call = structuredClone(budgetCall);
-      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+      const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
         else reservationId = record.id;
         return record;
       })); reservationId = usage.id;
-      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context), event: 'ai.invoke.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       dispatched = true;
-      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
+      const recordUsage = this.usageRecorder(call, usage.id);
+      const transportStarted = performance.now();
+      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)
+        .then(async value => {
+          // Pin the returned payload before receipt persistence yields to its owner.
+          const result = structuredClone(value);
+          if (result.usage) await recordUsage(result.usage);
+          return result;
+        })));
+      await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       const result = intentBinding ? this.textResult(rawResult,
         intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true,
         intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true) : rawResult;
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          timing: this.deliveryTiming(transportStarted),
           delivery: { mode: 'invoke' as const } })));
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
@@ -258,6 +327,13 @@ export class UnifiedAiGatewayService {
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      // Persist readiness before admission/claim/reserve. No presence-only gate.
+      const preparation = { context: structuredClone(context), callId: request.callId,
+        intentHash: intentBinding?.intentHash ?? hash, requestHash: hash,
+        configurationHash: requestFingerprint(route.profile), profile: structuredClone(route.profile), mode: 'stream' as const };
+      if (this.ports.audit.prepare) await life.wait(() => this.ports.audit.prepare!(preparation, life.controller.signal));
+      else await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context),
+        event: 'ai.stream.prepared', status: 'prepared', detail: requestFingerprint(preparation) }));
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
       binding = { scope: structuredClone(scope) as AiDispatchBinding['scope'], id: admission.id, actorId: context.actorId,
@@ -268,14 +344,15 @@ export class UnifiedAiGatewayService {
         else admissionId = admission.id;
       }));
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
-        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
+          countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), true) } };
       const call = structuredClone(budgetCall);
-      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+      const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
         else reservationId = record.id;
         return record;
       })); reservationId = usage.id;
-      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context), event: 'ai.stream.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
@@ -283,10 +360,17 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
+      const recordUsage = this.usageRecorder(call, usage.id);
+      const transportStarted = performance.now();
+      let firstText: number | null = null;
       let result: GatewayInvocationResult | undefined;
-      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)[Symbol.asyncIterator]();
+      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)[Symbol.asyncIterator]();
       while (true) {
-        const item = await life.wait(() => iterator!.next());
+        const item = await life.wait(() => iterator!.next().then(async value => {
+          const item = structuredClone(value);
+          if (!item.done && !result && item.value?.kind === 'result' && item.value.result?.usage) await recordUsage(item.value.result.usage);
+          return item;
+        }));
         if (item.done) { sourceDone = true; break; }
         if (++eventCount > 4094) throw new ModelGatewayError('INVALID_RESPONSE');
         const event = item.value;
@@ -302,6 +386,7 @@ export class UnifiedAiGatewayService {
           deltaCount++;
           deltaDigest.update(delta, 'utf8');
           await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+          if (delta.length && firstText === null) firstText = performance.now() - transportStarted;
           yield { kind: 'text_delta', delta };
         } else throw new ModelGatewayError('INVALID_RESPONSE');
       }
@@ -310,6 +395,7 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          timing: this.deliveryTiming(transportStarted, firstText),
           delivery: { mode: 'stream' as const, eventCount, deltaCount, deltaBytes, deltaHash: deltaDigest.digest('hex') } })));
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');

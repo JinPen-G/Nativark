@@ -3,7 +3,7 @@ import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { composePersistedModelOrderTaskRunner } from '../model-input/persisted-model-order-runner.composition';
 import { parseTaskModelInput, taskModelFingerprint, taskModelMaterialSchema, TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -18,7 +18,7 @@ import { composeAiTaskCenterScene } from '../task-center-scene.composition';
 import type { AiOriginalSceneResultService } from './original-scene-result.service';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
-type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource };
+type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource?: AiTaskInputSource };
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
@@ -30,12 +30,15 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
   if (options && (options.answerRoundTrip !== true || Object.keys(options).some(key => key !== 'answerRoundTrip'))) throw unavailable();
   const answerRoundTrip = options?.answerRoundTrip === true;
   if (input.scene.code !== 'order_explanation' || input.gatewayScene.orderExplainTool !== true
-    || input.gatewayScene.structuredOutput || typeof run?.inputSource?.resolve !== 'function'
-    || typeof run.inputSource.validateAnswers !== 'function' || typeof run.financialEvidence?.readDispatch !== 'function') throw unavailable();
+    || input.gatewayScene.structuredOutput || typeof run?.financialEvidence?.readDispatch !== 'function'
+    || run.inputSource !== undefined && (typeof run.inputSource?.resolve !== 'function'
+      || typeof run.inputSource?.validateAnswers !== 'function')) throw unavailable();
   const serverHost = structuredClone(host);
   const authorization = composePersistedTaskAuthorization(input);
   const taskTransitions = new AiTaskTransitionRepository(input.db, authorization.authority, input.clock);
   const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens, orderExplainTool: true };
+  const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
+    waitForTaskApplicationDependency(operation, afterMutation, signal, run.clock);
   const bound = async (value: unknown) => {
     const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -82,7 +85,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         sceneCode: original.request.sceneCode, sceneVersion: original.receipt.sceneVersion } });
       if (!current?.enabled || current.expiresAt && current.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime()) throw unavailable();
       limits = aiTaskRunnerLimitsSchema.parse(structuredClone(current.limits));
-      if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 3 : 2)) throw unavailable();
+      if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 2 : 1)) throw unavailable();
     } else {
       if (!stored && fresh !== 'prepared') throw unavailable();
       if (stored && (stored.scopeId !== scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId)) throw denied();
@@ -123,11 +126,11 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     /** Observe original preparation without claiming a lease, regenerating
      * input, or treating publication as proof that execution never started. */
     async readPreparation(value: unknown) {
-      const before = await bound(value), key = { scopeId: before.scopeId,
+      const before = await observe(() => bound(structuredClone(value))), key = { scopeId: before.scopeId,
         taskId: before.task.taskId, runId: before.task.runId };
       const refs = [`scene-model:${before.ref.inputRef}`, `scene-order:${before.ref.inputRef}`,
         ...(answerRoundTrip ? [`scene-answer:${before.ref.inputRef}`] : [])];
-      const observe = async () => {
+      const collectPreparation = async () => {
         const inputs = await input.db.aiTaskActionInput.findMany({ where: key, take: refs.length + 1 });
         const plan = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
         if (inputs.length > refs.length || new Set(inputs.map(row => row.registrationRef)).size !== inputs.length
@@ -146,10 +149,10 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
           .sort((a, b) => refs.indexOf(a.registrationRef) - refs.indexOf(b.registrationRef)),
           planHash: plan?.planHash ?? null };
       };
-      const observed = await observe();
-      await verify(before);
-      if (requestFingerprint(await observe()) !== requestFingerprint(observed)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-      await verify(before);
+      const observed = await observe(collectPreparation);
+      await observe(() => verify(before));
+      if (requestFingerprint(await observe(collectPreparation)) !== requestFingerprint(observed)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt,
         preparation: { publishedInputs: observed.inputs.length, requiredInputs: refs.length,
           missing: refs.filter(ref => !observed.inputs.some(row => row.registrationRef === ref))
@@ -161,10 +164,12 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const before = await bound(parsed.data.original);
-      const receipt = await taskTransitions.transition({ taskId: before.task.taskId,
-        expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
-      await verify(before);
+      const before = await observe(() => bound(parsed.data.original));
+      // A timeout observes neither rollback nor permission to retry the write.
+      // The original cancellation receipt is the only subsequent lookup.
+      const receipt = await observe(() => taskTransitions.transition({ taskId: before.task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' }), undefined, true);
+      await observe(() => verify(before), undefined, true);
       return freezeOriginalInput({ original: before.original.receipt, receipt,
         cancellation: 'requested_not_rollback' as const, automaticRetry: false as const });
     },
@@ -172,19 +177,19 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const before = await bound(parsed.data.original);
-      const receipt = await taskTransitions.readCancellationReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision });
-      await verify(before);
+      const before = await observe(() => bound(parsed.data.original));
+      const receipt = await observe(() => taskTransitions.readCancellationReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision }));
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
     },
     async settleUnstartedCancellation(value: unknown) {
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const before = await bound(parsed.data.original);
-      const receipt = await taskTransitions.settleUnstartedCancellation({ taskId: before.task.taskId,
-        expectedRevision: parsed.data.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, before.task.runId);
-      await verify(before);
+      const before = await observe(() => bound(parsed.data.original));
+      const receipt = await observe(() => taskTransitions.settleUnstartedCancellation({ taskId: before.task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, before.task.runId), undefined, true);
+      await observe(() => verify(before), undefined, true);
       return freezeOriginalInput({ original: before.original.receipt, receipt,
         cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });
     },
@@ -192,27 +197,30 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const before = await bound(parsed.data.original);
-      const receipt = await taskTransitions.readCancellationSettlementReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision });
-      await verify(before);
+      const before = await observe(() => bound(parsed.data.original));
+      const receipt = await observe(() => taskTransitions.readCancellationSettlementReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision }));
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
     },
     async start(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { outcome: { kind: 'not_started' as const, reason: 'host_aborted' as const } };
-      const { before, runner } = await assemble(value, true);
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, true), signal);
       const outcome = await runner.application.start({ taskId: before.task.taskId, runId: before.task.runId }, signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, businessExecution: 'readonly_not_business_commit' as const });
     },
     async recover(value: unknown, signal?: AbortSignal) {
-      const { before, runner } = await assemble(value, false);
-      const outcome = await runner.recoverOriginal(signal); await verify(before);
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, false), signal);
+      const outcome = await runner.recoverOriginal(signal); await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, automaticRetry: false as const });
     },
     async resumePrepared(value: unknown, signal?: AbortSignal) {
-      const { before, runner } = await assemble(value, 'prepared');
+      const original = structuredClone(value);
+      const { before, runner } = await observe(() => assemble(original, 'prepared'), signal);
       const outcome = await runner.resumePreparedOriginal(signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome,
         automaticRetry: false as const, preparation: 'original_inputs_only' as const,
         businessExecution: 'readonly_not_business_commit' as const });
@@ -224,9 +232,9 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { original, ...command } = parsed.data;
-      const { before, runner } = await assemble(original, false);
+      const { before, runner } = await observe(() => assemble(original, false), signal);
       const outcome = await runner.takeoverOriginal(command, signal);
-      await verify(before);
+      await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome,
         takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,
         businessExecution: 'readonly_not_business_commit' as const });
@@ -237,81 +245,83 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         expectedRunRevision: z.number().int().min(1).max(4294967294),
         expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { original, ...command } = parsed.data, { before, runner } = await assemble(original, false);
+      const { original, ...command } = parsed.data, { before, runner } = await observe(() => assemble(original, false));
       const receipt = await runner.readOriginalTakeoverReceipt(command);
-      await verify(before);
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
     },
     async readOrderResult(value: unknown) {
-      const { before, runner, key, orderRegistrationRef } = await assemble(value, false);
-      const steps = await input.db.aiStep.findMany({ where: { ...key, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      const { before, runner, key, orderRegistrationRef } = await observe(() => assemble(structuredClone(value), false));
+      const steps = await observe(() => input.db.aiStep.findMany({ where: { ...key, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }));
       if (steps.length > 1) throw denied();
       const step = steps[0];
-      const saved = step?.inputRef ? await input.db.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef, registrationRef: orderRegistrationRef } }) : null;
+      const inputRef = step?.inputRef;
+      const saved = inputRef ? await observe(() => input.db.aiTaskActionInput.findFirst({ where: { ...key, id: inputRef, registrationRef: orderRegistrationRef } })) : null;
       if (step && !saved) throw denied();
-      const result = step?.resultRef ? await runner.readOrderResult({ resultId: step.resultRef })
+      const result = step?.resultRef ? await observe(() => runner.readOrderResult({ resultId: step.resultRef! }))
         : { status: step?.status === 'UNKNOWN' ? 'unknown' as const : step?.status === 'FAILED' ? 'failed' as const : 'candidate_not_executed' as const,
           facts: null, automaticRetry: false as const, businessExecution: 'readonly_not_business_commit' as const };
-      await verify(before);
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, taskId: before.task.taskId, runId: before.task.runId, result });
     },
     async readModelResult(value: unknown) {
-      const { before, key, modelRegistrationRef } = await assemble(value, false);
-      const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: modelRegistrationRef } });
+      const { before, key, modelRegistrationRef } = await observe(() => assemble(structuredClone(value), false));
+      const frozen = await observe(() => input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: modelRegistrationRef } }));
       if (!frozen) throw unavailable();
-      const steps = await input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
-        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      const steps = await observe(() => input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }));
       if (steps.length !== 1 || !steps[0].resultRef || steps[0].requestFingerprint !== frozen.fingerprint) throw unavailable();
-      const result = await results.read({ original: before.ref, resultId: steps[0].resultRef });
-      await verify(before);
+      const result = await observe(() => results.read({ original: before.ref, resultId: steps[0].resultRef! }));
+      await observe(() => verify(before));
       return result;
     },
     async reopenOrderSource(value: unknown) {
-      const before = await bound(value);
+      const before = await observe(() => bound(structuredClone(value)));
       const result = await application.readModelResult(before.ref);
       if (result.status !== 'available' || !result.sources?.length) throw unavailable();
-      const source = await results.reopenSource({ original: before.ref, resultId: result.resultId, sourceIndex: 0 });
-      await verify(before);
+      const source = await observe(() => results.reopenSource({ original: before.ref, resultId: result.resultId, sourceIndex: 0 }));
+      await observe(() => verify(before));
       return source;
     },
     async readAnswer(value: unknown) {
       if (!answerRoundTrip) throw unavailable();
-      const { before, runner, key, answerRegistrationRef } = await assemble(value, false);
-      const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: answerRegistrationRef } });
+      const { before, runner, key, answerRegistrationRef } = await observe(() => assemble(structuredClone(value), false));
+      const frozen = await observe(() => input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: answerRegistrationRef } }));
       if (!frozen) throw unavailable();
-      const steps = await input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
-        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      const steps = await observe(() => input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }));
       if (steps.length > 1) throw denied();
-      const result = steps[0]?.resultRef ? await runner.readAnswerResult({ resultId: steps[0].resultRef })
+      const result = steps[0]?.resultRef ? await observe(() => runner.readAnswerResult({ resultId: steps[0].resultRef! }))
         : { status: 'not_observed' as const, text: null, automaticRetry: false as const };
-      await verify(before);
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, result });
     },
     async readNextSteps(value: unknown) {
-      const before = await bound(value);
+      const before = await observe(() => bound(structuredClone(value)));
       if (before.original.request.sceneCode !== 'order_explanation') throw denied();
-      const next = structuredClone(await scenes.tools.orderNextSteps(before.original.request.input.orderId).read(before.original.context));
-      await verify(before);
+      const orderId = before.original.request.input.orderId;
+      const next = structuredClone(await observe(() => scenes.tools.orderNextSteps(orderId).read(before.original.context)));
+      await observe(() => verify(before));
       return freezeOriginalInput({ original: before.original.receipt, next,
         execution: 'not_attempted' as const, approval: 'not_granted' as const });
     },
     async readScene(value: unknown): Promise<unknown> {
-      const before = await bound(value);
+      const before = await observe(() => bound(structuredClone(value)));
       const persisted = composePersistedTaskCenter(input);
       const center = composeAiTaskCenterScene({ ...persisted, scenes, modelResults: results,
         orderFacts: { read: application.readOrderResult } });
-      const modelInput = await input.db.aiTaskActionInput.findFirst({ where: { scopeId: before.scopeId,
-        taskId: before.task.taskId, runId: before.task.runId, registrationRef: `scene-model:${before.ref.inputRef}` } });
-      const steps = modelInput ? await input.db.aiStep.findMany({ where: { scopeId: before.scopeId,
+      const modelInput = await observe(() => input.db.aiTaskActionInput.findFirst({ where: { scopeId: before.scopeId,
+        taskId: before.task.taskId, runId: before.task.runId, registrationRef: `scene-model:${before.ref.inputRef}` } }));
+      const steps = modelInput ? await observe(() => input.db.aiStep.findMany({ where: { scopeId: before.scopeId,
         taskId: before.task.taskId, runId: before.task.runId, inputRef: modelInput.id,
-        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }) : [];
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 })) : [];
       if (steps.length > 1) throw denied();
-      const result = await center.readScene({ kind: 'original', original: before.ref,
-        taskId: before.task.taskId, runId: before.task.runId, ...(steps[0]?.resultRef ? { resultId: steps[0].resultRef } : {}) });
+      const result = await observe(() => center.readScene({ kind: 'original', original: before.ref,
+        taskId: before.task.taskId, runId: before.task.runId, ...(steps[0]?.resultRef ? { resultId: steps[0].resultRef } : {}) }));
       const handoff = await application.readNextSteps(before.ref);
-      await verify(before);
+      await observe(() => verify(before));
       const answer = answerRoundTrip ? await application.readAnswer(before.ref) : undefined;
-      await verify(before);
+      await observe(() => verify(before));
       return freezeOriginalInput({ ...result, handoff, ...(answer ? { answer } : {}) });
     }
   });

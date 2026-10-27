@@ -11,24 +11,86 @@ export type AiBudgetLimitDraft =
   | { state: "limited"; quantity: AiUsageQuantityDraft };
 export interface AiSettingGateDraft { enabled: boolean; revision: number }
 interface AiTenantModelSettingsInputBaseDraft {
+  /** Tenant configuration identity, NOT a Gateway provider Profile ID. The
+   * current server tenant must match; clients cannot select another tenant. */
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; configId: string; expectedRevision: number;
   enabled: boolean;
+  /** Original save reference; supplying it records a receipt in the same CAS.
+   * Observation is not permission to retry an uncertain write. */
+  operationKey?: string;
 }
 export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraft & (
   | { mode: "platform_managed" }
   | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string;
+  /** Explicit reviewed replacement: revision zero, a fresh key, disabled
+   * service and an original operationKey. Never import a masked credential. */
+  legacySource?: AiLegacyModelConfigurationReferenceDraft;
   /** Management-only write secret. Never reuse as model input/output/log schema. */
   secretChange: { operation: "retain" } | { operation: "replace"; apiKey: string } | { operation: "clear" } }
 );
 interface AiTenantModelSettingsSummaryBaseDraft {
+  /** Revision zero means no persisted configuration; the platform product
+   * default remains disabled and does not grant budget or execution. */
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; tenantId: string; configId: string; configRevision: number;
   enabled: boolean;
-  connectionState: "not_tested" | "mock_only" | "verified_live" | "failed";
+  connectionState: "not_tested" | "mock_only" | "verified_live" | "failed" | "not_verified";
 }
 export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBaseDraft & (
   | { mode: "platform_managed"; serviceName: "Rental OS AI"; routing: "automatic"; availability: "ready" | "unavailable" | "not_verified" }
   | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; credentialState: "configured" | "missing" | "rotation_required" }
 );
+/** Management only. No model request, secret readback, tenant or actor override. */
+export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
+  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation', legacy: 'legacy'
+} as const);
+/** Platform manager resource, never tenant-side configuration or dispatch.
+ * URL profile identity is validated separately; a body cannot override it. */
+export const AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({ basePath: 'platform/ai/providers' } as const);
+export interface AiPlatformModelDirectoryQueryDraft { limit?: number; after?: string }
+/** Safe metadata only; a directory entry does not prove capability, connection
+ * health, policy admission, available budget or permission to invoke. */
+export interface AiPlatformModelDirectoryDraft {
+  items: { profileId: string; profileKey: string; role: 'DEFAULT' | 'REASONING' | 'VISION' | 'EMBEDDING';
+    protocol: string; provider: string; model: string; revision: number; enabled: boolean }[];
+  nextCursor: string | null;
+  observation: 'configuration_catalog_not_capability_evidence';
+}
+/** Stored evidence and current verified readiness, never a probe or dispatch grant. */
+export interface AiPlatformModelCapabilityObservationDraft {
+  profileId: string; configurationRevision: number; enabled: boolean; observedAt: string;
+  items: { capability: 'text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning';
+    allowed: boolean; readiness: 'verified_supported' | 'unverified' | 'configuration_disabled';
+    recorded: null | { status: 'supported' | 'unsupported' | 'unverified'; source: 'connection_test' | 'declared' | 'manual';
+      observedRevision: number; checkedAt: string; expiresAt: string | null; mode: 'mock' | 'live' | 'not_attested';
+      applicability: 'current_configuration' | 'historical_configuration' } }[];
+  execution: 'read_only_no_probe_or_dispatch'; admission: 'not_granted';
+}
+export type AiPlatformModelSettingsInputDraft = {
+  expectedRevision: number; protocol: 'openai_chat_completions' | 'openai_responses' | 'anthropic_messages'; model: string; baseUrl: string;
+  operationKey?: string;
+  enabled: boolean; maxOutputTokens: number;
+  allowedCapabilities?: ('text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning')[];
+  secretChange: { operation: 'retain' } | { operation: 'replace'; apiKey: string } | { operation: 'clear' };
+};
+export type AiPlatformModelSettingsSaveDraft = {
+  profileId: string; revision: number; enabled: boolean; credentialConfigured: boolean;
+};
+export type AiPlatformModelSettingsSummaryDraft = AiPlatformModelSettingsSaveDraft & {
+  mode: 'platform_managed'; protocol: string; model: string;
+  allowedCapabilities: NonNullable<AiPlatformModelSettingsInputDraft['allowedCapabilities']>;
+  baseUrl?: string; maxOutputTokens?: number;
+  verification: 'not_assessed_by_configuration_read'; observation: 'current_configuration_not_write_receipt';
+};
+export type AiModelConfigurationOperationDraft = {
+  operationKey: string; automaticRetry: false; execution: 'not_granted'; observation: 'original_configuration_save';
+} & ({ state: 'unknown'; result: null } | { state: 'recorded'; expectedRevision: number; resultRevision: number;
+  recordedAt: string; result: AiTenantModelSettingsSummaryDraft | AiPlatformModelSettingsSaveDraft });
+export type AiLegacyModelConfigurationReferenceDraft = { parameterSetId: string; versionNo: number; fingerprint: string };
+export type AiLegacyModelConfigurationDraft = { currentConfiguration: 'present' | 'absent'; automaticImport: false;
+  sourcePreserved: true; execution: 'not_granted' } & ({ state: 'not_recorded'; source: null }
+    | { state: 'review_required'; source: AiLegacyModelConfigurationReferenceDraft;
+      supportedProtocol: 'openai_chat_completions' | null; credential: 'replacement_required';
+      conversion: 'explicit_disabled_replacement_only' });
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;

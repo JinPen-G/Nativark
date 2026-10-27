@@ -9,17 +9,16 @@ import type {
   RentalOfflinePaymentMethod
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
-import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
+import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, isRealFundingEvent, nextBalanceAfter, rentalPaymentBalance, resolveOfflineFundingEvents } from "./rental-funding-events";
 import { roundMoney } from "./rental-money";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
 
 type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string; ruleSnapshot: { payment?: { timing?: string } } };
 
 /**
- * RULE-01B：押金与预授权的模拟资金事件服务（需求 4.4.7 line 527、4.6.3）。
- *
- * 职责边界（RULE-01B 明确不做）：只记录资金事实，**不**改写订单状态、不进入取消/爽约/逾期
- * 或通用订单状态机；只使用明确标记的 mock provider，不接真实支付 Provider。
+ * 订单资金事实与门禁；不派发支付、不改写订单状态，线上入账仍由原支付运行器核验。
+ * 模拟只在明确开发空间且该订单没有真实资金操作时参与演练，不能抵消实款。
+ * 线下收款沿原登记确认事务入账；历史 mock 只按持久确认关系归一化，不改旧流水。
  *
  * 幂等且可恢复：每个动作带 idempotencyKey，落库唯一键为
  * (workspaceId, orderId, instrument, action, idempotencyKey)。重复提交（重试/崩溃恢复）
@@ -80,10 +79,52 @@ export class RentalFundingService {
       where: { tenantId, workspaceId, orderId },
       orderBy: { at: "asc" }
     });
-    return rows.map((row) => this.toEvent(row));
+    const events = rows.map((row) => this.toEvent(row));
+    if (!events.some(event => event.provider === "mock")) return events;
+    const registrations = await db.rentalOfflinePaymentRegistration.findMany({
+      where: { tenantId, workspaceId, orderId, status: "confirmed", fundingEventId: { not: null } }
+    });
+    return resolveOfflineFundingEvents(events, registrations);
   }
 
-  async listEvents(tenantId: string, workspaceId: string, orderId: string, tx?: Prisma.TransactionClient): Promise<RentalFundingBalance> {
+  private async loadBalanceContext(
+    db: Prisma.TransactionClient | PrismaService, tenantId: string, workspaceId: string, orderId: string,
+    realOnly = false
+  ) {
+    const events = await this.loadEvents(db, tenantId, workspaceId, orderId);
+    let simulationAllowed = false;
+    if (!realOnly && process.env.NODE_ENV !== "production" && events.every(event => event.provider === "mock")) {
+      // 执行门内锁住空间模式，不能在演练门检查后并发切为生产；读取页面不持锁。
+      const workspace = db === this.prisma
+        ? await db.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId }, select: { runMode: true } })
+        : (await db.$queryRaw<Array<{ runMode: string }>>(Prisma.sql`
+            SELECT runMode FROM business_workspaces WHERE id = ${workspaceId} AND tenantId = ${tenantId} LOCK IN SHARE MODE
+          `))[0];
+      if (workspace?.runMode === "development") {
+        // 已发起但未到账的真实支付/线下登记也不能靠模拟补齐；旧关闭记录不重开模拟口。
+        const [payment, offline] = db === this.prisma ? await Promise.all([
+          db.rentalPaymentIntent.findFirst({ where: { tenantId, workspaceId, orderId }, select: { id: true } }),
+          db.rentalOfflinePaymentRegistration.findFirst({ where: { tenantId, workspaceId, orderId }, select: { id: true } })
+        ]) : await Promise.all([
+          db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM rental_payment_intents WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId} LIMIT 1 LOCK IN SHARE MODE
+          `).then(rows => rows[0]),
+          db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id FROM rental_offline_payment_registrations WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId} LIMIT 1 LOCK IN SHARE MODE
+          `).then(rows => rows[0])
+        ]);
+        // 外层事务可能已经建立旧快照，执行门必须用 current read 看见刚提交的真实操作。
+        simulationAllowed = !payment && !offline;
+      }
+    }
+    const balanceBasis = simulationAllowed ? "simulated" as const : "real" as const;
+    return {
+      events, balanceBasis, simulationAllowed,
+      accountingEvents: events.filter(event => simulationAllowed ? event.provider === "mock" : isRealFundingEvent(event))
+    };
+  }
+
+  async listEvents(tenantId: string, workspaceId: string, orderId: string, tx?: Prisma.TransactionClient, options: { realOnly?: boolean } = {}): Promise<RentalFundingBalance> {
     const db = tx ?? this.prisma;
     await this.loadOrderScope(db, tenantId, workspaceId, orderId);
     const order = await db.rentalOrder.findFirstOrThrow({ where: { id: orderId, tenantId, workspaceId } });
@@ -100,12 +141,12 @@ export class RentalFundingService {
       depositDelta: Number(row.depositDelta),
       preAuthDelta: Number(row.preAuthDelta)
     })));
-    const events = await this.loadEvents(db, tenantId, workspaceId, orderId);
-    const ledgers = deriveFundingLedgers(events);
-    const rentalBase = rentalPaymentBalance(Number(order.finalPayableAmount), events);
+    const { events, accountingEvents, balanceBasis, simulationAllowed } = await this.loadBalanceContext(db, tenantId, workspaceId, orderId, options.realOnly);
+    const ledgers = deriveFundingLedgers(accountingEvents);
+    const rentalBase = rentalPaymentBalance(Number(order.finalPayableAmount), accountingEvents);
     const depositRequired = Number(order.depositAmount) + effective.depositAmount + pending.depositAmount;
     return {
-      orderId,
+      orderId, balanceBasis, simulationAllowed,
       rental: { ...rentalBase, pendingExtensionAmount: pending.payableAmount, due: roundMoney(Math.max(0, rentalBase.balance + pending.payableAmount)) },
       deposit: {
         collected: ledgers.deposit.collected,
@@ -160,7 +201,7 @@ export class RentalFundingService {
     options: { skipRentalPayment?: boolean } = {}
   ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
+    const ledgers = deriveFundingLedgers((await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
     if (order.depositAmount > 0 && ledgers.deposit.balance < order.depositAmount) {
       throw new ConflictException(`领取前须足额收取押金 ¥${order.depositAmount.toFixed(2)}`);
     }
@@ -172,7 +213,7 @@ export class RentalFundingService {
 
   async assertPaid(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient, payable?: number) {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const balance = rentalPaymentBalance(payable ?? order.payable, await this.loadEvents(tx, tenantId, workspaceId, orderId));
+    const balance = rentalPaymentBalance(payable ?? order.payable, (await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
     if (balance.balance > 0.005) throw new ConflictException(`租金及费用尚需收款 ${balance.balance.toFixed(2)}，请先登记收款`);
   }
 
@@ -194,13 +235,13 @@ export class RentalFundingService {
     const extension = await tx.rentalOrderExtension.findFirst({ where: { id: extensionId, orderId, tenantId, workspaceId } });
     if (!extension) throw new NotFoundException("续租记录不存在");
     if (extension.status === "effective") return;
-    const events = await this.loadEvents(tx, tenantId, workspaceId, orderId);
+    const { accountingEvents: events } = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(events);
     if (ledgers.deposit.balance < order.depositAmount + Number(extension.depositDelta) || ledgers.preauthorization.balance < order.preAuthAmount + Number(extension.preAuthDelta)) throw new ConflictException("续租保证金不足，请先追加押金或预授权");
     await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable + Number(extension.payableAmount));
   }
 
-  /** 关闭前两条模拟资金账都必须已经走完事件链并归零。 */
+  /** 关闭前按同一证据口径检查资金已结清。 */
   async assertReadyToClose(
     tenantId: string,
     workspaceId: string,
@@ -209,19 +250,19 @@ export class RentalFundingService {
     options: { skipRentalPayment?: boolean } = {}
   ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
+    const ledgers = deriveFundingLedgers((await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
     if (order.depositAmount > 0 && ledgers.deposit.collected < order.depositAmount) throw new ConflictException("订单押金尚未足额收取，不能关闭");
     if (order.preAuthAmount > 0 && ledgers.preauthorization.frozen < order.preAuthAmount) throw new ConflictException("订单预授权尚未足额冻结，不能关闭");
     if (ledgers.deposit.balance > 0) throw new ConflictException("仍有押金余额，请先抵扣或退款");
     if (ledgers.preauthorization.balance > 0) throw new ConflictException("仍有预授权冻结额度，请先转扣或释放");
     if (!options.skipRentalPayment) {
-      const balance = rentalPaymentBalance(order.payable, await this.loadEvents(tx, tenantId, workspaceId, orderId)).balance;
+      const balance = rentalPaymentBalance(order.payable, (await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents).balance;
       if (Math.abs(balance) > 0.005) throw new ConflictException(balance > 0 ? `尚有费用 ${balance.toFixed(2)} 未收取` : `尚有退款 ${(-balance).toFixed(2)} 未完成`);
     }
   }
 
   /**
-   * 取消 / 确认爽约后仍被订单持有、需要退还或释放的模拟资金。
+   * 取消 / 确认爽约后仍被订单持有、需要退还或释放的同口径资金。
    *
    * 三项分别是：押金余额、预授权冻结余额，以及多收的租金（取消核减后 `rental.balance`
    * 为负即多收）。`refund_due` 费用审核单据此挂出——这张单**不动账**，实际退款/释放仍由
@@ -238,7 +279,7 @@ export class RentalFundingService {
     tx: Prisma.TransactionClient,
     payableOverride?: number
   ): Promise<{ depositBalance: number; preauthBalance: number; rentalOverpaid: number }> {
-    const events = await this.loadEvents(tx, tenantId, workspaceId, orderId);
+    const { accountingEvents: events } = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(events);
     let payable = payableOverride;
     if (payable === undefined) {
@@ -276,8 +317,10 @@ export class RentalFundingService {
       paymentMethod?: RentalOfflinePaymentMethod;
       /** 仅由员工待确认登记服务在结算权限确认后启用，允许首次实收为部分金额。 */
       allowPartialInitiate?: boolean;
-      /** 仅供已验签且已核对原支付单金额的 Provider 入账调用；不对 HTTP DTO 开放。 */
+      /** 仅供已验签并核对原支付/退款单的 Provider 入账调用；不对 HTTP DTO 开放。 */
       verifiedExternalReceipt?: boolean;
+      /** 原员工确认服务传入，必须与本次事件在同一事务内确认；不对 HTTP DTO 开放。 */
+      offlineRegistrationId?: string;
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -286,18 +329,38 @@ export class RentalFundingService {
     if (!reason) throw new ConflictException("资金事件原因不能为空");
     const key = input.idempotencyKey?.trim();
     if (!key) throw new ConflictException("资金事件必须带幂等键");
+    if (input.provider === "offline" && !tx) throw new ConflictException("线下确认必须与原登记在同一事务内提交");
     const run = async (tx: Prisma.TransactionClient) => {
       // 资金余额是事件流推导值。必须先锁住订单行，把同一订单的不同幂等键动作也串行化；
       // 否则两笔并发抵扣都可能读到同一个旧余额并同时成功。
       const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
       assertActionApplies(input.instrument, input.action);
+      const provider = input.provider ?? "mock";
       const externalReceipt = input.verifiedExternalReceipt === true;
-      if (externalReceipt && (input.instrument !== "rental" || input.action !== "initiate"
-        || !["alipay", "wechat_pay", "stripe"].includes(input.provider ?? ""))) {
-        throw new ConflictException("真实到账只能由已核验的支付平台登记租金收款");
+      if (externalReceipt && (input.instrument !== "rental" || !["initiate", "refund"].includes(input.action)
+        || !["alipay", "wechat_pay", "stripe"].includes(provider))) {
+        throw new ConflictException("真实到账只能由已核验的支付平台登记原收退款");
       }
+      if (provider === "offline") {
+        const registration = input.offlineRegistrationId && await tx.rentalOfflinePaymentRegistration.findFirst({
+          where: { id: input.offlineRegistrationId, tenantId, workspaceId, orderId, status: "pending" }
+        });
+        if (!registration || registration.instrument !== input.instrument || Number(registration.amount) !== input.amount
+          || registration.paymentMethod !== input.paymentMethod || key !== `staff-offline:${registration.id}`
+          || !["rental", "deposit"].includes(input.instrument) || !["initiate", "append"].includes(input.action)) {
+          throw new ConflictException("线下实收必须沿原登记确认事务入账");
+        }
+      } else if (provider !== "mock" && !externalReceipt) {
+        throw new ConflictException("真实资金必须提供原核验收据");
+      }
+      if (input.allowPartialInitiate && provider !== "offline") throw new ConflictException("部分线下收款必须来自原确认登记");
+      const context = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId, provider !== "mock");
+      if (provider === "mock" && !context.simulationAllowed) {
+        throw new ConflictException("模拟资金仅限纯演练订单，不能用于生产空间或抵消真实资金，请走原收退款流程");
+      }
+      const events = context.accountingEvents;
 
-      // 命中既有同键事件即回放（重试/恢复）。锁内查询同时兜住并发重试。
+      // 命中既有同键事件即回放（重试/恢复）。来源不能跨模拟与实款借键。
       const existing = await tx.rentalFundingEvent.findUnique({
         where: {
           workspaceId_orderId_instrument_action_idempotencyKey: {
@@ -310,6 +373,9 @@ export class RentalFundingService {
         }
       });
       if (existing) {
+        if (existing.provider !== provider || (existing.paymentMethod ?? undefined) !== input.paymentMethod) {
+          throw new ConflictException("相同幂等键已用于不同来源的资金事件");
+        }
         // 回调首次入账与幂等回放都必须核对真实金额；不能让同一键的不同金额
         // 命中已有 initiate 事件后直接当作成功。
         const explicitAmount = input.action !== "fail" && input.amount !== undefined;
@@ -319,7 +385,6 @@ export class RentalFundingService {
         return this.toEvent(existing);
       }
 
-      const events = await this.loadEvents(tx, tenantId, workspaceId, orderId);
       const ledgers = deriveFundingLedgers(events);
       const payment = rentalPaymentBalance(order.payable, events);
       // 订单已终结时，遗留的待补款续租不再计入待收：订单都关了还为它收款，
@@ -368,10 +433,10 @@ export class RentalFundingService {
       if (input.action === "capture" && effectiveAmount > Math.max(0, payment.balance)) throw new ConflictException("保证金抵扣不能超过尚未支付的应收费用");
       let balanceAfter: number;
       if (input.instrument === "rental") {
-        // 已发生的真实到账必须入账。取消/核减/并发付款产生的超收形成负应收
-        // （待退款），由原支付退款链收尾，不能用当前应收拒绝外部资金事实。
+        // 已核验收退款按原操作如实入账；当前应收变化形成待退或待收，
+        // 不能否定外部已发生事实。新申请仍由原支付退款入口核准额度。
         if (!externalReceipt && ["initiate", "append"].includes(input.action) && effectiveAmount > Math.max(0, due)) throw new ConflictException("收款不能超过订单及待补款续租应收");
-        if (input.action === "refund" && effectiveAmount > Math.max(0, -payment.balance)) throw new ConflictException("退款不能超过已核准的待退金额，请先完成应收核减");
+        if (!externalReceipt && input.action === "refund" && effectiveAmount > Math.max(0, -payment.balance)) throw new ConflictException("退款不能超过已核准的待退金额，请先完成应收核减");
         balanceAfter = roundMoney(payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount));
       } else balanceAfter = nextBalanceAfter(input.instrument, input.action, effectiveAmount, ledgers);
       const created = await tx.rentalFundingEvent.create({
@@ -384,7 +449,7 @@ export class RentalFundingService {
           action: input.action,
           amount: new Prisma.Decimal(effectiveAmount),
           balanceAfter: new Prisma.Decimal(balanceAfter),
-          provider: input.provider ?? "mock",
+          provider,
           // 内部资金动作以及真实 Provider 回调不属于线下收退款，保持 NULL。
           paymentMethod: input.paymentMethod ?? null,
           idempotencyKey: key,

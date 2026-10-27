@@ -1,5 +1,6 @@
 import { ActionButton, Alert } from "@/components/ui";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { isTransientRefreshError } from "@/app/queryClient";
 import { useLocale } from "@/app/locale";
 import { LoadingState } from "./LoadingState";
 import { useTableRefresh } from "./ui/data-table/TableRefreshContext";
@@ -9,13 +10,25 @@ export function QueryState({ loading, error, onRetry, children, transitionKey = 
   const { t } = useLocale();
   const reader = useTableRefresh();
   const retry = onRetry ?? reader.onRefresh;
-  const phase = loading ? "loading" : error ? "error" : "ready";
-  return <ContentTransition value={`${transitionKey}:${phase}`}>{loading ? <div className="query-state-loading"><LoadingState /></div> : error ? <Alert type="error" showIcon title={t("数据暂不可用，请稍后重试")} action={retry && <ActionButton variant="secondary" label={t("重试")} pending={reader.busy} onAction={async () => {
+  const loaded = useRef({ key: transitionKey, ready: false });
+  if (loaded.current.key !== transitionKey) loaded.current = { key: transitionKey, ready: false };
+  if (!loading && !error) loaded.current.ready = true;
+  const transient = Boolean(error && loaded.current.ready && isTransientRefreshError(error));
+  const phase = loading ? "loading" : error && !transient ? "error" : "ready";
+  const retryAction = retry && <ActionButton variant="secondary" label={t("重试")} pending={reader.busy} onAction={async () => {
     const result = await retry();
     // Query.refetch may resolve to an error result; that is not a successful retry.
     const failed = (value: unknown): boolean => Array.isArray(value) ? value.some(failed) : Boolean(value && typeof value === "object" && "isError" in value && value.isError);
     if (failed(result)) throw new Error(t("数据暂不可用，请稍后重试"));
-  }} />} /> : children}</ContentTransition>;
+  }} />;
+  return <ContentTransition value={`${transitionKey}:${phase}`}>{loading
+    ? <div className="query-state-loading"><LoadingState /></div>
+    : error && !transient
+      ? <Alert type="error" showIcon title={t("数据暂不可用，请稍后重试")} action={retryAction} />
+      : <>
+        {transient ? <Alert type="warning" showIcon title={t("数据暂未更新，正在自动重试")} action={retryAction} /> : null}
+        {children}
+      </>}</ContentTransition>;
 }
 // ListSection may inspect the ready body's first child without mounting or
 // reimplementing this component. Loading/error branches keep their visible title.

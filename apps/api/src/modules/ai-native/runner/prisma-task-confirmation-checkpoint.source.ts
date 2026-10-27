@@ -111,6 +111,13 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     if (plan.taskId !== taskId || plan.runId !== runId || receipt.activeMs > BigInt(plan.limits.maxStepMs)
       || receipt.outputBytes > BigInt(plan.limits.maxOutputBytes)) throw denied();
     const authorize = async () => {
+      // Pausing records the already-persisted phase under the transition's
+      // current owner/lease checks. It grants no further execution. Only
+      // resuming a human decision requires today's live plan authority.
+      if (!continuation) {
+        if (!hash.safeParse(saved.authorityHash).success || !id.max(64).safeParse(saved.policyVersion).success) throw denied();
+        return requestFingerprint({ authorityHash: saved.authorityHash, policyVersion: saved.policyVersion });
+      }
       const proof = await this.plans.authorize(structuredClone(plan), structuredClone(input.lease));
       if (proof.authorityHash !== saved.authorityHash || proof.policyVersion !== saved.policyVersion
         || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.clock().getTime()) throw denied();

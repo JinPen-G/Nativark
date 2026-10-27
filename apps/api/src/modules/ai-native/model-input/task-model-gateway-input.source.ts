@@ -10,6 +10,7 @@ import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-inv
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { readModelNonDispatchEvidence } from './prisma-model-nondispatch.evidence';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
   parseTaskModelInput, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
 
@@ -27,7 +28,8 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   private readonly scene: GatewayTextIntentBinding;
   private readonly runtime: PublicGatewayRuntime;
   private readonly priceVersion: string;
-  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'>,
+  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'
+    | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'> & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
   private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
@@ -135,6 +137,62 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     return { inputRef: receipt.id, fingerprint: receipt.fingerprint, execution: 'not_attested' as const };
   }
 
+  /** Read the exact frozen input an invocation registered, for input counting
+   * only: verifies the persisted material against the invocation's registered
+   * hashes without publishing, leasing, registering a new call or dispatching.
+   * The counting consumer receives the same intent/configuration the text
+   * dispatch will send, so a receipt can never attest different content. */
+  async readFrozenCountingInput(value: unknown) {
+    const parsed = z.object({ callId: id.max(128).optional(), invocationId: id.max(36).optional(), scopeId: id.max(36), actorId: id })
+      .strict().refine(item => (item.callId !== undefined) !== (item.invocationId !== undefined))
+      .safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (this.kind || typeof this.db.aiTaskActionInput?.findFirst !== 'function') throw unavailable();
+    const invocation = parsed.data.invocationId !== undefined
+      ? await this.db.aiGatewayInvocation.findUnique({ where: { id: parsed.data.invocationId } })
+      : await this.db.aiGatewayInvocation.findUnique({
+        where: { scopeId_callId: { scopeId: parsed.data.scopeId, callId: parsed.data.callId! } } });
+    if (!invocation || invocation.scopeId !== parsed.data.scopeId
+      || parsed.data.callId !== undefined && invocation.callId !== parsed.data.callId
+      || parsed.data.invocationId !== undefined && invocation.id !== parsed.data.invocationId
+      || invocation.sceneCode !== this.scene.sceneCode || invocation.mode !== 'invoke') throw denied();
+    const context = structuredClone(await this.execution.authorize(invocation.taskId));
+    const actorId = this.narrow(context).actorId;
+    if (actorId !== parsed.data.actorId || invocation.actorId !== actorId) throw denied();
+    const access = aiTaskAccessFromContext(context, invocation.taskId, this.clock());
+    const task = await this.db.aiTask.findFirst({ where: access.where });
+    if (!task || task.scopeId !== invocation.scopeId) throw denied();
+    const step = await this.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: invocation.taskId,
+      runId: invocation.runId, id: invocation.stepId } });
+    if (!step || step.toolCode !== this.tool || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || !step.inputRef || step.requestFingerprint !== invocation.stepFingerprint) throw denied();
+    const saved = await this.db.aiTaskActionInput!.findFirst({ where: { id: step.inputRef, scopeId: task.scopeId,
+      taskId: invocation.taskId, runId: invocation.runId, toolCode: this.tool,
+      toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint: step.requestFingerprint } });
+    if (!saved || saved.id !== step.inputRef || saved.fingerprint !== step.requestFingerprint
+      || !(saved.expiresAt instanceof Date) || saved.expiresAt <= this.clock()) throw unavailable();
+    const frozen = parseTaskModelInput(saved.payload, this.policy);
+    if (taskModelFingerprint(frozen, this.policy) !== invocation.intentHash
+      || frozen.identityHash !== taskModelIdentity(context)
+      || frozen.priceVersion !== invocation.priceVersion
+      || requestFingerprint(frozen.configuration) !== invocation.configurationHash
+      || frozen.intent.requestId !== invocation.callId
+      || frozen.intent.maxOutputTokens !== invocation.maxOutputTokens
+      || frozen.intent.sceneCode !== invocation.sceneCode) throw denied();
+    const latest = await this.db.aiGatewayInvocation.findUnique({ where: {
+      scopeId_callId: { scopeId: task.scopeId, callId: invocation.callId } } });
+    if (!latest || latest.id !== invocation.id || latest.registrationHash !== invocation.registrationHash
+      || latest.intentHash !== invocation.intentHash
+      || taskModelIdentity(await this.execution.authorize(invocation.taskId)) !== taskModelIdentity(context)) throw denied();
+    return { scopeId: task.scopeId, actorId, context,
+      invocation: { id: invocation.id, taskId: invocation.taskId, runId: invocation.runId, stepId: invocation.stepId,
+        actionId: invocation.actionId, callId: invocation.callId, registrationHash: invocation.registrationHash,
+        intentHash: invocation.intentHash, configurationHash: invocation.configurationHash,
+        priceVersion: invocation.priceVersion, maxOutputTokens: invocation.maxOutputTokens,
+        sceneCode: invocation.sceneCode, expiresAt: new Date(invocation.expiresAt) },
+      intent: structuredClone(frozen.intent), configuration: structuredClone(frozen.configuration) };
+  }
+
   async resolve(presented: AiTaskRunnerStepRef, held: AiTaskRunnerLease) {
     const ref = structuredClone(presented), lease = leaseSchema.parse(structuredClone(held));
     if (ref.plan.toolCode !== this.tool || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION
@@ -210,7 +268,23 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     if (result.requestId !== input.intent.requestId || requestFingerprint(result.actual) !== requestFingerprint(input.configuration)) throw denied();
     const payload = JSON.parse(JSON.stringify(result));
     if (result.status === 'completed' && result.usage.kind === 'reported') return { kind: 'succeeded' as const, payload };
-    if (result.status === 'failed') return { kind: 'failed' as const, payload, errorCode: 'AI_RESOURCE_UNAVAILABLE' };
+    if (result.status === 'failed') {
+      if (context.scope.kind !== 'workspace') throw denied();
+      const unsent = await readModelNonDispatchEvidence(this.db, {
+        scopeId: task.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+        actorId: narrow.actorId }, invocation);
+      if (taskModelIdentity(await this.execution.authorize(binding.taskId)) !== input.identityHash) throw denied();
+      // Step outcomes use the shared tool-error contract, not an internal
+      // repository error code (which the transition authority must reject).
+      if (unsent) return { kind: 'failed' as const, payload, errorCode: 'AI_PROVIDER_UNAVAILABLE' };
+      // A process-local failed result is not durable proof of no dispatch or
+      // no debit. Preserve the original call for reconciliation, not retries.
+      return { kind: 'unknown' as const, payload: JSON.parse(JSON.stringify({ draftVersion: result.draftVersion,
+        requestId: result.requestId, actual: result.actual, evidence: result.evidence, status: 'unknown',
+        usage: { kind: 'unknown', reason: 'result_unknown', nextAction: 'reconcile' },
+        error: { code: 'AI_RESULT_UNKNOWN', message: 'Original dispatch or accounting outcome requires reconciliation.',
+          retryable: false, nextAction: 'reconcile' } })) };
+    }
     return { kind: 'unknown' as const, payload };
   }
 }

@@ -44,6 +44,20 @@ test('settings source resolves actual workspace Core context with authorized loc
   const h = await setup(), config = stores.createAbsorbingConfigStore();
   config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant-a', categoryCode: 'camera', isDefault: true }];
   const core = new RentalCoreService(config, stores.createAbsorbingFactStore()); await core.onApplicationBootstrap();
+  // Declared synthetic pagination endpoint over the SAME seeded synthetic
+  // catalog: AI reads are bounded-only (listItemGroupsPage), id-ordered pages
+  // with the formal cursor/truncated contract.
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  config.listItemGroupsPage = async (tenantId, workspaceId, query) => {
+    const seeded = core.listItemGroups(tenantId);
+    const all = seeded.filter(row => (!query.itemGroupId || row.id === query.itemGroupId)
+      && (!query.name || row.name === query.name) && (!query.cursor || row.id > query.cursor))
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const rows = all.slice(0, query.limit), truncated = all.length > query.limit;
+    return { rows, truncated, nextCursor: truncated ? rows[rows.length - 1].id : null,
+      source: 'persisted_workspace_configuration',
+      configurationVersion: requestFingerprint(seeded.map(row => [row.id, row.name, row.status, row.unit])) };
+  };
   const source = new AiGuardedQuoteCoreContextSource(core, h.bridge);
   const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const ctx = await source.current(scope);
@@ -71,6 +85,20 @@ for (const categoryCode of ['camera', 'camping', 'vehicle', 'construction']) tes
   const config = stores.createAbsorbingConfigStore();
   config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode, isDefault: true }];
   const core = new RentalCoreService(config, stores.createAbsorbingFactStore()); await core.onApplicationBootstrap();
+  // Declared synthetic pagination endpoint over the SAME seeded synthetic
+  // catalog: AI reads are bounded-only (listItemGroupsPage), id-ordered pages
+  // with the formal cursor/truncated contract.
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  config.listItemGroupsPage = async (tenantId, workspaceId, query) => {
+    const seeded = core.listItemGroups(tenantId);
+    const all = seeded.filter(row => (!query.itemGroupId || row.id === query.itemGroupId)
+      && (!query.name || row.name === query.name) && (!query.cursor || row.id > query.cursor))
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const rows = all.slice(0, query.limit), truncated = all.length > query.limit;
+    return { rows, truncated, nextCursor: truncated ? rows[rows.length - 1].id : null,
+      source: 'persisted_workspace_configuration',
+      configurationVersion: requestFingerprint(seeded.map(row => [row.id, row.name, row.status, row.unit])) };
+  };
   const { RentalBusinessService } = require('../apps/api/src/modules/rental-core/rental-business.service');
   const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), stores.createAbsorbingBusinessFactStore(), config);
   await business.onApplicationBootstrap();
@@ -127,9 +155,30 @@ test('current delivery choice reaches actual Core quote and changed address cann
   assert.equal(first.status, 'missing_input');
   assert.deepEqual(first.clarifications.find(c => c.field === 'deliveryAddressId').candidates.map(c => c.id), ['address-a']);
   const selected = { ...candidate, deliveryAddressId: 'address-a', selectionRevision: first.selectionRevision };
-  const prepared = await b.tools.quote.candidates.prepare(selected);
+  // The explicit address joins the candidate fingerprint and answering the
+  // re-offered round normalizes the untrusted name away, so the contract
+  // re-offers the candidate's own current values until it settles, keeping
+  // the confirmed address bound throughout.
+  const { originalQuoteAnswerContract, applyOriginalQuoteAnswers } = require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+  const answerCurrent = (candidateValue, field) => {
+    const current = field.fieldId === 'delivery_address_selection' ? candidateValue.deliveryAddressId
+      : field.fieldId === 'fulfillment_selection' ? candidateValue.fulfillmentMode
+      : field.fieldId === 'pricing_unit_selection' ? candidateValue.items[0].pricingUnit
+      : field.fieldId === 'item_selection' ? candidateValue.items[0].itemGroupId
+      : field.fieldId === 'customer_selection' ? candidateValue.customerId
+      : field.fieldId === 'pickup_location' ? candidateValue.locationId : undefined;
+    if (!field.options) return current;
+    return field.options.some(option => option.value === current) ? current : field.options[0].value;
+  };
+  let addressCandidate = selected, prepared = await b.tools.quote.candidates.prepare(addressCandidate);
+  for (let round = 0; round < 6 && prepared.status === 'missing_input'; round++) {
+    const roundContract = originalQuoteAnswerContract(addressCandidate, prepared, 'Reconfirm the chosen address');
+    addressCandidate = applyOriginalQuoteAnswers(addressCandidate, [{ contract: roundContract,
+      answers: roundContract.fields.filter(field => field.required).map(field => ({ fieldId: field.fieldId, value: answerCurrent(addressCandidate, field) })) }]);
+    prepared = await b.tools.quote.candidates.prepare(addressCandidate);
+  }
   assert.equal(prepared.status, 'needs_confirmation');
-  assert.equal((await b.tools.quote.previewSelection(selected)).status, 'quoted');
+  assert.equal((await b.tools.quote.previewSelection(addressCandidate)).status, 'quoted');
   assert.equal(writes, 1);
   row.revision++; row.detail = 'Changed detail';
   await assert.rejects(b.tools.quote.preview.preview(prepared.request, prepared.configurationFingerprint, prepared.addressFingerprint),

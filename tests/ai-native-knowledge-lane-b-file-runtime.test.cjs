@@ -28,7 +28,9 @@ function fileFixture() {
   const f = fixture(), { db } = f, grants = new Map();
   db.state.assets = new Map(); db.state.uploads = new Map();
   const clone = value => structuredClone(value);
-  const match = (row, where) => Object.entries(where).every(([key, value]) => value && typeof value === 'object' && 'gt' in value ? row[key] > value.gt : row[key] === value);
+  const match = (row, where) => Object.entries(where).every(([key, value]) => value instanceof Date
+    ? row[key] instanceof Date && row[key].getTime() === value.getTime()
+    : value && typeof value === 'object' && 'gt' in value ? row[key] > value.gt : row[key] === value);
   const delegate = name => ({
     async findFirst({ where, include }) { const row = [...db.state[name].values()].find(row => match(row, where));
       return row ? clone({ ...row, ...(include?.uploadSession ? { uploadSession: [...db.state.uploads.values()].find(session => session.fileAssetId === row.id) ?? null } : {}) }) : null; },
@@ -53,11 +55,12 @@ function fileFixture() {
   const text = Buffer.from('Synthetic SOP: inspect the package before return.');
   const input = { documentId: 'doc-1', fileName: 'sop.txt', mimeType: 'text/plain', sizeBytes: text.length };
   const config = { id: 'config-file', capability: 'file', provider: 's3_compatible', settings: { endpoint: 'https://objects.example.test', bucket: 'synthetic-bucket', region: 'us-east-1', forcePathStyle: true }, credentials: { accessKeyId: 'synthetic-access', secretAccessKey: 'synthetic-secret' } };
-  let reads = 0; const state = { afterBody: null, noProvider: false };
+  let reads = 0; const state = { afterBody: null, noProvider: false, body: text };
   const integrations = { runtimeConfig: async () => state.noProvider ? undefined : clone(config), assertEnabledInTransaction: async () => {} };
   const objectIO = { egress: async (url, _name, options) => { assert.equal(options.allowQuery, false); return url; },
     transport: async (url, init) => { reads++; assert.equal(new URL(url).search, ''); assert.match(init.headers.Authorization, /^AWS4-HMAC-SHA256 /); assert.equal(init.redirect, 'error');
-      return new Response(new ReadableStream({ start(controller) { controller.enqueue(text); if (state.afterBody) state.afterBody(); controller.close(); } }),
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(state.body);
+        if (state.afterBody) state.afterBody(); controller.close(); } }),
         { headers: { 'content-type': 'text/plain', 'content-length': String(text.length) } }); } };
   const deps = { ...f.ports, db, integrations, objectIO };
   function allow(action, resource = {}, workspaceId = 'space-1', domain = 'knowledge') {
@@ -234,10 +237,44 @@ test('first creation uses original upload receipt then real create parse index p
   await f.api.management.create(draft);
   assert.equal((await f.api.management.create(draft)).revision, 1);
   await assert.rejects(f.api.uploads.begin(f.input), { code: 'unavailable' });
+  assert.equal([...f.db.state.assets.values()][0].metadata.knowledgeContentHash,
+    require('node:crypto').createHash('sha256').update(f.text).digest('hex'));
   assert.equal((await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' })).parsing, 'parsed');
-  assert.equal(f.reads(), 1);
+  assert.equal(f.reads(), 2); // One completion read and one parser read.
   assert.equal((await f.api.management.reconcileParse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' })).parsing, 'parsed');
-  assert.equal(f.reads(), 1);
+  assert.equal(f.reads(), 2);
+  const parsedHead = f.db.state.documents.get('doc-1').state;
+  assert.equal(parsedHead.contentHash, require('node:crypto').createHash('sha256').update(f.text).digest('hex'));
+  const repository = new (h.load('prisma-knowledge.repository').PrismaKnowledgeRepository)(f.db);
+  const versionScope = { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'space-1' };
+  const versions = await repository.versions(versionScope, 'doc-1', 5);
+  assert.equal(versions[0].contentHash, 'v1'); assert.equal(versions[0].sourceContentHash, parsedHead.contentHash);
+  assert.equal(versions[0].chunks[0].text, f.text.toString());
+  const source = [...f.db.state.operations.values()].find(row => row.operationId.startsWith('source-content:'));
+  f.db.state.operations.delete(source.id);
+  await assert.rejects(repository.versions(versionScope, 'doc-1', 5), { code: 'unavailable' });
+  f.db.state.operations.set(source.id, source);
+  const chunk = [...f.db.state.chunks.values()][0], savedChunkText = chunk.text;
+  chunk.text = 'Synthetic tampered historical body';
+  await assert.rejects(repository.versions(versionScope, 'doc-1', 5), { code: 'unavailable' });
+  chunk.text = savedChunkText;
+  const originalProofRead = f.db.aiKnowledgeOperation.findFirst; let proofReads = 0;
+  f.db.aiKnowledgeOperation.findFirst = async args => {
+    const row = await originalProofRead(args);
+    if (args.where.operationId.startsWith('source-content:') && ++proofReads === 2) row.fingerprint = '0'.repeat(64);
+    return row;
+  };
+  await assert.rejects(repository.versionContent(versionScope, 'doc-1', 'v1'), { code: 'unavailable' });
+  f.db.aiKnowledgeOperation.findFirst = originalProofRead;
+  // Same key/type/length is not the same source bytes. The original runtime
+  // reopens the object and compares its actual digest against the parse basis.
+  f.state.body = Buffer.alloc(f.text.length, 120);
+  const fileAccess = new (h.load('prisma-knowledge-file-access').PrismaKnowledgeFileAccess)(f.db,
+    new (h.load('knowledge-current-session').KnowledgeCurrentSession)(f.identity.auth, f.identity.credentials, f.ports.clock),
+    f.ports.authorization, new TenantKnowledgeObjectReader(f.db, f.integrations, f.objectIO.transport, f.objectIO.egress));
+  await assert.rejects(fileAccess.read('tenant-1', bound.attachmentId, { businessType: 'ai_knowledge_document', businessId: 'doc-1',
+    workspaceId: 'space-1', actorUserId: 'user-1', uploadScene: 'ai-knowledge' }, 262144), { code: 'unavailable' });
+  f.state.body = f.text;
   assert.equal((await lifecycle.indexStatus({ documentId: 'doc-1' })).receipt, 'not_queued');
   const queued = await lifecycle.requestIndex({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
   const indexed = await lifecycle.resumeIndex({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
@@ -319,10 +356,11 @@ test('first creation uses original upload receipt then real create parse index p
   lifecycle.close(); await assert.rejects(lifecycle.indexStatus({ documentId: 'doc-1' }), { code: 'unavailable' });
 });
 
-test('first upload denies changed payload, cross-workspace occupation, free metadata and missing storage', async () => {
+test('first upload denies changed payload, cross-workspace occupation, free metadata and missing storage', async t => {
   const f = fileFixture(); f.allowUpload();
   f.db.responseError = new Error('upload commit reply lost');
-  await assert.rejects(f.api.uploads.begin(f.input), /reply lost/);
+  await assert.rejects(f.api.uploads.begin(f.input), { code: 'result_unknown' });
+  assert.equal(f.db.state.uploads.size, 1);
   f.db.responseError = null;
   const upload = await f.api.uploads.begin(f.input);
   assert.equal(f.db.state.uploads.size, 1);
@@ -335,6 +373,13 @@ test('first upload denies changed payload, cross-workspace occupation, free meta
   assert.equal(f.db.state.uploads.size, 1);
   const empty = fileFixture(); empty.allowUpload(); empty.state.noProvider = true;
   await assert.rejects(empty.api.uploads.begin(empty.input)); assert.equal(empty.db.state.uploads.size, 0);
+  const replaced = fileFixture(), { bound } = await completed(replaced, t);
+  replaced.allowDocument(bound.attachmentId);
+  replaced.state.body = Buffer.alloc(replaced.text.length, 120);
+  await replaced.api.management.create(h.draft({ attachmentId: bound.attachmentId }));
+  await assert.rejects(replaced.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-overwritten' }), { code: 'unavailable' });
+  assert.equal(replaced.db.state.chunks.size, 0);
+  assert.equal([...replaced.db.state.operations.values()].some(row => row.operationId.startsWith('source-content:')), false);
 });
 
 test('late body revocation remains pending and exact reconciliation never reads the object again', async t => {
@@ -344,7 +389,7 @@ test('late body revocation remains pending and exact reconciliation never reads 
   await assert.rejects(f.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-late' }), { code: 'unavailable' });
   f.flags.active = true; f.state.afterBody = null;
   await assert.rejects(f.api.management.reconcileParse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-late' }), { code: 'result_unknown' });
-  assert.equal(f.reads(), 1);
+  assert.equal(f.reads(), 2); // Completion + interrupted parse; reconciliation does not reread.
 });
 
 test('revision uploads preserve frozen source identity, reject retargeting and consume the original revise receipt', async t => {
@@ -394,7 +439,7 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
   assert.equal((await f.api.management.revise(3, request)).revision, 4);
   assert.equal(f.db.state.versions.size, 2);
   assert.equal((await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 4, operationId: 'parse-v2' })).parsing, 'parsed');
-  assert.equal(f.reads(), 2);
+  assert.equal(f.reads(), 4); // Both versions require completion and parser reads.
   await assert.rejects(f.api.management.revise(6, h.draft({ documentVersion: 'v3', attachmentId: uploaded.attachmentId, operationId: 'retarget-v3' })), { code: 'unavailable' });
   await assert.rejects(f.api.uploads.beginRevision({ ...selection, targetVersion: 'v3' }), { code: 'unavailable' });
 });

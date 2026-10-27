@@ -38,8 +38,12 @@ export class PrismaClientTaskBudgetAuthorizationSource implements BudgetAuthoriz
     const association = resource.association as Record<string, unknown> | undefined;
     if (!association || typeof association.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(association.requestId)
       || requestFingerprint(association.scope) !== requestFingerprint(context.scope)) throw new BudgetError('FORBIDDEN');
+    // Lease/fence validation stays in bindings; Decimal fields do not belong
+    // in this cloneable authorization projection.
     const row = structuredClone(await this.input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
-      scopeId: before.scope.id, callId: association.requestId } } }));
+      scopeId: before.scope.id, callId: association.requestId } }, select: { id: true, scopeId: true, actorId: true,
+        taskId: true, configuration: true, callId: true, maxOutputTokens: true, intentHash: true,
+        sceneCode: true, registrationHash: true, configurationHash: true } }));
     if (!row || row.scopeId !== before.scope.id || row.actorId !== context.actor.customerId || !isGatewayConfig(row.configuration)) throw new BudgetError('FORBIDDEN');
     const dispatching = action === 'reserve' || action === 'dispatch';
     const operation = dispatching ? 'execute' : action === 'read' ? 'read' : 'accounting';

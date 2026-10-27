@@ -2,7 +2,10 @@ import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES, AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
-import { AI_CLIENT_HOST_CAPABILITIES_VERSION } from './ai-client-entry-draft-schemas';
+import { AI_CLIENT_HOST_CAPABILITIES_VERSION, AI_CLIENT_MATERIAL_RECEIPT_VERSION } from './ai-client-entry-draft-schemas';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_INPUT_DRAFT_VERSION } from './ai-task-input-draft';
+import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 
 const id = { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const uuid = { type: 'string', format: 'uuid' };
@@ -12,6 +15,11 @@ const date = { type: 'string', format: 'date-time' };
 const literal = (value: string | boolean | number) => ({ const: value });
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) =>
   ({ type: 'object', properties, required, additionalProperties: false });
+const taskRevision = { type: 'integer', minimum: 1, maximum: 4294967295 };
+const cancelTransition = { taskRevision, cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' }, observedAt: date };
+const cancelObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
+  expectedRevision: { ...taskRevision, maximum: 4294967294 }, execution: literal('not_authorized_by_observation'),
+  externalRollback: literal('not_claimed'), retryable: literal(false), nextAction: literal('read_original_task') };
 const permissions = { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
   items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$' } };
 const scope = object({ kind: literal('workspace'), tenantId: id, workspaceId: id });
@@ -25,6 +33,14 @@ const selection = object({ quoteId: id, timeZone: { type: 'string', minLength: 1
     scheduledEndAt: date, serviceLocationId: id }, ['serviceId', 'quantity']) }
 }, ['quoteId', 'timeZone', 'startAt', 'endAt', 'fulfillmentMode', 'fulfillmentLocationId', 'bookingIdentity', 'lines']);
 const nullableId = { anyOf: [id, { type: 'null' }] };
+const { taskId: _submissionTaskId, ...clientAnswerProperties } = AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft.properties!;
+const clientAnswer = object(clientAnswerProperties);
+const inputReceipt = { taskId: { ...id, maxLength: 36 }, requestId: { ...id, maxLength: 36 },
+  receiptId: { ...id, maxLength: 36 }, taskRevision };
+const runObservation = object({ status: { enum: ['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed'] },
+  completedSteps: { type: 'integer', minimum: 0, maximum: 4294967295 }, cleanupFailed: { type: 'integer', minimum: 0, maximum: 4294967295 },
+  errorCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,127}$' }, stopReason: literal('input_limit_reached'), nextAction: literal('manual_handoff') },
+  ['status', 'completedSteps', 'cleanupFailed']);
 const amount = { type: 'number', minimum: 0 };
 const quote = object({ quoteId: id, quoteVersion: hash, pricingPlanVersion: id, ruleVersion: id,
   priceVersionId: nullableId, calendarVersion: nullableId, categoryVersionId: nullableId,
@@ -44,7 +60,61 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiClientOrderMaterialRequest: object({ operationKey: { ...id, maxLength: 128 }, orderId: id }),
+  AiClientOrderMaterialReceipt: object({ contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
+    operationKey: { ...id, maxLength: 128 }, state: { enum: ['observed', 'unknown'] },
+    materialRef: { anyOf: [uuid, { type: 'null' }] }, materialHash: { anyOf: [hash, { type: 'null' }] },
+    expiresAt: { anyOf: [date, { type: 'null' }] }, execution: literal('not_attested'),
+    freshness: literal('revalidate_before_execution'), retryable: literal(false), nextAction: literal('read_original_material_receipt') }),
+  AiClientTaskCreationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    creationKey: { ...id, maxLength: 128 }, materialRef: uuid, state: { enum: ['observed', 'unknown'] },
+    inputRef: { anyOf: [uuid, { type: 'null' }] }, inputHash: { anyOf: [hash, { type: 'null' }] },
+    task: { anyOf: [object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
+      status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
+    execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
+  AiClientTaskInputSubmissionRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
+  AiClientTaskInputReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('pending'),
+    question: object({ requestId: { ...id, maxLength: 36 }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 },
+      expiresAt: date, contract: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputContractDraft }), execution: literal('not_authorized_by_observation') }),
+    object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('not_pending'), question: { type: 'null' },
+      execution: literal('not_authorized_by_observation') })] },
+  AiClientTaskInputSubmissionReceipt: object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), status: literal('input_received'),
+    ...inputReceipt, replayed: { type: 'boolean' }, execution: literal('not_inferred_from_receipt') }),
+  AiClientTaskInputReceiptReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('observed'),
+    receipt: object(inputReceipt), execution: literal('not_inferred_from_receipt') }),
+    object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('not_observed'), receipt: { type: 'null' },
+      execution: literal('not_inferred_from_receipt') })] },
+  AiClientTaskModelControlResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    execution: { oneOf: [object({ kind: literal('not_started'), reason: { enum: ['host_aborted', 'plan_unavailable', 'task_not_runnable', 'lease_held', 'recovery_lease_unavailable'] } }),
+      object({ kind: literal('run_outcome'), outcome: runObservation })] },
+    businessExecution: literal('not_inferred_from_model_result'), retryable: literal(false), nextAction: literal('read_original_task') }),
+  AiClientTaskModelResultReadResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
+    taskRevision, workflowStatus: { enum: [...AI_TASK_STATUSES_DRAFT] },
+    resultPurpose: { enum: ['answer', 'clarification', 'not_attested'] }, state: { enum: ['observed', 'not_observed'] },
+    result: { anyOf: [object({ resultId: { ...id, maxLength: 36 }, status: { enum: ['succeeded', 'failed', 'unknown'] },
+      observedAt: date, text: { anyOf: [{ type: 'string', maxLength: 32768 }, { type: 'null' }] } }), { type: 'null' }] },
+    authority: literal('generated_text_not_business_fact'), businessExecution: literal('not_inferred_from_model_result'),
+    retryable: literal(false), nextAction: literal('read_original_task') },
+    ['contractVersion', 'taskId', 'taskRevision', 'state', 'result', 'authority', 'businessExecution', 'retryable', 'nextAction']),
+  AiClientTaskCancelRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
+    expectedRevision: { ...taskRevision, maximum: 4294967294 } }),
+  AiClientTaskUnstartedCancellationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
+    taskId: { ...id, maxLength: 36 }, ...cancelTransition, status: literal('cancelled'),
+    cancellation: literal('unstarted_task_settled'), externalRollback: literal('not_claimed'),
+    retryable: literal(false), nextAction: literal('read_original_task') }),
+  AiClientTaskCancellationObservation: { oneOf: [
+    object({ ...cancelObservation, state: literal('observed'),
+      transition: object({ ...cancelTransition, status: { enum: ['cancel_requested', 'cancelled'] } }) }),
+    object({ ...cancelObservation, state: literal('unknown'), transition: { type: 'null' } })] },
+  AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
+  AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),
+  AiTaskAccountingObservation: { $ref: '#/components/schemas/AiClientTaskAccountingResponse' },
+  AiClientTaskAccountingResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
+    state: { enum: ['observed', 'unknown'] }, account: { anyOf: [object({ status: { enum: ['reserved', 'settled', 'released', 'pending_reconciliation'] },
+      usageRecorded: { type: 'boolean' }, dispatched: { type: 'boolean' } }), { type: 'null' }] },
+    meaning: literal('ai_invocation_not_business_payment'), observedAt: date, execution: literal('not_authorized_by_accounting'),
+    retryable: literal(false), nextAction: literal('read_original_accounting') }),
   AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
   AiClientOrderExplanationReadRequest: object({ orderId: id, question: { enum: ['status', 'fees'], description: 'Omitted question uses status.' } }, ['orderId']),

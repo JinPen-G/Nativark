@@ -15,10 +15,23 @@ async function harness() {
 
 test('actual replay adapter reads a persisted terminal projection under distinct read authority', async () => {
   const h = await harness();
+  let active, sharedReads = 0, standaloneReads = 0;
+  const transaction = h.db.$transaction;
+  h.db.$transaction = (work, options) => transaction(async tx => {
+    active = tx; try { return await work(tx); } finally { active = undefined; }
+  }, options);
+  h.authority.resolveOriginal = async (_command, tx) => {
+    if (active) { assert.equal(tx, active, 'original revalidation must share the owning transaction'); sharedReads++; }
+    else { assert.equal(tx, undefined); standaloneReads++; }
+    const { expiresAt, ...grant } = clone(h.state.grant);
+    return { ...grant, registrationAllowed: false };
+  };
   const ports = createAiTaskRunnerRepositoryPorts({ tasks: {}, registrations: h.repository, replays: h.repository, transitions: {}, commands: { register: () => clone(command) } });
   const result = await ports.steps.register({ registrationRef: command.registrationRef, toolCode: 'rental.order.explain', toolVersion: 'draft-1', operation: 'readonly' }, { taskId: command.taskId, ...command.lease, expiresAt: h.state.run.leaseExpiresAt.toISOString() });
   assert.equal(result.replayed, true); assert.equal(result.existingStatus, 'succeeded'); assert.equal(result.resultRef, 'result-1');
   assert.equal(h.reads >= 2, true); assert.equal(h.state.steps.length, 1);
+  assert.equal((await h.repository.register(clone(command), true)).replayed, true);
+  assert.equal(sharedReads, 2); assert.equal(standaloneReads, 2);
 });
 
 for (const key of ['runId', 'requestFingerprint', 'toolCode', 'actionId']) test(`replay refuses changed ${key}`, async () => {

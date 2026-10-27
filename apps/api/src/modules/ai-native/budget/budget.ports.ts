@@ -1,14 +1,25 @@
 import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageQuantityDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 
 export type BudgetAction = 'settings_read' | 'settings_write' | 'reserve' | 'dispatch' | 'read' | 'settle' | 'release' | 'unknown' | 'reconcile';
+/** Original reservation lifecycle only. These actions cannot admit a new call;
+ * current action authority and persisted association/evidence remain mandatory. */
+export function isOriginalBudgetLifecycleAction(action: BudgetAction): boolean {
+  return action === 'read' || action === 'settle' || action === 'release' || action === 'unknown' || action === 'reconcile';
+}
 export type BudgetStatus = 'reserved' | 'settled' | 'released' | 'pending_reconciliation';
 export interface BudgetPolicyKey { scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; sceneCode: string; }
 export interface BudgetPolicy extends BudgetPolicyKey { id: string; revision: number; settings: AiUsageSettingsDraft; }
+/** Server-bound management operation, not budget admission or a dispatch token. */
+export type BudgetSettingsOperation = { operationKey: string; commandHash: string; actorId: string } & (
+  | { kind?: undefined; action: 'change' | 'initialize' | 'refreshConfiguration'; tenantId: string; workspaceId: string }
+  | { kind: 'platform'; action: 'platformSave' });
 export interface BudgetGrant {
   context: AiExecutionContext;
   /** Fresh, action-specific result from the server authorization adapter. */
   authorizationKey: string;
   expiresAt: Date;
+  /** Current commercial permission for NEW usage, not authority over old money.
+   * False blocks settings/new admission; original accounting needs its own grant. */
   entitled: boolean;
 }
 export interface BudgetAuthority {
@@ -19,6 +30,7 @@ export interface BudgetReserveCommand {
   callId: string;
   sceneCode: string;
   expiresAt: Date;
+  countRequestHash?: string;
 }
 export interface BudgetQuote {
   association: AiUsageAssociationDraft;
@@ -52,9 +64,12 @@ export interface BudgetEvidencePort {
 }
 export interface BudgetTransactionRepository {
   settings(key: BudgetPolicyKey): Promise<BudgetPolicy | null>;
-  saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>): Promise<BudgetPolicy>;
+  saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>, operation?: BudgetSettingsOperation): Promise<BudgetPolicy>;
   reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>): Promise<BudgetRecord>;
   get(id: string, association: AiUsageAssociationDraft): Promise<BudgetRecord | null>;
+  /** Exact original ledger event only. Optional for legacy adapters; absence
+   * cannot be inferred from a current balance or by replaying mutate. */
+  readMutation?(record: BudgetRecord, input: { action: 'release' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence }, revalidate: () => Promise<void>): Promise<BudgetRecord | null>;
   /** All mutations and ledger events are one DB transaction. No blind retry. */
   mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>): Promise<BudgetRecord>;
 }

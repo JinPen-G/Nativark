@@ -8,7 +8,7 @@ import type {
 } from "@rental-os/shared";
 import { $Enums, Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
-import { deriveFundingLedgers, rentalPaymentBalance } from "../rental-core/rental-funding-events";
+import { deriveFundingLedgers, isRealFundingEvent, rentalPaymentBalance, resolveOfflineFundingEvents } from "../rental-core/rental-funding-events";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 
@@ -377,7 +377,10 @@ export class CustomerMergeService {
     // 资金不能仅凭订单终态推断已结清，也不能让另一个空间的余额从注销检查中消失。
     const financialOrders = await db.rentalOrder.findMany({
       where: { tenantId, ...roleFilter },
-      select: { id: true, finalPayableAmount: true, fundingEvents: { where: { tenantId } } }
+      select: {
+        id: true, finalPayableAmount: true, fundingEvents: { where: { tenantId } },
+        offlinePaymentRegistrations: { where: { tenantId, status: "confirmed", fundingEventId: { not: null } } }
+      }
     });
     let unsettledRentalOrders = 0;
     let heldSecurityOrders = 0;
@@ -386,11 +389,14 @@ export class CustomerMergeService {
         id: event.id, tenantId: event.tenantId, workspaceId: event.workspaceId, orderId: event.orderId,
         instrument: event.instrument as RentalFundingEvent["instrument"], action: event.action as RentalFundingEvent["action"],
         amount: Number(event.amount), balanceAfter: Number(event.balanceAfter), provider: event.provider as RentalFundingEvent["provider"],
+        paymentMethod: event.paymentMethod as RentalFundingEvent["paymentMethod"] ?? undefined,
         idempotencyKey: event.idempotencyKey, reason: event.reason, operator: event.operator ?? undefined,
         failureCode: event.failureCode ?? undefined, at: event.at.toISOString(), createdAt: event.createdAt.toISOString()
       }));
-      const ledgers = deriveFundingLedgers(events);
-      if (rentalPaymentBalance(Number(order.finalPayableAmount), events).balance !== 0) unsettledRentalOrders += 1;
+      // 注销不属于演练：模拟退款不能抵消实收，历史线下款复用原确认关系。
+      const realEvents = resolveOfflineFundingEvents(events, order.offlinePaymentRegistrations).filter(isRealFundingEvent);
+      const ledgers = deriveFundingLedgers(realEvents);
+      if (rentalPaymentBalance(Number(order.finalPayableAmount), realEvents).balance !== 0) unsettledRentalOrders += 1;
       if (ledgers.deposit.balance !== 0 || ledgers.preauthorization.balance !== 0) heldSecurityOrders += 1;
     }
     if (unsettledRentalOrders) blockers.push({

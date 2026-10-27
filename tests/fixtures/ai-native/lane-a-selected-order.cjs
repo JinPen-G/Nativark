@@ -20,7 +20,8 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
     'aiApprovalConsumption', 'aiApprovedOrderSnapshot', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiTaskActionInput',
     'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy', 'aiApprovalReprepare',
     'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
-    'aiTaskInputRequest', 'aiTaskInputReceipt']) state.records[table] = [];
+    'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiDataErasure', 'aiGatewayInvocation', 'aiUsageReservation',
+    'aiBudgetReservation', 'aiInvocationAdmission']) state.records[table] = [];
   for (const row of state.records.aiBudgetPolicy) {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
@@ -34,12 +35,15 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
         executionPlan: rows('aiTaskRunPlan').find(p => p.runId === run.id) ?? null })) }
       : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
       : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
-      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
+      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null }
+      : name === 'aiTaskResultArtifact' ? { ...row, step: rows('aiStep').find(step => step.id === row.stepId) } : row;
     const project = (row, select) => !row ? null : !select ? clone(row) : Array.isArray(row) ? row.map(value => project(value, select))
       : Object.fromEntries(Object.entries(select).filter(([, rule]) => rule).map(([key, rule]) => [key, rule === true ? clone(row[key]) : project(row[key], rule.select)]));
     const db = { records: records ?? state.records,
       $queryRaw: async query => query.sql.includes('FROM ai_approval_reprepares')
-        ? clone(rows('aiApprovalReprepare').filter(row => row.scopeId === query.values[0] && row.operationKey === query.values[1])) : [],
+        ? clone(rows('aiApprovalReprepare').filter(row => row.scopeId === query.values[0] && row.operationKey === query.values[1]))
+        : query.sql.includes('FROM ai_scopes') ? rows('aiScope').filter(row => row.id === query.values[0]
+          && row.kind === 'WORKSPACE' && row.tenantId === query.values[1] && row.workspaceId === query.values[2]).map(row => ({ id: row.id })) : [],
       $executeRaw: async query => {
         assert.ok(query.sql.startsWith('INSERT INTO ai_approval_reprepares'));
         const columns = query.sql.match(/\(([^)]+)\) VALUES/u)[1].match(/`([^`]+)`/gu).map(key => key.slice(1, -1));
@@ -93,26 +97,71 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
   const active = new AsyncLocalStorage(); let queue = Promise.resolve();
   const db = client();
   db.$transaction = callback => {
-    if (active.getStore()) return callback(client());
-    const work = queue.then(() => active.run(true, async () => {
+    // A nested transaction inside a queued transaction must read and write the
+    // OUTER draft: writing the live records here would be overwritten when the
+    // outer transaction publishes its own committed draft (lost approval or
+    // order writes).
+    const draft = active.getStore();
+    if (draft) return callback(client(draft.records));
+    const work = queue.then(() => {
       const records = clone(state.records);
-      let result;
-      try { result = await callback(client(records)); }
-      catch (error) { state.failures.push(error.stack); throw error; }
-      const wrote = records.rentalOrder.length > state.records.rentalOrder.length;
-      const decided = records.aiApproval.length > state.records.aiApproval.length;
-      const reprepared = records.aiApprovalReprepare.length > state.records.aiApprovalReprepare.length;
-      state.records = records;
-      if (reprepared && state.reprepareAckLost) throw Error('synthetic reprepare commit reply lost');
-      if (wrote) state.commits++;
-      if (wrote && state.ackLost) throw Error('synthetic order commit reply lost');
-      if (decided && state.decisionAckLost) throw Error('synthetic approval commit reply lost');
-      return result;
-    }));
+      return active.run({ records }, async () => {
+        let result;
+        try { result = await callback(client(records)); }
+        catch (error) { state.failures.push(error.stack); throw error; }
+        const wrote = records.rentalOrder.length > state.records.rentalOrder.length;
+        const decided = records.aiApproval.length > state.records.aiApproval.length;
+        const reprepared = records.aiApprovalReprepare.length > state.records.aiApprovalReprepare.length;
+        state.records = records;
+        if (reprepared && state.reprepareAckLost) throw Error('synthetic reprepare commit reply lost');
+        if (wrote) state.commits++;
+        if (wrote && state.ackLost) throw Error('synthetic order commit reply lost');
+        if (decided && state.decisionAckLost) throw Error('synthetic approval commit reply lost');
+        return result;
+      });
+    });
     queue = work.catch(() => {}); return work;
   };
   Object.assign(h.dependencies.db, db);
   const dependencies = { ...h.dependencies, ...h.policyDependencies, scene: { code: 'quote_clarification', version: '1' } };
+  // The deferred scene assembly composes the full business-tools surface,
+  // which requires more of core/business than the approval chain does. Build
+  // a SEPARATE scene core so the approval chain's own core object is not
+  // mutated (an availability echo on the shared core regressed committed
+  // approval outcomes). Scene-only additions fail closed on use:
+  // resolvePricingGroupQuoteRequest and createQuote are financial ports that
+  // this harness must not fake — the selected flow's quote already exists in
+  // the approval chain, and no scene endpoint here creates a new one.
+  // Unspecified ports delegate to the real synthetic Core/Business instance:
+  // a class-instance spread would silently drop its prototype methods (e.g.
+  // getQuote/getOrder) and fail the scene assembly's declared-port check.
+  const sceneCore = Object.create(dependencies.core);
+  Object.assign(sceneCore, {
+    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
+    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
+    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
+      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 }),
+    listItemGroups: () => [], listPricingGroups: () => [], listCouponTemplates: () => [],
+    // The formal catalog read is bounded-only (listItemGroupsPage); the legacy
+    // unbounded method is never called by AI reads. The scene catalog is
+    // intentionally empty and the version only satisfies the 64-hex format
+    // check — it is a synthetic constant carrying no business fact.
+    listItemGroupsPage: async (_tenantId, query) => {
+      const rows = [], truncated = false;
+      return { rows, truncated, nextCursor: null,
+        source: 'persisted_workspace_configuration', configurationVersion: '0'.repeat(64) };
+    },
+    listLocations: () => [], listOperators: () => [], resolveWorkspaceId: () => 'workspace-a',
+    availability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
+      startAt: request.startAt, endAt: request.endAt,
+      lines: request.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: line.itemGroupId,
+        itemGroupName: line.itemGroupId, inventoryMode: 'quantity', requestedQuantity: line.quantity,
+        availableQuantity: 0, available: false, reasons: ['synthetic_fixture_unavailable'] })) }),
+    resolvePricingGroupQuoteRequest: async () => { throw new Error('pricing_group_resolution_not_available_in_harness'); } });
+  const sceneBusiness = Object.create(dependencies.business);
+  sceneBusiness.createQuote = async () => { throw new Error('quote_creation_not_available_in_harness'); };
+  dependencies.core = sceneCore;
+  dependencies.business = sceneBusiness;
   const route = new AiApprovedOrderRouteAuthority(dependencies.guard, dependencies.credentials, dependencies.clock);
   const identity = new (require('../../../apps/api/src/modules/ai-native/task-current-identity.authority').AiTaskCurrentIdentityAuthority)(h.auth, dependencies.credentials, dependencies.clock);
   const authority = new AiCurrentOriginalRequestAuthority(dependencies.db, { ...dependencies,
@@ -170,7 +219,8 @@ exports.selectedReprepareHarness = async () => {
   });
   const configuration = { holderId: 'worker-a', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
     audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
-    memberships: { listPersonalOptions: async () => [] } };
+    memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } };
   const services = composeFormalApprovedOrderReprepareServices(h.sceneDependencies, configuration);
   const dependencies = { ...h.sceneDependencies, originals: services.originals,
     reprepareServices: current => composeFormalApprovedOrderReprepareServices(current, configuration) };

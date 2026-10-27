@@ -13,6 +13,9 @@ import { composeTaskOrderHost, type TaskOrderHostDependencies } from '../runner/
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { AiApprovedOrderResultUnknownError } from '../approval-execution/approved-order.errors';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
@@ -20,6 +23,7 @@ export type SelectedQuoteTaskHostDependencies = HumanQuoteOrderDependencies & {
   host: TaskOrderHostDependencies['host'];
   task: Omit<TaskOrderHostDependencies['task'], 'order' | 'registrationRef'> & { selection: unknown };
   monotonic?: () => number;
+  runnerClock?: AiTaskRunnerClock;
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -233,6 +237,7 @@ export type SelectedQuoteTaskConfiguration = {
   host: TaskOrderHostDependencies['host'];
   limits: TaskOrderHostDependencies['task']['limits'];
   monotonic?: () => number;
+  runnerClock?: AiTaskRunnerClock;
 };
 const selectedTaskRequest = z.object({ selection: z.unknown() }).strict();
 const selectedTaskWait = selectedTaskRequest.extend({ stepId: z.string().uuid() });
@@ -243,13 +248,15 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
   const host = z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
   const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(configuration.limits));
   const selections = new PrismaQuoteSelectionRepository(dependencies), orders = composeHumanQuoteOrder(dependencies);
+  const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
+    waitForTaskApplicationDependency(operation, afterMutation, signal, configuration.runnerClock);
   const resolve = async (selection: unknown, active: boolean, requirePlan: boolean) => {
     const proof = parseQuoteSelectionProof(selection);
     const read = () => selections.read({ draftVersion: proof.draftVersion, originalInputRef: proof.originalInputRef, selectionId: proof.selectionId });
     const selected = await read();
     if (selected.taskId !== proof.taskId || selected.runId !== proof.runId || selected.inputHash !== proof.inputHash) throw denied();
     if (active) assertPayerSupported((await selections.readAuthorized(proof)).body);
-    const root = composeSelectedQuoteTaskHost({ ...dependencies, host, monotonic: configuration.monotonic,
+    const root = composeSelectedQuoteTaskHost({ ...dependencies, host, monotonic: configuration.monotonic, runnerClock: configuration.runnerClock,
       task: { taskId: proof.taskId, runId: proof.runId, selection: proof, limits } });
     const before = await root.authorization.tasks.resolveAccess(proof.taskId, 'read_metadata');
     const task = await dependencies.db.aiTask.findFirst({ where: before.where });
@@ -272,7 +279,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       if (after.bindingKey !== before.bindingKey || requestFingerprint(await read()) !== requestFingerprint(selected)) throw denied();
     };
     await verify();
-    return { proof, root, key, verify, planHash: saved?.planHash };
+    return { proof, root, key, verify, planHash: saved?.planHash, taskStatus: task.status };
   };
   const parse = <T>(schema: z.ZodType<T>, value: unknown) => {
     const parsed = schema.safeParse(structuredClone(value));
@@ -281,7 +288,8 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
   };
   const recover = async (value: unknown, continuing: boolean, signal?: AbortSignal) => {
     const command = continuing ? parse(selectedTaskContinue, value) : parse(selectedTaskRequest, value);
-    const resolved = await resolve(command.selection, continuing, true), { root, proof, key } = resolved;
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+    const resolved = await observe(() => resolve(command.selection, continuing, true), signal), { root, proof, key } = resolved;
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     if (!continuing) {
       const snapshot = await root.application.inspect({ taskId: proof.taskId, runId: proof.runId });
@@ -289,51 +297,70 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
         // Finished aggregates confer no execution lease. Reuse the existing
         // original Core/approval-consumption reader, including its unknown and
         // not-observed semantics; never infer an order from task success alone.
-        const result = await readResult(value);
+        const result = await readResult(command);
         const latest = await root.application.inspect({ taskId: proof.taskId, runId: proof.runId });
-        await resolved.verify();
+        await observe(resolved.verify, signal);
         if (requestFingerprint(snapshot) !== requestFingerprint(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         return result;
       }
     }
     if ('checkpointRef' in command) {
-      const step = await dependencies.db.aiStep.findFirst({ where: { ...key, toolCode: 'rental.order.commit' } });
+      const step = await observe(() => dependencies.db.aiStep.findFirst({ where: { ...key, toolCode: 'rental.order.commit' } }), signal);
       if (!step) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const waiting = await root.application.readConfirmation({ taskId: proof.taskId, runId: proof.runId, stepId: step.id });
       if (waiting.checkpointRef !== command.checkpointRef) throw denied();
-      const review = await orders.readSelectedProposal({ selection: proof, proposal: waiting.proposal });
-      const receipt = await orders.readSelectedDecisionReceipt({ selection: proof, proposal: { ...waiting.proposal,
-        decision: review.proposal.status === 'cancelled' ? 'reject' : 'approve' } });
+      const review = await observe(() => orders.readSelectedProposal({ selection: proof, proposal: waiting.proposal }), signal);
+      const receipt = await observe(() => orders.readSelectedDecisionReceipt({ selection: proof, proposal: { ...waiting.proposal,
+        decision: review.proposal.status === 'cancelled' ? 'reject' : 'approve' } }), signal);
       if (receipt.kind !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    const access = await root.authorization.tasks.resolveAccess(proof.taskId, 'claim_recovery_run');
-    const task = await dependencies.db.aiTask.findFirst({ where: access.where });
-    const run = await dependencies.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+    const access = await observe(() => root.authorization.tasks.resolveAccess(proof.taskId, 'claim_recovery_run'), signal);
+    const task = await observe(() => dependencies.db.aiTask.findFirst({ where: access.where }), signal);
+    const run = await observe(() => dependencies.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } }), signal);
     if (!task || !run || run.actorKind !== access.actorKind || run.actorId !== access.actorId) throw denied();
-    await resolved.verify();
+    await observe(resolved.verify, signal);
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
-    const lease = await root.authorization.tasks.claimRecoveryRun({ taskId: proof.taskId, runId: proof.runId, ...host,
-      expectedTaskRevision: task.revision, expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) });
+    const lease = await observe(() => root.authorization.tasks.claimRecoveryRun({ taskId: proof.taskId, runId: proof.runId, ...host,
+      expectedTaskRevision: task.revision, expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) }), signal, true);
+    let cleanupSafe = true, failed = false;
     try {
+      await observe(resolved.verify, signal);
+      if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+      // After delegation, an unchanged lease is not proof that the runner's
+      // in-flight confirmation/Core write cannot commit. Only it owns cleanup.
+      cleanupSafe = false;
       const result = 'checkpointRef' in command
         ? await root.application.continueConfirmation({ taskId: proof.taskId, runId: proof.runId, checkpointRef: command.checkpointRef }, signal)
         : await root.application.reconcile({ taskId: proof.taskId, runId: proof.runId }, signal);
-      await resolved.verify();
+      cleanupSafe = result.kind === 'not_started';
+      await observe(resolved.verify, undefined, true);
       return result;
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
-      // Only release this acquisition's fence; a resumed or replacement worker owns its own cleanup.
-      const held = await dependencies.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId,
-        leaseOwnerId: host.holderId, fencingToken: lease.fencingToken, revision: lease.revision } });
-      if (held) {
-        const current = await root.authorization.tasks.readMetadata(proof.taskId);
-        await root.authorization.tasks.releaseRun({ taskId: proof.taskId, runId: proof.runId, holderId: host.holderId,
-          expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, fencingToken: lease.fencingToken });
+      if (cleanupSafe) {
+        try {
+          await callAiTaskRunnerDependency(async child => {
+            const held = await dependencies.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId,
+              leaseOwnerId: host.holderId, fencingToken: lease.fencingToken, revision: lease.revision } });
+            if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (held) {
+              const current = await root.authorization.tasks.readMetadata(proof.taskId);
+              if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+              await root.authorization.tasks.releaseRun({ taskId: proof.taskId, runId: proof.runId, holderId: host.holderId,
+                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+            }
+          }, 5000, 'selected_order_cleanup', undefined, configuration.runnerClock);
+        } catch {
+          if (!failed) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        }
       }
     }
   };
   const readResult = async (value: unknown) => {
-      const command = parse(selectedTaskRequest, value), { proof, key, verify, planHash } = await resolve(command.selection, false, true);
-      const reference = await dependencies.db.$transaction(async tx => {
+      const command = parse(selectedTaskRequest, value), { proof, key, verify, planHash } = await observe(() => resolve(command.selection, false, true));
+      const reference = await observe(() => dependencies.db.$transaction(async tx => {
         const steps = await tx.aiStep.findMany({ where: { ...key, toolCode: 'rental.order.commit' }, take: 2 });
         if (steps.length !== 1 || !steps[0].inputRef) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const step = steps[0], phaseKey = { ...key, stepId: step.id };
@@ -374,40 +401,50 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
           proposalRevision: consumption.proposalRevision, reviewedPayloadHash: approval.payloadHash, approvalId: consumption.approvalId,
           actionId: step.actionId, lease: { runId: key.runId, holderId: executed.leaseOwnerId, revision: executed.runRevision,
             fencingToken: executed.fencingToken } });
-      }, { isolationLevel: 'RepeatableRead', maxWait: 2500, timeout: 5000 });
-      await verify();
+      }, { isolationLevel: 'RepeatableRead', maxWait: 2500, timeout: 5000 }));
+      await observe(verify);
       if (reference === 'unresolved_execution') return freezeOriginalInput({ status: 'unknown' as const,
         errorCode: 'AI_RESULT_UNKNOWN' as const, retryable: false as const,
         nextAction: 'read_selected_order_result' as const, sideEffect: 'may_have_committed' as const });
       if (!reference) return freezeOriginalInput({ status: 'not_observed' as const, retryable: false as const,
         nextAction: 'read_selected_order_result' as const, sideEffect: 'not_attested' as const,
         taskOutcome: 'owned_by_runner' as const, payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const });
-      const result = await orders.readSelectedOrderResult({ selection: proof, command: reference });
-      await verify();
+      const result = await observe(() => orders.readSelectedOrderResult({ selection: proof, command: reference }));
+      await observe(verify);
       return result;
   };
   return Object.freeze({
     async start(value: unknown, signal?: AbortSignal) {
-      const command = parse(selectedTaskRequest, value), { proof, root, verify } = await resolve(command.selection, true, false);
+      const command = parse(selectedTaskRequest, value);
+      if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+      const { proof, root, verify } = await observe(() => resolve(command.selection, true, false), signal);
       const result = await root.application.start({ taskId: proof.taskId, runId: proof.runId }, signal);
-      await verify();
+      await observe(verify, undefined, true);
       return result;
     },
     async readConfirmation(value: unknown) {
-      const command = parse(selectedTaskWait, value), { proof, root, verify } = await resolve(command.selection, false, true);
-      const waiting = await root.application.readConfirmation({ taskId: proof.taskId, runId: proof.runId, stepId: command.stepId });
-      await orders.readSelectedProposal({ selection: proof, proposal: waiting.proposal });
-      await verify();
+      const command = parse(selectedTaskWait, value), { proof, root, verify, taskStatus } = await observe(() => resolve(command.selection, false, true));
+      const original = { taskId: proof.taskId, runId: proof.runId, stepId: command.stepId };
+      if (taskStatus !== 'WAITING_CONFIRMATION') {
+        const history = await root.application.readConfirmationHistory(original);
+        if (history.task.status === 'waiting_confirmation') throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        await observe(verify);
+        return freezeOriginalInput({ state: 'not_waiting' as const, history,
+          execution: 'not_attested' as const, continuation: 'not_invoked' as const });
+      }
+      const waiting = await root.application.readConfirmation(original);
+      await observe(() => orders.readSelectedProposal({ selection: proof, proposal: waiting.proposal }));
+      await observe(verify);
       return waiting;
     },
     continueConfirmation: (value: unknown, signal?: AbortSignal) => recover(value, true, signal),
     reconcile: (value: unknown, signal?: AbortSignal) => recover(value, false, signal),
     readResult,
     async requestCancel(value: unknown) {
-      const command = parse(selectedTaskCancel, value), { proof, root, verify } = await resolve(command.selection, false, false);
-      const receipt = await root.taskTransitions.transition({ taskId: proof.taskId, expectedRevision: command.expectedRevision,
-        to: 'cancel_requested', reason: 'cancel_requested' });
-      await verify();
+      const command = parse(selectedTaskCancel, value), { proof, root, verify } = await observe(() => resolve(command.selection, false, false));
+      const receipt = await observe(() => root.taskTransitions.transition({ taskId: proof.taskId, expectedRevision: command.expectedRevision,
+        to: 'cancel_requested', reason: 'cancel_requested' }), undefined, true);
+      await observe(verify, undefined, true);
       return { receipt, cancellation: 'requested_not_rollback' as const };
     }
   });

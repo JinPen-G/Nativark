@@ -9,6 +9,8 @@ import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
 import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
 import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation";
+import { DesktopSessionBridge } from "@/features/agent-desktop/DesktopSessionBridge";
+import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
@@ -44,6 +46,9 @@ const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/Capab
 const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantOperationsAccountPage })));
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
+const AiModelSettingsPage = lazy(() => import("@/features/ai-native/AiModelSettingsPage").then((module) => ({ default: module.AiModelSettingsPage })));
+const TaskCenterPage = lazy(() => import("@/features/ai-native/TaskCenterPage").then((module) => ({ default: module.TaskCenterPage })));
+const PlatformModelSettingsPage = lazy(() => import("@/features/ai-native/PlatformModelSettingsPage").then((module) => ({ default: module.PlatformModelSettingsPage })));
 const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
 const AppearancePage = lazy(() => import("@/features/appearance/AppearancePage").then((module) => ({ default: module.AppearancePage })));
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
@@ -92,7 +97,7 @@ function DefaultRoute() {
 }
 
 function ProtectedRoutes() {
-  const workspaceScopeKey = useAuthStore((state) => `${state.tenant?.tenantId ?? "platform"}:${state.currentWorkspaceId ?? "none"}`);
+  const workspaceScopeKey = useAuthStore((state) => `${state.user?.id ?? "anonymous"}:${state.tenant?.tenantId ?? "platform"}:${state.currentWorkspaceId ?? "none"}`);
 
   return (
     <RequireAuth>
@@ -131,6 +136,8 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantAccounts.path} element={guard(APP_ROUTES.tenantAccounts, <TenantOperationsAccountPage />)} />
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
+            <Route path={APP_ROUTES.aiSettings.path} element={guard(APP_ROUTES.aiSettings, <AiModelSettingsPage />)} />
+            <Route path={APP_ROUTES.aiTasks.path} element={guard(APP_ROUTES.aiTasks, <TaskCenterPage />)} />
             <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
             <Route path={APP_ROUTES.appearance.path} element={guard(APP_ROUTES.appearance, <AppearancePage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
@@ -156,6 +163,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.subscriptionCatalog.path} element={guard(APP_ROUTES.subscriptionCatalog, <SubscriptionCatalogPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
+            <Route path={APP_ROUTES.platformAi.path} element={guard(APP_ROUTES.platformAi, <PlatformModelSettingsPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />
             <Route path={APP_ROUTES.platformTools.path} element={guard(APP_ROUTES.platformTools, <PlatformToolsPage />)} />
             <Route path={APP_ROUTES.platformOfficialCalendars.path} element={guard(APP_ROUTES.platformOfficialCalendars, <OfficialCalendarSourcePage />)} />
@@ -193,6 +201,7 @@ function ProtectedRoutes() {
 export function AppRouter() {
   return (
     <Suspense fallback={<PageLoader />}>
+      {rentalDesktopHost() && <DesktopSessionBridge />}
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         {/* 租户专属登录链接：/login/:tenantCode 直接显示该租户品牌，隐藏租户编码输入。 */}

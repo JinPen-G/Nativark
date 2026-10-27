@@ -857,14 +857,14 @@ export function RentalOrderDetailPage() {
         ]} /> : <span style={{ color: "var(--text-secondary)" }}>{t("当前订单没有需要人工裁定的费用事项。")}</span>}
       </ListSection>}
 {canViewFunding ? <OrderFundingPanel order={detail} funding={funding.data} loading={funding.isFetching} error={funding.isError} refresh={() => funding.refetch()} depositRequirement={depositRequirement} preauthorizationRequirement={preauthorizationRequirement} actions={{
- rental: <>{canSettleFunding && funding.data && <Space wrap>
+ rental: <>{canSettleFunding && funding.data?.simulationAllowed === true && <Space wrap>
             {funding.data.rental.balance + funding.data.rental.pendingExtensionAmount > 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "append" })}>{t("登记模拟收款／补款")}</Button>}
             {funding.data.rental.balance < 0 && <Button onClick={() => setFundingOperation({ instrument: "rental", action: "refund" })}>{t("办理模拟退款")}</Button>}
-          </Space>}</>, deposit: <>{canSettleFunding && <>{depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>{t("模拟收取押金")}</Button>}
+          </Space>}</>, deposit: <>{canSettleFunding && funding.data?.simulationAllowed === true && <>{depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>{t("模拟收取押金")}</Button>}
 {(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>{t("追加押金")}</Button>}
 {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>{t("押金抵扣")}</Button>}
 {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "refund" })}>{t("押金退款")}</Button>}
-{depositRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "deposit", action: "fail" })}>{t("记录押金收取失败")}</Button>}</>}</>, preauthorization: <>{canSettleFunding && <>{preauthorizationRequirement > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>{t("模拟冻结预授权")}</Button>}
+{depositRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "deposit", action: "fail" })}>{t("记录押金收取失败")}</Button>}</>}</>, preauthorization: <>{canSettleFunding && funding.data?.simulationAllowed === true && <>{preauthorizationRequirement > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>{t("模拟冻结预授权")}</Button>}
 {(funding.data?.preauthorization.frozen ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "append" })}>{t("追加预授权")}</Button>}
 {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "capture" })}>{t("预授权转扣")}</Button>}
 {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "release" })}>{t("释放全部预授权")}</Button>}

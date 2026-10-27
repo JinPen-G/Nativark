@@ -15,7 +15,7 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
   readonly repository: PrismaKnowledgeRepository;
   constructor(private readonly db: KnowledgePrismaClient & Pick<PrismaClient, 'fileAsset'>,
     readonly session: KnowledgeCurrentSession, private readonly authorization: KnowledgeAuthorizationPort,
-    private readonly objects: Pick<TenantKnowledgeObjectReader, 'read'>) {
+    private readonly objects: Pick<TenantKnowledgeObjectReader, 'read'> & Partial<Pick<TenantKnowledgeObjectReader, 'readUpload'>>) {
     this.repository = new PrismaKnowledgeRepository(db);
   }
 
@@ -54,6 +54,43 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
     });
   }
 
+  async authorizeUploadObservation(tenantId: string, value: FileBusinessOwner) {
+    const boundOwner = structuredClone(value);
+    return this.session.run(async context => {
+      const target = this.owner(context, tenantId, boundOwner);
+      const before = await this.repository.read(context.scope, target.documentId);
+      // Before first creation there is no document/ACL to invent. The persisted
+      // actor-bound metadata policy is still mandatory; the runtime additionally
+      // verifies the exact upload's stored actor and workspace before returning.
+      const request = { action: 'read_metadata' as const, scope: context.scope,
+        ...(before ? { document: before.document } : {}) };
+      const grant = await authorize(this.authorization, context, request);
+      if (fingerprint(before) !== fingerprint(await this.repository.read(context.scope, target.documentId))
+        || fingerprint(grant) !== fingerprint(await authorize(this.authorization, context, request))) return unavailable();
+    });
+  }
+
+  async readUploadContentHash(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
+    const boundOwner = structuredClone(owner);
+    return this.session.run(async context => {
+      const target = this.owner(context, tenantId, boundOwner);
+      const load = () => this.db.fileAsset.findFirst({ where: { id: fileAssetId, tenantId,
+        status: 'pending_upload', uploadedBy: target.actorUserId, businessModule: 'ai-native',
+        businessType: 'ai_knowledge_document', businessId: target.documentId, uploadScene: 'ai-knowledge' }, include: { uploadSession: true } });
+      const asset = structuredClone(await load());
+      if (!asset || !asset.uploadSession?.idempotencyKey || !this.objects.readUpload) return unavailable();
+      const input = { businessModule: asset.businessModule, businessType: asset.businessType,
+        businessId: target.documentId, uploadScene: asset.uploadScene, fileName: asset.fileName,
+        mimeType: asset.mimeType, sizeBytes: asset.sizeBytes, idempotencyKey: asset.uploadSession.idempotencyKey };
+      await this.authorizeUpload(tenantId, input, boundOwner);
+      const result = await this.objects.readUpload({ tenantId, workspaceId: target.workspaceId,
+        documentId: target.documentId, fileAssetId }, 262144);
+      if (!/^[a-f0-9]{64}$/u.test(result.contentHash) || fingerprint(asset) !== fingerprint(await load())) return unavailable();
+      await this.authorizeUpload(tenantId, input, boundOwner);
+      return result.contentHash;
+    });
+  }
+
   async assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, selection?: { documentVersion: string; expectedRevision: number }) {
     const boundOwner = structuredClone(owner), selected = structuredClone(selection);
     return this.session.run(async context => {
@@ -65,7 +102,8 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
       if (!asset || asset.id !== fileAssetId || asset.tenantId !== tenantId || asset.businessId !== target.documentId
         || asset.status !== 'active' || asset.uploadedBy !== target.actorUserId || asset.storageProvider === 'local_mock'
         || !metadata || typeof metadata !== 'object' || Array.isArray(metadata) || metadata.workspaceId !== target.workspaceId
-        || metadata.knowledgeUploadVersion !== 1 || session?.status !== 'completed' || !session.completedAt
+        || metadata.knowledgeUploadVersion !== 1 || typeof metadata.knowledgeContentHash !== 'string'
+        || !/^[a-f0-9]{64}$/u.test(metadata.knowledgeContentHash) || session?.status !== 'completed' || !session.completedAt
         || session.fileAssetId !== asset.id || session.tenantId !== tenantId || session.provider !== asset.storageProvider
         || session.storageKey !== asset.storageKey) return unavailable();
       const revision = metadata.knowledgeRevision === undefined ? undefined : parse(knowledgeUploadRevisionSchema, metadata.knowledgeRevision);
@@ -93,7 +131,9 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
       const after = await load();
       if (fingerprint(before) !== fingerprint(after) || signal?.aborted
         || fingerprint(grant) !== fingerprint(await authorize(this.authorization, context, request))) return unavailable();
-      return { mediaType: result.mediaType, bytes: result.bytes };
+      if (!/^[a-f0-9]{64}$/u.test(result.contentHash)
+        || before.contentHash !== undefined && before.contentHash !== result.contentHash) return unavailable();
+      return { mediaType: result.mediaType, bytes: result.bytes, contentHash: result.contentHash };
     });
   }
 }

@@ -6,12 +6,13 @@ import type { AiOrderRouteCredentialSource } from './order-route-context.authori
 import { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { PrismaPlatformModelConnection } from './platform-model-connection';
 import { ModelGatewayError } from './model-gateway.ports';
+import type { ModelConfigurationOperationDb } from './model-configuration-operation';
 
 /** Request-scoped explicit composition, not a root module or background loop.
  * Management and invocation resolve different authenticated consumer contexts;
  * neither factory switches role from a caller-provided flag. */
 export function createAuthorizedPlatformModelConfiguration(ports: {
-  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiProviderProfile' | 'aiPlatformModelConnection'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiProviderProfile' | 'aiPlatformModelConnection'> & ModelConfigurationOperationDb;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiOrderRouteCredentialSource;
   invocation: AiCurrentScopeAuthority;
@@ -23,8 +24,9 @@ export function createAuthorizedPlatformModelConfiguration(ports: {
     ports?.db?.aiPlatformModelConnection?.create, ports?.db?.aiPlatformModelConnection?.update]
     .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   const authority = new PlatformModelConfigurationAuthority(ports.guard, ports.credentials, ports.profileId, ports.invocation);
+  const observations = new AiScopeRepository(ports.db, { resolve: () => authority.resolveRead() });
   return {
-    management: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, authority), authority, ports.secrets),
+    management: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, authority), authority, ports.secrets, observations),
     invocation: new PrismaPlatformModelConnection(ports.db, new AiScopeRepository(ports.db, ports.invocation), authority, ports.secrets)
   };
 }

@@ -6,6 +6,7 @@
  * 本包同时导出类型、schema、常量与运行时工具，并非纯类型包；只需类型时用 import type。
  * 新增或调整导出须核对生产者、DTO/OpenAPI、各端消费者和构建边界，不把源码与 dist 一致视为当然。
  */
+export * from "./agent-desktop";
 export * from "./common";
 export * from "./core";
 export * from "./platform";
@@ -19,6 +20,7 @@ export * from "./demo-request";
 export * from "./client-rich-text";
 export * from "./category-governance";
 export * from "./ai-native";
+export * from "./ai-order-candidates-draft";
 export * from "./ai-task-draft";
 export * from "./ai-task-input-draft";
 export { AI_TASK_INPUT_DRAFT_SCHEMAS } from "./ai-task-input-draft-schemas";
@@ -46,12 +48,21 @@ export { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from "./ai-approved-settings-draft
 
 export * from "./ai-order-facts-draft";
 export { AI_ORDER_FACTS_DRAFT_SCHEMAS } from "./ai-order-facts-draft-schemas";
+export { AI_SCOPE_DRAFT_SCHEMAS } from './ai-scope-draft-schemas';
+export * from './ai-business-material-draft';
+export { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS } from './ai-business-material-draft-schemas';
+export * from './ai-scene-model-observation-draft';
+export { AI_SCENE_MODEL_OBSERVATION_SCHEMAS } from './ai-scene-model-observation-draft-schemas';
+export * from './ai-task-scene-observation-draft';
+export { AI_TASK_SCENE_OBSERVATION_SCHEMAS } from './ai-task-scene-observation-draft-schemas';
 export * from "./ai-entry-action-draft";
 export * from "./ai-booking-draft";
 export * from "./ai-knowledge-policy-management-draft";
 export { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from "./ai-entry-management-draft-schemas";
 export * from "./ai-entry-http-draft";
 export * from "./ai-task-recovery-draft";
+export * from "./ai-task-observation-draft-schemas";
+export * from "./ai-scene-quote-http-draft";
 export * from "./ai-client-quote-draft";
 export * from "./ai-client-entry-draft-schemas";
 export * from "./ai-knowledge-consumption-http-draft";
@@ -60,3 +71,9 @@ export * from "./ai-memory-management-http-draft";
 export * from "./ai-budget-management-http-draft";
 export * from "./ai-text-capability-http-draft";
 export * from "./ai-automation-review-queue-http-draft";
+export * from "./ai-automation-review-http-draft";
+export * from "./ai-automation-policy-http-draft";
+export * from "./ai-automation-event-task-http-draft";
+export * from "./ai-task-performance-draft";
+export * from "./ai-task-confirmation-history-draft";
+export * from "./ai-counting-http-draft";

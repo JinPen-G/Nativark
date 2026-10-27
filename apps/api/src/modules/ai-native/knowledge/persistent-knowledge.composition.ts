@@ -53,7 +53,11 @@ export function createPersistedKnowledgePorts(input: PersistentKnowledgeDependen
   const repository = new PrismaKnowledgeRepository(input.db, clock);
   const memory = new PrismaStructuredMemoryRepository(input.db, clock);
   const reads = new PrismaKnowledgeReadAdapter(input.db, repository, input.authorization, input.clock);
-  return { documents: { repository, authorization: input.authorization, files: input.files, clock: input.clock },
+  // This root REQUIRES a wired file service (files is a mandatory port), so
+  // attachment references must always be business-bound: fail closed when a
+  // supplied files port lacks assertBound instead of skipping the check.
+  return { documents: { repository, authorization: input.authorization, files: input.files, clock: input.clock,
+    attachmentBindingRequired: true },
     memory: { repository: memory, confirmations: memory, authorization: input.memoryAuthorization, clock: input.clock },
     content: reads, search: reads, selection: input.selection ?? new PrismaKnowledgeSelectionAdapter(input.db, repository, input.authorization), index: input.index ?? new PrismaKnowledgeIndexAdapter(input.db, input.authorization), gateway: input.gateway, cache: input.cache, policy: input.policy };
 }

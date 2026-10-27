@@ -3,12 +3,13 @@ import { z } from "zod";
 import { isAiStepExecutionContext as validContext, isAiStepState as validStep } from "./task-contract-validation";
 import { createHash } from "node:crypto";
 import {
-  AI_TASK_DRAFT_VERSION, AI_STEP_TRANSITION_REASONS_DRAFT,
+  AI_TASK_DRAFT_VERSION, AI_STEP_TRANSITION_REASONS_DRAFT, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE,
   type AiExecutionContext, type AiStepStateDraft, type AiTaskEventDraft
 } from "@rental-os/shared";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { evaluateAiStepTransitionDraft } from "./task-transition-draft";
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -116,17 +117,34 @@ export class AiStepTransitionRepository {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, initial = await this.resolve(input);
-    let callbackCompleted = false;
+    let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.access.where, select: taskSelect });
         if (!task) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
         if (task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION || !["RUNNING", "WAITING_EXTERNAL", "CANCEL_REQUESTED"].includes(task.status)
           || (task.status === "CANCEL_REQUESTED") !== (task.cancelRequestedAt !== null)) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-        if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
+        const terminalModel = [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE]
+          .some(code => code === initial.grant.next.toolCode) && ['succeeded', 'failed'].includes(initial.grant.next.outcome.status);
+        if (terminalModel) {
+          // Publish only an actual, measured artifact belonging to this exact
+          // transition. A result reference/unknown outcome alone proves nothing.
+          const artifact = await tx.aiTaskResultArtifact.findFirst({ where: { id: initial.grant.resultRef!,
+            scopeId: task.scopeId, taskId: task.id, runId: input.lease.runId, stepId: input.stepId } });
+          if (!artifact || artifact.id !== initial.grant.resultRef || artifact.scopeId !== task.scopeId || artifact.taskId !== task.id
+            || artifact.runId !== input.lease.runId || artifact.stepId !== input.stepId
+            || artifact.actionId !== initial.grant.next.actionId || artifact.stepFingerprint !== initial.grant.next.requestFingerprint
+            || artifact.outcome.toLowerCase() !== initial.grant.next.outcome.status || !artifact.completeMeasurement
+            || requestFingerprint(artifact.payload) !== artifact.contentHash
+            || typeof artifact.outputBytes !== 'bigint' || artifact.outputBytes < 0n
+            || BigInt(Buffer.byteLength(JSON.stringify(artifact.payload), 'utf8')) !== artifact.outputBytes) throw denied();
+        }
+        const eventCount = terminalModel ? 2n : 1n;
+        if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor > 18446744073709551615n - eventCount) throw conflict();
+        writeAttempted = true;
         const reserved = await tx.aiTask.updateMany({
           where: { ...initial.access.where, scopeId: task.scopeId, revision: task.revision, eventCursor: task.eventCursor, status: task.status, cancelRequestedAt: task.cancelRequestedAt },
-          data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
+          data: { revision: { increment: 1 }, eventCursor: { increment: eventCount } }
         });
         if (reserved.count !== 1) throw conflict();
         const row = await tx.aiStep.findFirst({ where: { id: input.stepId, scopeId: task.scopeId, taskId: task.id, runId: input.lease.runId }, select: stepSelect });
@@ -179,12 +197,22 @@ export class AiStepTransitionRepository {
           payload: { data: event.data, initiator: { kind: "worker", id: lease.holderId, actorKind: current.access.actorKind, actorId: current.access.actorId },
             evidence: { id: current.grant.evidenceId, revision: current.grant.evidenceRevision, digest: current.digest } }
         }, select: { cursor: true } });
+        if (terminalModel) await tx.aiTaskEvent.create({ data: {
+          scopeId: task.scopeId, taskId: task.id, cursor: task.eventCursor + 2n, taskRevision: task.revision + 1,
+          type: 'task.output_ready', occurredAt: current.access.now,
+          payload: { data: { resultId: current.grant.resultRef! },
+            initiator: { kind: 'worker', id: lease.holderId, actorKind: current.access.actorKind, actorId: current.access.actorId },
+            evidence: { id: current.grant.evidenceId, revision: current.grant.evidenceRevision, digest: current.digest } }
+        }, select: { cursor: true } });
         callbackCompleted = true;
         return { event, runRevision: lease.revision + 1 };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw error;
+      // Once the callback returned, an error-shaped acknowledgement cannot
+      // prove rollback, even if it resembles a known CAS/access refusal.
       if (callbackCompleted) throw new AiStepTransitionResultUnknownError();
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (writeAttempted) throw new AiStepTransitionResultUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }

@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), path = require('node:path');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { rootDir: path.resolve(__dirname, '..'), module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-original-request.cjs');
 const { PrismaQuoteSelectionRepository } = require('../apps/api/src/modules/ai-native/task-request/prisma-quote-selection.repository');
 const { composeHumanQuoteOrder } = require('../apps/api/src/modules/ai-native/scenes/human-quote-order.composition');
@@ -75,14 +75,9 @@ test('selected quote task HTTP uses normal runner and current human decision wit
   const { AiHumanQuoteSelectionModule } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
   for (const mode of ['approve', 'reject', 'cancel', 'unknown']) {
     const h = await selectedOrderHarness({ initializeOnly: true });
-    Object.assign(h.sceneDependencies.core, {
-      getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
-      getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
-      getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
-        fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
-    });
     const configuration = { holderId: 'selected-host', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
-      audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } };
+      audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } };
     const { credentials, originals, ...dependencies } = h.sceneDependencies;
     Object.assign(dependencies, { creationRules: configuration.creationRules, memberships: configuration.memberships });
     let ticks = 0;
@@ -332,17 +327,18 @@ test('selected order goes through human review and decision before Core commit a
   const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
-  Object.assign(h.sceneDependencies.core, {
-    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
-    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
-    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
-      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
-  });
   const { credentials, originals, ...dependencies } = h.sceneDependencies;
+  // The scene assembly requires the declared creation rules and bounded
+  // member-candidate port even when the reprepare configuration is separate.
+  Object.assign(dependencies, { creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
+    audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
+    memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const requests = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application').composeRequestBoundHumanQuoteOrder(
     dependencies, { enabled: true, audience: 'operator' }, { holderId: 'worker-a',
       creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1, audiences: ['operator'],
-        requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } });
+        requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
+      memberships: { listPersonalOptions: async () => [], listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const request = { headers: { authorization: (await credentials.current()).authorization } };
   assert.equal(requests.submitSelectedOrder, undefined);
   const humanController = new (require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller').AiHumanQuoteOrderController)(requests);
@@ -402,8 +398,64 @@ test('request-bound quote selection and human decision share only the current re
   const controller = new AiHumanQuoteSelectionController(module.providers[0].useFactory());
   assert.throws(() => AiHumanQuoteSelectionModule.registerHttp(h.orderDependencies, options).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   await assert.rejects(controller.select({ headers: {} }, h.command), e => e.getStatus() === 403);
+  const notObserved = await controller.reconcile(request, h.command);
+  assert.deepEqual(notObserved, { state: 'not_observed', retryable: false });
   const first = await controller.select(request, h.command);
   assert.equal(first.receipt.approval, 'not_granted'); assert.equal(h.state.aiApproval.length, 0);
+  const shared = require('@rental-os/shared'), schemas = shared.AI_QUOTE_SELECTION_DRAFT_SCHEMAS;
+  const selectionAjv = new (require('ajv'))({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+  require('ajv-formats')(selectionAjv);
+  const names = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionReconcileResponseDraft', 'AiQuoteSelectionReceiptDraft'];
+  const definitions = JSON.parse(JSON.stringify(Object.fromEntries(names.map(name => [name, schemas[name]]))).replaceAll('#/components/schemas/', '#/$defs/'));
+  const validSelect = selectionAjv.compile({ $ref: '#/$defs/AiQuoteSelectionSelectResponseDraft', $defs: definitions });
+  const validObserve = selectionAjv.compile({ $ref: '#/$defs/AiQuoteSelectionReconcileResponseDraft', $defs: definitions });
+  assert.equal(validSelect(first), true); assert.equal(validObserve(notObserved), true);
+  assert.equal(validSelect({ ...first, receipt: { ...first.receipt, approval: 'granted' } }), false);
+  assert.equal(validSelect({ ...first, internalContext: {} }), false);
+  assert.equal(validObserve({ ...notObserved, retryable: true }), false);
+  const assertClosed = schema => {
+    if (!schema || typeof schema !== 'object') return;
+    if (schema.type === 'object') assert.equal(schema.additionalProperties, false);
+    if (schema.$ref) assert.ok(definitions[schema.$ref.split('/').at(-1)]);
+    for (const value of Object.values(schema)) if (value && typeof value === 'object')
+      Array.isArray(value) ? value.forEach(assertClosed) : assertClosed(value);
+  };
+  for (const schema of Object.values(definitions)) assertClosed(schema);
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  for (const name of names) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schemas[name], name));
+  for (const [routes, contracts] of [[shared.AI_QUOTE_SELECTION_HTTP_DRAFT, shared.AI_QUOTE_SELECTION_HTTP_CONTRACTS],
+    [shared.AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT, shared.AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS]])
+    for (const [name, contract] of Object.entries(contracts)) {
+      const route = OPENAPI_DOCUMENT.paths[`/api/${routes.basePath}${routes[name] ? `/${routes[name]}` : ''}`].post;
+      assert.equal(route.requestBody.content['application/json'].schema.$ref, `#/components/schemas/${contract.request}`);
+      assert.equal(route.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+    }
+  const observed = await controller.reconcile(request, h.command);
+  assert.equal(validObserve(observed), true); assert.equal(observed.receipt.selectionId, first.receipt.selectionId);
+  const replay = await controller.select(request, h.command);
+  assert.equal(replay.replayed, true); assert.equal(replay.receipt.selectionId, first.receipt.selectionId);
+  const readReference = { draftVersion: first.receipt.draftVersion, originalInputRef: first.receipt.originalInputRef, selectionId: first.receipt.selectionId };
+  const wireControllers = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');
+  const wrapped = new wireControllers.AiHumanQuoteSelectionController({
+    select: async () => ({ ...first, secretBody: 'must-not-leak' }),
+    read: async () => ({ ...first.receipt, revision: NaN }), reconcile: async () => ({ ...notObserved, receipt: first.receipt }) });
+  await assert.rejects(wrapped.select(request, h.command), error => error.getStatus() === 409
+    && error.getResponse().code === 'AI_RESULT_UNKNOWN' && error.getResponse().nextAction === 'reconcile'
+    && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+  await assert.rejects(wrapped.read(request, readReference), error => error.getStatus() === 503 && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE');
+  await assert.rejects(wrapped.reconcile(request, h.command), error => error.getStatus() === 503);
+  const clarification = { original: { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: h.command.originalInputRef },
+    submission: { draftVersion: shared.AI_TASK_INPUT_DRAFT_VERSION, taskId: h.command.taskId, requestId: require('node:crypto').randomUUID(),
+      expectedRevision: 1, submissionKey: 'selection-contract-only', answers: [{ fieldId: 'clarification_text', value: 'Explicit reference' }] } };
+  const clarifiedController = new wireControllers.AiClarifiedQuoteSelectionController({ select: async () => first,
+    readOperation: async () => observed });
+  assert.deepEqual(await clarifiedController.select(request, { selection: h.command, clarification }), first);
+  assert.deepEqual(await clarifiedController.readOperation(request, { selection: h.command, clarification }), observed);
+  const badClarified = new wireControllers.AiClarifiedQuoteSelectionController({ select: async () => ({ ...first, receipt: { ...first.receipt, order: 'created' } }) });
+  await assert.rejects(badClarified.select(request, { selection: h.command, clarification }), error => error.getStatus() === 409
+    && error.getResponse().nextAction === 'read_clarified_selection_operation');
+  assert.equal(h.state.aiTaskQuoteSelection.length, 1); assert.equal(h.state.aiApproval.length, 0);
   const selection = { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: h.command.originalInputRef,
     taskId: h.command.taskId, runId: h.command.runId, selectionId: first.receipt.selectionId, inputHash: first.receipt.inputHash };
   assert.equal((await controller.read(request, { draftVersion: selection.draftVersion, originalInputRef: selection.originalInputRef,
@@ -463,6 +515,9 @@ test('selected new human materials reprepare through the formal factory and reta
   const { AiHumanQuoteSelectionModule } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
   const h = await selectedReprepareHarness();
   const { credentials, originals, reprepareServices, ...dependencies } = h.dependencies;
+  Object.assign(dependencies, { creationRules: h.configuration.creationRules,
+    memberships: { listPersonalOptions: async () => [],
+      listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } });
   const options = { enabled: true, audience: 'operator' };
   const module = AiHumanQuoteSelectionModule.registerHttpApplication(dependencies, options, h.configuration);
   const { AiHumanQuoteOrderController, AI_HUMAN_QUOTE_ORDER_REQUESTS } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');
@@ -650,6 +705,8 @@ test('human quote selection binds consumed model answers and prevents a competin
       assert.equal(aggregate.business.result.order.id,h.state.rentalOrder[0].id);
       assert.equal(aggregate.originRunId,h.created.task.runId);
       assert.equal(aggregate.pendingInput.availability,'not_requested');
+      const { validateAiTaskSceneObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+      assert.deepEqual(validateAiTaskSceneObservation(aggregate), aggregate);
       await assert.rejects(center.readScene({kind:'original',taskId:selection.taskId,runId:h.created.task.runId,
         original:h.reference,order:{selection}}),error=>error.code==='AI_ACCESS_DENIED');
       await assert.rejects(center.readOrderResult({original:h.reference,reference:{selection:{...selection,
@@ -659,6 +716,47 @@ test('human quote selection binds consumed model answers and prevents a competin
       await assert.rejects(noSelectionReader.readOrderResult({original:h.reference,reference:{selection}}),
         error=>error.code==='AI_RESOURCE_UNAVAILABLE');
       assert.equal(h.state.rentalOrder.length,1);
+      // Actual retention transaction: ordinary dialogue/answers/history copies
+      // expire while the original selected approval and Core receipt stay readable.
+      const { AiRetentionService } = require('../apps/api/src/modules/ai-native/privacy/retention.service');
+      h.b.h.identity.user.permissions.push('system:params:manage');
+      h.b.h.control.now = Math.max(h.b.h.control.now, h.state.aiTask[0].updatedAt.getTime()) + 31 * 86400000;
+      const privacy = new AiRetentionService(h.db, h.dependencies.auth, h.dependencies.credentials, undefined, h.dependencies.clock);
+      const bodyCount = h.state.aiTaskResultArtifact.length, originalHash = h.state.aiTaskOriginalRequest[0].contentHash;
+      // Persisted history fixture deliberately crosses five 200-row pages;
+      // sensitive refresh copies must not survive at the old 1,000-row boundary.
+      const retainedTask = h.state.aiTask.find(row => row.id === selection.taskId);
+      for (let index = 0; index < 1001; index++) h.state.aiTaskEvent.push({ scopeId: retainedTask.scopeId,
+        taskId: retainedTask.id, cursor: ++retainedTask.eventCursor, taskRevision: retainedTask.revision,
+        type: 'task.input_refreshed', occurredAt: h.dependencies.clock(), payload: {
+          data: { requestId: pending.requestId, previousRevision: 1, revision: 2 },
+          previousRequest: { sensitive: 'Synthetic previous customer/address text' } } });
+      const erased = await privacy.erase('task', selection.taskId);
+      assert.equal(erased.state, 'erased');
+      const erasedRevision = h.state.aiTask[0].revision;
+      assert.equal((await privacy.erase('task', selection.taskId)).state, 'erased');
+      assert.equal(h.state.aiTask[0].revision, erasedRevision);
+      assert.equal(h.state.aiTask[0].archivedAt, null);
+      assert.equal(h.state.aiTaskOriginalRequest[0].payload.retention, 'erased');
+      assert.equal(h.state.aiTaskOriginalRequest[0].contentHash, originalHash);
+      assert.equal(h.state.aiTaskResultArtifact.length, bodyCount);
+      assert.ok(h.state.aiTaskResultArtifact.filter(row => row.runId === h.created.task.runId).every(row => row.payload.retention === 'erased'));
+      assert.ok(h.state.aiTaskInputReceipt.every(row => row.answers.length === 0));
+      assert.ok(h.state.aiTaskInputRequest.every(row => row.allowedFields.length === 0));
+      assert.ok(h.state.aiTaskEvent.every(row => row.payload.previousRequest === undefined));
+      const terminal = await orderTask.readConfirmation({ selection, stepId: step.id });
+      assert.equal(terminal.state, 'not_waiting'); assert.equal(terminal.history.transitions.length, 2);
+      assert.equal((await orderTask.readResult({ selection })).order.id, h.state.rentalOrder[0].id);
+      assert.equal((await center.readOrderResult({ original: h.reference, reference: { selection } })).result.order.id, h.state.rentalOrder[0].id);
+      const retainedScene = await center.readScene({ kind: 'original', taskId: selection.taskId, runId: selection.runId,
+        original: h.reference, order: { selection } });
+      assert.deepEqual(validateAiTaskSceneObservation(retainedScene), retainedScene);
+      assert.equal(retainedScene.business.result.order.id, h.state.rentalOrder[0].id);
+      await assert.rejects(h.model.scenes.requests.readHistorical(h.reference));
+      await assert.rejects(repository.readAuthorized(selection));
+      const erasedState = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
+      await assert.rejects(orderTask.start({ selection }));
+      assert.deepEqual(h.state, erasedState); assert.equal(h.state.rentalOrder.length, 1);
     }
   }
   assert.equal(h.execution.sent.length,1);

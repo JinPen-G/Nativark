@@ -30,6 +30,41 @@ const aggregateRead = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('settings'), taskId: sceneId, runId: sceneId, reference: z.unknown() }).strict()
 ]);
 
+/** Shared read-only settings aggregation for the standalone settings host and
+ * the task center. The same original preparation/receipt and watermark reader
+ * are consumed; no lease, runner or approval continuation is invoked here. */
+export async function readSettingsTaskCenterScene(
+  settings: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>,
+  events: Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>, value: unknown) {
+  const parsed = aggregateRead.safeParse(structuredClone(value));
+  if (!parsed.success || parsed.data.kind !== 'settings') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const command = freezeOriginalInput(parsed.data);
+  const preparation = z.object({ preparation: z.object({ taskId: sceneId, runId: sceneId }).passthrough() }).passthrough().safeParse(command.reference);
+  if (!preparation.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  if (preparation.data.preparation.taskId !== command.taskId || preparation.data.preparation.runId !== command.runId)
+    throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const first = await settings.read(command.reference);
+  if (!('task' in first)) return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId,
+    business: first, snapshot: { availability: 'unavailable' as const },
+    consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+  let snapshot: { availability: 'unavailable' } | { availability: 'available'; value: Awaited<ReturnType<AiTaskEventRepository['readSnapshot']>> };
+  if (!events.readSnapshot) snapshot = { availability: 'unavailable' };
+  else {
+    const current = await events.readSnapshot({ taskId: command.taskId });
+    if (current.taskId !== command.taskId || current.revision !== first.task.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    snapshot = { availability: 'available', value: current };
+  }
+  const latest = await settings.read(command.reference);
+  if (!('task' in latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+  const { observedAt: _firstObservation, ...firstEvidence } = first;
+  const { observedAt: _latestObservation, ...latestEvidence } = latest;
+  if (requestFingerprint(latestEvidence) !== requestFingerprint(firstEvidence)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+  return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId, snapshot,
+    originalInput: { inputRef: first.step.inputRef, fingerprint: first.step.fingerprint, change: first.change },
+    business: first, submission: 'not_attested_by_approval' as const,
+    consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+}
+
 /**
  * Read-only task-center consumer. It deliberately does not become a second
  * task facade: listing, original request authorization and recovery remain in
@@ -39,6 +74,7 @@ const aggregateRead = z.discriminatedUnion('kind', [
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
   usage?: { read(value: unknown): Promise<unknown> };
+  performance?: { read(value: unknown): Promise<import('@rental-os/shared').AiTaskPerformanceObservationDraft> };
   events?: Pick<AiTaskEventRepository, 'readPage'> & Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>;
   settings?: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>;
   modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
@@ -49,7 +85,7 @@ export function composeAiTaskCenterScene(input: {
   /** Original two-step model -> readonly order host; never the order writer. */
   orderFacts?: { read(value: unknown): Promise<{ taskId: string; runId: string; result: unknown }> };
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
-    requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
+    requests: Pick<OriginalScenes['requests'], 'readHistorical'> & Partial<Pick<OriginalScenes['requests'], 'readTaskLocator'>>;
   };
 }) {
   if (!input?.list || typeof input.list.readPage !== 'function' || !input.scenes
@@ -85,6 +121,19 @@ export function composeAiTaskCenterScene(input: {
       const parsed = page.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return input.list.readPage(parsed.data);
+    },
+    readPerformance: async (value: unknown) => {
+      const parsed = taskRead.extend({ usageLimit: z.number().int().min(1).max(20), usageAfter: z.string().min(1).max(36).optional(), includeTaskFinancial: z.boolean().optional() })
+        .strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (!input.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = parsed.data, task = await readObservedTask(command.original, command.taskId);
+      const result = await input.performance.read({ taskId: task.taskId, usageLimit: command.usageLimit,
+        ...(command.includeTaskFinancial !== undefined ? { includeTaskFinancial: command.includeTaskFinancial } : {}),
+        ...(command.usageAfter ? { usageAfter: command.usageAfter } : {}) });
+      if (result.task.taskId !== task.taskId || result.task.revision !== task.revision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await assertStillCurrent(command.original, task);
+      return freezeOriginalInput(result);
     },
     readUsage: async (value: unknown) => {
       const parsed = taskRead.extend({ limit: z.number().int().min(1).max(20), after: z.string().min(1).max(36).optional() })
@@ -242,24 +291,7 @@ export function composeAiTaskCenterScene(input: {
       const command = freezeOriginalInput(parsed.data);
       if (command.kind === 'settings') {
         if (typeof input.settings?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const preparation = z.object({ preparation: z.object({ taskId: sceneId, runId: sceneId }).passthrough() }).passthrough().safeParse(command.reference);
-        if (!preparation.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        if (preparation.data.preparation.taskId !== command.taskId || preparation.data.preparation.runId !== command.runId)
-          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const first = await input.settings.read(command.reference);
-        if (!('task' in first)) return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId,
-          business: first, snapshot: { availability: 'unavailable' as const },
-          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
-        const snapshot = await readSnapshot(command.taskId, first.task.revision);
-        const latest = await input.settings.read(command.reference);
-        if (!('task' in latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        const { observedAt: _firstObservation, ...firstEvidence } = first;
-        const { observedAt: _latestObservation, ...latestEvidence } = latest;
-        if (requestFingerprint(latestEvidence) !== requestFingerprint(firstEvidence)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId, snapshot,
-          originalInput: { inputRef: first.step.inputRef, fingerprint: first.step.fingerprint, change: first.change },
-          business: first, submission: 'not_attested_by_approval' as const,
-          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+        return readSettingsTaskCenterScene(input.settings, input.events ?? {}, command);
       }
       const current = await readObservedTask(command.original, command.taskId);
       // Successors require consumed-input provenance from the formal model-result
@@ -275,13 +307,17 @@ export function composeAiTaskCenterScene(input: {
         const selected = await assertSelectedProof(nested.data.selection, command.original, current);
         if (selected.runId !== command.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       }
-      const task = await readers.readTask(command.original);
-      const snapshot = await readSnapshot(current.taskId, current.revision);
-      const original = await input.scenes.requests.readHistorical(command.original);
-      const originalInput = { receipt: original.receipt, request: original.request };
-      // Explicit business reads must not force this run through the model-only
-      // clarification reader. It has a different frozen plan/input provenance.
+      // Erased scene bodies are unavailable. Explicit business reads use only
+      // the retained locator and their own selection/approval/Core authority.
       const businessOnly = !command.resultId && (command.review !== undefined || command.decision !== undefined || command.order !== undefined);
+      const locator = businessOnly && input.scenes.requests.readTaskLocator
+        ? await input.scenes.requests.readTaskLocator(command.original) : null;
+      const task = locator ? { original: locator.receipt, task: locator.task,
+        recovery: { availability: 'not_requested' as const } } : await readers.readTask(command.original);
+      const snapshot = await readSnapshot(current.taskId, current.revision);
+      const original = locator ? null : await input.scenes.requests.readHistorical(command.original);
+      const originalInput = original ? { receipt: original.receipt, request: original.request }
+        : { receipt: locator!.receipt, material: { availability: 'not_requested' as const } };
       const pendingInput = businessOnly ? { availability: 'not_requested' as const } : typeof input.input?.read === 'function'
         ? await readers.readInput({ original: command.original, taskId: current.taskId }) : { availability: 'unavailable' as const };
       const model = command.resultId ? await readers.readModelResult({ original: command.original, resultId: command.resultId })
@@ -294,7 +330,7 @@ export function composeAiTaskCenterScene(input: {
         : { availability: 'not_requested' as const };
       const business = command.order !== undefined ? await readers.readOrderResult({ original: command.original, taskId: current.taskId, reference: command.order })
         : { availability: 'not_requested' as const };
-      const orderFacts = input.orderFacts && original.request.sceneCode === 'order_explanation'
+      const orderFacts = input.orderFacts && original?.request.sceneCode === 'order_explanation'
         ? await readers.readOrderFacts(command.original) : { availability: 'not_requested' as const };
       await assertStillCurrent(command.original, current);
       return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: command.runId,
@@ -314,14 +350,16 @@ export function composeAiTaskCenterScene(input: {
   }
 
   async function readObservedTask(reference: z.infer<typeof originalRequestReferenceSchema>, expectedTaskId?: string) {
-    const original = await input.scenes.requests.readHistorical(reference);
+    const readLocator = () => input.scenes.requests.readTaskLocator
+      ? input.scenes.requests.readTaskLocator(reference) : input.scenes.requests.readHistorical(reference);
+    const original = await readLocator();
     const inputRef = z.string().parse(reference.inputRef);
     const task = await input.scenes.readTaskReceipt(inputRef);
     const identity = z.object({ taskId: z.string().min(1).max(191), runId: z.string().min(1).max(191), revision: z.number().int().nonnegative() }).safeParse(task);
     if (task.state !== 'observed' || !identity.success || (expectedTaskId && expectedTaskId !== identity.data.taskId))
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const latest = await input.scenes.readTaskReceipt(inputRef);
-    const after = await input.scenes.requests.readHistorical(reference);
+    const after = await readLocator();
     if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
       || latest.state !== 'observed' || latest.taskId !== identity.data.taskId || latest.runId !== identity.data.runId

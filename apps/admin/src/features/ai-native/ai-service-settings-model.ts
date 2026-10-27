@@ -1,4 +1,4 @@
-import type { AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "../../../../../packages/shared/src/ai-usage-draft";
+import type { AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/shared";
 
 export type AiSettingsMode = "platform_managed" | "tenant_managed";
 export type SecretOperation = "retain" | "replace" | "clear";
@@ -31,10 +31,10 @@ export function setAiSettingsMode(current: AiServiceSettingsDraft, mode: AiSetti
 export function validateAiSettingsDraft(draft: AiServiceSettingsDraft): AiSettingsValidation {
   if (draft.mode === "platform_managed") return { ok: true, errors: {} };
   const errors: AiSettingsValidation["errors"] = {};
-  if (!draft.protocol.trim()) errors.protocol = "请选择已支持的协议";
-  if (!/^https:\/\//i.test(draft.baseUrl.trim())) errors.baseUrl = "Base URL 必须使用 HTTPS";
-  if (!draft.model.trim()) errors.model = "请填写模型标识";
-  if (draft.secretOperation === "replace" && !draft.apiKeyDraft.trim()) errors.apiKey = "替换密钥时必须输入新密钥";
+  if (!["openai_chat_completions", "openai_responses", "anthropic_messages"].includes(draft.protocol)) errors.protocol = "请选择已支持的协议";
+  if (!/^https:\/\/[^/@?#\s]+(?:\/[^?#\s]*)?$/u.test(draft.baseUrl.trim()) || draft.baseUrl.length > 2048) errors.baseUrl = "Base URL 必须使用 HTTPS，且不能包含凭据、查询或片段";
+  if (!/^[\w./:-]{1,256}$/u.test(draft.model.trim())) errors.model = "请填写有效模型标识";
+  if (draft.secretOperation === "replace" && !/^[\x21-\x7e]{1,8192}$/u.test(draft.apiKeyDraft)) errors.apiKey = "替换密钥时必须输入新密钥，不含空格或换行";
   return { ok: Object.keys(errors).length === 0, errors };
 }
 
@@ -43,7 +43,7 @@ export function toAiSettingsInput(draft: AiServiceSettingsDraft, configId: strin
   if (!validation.ok) return null;
   if (draft.mode === "platform_managed") return { draftVersion: "ain-c07-draft-2", configId, expectedRevision, enabled: draft.enabled, mode: "platform_managed" };
   return {
-    draftVersion: "ain-c07-draft-2", configId, expectedRevision, enabled: draft.enabled, mode: "tenant_managed",
+    draftVersion: "ain-c07-draft-2", configId, expectedRevision, enabled: draft.secretOperation === "clear" ? false : draft.enabled, mode: "tenant_managed",
     protocol: draft.protocol.trim(), baseUrl: draft.baseUrl.trim(), model: draft.model.trim(),
     secretChange: draft.secretOperation === "replace" ? { operation: "replace", apiKey: draft.apiKeyDraft } : { operation: draft.secretOperation },
   };

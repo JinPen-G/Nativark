@@ -117,8 +117,8 @@ export class CategoryGovernanceService {
     if (operation === "create" && !categoryScopeAllows(category.openingScope, category.openingTenantIds, tenantId)) return [];
     const rows = await this.prisma.rentalCategoryVersion.findMany({ where: { categoryCode, status: { in: ["published", "legacy_baseline"] } }, include: { policy: true } });
     const op = operation as "create" | "upgrade" | "restore";
-    return rows.filter((row) => row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId) &&
-      (op !== "create" || row.id === category.recommendedVersionId)).map((row) => ({ id: row.id, versionLabel: row.versionLabel, operation: op }));
+    return rows.filter((row) => row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId))
+      .map((row) => ({ id: row.id, versionLabel: row.versionLabel, operation: op }));
   }
   async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);

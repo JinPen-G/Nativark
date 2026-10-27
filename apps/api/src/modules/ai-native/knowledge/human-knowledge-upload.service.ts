@@ -14,7 +14,7 @@ const revisionSelection = z.object({ documentId: id, expectedRevision: z.number(
 export const knowledgeUploadRevisionSchema = z.object({ documentVersion: id, expectedRevision: z.number().int().positive(),
   aclRevision: z.number().int().positive(), targetVersion: id }).strict();
 export const knowledgeUploadKey = (documentId: string, targetVersion?: string) => `knowledge.${createHash('sha256').update(targetVersion === undefined ? documentId : `${documentId}\0${targetVersion}`).digest('hex')}`;
-export function knowledgeUploadRequest(value: unknown, revision?: KnowledgeUploadRevision): CreateFileUploadSessionRequest {
+export function knowledgeUploadRequest(value: unknown, revision?: Pick<KnowledgeUploadRevision, 'targetVersion'>): CreateFileUploadSessionRequest {
   const input = parse(knowledgeUploadInput, value);
   return { businessModule: 'ai-native', businessType: 'ai_knowledge_document', businessId: input.documentId,
     uploadScene: 'ai-knowledge', fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes,
@@ -23,7 +23,7 @@ export function knowledgeUploadRequest(value: unknown, revision?: KnowledgeUploa
 
 export class HumanKnowledgeUploadService {
   constructor(private readonly session: KnowledgeCurrentSession,
-    private readonly runtime: Pick<FileStorageRuntimeService, 'createUploadSession' | 'completeUpload'> & Partial<Pick<FileStorageRuntimeService, 'readKnowledgeUpload'>>,
+    private readonly runtime: Pick<FileStorageRuntimeService, 'createUploadSession' | 'completeUpload'> & Partial<Pick<FileStorageRuntimeService, 'readKnowledgeUpload' | 'findKnowledgeUpload'>>,
     private readonly repository: Pick<PrismaKnowledgeRepository, 'read'>) {}
 
   begin(value: unknown) {
@@ -75,6 +75,28 @@ export class HumanKnowledgeUploadService {
   observe(value: unknown) {
     const input = parse(z.object({ documentId: id, sessionId: id }).strict(), value);
     return this.observeOriginal(input);
+  }
+
+  findOriginal(value: unknown, revision = false) {
+    const revised = revision ? parse(knowledgeUploadInput.extend({ expectedRevision: revisionSelection.shape.expectedRevision,
+      targetVersion: id }).strict(), value) : undefined;
+    const input = revised ?? parse(knowledgeUploadInput, value);
+    const selected = revised ? { expectedRevision: revised.expectedRevision, targetVersion: revised.targetVersion } : undefined;
+    const original = knowledgeUploadRequest({ documentId: input.documentId, fileName: input.fileName,
+      mimeType: input.mimeType, sizeBytes: input.sizeBytes }, selected);
+    return this.session.run(async context => {
+      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || !this.runtime.findKnowledgeUpload) return unavailable();
+      const result = await this.runtime.findKnowledgeUpload(context.scope.tenantId, original, {
+        businessType: 'ai_knowledge_document', businessId: input.documentId, uploadScene: 'ai-knowledge',
+        workspaceId: context.scope.workspaceId, actorUserId: context.actor.userId }, selected);
+      // Observations never deliver a signed upload capability, including when
+      // the original intent still happens to be within its expiry period.
+      const upload = result ? { sessionId: result.sessionId, fileAssetId: result.fileAssetId, provider: result.provider,
+        mode: result.mode, status: result.status, expiresAt: result.expiresAt } : null;
+      const observation = { documentId: input.documentId, automaticRetry: false as const, execution: 'not_attested' as const,
+        semantics: 'original_upload_intent_not_document_commit' as const };
+      return upload ? { ...observation, state: 'observed' as const, upload } : { ...observation, state: 'unknown' as const, upload: null };
+    });
   }
 
   observeRevision(value: unknown) {

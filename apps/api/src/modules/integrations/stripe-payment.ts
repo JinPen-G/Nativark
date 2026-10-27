@@ -11,6 +11,17 @@ import { toCents } from "./payment-money";
 /** Stripe 回调时间容差:默认 5 分钟,与官方库一致。绝不用 0(等于关闭时效检查)。 */
 export const STRIPE_SIGNATURE_TOLERANCE_SECONDS = 300;
 
+/** 当前收单链只接实款；支持完整或 restricted live key，不把格式识别当连接认证。 */
+export function isStripeLiveKey(value: unknown): boolean {
+  return typeof value === "string" && /^(?:sk|rk)_live_[A-Za-z0-9]+$/u.test(value);
+}
+
+/** 原支付/退款响应中的核验标记，只能由运行器在原收据校验后写入。 */
+export function hasStripeLiveReceipt(value: unknown): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).stripeLiveVerified === true;
+}
+
 /**
  * 零小数币种(金额即最小单位,不 ×100)。本平台当前 7 种结算币种都不在其中,
  * 但保留此表,将来支持 JPY/KRW 等时金额换算不出错。

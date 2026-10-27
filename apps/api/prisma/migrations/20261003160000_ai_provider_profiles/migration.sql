@@ -1,19 +1,6 @@
--- B02-W01: provider profile ownership, role and revision state.
-CREATE TABLE `ai_scopes` (
-  `id` VARCHAR(36) NOT NULL,
-  `kind` ENUM('platform','tenant','workspace') NOT NULL,
-  `scopeKey` VARCHAR(512) NOT NULL,
-  `tenantId` VARCHAR(191) NULL,
-  `workspaceId` VARCHAR(191) NULL,
-  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE INDEX `ai_scopes_scope_key` (`scopeKey`),
-  UNIQUE INDEX `ai_scopes_id_kind` (`id`,`kind`),
-  INDEX `ai_scopes_owner_idx` (`tenantId`,`workspaceId`),
-  PRIMARY KEY (`id`),
-  CONSTRAINT `ai_scopes_tenant_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `ai_scopes_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `business_workspaces` (`tenantId`,`id`) ON DELETE RESTRICT ON UPDATE CASCADE
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- Provider, knowledge and usage persistence extends the existing AI foundation.
+-- ai_scopes is owned by 20261003060000_ai_task_foundation: reuse its canonical
+-- scope-key CHECK, indexes and RESTRICT foreign keys instead of redefining it.
 
 CREATE TABLE `ai_invocation_admissions` (
   `id` VARCHAR(36) NOT NULL,

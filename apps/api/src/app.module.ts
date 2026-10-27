@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ApiAuthGuard } from "./common/api-auth.guard";
 import { ConfigModule } from "@nestjs/config";
@@ -101,14 +102,45 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
 import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
-import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalTaskActionPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
-import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+import { AiOriginalScenesController, AiOriginalSceneObservationController, AiOriginalQuoteModelExecutionController, AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } from "./modules/ai-native/scenes/original-scenes.controller";
+import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER, AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER, AI_NATIVE_CAPABILITY_PROBE_PROVIDER, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER, AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER, AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS, AI_NATIVE_RETENTION_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+import { AiOriginalOrderReadController } from "./modules/ai-native/scenes/original-order-read.controller";
+import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/original-task-accounting-http.module";
+import { AiBudgetManagementController, AiGatewayPricingHistoryController } from "./modules/ai-native/budget/budget-management.module";
+import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
+import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
+import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
+import { AiTaskCenterController } from './modules/ai-native/task-center.application';
+import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
+import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
+  AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiPlatformModelSettingsController } from './modules/ai-native/platform-model-settings.application';
+import { HumanMemoryManagementController } from './modules/ai-native/knowledge/human-memory-management.controller';
+import { KnowledgePolicyManagementController } from './modules/ai-native/knowledge/knowledge-policy-management.controller';
+import { HumanKnowledgeManagementController } from './modules/ai-native/knowledge/human-knowledge-management.controller';
+import { HumanKnowledgeConsumptionController } from './modules/ai-native/knowledge/human-knowledge-consumption.controller';
+import { AI_NATIVE_BUSINESS_FAILURE_PROVIDERS, AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS, AI_NATIVE_QUOTE_ORDER_PROVIDERS, AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiHumanQuoteSelectionController, AiHumanQuoteOrderController, AiSelectedQuoteTaskController, AiClarifiedQuoteSelectionController } from './modules/ai-native/task-request/human-quote-selection.controller';
+import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController,
+  AiSettingsTaskController, AiSettingsTaskReadController } from './modules/ai-native/scenes/settings-task.controller';
+import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
+import { HumanAutomationPolicyRequestController } from './modules/ai-native/automation/human-automation-policy-request.controller';
 import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
+import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_STAFF_RECOGNITION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { InspectionRecognitionTaskController, StaffInspectionAccountingController } from './modules/ai-native/inspection-assist/inspection-recognition-task.controller';
+import { StaffInspectionTaskPolicyController } from './modules/ai-native/inspection-assist/inspection-task-policy.controller';
+import { ClientTaskPolicyController } from './modules/ai-native/scenes/client-task-policy.controller';
+import { AI_NATIVE_CLIENT_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
 
 @Module({
   imports: [
+    AiDesktopBusinessModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env", "../../.env"]
@@ -116,12 +148,44 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     DatabaseModule
   ],
   controllers: [
+    InspectionRecognitionTaskController,
+    StaffInspectionAccountingController,
+    StaffInspectionTaskPolicyController,
+    ClientTaskPolicyController,
+    AiCategoryDraftController,
+    TextCapabilityProbeController,
     AiOriginalScenesController,
+    AiOriginalOrderReadController,
+    AiOriginalTaskAccountingController,
+    AiBudgetManagementController,
+    AiGatewayPricingHistoryController,
+    AiModelSettingsController,
+    AiTaskCenterController,
+    AiPlatformModelSettingsController,
+    HumanMemoryManagementController,
+    KnowledgePolicyManagementController,
+    HumanKnowledgeManagementController,
+    HumanKnowledgeConsumptionController,
+    OperatorAutomationController,
+    StaffAutomationController,
+    HumanAutomationPolicyRequestController,
+    AiSettingsChangeController,
+    AiSettingsTaskCreationController,
+    AiSettingsTaskControlController,
+    AiSettingsTaskController,
+    AiSettingsTaskReadController,
+    AiHumanQuoteSelectionController,
+    AiClarifiedQuoteSelectionController,
+    AiHumanQuoteOrderController,
+    AiSelectedQuoteTaskController,
+    AiScenePlanPolicyController,
     StaffInspectionAssistController,
     WebsiteClientEntryController,
     WechatClientEntryController,
     AiRetentionController,
     AiOriginalSceneObservationController,
+    AiOriginalQuoteModelExecutionController,
+    AiOriginalOpeningModelExecutionController,
     AiOriginalTaskActionPolicyController,
     HealthController,
     OpenApiController,
@@ -158,8 +222,30 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     PlatformDemoRequestController
   ],
   providers: [
+    ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
+    AI_NATIVE_CLIENT_POLICY_PROVIDER,
+    AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
+    AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
+    AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER,
+    AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
+    AI_NATIVE_MODEL_SETTINGS_PROVIDER,
+    AI_NATIVE_TASK_CENTER_PROVIDER,
+    AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
+    AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
+    AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
+    AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER,
+    AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER,
+    ...AI_NATIVE_BUSINESS_FAILURE_PROVIDERS,
+    ...AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS,
+    ...AI_NATIVE_QUOTE_ORDER_PROVIDERS,
+    AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER,
+    AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
+    AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
+    AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
+    AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
+    AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
     AI_NATIVE_RETENTION_PROVIDER,

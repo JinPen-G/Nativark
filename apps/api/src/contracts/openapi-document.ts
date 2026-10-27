@@ -1,7 +1,27 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
+import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
+import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
+import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
+  AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
+  AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS,
+  AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS, AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -54,6 +74,7 @@ export interface ContractOperation {
   authRequired?: boolean;
   requestSchema?: string | SchemaObject;
   responseSchema?: string | SchemaObject;
+  successStatus?: 200 | 201;
   parameters?: ParameterObject[];
   rawResponseContentType?: string;
   rateLimited?: boolean;
@@ -146,7 +167,7 @@ function operation(config: ContractOperation) {
     "x-requiredPermissions": config.permissions,
     "x-permissionMode": config.permissions.length > 0 ? "any" : "none",
     responses: {
-      "200": {
+      [String(config.successStatus ?? 200)]: {
         description: "Success",
         content: {
           [responseContentType]: { schema: responseSchema }
@@ -195,6 +216,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_NATIVE_COMPONENT_SCHEMAS,
   ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
   ...AI_LEAF_COMPONENT_SCHEMAS,
+  ...DESKTOP_BUSINESS_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
   RegisterPersonalMembershipRequest: objectOf({
@@ -207,6 +229,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   }, ["name", "phone", "channel"]),
   RegisterPersonalMembershipResponse: objectOf({ customerId: stringSchema, membershipStatus: stringSchema, skipped: { type: "boolean" }, review: objectSchema }, ["customerId", "membershipStatus"]),
   MembershipRegistrationSettings: objectOf({ registrationMode: { type: "string", enum: ["manual", "automatic"] }, updatedAt: { type: "string", format: "date-time" }, supportsOnlyNewImport: { type: "boolean", description: "Server supports create-only imports. Legacy servers omit this field; clients must hide that import until supported." } }, ["registrationMode"]),
+  RecordCustomerCorporateCreditMaturityRequest: objectOf({ ledgerId: { type: "string", minLength: 1, maxLength: 191 },
+    dueAt: { type: "string", format: "date-time" }, basisRef: { type: "string", minLength: 1, maxLength: 191 },
+    reason: { type: "string", minLength: 1, maxLength: 500 }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["ledgerId", "dueAt", "basisRef", "reason", "idempotencyKey"], false),
+  CustomerCorporateCreditMaturityReceipt: objectOf({ ledgerId: stringSchema, orderId: stringSchema, currency: stringSchema,
+    dueAt: { type: "string", format: "date-time" }, basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema,
+    recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
+    ["ledgerId", "orderId", "currency", "dueAt", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
   RentalOperationLockRequest: {
     oneOf: [
       { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
@@ -1949,6 +1979,8 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/account", "Platform", "getCustomerCreditAccount", "Read the current corporate credit reserve and receivable summary", ["rental-os:corporate:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/ledger", "Platform", "listCustomerCreditLedger", "Read the append-only corporate credit ledger", ["rental-os:corporate:view"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments", "Platform", "recordCustomerCreditPayment", "Record an idempotent corporate credit payment", ["rental-os:corporate:manage"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/credit/maturities", "Platform", "recordCustomerCreditMaturity", "Record the original debt maturity date explicitly determined by finance", ["rental-os:corporate:manage"], true, "RecordCustomerCorporateCreditMaturityRequest", "CustomerCorporateCreditMaturityReceipt"),
+  { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/maturities/{ledgerId}", "Platform", "readCustomerCreditMaturity", "Read the immutable original debt maturity receipt", ["rental-os:corporate:view"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditMaturityReceipt"), { type: "null" }] } },
   // CUSTOMER-01D：重复识别、人工合并与注销。需求 4.8.14 要求合并与注销**分别授权**——
   // 两者都不可逆且影响面不同（合并改身份归属、注销终止业务资格），共用「会员管理」
   // 等于让任何能改会员等级的人都能合并或注销客户。
@@ -1994,7 +2026,35 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
 ];
 
+/** Existing settings lifecycle: names publish the actual request/response,
+ * not permission to execute or proof of a committed business transaction. */
+const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
+  ...Object.fromEntries(Object.entries(AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS)
+    .map(([name, contract]) => [name, [contract.request, contract.response] as const])),
+  ...Object.fromEntries(Object.entries(AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS)
+    .map(([name, contract]) => [name, [contract.request, contract.response] as const])),
+  createSettingsTask: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreatedDraft'],
+  readSettingsTaskCreation: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskCreationReadDraft'],
+  requestOriginalSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationResultDraft'],
+  readOriginalSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationReadDraft'],
+  settleUnstartedSettingsCancellation: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationResultDraft'],
+  readOriginalSettingsCancellationSettlement: ['AiApprovedSettingsTaskCancellationDraft', 'AiApprovedSettingsTaskCancellationReadDraft'],
+  startOriginalSettingsTask: ['AiApprovedSettingsTaskCreationDraft', 'AiApprovedSettingsTaskRunDraft'],
+  startSettingsTask: ['AiApprovedSettingsTaskRunRequestDraft', 'AiApprovedSettingsTaskRunDraft'],
+  readSettingsConfirmation: ['AiApprovedSettingsTaskCheckpointReadDraft', 'AiApprovedSettingsTaskCheckpointDraft'],
+  decideSettingsProposal: ['AiApprovedSettingsDecisionDraft', 'AiApprovedSettingsDecisionReceiptDraft'],
+  readSettingsDecision: ['AiApprovedSettingsReferenceDraft', 'AiApprovedSettingsDecisionReceiptDraft'],
+  continueSettingsConfirmation: ['AiApprovedSettingsTaskContinueDraft', 'AiApprovedSettingsTaskRunDraft'],
+  reconcileSettingsTask: ['AiApprovedSettingsTaskRunRequestDraft', 'AiApprovedSettingsTaskRecoveryDraft'],
+  cancelSettingsTask: ['AiApprovedSettingsTaskCancelDraft', 'AiApprovedSettingsTaskCancelResponseDraft'],
+  configureSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyConfigureDraft', 'AiApprovedSettingsTaskPolicyMutationDraft'],
+  readSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyReadDraft', 'AiApprovedSettingsTaskPolicyReadResultDraft'],
+  clearSettingsTaskPolicy: ['AiApprovedSettingsTaskPolicyClearDraft', 'AiApprovedSettingsTaskPolicyMutationDraft'],
+  readSettingsTaskPolicyOperation: ['AiApprovedSettingsTaskPolicyOperationReadDraft', 'AiApprovedSettingsTaskPolicyOperationDraft']
+};
+
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...DESKTOP_BUSINESS_OPERATIONS,
   { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
     permissions: ['system:params:manage'], authRequired: true,
     summary: 'Explicit bounded retention cleanup. Requires current full-workspace operator scope; unknown effects and original business receipts are held. No timer or automatic retry.',
@@ -2011,6 +2071,23 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskModelResult, 'AiClientTaskReadRequest', 'AiClientTaskModelResultReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInput, 'AiClientTaskReadRequest', 'AiClientTaskInputReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput, 'AiClientTaskInputSubmissionRequest', 'AiClientTaskInputSubmissionReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt, 'AiClientTaskInputSubmissionRequest', 'AiClientTaskInputReceiptReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.continueTaskInput, 'AiClientTaskInputSubmissionRequest', 'AiClientTaskModelControlResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.startTaskModel, 'AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.recoverTaskModel, 'AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskModel, 'AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationReceipt, 'AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCancellationSettlementReceipt, 'AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskUnstartedCancellationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskAccounting, 'AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskAccounting, 'AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance, 'AiBookingAcceptanceReadRequest', 'AiBookingAcceptanceReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission, 'AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking, 'AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
@@ -2019,10 +2096,53 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       `clientAi_${surface}_${route.replace(/\//gu, '_')}`,
       'Current independent customer identity and persisted surface/scene policy required. Observation does not grant execution; only an explicit original-page decision submits through Core. Unknown uses the same original receipt, never automatic resubmission.',
       { requestSchema, responseSchema })))),
+  ...(['detail', 'create', 'patch', 'validate', 'review'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/ai-native/category-drafts/${operation}`, tag: 'AI Native',
+    operationId: `aiCategoryDraft_${operation}`, permissions: [operation === 'create' || operation === 'patch'
+      ? 'system:rental-category:edit' : 'system:rental-category:view'],
+    summary: 'Human draft preparation through original platform CAT-GOV permissions, preview gate and DTO/CAS. New work is server-disabled by default; publication and adoption are unavailable. Unknown draft writes require manual original-state review, not automatic retry. Payload remains the existing internal draft adapter, not a new public governance contract.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/history-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionHistory', permissions: ['rental-os:order:view'],
     summary: 'Read bounded owned historical inspection draft references under current staff/order/location authorization; no media access or execution.',
     requestSchema: 'AiStaffInspectionHistoryRequest', responseSchema: 'AiStaffInspectionHistoryResponse' },
+  ...(['read', 'change', 'operation', 'readModelPlan', 'changeModelPlan'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `manageClientTaskPolicy_${operation}`, permissions: ['system:params:manage'],
+    summary: 'Server-opt-in operator management of the existing quote-clarification customer policy and text plan. Current workspace/identity and original CAS/audit are mandatory; no customer scope/scene/tool overrides. Changes do not grant model capabilities, budget or booking approval. Unknown policy writes use their original operation key; plan uncertainty requires observing the original plan, not blind retry.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
+  ...(['create', 'readCreation', 'start', 'reconcile', 'requestCancel', 'readInput', 'resume', 'readAnswer', 'continueAnswer'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: ['readCreation', 'requestCancel', 'readAnswer'].includes(operation)
+      ? 'Original owned staff task metadata, exact cancellation revision or exact human-answer receipt. Current order/resource and task action policies remain required independently of NEW recognition configuration, profile or draft expiry. Receipts do not resume execution, reopen attachment bytes, release budget or attest remote rollback. Unknown is observed only by the original key. Draft payload remains GenericObject.'
+      : 'Server opt-in candidate recognition only: original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger remain required. Creation is not dispatch; unknown uses original evidence. Draft payload remains GenericObject, not a frozen complete response schema.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
+  { method: 'post', path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancelReceipt}`, tag: 'AI Native',
+    operationId: 'staffRecognition_readCancelReceipt', permissions: ['rental-os:order:view'],
+    summary: 'Read the exact original task cancellation revision under CURRENT staff owner/resource/read policies, independently of NEW recognition enablement. Observation never cancels a provider, releases budget, retries execution or proves rollback. Not observed is not proof of an uncommitted write.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject' },
+  ...(['settleUnstartedCancellation', 'settleReleasedInputCancellation', 'readCancellationSettlementReceipt'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Original owned staff task cancellation settlement/receipt, not provider cancellation or business rollback. Current resource and task action policies required. The original task transaction must prove either never-started work without execution evidence, or a released input wait with persisted measured model result and all four recorded resource charges. Running/unknown/unmeasured work is refused; expiry is not proof. No refund, new run or model dispatch; lost acknowledgement is observed by the original revision only.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
+  ...(['readAccounting', 'reconcileAccounting'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Current same-staff task read policy and original invocation/usage only. Available independently of NEW recognition enablement, profile, input freshness or file storage. Does not dispatch, reserve, submit an inspection or prove business payment; unknown is observed by the original call key.',
+    requestSchema: 'AiStaffTaskAccountingRequest', responseSchema: 'AiTaskAccountingObservation'
+  })),
+  ...(['read', 'configure', 'clear'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT[operation]}`, tag: 'AI Native',
+    operationId: `staffRecognitionPolicy_${operation}`, permissions: ['rental-os:order:view'],
+    summary: 'Human CAS policy management for the original owned inspection candidate task only. Stage authority and current server plan bound every operation. Not approval, Core submission or platform policy management.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/receipt-host-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionReceiptHost', permissions: ['rental-os:order:view'],
     summary: 'Open an explicitly selected original historical receipt host. Does not authorize recognition or original inspection submission.',
@@ -2032,33 +2152,435 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Observe only the exact saved recognition association under current owner/order/location authority. Missing evidence is not permission to retry a write.',
     requestSchema: AI_LEAF_COMPONENT_SCHEMAS.AiStaffInspectionReceiptHostRequest.properties!.recognitionSave,
     responseSchema: 'GenericObject' },
-  { method: 'post', path: '/api/ai-native/scene-requests', tag: 'AI Native', operationId: 'createOriginalOrderFactsRequest',
-    summary: 'Prepare an owner-bound order explanation request; requires persisted enabled scene policy and AI entitlement. Creates metadata only, no model, execution or business write.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
-  ...(['read', 'material', 'recovery'] as const).map(action => ({ method: 'post' as const,
-    path: `/api/ai-native/scene-requests/${action}`, tag: 'AI Native', operationId: `readOriginalOrderFacts_${action}`,
-    summary: 'Read the exact original owner-bound request/current authorized facts; no worker, new run, approval or model invocation.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestReadDraft' })),
-  { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
-    summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
-    permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...(['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit', 'evidence-bind',
+    'evidence-fingerprint', 'evidence-replace', 'draft-operation', 'input-prepare', 'input-receipt', 'result-read', 'result-save', 'submission-review',
+    'submission-prepare', 'submission-preparation', 'submission-submit', 'submission-read'] as const).map(operation => ({
+    method: 'post' as const, path: `/api/staff/v1/ai-native/inspection-assist/${operation}`, tag: 'AI Native',
+    operationId: `staffInspection_${operation.replace(/-/gu, '_')}`, permissions: ['rental-os:order:view'],
+    summary: 'Original staff/order/location and stage action authorization is rechecked. Manual work and recognition require separate server opt-ins; exact original receipts remain readable. Recognition results are candidate evidence only, not field adoption or Core submission. An unknown write is observed by its original key, never automatically resent. Wire payload remains the existing draft; GenericObject does not certify full schema coverage.',
+    requestSchema: 'GenericObject', responseSchema: 'GenericObject'
+  })),
+  ...Object.entries(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]
+      ? `/${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]}` : ''}`,
+    tag: 'AI Native', operationId: name === 'create' ? 'createOriginalOrderFactsRequest'
+      : name === 'read' || name === 'recovery' || name === 'material' ? `readOriginalOrderFacts_${name}`
+        : name === 'reconcile' ? 'reconcileOriginalOrderFactsRequest' : `originalSceneRequest_${name}`,
+    permissions: ['rental-os:order:view'], requestSchema: contract.request, responseSchema: contract.response,
+    successStatus: contract.successStatus,
+    summary: 'Original current-owner scene request and Task metadata only, under existing resource Guard, scene policy and entitlement. Stored request, created metadata, original key observation and recovery are separate closed results; none invokes a model, approves an action or proves a Core effect. Reissue has its own original-key observation. Unknown never authorizes new-key creation. Existing POST success status is preserved.' })),
+  ...([
+    ['observeUpload', 'ObserveUploadRequestDraft', 'ObserveUploadResponseDraft'],
+    ['observeRevisionUpload', 'ObserveRevisionUploadRequestDraft', 'ObserveUploadResponseDraft'],
+    ['findOriginalUpload', 'FindOriginalUploadRequestDraft', 'FindOriginalUploadResponseDraft'],
+    ['findOriginalRevisionUpload', 'FindOriginalRevisionUploadRequestDraft', 'FindOriginalUploadResponseDraft'],
+    ['beginUpload', 'BeginUploadRequestDraft', 'BeginUploadResponseDraft'], ['completeUpload', 'CompleteUploadRequestDraft', 'CompleteUploadResponseDraft'],
+    ['beginRevisionUpload', 'BeginRevisionUploadRequestDraft', 'BeginRevisionUploadResponseDraft'],
+    ['completeRevisionUpload', 'CompleteRevisionUploadRequestDraft', 'CompleteRevisionUploadResponseDraft'],
+    ['prepareCreate', 'PrepareRequestDraft', 'PrepareResponseDraft'], ['create', 'CreateRequestDraft', 'CommandResponseDraft'],
+    ['parse', 'ParseRequestDraft', 'CommandResponseDraft'], ['reconcileParse', 'ReconcileParseRequestDraft', 'CommandResponseDraft'],
+    ['revise', 'ReviseRequestDraft', 'CommandResponseDraft'], ['publish', 'PublishRequestDraft', 'CommandResponseDraft'],
+    ['withdraw', 'WithdrawRequestDraft', 'CommandResponseDraft'], ['delete', 'DeleteRequestDraft', 'CommandResponseDraft'],
+    ['operationStatus', 'OperationRequestDraft', 'OperationResponseDraft'],
+    ['indexRead', 'IndexReadRequestDraft', 'IndexReadResponseDraft'], ['indexRequest', 'IndexRequestDraft', 'IndexMutationResponseDraft'],
+    ['indexResume', 'IndexResumeRequestDraft', 'IndexMutationResponseDraft'], ['indexOperationRead', 'IndexOperationRequestDraft', 'IndexOperationResponseDraft']
+  ] as const).map(([action, request, response]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageCurrentAiKnowledge_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current operator and exact persisted document/upload action policy, ACL, version and original file integration required. No ambient file grants or model call. Human confirmation is action-specific; upload, document commit and publication are separate facts. Unknown writes require original operation observation.',
+    requestSchema: `AiKnowledgeManagement${request}`, responseSchema: `AiKnowledgeManagement${response}` })),
+  ...([
+    ['readDocument', 'AiKnowledgeDocumentReadRequestDraft', 'AiKnowledgeDocumentReadResponseDraft'],
+    ['openSource', 'AiKnowledgeSourceReadRequestDraft', 'AiKnowledgeSourceReadResponseDraft'],
+    ['readMemory', 'AiKnowledgeMemoryReadRequestDraft', 'AiKnowledgeMemoryReadResponseDraft'],
+    ['readPreferences', 'AiKnowledgePreferencesReadRequestDraft', 'AiKnowledgePreferencesReadResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT[action]}`, tag: 'AI Native',
+      operationId: `readCurrentAiKnowledge_${action}`, permissions: ['system:params:manage'],
+      summary: 'Existing operator management entry permission plus exact persisted knowledge/memory action policy and original document/version/file ACL are required; management permission alone grants no resource access. Confirmed owner preferences only. Bounded read-only request, no model, task, write, download URL or business authority.',
+    requestSchema, responseSchema })),
+  ...([
+    ['list', 'ListRequestDraft', 'ListResponseDraft'], ['state', 'StateRequestDraft', 'StateDraft'],
+    ['read', 'ReadRequestDraft', 'MutationDraft'], ['propose', 'ProposeRequestDraft', 'MutationDraft'],
+    ['confirm', 'ConfirmRequestDraft', 'MutationDraft'], ['resumeConfirmation', 'ConfirmRequestDraft', 'MutationDraft'],
+    ['confirmation', 'ConfirmationRequestDraft', 'ConfirmationResponseDraft'], ['change', 'ChangeRequestDraft', 'MutationDraft'],
+    ['changeStatus', 'ChangeStatusRequestDraft', 'ChangeStatusResponseDraft'], ['revoke', 'RevokeRequestDraft', 'RevokeResponseDraft'],
+    ['operation', 'OperationRequestDraft', 'OperationResponseDraft']
+  ] as const).map(([action, request, response]) => ({ method: 'post' as const,
+    path: `/api/${AI_MEMORY_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_MEMORY_MANAGEMENT_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageOwnedAiMemory_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current human owner and persisted action policy required. Explicit consent is not business approval. Bounded request; uncertain writes must use the original memory operation, never automatic retry.',
+    requestSchema: `AiMemoryManagement${request}`, responseSchema: `AiMemoryManagement${response}` })),
+  ...([
+    ['prepareTarget', 'AiKnowledgeTargetSelectionDraft', 'GenericObject'],
+    ['target', 'AiKnowledgeTargetReadDraft', 'GenericObject'], ['bindTarget', 'AiKnowledgeTargetBindDraft', 'GenericObject'],
+    ['read', 'AiKnowledgeTargetSelectionDraft', 'GenericObject'],
+    ['prepare', 'AiKnowledgePolicyChangeDraft', 'AiKnowledgePolicyPrepareHttpResponseDraft'],
+    ['preparation', 'AiKnowledgePolicyPreparationSelectionDraft', 'AiKnowledgePolicyReviewHttpResponseDraft'],
+    ['commit', 'AiKnowledgePolicyCommitDraft', 'AiKnowledgePolicyCommitHttpResponseDraft'],
+    ['operation', 'AiKnowledgePolicyReceiptSelectionDraft', 'AiKnowledgePolicyOperationHttpResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `manageCurrentAiKnowledgePolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current tenant manager plus persisted exact management authority, participants and resource basis required. No default root/policy, file access, model execution or business approval is created. Unknown writes require original operation observation.',
+    requestSchema, responseSchema })),
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}`, tag: 'AI Native',
+    operationId: 'listPlatformAiModelConfigurations', permissions: ['system:ai-provider:view'],
+    summary: 'Current SaaS viewer only. Keyset page of at most 50 platform-owned configuration metadata records; no credentials, base URLs, capability proof or execution grant.',
+    parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 50 } },
+      { name: 'after', in: 'query', required: false, schema: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][\\w.:-]{0,35}$' } }],
+    responseSchema: 'AiPlatformModelDirectoryDraft' },
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
+    operationId: 'readPlatformAiModelConfiguration', permissions: ['system:ai-provider:view'],
+    summary: 'Current explicitly authorized SaaS platform viewer. Masked current configuration, not an original save receipt, write permission or connection/capability proof.',
+    responseSchema: 'AiPlatformModelSettingsSummaryDraft' },
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}/capabilities`, tag: 'AI Native',
+    operationId: 'readPlatformAiCapabilityEvidence', permissions: ['system:ai-provider:view'],
+    summary: 'Current SaaS viewer and platform-owned Profile only. Eight bounded capability observations: configured whitelist, original evidence metadata and current verified readiness are distinct. Uses original receipt verifier, no credentials, connection test, task start, budget mutation or dispatch grant. Missing/mocked/expired evidence never certifies support; inactive configuration retains historical metadata only. Identity, configuration and evidence are revalidated before delivery.',
+    responseSchema: 'AiPlatformModelCapabilityObservationDraft' },
+  { method: 'put', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}`, tag: 'AI Native',
+    operationId: 'savePlatformAiModelConfiguration', permissions: ['system:ai-provider:manage'],
+    summary: 'SaaS platform manager CAS + encrypted Vault/Profile transaction. Revision zero provisions only the first DEFAULT profile; no policy, capability evidence or budget is granted. Lost acknowledgement requires observing current configuration, never automatic retry.',
+    requestSchema: 'AiPlatformModelSettingsInputDraft', responseSchema: 'AiPlatformModelSettingsSaveDraft' },
+  { method: 'get', path: `/api/${AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT.basePath}/{profileId}/operations/{operationKey}`, tag: 'AI Native',
+    operationId: 'readOriginalPlatformModelConfigurationSave', permissions: ['system:ai-provider:view'],
+    summary: 'Current SaaS viewer and original actor only. Exact immutable save receipt, independent of later config rotations; missing is unknown, not rollback or permission to resend. No credential or execution grant.',
+    responseSchema: 'AiModelConfigurationOperationDraft' },
+  ...(['input', 'resumeInput', 'inputReceipt', 'continueInput'] as const).map(action => ({
+    method: 'post' as const, path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `aiTaskCenterOriginalClarification_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    requestSchema: action === 'input' ? 'AiTaskClarificationQueryDraft' : action === 'inputReceipt'
+      ? 'AiTaskClarificationReceiptRequestDraft' : action === 'continueInput' ? 'AiTaskClarificationContinueQueryDraft' : 'AiTaskClarificationAnswerDraft',
+    responseSchema: action === 'input' ? 'AiTaskClarificationObservationDraft' : 'AiTaskClarificationProgressDraft',
+    summary: action === 'input' || action === 'inputReceipt'
+      ? 'Read same-owner original question or exact answer receipt under current task/source authority. No start, model call, approval or automatic retry.'
+      : 'Explicit original answer/continuation through the existing configured host. Continuation accepts the exact original reference, resolving verified stored answers internally; it does not submit answers again. Binds immutable question revision/submission key and cumulative resources; answers do not approve Core writes. Unknown: read exact input receipt, never resubmit or redispatch automatically.' })),
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.list}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterList', summary: 'Read current owner task metadata; no task/run creation',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskMetadataQueryDraft', responseSchema: 'AiTaskMetadataPageDraft' },
+  ...(['review', 'decision', 'decisionReceipt'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`, tag: 'AI Native',
+    operationId: `aiTaskCenterHuman_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    summary: action === 'review' ? 'Read deterministic original waiting-step order/settings proposal under current domain authority.'
+      : action === 'decision' ? 'Explicit human decision on the exact reviewed proposal; server gate and current task/domain authority required. No runner continuation or Core execution. Unknown: read original decision receipt, never auto retry.'
+        : 'Read original same-actor decision after expiry or new-execution closure. Missing is not rollback or permission to resubmit.',
+    requestSchema: action === 'review' ? 'AiTaskReviewQueryDraft' : 'AiTaskDecisionQueryDraft',
+    responseSchema: action === 'review' ? 'AiTaskHumanReviewDraft' : 'AiTaskHumanDecisionReceiptDraft' })),
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.business}`, tag: 'AI Native',
+    operationId: 'aiTaskCenterOriginalBusinessReceipt', permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    requestSchema: 'AiTaskReviewQueryDraft', responseSchema: 'AiTaskBusinessObservationDraft',
+    summary: 'Current owner exact original selection/Core order or settings operation receipt. No latest-object fallback, runner continuation, reconciliation write or inference of payment/fulfillment. Missing retains uncertainty.' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.continue}`, tag: 'AI Native',
+    operationId: 'aiTaskCenterContinueOriginalApprovedTask', permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    requestSchema: 'AiTaskHumanContinueDraft', responseSchema: 'AiTaskHumanContinuationDraft',
+    summary: 'Explicit human continuation of exact current checkpoint/review/revision with recorded same-actor approval. Delegates to the existing configured order/settings host: current claim/fencing/resource/Core authority remains mandatory. Unknown is observed by original business receipt, never auto retried.' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.result}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalModelResult',
+    summary: 'Read original order/opening/quote model text via current business/source authorization. No raw artifact fallback or model invocation.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
+      resultId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'resultId'], false),
+    responseSchema: 'AiTaskModelObservationDraft' },
+  ...(['stop', 'stopReceipt'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `aiTaskCenterOriginal_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    summary: action === 'stop' ? 'Explicit cancellation intent through the current owned task transition policy/CAS, including model and settings tasks. Independent of new execution, model provenance or financial admission. Not rollback, remote cancellation or refund. Unknown: read exact original receipt; never resubmit.'
+      : 'Read cancellation request at exact original task revision and current owner/metadata/event authority, independent of new execution. Absence grants no retry.',
+    requestSchema: 'AiTaskStopQueryDraft', responseSchema: 'AiTaskStopObservationDraft' })),
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.source}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalModelSource', permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    summary: 'Reopen one server-issued frozen source through current original scene authority and knowledge ACL. Hash/index are lookups, not authorization. Bounded inert text/JSON only; never a URL, download, model invocation or execution.',
+    requestSchema: 'AiTaskModelSourceQueryDraft', responseSchema: 'AiTaskModelSourceObservationDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.confirmation}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalConfirmationHistory',
+    summary: 'Observe exact persisted confirmation phases and human decisions, independent of new execution. No approval, continuation, claim or business-success attestation.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
+      runId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
+      stepId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'runId', 'stepId'], false),
+    responseSchema: 'AiTaskConfirmationHistoryDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.usage}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalUsage', summary: 'Current owner original ledger page, not provider invoice or proof of business success. No new-execution gate, dispatch or settlement.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
+      limit: { type: 'integer', minimum: 1, maximum: 20 }, after: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'limit'], false),
+    responseSchema: 'AiTaskBudgetUsagePageDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.snapshot}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterSnapshot', summary: 'Read authorized task snapshot and persisted event watermark',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId'], false), responseSchema: 'AiTaskSnapshotDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.events}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterEvents', summary: 'Read persisted events after original cursor; reset is read-only',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
+      after: { type: 'string', maxLength: 20, pattern: '^(0|[1-9][0-9]*)$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['taskId', 'after', 'limit'], false),
+    responseSchema: { oneOf: [ref('AiTaskEventPageDraft'), ref('AiTaskEventResetDraft')] } },
+  { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.read}`,
+    tag: 'AI Native', operationId: 'readCurrentTenantModelSettings', permissions: ['system:params:manage'],
+    summary: 'Current tenant only. New tenant returns platform product default at revision zero with execution disabled. Masked configuration is not capability, budget or connection verification.',
+    requestSchema: objectOf({}, [], false), responseSchema: 'AiTenantModelSettingsSummaryDraft' },
+  { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.save}`,
+    tag: 'AI Native', operationId: 'saveCurrentTenantModelSettings', permissions: ['system:params:manage'],
+    summary: 'One expectedRevision CAS saves mode/service gate and retained or explicitly changed BYOK credential with its Profile. configId is the current tenant configuration, not a provider Profile. Uncertain acknowledgement must be observed, never retried with a new revision; current read is not an original operation receipt. Does not grant budget or execution.',
+    requestSchema: 'AiTenantModelSettingsInputDraft', responseSchema: 'AiTenantModelSettingsSummaryDraft' },
+  { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.operation}`,
+    tag: 'AI Native', operationId: 'readOriginalTenantModelConfigurationSave', permissions: ['system:params:manage'],
+    summary: 'Current tenant/workspace/original actor only. Observe the operationKey saved with the original config/Profile CAS, not current head or capability proof. Unknown is never automatic retry permission.',
+    requestSchema: 'AiModelConfigurationOperationReadDraft', responseSchema: 'AiModelConfigurationOperationDraft' },
+  { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.legacy}`,
+    tag: 'AI Native', operationId: 'reviewPreservedLegacyTenantModelSettings', permissions: ['system:params:manage'],
+    summary: 'Current authorized tenant review only. Returns a keyed original source/version reference, never old keys, masks, prompts or logs. Explicit save with legacySource requires revision zero, a replacement credential, operationKey and disabled BYOK; original settings remain unchanged and current capability/budget is not granted.',
+    requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
+  ...(['operator', 'staff'] as const).flatMap(audience => [
+    ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
+    ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
+    [AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation, 'createEventTask'],
+    ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation']
+  ].map(([suffix, action]) => ({ method: 'post' as const, path: `/api/ai-native/automation/${audience}/${suffix}`, tag: 'AI Native',
+    operationId: `humanAutomation_${audience}_${action}`,
+    permissions: audience === 'staff' ? ['rental-os:order:view']
+      : ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view', 'rental-os:finance:reconcile'],
+    summary: action === 'createEventTask'
+      ? 'Explicit original event to candidate, immutable input and idempotent Task metadata, under current human resource rights and the server-selected automation policy/subject/budget. Unknown input stops before task creation; recover by reviews/for-event and the original input/creation readers. No run, worker, model, approval, notification, refund or business action is started. Named closed request/response; defaults remain disabled.'
+      : 'Original human audience/tenant/workspace/location and event source are revalidated. Candidates, immutable inputs, task metadata, bounded reviews and human close/feedback use named closed contracts; a review closure is never business resolution. New shadow/manual task production additionally needs server-selected original policy, independent automation identity, budget and current persisted grants. Unknown is read by its original key; no worker, model or automatic business action.',
+    requestSchema: action === 'createEventTask' ? 'AiAutomationEventTaskRequestDraft'
+      : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.request ?? 'GenericObject',
+    responseSchema: action === 'createEventTask' ? 'AiAutomationEventTaskResponseDraft'
+      : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.response ?? 'GenericObject' }))),
+  ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
+    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
+    operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Named closed contracts distinguish current configuration, preview, prepared/stale/expired metadata and the original commit receipt.',
+    requestSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].request,
+    responseSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].response })),
+  ...Object.entries(AI_SCENE_MODEL_HTTP_DRAFT).filter(([name]) => /Settings/u.test(name)).map(([name, action]) => ({
+    method: 'post' as const, path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `originalNotificationSettings_${name}`, permissions: ['rental-os:price:manage'],
+    summary: 'Original notification-settings lifecycle only, not arbitrary configuration. Current original business Guard, owner, persisted scene/task policies and real human approval remain mandatory. New preparation/execution additionally needs the server-only settings host gate; original receipt/metadata observations do not. Same runner and Core transaction, no model, worker, self-approval or second budget. Creation, human decision, cancellation and task-policy mutation propagate HTTP abandonment into request credential closure; it never proves rollback. Unknown requires original change/task/decision/operation observation. Named metadata, execution, checkpoint, decision, recovery and cancellation responses are closed; remaining generic outcomes are not frozen. Runner success is not an original Core receipt.',
+    requestSchema: SETTINGS_TASK_CONTRACTS[name]?.[0] ?? 'GenericObject',
+    responseSchema: SETTINGS_TASK_CONTRACTS[name]?.[1] ?? 'GenericObject' })),
+  ...Object.entries(AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
+    permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...Object.entries(AI_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}${AI_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_QUOTE_SELECTION_HTTP_CONTRACTS]
+      ? `/${AI_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_QUOTE_SELECTION_HTTP_CONTRACTS]}` : ''}`,
+    tag: 'AI Native', operationId: `originalSelectedQuote_${name}_quote-selections`, authRequired: true,
+    permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: 'Current original owner and exact Core quote under the original Guard and persistent selection transaction. Select is not approval, plan publication, stock reservation or order creation. Named closed responses distinguish a saved selection from an unobserved original key; absence never authorizes retry. Malformed post-selection delivery is unknown and must be read by the original selection command.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...[AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT].flatMap(contract =>
+    Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
+      method: 'post' as const, path: `/api/${contract.basePath}${action ? `/${action}` : ''}`, tag: 'AI Native',
+      operationId: `originalSelectedQuote_${name}_${contract.basePath.split('/').at(-1)}`,
+      permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(name)
+        ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+      summary: 'Same current owner/original input and exact persisted Core quote selection. Selection is not approval; only the existing runner consumes a real human approval through the original Core transaction. New actions require the server quote-order host/limits and current persisted policies. Disabled execution still permits original selection/approval/order receipt reads; unknown is never a new quote/order. No model, stock/payment success claim or second runtime. Response is draft-polymorphic.',
+      requestSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT
+        ? AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS[name as keyof typeof AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS]
+        : AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS[name as keyof typeof AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS])?.request ?? 'GenericObject',
+      responseSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT
+        ? AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS[name as keyof typeof AI_SELECTED_QUOTE_TASK_HTTP_CONTRACTS]
+        : AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS[name as keyof typeof AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS])?.response ?? 'GenericObject' }))),
+  { method: 'post', path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders}`,
+    tag: 'AI Native', operationId: 'readAiOrderCandidates', authRequired: true, permissions: ['rental-os:order:view'],
+    summary: 'Bounded current Core order page under current Guard/ALS, workspace, data and location scope. Only minimal order facts; no model call, task creation, financial totals or stock reservation. Time filters mean rental-interval overlap, not today-created or pickup/return due.',
+    requestSchema: 'AiOrderCandidatesQueryDraft', responseSchema: 'AiOrderCandidatesPageDraft' },
+  { method: 'post', path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension}`,
+    tag: 'AI Native', operationId: 'previewOriginalOrderExtension',
+    summary: 'Current owner-bound original next-steps request and exact order version. Reuses human Core extension permission and pricing; no persistence, inventory reservation, approval, extension or payment. Response remains a draft projection, not an execution receipt.',
+    permissions: ['rental-os:order:extend', 'rental-os:order:operate'],
+    requestSchema: 'AiSceneOrderExtensionPreviewDraft', responseSchema: 'GenericObject' },
+  ...(['quoteReview', 'quoteConfirm', 'quoteReceipt', 'compareOriginalQuotes'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `consumeOriginalQuote_${action}`,
+    permissions: action === 'quoteConfirm' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
+    summary: action === 'quoteConfirm' ? 'Explicit human confirmation of the immutable original quote inputs. Original Core pricing/persistence only; no stock reservation, order approval, order creation or model call. Unknown is observed by its original quote receipt, never recreated.'
+      : 'Current original-owner quote preparation or exact Core receipt. Historical receipt and current admissibility are separate; no quotation, inventory reservation, approval or new execution.',
+    requestSchema: AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS[action].request,
+    responseSchema: AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS[action].response })),
+  ...([
+    ['start', 'AiSceneOrderReadReferenceDraft'], ['recover', 'AiSceneOrderReadReferenceDraft'],
+    ['readPreparation', 'AiSceneOrderReadReferenceDraft'], ['resumePrepared', 'AiSceneOrderReadReferenceDraft'],
+    ['readAnswer', 'AiSceneOrderReadReferenceDraft'], ['readOrderResult', 'AiSceneOrderReadReferenceDraft'],
+    ['readModelResult', 'AiSceneOrderReadReferenceDraft'], ['readTaskScene', 'AiSceneOrderReadReferenceDraft'],
+    ['readNextSteps', 'AiSceneOrderReadReferenceDraft'], ['readTaskSnapshot', 'AiSceneOrderReadReferenceDraft'],
+    ['reopenModelSource', 'AiSceneOrderReadReferenceDraft'], ['takeover', 'AiSceneOrderReadTakeoverDraft'],
+    ['readTakeoverReceipt', 'AiSceneOrderReadTakeoverDraft'], ['requestCancel', 'AiSceneOrderReadCancelDraft'],
+    ['readCancellationReceipt', 'AiSceneOrderReadCancelDraft'], ['settleUnstartedCancellation', 'AiSceneOrderReadCancelDraft'],
+    ['readCancellationSettlementReceipt', 'AiSceneOrderReadCancelDraft']
+  ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalOrderReadChain_${action}`, authRequired: true,
+    permissions: ['rental-os:order:view'], requestSchema, responseSchema: 'GenericObject',
+    summary: 'Default closed without explicit trusted server execution configuration. Uses only the original owner-bound model/order/answer chain; current action/plan permissions, verified route and single financial ledger still apply. Recovery observes original effects, never redispatches unknown work. Historical read-only observation remains independently available.' })),
+  ...([
+    ['read', 'AiBudgetSettingsReadDraft', 'AiBudgetSettingsSummaryDraft'],
+    ['readOperation', 'AiBudgetSettingsOperationReadDraft', 'AiBudgetSettingsOperationReceiptDraft'],
+    ['change', 'AiBudgetSettingsChangeDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['initialize', 'AiBudgetSettingsInitializeDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['refreshConfiguration', 'AiBudgetSettingsRefreshConfigurationDraft', 'AiBudgetSettingsChangeResponseDraft'],
+    ['platformRead', 'AiPlatformBudgetSettingsReadDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['platformSave', 'AiPlatformBudgetSettingsSaveDraft', 'AiPlatformBudgetSettingsSummaryDraft'],
+    ['platformReadOperation', 'AiPlatformBudgetSettingsOperationReadDraft', 'AiPlatformBudgetSettingsOperationReceiptDraft'],
+    ['readPriceConfiguration', 'AiGatewayPriceConfigurationReadDraft', 'AiGatewayPriceConfigurationDraft'],
+    ['reviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['readPriceReview', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['platformReviewPrice', 'AiGatewayPriceReviewDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['platformPriceReviewReceipt', 'AiGatewayPriceReviewReadDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['adoptPlatformPrice', 'AiGatewayPlatformPriceAdoptionDraft', 'AiGatewayPriceReviewResponseDraft'],
+    ['previewPlatformPrice', 'AiGatewayPlatformPriceAdoptionReadDraft', 'AiGatewayPlatformPricePreviewDraft'],
+    ['readPlatformPriceAdoption', 'AiGatewayPlatformPriceAdoptionReadDraft', 'AiGatewayPriceReviewResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `manageAiBudgetSettings_${action}`, authRequired: true,
+    permissions: [['platformPriceReviewReceipt', 'platformRead', 'platformReadOperation'].includes(action) ? 'system:ai-provider:view'
+      : action.startsWith('platform') ? 'system:ai-provider:manage' : 'system:params:manage'],
+    requestSchema, responseSchema,
+    summary: action === 'platformRead' || action === 'platformSave' || action === 'platformReadOperation'
+      ? 'Current SaaS authority manages the original platform/scene policy with CAS and server-selected configuration. Keyed saves append an immutable, actor/scope/scene/hash-bound configuration receipt in the same policy transaction; original observation requires only current platform view, not a live Profile or new execution permission. Lost replies never authorize another save or imply rollback. No tenant audit attribution, budget admission, supplier call or second ledger.'
+      : action === 'readPriceConfiguration'
+      ? 'Current tenant settings-read authority resolves the unique tenant-owned default BYOK Profile and revision under current selection. Bounded read with identity and configuration revalidation; no caller-selected owner, model/credential disclosure, price publication, input-count proof or execution grant. Tenant settings object ID is not the Profile ID. Original review receipts remain independent of current configuration.'
+      : action === 'previewPlatformPrice'
+      ? 'Current tenant settings-read authority reviews one immutable platform rate under current server-selected platform configuration and validity. No reviewer identity, provider, model, credential, adoption, input-count certification or execution grant. Preview is read-only; adoption remains an explicit separate write; original adoption receipts remain independently readable.'
+      : action === 'platformReviewPrice' || action === 'platformPriceReviewReceipt' || action === 'adoptPlatformPrice' || action === 'readPlatformPriceAdoption'
+      ? 'SaaS authority reviews immutable platform budget rates under the server-selected Profile, optionally including explicit cache read/write per-million rates. Tenants adopt only that exact version, without rate overrides. Reservations use the maximum reviewed input rate; settlement uses persisted disjoint token counters with one six-decimal rounding. Missing cache rates retain unknown accounting. Original review/adoption receipts remain readable under current authority after profile changes; unknown does not authorize another publication. No supplier invoice, input counting or dispatch grant. The default-disabled management gate is independent of model execution.'
+      : action === 'reviewPrice' || action === 'readPriceReview'
+      ? 'Current authorized BYOK administrator reviews immutable budget rates, optionally explicit inputCache read/write per-million rates, never inferred supplier discounts. Cache counters are disjoint subsets of total input: exact BigInt amounts are rounded once; admission uses the maximum reviewed input rate. This is not a supplier invoice or input-token certificate. Profile revision and ownership are verified under locks; price and review receipt commit atomically. Lost responses require the original operation key, not a new version retry. No platform rate, reservation or dispatch grant. The default-disabled management gate is independent of model execution.'
+      : 'Standard server-composed settings host, default unavailable without trusted management configuration; legacy explicit execution configuration remains compatible. Explicit management disable wins. Current tenant/workspace or distinct platform management Guard, version CAS and original single-ledger policies remain mandatory. No policy seed, unlimited default, model call, reservation or dispatch. Rebinding uses the current server-selected profile and disables its policy gate. Tenant writes with operationKey atomically record original actor/workspace/scene, command hash and saved revision in OperationLog; operation reads observe only that original save under current authority, independently of a live Profile. Unknown never means rollback or permission to retry. Unkeyed historical writes cannot be reconstructed from current policy values.' })),
+  ...([
+    ['priceRead', 'AiGatewayPriceReadDraft', 'AiGatewayPriceSummaryDraft'],
+    ['pricePublicationRead', 'AiGatewayPricePublicationReadDraft', 'AiGatewayPriceSummaryDraft'],
+    ['inputBoundRead', 'AiGatewayInputBoundReadDraft', 'AiGatewayInputBoundSummaryDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${AI_BUDGET_MANAGEMENT_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `readHistoricalGatewayPricing_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], requestSchema, responseSchema,
+    summary: 'Standard read-only host for persisted pricing evidence under current management authority; input-bound reads also bind the current owner and original invocation scene. Producer/profile availability, rate expiry and new execution gates are not history gates. Request-local credentials close on abort or bounded wait; no late disclosure. No publication, certification, reserve or dispatch.' })),
+  ...([
+    ['prepare', 'AiTextCapabilityPrepareRequestDraft', 'AiTextCapabilityPrepareResponseDraft'],
+    ['publish', 'AiTextCapabilityPrepareRequestDraft', 'AiTextCapabilityPublishResponseDraft'],
+    ['readOriginal', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReadOriginalResponseDraft'],
+    ['createTask', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityCreateTaskResponseDraft'],
+    ['readTask', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReadTaskResponseDraft'],
+    ['configureTaskAction', 'AiTextCapabilityConfigureActionDraft', 'AiTextCapabilityConfigureActionResponseDraft'],
+    ['readTaskAction', 'AiTextCapabilityActionRequestDraft', 'AiTextCapabilityReadActionResponseDraft'],
+    ['readTaskActionReceipt', 'AiTextCapabilityConfigureActionDraft', 'AiTextCapabilityActionReceiptResponseDraft'],
+    ['start', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityRunResponseDraft'],
+    ['inspect', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityInspectResponseDraft'],
+    ['cancel', 'AiTextCapabilityCancelRequestDraft', 'AiTextCapabilityCancelResponseDraft'],
+    ['reconcile', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityRunResponseDraft'],
+    ['readCapabilityReceipt', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityReceiptResponseDraft'],
+    ['preflight', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityPreflightResponseDraft'],
+    ['readHistory', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityHistoryResponseDraft'],
+    ['readAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
+    ['releaseUnsent', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
+    ['reconcileAccounting', 'AiTextCapabilityRequestDraft', 'AiTextCapabilityAccountingResponseDraft'],
+    ['readAccountingOperation', 'AiTextCapabilityAccountingOperationRequestDraft', 'AiTextCapabilityAccountingOperationResponseDraft']
+  ] as const).map(([action, requestSchema, responseSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_TEXT_CAPABILITY_HTTP_DRAFT.basePath}/${AI_TEXT_CAPABILITY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalProbeAccounting_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], requestSchema, responseSchema,
+    summary: action === 'readAccountingOperation'
+      ? 'Read the exact existing original release/reconcile ledger event and its trusted payload under current same-owner read authority. Original request selects the call and event key; caller amounts, usage, dispatch evidence and event keys are forbidden. No mutation replay, model dispatch, secret read or budget release. Current terminal balance without this event returns not_observed, never proof of rollback or permission to resend. Trusted probe host remains required.'
+      : action === 'readTaskActionReceipt'
+      ? 'Read the immutable same-owner action-policy CAS save receipt under current management authority. Policy and receipt commit atomically; original task, operation, prior revision, actor and scope must match. Does not resolve a live model or require the saved policy to remain unexpired. Missing/legacy receipt is not proof of rollback; observing a receipt grants no current policy, lease, dispatch or retry. Trusted probe host configuration is still required.'
+      : 'Standard capability workflow, unavailable without separate trusted server probe configuration. Human configuration of persisted scene and same-owner task policies is required; never seeded on task creation. Immutable original input, measured runner, unique Gateway dispatch and the original single ledger remain mandatory. Probe completion is not capability evidence: read its persisted receipt. Historical observations/accounting do not dispatch; unknown uses the same original key, never automatic retry or caller usage. Calls quotas do not prove supplier token/money pricing.' })),
+  ...AI_COUNTING_HTTP_OPERATIONS.map(([action, requestSchema, responseSchema, permission]) => ({ method: 'post' as const,
+    path: `/api/${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `inputCounting_${action}`, authRequired: true,
+    permissions: permission === 'management' ? ['system:params:manage'] : [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema, responseSchema,
+    summary: 'Explicit opt-in operator counting host. Current Auth/Guard/ALS, original task owner/action policy and one budget ledger remain mandatory. Caller provides only original identifiers; protocol/model, tool policy, count evidence, price and transport are server-owned. Count/publish acknowledgement loss uses observeCountKey/readInputBound respectively, never a replacement call or automatic refund. Task cost views distinguish missing records, unknown, calls and generation usage; they are not supplier invoices. Omitted dependencies do not register or enable this module.' })),
+  ...AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS.map(([action, requestSchema, responseSchema, permission]) => ({ method: 'post' as const,
+    path: `/api/${AI_PLATFORM_CAPABILITY_HTTP_DRAFT.basePath}/${AI_PLATFORM_CAPABILITY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `platformCapability_${action}`, authRequired: true,
+    permissions: [`system:ai-provider:${permission}`], requestSchema, responseSchema,
+    summary: 'Opt-in SaaS platform capability host. Publication accepts a currently verified server-prepared probe command; all later operations name the original request key. The server resolves creation/input references, current owner/action policy and the original Gateway ledger. Receipt reconciliation may record capability evidence and requires manage permission; history and financial operation receipts never dispatch. Unknown results require original-key observation, never a new ID or automatic retry. Omitted host/audit/dependencies stay unavailable; this contract does not register AppModule or execute migrations.' })),
+  ...(['start', 'recover', 'reconcile', 'takeover', 'requestCancel', 'readExecution'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.basePath}/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalOpeningModel_${action}`, authRequired: true,
+    permissions: ['rental-os:price:manage'],
+    requestSchema: action === 'requestCancel' ? 'AiSceneOrderReadCancelDraft'
+      : action === 'takeover' ? 'AiSceneOrderReadTakeoverDraft' : 'AiSceneRequestReadDraft',
+    responseSchema: action === 'start' ? 'AiSceneModelStartResponseDraft'
+      : action === 'readExecution' ? 'AiTaskRecoverySnapshot'
+      : action === 'requestCancel' ? 'AiSceneModelCancelResponseDraft'
+      : action === 'reconcile' ? 'AiSceneModelReconcileResponseDraft' : 'AiSceneModelExecutionDraft',
+    summary: 'Independent opt-in opening diagnosis model host; omitted configuration performs no reads or execution. Reuses the original request, current same-owner scene/action policies, immutable input/plan, measured runner and single Gateway ledger. Current opening business authority is mandatory. Existing model/result/source observations remain on their read host. All six responses use shared closed contracts; malformed post-execution replies remain unknown. Cancellation intent and its later persisted settlement remain distinct, never remote rollback or budget release. No settings approval, publication, capability attestation or automatic retry of unknown work.' })),
+  ...(['read', 'releaseUnsent', 'reconcile', 'readOperation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `originalAiTaskAccounting_${action}`, authRequired: true,
+    permissions: ['rental-os:order:view'],
+    requestSchema: action === 'readOperation' ? 'AiOriginalTaskAccountingOperationRequestDraft' : 'AiOriginalTaskAccountingRequestDraft',
+    responseSchema: action === 'readOperation' ? 'AiOriginalTaskAccountingOperationResponseDraft' : 'AiOriginalTaskAccountingResponseDraft',
+    summary: action === 'readOperation'
+      ? 'Read the exact original release/reconcile ledger event and trusted payload under current same-owner task/resource authority, independent of new execution. Caller supplies only the original request, call and fixed operation; never event keys, usage or amounts. Missing event is not proof of rollback; current settled/released balance alone does not attest this operation. No mutation, reservation, dispatch or business execution.'
+      : 'Standard original order recovery host, independent of new-execution configuration. Current owner, original resource and task action required. Read an original AI budget balance, release only a proved never-dispatched reservation, or reconcile persisted same-call usage. No new reservation/model call or business-funds action; uncertain responses require the exact original operation receipt, never retry dispatch. Other scenes still require their own explicit trusted composition.' })),
   ...(['read', 'configure', 'clear'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `manageOriginalTaskReadPolicy_${action}`, permissions: ['system:params:manage'], authRequired: true,
-    summary: 'Current manager and same-owner original-resource access required. Standard host only manages read_metadata/read_events/read_step_terminal, with bounded expiry and revision CAS. No execution, approval, new input or financial permission.',
+    summary: 'Current manager and same-owner original-resource access required, with bounded expiry and revision CAS. Defaults to read policies only. Explicit trusted order execution configuration additionally exposes claim/recovery/release/transition/takeover policy management for the original closed order chain. No automatic policy seed, approval, arbitrary input, lease, financial grant or dispatch.',
     requestSchema: objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
-      operation: { type: 'string', enum: ['read_metadata', 'read_events', 'read_step_terminal'] },
+      operation: { type: 'string', enum: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
+        'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] },
       ...(action === 'read' ? {} : { expectedRevision: action === 'configure'
         ? { oneOf: [{ type: 'null' }, { type: 'integer', minimum: 1, maximum: 4294967294 }] }
         : { type: 'integer', minimum: 1, maximum: 4294967293 } }) },
       action === 'read' ? ['original', 'operation'] : ['original', 'operation', 'expectedRevision'], false) })),
+  ...(['read', 'change'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: `manageOriginalOrderPlanPolicy_${action}`, authRequired: true,
+    permissions: ['system:params:manage'], responseSchema: 'GenericObject',
+    summary: 'Default unavailable without trusted server order execution configuration. Current configuration Guard selects the workspace; the server fixes order_explanation v1 and only ai.model.text/rental.order.explain. Change uses revision CAS and same-transaction audit. No automatic task permission, approval, lease, invocation or financial occupancy. Lost write acknowledgements require original policy read.',
+    requestSchema: objectOf({ sceneCode: { type: 'string', enum: ['order_explanation'] },
+      ...(action === 'read' ? {} : { change: objectOf({ expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293, nullable: true },
+        enabled: { type: 'boolean' }, expiresAt: { type: 'string', format: 'date-time' },
+        limits: objectOf({ maxSteps: { type: 'integer', minimum: 1, maximum: 1000 },
+          maxCalls: { type: 'integer', minimum: 1, maximum: 1000 }, maxConcurrent: { type: 'integer', enum: [1] },
+          maxTotalMs: { type: 'integer', minimum: 1, maximum: 86400000 },
+          maxStepMs: { type: 'integer', minimum: 1, maximum: 86400000, description: 'Must not exceed maxTotalMs.' },
+          maxOutputBytes: { type: 'integer', minimum: 1, maximum: 16777216 } },
+          ['maxSteps', 'maxCalls', 'maxConcurrent', 'maxTotalMs', 'maxStepMs', 'maxOutputBytes'], false) },
+        ['expectedRevision', 'enabled', 'limits', 'expiresAt'], false) }) },
+      action === 'read' ? ['sceneCode'] : ['sceneCode', 'change'], false) })),
   ...([
-    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
-      cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
-      sceneCode: { type: 'string', maxLength: 191 } }, [], false)],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
-      after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['original', 'after', 'limit'], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.start, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.refreshInput, 'AiSceneModelInputRefreshDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.resume, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer, 'AiSceneModelAnswerQueryDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.reconcile, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.recover, 'AiSceneRequestReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.takeover, 'AiSceneModelTakeoverDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.requestCancel, 'AiSceneModelCancelDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation, 'AiSceneModelAnswerQueryDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote, 'AiSceneModelQuoteConfirmDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt, 'AiSceneModelAnswerQueryDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readExecution, 'AiSceneRequestReadDraft']
+  ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `executeOriginalAiQuote_${action.replace(/\//gu, '_')}`, requestSchema,
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.start ? 'AiSceneModelStartResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer ? 'AiSceneModelSubmitAnswerResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.resume ? 'AiSceneModelResumeResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer ? 'AiSceneModelContinueAnswerResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readExecution ? 'AiTaskRecoverySnapshot'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.reconcile ? 'AiSceneModelReconcileResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.requestCancel ? 'AiSceneModelCancelResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation ? 'AiSceneModelQuotePreparationResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote ? 'AiSceneModelQuoteConfirmResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt ? 'AiSceneModelQuoteReceiptResponseDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.refreshInput ? 'AiSceneModelPendingInputDraft'
+      : 'AiSceneModelExecutionDraft',
+    permissions: ['rental-os:order:create'], authRequired: true,
+    summary: 'Explicit original quote clarification host, separately enabled by server configuration. Uses the existing persistent input runner, current owner/action/plan policy, Gateway and single ledger; no caller prompt/provider/lease. Answers and model completion are not quote selection or order approval. Confirmation uses original Core quote operation; order execution remains the independent human-selection/approval host. All quote execution/input/review/confirmation/original-receipt actions have named closed responses. The review carries current guarded parameters and unconfirmed field provenance; a malformed post-confirmation reply remains unknown and is read by its original clarified-quote receipt. Recovery never redispatches unknown calls.' })),
+  ...([
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.request],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage, 'AiSceneTaskUsageReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance, 'AiSceneTaskPerformanceReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.request],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readInput, 'AiSceneRequestReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' }, runId: { type: 'string', minLength: 1, maxLength: 191 } }, ['original', 'runId'], false)],
     [AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
       runId: { type: 'string', minLength: 1, maxLength: 191 }, expectedTaskRevision: { type: 'integer', minimum: 1, maximum: 4294967294 },
@@ -2066,14 +2588,23 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       ['original', 'runId', 'expectedTaskRevision', 'expectedRunRevision', 'expectedFencingToken'], false)],
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, 'AiSceneModelCancelDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt, 'AiSceneModelCancelDraft'],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelResumeDraft'],
-    [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, 'AiSceneModelResultReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelAnswerQueryDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, 'AiSceneModelSourceReadDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, 'AiSceneOpeningModelSourceReadDraft'],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
     path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
-    permissions: ['rental-os:order:view'], authRequired: true, requestSchema,
-    summary: 'Current owner, scope, original resource and action policy are rechecked. Read-only original task/receipt observation without a model, runner, new execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),
+    responseSchema: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskPage.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readModelResult ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot ? 'AiSceneModelRecoverySnapshotReadResponse'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readInput ? 'AiSceneModelPendingInputDraft'
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readAnswer ? 'AiTaskInputReceiptObservationDraft' : undefined,
+    permissions: action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene
+      ? ['rental-os:order:view', 'rental-os:order:create', 'rental-os:price:manage'] : ['rental-os:order:view'], authRequired: true, requestSchema,
+    summary: 'Current owner, scope, original resource and action policy are rechecked. Financial observations include exact integer-atom amounts for the visible page only: reserved, pending, settled, released reservation and settled excess, separated by unit and currency. Missing records are not zero consumption, and page amounts are neither whole-task totals nor supplier invoices. Performance observations include original recorded budget-gate rejections in a bounded invocation window: absence is not admission success and rejection is not release evidence. Fixed scene aggregation can consume original selected-quote approval/Core receipts or notification-settings preparation and waiting/receipt readers even while new execution is closed. Read-only observation without a model, runner start, execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),
   { method: "get", path: "/api/rental/v1/category-adoption/candidates", tag: "Rental Core", operationId: "listCategoryAdoptionCandidates", summary: "List same-category published target IDs and labels allowed for the session tenant/space; operation=upgrade|restore; no bodies, pilot lists or platform drafts", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
   { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; operation=upgrade|restore, no active facts changed", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
   { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Stage target-version model/asset attribute patches with source and entity revision checks; does not adopt or publish prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: objectOf({

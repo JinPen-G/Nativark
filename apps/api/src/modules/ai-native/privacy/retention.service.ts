@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE, type AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
@@ -13,6 +13,10 @@ import { z } from 'zod';
 import { retentionKinds, requireRestorePermit, signRetentionManifest, retentionPublicKeyHash, type AiRestorePermit } from './retention-restore';
 import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
+import { inspectRetentionSource } from './retention-model-sources';
+import { projectAiTaskWireEvent } from '../ai-task-event.repository';
+import { aiTaskConfirmationEventSchema } from '../runner/prisma-task-confirmation-history.reader';
+import { aiTaskResumedConfirmationSchema } from '../runner/prisma-task-run-evidence.repository';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -53,6 +57,28 @@ export class AiRetentionService {
   async check(before: Session) { if ((await this.current()).hash !== before.hash) throw refused(); }
   private now() { const value = this.clock(); if (!Number.isFinite(value.getTime())) throw unavailable(); return value; }
   private cutoff(days: number) { return new Date(this.now().getTime() - days * 86400000); }
+  private async unresolvedTask(tx: Prisma.TransactionClient, scopeId: string, taskId: string,
+    owner: { tenantId: string; workspaceId: string }): Promise<boolean> {
+    if (await tx.aiTask.findFirst({ where: { id: taskId, scopeId, status: { notIn: [...terminal] } }, select: { id: true } })
+      || await tx.aiStep.findFirst({ where: { taskId, scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
+      || await tx.aiTaskExecutionCharge.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { chargeId: true } })
+      || await tx.aiApprovalConsumption.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { actionId: true } })
+      || await tx.aiStep.findFirst({ where: { taskId, scopeId, effect: 'POSSIBLE' }, select: { id: true } })) return true;
+    // Resolve persisted associations, not guessed call prefixes. Include
+    // reservations created before their accounting link was acknowledged.
+    const runs = await tx.aiRun.findMany({ where: { taskId, scopeId }, select: { id: true }, orderBy: { id: 'asc' }, take: 101 });
+    const invocations = await tx.aiGatewayInvocation.findMany({ where: { taskId, scopeId }, select: { callId: true }, orderBy: { id: 'asc' }, take: 201 });
+    if (runs.length > 100 || invocations.length > 200) return true;
+    const calls = invocations.map(row => row.callId);
+    return Boolean(await tx.aiBudgetReservation.findFirst({ where: { scopeId, scopeKind: 'WORKSPACE',
+      status: { in: ['reserved', 'pending_reconciliation'] }, OR: [
+        { runId: { in: runs.map(row => row.id) } }, { accountingReceipts: { some: { taskId, scopeId } } }
+      ] }, select: { id: true } })
+      || calls.length && (await tx.aiInvocationAdmission.findFirst({ where: { ...owner, callId: { in: calls },
+        status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
+      || await tx.aiUsageReservation.findFirst({ where: { ...owner, callId: { in: calls },
+        status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })));
+  }
   async receipt(value: unknown) {
     const command = aiRetentionReceiptSchema.parse(value), current = await this.current();
     const row = await this.db.aiDataErasure.findFirst({ where: { id: command.id,
@@ -170,17 +196,13 @@ export class AiRetentionService {
         if (receipt && (receipt.tenantId !== owner.tenantId || receipt.workspaceId !== owner.workspaceId
           || receipt.kind !== kind || receipt.resourceId !== resourceId || receipt.policyVersion !== AI_RETENTION_POLICY.version
           || expectedHash && receipt.targetHash !== expectedHash)) throw refused();
-        if (receipt?.state === 'erased' && !expectedHash) return { id: key, state: 'erased', replayed: true };
-        // Conservative scope hold for sources without a sufficiently precise
-        // task reference. TTL is never evidence of no side effects/consumption.
-        if (await tx.aiTask.findFirst({ where: { scopeId: scope.id, status: { notIn: [...terminal] } }, select: { id: true } })
-          || await tx.aiStep.findFirst({ where: { scopeId: scope.id, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
-          || await tx.aiBudgetReservation.findFirst({ where: { scopeId: scope.id,
-            status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })
-          || await tx.aiInvocationAdmission.findFirst({ where: { ...owner,
-            status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
-          || await tx.aiUsageReservation.findFirst({ where: { ...owner,
-            status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })) return { id: key, state: 'held', reason: 'unresolved_effects' };
+        if (receipt?.state === 'erased' && !expectedHash && kind !== 'task') return { id: key, state: 'erased', replayed: true };
+        if (['knowledge', 'memory', 'attachment'].includes(kind)) {
+          const source = await inspectRetentionSource(tx, scope.id, kind as 'knowledge' | 'memory' | 'attachment', resourceId, owner);
+          if (source !== 'clear') return { id: key, state: source,
+            reason: source === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable' };
+        }
+        if (kind === 'task' && await this.unresolvedTask(tx, scope.id, resourceId, owner)) return { id: key, state: 'held', reason: 'unresolved_effects' };
         const mark = { retention: 'erased', receiptId: key, policyVersion: AI_RETENTION_POLICY.version };
         if (expectedHash) {
           const exists = kind === 'task' ? await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: scope.id }, select: { id: true } })
@@ -201,37 +223,88 @@ export class AiRetentionService {
         let targetHash: string;
         if (kind === 'task') {
           const task = await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: scope.id } });
-          if (!task || !terminal.includes(task.status as typeof terminal[number]) || task.updatedAt > this.cutoff(30) && !expectedHash) throw unavailable();
-          if (await tx.aiProposal.findFirst({ where: { taskId: task.id, scopeId: scope.id }, select: { id: true } })
-            || await tx.aiStep.findFirst({ where: { taskId: task.id, scopeId: scope.id,
-              OR: [{ effect: 'POSSIBLE' }, { effect: { not: 'NONE' },
-                toolCode: { notIn: [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE] } }] }, select: { id: true } })
-            || await tx.aiTaskExecutionPhaseReceipt.findFirst({ where: { taskId: task.id, scopeId: scope.id,
-              businessResultRef: { not: null } }, select: { id: true } })) return { id: key, state: 'held', reason: 'business_retention' };
+          if (!task || !terminal.includes(task.status as typeof terminal[number])
+            || task.updatedAt > this.cutoff(30) && !expectedHash && receipt?.state !== 'erased') throw unavailable();
+          // Required proposal/approval/Core receipts outlive ordinary dialogue.
+          // Their existence is not a permanent hold on every model body/input.
+          // unresolvedTask already refuses live effects and uncertain consumption.
+          const businessTools = ['rental.order.commit', 'tenant.notifications.commit'];
+          const businessStep = await tx.aiStep.findFirst({ where: { taskId: task.id, scopeId: scope.id,
+            toolCode: { in: businessTools } }, select: { id: true } });
           targetHash = fingerprint([kind, task.id, task.inputRef, task.inputHash, task.createdAt.toISOString()]);
-          if (expectedHash && targetHash !== expectedHash) throw refused();
+          if (expectedHash && targetHash !== expectedHash || receipt && receipt.targetHash !== targetHash) throw refused();
           await this.check(current); attempted = true;
-          const changed = await tx.aiTask.updateMany({ where: { id: task.id, scopeId: scope.id, revision: task.revision,
-            status: task.status }, data: { archivedAt: now, revision: { increment: 1 } } });
-          if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          if (receipt?.state !== 'erased') {
+            const changed = await tx.aiTask.updateMany({ where: { id: task.id, scopeId: scope.id, revision: task.revision,
+              status: task.status }, data: { archivedAt: businessStep ? task.archivedAt : now, revision: { increment: 1 } } });
+            if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          }
           const taskWhere = { taskId: task.id, scopeId: scope.id };
-          await tx.aiTaskResultArtifact.updateMany({ where: taskWhere, data: { payload: mark } });
+          await tx.aiTaskResultArtifact.updateMany({ where: { ...taskWhere, step: { toolCode: { notIn: businessTools } } }, data: { payload: mark } });
           await tx.aiTaskInputReceipt.updateMany({ where: taskWhere, data: { answers: [] } });
           await tx.aiTaskInputRequest.updateMany({ where: taskWhere, data: { allowedFields: [] } });
-          await tx.aiTaskActionInput.updateMany({ where: taskWhere, data: { payload: mark } });
-          await tx.aiTaskRunPlan.updateMany({ where: taskWhere, data: { payload: mark } });
-          await tx.aiTaskExecutionPhaseReceipt.updateMany({ where: taskWhere, data: { payload: mark } });
-          if (task.inputRef && !await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: scope.id,
-            originalRequestId: task.inputRef }, select: { id: true } })
-            && !await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: task.inputRef,
+          await tx.aiTaskActionInput.updateMany({ where: { ...taskWhere, toolCode: { notIn: businessTools } }, data: { payload: mark } });
+          // Plans hold IDs/limits, not prompts. Retain the original plan hash
+          // where a business phase needs it to reopen approval/Core receipts.
+          if (!businessStep)
+            await tx.aiTaskRunPlan.updateMany({ where: taskWhere, data: { payload: mark } });
+          // Business receipt readers use current task authority. Erasing the
+          // dialogue does not archive that authority or permit a new execution.
+          // Event data/cursor remain useful, but refresh history and internal
+          // inputs can contain the same customer/address labels as the head.
+          if (task.eventCursor < 0n || task.eventCursor > 18446744073709551615n
+            || await tx.aiTaskEvent.findFirst({ where: { ...taskWhere,
+              OR: [{ cursor: { lte: 0n } }, { cursor: { gt: task.eventCursor } }] }, select: { cursor: true } })) throw unavailable();
+          let afterCursor = 0n, eventCount = 0;
+          while (afterCursor < task.eventCursor) {
+            const events = await tx.aiTaskEvent.findMany({ where: { ...taskWhere,
+              cursor: { gt: afterCursor, lte: task.eventCursor } }, orderBy: { cursor: 'asc' }, take: 200 });
+            eventCount += events.length;
+            // Bounded pages under the same transaction/watermark. Overflow or
+            // missing history rolls back instead of leaving a plaintext suffix.
+            if (!events.length || eventCount > 10000) throw unavailable();
+            for (const event of events) {
+              if (event.scopeId !== scope.id || event.taskId !== task.id || event.cursor <= afterCursor
+                || event.cursor > task.eventCursor) throw unavailable();
+              afterCursor = event.cursor;
+              const raw = event.payload;
+              if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw unavailable();
+              const data = projectAiTaskWireEvent(event).data;
+              let confirmation;
+              if (businessStep && event.type === 'task.transition' && raw.confirmation !== undefined) {
+                const envelope = aiTaskConfirmationEventSchema.parse(raw), initiator = envelope.initiator;
+                if (initiator.actorKind !== task.ownerKind || initiator.actorId !== task.ownerId) throw refused();
+                const paused = envelope.data.from === 'running' && envelope.data.to === 'waiting_confirmation'
+                  && envelope.data.reason === 'confirmation_required';
+                const resumed = envelope.data.from === 'waiting_confirmation' && envelope.data.to === 'running'
+                  && envelope.data.reason === 'resume';
+                if (!paused && !resumed) throw unavailable();
+                confirmation = { initiator, confirmation: resumed ? aiTaskResumedConfirmationSchema.parse(raw).confirmation
+                  : { checkpointRef: envelope.confirmation.checkpointRef, phaseId: envelope.confirmation.phaseId } };
+              }
+              // Reconstruct only validated wire data and minimal business proof.
+              // Never carry previousRequest, extra audit fields or prompt copies.
+              const safe = { data, ...confirmation, retention: mark };
+              const changedEvent = await tx.aiTaskEvent.updateMany({ where: { ...taskWhere, cursor: event.cursor,
+                taskRevision: event.taskRevision, type: event.type }, data: { payload: safe } });
+              if (changedEvent.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+            }
+          }
+          // Preserve the minimal business phase/approval/receipt association;
+          // it is independent from ordinary inputs and generated response text.
+          if (task.inputRef && !await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: task.inputRef,
             id: { not: task.id }, archivedAt: null }, select: { id: true } })) {
             await tx.aiTaskOriginalRequest.updateMany({ where: { id: task.inputRef, scopeId: scope.id }, data: { payload: mark, erasedAt: now } });
           }
         } else if (kind === 'request') {
           const row = await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: scope.id } });
           if (!row || row.createdAt > this.cutoff(30) && !expectedHash) throw unavailable();
-          if (await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: row.id, archivedAt: null }, select: { id: true } })
-            || await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: scope.id, originalRequestId: row.id }, select: { id: true } })) return { id: key, state: 'held', reason: 'original_operation_retention' };
+          const related = await tx.aiTask.findMany({ where: { scopeId: scope.id, inputRef: row.id },
+            select: { id: true }, orderBy: { id: 'asc' }, take: 101 });
+          if (related.length > 100) return { id: key, state: 'held', reason: 'association_limit' };
+          for (const task of related) if (await this.unresolvedTask(tx, scope.id, task.id, owner)) return { id: key, state: 'held', reason: 'unresolved_effects' };
+          // Terminal business readers reopen the retained locator under current
+          // task policy. A selection does not retain the scene candidate forever.
           targetHash = fingerprint([kind, row.id, row.contentHash, row.createdAt.toISOString()]);
           if (expectedHash && targetHash !== expectedHash) throw refused();
           await this.check(current); attempted = true;

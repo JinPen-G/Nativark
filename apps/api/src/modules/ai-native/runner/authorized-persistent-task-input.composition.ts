@@ -13,9 +13,9 @@ import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistentTaskRunnerComposition } from './persistent-task-runner.composition';
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
-import { PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
+import { AiTaskTakeoverCommitUnknownError, PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
 import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
-import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
@@ -59,16 +59,51 @@ export function composeCurrentAuthorizedPersistentTaskInputRunner(
   const takeovers = new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.wall);
   const takeoverAndRecover = async (command: unknown, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> => {
     if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
-    const lease = await takeovers.takeover(command);
+    let lease;
+    try {
+      // Await the explicit fencing request independently of host disconnect.
+      // Only its acknowledged result can be handed to recovery; a deadline
+      // aborts late pre-write work, but never grants a lease by rereading it.
+      const original = structuredClone(command);
+      lease = await callAiTaskRunnerDependency(child => takeovers.takeover(original, child), 5000, 'takeover', undefined, input.clock);
+    } catch (error) {
+      if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN')) {
+        throw new AiTaskTakeoverCommitUnknownError();
+      }
+      throw error;
+    }
+    if (signal?.aborted) {
+      // No runner was entered. Cleanup is authorized and CAS-bound to this
+      // acknowledged generation, never an inferred rollback of remote work.
+      try {
+        await callAiTaskRunnerDependency(async child => {
+          const current = await authorization.tasks.readMetadata(lease.taskId);
+          if (child.aborted) throw new AiTaskTakeoverCommitUnknownError();
+          await authorization.tasks.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+            expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+        }, 5000, 'takeover_cleanup', undefined, input.clock);
+      } catch { throw new AiTaskTakeoverCommitUnknownError(); }
+      return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
+    }
     return composed.runner.recover(lease, signal);
+  };
+  const readTakeoverReceipt = async (command: unknown, signal?: AbortSignal) => {
+    const original = structuredClone(command);
+    try { return await callAiTaskRunnerDependency(() => takeovers.readReceipt(original), 5000, 'takeover_receipt', signal, input.clock); }
+    catch (error) {
+      if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN')) {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      throw error;
+    }
   };
   const recovery = new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks);
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.wall);
   const results = new AiTaskResultRepository(input.db, authorization.tasks, input.wall);
   const createApplication = (host: AiTaskApplicationHost, prepare?: AiTaskHeldPreparation) => new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks,
-    runner: composed.runner, inputs: composed.inputs, recovery, events, host, prepare });
+    runner: composed.runner, inputs: composed.inputs, recovery, events, host, prepare, clock: input.clock });
   return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover,
-    readTakeoverReceipt: takeovers.readReceipt.bind(takeovers), recovery, events, results, createApplication });
+    readTakeoverReceipt, recovery, events, results, createApplication });
 }
 
 /** Explicit read-only subset. Uses current persisted action authorization and

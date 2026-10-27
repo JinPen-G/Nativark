@@ -53,7 +53,8 @@ export function aiLeafToOpenApi30(schema: unknown, path = "schema"): SchemaObjec
         output[key] = value;
         break;
       case "enum":
-        if (!Array.isArray(value) || value.length === 0 || !value.every(scalar)) return fail("enum must contain finite scalar values");
+        if (!Array.isArray(value) || value.length === 0 || !value.every(item => scalar(item)
+          || item === null && Array.isArray(input.type) && input.type.includes('null'))) return fail("enum must contain finite scalar values, or null under an explicit nullable type");
         output.enum = [...value];
         break;
       case "required":

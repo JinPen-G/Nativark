@@ -1424,10 +1424,9 @@ export class ClientApiService {
   private async extensionSettlement(context: ClientRequestContext, order: RentalOrder) {
     const overdue = new Date(order.effectiveEndAt ?? order.endAt).getTime() < Date.now();
     if (overdue) return "immediate" as const;
-    const corporateId = order.membershipSnapshot?.enterpriseContractAndPayer ? order.membershipSnapshot.corporateCustomerId : undefined;
-    if (!corporateId) return "immediate" as const;
-    const credit = await this.prisma.customerCorporateCredit.findFirst({ where: { tenantId: context.tenantId, customerId: corporateId, status: "active" }, select: { billingCycle: true } });
-    return credit && credit.billingCycle !== "per_order" ? "monthly" as const : "immediate" as const;
+    if (!order.membershipSnapshot?.enterpriseContractAndPayer) return "immediate" as const;
+    if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪，不能判断续租付款方式");
+    return await this.corporateSettlement.allowsExtensionCredit(context.tenantId, order.id) ? "monthly" as const : "immediate" as const;
   }
 
   private async priceExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
@@ -1531,7 +1530,11 @@ export class ClientApiService {
     if (!key) throw new BadRequestException("资金操作必须提供 Idempotency-Key");
     const needsMethod = ["initiate", "append", "refund", "fail"].includes(input.action);
     const paymentMethod = needsMethod ? this.core.resolveOfflinePaymentMethod(context.tenantId, input.paymentMethod) : undefined;
-    return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, { ...input, idempotencyKey: key, paymentMethod }, `client:${context.customerId}`);
+    // 模拟请求逐字段投影，不能把调用方附带的 Provider/已核验标志带入内部入账口。
+    return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, {
+      instrument: input.instrument, action: input.action, amount: input.amount, reason: input.reason,
+      failureCode: input.failureCode, idempotencyKey: key, paymentMethod
+    }, `client:${context.customerId}`);
   }
 
   async createPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientPaymentIntentRequest) {

@@ -1,17 +1,44 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '@rental-os/shared';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES, type AiSceneCode, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';
 import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestAccess } from './original-request.authority';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from './original-request.validation';
+import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
 type Row = Prisma.AiTaskOriginalRequestGetPayload<{}>;
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const keyForTask = (inputRef: string) => `scene-request:${inputRef}`;
+
+/** Immutable original provenance for current-authorized historical model reads.
+ * Expiry is not a new-effect grant. Callers must independently authorize the
+ * task/resource now and recheck this binding after dependent reads. */
+export async function readOriginalTaskModelProvenance(db: Pick<PrismaClient, 'aiTaskOriginalRequest'>,
+  task: Prisma.AiTaskGetPayload<{}>) {
+  if (!task.inputRef || task.ownerKind !== 'USER' || task.scopeKind !== 'WORKSPACE') throw denied();
+  const where = { id: task.inputRef, scopeId: task.scopeId, audience: task.audience,
+    ownerKind: task.ownerKind, ownerId: task.ownerId };
+  const row = await db.aiTaskOriginalRequest.findFirst({ where });
+  if (!row || Object.entries(where).some(([key, value]) => row[key as keyof typeof row] !== value)
+    || row.status !== 'STORED' || row.erasedAt || row.sceneCode !== task.sceneCode || row.sceneVersion !== task.sceneVersion
+    || row.revision !== task.inputRevision || row.contentHash !== task.inputHash
+    || !/^[a-f0-9]{64}$/u.test(row.authorizationBindingHash)) throw denied();
+  const body = originalBody(parseOriginalRequest({ draftVersion: row.contractVersion, requestKey: row.requestKey,
+    sceneCode: row.sceneCode, input: structuredClone(row.payload) }));
+  const contentHash = requestFingerprint({ version: row.contractVersion, scopeId: row.scopeId, audience: row.audience,
+    ownerKind: row.ownerKind, ownerId: row.ownerId, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion,
+    revision: row.revision, previousInputRef: row.previousRequestId, input: body.input });
+  if (row.contentHash !== contentHash) throw denied();
+  return Object.freeze({ inputRef: row.id, contentHash, revision: row.revision,
+    authorizationHash: row.authorizationBindingHash,
+    bindingHash: requestFingerprint({ ...where, contentHash, revision: row.revision,
+      authorizationHash: row.authorizationBindingHash, expiresAt: row.expiresAt.toISOString() }) });
+}
+
 export class AiOriginalRequestResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
   readonly retryable = false;
@@ -21,7 +48,8 @@ export class AiOriginalRequestResultUnknownError extends Error {
 
 export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority {
   private readonly tasks: AiTaskCreationRepository;
-  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskOriginalRequest'>,
+  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskOriginalRequest'>
+    & Partial<Pick<PrismaClient, 'aiDataErasure'>>,
     private readonly authority: AiOriginalRequestAuthority, private readonly clock: () => Date = () => new Date()) {
     this.tasks = new AiTaskCreationRepository(db, this, clock);
   }
@@ -54,7 +82,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
   }
   private receipt(row: Row): AiSceneRequestReceiptDraft {
     return freezeOriginalInput({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: row.id, revision: row.revision,
-      contentHash: row.contentHash, sceneCode: this.body(row).sceneCode, sceneVersion: row.sceneVersion, requestKey: row.requestKey,
+      contentHash: row.contentHash, sceneCode: row.sceneCode as AiSceneCode, sceneVersion: row.sceneVersion, requestKey: row.requestKey,
       previousInputRef: row.previousRequestId, expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
       state: row.status === 'REVOKED' ? 'revoked' : row.expiresAt.getTime() <= this.clock().getTime() ? 'expired' : 'stored' });
   }
@@ -90,6 +118,65 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const result = await this.load(parsed.data.inputRef, false, true);
     return freezeOriginalInput({ receipt: result.receipt, request: result.body, context: result.context });
+  }
+  /** Retained business locator only. An erasure receipt attests deletion, not
+   * the missing plaintext. Current task policy and downstream Core/quote guards
+   * still authorize each read; this never returns scene input or a create grant. */
+  async readTaskLocator(value: unknown) {
+    const parsed = originalRequestReferenceSchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const inputRef = parsed.data.inputRef, initial = await this.authority.current();
+    const row = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(initial), id: inputRef } }));
+    if (!row || row.id !== inputRef) throw unavailable();
+    if (!row.erasedAt) {
+      const original = await this.checked(row, initial, false, true);
+      return freezeOriginalInput({ receipt: original.receipt, context: original.context, material: 'retained' as const,
+        task: await this.readTaskReceipt(inputRef) });
+    }
+    if (!this.authority.observeTask || !this.db.aiDataErasure || row.contractVersion !== AI_SCENE_REQUEST_DRAFT_VERSION
+      || !(AI_SCENE_CODES as readonly string[]).includes(row.sceneCode) || !Number.isSafeInteger(row.revision) || row.revision < 1
+      || !/^[a-f0-9]{64}$/u.test(row.contentHash) || !/^[a-f0-9]{64}$/u.test(row.authorizationBindingHash)) throw unavailable();
+    const read = async () => {
+      const task = await this.db.aiTask.findFirst({ where: { ...this.owned(initial), creationKey: keyForTask(inputRef) }, select: {
+        id: true, scopeId: true, scopeKind: true, ownerKind: true, ownerId: true, audience: true, creationKey: true,
+        inputRef: true, inputRevision: true, inputHash: true, sceneCode: true, sceneVersion: true,
+        archivedAt: true, status: true, revision: true, resultRef: true, createdAt: true,
+        runs: { where: { sequence: 1 }, take: 2, select: { id: true, scopeId: true, taskId: true, sequence: true,
+          actorKind: true, actorId: true, inputReceiptId: true, resourceOriginRunId: true, executionPlan: { select: { planHash: true } } } } } });
+      if (!task || task.creationKey !== keyForTask(inputRef) || task.inputRef !== row.id || task.inputRevision !== row.revision || task.inputHash !== row.contentHash
+        || !['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.status)
+        || task.sceneCode !== row.sceneCode || task.sceneVersion !== row.sceneVersion || task.archivedAt !== null
+        || task.scopeKind !== 'WORKSPACE' || Object.entries(this.owned(initial)).some(([key, value]) => task[key as keyof typeof task] !== value)
+        || task.runs.length !== 1 || task.runs[0].sequence !== 1 || task.runs[0].scopeId !== row.scopeId || task.runs[0].taskId !== task.id
+        || task.runs[0].actorKind !== task.ownerKind || task.runs[0].actorId !== task.ownerId
+        || task.runs[0].inputReceiptId != null || task.runs[0].resourceOriginRunId != null) throw unavailable();
+      const marker = row.payload;
+      if (!marker || typeof marker !== 'object' || Array.isArray(marker) || marker.retention !== 'erased'
+        || marker.policyVersion !== AI_RETENTION_POLICY.version || typeof marker.receiptId !== 'string') throw unavailable();
+      const erasure = await this.db.aiDataErasure!.findUnique({ where: { id: marker.receiptId } });
+      const scope = initial.context.scope;
+      if (scope.kind !== 'workspace' || !erasure || erasure.state !== 'erased' || erasure.tenantId !== scope.tenantId
+        || erasure.workspaceId !== scope.workspaceId || erasure.policyVersion !== AI_RETENTION_POLICY.version
+        || !(erasure.erasedAt instanceof Date) || erasure.erasedAt > this.clock()
+        || !['task', 'request'].includes(erasure.kind)
+        || erasure.resourceId !== (erasure.kind === 'task' ? task.id : row.id)
+        || erasure.id !== requestFingerprint([AI_RETENTION_POLICY.version, scope.tenantId, scope.workspaceId, erasure.kind, erasure.resourceId])
+        || erasure.targetHash !== (erasure.kind === 'task'
+          ? requestFingerprint(['task', task.id, task.inputRef, task.inputHash, task.createdAt.toISOString()])
+          : requestFingerprint(['request', row.id, row.contentHash, row.createdAt.toISOString()]))) throw denied();
+      return { taskId: task.id, runId: task.runs[0].id, revision: task.revision, status: task.status.toLowerCase() as Lowercase<typeof task.status>,
+        plan: task.runs[0].executionPlan ? 'stored' as const : 'not_observed' as const, resultAvailable: task.resultRef !== null };
+    };
+    const rowBinding = (value: Row) => requestFingerprint({ ...value, createdAt: value.createdAt.toISOString(),
+      expiresAt: value.expiresAt.toISOString(), erasedAt: value.erasedAt?.toISOString() });
+    const before = await read(), current = await this.authority.observeTask(before.taskId);
+    this.sameIdentity(initial, current);
+    const after = await read(), latest = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } });
+    if (!latest || requestFingerprint(before) !== requestFingerprint(after)
+      || rowBinding(latest) !== rowBinding(row)) throw denied();
+    this.sameIdentity(current, await this.authority.observeTask(before.taskId));
+    return freezeOriginalInput({ receipt: this.receipt(row), context: current.context, material: 'erased' as const,
+      task: { state: 'observed' as const, ...before, execution: 'not_inferred_from_metadata' as const } });
   }
   async save(value: unknown, isReissue = false) {
     const command = parseOriginalRequest(value, isReissue), body = originalBody(command);
@@ -161,6 +248,11 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     return this.tasks.create({ creationKey: keyForTask(original.row.id), sceneCode: original.row.sceneCode, inputRef: original.row.id });
   }
   async readTaskReceipt(inputRef: string): Promise<AiSceneTaskReceiptDraft> {
+    if (!originalRequestReferenceSchema.safeParse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef }).success)
+      throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const current = await this.authority.current();
+    const head = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
+    if (head?.erasedAt) return (await this.readTaskLocator({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef })).task;
     const original = await this.load(inputRef, false, true), access = aiTaskAccessFromContext(original.context, 'original-request', this.clock());
     const row = await this.stored(() => this.db.aiTask.findFirst({ where: { scopeId: original.row.scopeId, scope: { is: access.scope },
       audience: access.audience, ownerKind: access.actorKind, ownerId: access.actorId, creationKey: keyForTask(inputRef) },

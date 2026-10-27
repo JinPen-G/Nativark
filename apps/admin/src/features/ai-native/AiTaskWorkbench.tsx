@@ -12,6 +12,9 @@ import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
 import { consumePolledEvents } from "./polling-consumer";
 import { safeDisplayText } from "./safe-display";
+import { ModelText } from "./ModelText";
+import { TaskModelSources, type TaskModelSourceReader } from "./TaskModelSources";
+import type { AiTaskConfirmationHistoryDraft, AiTaskModelObservationDraft } from "@rental-os/shared";
 import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
 export type AiWorkbenchContext = Readonly<{
@@ -25,6 +28,7 @@ export type AiTaskDetailProjection = Readonly<{
   task?: unknown;
   steps?: readonly unknown[];
   modelText?: string;
+  modelObservation?: AiTaskModelObservationDraft;
   fields?: readonly MissingField[];
   draft?: Record<string, string>;
   proposal?: ProposalPreviewData | null;
@@ -38,6 +42,7 @@ export type AiTaskDetailProjection = Readonly<{
   events?: readonly DisplayEventInput[];
   /** Feature-local rows projected from authorized business facts, not model text. */
   factRows?: readonly { label: string; value: string }[];
+  confirmationSteps?: readonly { runId: string; stepId: string }[];
 }>;
 
 export type AiTaskDetailReader = (
@@ -67,6 +72,8 @@ export interface AiTaskWorkbenchProps {
   onConfirm?: (input: { proposalId: string; revision: string }) => Promise<unknown>;
   onCancel?: () => Promise<unknown>;
   onRecover?: () => Promise<unknown>;
+  readConfirmation?: (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => Promise<AiTaskConfirmationHistoryDraft>;
+  readSource?: TaskModelSourceReader;
 }
 
 type DetailState = "idle" | "unavailable" | "loading" | "ready" | "failed" | "hidden";
@@ -95,6 +102,8 @@ export function AiTaskWorkbench({
   onConfirm,
   onCancel,
   onRecover,
+  readConfirmation,
+  readSource,
 }: AiTaskWorkbenchProps) {
   const contextKey = JSON.stringify([context.audience, context.tenantId ?? null, context.workspaceId ?? null]);
   const [selection, setSelection] = useState({ contextKey, taskId: controlledTaskId ?? null });
@@ -244,8 +253,12 @@ export function AiTaskWorkbench({
               />
             )}
             {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
-            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权订单事实">
-              <h3>当前受权订单事实（非模型生成）</h3>
+            {detailSynchronized && typeof currentDetail.modelText === "string" && <ModelText text={currentDetail.modelText} />}
+            {detailSynchronized && readConfirmation && currentDetail.confirmationSteps?.slice(0, 20).map(step =>
+              <ConfirmationHistory key={`${identity}:${step.runId}:${step.stepId}`} taskId={taskId} {...step} read={readConfirmation} />)}
+            {detailSynchronized && (currentDetail.confirmationSteps?.length ?? 0) > 20 && <p role="status">仅展示前20个确认步骤，其他记录未加载。</p>}
+            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权事实">
+              <h3>当前受权事实（非模型生成）</h3>
               <dl>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
                 <dt>{safeDisplayText(row.label, 100)}</dt><dd style={{ overflowWrap: "anywhere" }}>{safeDisplayText(row.value, 1000)}</dd>
               </div>)}</dl>
@@ -270,6 +283,8 @@ export function AiTaskWorkbench({
                 onRecover={onRecover}
               />
             )}
+            {detailSynchronized && currentDetail.modelObservation && readSource
+              && <TaskModelSources key={identity} result={currentDetail.modelObservation} read={readSource} />}
             {detailSynchronized && currentDetail.sources && <KnowledgeSources sources={currentDetail.sources} />}
             {detailSynchronized && currentDetail.memories && <MemoryPreferences items={currentDetail.memories} />}
             {detailSynchronized && currentDetail.serviceSummary && <AiServiceSummary summary={currentDetail.serviceSummary} />}
@@ -280,4 +295,45 @@ export function AiTaskWorkbench({
       </section>
     </section>
   );
+}
+
+function ConfirmationHistory({ taskId, runId, stepId, read }: { taskId: string; runId: string; stepId: string;
+  read: NonNullable<AiTaskWorkbenchProps['readConfirmation']> }) {
+  const [history, setHistory] = useState<AiTaskConfirmationHistoryDraft | null>(null);
+  const [error, setError] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  const reader = useRef(read); reader.current = read;
+  useEffect(() => () => { request.current?.abort(); }, []);
+  return <section aria-label="原人工确认记录">
+    <h3>原人工确认记录</h3>
+    <p>步骤 {safeDisplayText(stepId, 191)}。只核对原记录，不批准、不继续执行；没有记录不代表未执行。</p>
+    <ActionButton label="读取原确认历史" pendingLabel="读取中…" onAction={async () => {
+      if (request.current) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const controller = new AbortController(), selectedReader = read; request.current = controller;
+      setHistory(null); setError(false);
+      try {
+        const result = await selectedReader({ taskId, runId, stepId }, controller.signal);
+        if (controller.signal.aborted || reader.current !== selectedReader) return;
+        if (!result || result.version !== 'task-confirmation-history-1' || result.taskId !== taskId || result.runId !== runId || result.stepId !== stepId
+          || result.execution !== 'read_only_no_claim_or_dispatch' || result.businessOutcome !== 'not_attested'
+          || !Array.isArray(result.phases) || result.phases.length > 2 || !Array.isArray(result.transitions) || result.transitions.length > 2
+          || result.phases.some(phase => !phase || typeof phase.phaseId !== 'string' || ![1, 2].includes(phase.sequence)
+            || phase.kind !== null && !['confirmation', 'succeeded', 'failed', 'unknown'].includes(phase.kind))
+          || result.transitions.some(item => !item || !['paused', 'continued'].includes(item.kind)))
+          throw Error('AI_RESOURCE_UNAVAILABLE');
+        setHistory(result);
+      } catch (failure) { if (!controller.signal.aborted && reader.current === selectedReader) setError(true); throw failure; }
+      finally { if (request.current === controller) request.current = null; }
+    }} />
+    {error && <Alert type="warning" title="原确认记录不可读取，旧内容已清除。"/>}
+    {history && <div aria-live="polite">
+      {!history.phases.length && <p>尚未观察到原确认阶段，不推断审批或业务结果。</p>}
+      <ul>{history.phases.map(phase => <li key={phase.phaseId}>
+        阶段 {phase.sequence}：{phase.kind === 'confirmation' ? '已保存等待记录' : phase.kind === 'succeeded' ? '原阶段完成，业务结果需另查原收据'
+          : phase.kind === 'failed' ? '原阶段未完成' : phase.kind === 'unknown' ? '结果待核对' : '尚无阶段收据'}
+      </li>)}</ul>
+      <p>已观察的转换：{history.transitions.map(item => item.kind === 'paused' ? '暂停等待' : '按原决定继续').join(' → ') || '未观察到'}。</p>
+      <p>读取记录不是新的批准、执行许可或业务成功证明。</p>
+    </div>}
+  </section>;
 }

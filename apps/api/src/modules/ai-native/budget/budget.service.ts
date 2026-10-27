@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { isAiStepExecutionContext } from '../task-contract-validation';
-import { BudgetError, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
+import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
+import { modelRequestSchema } from '../model-gateway.ports';
+import type { BudgetSettingsOperation } from './budget.ports';
 
 function fingerprint(value: unknown): string {
   const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical) : item && typeof item === 'object'
@@ -38,7 +40,8 @@ export class BudgetService {
     try { grant = structuredClone(await this.authority.resolve(action, structuredClone(resource))); }
     catch { throw new BudgetError('FORBIDDEN'); }
     const now = this.now(), context = grant?.context;
-    if (!grant || !isAiStepExecutionContext(context) || !grant.entitled || !identifier(grant.authorizationKey)
+    if (!grant || !isAiStepExecutionContext(context) || typeof grant.entitled !== 'boolean'
+      || !isOriginalBudgetLifecycleAction(action) && !grant.entitled || !identifier(grant.authorizationKey)
       || !(grant.expiresAt instanceof Date) || grant.expiresAt <= now || Date.parse(context.authorizedAt) > now.getTime()
       || (context.actor.kind === 'automation' && Date.parse(context.actor.expiresAt) <= now.getTime())
       || (resource.association && !same(context.scope, resource.association.scope))) throw new BudgetError('FORBIDDEN');
@@ -63,28 +66,40 @@ export class BudgetService {
     return result;
   }
   async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number,
-    revalidateConfiguration?: () => Promise<void>) {
+    revalidateConfiguration?: () => Promise<void>, operation?: BudgetSettingsOperation) {
     key = structuredClone(key);
     settings = structuredClone(settings);
+    operation = operation && structuredClone(operation);
     validateBudgetSettings(settings);
     if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
     const session = await this.session('settings_write', { policy: key });
+    if (operation) {
+      const context = session.grant.context;
+      if (operation.kind === 'platform') {
+        if (context.actor.kind !== 'saas_admin' || context.scope.kind !== 'platform' || key.scopeKind !== 'PLATFORM'
+          || context.actor.userId !== operation.actorId) throw new BudgetError('FORBIDDEN');
+      } else if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+        || context.actor.userId !== operation.actorId || context.scope.tenantId !== operation.tenantId
+        || context.scope.workspaceId !== operation.workspaceId) throw new BudgetError('FORBIDDEN');
+    }
     return this.repository.saveSettings(structuredClone(key), structuredClone(settings), expectedRevision, async () => {
       // An application may add a current-profile check, never replace the
       // mandatory action/entitlement revalidation with its own success gate.
       await session.revalidate();
       await revalidateConfiguration?.();
-    });
+    }, operation);
   }
   async reserve(value: BudgetReserveCommand) {
     const command = structuredClone(value);
     this.validateAssociation(command.association);
-    if (!identifier(command.callId, 128) || !identifier(command.sceneCode, 128) || !(command.expiresAt instanceof Date) || command.expiresAt <= this.now()) throw new BudgetError('INVALID');
+    if (!identifier(command.callId, 128) || !identifier(command.sceneCode, 128)
+      || command.countRequestHash !== undefined && !/^[a-f0-9]{64}$/u.test(command.countRequestHash)
+      || !(command.expiresAt instanceof Date) || command.expiresAt <= this.now()) throw new BudgetError('INVALID');
     const session = await this.session('reserve', { association: command.association });
     const quote = structuredClone(await this.quotes.quote(command, session.grant));
     if (!same(quote.association, command.association) || quote.callId !== command.callId || quote.sceneCode !== command.sceneCode
-      || !identifier(quote.model, 256) || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
+      || !modelRequestSchema.shape.model.safeParse(quote.model).success || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
       || !Array.isArray(quote.policies) || quote.policies.length < 1 || quote.policies.length > 3
       || !quote.consumerScope || quote.consumerScope.sceneCode !== command.sceneCode || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)
       || !quote.policies.some(policy => policy.scopeId === quote.consumerScope.scopeId && policy.scopeKind === quote.consumerScope.scopeKind)) throw new BudgetError('INVALID');
@@ -102,6 +117,26 @@ export class BudgetService {
     return { record, session };
   }
   async read(id: string, association: AiUsageAssociationDraft) { return (await this.load('read', id, association)).record; }
+  async readMutation(id: string, association: AiUsageAssociationDraft, input: {
+    action: 'release' | 'reconcile'; eventKey: string; evidenceRef?: string;
+  }) {
+    input = structuredClone(input);
+    if (!identifier(input.eventKey, 128) || !['release', 'reconcile'].includes(input.action)
+      || input.action === 'reconcile' && !identifier(input.evidenceRef) || input.action === 'release' && input.evidenceRef !== undefined)
+      throw new BudgetError('INVALID');
+    const { record, session } = await this.load('read', id, association);
+    if (!this.repository.readMutation) throw new BudgetError('UNAVAILABLE');
+    const usage = input.action === 'reconcile'
+      ? structuredClone(await this.evidence.usage(record, input.evidenceRef!, true)) : undefined;
+    if (usage) {
+      quantityAtoms(usage.quantity);
+      if (!/^[a-f0-9]{64}$/u.test(usage.evidenceHash)) throw new BudgetError('UNAVAILABLE');
+    }
+    await session.revalidate();
+    const observed = await this.repository.readMutation(record, { action: input.action, eventKey: input.eventKey, usage }, session.revalidate);
+    await session.revalidate();
+    return observed;
+  }
   async dispatch(id: string, association: AiUsageAssociationDraft, eventKey: string) {
     const { record, session } = await this.load('dispatch', id, association);
     if (record.status !== 'reserved' || record.expiresAt <= this.now()) throw new BudgetError('UNAVAILABLE');
@@ -116,6 +151,11 @@ export class BudgetService {
   }
   async release(id: string, association: AiUsageAssociationDraft, eventKey: string) {
     const { record, session } = await this.load('release', id, association);
+    // A completed original release may only replay its exact ledger event.
+    // The repository refuses a new key here; this is not a second release or
+    // fresh proof that a different/unknown invocation was never dispatched.
+    if (record.status === 'released' && !record.dispatched)
+      return this.repository.mutate(record, { action: 'release', eventKey }, session.revalidate);
     if (record.dispatched || record.status !== 'reserved' || await this.evidence.dispatch(record) !== 'not_dispatched') throw new BudgetError('PENDING_RECONCILIATION');
     await session.revalidate();
     return this.repository.mutate(record, { action: 'release', eventKey }, session.revalidate);

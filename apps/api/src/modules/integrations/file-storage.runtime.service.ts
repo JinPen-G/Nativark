@@ -20,6 +20,8 @@ import { OperationLogService } from "../../common/operation-log.service";
 import { createAliyunOssV4Url } from "./aliyun-oss-v4";
 import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
+import { KnowledgeCommitUnknownError } from '../ai-native/knowledge/knowledge-errors';
+import { knowledgeUploadRevisionSchema, knowledgeUploadKey } from '../ai-native/knowledge/human-knowledge-upload.service';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -201,6 +203,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       throw new ServiceUnavailableException("文件存储尚未配置，请先启用一个文件平台");
     }
 
+    let knowledgeWriteAttempted = false;
     let created: {
       asset: Prisma.FileAssetGetPayload<object>;
       session: Prisma.FileUploadSessionGetPayload<object>;
@@ -213,6 +216,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", configured.provider);
         }
         if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
+        if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
         const asset = await tx.fileAsset.create({
           data: {
             id: assetId,
@@ -278,10 +282,14 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
         }
       }
+      if (knowledgeWriteAttempted) throw new KnowledgeCommitUnknownError();
       throw error;
     }
 
-    if (input.businessType === 'ai_knowledge_document') return this.knowledgeUploadSummary(tenantId, input, created.session, created.asset, owner);
+    if (input.businessType === 'ai_knowledge_document') {
+      try { return await this.knowledgeUploadSummary(tenantId, input, created.session, created.asset, owner); }
+      catch { throw new KnowledgeCommitUnknownError(); }
+    }
     if (!configured) return this.sessionSummary(created.session, created.asset, mode);
     const signed = this.presign(configured, "PUT", storageKey, mimeType, expiresAt);
     return {
@@ -638,6 +646,49 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     return this.sessionSummary(before.session, before.asset, 'provider');
   }
 
+  /** Exact original upload lookup after a lost first response, including after
+   * its intent expires or the document is created/revised. No new URL, storage
+   * access or re-upload grant; a missing row is only an unknown observation. */
+  async findKnowledgeUpload(tenantId: string, value: CreateFileUploadSessionRequest, valueOwner: FileBusinessOwner,
+    revision?: { expectedRevision: number; targetVersion: string }): Promise<FileUploadSessionSummary | null> {
+    const input = structuredClone(value), owner = structuredClone(valueOwner), selected = structuredClone(revision);
+    if (input.businessModule !== 'ai-native' || input.businessType !== 'ai_knowledge_document' || input.uploadScene !== 'ai-knowledge'
+      || !input.idempotencyKey || owner?.businessId !== input.businessId || owner.businessType !== input.businessType
+      || owner.uploadScene !== input.uploadScene || !owner.workspaceId || !owner.actorUserId
+      || !this.knowledgeFiles?.authorizeUploadObservation) throw new NotFoundException('知识上传观察权威不可用');
+    if (input.idempotencyKey !== knowledgeUploadKey(input.businessId, selected?.targetVersion)) throw new BadRequestException('原知识上传键不匹配');
+    const mimeType = this.validateInput(input);
+    const authorize = () => this.knowledgeFiles!.authorizeUploadObservation!(tenantId, structuredClone(owner));
+    await authorize();
+    const load = async () => {
+      // This is the existing tenant/idempotency unique key, not a latest-upload
+      // scan. Request values never select a foreign tenant, actor or workspace.
+      const session = await this.prisma.fileUploadSession.findFirst({ where: { tenantId, idempotencyKey: input.idempotencyKey } });
+      if (!session) return null;
+      const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
+      const metadata = asset?.metadata as JsonRecord | null | undefined;
+      // A tenant-wide key hit is not evidence the current owner may learn that
+      // another actor/workspace has an upload. Do not expose its existence.
+      if (!asset || asset.uploadedBy !== owner.actorUserId || metadata?.workspaceId !== owner.workspaceId) return null;
+      if (!asset || !this.matchesOwner(asset, owner) || !this.matchesUploadRequest(asset, input, mimeType)
+        || session.tenantId !== tenantId || session.idempotencyKey !== input.idempotencyKey
+        || session.fileAssetId !== asset.id || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey)
+        throw new ConflictException('原知识上传请求不匹配');
+      const parsed = metadata?.knowledgeRevision === undefined ? undefined : knowledgeUploadRevisionSchema.safeParse(metadata.knowledgeRevision);
+      if (selected ? !parsed?.success || parsed.data.expectedRevision !== selected.expectedRevision || parsed.data.targetVersion !== selected.targetVersion
+        : parsed !== undefined) throw new ConflictException('原知识上传版本不匹配');
+      this.assertKnowledgeUploadAsset(asset, { ...owner, ...(parsed?.success ? { knowledgeRevision: parsed.data } : {}) });
+      if (!(session.status === 'pending_upload' && asset.status === 'pending_upload' || session.status === 'completed' && asset.status === 'active'
+        || session.status === 'failed' && asset.status === 'failed')) throw new ConflictException('原知识上传状态不可用');
+      return { session, asset };
+    };
+    const before = structuredClone(await load());
+    await authorize();
+    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('原知识上传观察期间已变化');
+    await authorize();
+    return before ? this.sessionSummary(before.session, before.asset, 'provider') : null;
+  }
+
   async completeUpload(
     tenantId: string,
     sessionId: string,
@@ -671,26 +722,48 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (session.provider === "local_mock" && process.env.NODE_ENV === "production") {
       throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
     }
-    if (session.provider !== "local_mock") {
+    // Knowledge completion proves existence/type/length through its bounded,
+    // DNS-pinned bytes read below, not a separate ambient HEAD connection.
+    if (session.provider !== "local_mock" && !knowledgeInput) {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
       if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
       const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
       if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
     }
+    let knowledgeContentHash: string | undefined;
+    if (knowledgeInput) {
+      if (!this.knowledgeFiles?.readUploadContentHash) throw new ServiceUnavailableException('知识上传正文证据未配置');
+      knowledgeContentHash = await this.knowledgeFiles.readUploadContentHash(tenantId, asset.id, owner!);
+      if (!/^[a-f0-9]{64}$/u.test(knowledgeContentHash)) throw new ConflictException('知识上传正文证据不可用');
+    }
     const metadata = {
       ...((asset.metadata ?? {}) as JsonRecord),
       completedAt: new Date().toISOString(),
+      ...(knowledgeContentHash ? { knowledgeContentHash } : {}),
       ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
     };
     const updated = await this.prisma.$transaction(async (tx) => {
-      if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+      if (knowledgeInput) {
+        await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+        const [currentAsset, currentSession] = await Promise.all([
+          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
+          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
+        ]);
+        const stable = (row: unknown) => JSON.stringify(row);
+        if (stable(currentAsset) !== stable(asset) || stable(currentSession) !== stable(session))
+          throw new ConflictException('知识上传绑定在读取正文后已变化');
+      }
       const sessionClaim = await tx.fileUploadSession.updateMany({
-        where: { id: session.id, tenantId, status: "pending_upload" },
+        where: { id: session.id, tenantId, status: "pending_upload",
+          ...(knowledgeInput ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
+            provider: asset.storageProvider, storageKey: asset.storageKey } : {}) },
         data: { status: "completed", completedAt: new Date(), failureReason: null }
       });
       if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
       const assetClaim = await tx.fileAsset.updateMany({
-        where: { id: asset.id, tenantId, status: "pending_upload" },
+        where: { id: asset.id, tenantId, status: "pending_upload",
+          ...(knowledgeInput ? { updatedAt: asset.updatedAt, storageProvider: asset.storageProvider,
+            storageKey: asset.storageKey, uploadedBy: asset.uploadedBy } : {}) },
         data: { status: "active", metadata: metadata as Prisma.InputJsonValue }
       });
       if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");

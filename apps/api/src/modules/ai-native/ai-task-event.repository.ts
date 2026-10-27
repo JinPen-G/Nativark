@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
-  AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
+  AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE,
   AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT,
   type AiTaskEventDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type AiTaskSnapshotDraft
 } from "@rental-os/shared";
@@ -25,20 +25,20 @@ const taskSelect = { id: true, scopeId: true, revision: true, contractVersion: t
 const snapshotTaskSelect = { ...taskSelect, status: true, sceneCode: true, sceneVersion: true,
   createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const snapshotStepSelect = { id: true, taskId: true, scopeId: true, runId: true,
-  sequence: true, revision: true, status: true } satisfies Prisma.AiStepSelect;
+  sequence: true, revision: true, status: true, toolCode: true, resultRef: true } satisfies Prisma.AiStepSelect;
 const snapshotSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id, revision, status: z.enum(AI_TASK_STATUSES_DRAFT),
   sceneCode: id, sceneVersion: id, createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }), cancelRequestedAt: z.string().datetime({ offset: true }).nullable(),
   cursor: z.string().refine(value => { try { aiPersistenceEventCursor(value); return true; } catch { return false; } }),
   steps: z.array(z.object({ stepId: id, runId: id, sequence: revision, revision,
-    status: z.enum(AI_STEP_STATUSES_DRAFT) }).strict()).max(1000)
+    status: z.enum(AI_STEP_STATUSES_DRAFT), resultId: id.optional(), kind: z.enum(['model', 'confirmation']).optional() }).strict()).max(1000)
 }).strict();
 const eventSelect = { scopeId: true, taskId: true, cursor: true, taskRevision: true, type: true, payload: true, occurredAt: true } satisfies Prisma.AiTaskEventSelect;
 type EventRow = Prisma.AiTaskEventGetPayload<{ select: typeof eventSelect }>;
 
 /** Decode only declared wire fields. The internal audit envelope never leaves this function. */
-function wireEvent(row: EventRow): AiTaskEventDraft {
+export function projectAiTaskWireEvent(row: EventRow): AiTaskEventDraft {
   if (!revision.safeParse(row.taskRevision).success || !(row.occurredAt instanceof Date) || !Number.isFinite(row.occurredAt.getTime())) {
     throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
   }
@@ -66,10 +66,11 @@ export class AiTaskEventRepository {
   private readonly db: Pick<PrismaClient, "$transaction" | "aiTask" | "aiRun">;
 
   /** Metadata and timeline share a RepeatableRead watermark. This does not
-   * expose input, output bodies, worker tokens or result/approval evidence.
+   * expose input/output bodies, worker tokens or approval evidence. Terminal
+   * model result IDs are lookup keys only, not permission or success proof.
    * Reading never claims a run or restarts execution after a reset.
    */
-  async readSnapshot(value: unknown): Promise<AiTaskSnapshotDraft> {
+  async readSnapshot(value: unknown, includeReadReferences = false): Promise<AiTaskSnapshotDraft> {
     const parsed = z.object({ taskId: id }).strict().safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const taskId = parsed.data.taskId;
@@ -95,7 +96,12 @@ export class AiTaskEventRepository {
           createdAt: task.createdAt.toISOString(), updatedAt: task.updatedAt.toISOString(),
           cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null, cursor: task.eventCursor.toString(),
           steps: rows.map(row => ({ stepId: row.id, runId: row.runId, sequence: row.sequence, revision: row.revision,
-            status: row.status.toLowerCase() })) });
+            status: row.status.toLowerCase(),
+            ...(includeReadReferences && ['rental.order.commit', 'tenant.notifications.commit'].includes(row.toolCode) ? { kind: 'confirmation' }
+              : includeReadReferences && [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE].some(code => code === row.toolCode) ? { kind: 'model' } : {}),
+            ...(includeReadReferences && ['SUCCEEDED', 'FAILED'].includes(row.status) && row.resultRef
+              && [AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE].some(code => code === row.toolCode)
+              ? { resultId: row.resultRef } : {}) })) });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
@@ -138,7 +144,7 @@ export class AiTaskEventRepository {
         }
         // We cannot invent missing history. Explicit retained-prefix watermarks belong to the future retention policy.
         if (rows.length === 0 && after < task.eventCursor) return { contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, status: "reset_required", reason: "cursor_expired" };
-        const events = rows.slice(0, input.limit).map(wireEvent);
+        const events = rows.slice(0, input.limit).map(projectAiTaskWireEvent);
         const page: AiTaskEventPageDraft = {
           contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, events,
           nextCursor: events.at(-1)?.cursor ?? input.after, hasMore: rows.length > input.limit

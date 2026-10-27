@@ -1,4 +1,5 @@
 import type { AiScopeRepository } from '../ai-scope.repository';
+import type { PrismaClient } from '@prisma/client';
 import type { SubscriptionService } from '../../subscription/subscription.service';
 import { BudgetError, type BudgetQuotePort, type BudgetPolicyKey } from './budget.ports';
 import type { AiUsageSettingsDraft } from '@rental-os/shared';
@@ -7,34 +8,49 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import { validateBudgetSettings, presentBudgetSettingsFields } from './budget-settings';
-import type { BudgetAuthorizationSource } from './budget-dependency-adapters';
-import { PersistedBudgetEvidenceAdapter } from './budget-dependency-adapters';
+import type { BudgetAuthorizationSource, BudgetEntitlementSource } from './budget-dependency-adapters';
+import { PersistedBudgetEvidenceAdapter, ServerBudgetAuthorityAdapter } from './budget-dependency-adapters';
 import { BudgetGatewayAdapter } from './budget-gateway-adapter';
 import { createPersistedBudgetSubsystem } from './budget.module';
+import { BudgetService } from './budget.service';
+import { PrismaBudgetRepository } from './prisma-budget.repository';
 import { PersistentGatewayBudget } from './persistent-gateway-budget';
 import { PrismaGatewayAccountingFacts, type GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
-import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { gatewayBudgetPrincipal, gatewayPlatformBudgetPrincipal } from './gateway-budget-principal';
+import { type BudgetGatewayContext } from './budget-gateway-adapter';
 import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
+import { budgetSettingsOperationSchema, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
 import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
 
 export function createPersistedGatewayBudget(input: {
-  db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0];
+  db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0]
+    & Partial<Pick<PrismaClient, 'operationLog'>>;
   scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
   authorization: BudgetAuthorizationSource;
+  /** Optional composition-owned entitlement source. The SaaS platform passes
+   * its own policy gate; absent keeps the tenant subscription adapter. */
+  entitlements?: BudgetEntitlementSource;
+  /** Feature code handed to the entitlement source above. */
+  entitlementFeatureCode?: string;
   pricing: BudgetQuotePort & GatewayActualUsagePricing;
   clock?: () => Date;
 }) {
   const bindings = new PrismaGatewayInvocationBindings(input.db, input.scopes, input.clock);
   const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, input.pricing, input.clock);
-  const service = createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
-    quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
+  const service = input.entitlements
+    ? new BudgetService(new PrismaBudgetRepository(input.db, input.clock),
+      new ServerBudgetAuthorityAdapter(input.authorization, input.entitlements, input.entitlementFeatureCode),
+      input.pricing, new PersistedBudgetEvidenceAdapter(facts), input.clock)
+    : createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
+      quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
   const selector = z.object({ scope: z.enum(['tenant', 'workspace']),
     sceneCode: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
-  const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown() }).strict();
+  const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown(),
+    operation: budgetSettingsOperationSchema.pick({ operationKey: true, action: true, commandHash: true }).optional() }).strict();
   const identity = (value: Awaited<ReturnType<typeof input.scopes.resolveCurrent>>) => {
     const { requestId: _, authorizedAt: __, ...context } = value.context;
     return requestFingerprint({ context, scope: value.scope });
@@ -54,7 +70,7 @@ export function createPersistedGatewayBudget(input: {
       if (identity(current) !== identity(structuredClone(await input.scopes.resolveCurrent()))) throw new BudgetError('FORBIDDEN');
     };
     await recheck();
-    return { key, tenantId, recheck };
+    return { key, tenantId, context: current.context, recheck };
   };
   // Management consumers use the SAME service/repository/entitlement as the
   // financial lifecycle. These are internal server methods, not public DTOs
@@ -72,6 +88,32 @@ export function createPersistedGatewayBudget(input: {
   };
   const settings = Object.freeze({
     read: readSettings,
+    readOperation: async (value: unknown) => {
+      const parsed = selector.extend({ operationKey: budgetSettingsOperationSchema.shape.operationKey }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const { operationKey, ...selection } = parsed.data, current = await target(selection), context = current.context;
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+      // Observation uses current read permission, not a live Profile, write
+      // permission or permission to admit a new model call.
+      await readSettings(selection);
+      if (typeof input.db.operationLog?.findFirst !== 'function') throw new BudgetError('UNAVAILABLE');
+      const row = structuredClone(await input.db.operationLog.findFirst({ where: { id: settingsOperationId(current.key, operationKey),
+        tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, userId: context.actor.userId,
+        action: 'ai.budget.settings.saved' }, select: { id: true, tenantId: true, workspaceId: true, userId: true,
+          action: true, detail: true, createdAt: true } }));
+      await readSettings(selection); await current.recheck();
+      const base = { ...selection, operationKey, admission: 'not_granted' as const, automaticRetry: false as const };
+      if (!row || row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+        || row.userId !== context.actor.userId) return { ...base, state: 'unknown' as const };
+      const detail = budgetSettingsReceiptSchema.safeParse(row.detail);
+      if (row.action !== 'ai.budget.settings.saved' || !detail.success || row.id !== settingsOperationId(current.key, operationKey)
+        || detail.data.operationKey !== operationKey || detail.data.scopeKind !== current.key.scopeKind
+        || detail.data.scopeId !== current.key.scopeId || detail.data.sceneCode !== current.key.sceneCode
+        || detail.data.tenantId !== row.tenantId || detail.data.workspaceId !== row.workspaceId || detail.data.actorId !== row.userId
+        || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime())) throw new BudgetError('UNAVAILABLE');
+      return { ...base, state: 'recorded' as const, action: detail.data.action, expectedRevision: detail.data.expectedRevision,
+        savedRevision: detail.data.savedRevision, commandHash: detail.data.commandHash, recordedAt: row.createdAt.toISOString() };
+    },
     /** Tenant-facing data projection, not a model capability/dispatch grant.
      * The raw read above remains an internal server management result. */
     summary: async (value: unknown) => {
@@ -125,7 +167,11 @@ export function createPersistedGatewayBudget(input: {
         await current.recheck();
       };
       await revalidateConfiguration();
-      const saved = await service.saveSettings(current.key, proposed, command.expectedRevision, revalidateConfiguration);
+      const context = current.context;
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
+      const saved = await service.saveSettings(current.key, proposed, command.expectedRevision, revalidateConfiguration,
+        command.operation && { ...command.operation, tenantId: context.scope.tenantId,
+          workspaceId: context.scope.workspaceId, actorId: context.actor.userId });
       // If current identity changed after COMMIT, do not disclose the saved
       // policy or pretend that the write was rolled back.
       try { await current.recheck(); } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
@@ -140,8 +186,13 @@ export function createPersistedGatewayBudget(input: {
     const parsed = recoveryCommand.safeParse(structuredClone(value));
     if (!parsed.success) throw new BudgetError('INVALID');
     const before = structuredClone(await input.scopes.resolveCurrent());
-    const { actorKind: _, ...context } = gatewayBudgetPrincipal(before.context);
-    const binding = structuredClone(await bindings.resolveForReservation(context, parsed.data.reservationId));
+    // Dual-scope principal: workspace consumers keep their tenant attribution;
+    // explicit SaaS/platform principals carry actorId only for the binding.
+    const gatewayContext: BudgetGatewayContext = before.scope.kind === 'PLATFORM'
+      ? { actorId: gatewayPlatformBudgetPrincipal(before.context).actorId }
+      : (() => { const p = gatewayBudgetPrincipal(before.context);
+          return { tenantId: p.tenantId, workspaceId: p.workspaceId, actorId: p.actorId }; })();
+    const binding = structuredClone(await bindings.resolveForReservation(gatewayContext, parsed.data.reservationId));
     const record = await service.read(parsed.data.reservationId, binding.association);
     return { before, binding, record, reservationId: parsed.data.reservationId };
   };
@@ -153,17 +204,19 @@ export function createPersistedGatewayBudget(input: {
       const parsed = originalCallCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new BudgetError('INVALID');
       const before = structuredClone(await input.scopes.resolveCurrent());
-      const principal = gatewayBudgetPrincipal(before.context);
-      if (before.scope.kind !== 'WORKSPACE' || before.scope.tenantId !== principal.tenantId
-        || before.scope.workspaceId !== principal.workspaceId) throw new BudgetError('FORBIDDEN');
+      const platform = before.scope.kind === 'PLATFORM';
+      const principal = platform ? { actorId: gatewayPlatformBudgetPrincipal(before.context).actorId, tenantId: null as string | null, workspaceId: null as string | null }
+        : (() => { const p = gatewayBudgetPrincipal(before.context); return { actorId: p.actorId, tenantId: p.tenantId as string | null, workspaceId: p.workspaceId as string | null }; })();
+      const scopeKind = platform ? 'PLATFORM' as const : 'WORKSPACE' as const;
       const row = structuredClone(await input.db.aiBudgetReservation.findUnique({ where: {
-        scopeId_scopeKind_callId: { scopeId: before.scope.id, scopeKind: 'WORKSPACE', callId: parsed.data.callId }
+        scopeId_scopeKind_callId: { scopeId: before.scope.id, scopeKind, callId: parsed.data.callId }
       }, select: { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true, actorId: true, callId: true } }));
       // Absence is not proof of no consumption. In particular, do not perform
       // a replacement reserve after a lost COMMIT response or a missing link.
       if (!row) throw new BudgetError('PENDING_RECONCILIATION');
-      if (row.scopeId !== before.scope.id || row.scopeKind !== 'WORKSPACE'
-        || row.tenantId !== principal.tenantId || row.workspaceId !== principal.workspaceId
+      if (row.scopeId !== before.scope.id || row.scopeKind !== scopeKind
+        || (platform ? row.tenantId !== null || row.workspaceId !== null
+          : row.tenantId !== principal.tenantId || row.workspaceId !== principal.workspaceId)
         || row.actorId !== principal.actorId || row.callId !== parsed.data.callId) throw new BudgetError('FORBIDDEN');
       const { record } = await originalReservation({ reservationId: row.id });
       if (record.id !== row.id || record.callId !== parsed.data.callId
@@ -176,6 +229,22 @@ export function createPersistedGatewayBudget(input: {
       const { before, record } = await originalReservation(value);
       if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
       return structuredClone(record);
+    },
+    /** Exact existing recovery event; read never delegates to release/reconcile.
+     * Terminal current state alone cannot attest which original operation committed. */
+    readOperation: async (value: unknown) => {
+      const parsed = recoveryCommand.extend({ operation: z.enum(['releaseUnsent', 'reconcile']) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new BudgetError('INVALID');
+      const { before, binding, record: current, reservationId } = await originalReservation({ reservationId: parsed.data.reservationId });
+      const evidenceRef = parsed.data.operation === 'reconcile' ? await facts.originalUsageReference(reservationId) : undefined;
+      const eventKey = requestFingerprint(parsed.data.operation === 'releaseUnsent'
+        ? { method: 'persisted-original-unsent-release-1', reservationId, association: binding.association }
+        : { method: 'persisted-original-usage-reconcile-1', reservationId, evidenceRef, association: binding.association });
+      const record = await service.readMutation(reservationId, binding.association, {
+        action: parsed.data.operation === 'releaseUnsent' ? 'release' : 'reconcile', eventKey, evidenceRef });
+      if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
+      if (record && (record.id !== current.id || record.callId !== current.callId)) throw new BudgetError('FORBIDDEN');
+      return { operation: parsed.data.operation, status: record ? 'observed' as const : 'not_observed' as const, record };
     },
     /** Complete only a previously persisted NOT-SENT cancellation. Neither
      * expiry nor a failed provider request is evidence permitting a refund. */
@@ -238,13 +307,11 @@ export function createPersistedGatewayBudget(input: {
   return { bindings, facts, settings, recovery, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
 }
 
-export function createRecordedPricingGatewayBudget(input:
+type RecordedPricingAccountingDependencies =
   Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'pricing'>
-  & { db: ConstructorParameters<typeof PrismaGatewayRecordedPricing>[0]; pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
-  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
-  const gateway = createPersistedGatewayBudget({ ...input, pricing });
-  const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
-    input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
+  & { db: ConstructorParameters<typeof PrismaGatewayRecordedPricing>[0] };
+
+function recordedPricingRecovery(gateway: ReturnType<typeof createPersistedGatewayBudget>, pricing: PrismaGatewayRecordedPricing) {
   const readPricing = async (value: unknown, readOriginal: typeof gateway.recovery.read) => {
     const command = structuredClone(value);
     const original = await readOriginal(command);
@@ -258,11 +325,28 @@ export function createRecordedPricingGatewayBudget(input:
     return { ...basis, reservationStatus: confirmed.status, configurationRevision: confirmed.association.config.configRevision,
       dispatched: confirmed.dispatched, recordedActualQuantity: confirmed.actual };
   };
-  const recovery = Object.freeze({ ...gateway.recovery,
+  return Object.freeze({ ...gateway.recovery,
     readPricing: (value: unknown) => readPricing(value, gateway.recovery.read),
     readPricingCall: (value: unknown) => readPricing(value, gateway.recovery.readCall)
   });
-  return { ...gateway, pricingRecords, recovery };
+}
+
+/** Original stored pricing only: no new-price/input-bound producer, model
+ * connection or execution gate is required. Current accounting authorization
+ * and same-ledger binding still apply; this never publishes new evidence. */
+export function createRecordedPricingGatewayAccountingRecovery(input: RecordedPricingAccountingDependencies) {
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const gateway = createPersistedGatewayBudget({ ...input, pricing });
+  return recordedPricingRecovery(gateway, pricing);
+}
+
+export function createRecordedPricingGatewayBudget(input: RecordedPricingAccountingDependencies
+  & { pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const gateway = createPersistedGatewayBudget({ ...input, pricing });
+  const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
+    input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
+  return { ...gateway, pricingRecords, recovery: recordedPricingRecovery(gateway, pricing) };
 }
 
 /** Workspace-user server assembly with real current task/configuration

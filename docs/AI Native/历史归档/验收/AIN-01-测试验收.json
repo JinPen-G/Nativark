@@ -1,0 +1,84 @@
+{
+  "taskId": "AIN-01",
+  "decision": "accepted_under_owner_authorized_nonhuman_testing",
+  "date": "2026-10-26",
+  "originalTaskScope": "inventory, business reference baseline and A27/A28 repeatability; not delivery of all inventoried tools",
+  "policy": "owner authorizes no mandatory human acceptance for all AI Native tasks; applicable real-environment testing remains required",
+  "selfChecks": {
+    "inventoryEvidenceAndFactBaseline": {
+      "pass": 38,
+      "fail": 0,
+      "skip": 0,
+      "todo": 0
+    },
+    "fourCategoryReferenceAssertionGroups": 16,
+    "knownGapCharacterizations": 3,
+    "knownGapsAreNotRepaired": true
+  },
+  "priorRealEvidence": {
+    "fourCategories": 4,
+    "referenceCaseGroups": 8,
+    "referenceCaseGroupsPassed": 8,
+    "apiAndRestart": true,
+    "a27a28": true,
+    "referenceDriver": "automated_not_human",
+    "manifestSources": 720,
+    "unchangedReferenceSources": 714,
+    "changedClientSourcesExcluded": [
+      "packages/shared/src/agent-desktop-business.ts",
+      "packages/shared/src/agent-desktop.ts",
+      "apps/api/src/contracts/ai-desktop-business-schemas.ts",
+      "apps/api/src/modules/ai-native/desktop-business/desktop-catalog-source.repository.ts",
+      "apps/api/src/modules/ai-native/desktop-business/desktop-business.application.ts",
+      "apps/api/src/modules/ai-native/desktop-business/desktop-business.module.ts"
+    ],
+    "httpSamples": 823,
+    "httpStatusCounts": {
+      "200": 281,
+      "201": 496,
+      "401": 1,
+      "404": 1,
+      "409": 44
+    },
+    "httpRequestElapsedMs": {
+      "min": 2.3648,
+      "p50": 184.8053,
+      "p95": 567.1907,
+      "max": 825.2071
+    },
+    "notTaskSloOrHumanExperience": true
+  },
+  "metricsNotCollected": {
+    "humanExperience": "not_collected_not_required_by_owner_policy",
+    "modelCost": "not_applicable_to_ai_disabled_core_reference",
+    "humanCorrectionAndTakeover": "not_collected_not_invented",
+    "aiRuntimeRecoveryPerformance": "outside_AIN01_reference_scope_deferred_to_AIN06_AIN25"
+  },
+  "remainingByOtherTask": {
+    "AIN03": "full historical B02 upgrade remains unsupported; clone refusal proof is not an upgrade",
+    "AIN08_AIN14_RentalCore": "three known gap characterizations remain assigned to their original implementation tasks"
+  },
+  "boundaries": [
+    "no new provider/model/payment/browser/device acceptance",
+    "no deployment or production authorization",
+    "inherited server WIP preserved; current Git HEAD is not represented as the frozen API build",
+    "existing and newly created dedicated test resources retained with ownership records; no forbidden stop bypass"
+  ],
+  "evidence": {
+    "tests/ai-native-tool-baseline.test.cjs": "411a92ccc2f23f9f3d32b5310f152a1a28042054790393dfac4992989f7d2ec1",
+    "tests/ai-native-evidence-index.test.cjs": "048bbe731337cb5b9d96c695232d8a0149c32c48da30ca1d2dd406064eb5ca4f",
+    "tests/ai-native-fact-baseline.test.cjs": "db742d6a89b0d65cda1411898c185539882b9afd9050547da00e18b11b312c9e",
+    "tests/rental-four-category-acceptance.test.cjs": "872ec16316424eb2b31d6a3e1dfd6d29e9894618d4b1f677c47658f39e1ce105",
+    "output/ain01-self-acceptance-20261026/baseline-tests.log": "769a97fc2e12651d9d4d8119ba3ab7f0fa1c20ae5ab9f0a4e16a4f51381b5834",
+    "output/ain01-self-acceptance-20261026/four-category-reference.log": "687767568859ee64779b52be1e832b33f635dbb72e2b0c854486721fbefc7a4f",
+    "output/ain01-migration-repair-20261026.YMvW0q/build-manifest.json": "76df5a3dbc7a038be5b410e3ccf40993bc4ca94abfe337cb4877a231b1014144",
+    "output/ain01-migration-repair-20261026.YMvW0q/api-baseline.log": "84baf9726c6d4213c3fb0293fa0f60e755e465e87d2db2e2db927c269acce38c",
+    "output/ain01-migration-repair-20261026.YMvW0q/restart-baseline.log": "e1e8e6a042dabd47ca228cb8c7e23c2cabfc90b0350fb3bae832e46406ca7300",
+    "output/ain01-migration-repair-20261026.YMvW0q/a27-a28-live-result.json": "c150453db348545175dbcaaa0d0d63c05d3a2d8805cb86a545c3bce4b85454b2",
+    "output/ain01-legacy-scope-20261026/result.json": "1611a490dd23e35ff3726fd25bbb3e44d00508f01d250b3705fdb427b32b180f"
+  },
+  "requirementVersion": "v1.11",
+  "taskVersion": "v1.15",
+  "inputGitHead": "25d5468569c1ee090ebd513954f21fb9a20adb0f",
+  "inheritedServerWipPreserved": true
+}

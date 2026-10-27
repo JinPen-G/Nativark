@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestDataScope, getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
@@ -18,6 +18,7 @@ import {
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   RecordCustomerCorporateCreditPaymentRequest,
+  RecordCustomerCorporateCreditMaturityRequest,
   SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
   UpdateBusinessWorkspaceRequest,
@@ -2531,6 +2532,23 @@ export class PlatformService {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerCorporateSettlement().listLedger(tenantId, customerId);
+  }
+
+  recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    if (!currentUser?.id || !(currentUser.permissions.includes("rental-os:corporate:manage") || currentUser.permissions.includes("*"))) {
+      throw new ForbiddenException("核定债权到期日需要当前企业管理权限");
+    }
+    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("核定债权须当前完整空间财务范围");
+    return this.requireCustomerCorporateSettlement().recordMaturity(currentUser.tenantId, customerId, input,
+      currentUser.id, requireRequestWorkspaceId());
+  }
+
+  readCustomerCreditMaturity(customerId: string, ledgerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("读取债权到期依据须当前完整空间财务范围");
+    return this.requireCustomerCorporateSettlement().readMaturity(tenantId, customerId, ledgerId, requireRequestWorkspaceId());
   }
 
   recordCustomerCreditPayment(

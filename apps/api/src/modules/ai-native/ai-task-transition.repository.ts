@@ -50,6 +50,7 @@ const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
 export class AiTaskTransitionResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
   readonly retryable = false;
+  readonly nextAction = 'reconcile';
   constructor() { super('AI_RESULT_UNKNOWN'); }
 }
 
@@ -298,7 +299,7 @@ export class AiTaskTransitionRepository {
     const input = parsed.data;
     if (settleCancellation && (input.to !== 'cancelled' || input.reason !== 'cancel_settled')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const initial = await this.access.resolveAccess(input.taskId, "transition_task");
-    let callbackCompleted = false;
+    let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.where, select: taskSelect });
@@ -312,6 +313,7 @@ export class AiTaskTransitionRepository {
         }
         if (task.revision !== input.expectedRevision || task.eventCursor < 0n || task.eventCursor >= maxCursor) throw conflict();
         // The update locks the task row; all reservations below roll back on any failure.
+        writeAttempted = true;
         const reserved = await tx.aiTask.updateMany({
           where: { ...initial.where, scopeId: task.scopeId, revision: task.revision, eventCursor: task.eventCursor, status: task.status },
           data: { revision: { increment: 1 }, eventCursor: { increment: 1n } }
@@ -424,12 +426,12 @@ export class AiTaskTransitionRepository {
             remainingActiveMs: checkpoint.decision.remainingActiveMs, remainingOutputBytes: checkpoint.decision.remainingOutputBytes } } : {}) };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw error;
       // Any completed mutation callback may have committed before the reply
       // was lost, not only an input-witness cancellation. Never label this as
       // a definitely-uncommitted storage failure or automatically replay it.
       if (callbackCompleted) throw new AiTaskTransitionResultUnknownError();
-      // Includes an ambiguous connection loss at commit: do not automatically retry the mutation.
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (writeAttempted) throw new AiTaskTransitionResultUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }

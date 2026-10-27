@@ -50,9 +50,15 @@ export class HumanMemoryManagementRequestFactory {
       if (authorization === undefined) return unavailable();
       return { authorization, requestId, audience: 'operator' as const };
     } };
+    const requestAuth: typeof auth = { resolveAccessContext: async (...args) => {
+      await credentials.current();
+      const current = await auth.resolveAccessContext(...args);
+      await credentials.current();
+      return current;
+    } };
     const source = new PrismaKnowledgeActionPolicySource(db, () => new Date(clock.now()));
-    const memory = new PersistentMemoryConsentService({ db, auth, clock, credentials,
-      authorization: new FormalMemoryAuthorizationAdapter(auth, credentials, source.memory, () => new Date(clock.now())) });
+    const memory = new PersistentMemoryConsentService({ db, auth: requestAuth, clock, credentials,
+      authorization: new FormalMemoryAuthorizationAdapter(requestAuth, credentials, source.memory, () => new Date(clock.now())) });
     const mutation = (value: AiMemoryDraft) => ({ memory: parse(memoryDraftSchema, value),
       semantics: 'human_preference_not_business_approval' as const });
     return {

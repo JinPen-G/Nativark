@@ -4,7 +4,7 @@
  * 恢复必须保留 fencing 和原操作关联；租约过期或取消不证明外部副作用未发生。
  */
 import {
-  type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult,
+  type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult, type AiTaskRunnerClaimInput,
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,
   type AiTaskRunnerOutcome, type AiTaskRunnerPlan, type AiTaskRunnerStepPlan,
   type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef, type AiTaskRunnerTaskOutcome,
@@ -20,11 +20,64 @@ export class AiTaskRunnerError extends Error {
   }
 }
 
+/** Claim acknowledgement, not a later lease read, owns execution/cleanup.
+ * Share this check with original business recovery hosts; an uncertain claim
+ * may already have committed, so no guessed release or second claim is safe. */
+export function snapshotAiTaskRunnerClaimLease(input: AiTaskRunnerClaimInput, value: unknown): AiTaskRunnerLease {
+  let lease: AiTaskRunnerLease;
+  try { lease = structuredClone(value) as AiTaskRunnerLease; }
+  catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is not snapshot-safe'); }
+  const fence = /^(0|[1-9][0-9]{0,19})$/u;
+  if (!lease || lease.taskId !== input.taskId || lease.runId !== input.runId || lease.holderId !== input.holderId
+    || !finiteInteger(input.expectedRunRevision, 1, 4294967294)
+    || lease.revision !== input.expectedRunRevision + 1
+    || typeof input.expectedFencingToken !== 'string' || !fence.test(input.expectedFencingToken)
+    || typeof lease.fencingToken !== 'string' || !fence.test(lease.fencingToken)
+    || BigInt(lease.fencingToken) !== BigInt(input.expectedFencingToken) + 1n
+    || typeof lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(lease.expiresAt))) {
+    throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim does not match the original CAS');
+  }
+  return lease;
+}
+
 const defaultClock: AiTaskRunnerClock = {
   now: () => Date.now(),
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
   clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>)
 };
+
+/** Shared wait boundary for the runner and its explicit recovery hosts.
+ * Interruption only stops local continuation; it never attests rollback. */
+export function callAiTaskRunnerDependency<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number,
+  phase: string, signal?: AbortSignal, clock: AiTaskRunnerClock = defaultClock): Promise<T> {
+  const controller = new AbortController();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false, timer: unknown, timerStarted = false;
+    const clear = () => {
+      try { if (timerStarted) clock.clearTimeout(timer); } catch { /* cleanup cannot revive a closed wait */ }
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const stop = (code: 'AI_RESULT_UNKNOWN' | 'AI_RUN_LIMIT', message: string) => {
+      if (settled) return;
+      settled = true; clear(); controller.abort();
+      reject(new AiTaskRunnerError(code, message));
+    };
+    const onAbort = () => stop('AI_RESULT_UNKNOWN', `${phase} interrupted`);
+    if (signal?.aborted) { onAbort(); return; }
+    try {
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timer = clock.setTimeout(() => stop(phase === 'reconcile' ? 'AI_RESULT_UNKNOWN' : 'AI_RUN_LIMIT', `${phase} deadline exceeded`), limitMs);
+      timerStarted = true;
+      if (settled) { clear(); return; }
+      if (signal?.aborted) { onAbort(); return; }
+      Promise.resolve(operation(controller.signal)).then(value => {
+        if (!settled) { settled = true; clear(); resolve(value); }
+      }, error => {
+        if (!settled) { settled = true; clear(); reject(error); }
+      });
+    } catch (error) { settled = true; clear(); reject(error); }
+  });
+}
 
 function finiteInteger(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
@@ -39,12 +92,15 @@ function validateLimits(value: AiTaskRunnerLimits): AiTaskRunnerLimits {
   return value;
 }
 
-function validatePlan(plan: AiTaskRunnerPlan, input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>): AiTaskRunnerPlan {
+function validatePlan(plan: AiTaskRunnerPlan, input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, modelCallsMetered = false): AiTaskRunnerPlan {
   if (!plan || plan.taskId !== input.taskId || plan.runId !== input.runId || !Array.isArray(plan.steps)) {
     throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "authorized task plan is unavailable");
   }
   const limits = validateLimits(plan.limits);
-  if (plan.steps.length > limits.maxSteps || plan.steps.length > limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+  // Persistent calls are Gateway invocations, not business reads or original
+  // receipt reconciliation. The resource gate owns their durable admission.
+  // Legacy isolated consumers have no classifier and retain the stricter cap.
+  if (plan.steps.length > limits.maxSteps || (!modelCallsMetered && plan.steps.length > limits.maxCalls)) throw new AiTaskRunnerError("AI_RUN_LIMIT");
   for (const step of plan.steps) {
     if (!step || typeof step.registrationRef !== "string" || step.registrationRef.length < 1 || step.registrationRef.length > 191
       || typeof step.toolCode !== "string" || step.toolCode.length < 1 || step.toolCode.length > 191
@@ -117,9 +173,10 @@ export class AiTaskRunner {
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
     let lease: AiTaskRunnerLease;
     try {
-      lease = structuredClone(await this.callBounded(() => recovery
+      const observed = await this.callBounded(() => recovery
         ? this.deps.leases.claimRecoveryRun(structuredClone(claimInput))
-        : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal));
+        : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal);
+      lease = snapshotAiTaskRunnerClaimLease(claimInput, observed);
     } catch (error) {
       // A transaction may have committed. A late acknowledgement is observed
       // by callBounded but NEVER re-enters runHeld or grants execution rights.
@@ -145,20 +202,34 @@ export class AiTaskRunner {
   async continueConfirmation(value: AiTaskRunnerConfirmationRequest, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
     const input = structuredClone(value);
     if (!this.deps.confirmation || !this.deps.effects.continueConfirmation || signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
-    const initial = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal);
-    if (initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
+    const initial = structuredClone(await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal));
+    if (initial.taskId !== input.taskId || initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
       || initial.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     let committed: Awaited<ReturnType<NonNullable<AiTaskRunnerDependencies['confirmation']>['resume']>>;
-    try { committed = await this.callBounded(() => this.deps.confirmation!.resume(input), 5000, 'confirmation_resume', signal); }
-    catch (error) {
-      if (error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      throw error;
-    }
-    if (committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
+    // Both commands and acknowledgements cross asynchronous ports. Preserve
+    // the original basis and holder even if their producer reuses an object.
+    const observed = await this.callWriteBounded(() => this.deps.confirmation!.resume(structuredClone(input)), 5000, 'confirmation_resume', signal);
+    try { committed = structuredClone(observed); }
+    catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement is not snapshot-safe'); }
+    if (!committed || !committed.lease || !committed.continuation
+      || committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
       || committed.lease.holderId !== input.lease.holderId || committed.lease.fencingToken !== input.lease.fencingToken
       || committed.lease.revision !== input.lease.revision + 1 || committed.continuation.stepId !== input.stepId
-      || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
-    const current = await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal);
+      || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef
+      || !['approved', 'rejected'].includes(committed.continuation.decision)
+      || typeof committed.continuation.decisionRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(committed.continuation.decisionRef)
+      || !finiteInteger(committed.continuation.remainingActiveMs, 1, 86400000)
+      || !finiteInteger(committed.continuation.remainingOutputBytes, 1, 16 * 1024 * 1024)
+      || typeof committed.lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(committed.lease.expiresAt))) {
+      // Resume may already be durable. A malformed observation cannot authorize
+      // another approval consumption, a guessed outcome or releasing its holder.
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement requires original receipt');
+    }
+    const current = structuredClone(await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal));
+    if (current.taskId !== input.taskId || current.revision !== committed.taskRevision
+      || current.status !== 'running' || current.cancelRequestedAt !== null) {
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation state changed before continuation');
+    }
     return this.runHeld({ taskId: input.taskId, runId: input.lease.runId }, false, current, committed.lease,
       signal, false, undefined, committed.continuation);
   }
@@ -166,17 +237,24 @@ export class AiTaskRunner {
   private async runHeld(input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, recovery: boolean,
     initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false, prepare?: AiTaskHeldPreparation,
     continuation?: AiTaskRunnerConfirmationContinuation): Promise<AiTaskRunnerOutcome> {
+    const heldStartedAt = this.clock.now();
     let taskRevision = initial.revision;
-    let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
+    let completedSteps = 0, cleanupFailed = 0, legacyCalls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
     let outcomeAttempted = false;
     let outcomeAcknowledged = false;
     let primaryUnknown: Error | undefined;
+    let propagatedError: unknown;
     const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
         || !commit.lease || commit.lease.taskId !== lease.taskId || commit.lease.runId !== lease.runId
         || commit.lease.holderId !== lease.holderId || commit.lease.fencingToken !== lease.fencingToken
-        || !finiteInteger(commit.lease.revision, lease.revision + 1, 4294967295)) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
+        || !finiteInteger(commit.lease.revision, lease.revision + 1, 4294967295)) {
+        // Every caller has already attempted a durable task/step transition.
+        // Without its exact new fence/revision we cannot release the old holder
+        // or report an ordinary unavailable result and imply safe retry.
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'persistent step acknowledgement requires original receipt');
+      }
       lease = structuredClone(commit.lease); taskRevision = commit.taskRevision;
       if (ref) ref.registered = { ...ref.registered, stepRevision: ref.registered.stepRevision + 1, taskRevision, runRevision: lease.revision };
     };
@@ -208,7 +286,7 @@ export class AiTaskRunner {
       if (initial.status === 'waiting_input' || initial.status === 'waiting_confirmation') return { status: 'paused', completedSteps, cleanupFailed };
       if (!recovery && initial.status === 'queued') {
         if (!this.deps.taskOutcome?.start) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (!prepare) validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false), 5000, 'initial_plan', signal)), input);
+        if (!prepare) validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false), 5000, 'initial_plan', signal)), input, this.deps.resources !== undefined);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         advance(await this.callWriteBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
         initial = { ...initial, status: 'running', revision: taskRevision };
@@ -228,17 +306,31 @@ export class AiTaskRunner {
       }
       if (this.deps.resources) await this.callWriteBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-      const plan = validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery), 5000, 'execution_plan', signal)), input);
+      const plan = validatePlan(structuredClone(await this.callReadBounded(() => this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery), 5000, 'execution_plan', signal)), input, this.deps.resources !== undefined);
       if (continuation) {
         if (recovery || !finiteInteger(continuation.remainingActiveMs, 1, plan.limits.maxStepMs)
           || !finiteInteger(continuation.remainingOutputBytes, 1, plan.limits.maxOutputBytes)) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         outputBytes = plan.limits.maxOutputBytes - continuation.remainingOutputBytes;
       }
-      const startedAt = this.clock.now();
-      const checkCancel = async () => {
+      // Loading the trusted plan and opening its persistent resource gate are
+      // part of this held run, not a free prefix followed by a fresh timeout.
+      // Original result/charge checkpointing retains its separate bounded wait:
+      // an expired work window cannot prove rollback or justify abandoning debt.
+      const startedAt = heldStartedAt;
+      let stepStartedAt: number | null = null;
+      const workMs = () => {
+        const now = this.clock.now(), elapsed = now - startedAt,
+          stepElapsed = stepStartedAt === null ? 0 : now - stepStartedAt;
+        if (!Number.isFinite(elapsed) || !Number.isFinite(stepElapsed) || elapsed < 0 || stepElapsed < 0)
+          throw new AiTaskRunnerError('AI_RUN_LIMIT');
+        const remaining = Math.floor(Math.min(plan.limits.maxTotalMs - elapsed, plan.limits.maxStepMs - stepElapsed));
+        if (remaining < 1) throw new AiTaskRunnerError('AI_RUN_LIMIT');
+        return remaining;
+      };
+      const checkCancel = async (beforeNewWork = false) => {
         // A host abort must not skip reconciliation/checkpointing of a result
         // already persisted. This read remains bounded independently.
-        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), plan.limits.maxStepMs, 'cancel_metadata');
+        const current = await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), beforeNewWork ? workMs() : plan.limits.maxStepMs, 'cancel_metadata');
         if (current.cancelRequestedAt === null && current.status !== "cancel_requested") return false;
         taskRevision = current.revision;
         return true;
@@ -248,6 +340,14 @@ export class AiTaskRunner {
         const current = { ...structuredClone(ref), registered: { ...ref.registered, taskRevision, runRevision: lease.revision } };
         const committed = structuredClone(await this.callWriteBounded(() => this.deps.inputs!.afterSucceeded(current, structuredClone(lease)), plan.limits.maxStepMs, 'input_wait'));
         if (!committed) return false;
+        if ('kind' in committed) {
+          if (committed.kind !== 'input_limit_reached' || Object.keys(committed).length !== 1)
+            throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          // All registered steps may have succeeded without satisfying the
+          // user's goal. The existing FSM must not falsely mark that success,
+          // fail a successful step or invent an unresolved external effect.
+          return 'input_limit_reached' as const;
+        }
         if (committed.taskRevision !== taskRevision + 1 || committed.lease?.revision !== lease.revision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
         advance(committed);
         return true;
@@ -256,12 +356,14 @@ export class AiTaskRunner {
         return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
       }
       for (const stepPlan of plan.steps) {
+        stepStartedAt = this.clock.now();
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
-        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs || calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
-        const cancelling = await checkCancel();
+        workMs();
+        if (!this.deps.resources && legacyCalls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+        const cancelling = await checkCancel(true);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
-        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), plan.limits.maxStepMs, 'step_register'));
+        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), workMs(), 'step_register'));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
@@ -282,7 +384,10 @@ export class AiTaskRunner {
             }
           }
           completedSteps++;
-          if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
+          const pause = await pauseForInput(ref);
+          if (pause === 'input_limit_reached') return { status: 'unavailable', completedSteps, cleanupFailed,
+            stopReason: 'input_limit_reached', nextAction: 'manual_handoff' };
+          if (pause) return { status: 'paused', completedSteps, cleanupFailed };
           continue;
         }
         if (registered.replayed && registered.existingStatus === 'failed' && this.deps.resources) {
@@ -320,27 +425,39 @@ export class AiTaskRunner {
           try {
             resourceTicket = structuredClone(await this.callWriteBounded(() => reconcile || continuing
               ? this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease))
-              : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
+              : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), workMs(), 'resource_reserve'));
           } catch (error) {
             if (reconcile) return { status: 'unavailable', completedSteps, cleanupFailed };
             throw error;
           }
           activeResourceTicket = resourceTicket;
         }
-        if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), plan.limits.maxStepMs, 'step_start'), ref);
-        if (!reconcile && !continuing && resourceTicket && this.deps.resources?.beforeExecute) {
-          resourceTicket = structuredClone(await this.callWriteBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'model_resource_reserve'));
+        if (!reconcile && !continuing) advance(await this.callWriteBounded(() => this.deps.steps.start(ref, structuredClone(lease)), workMs(), 'step_start'), ref);
+        const measuredPreparation = !reconcile && !continuing && resourceTicket?.modelPending === true
+          && typeof this.deps.resources?.beforeExecute === 'function' && typeof this.deps.effects.executePrepared === 'function';
+        if (!reconcile && !continuing && !measuredPreparation && resourceTicket && this.deps.resources?.beforeExecute) {
+          resourceTicket = structuredClone(await this.callBounded(child => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease), child), workMs(), 'model_resource_reserve', signal).catch(error => {
+            if (error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            throw error;
+          }));
           activeResourceTicket = resourceTicket;
         }
-        if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
-        calls++;
+        if (resourceTicket?.modelPending && !measuredPreparation) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+        if (!this.deps.resources) legacyCalls++;
         let result: AiTaskRunnerEffectResult;
         try {
-          const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));
+          // Registration/start and resource accounting can consume the remaining
+          // host budget. Do not mint a fresh millisecond to start a late effect.
+          // Existing interrupted-receipt handling below preserves uncertainty.
+          const remaining = workMs();
           const raw = await this.callBounded(signal => continuing
             ? this.deps.effects.continueConfirmation!(structuredClone(stepPlan), signal, structuredClone(lease), structuredClone(continuation!))
             : reconcile ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
-              : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)),
+              : measuredPreparation ? this.deps.effects.executePrepared!(structuredClone(stepPlan), signal, structuredClone(lease), async () => {
+                resourceTicket = structuredClone(await this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease), signal));
+                activeResourceTicket = resourceTicket;
+                if (resourceTicket.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+              }) : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)),
           Math.min(plan.limits.maxStepMs, remaining, continuing ? continuation!.remainingActiveMs : plan.limits.maxStepMs),
           reconcile ? 'reconcile' : 'execute', signal);
           result = boundedResult(structuredClone(raw), plan.limits.maxOutputBytes - outputBytes);
@@ -398,7 +515,7 @@ export class AiTaskRunner {
           if (recovery || stepPlan.operation !== 'idempotent' || !result.resultRef) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
           const commit = structuredClone(await this.persistResult(ref, structuredClone(lease), result));
           if (commit?.confirmation?.checkpointRef !== result.resultRef || commit.confirmation.stepId !== ref.registered.stepId
-            || commit.confirmation.stepRevision !== ref.registered.stepRevision || commit.taskRevision !== taskRevision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+            || commit.confirmation.stepRevision !== ref.registered.stepRevision || commit.taskRevision !== taskRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation checkpoint acknowledgement requires original receipt');
           // The checkpoint already committed the task pause; the step and its original charges remain open.
           advance(commit);
           activeResourceTicket = undefined;
@@ -423,7 +540,10 @@ export class AiTaskRunner {
         // Cleanup uncertainty is local operational uncertainty. With all
         // steps successful, the existing FSM cannot claim unresolved effects.
         if (cleanupUnavailable) return { status: 'unknown', completedSteps, cleanupFailed };
-        if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
+        const pause = await pauseForInput(ref);
+        if (pause === 'input_limit_reached') return { status: 'unavailable', completedSteps, cleanupFailed,
+          stopReason: 'input_limit_reached', nextAction: 'manual_handoff' };
+        if (pause) return { status: 'paused', completedSteps, cleanupFailed };
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
@@ -441,6 +561,7 @@ export class AiTaskRunner {
         return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed };
+      propagatedError = error;
       throw error;
     } finally {
       // A late persistent commit can still own the original CAS revision.
@@ -449,7 +570,11 @@ export class AiTaskRunner {
         try {
           await this.callBounded(() => this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
             expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken }), 5000, 'release_run');
-        } catch {
+        } catch (error) {
+          // An acknowledged CAS/access refusal cannot release another holder.
+          // Preserve the original failure; lost/late release replies stay unknown.
+          if (propagatedError && error instanceof Error && 'code' in error
+            && (error.code === 'AI_REVISION_CONFLICT' || error.code === 'AI_ACCESS_DENIED')) throw propagatedError;
           throw new AiTaskRunnerError("AI_RESULT_UNKNOWN", "lease release acknowledgement is uncertain");
         }
       }
@@ -466,8 +591,8 @@ export class AiTaskRunner {
     if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
       || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
       || committed.lease.holderId !== lease.holderId || !Number.isSafeInteger(committed.lease.revision)
-      || committed.lease.revision <= lease.revision || committed.lease.fencingToken !== lease.fencingToken) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
-    if (committed.outcomeStatus !== undefined && !['succeeded', 'partially_succeeded', 'cancelled'].includes(committed.outcomeStatus)) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+      || committed.lease.revision <= lease.revision || committed.lease.fencingToken !== lease.fencingToken) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'task outcome acknowledgement requires original receipt');
+    if (committed.outcomeStatus !== undefined && !['succeeded', 'partially_succeeded', 'cancelled'].includes(committed.outcomeStatus)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'task outcome observation is invalid');
     const result: AiTaskRunnerOutcome = committed.outcomeStatus
       ? { status: committed.outcomeStatus, completedSteps: outcome.completedSteps, cleanupFailed: outcome.cleanupFailed } : outcome;
     return { outcome: result, lease: committed.lease, taskRevision: committed.taskRevision };
@@ -503,32 +628,7 @@ export class AiTaskRunner {
   }
 
   private callBounded<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {
-    const controller = new AbortController();
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const clear = () => {
-        this.clock.clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => {
-        if (settled) return;
-        settled = true; clear(); controller.abort();
-        reject(new AiTaskRunnerError('AI_RESULT_UNKNOWN', `${phase} interrupted`));
-      };
-      const timer = this.clock.setTimeout(() => {
-        if (settled) return;
-        settled = true; clear(); controller.abort();
-        reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
-      }, limitMs);
-      signal?.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) { onAbort(); return; }
-      let pending: Promise<T>;
-      try { pending = operation(controller.signal); }
-      catch (error) { settled = true; clear(); reject(error); return; }
-      pending.then(value => { if (!settled) { settled = true; clear(); resolve(value); } }, error => {
-        if (!settled) { settled = true; clear(); reject(error); }
-      });
-    });
+    return callAiTaskRunnerDependency(operation, limitMs, phase, signal, this.clock);
   }
 
   private async cleanupStep(step: AiTaskRunnerStepPlan, limitMs: number): Promise<boolean> {

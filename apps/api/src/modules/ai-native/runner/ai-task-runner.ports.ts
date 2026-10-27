@@ -1,4 +1,4 @@
-import type { AiTaskStatusDraft, AiStepStatusDraft } from "@rental-os/shared";
+import type { AiTaskStatusDraft, AiStepStatusDraft, AiTaskRunnerOutcomeDraft } from "@rental-os/shared";
 import type { Prisma } from '@prisma/client';
 
 export type AiTaskRunnerObservedResult =
@@ -45,6 +45,8 @@ export interface AiTaskRunnerLimits {
   maxStepMs: number;
   maxOutputBytes: number;
   maxConcurrent: number;
+  /** Persistent model invocation ceiling; business steps use maxSteps. The
+   * durable resource gate must reserve each call before Gateway dispatch. */
   maxCalls: number;
 }
 
@@ -149,6 +151,10 @@ export interface AiTaskRunnerPlanPort {
 /** Gateway/Tool adapters live outside this module. No provider SDK or URL is accepted here. */
 export interface AiTaskRunnerEffectPort {
   execute(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
+  /** Runs preparation inside the original durable measured marker, before the
+   * registered effect. Interruption preserves that marker and never retries. */
+  executePrepared?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease,
+    prepare: () => Promise<void>): Promise<AiTaskRunnerEffectResult>;
   continueConfirmation?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease,
     continuation: AiTaskRunnerConfirmationContinuation): Promise<AiTaskRunnerEffectResult>;
   reconcile?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
@@ -182,7 +188,8 @@ export interface AiTaskRunnerClock {
 }
 
 export interface AiTaskRunnerInputPort {
-  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | null>;
+  /** input_limit_reached attests no new question/transition was written. */
+  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | { kind: 'input_limit_reached' } | null>;
 }
 
 export interface AiTaskRunnerDependencies {
@@ -202,9 +209,10 @@ export interface AiTaskRunnerResourceTicket { chargeIds: readonly string[]; mode
 export interface AiTaskRunnerResourcePort {
   open(lease: AiTaskRunnerLease, recovery: boolean): Promise<void>;
   reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
-  /** Bind/reserve model-call resources only after the durable step start,
-   * before any effect. This registers an association, never dispatches. */
-  beforeExecute?(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
+  /** Bind/reserve generation and optional count after durable step start.
+   * An explicit counting consumer may then send only its own budgeted request;
+   * this stage never sends generation or grants business execution. */
+  beforeExecute?(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal): Promise<AiTaskRunnerResourceTicket>;
   record(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, reconcile: boolean): Promise<void>;
   markUnknown(ticket: AiTaskRunnerResourceTicket, lease: AiTaskRunnerLease): Promise<void>;
   recover?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
@@ -214,6 +222,4 @@ export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
   recovery?: boolean;
 }
 
-export type AiTaskRunnerOutcome =
-  | { status: "succeeded" | "partially_succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
-  | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };
+export type AiTaskRunnerOutcome = AiTaskRunnerOutcomeDraft;

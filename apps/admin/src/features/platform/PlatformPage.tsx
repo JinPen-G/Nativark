@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
+import { useServerFormSync } from "@/app/useServerFormSync";
 
 type EditorKind = "organization" | "user" | "role" | undefined;
 
@@ -48,7 +49,7 @@ export function PlatformPage() {
   const rules = useQuery({ queryKey: ["system-rules"], queryFn: api.systemRules });
 
   useEffect(() => setActiveKey(location.pathname.endsWith("/system") ? "parameters" : "users"), [location.pathname]);
-  useEffect(() => { if (rules.data) rulesForm.setFieldsValue(rules.data); }, [rules.data, rulesForm]);
+  const rulesCurrent = useServerFormSync(rulesForm, rules.data, () => { if (rules.data) rulesForm.setFieldsValue(rules.data); });
 
   const refreshPlatform = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ["platform-organizations"] }),
@@ -65,9 +66,12 @@ export function PlatformPage() {
   const saveRole = useMutation({ mutationFn: api.saveRole, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("角色已保存")); }, onError: () => message.error(t("角色保存失败，请检查角色编码和权限")) });
   const deleteRole = useMutation({ mutationFn: api.deleteRole, onSuccess: async () => { await refreshPlatform(); message.success(t("角色已删除")); }, onError: () => message.error(t("角色无法删除，可能是预设角色或仍被账号使用")) });
   const saveRules = useMutation({
-    mutationFn: (config: SystemRulesConfig) => api.saveSystemRuleSection("memberRegister", { ...config, updatedBy: operator }, operator),
+    mutationFn: async (config: SystemRulesConfig) => {
+      if (!rulesCurrent()) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
+      return api.saveSystemRuleSection("memberRegister", { ...config, updatedBy: operator }, operator);
+    },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["system-rules"] }); message.success(t("系统参数已保存")); },
-    onError: () => message.error(t("系统参数保存失败，请检查字段约束"))
+    onError: (error: Error) => message.error(error.message || t("系统参数保存失败，请检查字段约束"))
   });
   const testAi = useMutation({ mutationFn: () => api.testAiConnection(operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["system-rules"] }); message.success(t("AI 连接测试已完成，结果已写入日志")); }, onError: () => message.error(t("AI 连接测试失败")) });
 

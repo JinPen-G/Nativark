@@ -8,7 +8,9 @@ import { Alert, FileUpload, type FileUploadItem } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { ActionButton, Button, ColorPicker, RichTextEditor, SaveButton, Tabs } from "@/components/ui";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useServerFormSync } from "@/app/useServerFormSync";
+import { isTransientRefreshError } from "@/app/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
@@ -58,7 +60,7 @@ function ProfileCard() {
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
   const profile = useQuery({ queryKey: ["client-channel-profile", tenantId], queryFn: clientChannelApi.getProfile, enabled: Boolean(tenantId) });
 
-  useEffect(() => {
+  useServerFormSync(form, profile.data, () => {
     const data = profile.data;
     if (!data) return;
     form.setFieldsValue({
@@ -90,13 +92,13 @@ function ProfileCard() {
       publishedWorkspaceIds: data.publishedWorkspaceIds,
       defaultWorkspaceId: data.defaultWorkspaceId
     });
-  }, [profile.data, form]);
+  });
 
   const save = useMutation({
     meta: { soundFeedback: true },
     mutationFn: (values: ProfileForm) => clientChannelApi.saveProfile({
       ...values,
-      expectedRevision: profile.data?.revision,
+      expectedRevision: form.getFieldValue("expectedRevision"),
       helpFaq: (values.helpFaq ?? []).filter((item) => item?.question?.trim() && item?.answer?.trim())
     }),
     onSuccess: async (data) => {
@@ -112,7 +114,7 @@ function ProfileCard() {
   });
 
   if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><LoadingState /></div>;
-  if (profile.error || !profile.data) return <Alert showIcon type="error" title={t("无法读取客户端渠道配置")} description={t("请刷新重试。")} />;
+  if (!profile.data || profile.error && !isTransientRefreshError(profile.error)) return <Alert showIcon type="error" title={t("无法读取客户端渠道配置")} description={t("请刷新重试。")} />;
 
   const data = profile.data;
   const workspaceOptions = data.workspaces.map((w) => ({ label: `${w.name}（${w.code}）`, value: w.id }));
@@ -251,14 +253,17 @@ function WechatCredentialsCard() {
   const channel = useQuery({ queryKey: ["mini-program-channel"], queryFn: clientChannelApi.getWechat });
   const enabled = Form.useWatch("enabled", form);
 
-  useEffect(() => {
+  const channelCurrent = useServerFormSync(form, channel.data, () => {
     if (!channel.data) return;
     form.setFieldsValue({ appId: channel.data.appId ?? "", appSecret: "", enabled: channel.data.enabled });
-  }, [channel.data, form]);
+  });
 
   const save = useMutation({
     meta: { soundFeedback: true },
-    mutationFn: (values: SaveMiniProgramChannelRequest) => clientChannelApi.saveWechat({ ...values, appSecret: values.appSecret?.trim() || undefined }),
+    mutationFn: async (values: SaveMiniProgramChannelRequest) => {
+      if (!channelCurrent()) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
+      return clientChannelApi.saveWechat({ ...values, appSecret: values.appSecret?.trim() || undefined });
+    },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["mini-program-channel"] }); message.success(t("微信小程序凭证已保存")); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
   });
@@ -311,7 +316,7 @@ function WebsiteProfileCard() {
       : "#0A5CFF";
   const profile = useQuery({ queryKey: ["website-channel-profile"], queryFn: websiteChannelApi.getProfile });
 
-  useEffect(() => {
+  useServerFormSync(form, profile.data, () => {
     const data = profile.data;
     if (!data) return;
     form.setFieldsValue({
@@ -336,7 +341,7 @@ function WebsiteProfileCard() {
       steps: data.steps ?? [],
       testimonials: data.testimonials ?? []
     });
-  }, [profile.data, form]);
+  });
 
   const save = useMutation({
     meta: { soundFeedback: true },
@@ -345,14 +350,14 @@ function WebsiteProfileCard() {
       const categoryImages = Object.entries(categoryImageMap ?? {})
         .map(([code, imageUrl]) => ({ code, imageUrl: (imageUrl ?? "").trim() }))
         .filter((item) => item.imageUrl);
-      return websiteChannelApi.saveProfile({ ...rest, categoryImages, expectedRevision: profile.data?.revision });
+      return websiteChannelApi.saveProfile({ ...rest, categoryImages, expectedRevision: form.getFieldValue("expectedRevision") });
     },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["website-channel-profile"] }); message.success(t("官网渠道配置已保存")); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
   });
 
   if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><LoadingState /></div>;
-  if (profile.error || !profile.data) return <Alert showIcon type="error" title={t("无法读取官网渠道配置")} description={t("请刷新重试。")} />;
+  if (!profile.data || profile.error && !isTransientRefreshError(profile.error)) return <Alert showIcon type="error" title={t("无法读取官网渠道配置")} description={t("请刷新重试。")} />;
 
   const data = profile.data;
 

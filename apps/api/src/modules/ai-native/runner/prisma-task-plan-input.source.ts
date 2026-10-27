@@ -16,7 +16,8 @@ import { aiMembershipCandidateReadInputSchema } from '../membership-candidate-re
 import { aiOpeningReadInputSchema, aiRiskReadInputSchema } from '../tools/diagnostic-read-facts.service';
 import { isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
-import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
+import { aiStepActionId, type AiStepRegistrationAuthority, type AiStepRegistrationCommand,
+  type AiStepOriginalRegistrationGrant } from '../ai-step-registration.repository';
 import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerPlan } from './ai-task-runner.ports';
@@ -153,11 +154,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall() || !['QUEUED', 'RUNNING'].includes(run.status)) throw denied();
   }
 
-  private async input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }) {
+  private async input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }, originalOnly = false) {
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
       || !id.max(36).safeParse(row.id).success || row.toolCode !== this.toolCode || row.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !rev.safeParse(row.policyRevision).success || !id.safeParse(row.registrationRef).success
-      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
+      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || !originalOnly && row.expiresAt <= this.wall()) throw unavailable();
     const payload = await this.parseInput(row.payload);
     if (this.fingerprint(payload) !== row.fingerprint) throw denied();
     return { id: row.id, registrationRef: row.registrationRef, toolCode: row.toolCode, toolVersion: row.toolVersion,
@@ -333,9 +334,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         }
         // Once a plan exists its input set is closed. No late action injection.
         if (await tx.aiTaskRunPlan.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } })) throw conflict();
+        // Inputs bind business steps as well as model steps. Model calls are
+        // reserved by the durable resource gate, not by counting input rows.
         const published = await tx.aiTaskActionInput.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId },
-          take: Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls) + 1 });
-        if (published.length >= Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls)) throw unavailable();
+          take: current.policy.limits.maxSteps + 1 });
+        if (published.length >= current.policy.limits.maxSteps) throw unavailable();
         const changed = await tx.aiTask.updateMany({ where: { ...current.access.where, revision: command.expectedTaskRevision,
           status: 'RUNNING', cancelRequestedAt: null }, data: { revision: command.expectedTaskRevision } });
         if (changed.count !== 1) throw conflict();
@@ -412,6 +415,65 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       identity: identity(current.context), steps: plan.steps, limits: plan.limits, inputs }),
       policyVersion: `scene-policy-${before.policy.revision}`,
       expiresAt: new Date(Math.min(Date.parse(before.policy.expiresAt), ...inputs.map(i => Date.parse(i.expiresAt)))).toISOString() };
+  }
+
+  /** Observe an already registered action under today's independent read
+   * permission. Original plan/input hashes, task owner and held generation
+   * remain mandatory; this proof cannot register or execute anything new. */
+  async resolveOriginal(raw: Readonly<AiStepRegistrationCommand>, tx?: Prisma.TransactionClient): Promise<AiStepOriginalRegistrationGrant> {
+    const command = structuredClone(raw);
+    const context = structuredClone(await this.authorization.resolve(command.taskId, 'read_step_terminal'));
+    const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
+    // Inside the transition transaction the caller's tx is consumed directly:
+    // the transition has already CAS-incremented the run revision, and a
+    // separate snapshot would see the pre-transition lease and falsely deny
+    // the very generation whose result is being committed. Standalone
+    // callers (registration-time revalidation) keep their own
+    // RepeatableRead snapshot.
+    const readView = async (db: Prisma.TransactionClient) => {
+      const task = await db.aiTask.findFirst({ where: access.where });
+      if (!task || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId || task.audience !== access.audience
+        || task.archivedAt !== null) throw denied();
+      // The transition caller consumes its own transaction (whose run CAS has
+      // produced the exact post-CAS revision carried in command.lease) and
+      // this read shares that view. Standalone callers open their own
+      // RepeatableRead snapshot over the committed lease. Either way this
+      // exact revision is the only acceptable one.
+      const run = await db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: command.lease.runId } });
+      if (!run || run.actorKind !== access.actorKind || run.actorId !== access.actorId || run.leaseOwnerId !== command.lease.holderId
+        || run.revision !== command.lease.revision || run.fencingToken.toFixed(0) !== command.lease.fencingToken
+        || run.status !== 'RUNNING' || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()) throw denied();
+      const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
+      const stored = await db.aiTaskRunPlan.findFirst({ where: key });
+      if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== key.runId
+        || !/^[a-f0-9]{64}$/u.test(stored.authorityHash) || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
+      const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
+      const selected = plan.steps.filter(step => step.registrationRef === command.registrationRef);
+      if (plan.taskId !== task.id || plan.runId !== run.id || selected.length !== 1
+        || selected[0].toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      const source = selected[0].toolCode === this.toolCode ? this : this.planSources?.get(selected[0].toolCode as PersistedTaskInputTool);
+      if (!source) throw denied();
+      const input = await source.input(await db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: command.registrationRef } }),
+        { ...key, registrationRef: command.registrationRef }, true);
+      if (stored.policyVersion !== `scene-policy-${input.policyRevision}`) throw denied();
+      const inputRef = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id;
+      const fingerprint = source.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint;
+      const actionId = aiStepActionId(access.scope, task.id, command.registrationRef);
+      const step = await db.aiStep.findFirst({ where: { ...key, actionId, toolCode: source.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
+        inputRef, requestFingerprint: fingerprint } });
+      if (!step || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId || step.actionId !== actionId
+        || step.inputRef !== inputRef || step.requestFingerprint !== fingerprint || step.toolCode !== source.toolCode
+        || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      return { inputRef, fingerprint, planHash: stored.planHash, inputHash: input.fingerprint, stepId: step.id, toolCode: source.toolCode };
+    };
+    const observed = tx ? await readView(tx)
+      : await this.db.$transaction(readView, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        maxWait: 2500, timeout: 5000 });
+    const current = await this.authorization.resolve(command.taskId, 'read_step_terminal');
+    if (identity(current) !== identity(context)) throw denied();
+    return { context: structuredClone(current), registrationAllowed: false, taskId: command.taskId,
+      registrationRef: command.registrationRef, authorizationKey: `original-step-${requestFingerprint(observed)}`,
+      toolCode: observed.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: observed.inputRef, requestFingerprint: observed.fingerprint };
   }
 
   async resolve(raw: Readonly<AiStepRegistrationCommand>) {
@@ -555,7 +617,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         taskId: task.id, registrationRef: row.registrationRef })}`;
       const input = await this.parseInput(structuredClone(row.payload));
       if (step.actionId !== expectedAction || this.fingerprint(input) !== row.fingerprint) throw denied();
-      return { context, input, binding: requestFingerprint({ taskId: task.id, scopeId: task.scopeId,
+      return { context, input, inputRef: row.id, fingerprint: row.fingerprint, registrationRef: row.registrationRef,
+        binding: requestFingerprint({ taskId: task.id, scopeId: task.scopeId,
         runId: step.runId, stepId: step.id, actionId: step.actionId, inputRef: row.id,
         fingerprint: row.fingerprint, toolCode: row.toolCode, toolVersion: row.toolVersion,
         policyRevision: row.policyRevision, registrationRef: row.registrationRef }) };

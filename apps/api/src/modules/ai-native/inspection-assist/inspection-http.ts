@@ -3,15 +3,29 @@ import { HttpException } from '@nestjs/common';
 import { z } from 'zod';
 
 export type InspectionHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
-export async function withInspectionRequestSignal<T>(request: InspectionHttpRequest, work: (signal: AbortSignal) => Promise<T>) {
+export async function withInspectionRequestSignal<T>(request: InspectionHttpRequest, work: (signal: AbortSignal) => Promise<T>, maxWaitMs?: number) {
   const aborter = new AbortController(), abort = () => aborter.abort();
   const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
   if (request?.aborted) abort();
   else if (listens) request.once!('aborted', abort);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let interrupted: (() => void) | undefined;
   try {
     if (aborter.signal.aborted) throw Object.assign(new Error('interrupted'), { code: 'RECONCILIATION_REQUIRED' });
-    return await work(aborter.signal);
-  } finally { if (listens) request.removeListener!('aborted', abort); }
+    if (maxWaitMs === undefined) return await work(aborter.signal);
+    if (!Number.isInteger(maxWaitMs) || maxWaitMs < 1 || maxWaitMs > 120000) throw new Error('invalid server deadline');
+    const cancellation = new Promise<never>((_, reject) => {
+      interrupted = () => reject(Object.assign(new Error('original operation may have committed'), { code: 'RECONCILIATION_REQUIRED' }));
+      aborter.signal.addEventListener('abort', interrupted, { once: true });
+      timer = setTimeout(abort, maxWaitMs);
+    });
+    // Timeout is UNKNOWN, never proof that a database/Core write rolled back.
+    return await Promise.race([Promise.resolve().then(() => work(aborter.signal)), cancellation]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (interrupted) aborter.signal.removeEventListener('abort', interrupted);
+    if (listens) request.removeListener!('aborted', abort);
+  }
 }
 
 export async function respondInspectionHttp<T>(work: () => Promise<T>, nextAction: string) {

@@ -88,7 +88,7 @@ export class ApprovedSettingsTaskAuthority {
     if (identityHash(latest) !== identityHash(context)) throw settingsDenied();
     const taskEvidence = { id: task.id, scopeId: task.scopeId, revision: task.revision, status: task.status, cancelRequestedAt: task.cancelRequestedAt,
       sceneCode: task.sceneCode, sceneVersion: task.sceneVersion, ownerKind: task.ownerKind, ownerId: task.ownerId, audience: task.audience, archivedAt: task.archivedAt };
-    return { context, access, task, scopeId: task.scopeId, actor: { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId },
+    return { context: { ...context, scope: context.scope }, access, task, scopeId: task.scopeId, actor: { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId },
       bindingHash: requestFingerprint(JSON.parse(JSON.stringify({ identity: identityHash(context), task: taskEvidence, policyAndGates }))) };
   }
 

@@ -7,15 +7,27 @@ import { dispatchBindingSchema, dispatchOutcomeSchema, type AdmissionDispatchRep
 import { admissionCallIdSchema, admissionInputSchema, admissionPatchSchema, admissionRecordSchema, admissionScopeSchema, admissionStatusSchema } from './invocation-admission.validation';
 
 const select = {
-  id: true, tenantId: true, workspaceId: true, actorId: true, callId: true, requestHash: true, profileId: true,
+  id: true, scopeKind: true, platformDedupKey: true, tenantId: true, workspaceId: true, actorId: true, callId: true, requestHash: true, profileId: true,
   status: true, dispatchId: true, unknownReason: true, expiresAt: true, admittedAt: true, updatedAt: true, revokedAt: true, completedAt: true
 } satisfies Prisma.AiInvocationAdmissionSelect;
 type Row = Prisma.AiInvocationAdmissionGetPayload<{ select: typeof select }>;
 type Scope = ReturnType<typeof admissionScopeSchema.parse>;
-const filter = (scope: Scope, callId: string): Prisma.AiInvocationAdmissionWhereInput => ({ tenantId: scope.tenantId, workspaceId: scope.workspaceId, callId });
+const filter = (scope: Scope, callId: string): Prisma.AiInvocationAdmissionWhereInput => scope.kind === 'PLATFORM'
+  ? { scopeKind: 'PLATFORM', tenantId: null, workspaceId: null, callId }
+  : { scopeKind: 'WORKSPACE', tenantId: scope.tenantId, workspaceId: scope.workspaceId, callId };
+
+/** Compare a stored admission row's attribution against either scope member:
+ * workspace rows keep tenant/workspace equality; platform rows require the
+ * platform scope kind with null attribution. */
+function attributionMatches(scope: Scope, row: { scopeKind?: string | null; tenantId?: string | null; workspaceId?: string | null }): boolean {
+  return scope.kind === 'PLATFORM'
+    ? row.scopeKind === 'PLATFORM' && row.tenantId == null && row.workspaceId == null
+    : row.scopeKind === 'WORKSPACE' && row.tenantId === scope.tenantId && row.workspaceId === scope.workspaceId;
+}
+
 function record(row: Row, scope: Scope, callId: string): AiInvocationAdmissionRecord {
-  if (row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId || row.callId !== callId) throw new ModelGatewayError('CONFIG_INVALID');
-  const { tenantId: _, workspaceId: __, ...fields } = row;
+  if (!attributionMatches(scope, row) || row.callId !== callId) throw new ModelGatewayError('CONFIG_INVALID');
+  const { tenantId: _, workspaceId: __, scopeKind: ___, platformDedupKey: ____, ...fields } = row;
   const parsed = admissionRecordSchema.safeParse({ ...fields, scope });
   if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
   return parsed.data;
@@ -31,6 +43,11 @@ export class PrismaAdmissionRepository implements AdmissionRepository, Admission
     const parsed = admissionScopeSchema.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     const scope = structuredClone(parsed.data);
+    if (scope.kind === 'PLATFORM') {
+      const row = await db.aiScope.findFirst({ where: { id: scope.id, kind: 'PLATFORM', tenantId: null, workspaceId: null }, select: { id: true, kind: true, tenantId: true, workspaceId: true } });
+      if (!row || row.id !== scope.id || row.kind !== 'PLATFORM' || row.tenantId !== null || row.workspaceId !== null) throw new ModelGatewayError('CONFIG_INVALID');
+      return scope;
+    }
     const row = await db.aiScope.findFirst({ where: { id: scope.id, kind: 'WORKSPACE', tenantId: scope.tenantId, workspaceId: scope.workspaceId }, select: { id: true, kind: true, tenantId: true, workspaceId: true } });
     if (!row || row.id !== scope.id || row.kind !== scope.kind || row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId) throw new ModelGatewayError('CONFIG_INVALID');
     return scope;
@@ -48,7 +65,10 @@ export class PrismaAdmissionRepository implements AdmissionRepository, Admission
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     const input = structuredClone(parsed.data), scope = await this.scope(input.scope);
     const row = await this.prisma.aiInvocationAdmission.create({ data: {
-      id: randomUUID(), tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId: input.actorId,
+      id: randomUUID(), scopeKind: scope.kind === 'PLATFORM' ? 'PLATFORM' : 'WORKSPACE',
+      ...(scope.kind === 'PLATFORM' ? { platformDedupKey: input.callId, tenantId: null, workspaceId: null }
+        : { tenantId: scope.tenantId, workspaceId: scope.workspaceId }),
+      actorId: input.actorId,
       callId: input.callId, requestHash: input.requestHash, profileId: input.profileId ?? null, status: 'admitted', expiresAt: input.expiresAt
     }, select });
     return record(row, scope, input.callId);

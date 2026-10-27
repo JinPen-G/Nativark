@@ -28,6 +28,11 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   kind?: TaskModelKind;
   /** Explicit server scene assembly; policy management still requires its Guard and CAS. */
   planTools?: readonly PersistedTaskInputTool[];
+  /** Recorded hosts only: the in-task counting chain (count the registered
+   * frozen input, publish its trusted bound) wrapped around the invocation
+   * preparation. A calls host omits it and never counts. */
+  inputCounting?: { preparation(inner: import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation):
+    import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation };
 };
 export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & TaskModelCompositionInput) {
   const authorization = composePersistedTaskAuthorization(input);
@@ -56,7 +61,9 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const inputs = new TaskModelGatewayInputSource(input.db, source, authorization.execution, input.runtime,
     input.gatewayScene, input.priceVersion, clock, input.kind);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
-  const invocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
+  const invocations = input.inputCounting
+    ? input.inputCounting.preparation(new PrismaTaskGatewayInvocationPreparation(bindings, inputs))
+    : new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
     new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);
   const commands: AiTaskRunnerRepositoryCommandFactory = {

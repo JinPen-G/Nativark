@@ -10,6 +10,7 @@ import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navig
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { WorkspaceClock } from "./WorkspaceClock";
+import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
 import { Sidebar, SidebarProvider, SidebarHeader, SidebarContent, SidebarFooter, SidebarRail, SidebarTrigger, SidebarInset, SidebarInput, useSidebar } from "./animate-sidebar/runtime/sidebar";
@@ -27,6 +28,12 @@ import "./animate-sidebar/sidebar-adapter.css";
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
+  if (rentalDesktopHost()) {
+    return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
+      <main className="content-canvas">{children}</main>
+      <SubscriptionExpiryFloatingCard />
+    </div>;
+  }
   // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
   return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
     <OperatorProvider><ShellContents>{children}</ShellContents></OperatorProvider>

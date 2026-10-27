@@ -11,7 +11,7 @@ const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native
 const now = new Date('2026-10-06T00:00:00Z');
 function harness() {
   const state = { user: user(), session: true, member: true, policy: true, workspace: 'workspace-a', duringRead: null, duringPolicy: null, queries: [], policyReads: [], deniedTasks: [],
-    rows: [{ id: 'task-a', status: 'UNKNOWN', revision: 1, sceneCode: 'order-explain', sceneVersion: '1', createdAt: now, updatedAt: now, cancelRequestedAt: null }] };
+    rows: [{ id: 'task-a', status: 'WAITING_EXTERNAL', revision: 1, sceneCode: 'order-explain', sceneVersion: '1', createdAt: now, updatedAt: now, cancelRequestedAt: null }] };
   const auth = new AuthService({ getAuthSession: async () => state.session ? { id: 'session-a', userId: state.user.id, audience: 'operator', currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.member ? state.user : undefined, listUserWorkspaces: async () => [] },
     { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-list-secret' : undefined });
@@ -26,9 +26,15 @@ function harness() {
 }
 test('actual AuthService, scope and persisted per-task metadata policy compose owner listing', async () => {
   const h = harness(), result = await h.repository.readPage({ limit: 5 });
-  assert.equal(result.items[0].status, 'unknown'); assert.equal(h.state.queries[0].where.ownerId, 'operator-a');
+  assert.equal(result.items[0].status, 'waiting_external'); assert.equal(h.state.queries[0].where.ownerId, 'operator-a');
   assert.deepEqual(h.state.policyReads[0].scopeId_taskId_operation, { scopeId: 'scope-a', taskId: 'task-a', operation: 'read_metadata' });
   assert.equal(h.state.policyReads.length, 2);
+  // Unknown belongs to a step/outcome, not the persisted Task status enum.
+  const queryCount = h.state.queries.length;
+  await assert.rejects(h.repository.readPage({ status: 'unknown' }), e => e.code === 'AI_INVALID_INPUT');
+  assert.equal(h.state.queries.length, queryCount);
+  h.state.rows[0].status = 'UNKNOWN';
+  await assert.rejects(h.repository.readPage({}), e => e.code === 'AI_STORAGE_UNAVAILABLE');
 });
 for (const [name, change] of Object.entries({ 'missing metadata policy': s => s.policy = false, 'no view permission': s => s.user.permissions = [], 'membership revoked': s => s.member = false, 'session revoked': s => s.session = false, 'SaaS actor': s => s.user.isSaasAdmin = true })) test(`list refuses ${name}`, async () => {
   const h = harness(); change(h.state); await assert.rejects(h.repository.readPage({}), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));

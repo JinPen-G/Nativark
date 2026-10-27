@@ -27,8 +27,7 @@ const mask = (value?: string) => {
  * 两条边界必须守住：
  *   1. **不碰定价链与订单状态机**。本服务只解析并校验主体、返回可固化的快照；
  *      订单侧拿到结果后原样存入既有列，金额计算与状态流转完全不变。
- *      授信额度同理——只存、只读，不参与任何金额判定（额度占用需要与支付/退款联动，
- *      属后续任务；在没有联动设计前先改金额链路会留下对不上的账）。
+ *      授信主档调整与原占用共用行锁，核对敞口但不代写账务流水。
  *   2. **主体一律限定在同一租户内**。四个角色的客户 id 都必须属于当前租户，
  *      经办人也必须是签约主体自己的授权人——否则可以把别人的经办人挂到自己的订单上。
  */
@@ -249,16 +248,6 @@ export class CustomerCorporateService {
     if (!Number.isInteger(input.settlementTermDays) || input.settlementTermDays < 0) {
       throw new BadRequestException("账期天数必须是非负整数");
     }
-    // CORP-SETTLE-01A：不能把主档额度调到已占用+已应收以下，否则已有订单会
-    // 在不产生任何流水的情况下变成“超额度”负账。降额前必须先释放/回款或改为停用。
-    const ledger = await this.prisma.customerCorporateCreditLedger.aggregate({
-      where: { tenantId, customerId },
-      _sum: { reservedDelta: true, receivableDelta: true }
-    });
-    const exposure = new Prisma.Decimal(ledger._sum.reservedDelta ?? 0).plus(ledger._sum.receivableDelta ?? 0);
-    if (new Prisma.Decimal(input.creditLimit).plus("0.005").lt(exposure)) {
-      throw new ConflictException("新的授信额度不能低于当前已占用与应收合计，请先处理存量账务");
-    }
     const data = {
       creditLimit: new Prisma.Decimal(input.creditLimit),
       settlementTermDays: input.settlementTermDays,
@@ -268,26 +257,37 @@ export class CustomerCorporateService {
       approvedBy: operator ?? null,
       approvedAt: new Date()
     };
-    const existing = await this.prisma.customerCorporateCredit.findFirst({ where: { tenantId, customerId } });
-    let row;
-    if (existing) {
-      if (!input.expectedRevision) throw new BadRequestException("调整已有授信必须携带读取时的版本号");
-      const changed = await this.prisma.customerCorporateCredit.updateMany({
-        where: { id: existing.id, revision: input.expectedRevision },
-        data: { ...data, revision: { increment: 1 } }
+    const row = await this.prisma.$transaction(async tx => {
+      // 与新增占用共用主档行锁；ReadCommitted确保等到锁后重新汇总最新流水，
+      // 不能用事务外敞口或编辑revision代替资金并发控制。
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM customer_corporate_credits WHERE tenantId = ${tenantId} AND customerId = ${customerId} FOR UPDATE
+      `);
+      const existing = await tx.customerCorporateCredit.findFirst({ where: { tenantId, customerId } });
+      const ledger = await tx.customerCorporateCreditLedger.aggregate({
+        where: { tenantId, customerId }, _sum: { reservedDelta: true, receivableDelta: true }
       });
-      if (changed.count === 0) throw new ConflictException("授信与账期已被其他人修改，请刷新后重试");
-      row = await this.prisma.customerCorporateCredit.findUniqueOrThrow({ where: { id: existing.id } });
-    } else {
-      try {
-        row = await this.prisma.customerCorporateCredit.create({ data: { tenantId, customerId, ...data } });
-      } catch (error) {
+      const exposure = new Prisma.Decimal(ledger._sum.reservedDelta ?? 0).plus(ledger._sum.receivableDelta ?? 0);
+      if (data.creditLimit.plus("0.005").lt(exposure)) {
+        throw new ConflictException("新的授信额度不能低于当前已占用与应收合计，请先处理存量账务");
+      }
+      if (existing) {
+        if (!input.expectedRevision) throw new BadRequestException("调整已有授信必须携带读取时的版本号");
+        const changed = await tx.customerCorporateCredit.updateMany({
+          where: { id: existing.id, tenantId, customerId, revision: input.expectedRevision },
+          data: { ...data, revision: { increment: 1 } }
+        });
+        if (changed.count === 0) throw new ConflictException("授信与账期已被其他人修改，请刷新后重试");
+        return tx.customerCorporateCredit.findUniqueOrThrow({ where: { id: existing.id } });
+      }
+      try { return await tx.customerCorporateCredit.create({ data: { tenantId, customerId, ...data } }); }
+      catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
           throw new ConflictException("授信记录已由其他人创建，请刷新后重试");
         }
         throw error;
       }
-    }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.toCredit(row);
   }
 

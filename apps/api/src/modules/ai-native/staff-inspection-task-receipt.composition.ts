@@ -8,8 +8,8 @@ import { AiTaskCreationRepository } from './ai-task-creation.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
-import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
-import { inspectionRecognitionMediaKind } from './inspection-assist/inspection-recognition.service';
+import type { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
+import { InspectionActionAuthority } from './inspection-assist/inspection-action.authority';
 import { inspectionId, inspectionTargetSchema } from './inspection-assist/inspection-assist.validation';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { originalIdentityHash } from './task-request/original-request.authority';
@@ -28,11 +28,12 @@ export type StaffInspectionTaskReceiptOptions = { enabled: boolean; scenes: read
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
-/** Current resource/attachment authority -> original metadata receipt only.
+/** Current order read authority -> original metadata receipt only.
  * Original creation provenance comes from the durable owned task, not today's
  * plan/profile/price. No candidate payload, execution grant or task creation.
- * An expired/changed draft still fails its original source validation; this
- * does not weaken file ACL or implement a historical inspection payload reader. */
+ * Draft expiry/edits/removed attachments cannot erase an original task receipt.
+ * No attachment or candidate payload is read, nor is an expired input restored
+ * as execution authority. A missing original draft association still fails closed. */
 export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspectionTaskReceiptDependencies,
   options: StaffInspectionTaskReceiptOptions) {
   const selected = freezeOriginalInput(z.object({ enabled: z.literal(true),
@@ -41,28 +42,43 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
   if (dependencies.db !== dependencies.inspection.db || typeof dependencies.auth?.resolveAccessContext !== 'function') throw unavailable();
   const server = { ...dependencies, inspection: { ...dependencies.inspection } }, clock = server.clock ?? (() => new Date());
   return Object.freeze({
-    async readCreation(request: { headers: { authorization?: unknown } }, value: unknown) {
+    async readCreation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) {
       const parsed = referenceSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const reference = freezeOriginalInput(parsed.data);
       const token = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u).safeParse(request?.headers?.authorization);
       if (!token.success) throw denied();
-      const requestId = randomUUID(), credentials = { current: async () => ({ authorization: token.data,
-        requestId, audience: 'staff' as const }) };
+      let active = true;
+      const requestId = randomUUID(), credentials = { current: async () => {
+        if (!active || signal?.aborted) throw denied();
+        return { authorization: token.data, requestId, audience: 'staff' as const };
+      } };
       return runWithRequestIdentity({}, async () => {
         const scopes = new AiScopeRepository(server.db, new AiTaskCurrentIdentityAuthority(server.auth, credentials, clock), clock);
-        const inspection = new StaffInspectionRequestFactory(server.inspection).open({ headers: { authorization: token.data }, requestId });
+        const resource = new InspectionActionAuthority(server.inspection.guard, credentials);
+        const close = () => { active = false; };
+        signal?.addEventListener('abort', close, { once: true });
         try {
+          if (signal?.aborted) throw denied();
           let originalBinding: string | undefined;
           const resolve = async () => {
             const before = await scopes.resolveCurrent(), context = before.context;
             if (before.scope.kind !== 'WORKSPACE' || context.audience !== 'staff' || context.actor.kind !== 'user') throw denied();
-            if (!inspection.recognition) throw unavailable();
-            // This reads/validates the original frozen metadata and current
-            // evidence binding; it never calls media.resolve or opens bytes.
-            const media = await inspection.recognition.gatewayMedia(reference);
-            const kind = inspectionRecognitionMediaKind(media.input), configured = selected.scenes.find(row => row.kind === kind);
-            if (!configured) throw unavailable();
+            if (typeof server.inspection.db?.aiInspectionDraft?.findFirst !== 'function') throw unavailable();
+            // Query only original association columns, not mutable form values,
+            // attachment metadata/bytes, live template, price or execution plan.
+            const draft = await resource.withAction(reference, 'read', async owner => {
+              if (owner.tenantId !== before.scope.tenantId || owner.workspaceId !== before.scope.workspaceId
+                || context.actor.kind !== 'user' || owner.ownerId !== context.actor.userId || owner.audience !== context.audience) throw denied();
+              const row = await server.inspection.db!.aiInspectionDraft.findFirst({ where: { ...owner, id: reference.draftId,
+                orderId: reference.orderId, allocationId: reference.allocationId, templateId: reference.templateId, stage: reference.stage },
+                select: { id: true, tenantId: true, workspaceId: true, ownerId: true, audience: true,
+                  orderId: true, allocationId: true, templateId: true, stage: true } });
+              if (!row || row.id !== reference.draftId || Object.entries(owner).some(([key, expected]) => row[key as keyof typeof row] !== expected)
+                || row.orderId !== reference.orderId || row.allocationId !== reference.allocationId
+                || row.templateId !== reference.templateId || row.stage !== reference.stage) throw denied();
+              return structuredClone(row);
+            });
             const creationKey = `inspection:${requestFingerprint({ scope: context.scope, actor: context.actor,
               audience: context.audience, draftId: reference.draftId, inputId: reference.inputId })}`;
             const access = aiTaskAccessFromContext(context, creationKey, clock());
@@ -73,26 +89,24 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
               creationKey: true, creationFingerprint: true, inputRef: true, inputRevision: true, inputHash: true, archivedAt: true } }));
             const after = await scopes.resolveCurrent();
             if (after.scope.id !== before.scope.id || originalIdentityHash(after.context) !== originalIdentityHash(context)) throw denied();
-            if (!row) return { state: 'not_observed' as const, creationKey, context: after.context, configured,
-              inputFingerprint: media.input.inputFingerprint };
+            const binding = requestFingerprint({ identity: originalIdentityHash(context), original: row, draft, reference });
+            if (originalBinding !== undefined && originalBinding !== binding) throw denied();
+            originalBinding = binding;
+            if (!row) return { state: 'not_observed' as const, creationKey, context: after.context };
+            const configured = selected.scenes.find(scene => scene.code === row.sceneCode && scene.version === row.sceneVersion);
+            if (!configured) throw unavailable();
             if (row.scopeId !== before.scope.id || row.ownerKind !== access.actorKind || row.ownerId !== access.actorId
               || row.audience !== access.audience || row.creationKey !== creationKey || row.sceneCode !== configured.code
               || row.sceneVersion !== configured.version || row.inputRef !== reference.inputId
               || row.inputRevision !== reference.expectedRevision || row.archivedAt !== null
               || !z.string().regex(/^[a-f0-9]{64}$/u).safeParse(row.inputHash).success
               || !z.string().regex(/^[a-f0-9]{64}$/u).safeParse(row.creationFingerprint).success) throw denied();
-            const binding = requestFingerprint({ identity: originalIdentityHash(context), original: row,
-              reference, frozen: media.input.inputFingerprint, kind });
-            if (originalBinding !== undefined && originalBinding !== binding) throw denied();
-            originalBinding = binding;
-            return { state: 'observed' as const, creationKey, context: after.context, configured, row,
-              inputFingerprint: media.input.inputFingerprint };
+            return { state: 'observed' as const, creationKey, context: after.context, configured, row };
           };
           const original = await resolve();
           if (original.state !== 'observed') {
             const after = await resolve();
-            if (after.state !== original.state || after.creationKey !== original.creationKey
-              || after.inputFingerprint !== original.inputFingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+            if (after.state !== original.state || after.creationKey !== original.creationKey) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
             return freezeOriginalInput({ state: 'not_observed' as const, creationKey: original.creationKey, task: null,
               execution: 'not_attested' as const, retryable: false as const, nextAction: 'read_original_task' as const });
           }
@@ -107,7 +121,7 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
             sceneCode: original.configured.code, inputRef: reference.inputId });
           return freezeOriginalInput({ ...receipt, execution: 'not_attested' as const,
             semantics: 'original_metadata_not_dispatch_or_candidate_evidence' as const });
-        } finally { inspection.close(); }
+        } finally { signal?.removeEventListener('abort', close); close(); }
       });
     }
   });

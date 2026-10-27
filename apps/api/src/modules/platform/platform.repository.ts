@@ -423,9 +423,11 @@ export class PlatformRepository {
       if (!category) {
         throw new BadRequestException("经营品类不存在");
       }
-      const categoryVersion = category.recommendedVersionId
-        ? await tx.rentalCategoryVersion.findUnique({ where: { id: category.recommendedVersionId } })
-        : null;
+      const versionId = input.categoryVersionId ?? category.recommendedVersionId;
+      if (typeof versionId !== "string" || !versionId.trim() || versionId.length > 191) {
+        throw new BadRequestException("必须选择有效的品类发布版本");
+      }
+      const categoryVersion = await tx.rentalCategoryVersion.findUnique({ where: { id: versionId } });
       if (!categoryVersion || categoryVersion.categoryCode !== categoryCode ||
           !["published", "legacy_baseline"].includes(categoryVersion.status)) {
         throw new BadRequestException("经营品类没有可采用的发布版本");
@@ -457,7 +459,7 @@ export class PlatformRepository {
         data: {
           tenantId, workspaceId, toVersionId: categoryVersion.id,
           fromRevision: 0, toRevision: 0, action: "create",
-          actorId: actorId ?? "system", reason: "新建经营空间绑定推荐品类版本"
+          actorId: actorId ?? "system", reason: input.categoryVersionId ? "新建经营空间明确采用品类版本" : "新建经营空间绑定推荐品类版本"
         }
       });
       await onBeforeCommit?.(tx, workspaceId, tenantId);

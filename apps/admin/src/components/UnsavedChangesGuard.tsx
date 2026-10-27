@@ -11,7 +11,13 @@ export function UnsavedChangesGuard({ dirty, busy = false }: { dirty: boolean; b
     if (!dirty && !busy) return;
     const leave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", leave);
-    return () => window.removeEventListener("beforeunload", leave);
+    // Native account/space controls cannot discard a route's draft before the SPA blocker can run.
+    const sessionChange = (event: Event) => event.preventDefault();
+    window.addEventListener("rental-desktop-before-session-change", sessionChange);
+    return () => {
+      window.removeEventListener("beforeunload", leave);
+      window.removeEventListener("rental-desktop-before-session-change", sessionChange);
+    };
   }, [dirty, busy]);
   useEffect(() => {
     // A save completed while navigation was pending: stay on the saved page.

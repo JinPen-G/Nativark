@@ -3,21 +3,40 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AutomationManagementError } from './automation-management.validation';
 import { HumanAutomationPolicyRequestFactory, type HumanAutomationPolicyHttpRequest,
   type HumanAutomationPolicyRequestAction } from './human-automation-policy-request.composition';
+import { withRequestAbort } from '../scenes/request-abort';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS, AI_AUTOMATION_POLICY_HTTP_SCHEMAS } from '@rental-os/shared';
+
+const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(ajv);
+const definitions = JSON.parse(JSON.stringify(AI_AUTOMATION_POLICY_HTTP_SCHEMAS).replaceAll('#/components/schemas/', '#/$defs/'));
+const validators = Object.fromEntries(Object.keys(definitions).map(name => [name,
+  ajv.compile({ $ref: `#/$defs/${name}`, $defs: definitions })]));
 
 @Controller('ai-native/automation/operator/policies')
 export class HumanAutomationPolicyRequestController {
   constructor(@Inject(HumanAutomationPolicyRequestFactory) private readonly requests: HumanAutomationPolicyRequestFactory) {}
 
   private async call(request: HumanAutomationPolicyHttpRequest, action: HumanAutomationPolicyRequestAction, value: unknown) {
-    try { return await this.requests.call(request, action, value); }
+    try {
+      const contract = AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action];
+      if (!validators[contract.request](value)) throw new AutomationManagementError('invalid_input');
+      const result = await withRequestAbort(request, signal => this.requests.call(request, action, value, signal));
+      try { const copy = structuredClone(result); if (validators[contract.response](copy)) return copy; }
+      catch { /* Never serialize a damaged internal policy or grant projection. */ }
+      throw new AutomationManagementError(action === 'prepare' || action === 'commit' ? 'result_unknown' : 'unavailable');
+    }
     catch (error) {
       const reason = error instanceof AutomationManagementError ? error.code
-        : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input' : 'unavailable';
-      const code = reason === 'invalid_input' ? 'AI_INVALID_INPUT' : reason === 'conflict' ? 'AI_REVISION_CONFLICT' : 'AI_RESOURCE_UNAVAILABLE';
+        : error instanceof AiTaskRepositoryError && error.code === 'AI_INVALID_INPUT' ? 'invalid_input'
+          : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN' ? 'result_unknown' : 'unavailable';
+      const code = reason === 'invalid_input' ? 'AI_INVALID_INPUT' : reason === 'conflict' ? 'AI_REVISION_CONFLICT'
+        : reason === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
       throw new HttpException({ code, retryable: false, executionPermission: false, businessActionRequested: false,
         nextAction: action === 'commit' || action === 'operation' ? 'read_original_operation'
           : action === 'read' || action === 'preview' ? 'preview_current_configuration' : 'read_original_preparation' },
-      reason === 'invalid_input' ? 400 : reason === 'conflict' ? 409 : 503);
+      reason === 'invalid_input' ? 400 : reason === 'conflict' || reason === 'result_unknown' ? 409 : 503);
     }
   }
 

@@ -31,6 +31,17 @@ const identity = (value: Record<string, unknown>) => {
   const { requestId: _id, authorizedAt: _at, ...rest } = value;
   return requestFingerprint(rest);
 };
+/** Composition-owned current access port. The default resolves the workspace
+ * operator; the platform composition supplies the explicit SaaS principal.
+ * Either way the owner stays bound to the real current credential. */
+export interface TextProbeOriginalAccessPort {
+  access(): Promise<{ context: import('@rental-os/shared').AiExecutionContext;
+    owner: { scopeId: string; audience: import('@prisma/client').AiAudience; ownerKind: import('@prisma/client').AiActorKind; ownerId: string }; binding: string }>;
+  authorizeManagement?(context: import('@rental-os/shared').AiExecutionContext): Promise<void>;
+  /** Current read permission for immutable original locators only. Never
+   * reused for publication, task creation, policy changes or dispatch. */
+  authorizeHistoricalRead?(context: import('@rental-os/shared').AiExecutionContext): Promise<void>;
+}
 
 /** A failed commit acknowledgement is not evidence that nothing was stored.
  * Re-read the SAME request key; never generate a replacement operation ID. */
@@ -52,9 +63,12 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
     policy: Pick<PrismaTaskPlanPolicyRepository, 'read'>;
     probe: Pick<TextCapabilityProbeApplication, 'prepareCurrent'>;
-    /** Only historical reads use this real current management authority. A
-     * missing port keeps history closed, never substitutes old authorization. */
+    /** Workspace history retains its current management authority. Explicit
+     * platform access can supply a separate historical-read action below. */
     management?: Pick<TenantModelConfigurationAuthority, 'authorize'>;
+    /** Optional composition-owned access port (e.g. the SaaS platform
+     * principal); absent keeps the workspace operator behaviour. */
+    access?: TextProbeOriginalAccessPort;
     /** Trusted server composition, not fields accepted from an HTTP body.
      * The existing Gateway pricing port must validate this version at execution. */
     sceneVersion: string; priceVersion: string;
@@ -65,6 +79,11 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
       input.policy?.read, input.probe?.prepareCurrent].some(method => typeof method !== 'function')) throw unavailable();
   }
   private async access() {
+    if (this.input.access) {
+      const resolved = await this.input.access.access();
+      if (!resolved?.context || !resolved.owner || typeof resolved.binding !== 'string') throw denied();
+      return resolved;
+    }
     const current = structuredClone(await this.input.scopes.resolveCurrent());
     const access = aiTaskAccessFromContext(current.context, 'text-probe-original', this.clock());
     // Configuration plan-policy management is operator-only; no staff or
@@ -130,11 +149,18 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     return row.expiresAt.toISOString();
   }
   private async historicalAccess() {
-    if (typeof this.input.management?.authorize !== 'function') throw unavailable();
     const before = await this.access(), context = before.context;
-    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
-    await this.input.management.authorize({ actorId: context.actor.userId, tenantId: context.scope.tenantId,
-      workspaceId: context.scope.workspaceId }, 'manage');
+    if (context.actor.kind !== 'user' && context.actor.kind !== 'saas_admin') throw denied();
+    if (this.input.access) {
+      const authorize = this.input.access.authorizeHistoricalRead ?? this.input.access.authorizeManagement;
+      if (typeof authorize !== 'function') throw unavailable();
+      await authorize.call(this.input.access, context);
+    } else {
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
+      if (typeof this.input.management?.authorize !== 'function') throw unavailable();
+      await this.input.management.authorize({ actorId: context.actor.userId, tenantId: context.scope.tenantId,
+        workspaceId: context.scope.workspaceId }, 'manage');
+    }
     const after = await this.access();
     if (after.binding !== before.binding || requestFingerprint(after.owner) !== requestFingerprint(before.owner)) throw denied();
     return after;
@@ -159,7 +185,25 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (row.contentHash !== this.hash(binding)) throw unavailable();
     return { context: after.context, owner: after.owner, sceneVersion: row.sceneVersion,
       inputRef: row.id, inputRevision: row.revision, inputHash: row.contentHash, expiresAt: row.expiresAt.toISOString(),
-      command: structuredClone(value.command), preparationHash: value.preparationHash };
+      command: structuredClone(value.command), preparationHash: value.preparationHash, priceVersion: value.priceVersion,
+      sceneCode: TEXT_PROBE_SCENE as 'ai.capability.text', registrationRef: value.registrationRef,
+      limits: structuredClone(value.limits) };
+  }
+  async readHistorical(inputRef: string) {
+    if (!id.max(36).safeParse(inputRef).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.historicalAccess();
+    const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...before.owner, id: inputRef,
+      contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
+    if (!row || row.id !== inputRef) throw unavailable();
+    const original = await this.readHistoricalOriginal(row.requestKey);
+    const after = await this.historicalAccess();
+    if (!original || original.inputRef !== inputRef || after.binding !== before.binding
+      || requestFingerprint(after.owner) !== requestFingerprint(before.owner)
+      || requestFingerprint(original.owner) !== requestFingerprint(before.owner)) throw denied();
+    return { context: original.context, sceneCode: original.sceneCode, sceneVersion: original.sceneVersion,
+      inputRef: original.inputRef, inputRevision: original.inputRevision, inputHash: original.inputHash,
+      command: original.command, registrationRef: original.registrationRef, priceVersion: original.priceVersion,
+      limits: original.limits };
   }
   async readOriginal(requestKey: string) {
     if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

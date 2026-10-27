@@ -17,6 +17,7 @@ import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRep
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -30,6 +31,7 @@ export type TaskOrderHostDependencies = ControlledApprovedOrderDependencies & {
    * after the runner has acquired its real lease. */
   selectedOrder?: { taskId: string; runId: string; read: () => Promise<unknown> };
   monotonic?: () => number;
+  runnerClock?: AiTaskRunnerClock;
 };
 
 export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
@@ -98,14 +100,15 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
       return executor ? { ...executor, phase: 'confirmation' as const } : null;
     } },
     toolCatalog: { resolve: async (code, version) => code === 'rental.order.commit' && version === AI_TOOL_DRAFT_VERSION ? { modelCall: false } : null },
-    wall: input.clock, monotonic: input.monotonic });
+    wall: input.clock, monotonic: input.monotonic, clock: input.runnerClock });
   const recovery = new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks);
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.clock);
   const unavailableInput = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner,
-    recovery, events, host: input.host, prepare, inputs: { submit: unavailableInput, readPending: unavailableInput } });
+    recovery, events, host: input.host, prepare, clock: input.runnerClock, inputs: { submit: unavailableInput, readPending: unavailableInput } });
   return Object.freeze({ orders, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
+      readConfirmationHistory: application.readConfirmationHistory.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application) }) });
 }

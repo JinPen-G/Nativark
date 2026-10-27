@@ -8,11 +8,12 @@ import { draftInput, id, mutationInput, parse } from './knowledge-validation';
 import type { FileUploadSessionSummary } from '@rental-os/shared';
 import type { HumanKnowledgeIndexService } from './human-knowledge-index.service';
 import type { KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
+import type { IncomingMessage } from 'node:http';
 
 export type HumanKnowledgeManagementDependencies = Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'memory'>;
 type PolicyAction = keyof KnowledgePolicyManagementApplication;
 const policyActions: readonly PolicyAction[] = ['prepareTarget', 'target', 'bindTarget', 'read', 'prepare', 'preparation', 'commit', 'operation'];
-export type HumanKnowledgeManagementHttpRequest = { headers: { authorization?: unknown } };
+export type HumanKnowledgeManagementHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanKnowledgeManagementRequest = {
   [K in keyof AiKnowledgeManagementHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeManagementHttpResponsesDraft[K]>;
 } & {
@@ -30,6 +31,8 @@ const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/
 const createInput = z.object({ confirmation: z.literal('create'), command: draftInput }).strict();
 const reviseInput = z.object({ confirmation: z.literal('revise'), expectedRevision: mutationInput.shape.expectedRevision, command: draftInput }).strict();
 const operationInput = z.object({ documentId: id, operationId: id }).strict();
+const indexReference = z.object({ documentId: id, operationId: z.string().min(1).max(191),
+  generation: z.number().int().min(1).max(4294967294) }).strict();
 const commands = {
   parse: z.object({ confirmation: z.literal('parse'), command: mutationInput }).strict(),
   publish: z.object({ confirmation: z.literal('publish'), command: mutationInput }).strict(),
@@ -96,6 +99,28 @@ export class HumanKnowledgeManagementRequestFactory {
       return response(command.operationId, await management[action](command));
     };
     return {
+      findOriginalUpload: value => uploads.findOriginal(value),
+      findOriginalRevisionUpload: value => uploads.findOriginal(value, true),
+      indexRead: async value => {
+        const result = await index.status(parse(z.object({ documentId: id }).strict(), value).documentId);
+        return { ...result, document: publicState(result.document) };
+      },
+      indexRequest: async value => {
+        const input = parse(z.object({ confirmation: z.literal('request_relational_index'),
+          command: mutationInput.extend({ kind: z.enum(['upsert', 'remove']) }).strict() }).strict(), value);
+        return { document: publicState(await index.request(input.command)), semantics: 'relational_index_not_external_index' as const };
+      },
+      indexResume: async value => {
+        const input = parse(z.object({ confirmation: z.literal('resume_original_relational_index'), command: indexReference }).strict(), value);
+        return { document: publicState(await index.resume(input.command)), semantics: 'relational_index_not_external_index' as const };
+      },
+      indexOperationRead: async value => {
+        const result = await index.operationStatus(parse(indexReference, value));
+        // An exact generation observation cannot attest a not-queued receipt;
+        // the original service uses unavailable when that generation is absent.
+        if (result.receipt === 'not_queued') return unavailable();
+        return { ...result, receipt: result.receipt, document: publicState(result.document) };
+      },
       managePolicy: async (action, value) => {
         if (!policyActions.includes(action) || !policyManagement) return unavailable();
         const command = structuredClone(value);

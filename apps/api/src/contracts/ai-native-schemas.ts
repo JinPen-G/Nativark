@@ -2,7 +2,8 @@
  * AIN-C01/C02 草案 schema：只并入 OpenAPI components，不公布可调用 paths。
  * JSON 结构校验不是身份验证、资源授权或业务校验；没有任何执行 handler。
  */
-import { AI_CONTRACT_DRAFT_VERSION, AI_ERROR_CODES, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION } from "@rental-os/shared";
+import { AI_CONTRACT_DRAFT_VERSION, AI_ERROR_CODES, AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION, AI_SCOPE_DRAFT_SCHEMAS } from "@rental-os/shared";
+import { aiLeafToOpenApi30 } from './ai-leaf-openapi';
 import type { AiOperatorAccess, AiToolContractDraft } from "@rental-os/shared";
 import type { SchemaObject } from "./openapi-document";
 
@@ -54,10 +55,7 @@ const toolProperties = {
 } satisfies Record<keyof AiToolContractDraft, SchemaObject>;
 
 export const AI_NATIVE_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
-  AiPlatformScope: closed({ kind: choice("platform") }),
-  AiTenantScope: closed({ kind: choice("tenant"), tenantId: id() }),
-  AiWorkspaceScope: closed({ kind: choice("workspace"), tenantId: id(), workspaceId: id() }),
-  AiExecutionScope: { oneOf: [ref("AiPlatformScope"), ref("AiTenantScope"), ref("AiWorkspaceScope")] },
+  ...Object.fromEntries(Object.entries(AI_SCOPE_DRAFT_SCHEMAS).map(([name, schema]) => [name, aiLeafToOpenApi30(schema, name)])),
   AiLocationScope: {
     oneOf: [
       closed({ mode: choice("all"), locationIds: list(id(), 0, 0) }),

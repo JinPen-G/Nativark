@@ -29,7 +29,7 @@ export function OrderFundingPanel({ order, funding, loading, error, refresh, dep
       values: [["累计冻结", funding.preauthorization.frozen], ["已转扣", funding.preauthorization.captured], ["已释放", funding.preauthorization.released], ["冻结余额", funding.preauthorization.balance], ...(funding.preauthorization.pendingExtensionAmount !== 0 ? [["续租待补", funding.preauthorization.pendingExtensionAmount]] : [])] },
   ];
   return <div className={styles.stack}>
-    <Alert type="warning" showIcon title={t("当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。")} />
+    <Alert type={funding.balanceBasis === "simulated" ? "warning" : "info"} showIcon title={t(funding.balanceBasis === "simulated" ? "以下余额及操作仅用于演练，不代表真实收款、冻结或退款。" : "余额只计实际资金；模拟历史不冲抵实款。实际收退款仍须走原支付或线下确认流程。")} />
     <section aria-label={t("资金账户")}>
       {accounts.map(account => <section key={account.key} className={styles.account} aria-label={t(account.name)}>
         <div><h3 className={styles.accountName}>{t(account.name)}</h3><span className={styles.label}>{t(account.target)} · <OrderMoney value={account.amount} currency={order.currency} /></span></div>
@@ -46,7 +46,8 @@ export function OrderFundingPanel({ order, funding, loading, error, refresh, dep
         { title: t("金额"), dataIndex: "amount", align: "right", render: value => <OrderMoney value={value} currency={order.currency} /> },
         { title: t("事件后余额"), dataIndex: "balanceAfter", align: "right", render: value => <OrderMoney value={value} currency={order.currency} /> },
         { title: t("原因"), dataIndex: "reason" },
-        { title: t("状态"), render: (_, row) => row.action === "fail" ? <span>{t("失败")} · {row.failureCode ?? "—"}</span> : t(row.provider === "mock" ? "模拟成功" : "已记录") },
+        { title: t("来源"), dataIndex: "provider", render: value => t(({ mock: "模拟", offline: "线下确认", alipay: "支付宝", wechat_pay: "微信支付", stripe: "Stripe" } as Record<string, string>)[String(value)] ?? "待核对") },
+        { title: t("状态"), render: (_, row) => row.action === "fail" ? <span>{t("失败")} · {row.failureCode ?? "—"}</span> : t(row.provider === "mock" ? "模拟记录" : "已记录") },
       ]} />
       <p className={styles.note}>{t("按发生时间倒序；押金和预授权仅在抵扣或转扣后计入已付。")}</p>
     </ListSection>

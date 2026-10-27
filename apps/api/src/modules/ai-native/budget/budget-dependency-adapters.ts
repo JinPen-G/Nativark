@@ -1,5 +1,5 @@
 import type { AiExecutionContext } from '@rental-os/shared';
-import { BudgetError, type BudgetAction, type BudgetAuthority, type BudgetGrant, type BudgetPolicyKey, type BudgetRecord, type BudgetUsageEvidence } from './budget.ports';
+import { BudgetError, isOriginalBudgetLifecycleAction, type BudgetAction, type BudgetAuthority, type BudgetGrant, type BudgetPolicyKey, type BudgetRecord, type BudgetUsageEvidence } from './budget.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import { quantityAtoms } from './budget-quantity';
@@ -43,6 +43,9 @@ export class ServerBudgetAuthorityAdapter implements BudgetAuthority {
   }
   async resolve(action: BudgetAction, resource: Readonly<{ association?: unknown; reservationId?: string; policy?: BudgetPolicyKey }>): Promise<BudgetGrant> {
     const snapshot = structuredClone(resource);
+    const original = isOriginalBudgetLifecycleAction(action);
+    if (original && (!snapshot.association || typeof snapshot.reservationId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(snapshot.reservationId))) throw new BudgetError('FORBIDDEN');
     const context = structuredClone(await this.source.resolveContext());
     const identity = (value: AiExecutionContext) => {
       if (!isAiStepExecutionContext(value)) throw new BudgetError('FORBIDDEN');
@@ -52,12 +55,16 @@ export class ServerBudgetAuthorityAdapter implements BudgetAuthority {
     const initial = identity(context);
     const grant = structuredClone(await this.source.authorize(action, structuredClone(context), structuredClone(snapshot)));
     const entitlement = structuredClone(await this.entitlements.check(structuredClone(context), this.featureCode));
-    if (entitlement?.available !== true || !Number.isSafeInteger(entitlement.revision) || entitlement.revision < 1
+    if (typeof entitlement?.available !== 'boolean' || !original && !entitlement.available
+      || !Number.isSafeInteger(entitlement.revision) || entitlement.revision < 1
       || !grant || typeof grant.authorizationKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/.test(grant.authorizationKey)
       || !(grant.expiresAt instanceof Date) || !Number.isFinite(grant.expiresAt.getTime())) throw new BudgetError('FORBIDDEN');
     if (identity(await this.source.resolveContext()) !== initial) throw new BudgetError('FORBIDDEN');
-    return { context, authorizationKey: requestFingerprint({ key: grant.authorizationKey, feature: this.featureCode, entitlementRevision: entitlement.revision }),
-      expiresAt: new Date(grant.expiresAt), entitled: true };
+    // A withdrawn new-use entitlement does not undo an existing dispatch or its
+    // debt. Retain the actual false value; never fabricate a commercial grant.
+    return { context, authorizationKey: requestFingerprint({ key: grant.authorizationKey, feature: this.featureCode,
+      entitlementRevision: entitlement.revision, entitled: entitlement.available }),
+      expiresAt: new Date(grant.expiresAt), entitled: entitlement.available };
   }
 }
 

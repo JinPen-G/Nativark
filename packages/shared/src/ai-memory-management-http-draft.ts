@@ -39,7 +39,7 @@ export type AiMemoryManagementResponsesDraft = {
     nextStep: 'reconcile_recorded_operation' | 'reconcile_same_operation'; absenceSemantics: 'no_receipt_is_not_proof_of_non_execution' };
 };
 export type AiMemoryManagementErrorDraft = { code: 'AI_INVALID_INPUT' | 'AI_REVISION_CONFLICT' | 'AI_NOT_READY' | 'AI_RESULT_UNKNOWN' | 'AI_RESOURCE_UNAVAILABLE';
-  retryable: false; nextAction: 'read_original_memory_operation' };
+  retryable: false; nextAction: 'read_original_memory_operation' | 'read_current_memory_state' };
 const id = (): AiLeafSchemaDraft => ({ type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' });
 const operationId = (): AiLeafSchemaDraft => ({ ...id(), maxLength: 110 });
 const revision = int(1, 4294967293), status = choice('proposed', 'confirmed', 'deleted');
@@ -70,5 +70,5 @@ export const AI_MEMORY_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiMemoryManagementConfirmationResponseDraft: obj({ memoryId: id(), operationId: operationId(), status: choice('not_created', 'confirmation_saved', 'confirmed', 'invalidated', 'unknown'), confirmationRecordId: id() }, ['memoryId', 'operationId', 'status']),
   AiMemoryManagementOperationResponseDraft: obj({ memoryId: id(), operationId: operationId(), requestedOperation: choice('propose', 'modify', 'confirm', 'revoke', 'delete'), receipt: choice('recorded', 'unknown'), binding: choice('key_only_not_command_attestation'),
     current: obj({ status, revision: int(1, 4294967294), expiresAt: time }), nextStep: choice('reconcile_recorded_operation', 'reconcile_same_operation'), absenceSemantics: choice('no_receipt_is_not_proof_of_non_execution') }),
-  AiMemoryManagementErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_REVISION_CONFLICT', 'AI_NOT_READY', 'AI_RESULT_UNKNOWN', 'AI_RESOURCE_UNAVAILABLE'), retryable: { type: 'boolean', const: false }, nextAction: choice('read_original_memory_operation') }),
+  AiMemoryManagementErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_REVISION_CONFLICT', 'AI_NOT_READY', 'AI_RESULT_UNKNOWN', 'AI_RESOURCE_UNAVAILABLE'), retryable: { type: 'boolean', const: false }, nextAction: choice('read_original_memory_operation', 'read_current_memory_state') }),
 };

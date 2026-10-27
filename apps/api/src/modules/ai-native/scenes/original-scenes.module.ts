@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOriginalOrderReadHttpModule } from './original-order-read-http.module';
+import { AiOriginalTaskAccountingHttpModule } from './original-task-accounting-http.module';
 import { AiSettingsTaskHttpModule } from './settings-task-http.module';
 import { AiHumanQuoteSelectionModule } from '../task-request/human-quote-selection.module';
 import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
@@ -15,7 +16,7 @@ import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesControl
   AI_ORIGINAL_OPENING_READ_TASK_REQUESTS, AiOriginalOpeningReadTaskController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
-  composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
+  composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundPersistedOriginalOrderRead, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
   type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection,
   composeRequestBoundSettingsBusinessTask } from './request-bound-scenes.application';
@@ -35,6 +36,10 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Mount separately from model execution. No production/root activation. */
+  static registerHttpAccounting(dependencies?: RequestBoundOriginalSceneDependencies, options?: AiSceneRequestOptions): DynamicModule {
+    return AiOriginalTaskAccountingHttpModule.register(dependencies, options);
+  }
   /** Explicit transport for the same original read host. The host must not
    * also register a model driver for these runs; no root activation here. */
   static registerHttpOpeningReadTask(
@@ -90,7 +95,8 @@ export class AiOriginalScenesModule {
     const model = this.registerHttpPersistedModel(dependencies, options);
     const human = AiHumanQuoteSelectionModule.registerHttpTask(business.dependencies,
       { enabled: options.enabled, audience: options.audience }, business.task, business.reprepare);
-    const serverDependencies = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const serverDependencies = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const serverOptions = { ...options, host: structuredClone(options.host) }, serverBusiness = { ...business.dependencies };
     return { ...model, imports: [...(model.imports ?? []), human],
       providers: [...(model.providers ?? []), { provide: AI_CLARIFIED_QUOTE_SELECTION_REQUESTS,
@@ -110,17 +116,11 @@ export class AiOriginalScenesModule {
     }): DynamicModule {
     if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const registered = this.registerPersistedRequestModel(dependencies, options);
-    const server = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const server = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const selected = { ...options, host: structuredClone(options.host) };
-    return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS, useFactory: () => {
-      const app = composeRequestBoundPersistedOriginalSceneModel(server, selected);
-      return Object.freeze({ ...app, readAnswer: app.readOrderReadChainAnswer,
-        readModelResult: app.readOrderReadChainModelResult, reopenModelSource: app.reopenOrderReadChainSource,
-        readTakeoverReceipt: app.readOrderReadChainTakeoverReceipt,
-        readCancellationReceipt: app.readOrderReadChainCancellationReceipt,
-        settleUnstartedCancellation: app.settleOrderReadChainUnstartedCancellation,
-        readCancellationSettlementReceipt: app.readOrderReadChainCancellationSettlementReceipt });
-    } }],
+    return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS,
+      useFactory: () => composeRequestBoundPersistedOriginalOrderRead(server, selected) }],
       exports: [AI_ORIGINAL_ORDER_READ_REQUESTS] };
   }
   /** Gateway-free recovery host. Use instead of, not alongside, HTTP model
@@ -174,7 +174,8 @@ export class AiOriginalScenesModule {
    * full task-center controller, which also requires business-only readers. */
   static registerPersistedRequestModel(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
     options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]): DynamicModule {
-    const server = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const server = { ...dependencies, gateway: { ...dependencies.gateway,
+      ...(dependencies.gateway.adapters === undefined ? {} : { adapters: [...dependencies.gateway.adapters] }) } };
     const selected = { ...options, host: structuredClone(options.host) };
     return { module: AiOriginalScenesModule,
       providers: [{ provide: AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,

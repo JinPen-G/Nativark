@@ -1,8 +1,19 @@
-import type { RentalFulfillmentMode, RENTAL_PRICING_UNIT_CODES } from './core';
+import type { RentalFulfillmentMode, RentalOrderExtensionRequest, RENTAL_PRICING_UNIT_CODES } from './core';
 import type { AiTaskStatusDraft, AiStepStateDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
 import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import type { AiTaskInputSubmissionDraft, AiTaskInputReceiptReferenceDraft } from './ai-task-input-draft';
+
+/** Reopen an existing answer by payload or exact receipt key, never both.
+ * Reference recovery reads the stored binding; it cannot submit a new answer. */
+export type AiSceneModelAnswerQueryDraft = { original: { draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION; inputRef: string } } & (
+  { submission: AiTaskInputSubmissionDraft; reference?: never } |
+  { reference: AiTaskInputReceiptReferenceDraft; submission?: never });
+/** Human confirmation of the final reviewed parameters, not order approval. */
+export type AiSceneModelQuoteConfirmDraft = AiSceneModelAnswerQueryDraft & {
+  selectionRevision: string; inputFingerprint: string; confirmQuote: true;
+};
 
 export const AI_SCENE_REQUEST_DRAFT_VERSION = 'ain-scene-request-draft-1' as const;
 export const AI_SCENE_REQUEST_MAX_BYTES = 32768;
@@ -12,6 +23,9 @@ export interface AiSceneQuoteCandidate {
   customerType: 'personal' | 'corporate';
   customerId?: string;
   customerName?: string;
+  bookingIdentity?: { bookingIdentity: 'personal' } | { bookingIdentity: 'enterprise_employee';
+    corporateCustomerId?: string; enterpriseContractAndPayer?: boolean };
+  deliveryAddressId?: string;
   items?: Array<{ productName?: string; itemGroupId?: string; quantity: number; pricingUnit?: typeof RENTAL_PRICING_UNIT_CODES[number]; usageQuantity?: number }>;
   start?: string;
   end?: string;
@@ -35,6 +49,12 @@ export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
 }
+/** Explicit current preview for the order selected by the stored original
+ * next-steps request. No caller order/actor/scope, amount or execution grant. */
+export interface AiSceneOrderExtensionPreviewDraft extends AiSceneRequestReadDraft {
+  expectedOrderVersion: string;
+  extension: RentalOrderExtensionRequest;
+}
 /** Reopen only a readiness section selected by the original request. This is
  * a current authorized observation, not a URL or historical configuration. */
 export interface AiSceneOpeningModelSourceReadDraft {
@@ -45,19 +65,69 @@ export interface AiSceneOpeningModelSourceReadDraft {
 export interface AiSceneTaskUsageReadDraft {
   original: AiSceneRequestReadDraft; taskId?: string; limit: number; after?: string;
 }
+/** Current authorized observation of one original invocation, not a new call,
+ * arbitrary reservation selector or an assertion of zero consumption. */
+export interface AiOriginalTaskAccountingRequestDraft {
+  original: AiSceneRequestReadDraft;
+  callId: string;
+}
+/** Observe the exact recovery event, independently of current balance. */
+export interface AiOriginalTaskAccountingOperationRequestDraft extends AiOriginalTaskAccountingRequestDraft {
+  operation: 'releaseUnsent' | 'reconcile';
+}
+export interface AiOriginalTaskAccountingOperationResponseDraft extends AiOriginalTaskAccountingOperationRequestDraft {
+  taskId: string; reservationId: string; status: 'observed' | 'not_observed';
+  execution: 'read_only_no_dispatch_or_release'; automaticRetry: false;
+  semantics: 'original_accounting_operation_not_current_balance';
+}
+export interface AiTaskBudgetUsageRecordDraft {
+  invocationId: string; callId: string; accounting: 'recorded'; reservationId: string;
+  sceneCode: string; runId: string; stepId: string; revision: number; observedVersionAt: string;
+  status: Exclude<AiUsageRecordDraft['status'], 'estimated'>;
+  reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null; budgetDispatchMarked: boolean;
+  modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI' } | { mode: 'tenant_managed'; model: string };
+}
+export interface AiOriginalTaskAccountingResponseDraft {
+  draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
+  original: AiSceneRequestReadDraft; taskId: string; record: AiTaskBudgetUsageRecordDraft;
+  accounting: 'observed' | 'original_operation_only'; execution: 'not_invoked'; automaticRetry: false;
+  businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
+}
 export interface AiTaskBudgetUsagePageDraft {
   taskId: string;
   items: Array<{ invocationId: string; callId: string } & (
     | { accounting: 'not_recorded' }
-    | { accounting: 'recorded'; reservationId: string; sceneCode: string; runId: string; stepId: string;
-        revision: number; observedVersionAt: string; status: Exclude<AiUsageRecordDraft['status'], 'estimated'>;
-        reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null; budgetDispatchMarked: boolean;
-        modelPolicy: { mode: 'platform_managed'; serviceName: 'Rental OS AI' } | { mode: 'tenant_managed'; model: string } }
+    | AiTaskBudgetUsageRecordDraft
   )>;
   nextAfter: string | null; observedAt: string; coverage: 'page_not_total'; totals: 'not_computed';
+  /** Integer atoms from this visible page only, not task totals or a provider
+   * invoice. Money uses micro-units; currencies and units never coalesce. */
+  pageAmounts?: {
+    coverage: 'visible_page_only'; basis: 'persisted_budget_records_not_provider_invoice';
+    recordedCount: number; notRecordedCount: number;
+    groups: Array<({ unit: 'money'; currency: string; scale: 6 } | { unit: 'tokens' | 'calls'; currency: null; scale: 0 }) & {
+      reservedAtoms: string; pendingAtoms: string; settledAtoms: string;
+      releasedReservationAtoms: string; settledExcessAtoms: string;
+    }>;
+  };
   consistency: 'revalidated_reads_not_atomic_snapshot'; absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
   businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
 }
+/** All registered calls within a fixed observation bound. Unrecorded calls
+ * prevent a complete accounting total; this never certifies a provider bill. */
+export type AiTaskBudgetUsageSummaryDraft = {
+  taskId: string; observedAt: string; invocationLimit: 50;
+  consistency: 'revalidated_reads_not_atomic_snapshot';
+  execution: 'read_only_no_dispatch_or_release';
+  basis: 'persisted_budget_records_not_provider_invoice';
+  absenceSemantics: 'no_record_is_not_proof_of_no_consumption';
+  businessExecution: 'not_inferred_from_usage'; admission: 'not_granted';
+} & (
+  | { state: 'limit_exceeded'; coverage: 'not_computed' }
+  | { state: 'observed'; coverage: 'all_registered_invocations'; invocationCount: number;
+    recordedCount: number; notRecordedCount: number; accountingComplete: boolean;
+    groups: NonNullable<AiTaskBudgetUsagePageDraft['pageAmounts']>['groups'] }
+);
 /** Explicit same-owner recovery takeover. Revisions describe an observed
  * original run; they are not permission or a caller-selected worker lease. */
 export interface AiSceneModelTakeoverDraft {
@@ -153,11 +223,38 @@ export interface AiSceneRecoveryStepDraft {
   resultAvailable: boolean;
   nextAction: 'reconcile_original_action' | 'read_authorized_result' | 'runner_owned';
 }
+export interface AiSceneCreatedTaskDraft { taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean }
+export type AiSceneRequestCreationResponseDraft = { receipt: AiSceneRequestReceiptDraft; model: 'not_called' } & (
+  | { stage: 'existing_request'; task: AiSceneTaskReceiptDraft }
+  | { stage: 'task_metadata_created'; task: AiSceneCreatedTaskDraft; plan: 'not_started' }
+  | { stage: 'request_stored'; creation: { retryable: false } & (
+      | { code: 'AI_STORAGE_UNAVAILABLE'; state: 'requires_reconciliation' }
+      | { code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT'; state: 'blocked' }) });
+export interface AiSceneRequestReadResponseDraft { receipt: AiSceneRequestReceiptDraft; request: AiSceneRequestBody }
+export type AiSceneRequestReconcileResponseDraft = { state: 'not_observed'; retryable: false }
+  | { state: 'observed'; receipt: AiSceneRequestReceiptDraft; task: AiSceneTaskReceiptDraft };
+export type AiSceneRequestRecoveryDraft =
+  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'not_observed' }>; nextAction: 'reconcile_request_or_explicit_create_task'; automaticExecution: false }
+  | { task: Extract<AiSceneTaskReceiptDraft, { state: 'observed' }>; steps: AiSceneRecoveryStepDraft[]; hasMore: boolean; automaticExecution: false;
+      nextAction: 'host_plan_handoff' | 'existing_runner_recovery'; observedResults: 'preserved_even_if_task_cancelled'; snapshot: 'bounded_sequential_read' };
+/** Original request/Task metadata only, not dispatch or business execution.
+ * Status 201 preserves the existing Nest POST transport, including its reads. */
+export const AI_SCENE_REQUEST_HTTP_CONTRACTS = Object.freeze({
+  create: { request: 'AiSceneRequestCreateDraft', response: 'AiSceneRequestCreationResponseDraft', successStatus: 201 },
+  reissue: { request: 'AiSceneRequestReissueDraft', response: 'AiSceneRequestCreationResponseDraft', successStatus: 201 },
+  read: { request: 'AiSceneRequestReadDraft', response: 'AiSceneRequestReadResponseDraft', successStatus: 201 },
+  reconcile: { request: 'AiSceneRequestCreateDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
+  reconcileReissue: { request: 'AiSceneRequestReissueDraft', response: 'AiSceneRequestReconcileResponseDraft', successStatus: 201 },
+  createTask: { request: 'AiSceneRequestReadDraft', response: 'AiSceneCreatedTaskDraft', successStatus: 201 },
+  material: { request: 'AiSceneRequestReadDraft', response: 'AiSceneTaskMaterialResponseDraft', successStatus: 201 },
+  recovery: { request: 'AiSceneRequestReadDraft', response: 'AiSceneRequestRecoveryDraft', successStatus: 201 }
+} as const);
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
-  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare'
+  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare',
+  previewOrderExtension: 'order-extension-preview', queryOrders: 'order-candidates/read'
 } as const);
 /** Owner-only operator policy management; never execution or business approval. */
 export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({
@@ -172,7 +269,7 @@ export const AI_SCENE_PLAN_POLICY_HTTP_DRAFT = Object.freeze({
  * submission contract; callers never supply leases, prompts or model settings. */
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
-  start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
+  start: 'start', readInput: 'input', refreshInput: 'input/refresh', submitAnswer: 'input/submit', resume: 'resume', reconcile: 'reconcile',
   readExecution: 'execution', readRecoverySnapshot: 'execution/snapshot', recover: 'recover', takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt',
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
@@ -182,7 +279,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   settleReleasedInputCancellation: 'cancel/settle-input-wait',
   readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
   reopenOpeningModelSource: 'source/opening-section',
-  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
+  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskPerformance: 'performance', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
   createSettingsTask: 'settings/create-task', readSettingsTaskCreation: 'settings/create-task/receipt',
   readCurrentSettings: 'settings/current', prepareOriginalSettingsChange: 'settings/change/prepare',
@@ -191,12 +288,37 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   readOriginalSettingsConfirmation: 'settings/original/confirmation',
   readOriginalSettingsResult: 'settings/original/result',
   readSettingsTaskPolicy: 'settings/task-policy/read', configureSettingsTaskPolicy: 'settings/task-policy/configure',
+  readSettingsTaskPolicyOperation: 'settings/task-policy/operation',
   clearSettingsTaskPolicy: 'settings/task-policy/clear', startOriginalSettingsTask: 'settings/start-original',
   requestOriginalSettingsCancellation: 'settings/original/cancel', readOriginalSettingsCancellation: 'settings/original/cancel/receipt',
   settleUnstartedSettingsCancellation: 'settings/original/cancel/settle-unstarted',
   readOriginalSettingsCancellationSettlement: 'settings/original/cancel/settlement-receipt',
   decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
+} as const);
+
+/** Original model observations reuse the same metadata/event wire contracts
+ * as the task center. A list or event cursor is never execution authority. */
+export const AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS = Object.freeze({
+  readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft', successStatus: 200 },
+  readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft', successStatus: 200 },
+  readModelResult: { request: 'AiSceneModelResultReadDraft', response: 'AiSceneModelResultObservationDraft', successStatus: 200 },
+  readTaskScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft', successStatus: 200 }
+} as const);
+
+/** Separate opt-in accounting host. No model/runner routes are registered,
+ * and no transport action may select a tenant, actor or current model price. */
+export const AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/accounting`, method: 'POST',
+  read: 'read', releaseUnsent: 'release-unsent', reconcile: 'reconcile', readOperation: 'operation'
+} as const);
+
+/** Opening diagnosis model actions reuse original-reference/run contracts.
+ * Configuration writes and approvals remain on their existing independent host. */
+export const AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/opening-model`, method: 'POST',
+  start: 'start', recover: 'recover', reconcile: 'reconcile', takeover: 'takeover',
+  requestCancel: 'cancel', readExecution: 'execution'
 } as const);
 
 /** Explicit original opening READ host, not model execution or production

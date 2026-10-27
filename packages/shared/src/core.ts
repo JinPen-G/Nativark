@@ -948,6 +948,8 @@ export interface CreateBusinessWorkspaceRequest {
   code: string;
   name: string;
   categoryCode: RentalCategoryCode;
+  /** 明确采用的发布版本；省略才使用默认推荐，资格始终由服务端复核。 */
+  categoryVersionId?: string;
   /** 缺省为 `development`；只有显式转正且全部品类必选能力齐备时才进入正式经营。 */
   runMode?: BusinessWorkspaceRunMode;
 }
@@ -2193,6 +2195,16 @@ export interface RentalMembershipSnapshot {
   corporateCustomerName?: string;
   corporateMembershipId?: string;
   enterpriseContractAndPayer: boolean;
+  /** 仅由订单确认事务冻结；缺失的旧单须核对原账，不用当前主档补写历史。 */
+  settlement?: {
+    mode: "per_order" | "credit";
+    payerCustomerId: string;
+    currency: string;
+    billingCycle: "monthly" | "semi_monthly" | "per_order";
+    creditId?: string;
+    creditRevision?: number;
+    confirmedAt: string;
+  };
   benefitSource: "personal" | "corporate";
   personalPlan?: CustomerMembershipPlanAssignment;
   corporatePlan?: CustomerMembershipPlanAssignment;
@@ -2261,6 +2273,26 @@ export interface CustomerCorporateCreditLedgerEntry {
   operator?: string;
   occurredAt: string;
   createdAt: string;
+}
+
+/** 财务按原合同/账单核定一笔企业债权到期日，不由程序推算账期。 */
+export interface RecordCustomerCorporateCreditMaturityRequest {
+  ledgerId: string;
+  dueAt: string;
+  basisRef: string;
+  reason: string;
+  idempotencyKey: string;
+}
+export interface CustomerCorporateCreditMaturityReceipt {
+  ledgerId: string;
+  orderId: string;
+  currency: string;
+  dueAt: string;
+  basisRef: string;
+  reason: string;
+  idempotencyKey: string;
+  recordedBy: string;
+  recordedAt: string;
 }
 
 /** CORP-SETTLE-01A：企业账期回款登记。 */
@@ -3845,9 +3877,8 @@ export interface RentalSecurityReduction {
 }
 
 /**
- * RULE-01B：模拟资金事件（需求 4.4.7 line 527、4.6.3）。押金与预授权的每一次
- * 发起、追加、抵扣、退款、释放、失败都是一条**独立、只追加**的资金事件，
- * 不得通过修改原报价明细表达。未接真实支付供应商前 provider 恒为明确标记的 mock。
+ * 资金事件只追加，不通过修改原报价明细表达。mock 是模拟，offline 是原授权下已确认
+ * 的线下收款，线上来源由支付运行器核验；这些来源不能混作同一笔实款。
  */
 export type RentalFundingInstrument = "deposit" | "preauthorization" | "rental";
 
@@ -3867,8 +3898,8 @@ export interface RentalFundingEvent {
   amount: number;
   /** 该 instrument 在本事件后的余额（押金实收余额 / 预授权冻结余额）。由服务端结算。 */
   balanceAfter: number;
-  /** mock 或已验签的真实支付提供方；普通收款不能冒充预授权。 */
-  provider: "mock" | "alipay" | "wechat_pay" | "stripe";
+  /** 服务端核对的资金来源；旧 mock 只有关联原线下确认记录才可投影为 offline。 */
+  provider: "mock" | "offline" | "alipay" | "wechat_pay" | "stripe";
   /** 线下人工收退款的实际方式；预授权转扣/释放等内部资金动作不填。 */
   paymentMethod?: RentalOfflinePaymentMethod;
   /** 幂等键：同一 (order, instrument, action, idempotencyKey) 重复提交只落一条。 */
@@ -3920,7 +3951,11 @@ export interface RentalFundingFailureRequest {
 
 export interface RentalFundingBalance {
   orderId: string;
-  /** 模拟收付款账；保证金只有实际抵扣后才计入已付，退款减少净收款。due 为当前待收（含待补款续租，已下限 0），由服务端计算，客户端与门面统一读取，勿再自行推导。 */
+  /** 本次余额的证据口径，未混入另一类事件；events 仍保留全部历史。 */
+  balanceBasis: "real" | "simulated";
+  /** 仅服务端确认的纯演练订单可用；不是客户端写入授权。 */
+  simulationAllowed: boolean;
+  /** 保证金只有实际抵扣后才计入已付，退款减少净收款。due 为当前待收（含待补款续租，已下限 0），由服务端计算，客户端与门面统一读取，勿再自行推导。 */
   rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number; due: number };
   /** pendingExtensionAmount 是尚未生效续租申请带来的新增资金要求；due 为当前待收押金（requiredAmount - collected，已下限 0），服务端计算。 */
   deposit: { collected: number; captured: number; refunded: number; balance: number; requiredAmount: number; pendingExtensionAmount: number; due: number };

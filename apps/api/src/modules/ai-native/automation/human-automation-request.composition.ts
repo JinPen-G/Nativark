@@ -12,14 +12,16 @@ import { composeAutomationFailureTasks, type AutomationDependencies } from './au
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';
 import { HumanAutomationReviewQueueService } from './human-automation-review-queue.service';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import type { IncomingMessage } from 'node:http';
 
-export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } };
+export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock'> & {
   /** Server configuration, never selected by the HTTP body. History reads need no active policy. */
   automation?: Pick<AutomationDependencies, 'policyId' | 'subscriptions'>;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
-  | 'prepareInput' | 'readInput' | 'createTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue';
+  | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue';
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const eventInput = z.object({ eventId: z.string().uuid() }).strict();
 const unavailable = () => new AutomationError('unavailable');
@@ -45,14 +47,22 @@ export class HumanAutomationRequestFactory {
 
   /** The controller supplies the audience as a literal. No credentials or service
    * graph survive the request; an ambient ALS identity is never an authority. */
-  async call(request: HumanAutomationHttpRequest, audience: 'operator' | 'staff', action: HumanAutomationRequestAction, value: unknown) {
+  async call(request: HumanAutomationHttpRequest, audience: 'operator' | 'staff', action: HumanAutomationRequestAction, value: unknown, signal?: AbortSignal) {
     const header = bearer.safeParse(request?.headers?.authorization);
     if (!header.success || !['operator', 'staff'].includes(audience)) throw unavailable();
     let command: unknown;
-    try { command = structuredClone(value); } catch { throw new AutomationError('invalid_input'); }
+    try { command = structuredClone(value); if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error(); }
+    catch { throw new AutomationError('invalid_input'); }
     const credential = Object.freeze({ authorization: header.data, audience, requestId: randomUUID() });
     const server = this.dependencies, clock = server.clock ?? (() => new Date());
     let active = true, initialIdentity: string | undefined;
+    const close = () => { active = false; };
+    signal?.addEventListener('abort', close, { once: true });
+    if (signal?.aborted) close();
+    // A stale candidate read can expire its original outbox marker. Treat
+    // interruption conservatively even though it never changes the business.
+    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'createEventTask', 'close', 'feedback'].includes(action);
+    let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
       return { ...credential };
@@ -80,7 +90,7 @@ export class HumanAutomationRequestFactory {
       return true;
     } };
     try {
-      return await runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
         const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock);
         const candidates = new BusinessFailureCandidateService(server.db, reads, clock);
@@ -90,43 +100,72 @@ export class HumanAutomationRequestFactory {
           // This request path always supplies original human resource authority.
           return composeAutomationFailureTasks({ db: server.db, clock, ...server.automation }, reads);
         };
+        const prepareInput = async (value: unknown) => {
+          const selected = eventInput.safeParse(value);
+          if (!selected.success) throw new AutomationError('invalid_input');
+          const candidate = await candidates.read(selected.data);
+          if (candidate.status !== 'ready' || !candidate.material) throw unavailable();
+          const result = await automation().prepare(selected.data);
+          writeReturned = true;
+          if (result.state === 'prepared') {
+            const view = await reviews.read({ inputRef: result.inputRef });
+            if (view.event.eventId !== selected.data.eventId || view.actionResource.creationKey !== result.creationKey
+              || view.review.status !== 'open' || !view.currentSource.failed
+              || view.currentSource.revision !== view.event.resourceRevision) throw new AutomationError('result_unknown');
+          }
+          return result;
+        };
+        const creation = async (value: unknown, create: boolean) => {
+          const service = automation();
+          const result = await (create ? service.create(value) : service.reconcile(value));
+          if (create) writeReturned = true;
+          const view = await reviews.read({ inputRef: result.inputRef });
+          if (view.actionResource.creationKey !== result.creationKey || view.review.status !== 'open'
+            || !view.currentSource.failed || view.currentSource.revision !== view.event.resourceRevision
+            || result.state === 'observed' && (view.task.taskId !== result.task.taskId || view.task.runId !== result.task.runId
+              || view.task.state !== 'observed' || view.task.revision !== result.task.revision || view.task.status !== result.task.status)
+            || result.state === 'not_observed' && view.task.state !== 'not_observed') throw new AutomationError('result_unknown');
+          return result;
+        };
         const execute = async () => {
           switch (action) {
             case 'readCandidate': return candidates.read(command);
             case 'prepareCandidate': return candidates.prepare(command);
             // The original bounded algorithm owns partial failures and final re-reads.
             case 'preparePending': return candidates.preparePending(command);
-            case 'prepareInput': {
+            case 'createEventTask': {
               const selected = eventInput.safeParse(command);
               if (!selected.success) throw new AutomationError('invalid_input');
-              const candidate = await candidates.read(selected.data);
+              // Resolve the explicit server policy dependency before touching
+              // the event marker. No fallback subject or execution driver.
+              automation();
+              const candidate = await candidates.prepare(selected.data);
+              writeReturned = true;
               if (candidate.status !== 'ready' || !candidate.material) throw unavailable();
-              const result = await automation().prepare(command);
-              if (result.state === 'prepared') {
-                const view = await reviews.read({ inputRef: result.inputRef });
-                if (view.event.eventId !== selected.data.eventId || view.actionResource.creationKey !== result.creationKey
-                  || view.review.status !== 'open' || !view.currentSource.failed
-                  || view.currentSource.revision !== view.event.resourceRevision) throw new AutomationError('result_unknown');
-              }
-              return result;
+              const input = structuredClone(await prepareInput(selected.data));
+              const base = { eventId: selected.data.eventId, inputRef: input.inputRef, creationKey: input.creationKey,
+                dispatchRequested: false as const, confirmationGranted: false as const,
+                executionPermission: false as const, businessActionRequested: false as const,
+                workerStarted: false as const, automaticRetry: false as const, execution: 'metadata_only_no_dispatch' as const };
+              // A possibly committed input is not permission to create a task.
+              // The caller can recover its reference through reviews/for-event.
+              if (input.state === 'unknown') return { ...base, inputState: 'unknown' as const,
+                creationState: 'not_attempted' as const, task: null, nextAction: 'read_original_event' as const };
+              const task = structuredClone(await creation({ inputRef: input.inputRef }, true));
+              if (task.inputRef !== input.inputRef || task.creationKey !== input.creationKey) throw new AutomationError('result_unknown');
+              const observed = await reviews.read({ inputRef: input.inputRef });
+              if (observed.event.eventId !== selected.data.eventId) throw new AutomationError('result_unknown');
+              return { ...base, inputState: 'prepared' as const, creationState: task.state, task: task.task,
+                nextAction: task.state === 'observed' ? 'read_original_task' as const : 'read_original_creation' as const };
             }
+            case 'prepareInput': return prepareInput(command);
             case 'readInput': {
               const service = automation(), result = await service.read(command);
               if (hash(result) !== hash(await service.read(command))) throw unavailable();
               return result;
             }
             case 'createTask':
-            case 'readCreation': {
-              const service = automation();
-              const result = await (action === 'createTask' ? service.create(command) : service.reconcile(command));
-              const view = await reviews.read({ inputRef: result.inputRef });
-              if (view.actionResource.creationKey !== result.creationKey || view.review.status !== 'open'
-                || !view.currentSource.failed || view.currentSource.revision !== view.event.resourceRevision
-                || result.state === 'observed' && (view.task.taskId !== result.task.taskId || view.task.runId !== result.task.runId
-                  || view.task.state !== 'observed' || view.task.revision !== result.task.revision || view.task.status !== result.task.status)
-                || result.state === 'not_observed' && view.task.state !== 'not_observed') throw new AutomationError('result_unknown');
-              return result;
-            }
+            case 'readCreation': return creation(command, action === 'createTask');
             case 'readQueue': return new HumanAutomationReviewQueueService(server.db, reads, reviews, async () => {
               await identity.resolve();
               if (!initialIdentity) throw unavailable();
@@ -138,6 +177,7 @@ export class HumanAutomationRequestFactory {
             case 'close':
             case 'feedback': {
               const result = await (action === 'close' ? reviews.close(command) : reviews.feedback(command));
+              writeReturned = true;
               if (result.state === 'observed' && hash(result) !== hash(await reviews.operation({ inputRef: result.inputRef, operationKey: result.operationKey }))) {
                 throw new AutomationError('result_unknown');
               }
@@ -147,9 +187,13 @@ export class HumanAutomationRequestFactory {
           }
         };
         const result = await execute();
+        writeReturned = write;
         await identity.resolve();
         return result;
-      });
-    } finally { active = false; }
+      }), write, signal);
+    } catch (error) {
+      if (writeReturned || error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new AutomationError('result_unknown');
+      throw error;
+    } finally { close(); signal?.removeEventListener('abort', close); }
   }
 }

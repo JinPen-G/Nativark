@@ -5,7 +5,7 @@ import type { AiProfileCapability, AiProfileScope, AiProfileServiceMode } from '
 import type { AiRouteScene, ProviderRouteDecision } from './provider-router.ports';
 import type { ProviderRouterService } from './provider-router.service';
 import type { TenantModelConfigService } from './tenant-model-config.service';
-import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
+import { ModelGatewayError, type WorkspaceGatewayContext } from './model-gateway.ports';
 import { capabilityNameSchema } from './capability-verification';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -36,7 +36,7 @@ export class AiGatewayRoutingService {
   constructor(
     private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>,
     private readonly configuration: Pick<TenantModelConfigService, 'selectionForInvocation'>,
-    private readonly router: Pick<ProviderRouterService, 'resolve'>,
+    private readonly router: Pick<ProviderRouterService, 'resolve'> & Partial<Pick<ProviderRouterService, 'assertCurrent'>>,
     private readonly scene: AiRouteScene
   ) {
     if (!scopes || typeof scopes.resolveCurrent !== 'function' || typeof scopes.resolveRoutingScopes !== 'function'
@@ -45,7 +45,7 @@ export class AiGatewayRoutingService {
     }
   }
 
-  private match(expected: GatewayContext, current: AiExecutionContext) {
+  private match(expected: WorkspaceGatewayContext, current: AiExecutionContext) {
     const actorId = current.actor.kind === 'customer' ? current.actor.customerId
       : 'userId' in current.actor ? current.actor.userId : undefined;
     if (!['operator', 'staff', 'client'].includes(current.audience)
@@ -55,12 +55,12 @@ export class AiGatewayRoutingService {
       || current.scope.tenantId !== expected.tenantId || current.scope.workspaceId !== expected.workspaceId) throw new ModelGatewayError('FORBIDDEN');
   }
 
-  private async selection(context: GatewayContext) {
+  private async selection(context: WorkspaceGatewayContext) {
     try { return selectionSchema.parse(await this.configuration.selectionForInvocation(structuredClone(context))); }
-    catch { throw new ModelGatewayError('CONFIG_INVALID'); }
+    catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  async resolve(value: GatewayContext, requested: readonly AiProfileCapability[]): Promise<GatewayRoutingResolution> {
+  async resolve(value: WorkspaceGatewayContext, requested: readonly AiProfileCapability[]): Promise<GatewayRoutingResolution> {
     const expected = contextSchema.safeParse(value), required = requiredSchema.safeParse(requested);
     if (!expected.success || !required.success) throw new ModelGatewayError('INVALID_REQUEST');
     const context = expected.data;
@@ -90,8 +90,24 @@ export class AiGatewayRoutingService {
       scene: this.scene, requiredCapabilities: [...required.data] };
   }
 
-  async assertCurrent(context: GatewayContext, resolution: GatewayRoutingResolution): Promise<void> {
-    const current = await this.resolve(context, resolution.requiredCapabilities);
-    if (gatewayRoutingBinding(current) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
+  async assertCurrent(context: WorkspaceGatewayContext, resolution: GatewayRoutingResolution): Promise<void> {
+    if (!this.router.assertCurrent) {
+      const current = await this.resolve(context, resolution.requiredCapabilities);
+      if (gatewayRoutingBinding(current) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
+      return;
+    }
+    const expected = contextSchema.parse(structuredClone(context)), original = structuredClone(resolution);
+    const check = async () => {
+      const selected = await this.selection(expected);
+      const current = structuredClone(await this.scopes.resolveRoutingScopes(selected.mode));
+      this.match(expected, current.context);
+      if (requestFingerprint(identity(current.context)) !== requestFingerprint(identity(original.context))
+        || requestFingerprint(current.consumerScope) !== requestFingerprint(original.consumerScope)) throw new ModelGatewayError('FORBIDDEN');
+      if (requestFingerprint(selected) !== requestFingerprint(original.selection)
+        || requestFingerprint(current.configurationScope) !== requestFingerprint(original.route.scope)) throw new ModelGatewayError('CONFIG_INVALID');
+    };
+    await check();
+    await this.router.assertCurrent(structuredClone(original.route), [...original.requiredCapabilities]);
+    await check();
   }
 }

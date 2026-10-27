@@ -122,8 +122,8 @@ test("a database outage is not acknowledged as a successful submission", async (
 });
 
 test("pagination has safe defaults and rejects invalid page limits", async () => {
-  assert.deepEqual({ ...await validate({}, DemoRequestListQueryDto) }, { page: 1, pageSize: 20 });
-  assert.deepEqual({ ...await validate({ page: "2", pageSize: "10" }, DemoRequestListQueryDto) }, { page: 2, pageSize: 10 });
+  assert.deepEqual({ ...await validate({}, DemoRequestListQueryDto) }, { keyword: undefined, page: 1, pageSize: 20 });
+  assert.deepEqual({ ...await validate({ page: "2", pageSize: "10" }, DemoRequestListQueryDto) }, { keyword: undefined, page: 2, pageSize: 10 });
   for (const query of [{ page: 0 }, { page: 1.5 }, { page: 100001 }, { pageSize: 101 }, { pageSize: -1 }, { page: "NaN" }]) {
     await assert.rejects(validate(query, DemoRequestListQueryDto), status(400));
   }
@@ -210,7 +210,7 @@ test("controller independently enforces SaaS-only access", async () => {
     assert.throws(() => controller.list({ user: account }, { page: 1, pageSize: 20 }), status(403));
   }
   assert.equal(reads, 0);
-  await controller.list({ user: user({ isSaasAdmin: true }) }, { page: 1, pageSize: 20 });
+  await controller.list({ user: user({ isSaasAdmin: true }) }, { keyword: undefined, page: 1, pageSize: 20 });
   assert.equal(reads, 1);
 });
 

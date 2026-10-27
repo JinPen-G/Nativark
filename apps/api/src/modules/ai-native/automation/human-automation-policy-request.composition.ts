@@ -7,8 +7,10 @@ import { requestFingerprint as hash } from '../../rental-core/rental-idempotency
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { HumanAutomationPolicyManagementService } from './human-automation-policy-management.service';
 import { AutomationManagementError } from './automation-management.validation';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
+import type { IncomingMessage } from 'node:http';
 
-export type HumanAutomationPolicyHttpRequest = { headers: { authorization?: unknown } };
+export type HumanAutomationPolicyHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanAutomationPolicyRequestAction = 'read' | 'preview' | 'prepare' | 'preparation' | 'review' | 'operation' | 'commit';
 export type HumanAutomationPolicyRequestDependencies = {
   db: ConstructorParameters<typeof HumanAutomationPolicyManagementService>[0];
@@ -40,14 +42,20 @@ export class HumanAutomationPolicyRequestFactory {
 
   /** Only an operator Bearer is accepted. Desired settings are proposals, never
    * credentials or grants. Each call owns and then closes its service graph. */
-  async call(request: HumanAutomationPolicyHttpRequest, action: HumanAutomationPolicyRequestAction, value: unknown) {
+  async call(request: HumanAutomationPolicyHttpRequest, action: HumanAutomationPolicyRequestAction, value: unknown, signal?: AbortSignal) {
     const header = bearer.safeParse(request?.headers?.authorization);
     if (!header.success) throw unavailable();
     let command: unknown;
-    try { command = structuredClone(value); } catch { throw new AutomationManagementError('invalid_input'); }
+    try { command = structuredClone(value); if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error(); }
+    catch { throw new AutomationManagementError('invalid_input'); }
     const credential = Object.freeze({ authorization: header.data, audience: 'operator' as const, requestId: randomUUID() });
     const server = this.dependencies, clock = server.clock ?? (() => new Date());
     let active = true, initialIdentity: string | undefined;
+    const close = () => { active = false; };
+    signal?.addEventListener('abort', close, { once: true });
+    if (signal?.aborted) close();
+    const write = action === 'prepare' || action === 'commit';
+    let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
       return { ...credential };
@@ -77,7 +85,7 @@ export class HumanAutomationPolicyRequestFactory {
       return true;
     } };
     try {
-      return await runWithRequestIdentity({}, async () => {
+      return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
         const service = new HumanAutomationPolicyManagementService(server.db, { auth, guard, credentials }, clock);
         const stable = async <T>(read: () => Promise<T>): Promise<T> => {
@@ -94,11 +102,13 @@ export class HumanAutomationPolicyRequestFactory {
             case 'operation': return stable(() => service.operation(command));
             case 'prepare': {
               const result = await service.prepare(command);
+              writeReturned = true;
               if (result.state !== 'unknown' && hash(result) !== hash(await service.review({ preparationId: result.preparationId }))) throw conflict();
               return result;
             }
             case 'commit': {
               const result = await service.commit(command);
+              writeReturned = true;
               if (result.state === 'observed' && hash(result) !== hash(await service.operation({ operationKey: result.operationKey }))) throw conflict();
               return result;
             }
@@ -106,9 +116,13 @@ export class HumanAutomationPolicyRequestFactory {
           }
         };
         const result = await execute();
+        writeReturned = write;
         await identity.resolve();
         return result;
-      });
-    } finally { active = false; }
+      }), write, signal);
+    } catch (error) {
+      if (writeReturned || error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') throw new AutomationManagementError('result_unknown');
+      throw error;
+    } finally { close(); signal?.removeEventListener('abort', close); }
   }
 }

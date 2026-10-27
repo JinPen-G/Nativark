@@ -5,9 +5,9 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import type { PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunnerTaskMetadata } from './ai-task-runner.ports';
 
-/** Derives resource ceilings from the immutable, currently authorized saved
- * plan. Not a permission/entitlement policy and not a source of model limits.
- * Recovery reuses the same plan/limits; it cannot mint a fresh task allowance.
+/** New reservations require today's execution policy. Original accounting
+ * reads the immutable saved bounds under current task/lease authorization.
+ * Neither mode grants permission; recovery cannot mint a fresh allowance.
  */
 export class PersistedPlanResourcePolicySource implements AiTaskExecutionPolicySource {
   constructor(private readonly tasks: Pick<AiTaskRepository, 'readMetadata'>,
@@ -18,11 +18,20 @@ export class PersistedPlanResourcePolicySource implements AiTaskExecutionPolicyS
   }
 
   async resolve(taskId: string, presented: AiTaskExecutionLease) {
+    return this.read(taskId, presented, false);
+  }
+
+  /** Original resource bounds only, never a source for initialize/reserve. */
+  async resolveReconciliation(taskId: string, presented: AiTaskExecutionLease) {
+    return this.read(taskId, presented, true);
+  }
+
+  private async read(taskId: string, presented: AiTaskExecutionLease, reconciliation: boolean) {
     const lease = structuredClone(presented);
     if (!lease || lease.taskId !== taskId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const metadata = structuredClone(await this.tasks.readMetadata(taskId));
     if (metadata.taskId !== taskId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const current = structuredClone(await this.plans.resolve(metadata as AiTaskRunnerTaskMetadata, { ...lease, expiresAt: '' }, true));
+    const current = structuredClone(await this.plans.resolve(metadata as AiTaskRunnerTaskMetadata, { ...lease, expiresAt: '' }, reconciliation));
     if (current.taskId !== taskId || current.runId !== lease.runId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const plan = this.plans.resourceOrigin ? await this.plans.resourceOrigin(current, { ...lease, expiresAt: '' }) : current;
     const bounds = [plan.limits.maxSteps, plan.limits.maxCalls, plan.limits.maxTotalMs, plan.limits.maxOutputBytes];

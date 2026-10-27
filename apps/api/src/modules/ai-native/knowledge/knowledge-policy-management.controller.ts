@@ -5,8 +5,10 @@ import { AI_KNOWLEDGE_POLICY_HTTP_DRAFT as paths, AI_KNOWLEDGE_POLICY_HTTP_ERROR
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { KNOWLEDGE_POLICY_MANAGEMENT, type KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
 import { KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
+import { withRequestAbort } from '../scenes/request-abort';
+import type { IncomingMessage } from 'node:http';
 
-export type KnowledgePolicyHttpRequest = { headers: { authorization?: unknown } };
+export type KnowledgePolicyHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 
 /** Transport only: the original application rechecks current Auth/Guard and persisted roots. */
@@ -20,21 +22,34 @@ export class KnowledgePolicyManagementController {
       if (!header.success || typeof this.application?.[method] !== 'function') throw new KnowledgePolicyManagementError('unavailable');
       const credential = { authorization: header.data, audience: 'operator' as const, requestId: randomUUID() };
       const command = structuredClone(value);
-      return await runWithRequestIdentity({}, () => this.application[method](credential, command));
+      return await withRequestAbort<unknown>(request, signal => runWithRequestIdentity({}, async () => this.application[method](credential, command, signal)));
     } catch (error) {
-      const key = error instanceof KnowledgePolicyManagementError ? error.code : 'unavailable';
+      const key = error instanceof KnowledgePolicyManagementError ? error.code
+        : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN'
+          && ['prepareTarget', 'bindTarget', 'prepare', 'commit'].includes(method) ? 'result_unknown' : 'unavailable';
       const translated = errors[key];
-      throw new HttpException({ code: translated.code, retryable: false }, translated.status);
+      const nextAction = method === 'prepareTarget' || method === 'bindTarget' ? 'read_original_policy_target'
+        : method === 'prepare' ? 'read_original_policy_preparation' : 'read_original_policy_operation';
+      throw new HttpException({ code: translated.code, retryable: false,
+        ...(key === 'result_unknown' ? { nextAction } : {}) }, translated.status);
     }
   }
 
   @Post(paths.prepareTarget)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   prepareTarget(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('prepareTarget', request, body); }
   @Post(paths.target)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   target(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('target', request, body); }
   @Post(paths.bindTarget)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   bindTarget(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('bindTarget', request, body); }
   @Post(paths.read)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   read(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('read', request, body); }
   @Post(paths.prepare)
   @HttpCode(200)

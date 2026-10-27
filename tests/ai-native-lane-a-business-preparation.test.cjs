@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-business-consumption.cjs');
 
 test('actual composed preparation reads Core availability, preserves selection review and never saves quotes', async () => {
@@ -14,8 +14,9 @@ test('actual composed preparation reads Core availability, preserves selection r
   assert.equal(prepared.status, prepared.availability.result.available ? 'ready' : 'unavailable');
   assert.equal(prepared.review.configVersion, first.configVersion);
   assert.equal(prepared.reservation, 'not_reserved'); assert.equal(quotes, 0);
-  const reconcile = await tools.quote.businessPreparation.reconciliationAvailability();
-  assert.equal(reconcile.retryable, false); assert.equal(reconcile.status, 'unavailable'); assert.equal(quotes, 0);
+  const reconcile = await tools.quote.reconciliationAvailability();
+  assert.equal(reconcile.retryable, false);
+  assert.equal(reconcile.status, 'available_original_reference_only'); assert.equal(quotes, 0);
 });
 
 test('partial input stays actionable and revoked permissions cannot be downgraded into facts', async () => {

@@ -67,9 +67,9 @@ export class PrismaTaskRecoverySnapshotRepository implements AiTaskRecoverySnaps
         const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key }, select: planSelect });
         const steps = await tx.aiStep.findMany({ where: key, select: stepSelect, orderBy: { sequence: 'asc' }, take: 1001 });
         const artifacts = await tx.aiTaskResultArtifact.findMany({ where: key, select: artifactSelect, orderBy: { id: 'asc' }, take: 2001 });
-        const charges = await tx.aiTaskExecutionCharge.findMany({ where: key, select: chargeSelect, orderBy: { chargeId: 'asc' }, take: 4001 });
+        const charges = await tx.aiTaskExecutionCharge.findMany({ where: key, select: chargeSelect, orderBy: { chargeId: 'asc' }, take: 5001 });
         const budget = await tx.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: { scopeId: key.scopeId, taskId: key.taskId } }, select: budgetSelect });
-        if (steps.length > 1000 || artifacts.length > 2000 || charges.length > 4000) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (steps.length > 1000 || artifacts.length > 2000 || charges.length > 5000) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const scoped = (row: typeof key) => {
           if (row.scopeId !== key.scopeId || row.taskId !== key.taskId || row.runId !== key.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         };

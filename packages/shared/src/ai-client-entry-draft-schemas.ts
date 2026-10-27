@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
-import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
 import { AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft } from './ai-task-input-draft';
@@ -9,10 +9,40 @@ export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 /** Reads bind the original creation/material reference; no caller task, owner or scope. */
 export const aiClientTaskReadRequestSchema = z.object({ creationKey: id.max(128), materialRef: z.string().uuid() }).strict();
+export const AI_CLIENT_MATERIAL_RECEIPT_VERSION = 'ain-client-material-receipt-1' as const;
+export const aiClientOrderMaterialRequestSchema = z.object({ operationKey: id.max(128), orderId: id }).strict();
+export const aiClientOrderMaterialReceiptSchema = z.object({ contractVersion: z.literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
+  operationKey: id.max(128), state: z.enum(['observed', 'unknown']), materialRef: z.string().uuid().nullable(),
+  materialHash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(), expiresAt: z.string().datetime({ offset: true }).nullable(),
+  execution: z.literal('not_attested'), freshness: z.literal('revalidate_before_execution'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_material_receipt') }).strict()
+  .refine(value => value.state === 'observed' ? value.materialRef !== null && value.materialHash !== null && value.expiresAt !== null
+    : value.materialRef === null && value.materialHash === null && value.expiresAt === null);
+export const aiClientTaskCreationReceiptSchema = z.object({ contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
+  creationKey: id.max(128), materialRef: z.string().uuid(), state: z.enum(['observed', 'unknown']),
+  inputRef: z.string().uuid().nullable(), inputHash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  task: z.object({ taskId: id.max(36), runId: id.max(36), status: z.enum(AI_TASK_STATUSES_DRAFT),
+    revision: z.number().int().min(1).max(4294967294), replayed: z.boolean() }).strict().nullable(),
+  execution: z.literal('not_attested'), retryable: z.literal(false), nextAction: z.literal('read_original_task_creation') }).strict()
+  .refine(value => value.state === 'observed' ? value.task !== null && value.inputRef !== null && value.inputHash !== null : value.task === null);
 /** Cancellation is a distinct current-policy action, never execution authority. */
 export const aiClientTaskCancelRequestSchema = aiClientTaskReadRequestSchema.extend({
   expectedRevision: z.number().int().min(1).max(4294967294)
 }).strict();
+/** Original call selector, not customer-supplied usage, price or authority. */
+export const aiClientTaskAccountingRequestSchema = aiClientTaskReadRequestSchema.extend({ callId: id.max(128) }).strict();
+/** Audience-neutral status shape; the owning endpoint supplies current authority. */
+export const aiTaskAccountingObservationSchema = z.object({ contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
+  callId: id.max(128), state: z.enum(['observed', 'unknown']),
+  account: z.object({ status: z.enum(['reserved', 'settled', 'released', 'pending_reconciliation']),
+    usageRecorded: z.boolean(), dispatched: z.boolean() }).strict().nullable(),
+  meaning: z.literal('ai_invocation_not_business_payment'),
+  observedAt: z.string().datetime({ offset: true }), execution: z.literal('not_authorized_by_accounting'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_accounting') }).strict()
+  .refine(value => (value.state === 'observed') === (value.account !== null))
+  .refine(value => !value.account || (value.account.status === 'settled') === value.account.usageRecorded);
+export const aiClientTaskAccountingResponseSchema = aiTaskAccountingObservationSchema;
+export const aiStaffTaskAccountingRequestSchema = z.object({ taskId: id.max(36), callId: id.max(128) }).strict();
 export const aiClientTaskCancelReceiptSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),
@@ -29,6 +59,22 @@ export const aiClientTaskInputCancellationReceiptSchema = aiClientTaskCancelRece
   externalRollback: z.literal('not_claimed')
 }).strict();
 export type AiClientTaskInputCancellationReceipt = z.infer<typeof aiClientTaskInputCancellationReceiptSchema>;
+/** Task cancellation is not business rollback or a financial release. */
+export const aiClientTaskUnstartedCancellationReceiptSchema = aiClientTaskInputCancellationReceiptSchema.extend({
+  cancellation: z.literal('unstarted_task_settled')
+}).strict();
+export type AiClientTaskUnstartedCancellationReceipt = z.infer<typeof aiClientTaskUnstartedCancellationReceiptSchema>;
+/** Observe one exact original revision, not today's status or latest event. */
+export const aiClientTaskCancellationObservationSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
+  expectedRevision: z.number().int().min(1).max(4294967294), state: z.enum(['observed', 'unknown']),
+  transition: aiClientTaskCancelReceiptSchema.pick({ taskRevision: true, cursor: true, observedAt: true })
+    .extend({ status: z.enum(['cancel_requested', 'cancelled']) }).strict().nullable(),
+  execution: z.literal('not_authorized_by_observation'), externalRollback: z.literal('not_claimed'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_task')
+}).strict().refine(value => value.state === 'observed'
+  ? value.transition !== null && value.transition.taskRevision === value.expectedRevision + 1 : value.transition === null);
+export type AiClientTaskCancellationObservation = z.infer<typeof aiClientTaskCancellationObservationSchema>;
 /** The original input contract remains authoritative; no parallel field DSL. */
 export const aiClientTaskInputReadResponseSchema = z.discriminatedUnion('state', [
   z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('pending'),
@@ -49,14 +95,23 @@ export const aiClientTaskModelControlResponseSchema = z.object({
     z.object({ kind: z.literal('run_outcome'), outcome: z.object({
       status: z.enum(['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed']),
       completedSteps: z.number().int().min(0).max(4294967295),
-      cleanupFailed: z.number().int().min(0).max(4294967295)
-    }).strict() }).strict()
+      cleanupFailed: z.number().int().min(0).max(4294967295),
+      errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u).optional(),
+      stopReason: z.literal('input_limit_reached').optional(), nextAction: z.literal('manual_handoff').optional()
+    }).strict().superRefine((value, context) => {
+      if (value.errorCode !== undefined && value.status !== 'failed'
+        || (value.stopReason !== undefined || value.nextAction !== undefined)
+          && (value.status !== 'unavailable' || value.stopReason !== 'input_limit_reached' || value.nextAction !== 'manual_handoff'))
+        context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent model run observation' });
+    }) }).strict()
   ]), businessExecution: z.literal('not_inferred_from_model_result'),
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict();
 export const aiClientTaskModelResultReadResponseSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),
+  workflowStatus: z.enum(AI_TASK_STATUSES_DRAFT).optional(),
+  resultPurpose: z.enum(['answer', 'clarification', 'not_attested']).optional(),
   state: z.enum(['observed', 'not_observed']),
   result: z.object({ resultId: id.max(36), status: z.enum(['succeeded', 'failed', 'unknown']),
     observedAt: z.string().datetime({ offset: true }), text: z.string().max(32768).nullable() }).strict().nullable(),
@@ -64,7 +119,9 @@ export const aiClientTaskModelResultReadResponseSchema = z.object({
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict().superRefine((value, context) => {
   if ((value.state === 'observed') !== (value.result !== null)
-    || (value.result && (value.result.status === 'succeeded') !== (value.result.text !== null)))
+    || (value.result && (value.result.status === 'succeeded') !== (value.result.text !== null))
+    || value.resultPurpose === 'answer' && (value.workflowStatus !== 'succeeded' || value.result?.status !== 'succeeded')
+    || value.resultPurpose === 'clarification' && (value.workflowStatus !== 'waiting_input' || value.result?.status !== 'succeeded'))
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent model result observation' });
 });
 export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestSchema.extend({

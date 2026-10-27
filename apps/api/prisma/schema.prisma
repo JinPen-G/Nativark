@@ -7,6 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Explicit local-model business permission; independent from hosted model configuration and money budgets.
+model AiDesktopBusinessPolicy {
+  tenantId      String   @db.VarChar(36)
+  workspaceId   String   @db.VarChar(36)
+  revision      Int      @db.UnsignedInt
+  policyJson    Json
+  updatedBy     String   @db.VarChar(36)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+
+  @@id([tenantId, workspaceId])
+  @@map("ai_desktop_business_policies")
+}
+
+model AiDesktopBusinessPolicyOperation {
+  tenantId       String   @db.VarChar(36)
+  workspaceId    String   @db.VarChar(36)
+  operationKey   String   @db.VarChar(128)
+  actorId        String   @db.VarChar(36)
+  payloadHash    String   @db.Char(64)
+  resultJson     Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+
+  @@id([tenantId, workspaceId, operationKey])
+  @@index([tenantId, workspaceId, createdAt], map: "ai_desktop_business_operations_created_idx")
+  @@map("ai_desktop_business_policy_operations")
+}
+
 /// 官网演示预约是平台级线索，不挂租户/经营空间，不自动建立客户或会员。
 model DemoRequest {
   id           String   @id @db.VarChar(36)
@@ -380,12 +408,38 @@ model AiTenantModelConfiguration {
   tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   mode                 String   @default("platform_managed") @db.VarChar(32)
   revision             Int      @default(1) @db.UnsignedInt
+  /// Null preserves legacy BYOK enabled semantics; explicit saves bind the
+  /// service gate independently of retained BYOK fields and selected mode.
+  serviceEnabled       Boolean?
   settings             Json?
   credentialsEncrypted String?  @db.Text
   createdAt            DateTime @default(now()) @db.DateTime(3)
   updatedAt            DateTime @updatedAt @db.DateTime(3)
 
   @@map("ai_tenant_model_configurations")
+}
+
+/// Immutable original configuration-save observation, committed with the config
+/// and Profile/Vault CAS. Contains safe results and keyed input hashes, no keys.
+model AiModelConfigurationOperation {
+  id               String      @id @default(uuid()) @db.VarChar(36)
+  scopeId          String      @db.VarChar(36)
+  scopeKind        AiScopeKind
+  targetId         String      @db.VarChar(191)
+  operationKey     String      @db.VarChar(128)
+  actorId          String      @db.VarChar(191)
+  workspaceId      String?     @db.VarChar(191)
+  expectedRevision Int         @db.UnsignedInt
+  resultRevision   Int         @db.UnsignedInt
+  commandHash      String      @db.Char(64)
+  result           Json
+  resultHash       String      @db.Char(64)
+  recordedAt       DateTime    @default(now()) @db.DateTime(3)
+  scope            AiScope     @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scopeId, scopeKind, targetId, operationKey], map: "ai_model_config_operation_original_key")
+  @@unique([scopeId, scopeKind, targetId, resultRevision], map: "ai_model_config_operation_revision_key")
+  @@map("ai_model_configuration_operations")
 }
 
 /// Server-resolved profile. credentialRef is a vault reference, never a key.
@@ -478,8 +532,15 @@ model AiProviderCapabilityEvidence {
 /// it cannot be silently retried or treated as a successful business action.
 model AiInvocationAdmission {
   id             String   @id @default(uuid()) @db.VarChar(36)
-  tenantId       String   @db.VarChar(191)
-  workspaceId    String   @db.VarChar(191)
+  /// Explicit scope ownership: WORKSPACE keeps the legacy tenant attribution;
+  /// PLATFORM rows carry null tenant/workspace and the platform dedup key.
+  scopeKind      AiScopeKind @default(WORKSPACE)
+  /// Non-null only for PLATFORM rows (callId under the single platform scope);
+  /// unique-indexed so MySQL still enforces single-admission dedup where the
+  /// nullable tenant columns cannot.
+  platformDedupKey String? @unique(map: "ai_invocation_admission_platform_dedup_key") @db.VarChar(191)
+  tenantId       String?  @db.VarChar(191)
+  workspaceId    String?  @db.VarChar(191)
   actorId        String   @db.VarChar(191)
   callId         String   @db.VarChar(128)
   requestHash    String   @db.VarChar(128)
@@ -578,8 +639,9 @@ model AiGatewayAccountingReceipt {
   scopeId       String @db.VarChar(36)
   scopeKind     AiScopeKind
   taskId        String @db.VarChar(36)
-  tenantId      String @db.VarChar(191)
-  workspaceId   String @db.VarChar(191)
+  /// Null for PLATFORM rows; scopeKind is the authoritative attribution.
+  tenantId      String? @db.VarChar(191)
+  workspaceId   String? @db.VarChar(191)
   invocationId  String @unique @db.VarChar(36)
   reservationId String @unique @db.VarChar(36)
   admissionId   String @unique @db.VarChar(36)
@@ -588,12 +650,15 @@ model AiGatewayAccountingReceipt {
   state         String @default("reserved") @db.VarChar(16)
   inputTokens   BigInt? @db.UnsignedBigInt
   outputTokens  BigInt? @db.UnsignedBigInt
+  /// Validated protocol billing dimensions, atomically bound by usageHash.
+  usageDetails  Json?
   usageHash     String? @db.Char(64)
   createdAt     DateTime @default(now()) @db.DateTime(3)
   updatedAt     DateTime @updatedAt @db.DateTime(3)
   invocation    AiGatewayInvocation @relation(fields: [scopeId, taskId, invocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   reservation   AiBudgetReservation @relation(fields: [scopeId, scopeKind, reservationId], references: [scopeId, scopeKind, id], onDelete: Restrict, onUpdate: Restrict)
-  admission     AiInvocationAdmission @relation(fields: [tenantId, workspaceId, admissionId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  /// Optional because PLATFORM rows carry null tenant/workspace attribution.
+  admission     AiInvocationAdmission? @relation(fields: [tenantId, workspaceId, admissionId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([scopeId, state], map: "ai_gateway_accounting_scope_state_idx")
   @@map("ai_gateway_accounting_receipts")
@@ -6147,6 +6212,7 @@ model AiScope {
   workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   tasks       AiTask[]
   profiles    AiProviderProfile[]
+  modelConfigurationOperations AiModelConfigurationOperation[]
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
   originalRequests AiTaskOriginalRequest[]

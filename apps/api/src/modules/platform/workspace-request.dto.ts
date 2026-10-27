@@ -12,6 +12,7 @@ export class CreateBusinessWorkspaceDto implements CreateBusinessWorkspaceReques
   @IsString() @IsNotEmpty() code!: string;
   @IsString() @IsNotEmpty() name!: string;
   @IsIn(CATEGORIES) categoryCode!: CreateBusinessWorkspaceRequest["categoryCode"];
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(191) categoryVersionId?: string;
   @IsOptional() @IsIn(RUN_MODES) runMode?: CreateBusinessWorkspaceRequest["runMode"];
 }
 export class UpdateBusinessWorkspaceDto implements UpdateBusinessWorkspaceRequest {

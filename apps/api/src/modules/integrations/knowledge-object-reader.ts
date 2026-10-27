@@ -5,16 +5,29 @@ import type { TenantIntegrationService } from './tenant-integration.service';
 import { s3ObjectReadRequest } from './inspection-object-reader';
 
 export type KnowledgeObjectReference = { tenantId: string; workspaceId: string; documentId: string; fileAssetId: string };
+/** Server-injected bounded, DNS-pinned signed GET. No ambient fetch fallback. */
+export interface KnowledgeObjectTransport {
+  get(input: { url: string; headers: Readonly<Record<string, string>>; signal: AbortSignal; maxResponseBytes: number }):
+    Promise<{ status: number; bytes: Uint8Array; headers: Readonly<Record<string, string>> }>;
+}
 const unavailable = () => new Error('Knowledge object storage unavailable');
 
 export class TenantKnowledgeObjectReader {
   constructor(private readonly db: Pick<PrismaClient, 'fileAsset' | 'aiKnowledgeDocument'>,
     private readonly integrations: Pick<TenantIntegrationService, 'runtimeConfig'>,
-    private readonly transport: typeof fetch = globalThis.fetch,
+    private readonly transport?: KnowledgeObjectTransport | typeof fetch,
     private readonly egress: typeof assertOutboundUrl = assertOutboundUrl,
     private readonly clock: () => Date = () => new Date()) {}
 
-  async read(input: KnowledgeObjectReference, maxBytes: number, signal?: AbortSignal) {
+  read(input: KnowledgeObjectReference, maxBytes: number, signal?: AbortSignal) {
+    return this.readObject(input, maxBytes, signal, false);
+  }
+  /** Internal upload-completion reader. The caller must authorize the original
+   * upload/actor before entering; this supplies bytes evidence, never a grant. */
+  readUpload(input: KnowledgeObjectReference, maxBytes: number, signal?: AbortSignal) {
+    return this.readObject(input, maxBytes, signal, true);
+  }
+  private async readObject(input: KnowledgeObjectReference, maxBytes: number, signal: AbortSignal | undefined, upload: boolean) {
     const ref = structuredClone(input);
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 262144 || signal?.aborted) throw unavailable();
     const control = new AbortController(), abort = () => control.abort();
@@ -31,32 +44,44 @@ export class TenantKnowledgeObjectReader {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const load = () => this.db.fileAsset.findFirst({ where: { id: ref.fileAssetId, tenantId: ref.tenantId,
-        businessType: 'ai_knowledge_document', businessId: ref.documentId, uploadScene: 'ai-knowledge', status: 'active' }, include: { uploadSession: true } });
-      const document = () => this.db.aiKnowledgeDocument.findFirst({ where: { id: ref.documentId, tenantId: ref.tenantId, workspaceId: ref.workspaceId } });
+        businessType: 'ai_knowledge_document', businessId: ref.documentId, uploadScene: 'ai-knowledge',
+        status: upload ? 'pending_upload' : 'active' }, include: { uploadSession: true } });
+      const document = () => upload ? Promise.resolve(null)
+        : this.db.aiKnowledgeDocument.findFirst({ where: { id: ref.documentId, tenantId: ref.tenantId, workspaceId: ref.workspaceId } });
       const asset = structuredClone(await wait(load())), head = structuredClone(await wait(document()));
       const metadata = asset?.metadata;
       if (!asset || asset.id !== ref.fileAssetId || asset.tenantId !== ref.tenantId || asset.businessId !== ref.documentId
         || asset.businessType !== 'ai_knowledge_document' || asset.businessModule !== 'ai-native' || asset.uploadScene !== 'ai-knowledge'
-        || asset.status !== 'active' || asset.storageProvider !== 's3_compatible' || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+        || asset.status !== (upload ? 'pending_upload' : 'active') || asset.storageProvider !== 's3_compatible'
+        || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)
         || metadata.workspaceId !== ref.workspaceId || metadata.knowledgeUploadVersion !== 1
         || !Number.isSafeInteger(asset.sizeBytes) || asset.sizeBytes < 1 || asset.sizeBytes > maxBytes
-        || !head || head.id !== ref.documentId || head.tenantId !== ref.tenantId || head.workspaceId !== ref.workspaceId
-        || !['draft', 'published'].includes(head.status)
-        || asset.uploadSession?.status !== 'completed' || !asset.uploadSession.completedAt || asset.uploadSession.fileAssetId !== asset.id
+        || asset.uploadSession?.status !== (upload ? 'pending_upload' : 'completed')
+        || (!upload && !asset.uploadSession.completedAt) || asset.uploadSession.fileAssetId !== asset.id
         || asset.uploadSession.tenantId !== ref.tenantId || asset.uploadSession.storageKey !== asset.storageKey
         || asset.uploadSession.provider !== asset.storageProvider) throw unavailable();
-      const state = head.state;
-      if (!state || typeof state !== 'object' || Array.isArray(state) || !state.document || typeof state.document !== 'object'
-        || Array.isArray(state.document) || state.document.attachmentId !== asset.id) throw unavailable();
-      const revision = metadata.knowledgeRevision;
-      if (revision !== undefined && (!revision || typeof revision !== 'object' || Array.isArray(revision)
-        || revision.targetVersion !== state.document.documentVersion)) throw unavailable();
+      if (!upload) {
+        if (!head || head.id !== ref.documentId || head.tenantId !== ref.tenantId || head.workspaceId !== ref.workspaceId
+          || !['draft', 'published'].includes(head.status)) throw unavailable();
+        const state = head.state;
+        if (!state || typeof state !== 'object' || Array.isArray(state) || !state.document || typeof state.document !== 'object'
+          || Array.isArray(state.document) || state.document.attachmentId !== asset.id) throw unavailable();
+        const revision = metadata.knowledgeRevision;
+        if (revision !== undefined && (!revision || typeof revision !== 'object' || Array.isArray(revision)
+          || revision.targetVersion !== state.document.documentVersion)) throw unavailable();
+      }
       const config = structuredClone(await wait(this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible')));
       if (!config) throw unavailable();
       const request = s3ObjectReadRequest(config, asset.storageKey, this.clock());
       const url = await wait(this.egress(request.url, '知识正文对象地址', { allowQuery: false }));
       if (control.signal.aborted) throw unavailable();
-      const responseTask = this.transport(url, { method: 'GET', headers: request.headers, redirect: 'error', signal: control.signal });
+      if (!this.transport) throw unavailable();
+      // Explicit fetch-shaped fixtures remain injectable; production composition
+      // supplies a bounded signed GET that pins the actual socket lookup.
+      const responseTask = typeof this.transport === 'function'
+        ? this.transport(url, { method: 'GET', headers: request.headers, redirect: 'error', signal: control.signal })
+        : this.transport.get({ url: url.toString(), headers: request.headers, signal: control.signal, maxResponseBytes: Math.min(maxBytes, asset.sizeBytes) })
+          .then(result => new Response(Uint8Array.from(result.bytes), { status: result.status, headers: result.headers }));
       void responseTask.then(response => { if (control.signal.aborted && response.body) void response.body.cancel().catch(() => undefined); }, () => undefined);
       const response = await wait(responseTask);
       const mediaType = (response.headers.get('content-type') ?? '').trim().toLowerCase();
@@ -81,7 +106,10 @@ export class TenantKnowledgeObjectReader {
       if (JSON.stringify(asset) !== JSON.stringify(latest) || JSON.stringify(head) !== JSON.stringify(currentHead)
         || JSON.stringify(config) !== JSON.stringify(currentConfig) || control.signal.aborted) throw unavailable();
       const bytes = Buffer.concat(chunks, total);
-      return { mediaType, bytes, contentHash: createHash('sha256').update(bytes).digest('hex') };
+      const contentHash = createHash('sha256').update(bytes).digest('hex');
+      if (!upload && (typeof metadata.knowledgeContentHash !== 'string'
+        || !/^[a-f0-9]{64}$/u.test(metadata.knowledgeContentHash) || metadata.knowledgeContentHash !== contentHash)) throw unavailable();
+      return { mediaType, bytes, contentHash };
     } finally {
       control.abort(); clearTimeout(timer); signal?.removeEventListener('abort', abort);
       if (reader) { void reader.cancel().catch(() => undefined); reader.releaseLock(); }

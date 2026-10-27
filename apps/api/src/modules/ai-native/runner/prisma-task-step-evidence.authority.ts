@@ -1,9 +1,10 @@
-import type { PrismaClient, AiStep, AiTaskResultArtifact, AiTaskExecutionCharge } from '@prisma/client';
+import { Prisma, type PrismaClient, AiStep, AiTaskResultArtifact, AiTaskExecutionCharge } from '@prisma/client';
 import { AI_ERROR_CODES, type AiErrorCode, type AiExecutionContext, type AiStepStateDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepTransitionAuthority, AiStepTransitionCommand, AiStepTransitionGrant } from '../ai-step-transition.repository';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
+import { taskStepChargesValid } from './task-model-count-charge';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge'>;
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -36,22 +37,26 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
         .every(name => typeof (db?.[name as keyof Db] as { findFirst?: unknown } | undefined)?.findFirst === 'function')) throw unavailable();
   }
 
-  async resolve(raw: Readonly<AiStepTransitionCommand>): Promise<AiStepTransitionGrant> {
+  async resolve(raw: Readonly<AiStepTransitionCommand>, tx?: Prisma.TransactionClient): Promise<AiStepTransitionGrant> {
     const command = structuredClone(raw);
+    // Inside the transition transaction, evidence reads must share its view:
+    // the transition has already CAS-incremented the run revision, so a
+    // separate snapshot would see the pre-transition lease and falsely deny.
+    const db = tx ?? this.db;
     if (!command?.lease || !['start', 'result_observed', ...(this.modelStep ? ['result_unknown'] : [])].includes(command.reason)) throw unavailable();
     const context = structuredClone(await this.authorization.resolve(command.taskId, 'transition_task'));
     const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
-    const task = await this.db.aiTask.findFirst({ where: access.where });
+    const task = await db.aiTask.findFirst({ where: access.where });
     if (!task || task.id !== command.taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
       || task.audience !== access.audience || !['RUNNING', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     const key = { scopeId: task.scopeId, taskId: task.id, runId: command.lease.runId };
-    const run = await this.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+    const run = await db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
     if (!run || run.scopeId !== key.scopeId || run.taskId !== key.taskId || run.id !== key.runId
       || run.actorKind !== access.actorKind || run.actorId !== access.actorId || run.leaseOwnerId !== command.lease.holderId
       || run.fencingToken.toFixed(0) !== command.lease.fencingToken || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()
       || !['QUEUED', 'RUNNING'].includes(run.status)) throw denied();
-    const step = await this.db.aiStep.findFirst({ where: { ...key, id: command.stepId } });
-    const saved = await this.db.aiTaskRunPlan.findFirst({ where: key });
+    const step = await db.aiStep.findFirst({ where: { ...key, id: command.stepId } });
+    const saved = await db.aiTaskRunPlan.findFirst({ where: key });
     if (!step || step.id !== command.stepId || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
       || step.revision !== command.expectedStepRevision || !saved || saved.scopeId !== key.scopeId
       || saved.taskId !== key.taskId || saved.runId !== key.runId) throw denied();
@@ -62,7 +67,25 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     if (matching.length !== 1 || !this.accepts(step, matching[0].operation) || matching[0].toolCode !== step.toolCode
       || matching[0].toolVersion !== step.toolVersion || step.effect !== (this.modelStep && command.reason !== 'start' ? 'POSSIBLE' : 'NONE')) throw unavailable();
     const lease = { taskId: key.taskId, ...command.lease, expiresAt: run.leaseExpiresAt.toISOString() };
-    const proof = structuredClone(await this.plans.authorize(structuredClone(plan), lease));
+    const original = command.reason !== 'start' && this.plans.resolveOriginal
+      ? structuredClone(await this.plans.resolveOriginal({ taskId: task.id, registrationRef: matching[0].registrationRef,
+        expectedTaskRevision: task.revision,
+        lease: { ...command.lease, revision: command.lease.revision + (tx ? 1 : 0) } }, tx)) : null;
+    if (original && (original.registrationAllowed !== false || original.taskId !== task.id
+      || original.registrationRef !== matching[0].registrationRef || original.inputRef !== step.inputRef
+      || original.requestFingerprint !== step.requestFingerprint || original.toolCode !== step.toolCode
+      || original.toolVersion !== step.toolVersion || identity(original.context) !== identity(context)
+      || !/^[a-f0-9]{64}$/u.test(saved.authorityHash) || typeof saved.policyVersion !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(saved.policyVersion))) throw denied();
+    // Completing a measured original result is not a new tool invocation.
+    // Legacy adapters without original evidence retain their stricter gate.
+    // The legacy authorize fallback deliberately keeps the unbumped lease and
+    // its own committed view: at in-tx-resolve time the run CAS is uncommitted,
+    // so the committed revision still equals it, and the digest comparison
+    // fail-closes on drift. Teaching it post-CAS revisions would false-deny.
+    const proof = original ? { authorityHash: saved.authorityHash, policyVersion: saved.policyVersion,
+      expiresAt: run.leaseExpiresAt.toISOString() }
+      : structuredClone(await this.plans.authorize(structuredClone(plan), lease));
     if (proof.authorityHash !== saved.authorityHash || proof.policyVersion !== saved.policyVersion
       || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
     const previous: AiStepStateDraft = { stepId: step.id, runId: step.runId, sequence: step.sequence, revision: step.revision,
@@ -77,7 +100,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
       if (command.evidenceId !== `start-${step.id}` || task.status !== 'RUNNING' || task.cancelRequestedAt !== null) throw denied();
       resultBinding = await this.additionalEvidence(step, null, [], context);
     } else {
-      const artifact = await this.db.aiTaskResultArtifact.findFirst({ where: { ...key, stepId: step.id, id: command.evidenceId } });
+      const artifact = await db.aiTaskResultArtifact.findFirst({ where: { ...key, stepId: step.id, id: command.evidenceId } });
       if (!artifact || artifact.id !== command.evidenceId || artifact.scopeId !== key.scopeId || artifact.taskId !== key.taskId
         || artifact.runId !== key.runId || artifact.stepId !== step.id || artifact.actionId !== step.actionId
         || artifact.stepFingerprint !== step.requestFingerprint
@@ -98,9 +121,8 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
         || (startedMarker ? artifact.contentHash !== requestFingerprint({}) || artifact.outputBytes !== 0n || artifact.activeMs !== 0n
           : BigInt(bytes) !== artifact.outputBytes)
         || bytes > plan.limits.maxOutputBytes || artifact.activeMs < 0n || artifact.activeMs > BigInt(plan.limits.maxStepMs)) throw denied();
-      const charges = await this.db.aiTaskExecutionCharge.findMany({ where: { ...key, stepId: step.id }, take: 5 });
-      if (charges.length < 3 || charges.length > 4 || new Set(charges.map(c => c.resource)).size !== charges.length
-        || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(r => charges.some(c => c.resource === r))
+      const charges = await db.aiTaskExecutionCharge.findMany({ where: { ...key, stepId: step.id }, take: 6 });
+      if (!taskStepChargesValid(charges)
         || charges.some(c => c.scopeId !== key.scopeId || c.taskId !== key.taskId || c.runId !== key.runId || c.stepId !== step.id
           || c.actionId !== step.actionId || c.stepFingerprint !== step.requestFingerprint || c.leaseOwnerId !== artifact.leaseOwnerId
           || c.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0) || !['RESERVED', 'RECORDED', 'UNKNOWN'].includes(c.status)

@@ -143,7 +143,7 @@ test('text capability probe resolves the platform-managed profile without tenant
   const resolved = await authority.resolve(context, ['text']);
   assert.equal(resolved.selection.mode, 'platform_managed');
   assert.equal(resolved.route.profile.serviceMode, 'platform_managed');
-  assert.deepEqual(textProbeConfiguration(platformProfile, context.tenantId).configurationScope, { kind: 'platform' });
+  assert.deepEqual(textProbeConfiguration(platformProfile, { kind: 'workspace', tenantId: context.tenantId }).configurationScope, { kind: 'platform' });
 });
 
 test('probe validates execution before occupying operation key and never redispatches original registration', async () => {
@@ -249,17 +249,19 @@ test('owned probe returns the real public Gateway envelope, not the capability s
       authorizeDispatch: async (_context, request) => { assert.equal(request.callId, preparedIntent.intent.requestId); } });
     app.accounting = { bindings: { register: async () => { events.push('register'); return { id: 'invocation', replayed: false }; } },
       budget: { reserve: async () => { events.push('reserve'); return { id: 'reservation' }; }, dispatch: async () => { events.push('dispatch'); },
+        recordUsage: async () => {},
         settle: async () => { events.push('settle'); }, abandon: async () => { events.push('unknown'); } } };
     app.admission = { admit: async () => ({ id: 'admission' }) };
     app.dispatch = { claim: async () => { events.push('claim'); }, finish: async (_binding, state) => { events.push(state); } };
     app.receipts = { find: async () => null, begin: async () => ({ created: true, receipt: { id: 'receipt' } }),
       observe: async (_id, _observation, mode) => { assert.equal(mode, 'mock'); events.push('observe'); } };
     app.collect = async () => ({ capability: 'text', status: 'unverified', receiptId: 'receipt' });
-    app.adapter = new ChatCompletionsAdapter({ post: async () => {
+    const adapter = new ChatCompletionsAdapter({ post: async () => {
       events.push('protocol'); if (scenario === 'lost_response') throw Error('offline lost response');
       return { status: 200, body: JSON.stringify({ choices: [{ message: { content: 'bounded mock reply' }, finish_reason: 'stop' }],
         ...(scenario === 'reported' ? { usage: { prompt_tokens: 1, completion_tokens: 2 } } : {}) }) };
     } });
+    app.adapter = () => adapter;
     const held = await app.prepareHeldInvocationCurrent(command, { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' },
       priceVersion: 'price', expiresAt: new Date('2026-10-13T00:00:00Z') });
     const result = await held.execute();
@@ -282,7 +284,7 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { textProbeIntent, textProbeConfiguration, textDigest, textProbeEvidenceHash, TEXT_PROBE_METHOD, TEXT_PROBE_TTL_MS } = require('../apps/api/src/modules/ai-native/text-capability-probe');
   const now = new Date('2026-10-11T12:00:00.000Z'), prepared = textProbeIntent('probe-operation', 'probe-scope');
-  const fingerprint = capabilityProfileFingerprint(profile), configuration = textProbeConfiguration(profile, context.tenantId);
+  const fingerprint = capabilityProfileFingerprint(profile), configuration = textProbeConfiguration(profile, { kind: 'workspace', tenantId: context.tenantId });
   const descriptor = { command: { operationId: 'probe-operation', profileKey: profile.profileKey, profileFingerprint: fingerprint },
     context, scopeId: 'probe-scope', profileId: profile.id, profileFingerprint: fingerprint, methodVersion: TEXT_PROBE_METHOD,
     callId: prepared.intent.requestId, intentHash: prepared.intentHash, challengeHash: prepared.challengeHash,

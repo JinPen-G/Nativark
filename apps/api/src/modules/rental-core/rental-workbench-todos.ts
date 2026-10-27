@@ -202,8 +202,10 @@ export function buildRentalWorkbenchTodos(
       add(items, {
         id: `refund:${order.id}`,
         type: "refund",
-        title: "待办理模拟退款",
-        description: "退款审核/应收核减已完成，但资金流水尚未登记实际模拟退款。",
+        title: fundingByOrderId[order.id]?.balanceBasis === "simulated" ? "待办理模拟退款" : "待办理实际退款",
+        description: fundingByOrderId[order.id]?.balanceBasis === "simulated"
+          ? "演练退款审核/应收核减已完成，模拟资金尚未收尾，不代表实际退款。"
+          : "退款审核/应收核减已完成，但尚缺原资金渠道的实际退款记录；模拟事件不能代替。",
         href: orderHref,
         orderId: order.id,
         orderNo: order.orderNo,

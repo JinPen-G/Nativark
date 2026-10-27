@@ -1,7 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import type { AiTaskStatusDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskExecutionBudgetError, type AiTaskExecutionResource } from '../task-execution-budget.ports';
+import { AiTaskExecutionBudgetError, type AiTaskExecutionResource, type AiTaskExecutionBudgetPort, type AiTaskExecutionChargeRequest } from '../task-execution-budget.ports';
+import { taskStepChargesValid, isTaskModelCountCharge, reconcileTaskModelCountCharge } from './task-model-count-charge';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef, AiTaskRunnerResourceTicket } from './ai-task-runner.ports';
 import type { AiTaskRunnerResourceEvidenceSource } from './persistent-task-runner-resource-gate';
@@ -14,7 +15,8 @@ export interface AiTaskToolResourceCatalog {
 }
 export interface AiTaskModelInvocationPreparation {
   /** Registers the server-owned invocation after step start; never sends it. */
-  prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ invocationId: string }>;
+  prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal): Promise<{ invocationId: string }>;
+  beforeDispatch?(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal): Promise<string>;
 }
 const fail = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const uuid = (hash: string) => `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -31,7 +33,31 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
     if (typeof plans?.resolve !== 'function' || typeof catalog?.resolve !== 'function') throw fail();
     this.recovery = new PrismaTaskResourceRecoverySource(db, scopes, clock);
   }
-  recoverTicket(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) { return this.recovery.recoverTicket(step, lease); }
+  async recoverTicket(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, budget?: AiTaskExecutionBudgetPort) {
+    const ticket = await this.recovery.recoverTicket(step, lease);
+    if (budget) {
+      const access = await this.scopes.resolve(lease.taskId, lease, 'write');
+      const stored = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId,
+        runId: lease.runId, id: step.registered.stepId }, select: { id: true, actionId: true, requestFingerprint: true } });
+      const rows = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId,
+        runId: lease.runId, stepId: step.registered.stepId }, take: 6 });
+      if (!stored || !taskStepChargesValid(rows) || rows.length !== ticket.chargeIds.length
+        || rows.some(row => row.scopeId !== access.scopeId || row.taskId !== lease.taskId || row.runId !== lease.runId
+          || row.stepId !== stored.id || row.actionId !== stored.actionId
+          || row.stepFingerprint !== stored.requestFingerprint || !ticket.chargeIds.includes(row.chargeId))) throw fail();
+      for (const count of rows.filter(isTaskModelCountCharge)) {
+        // Count may have finished before generation ever started. Read its own
+        // original receipt without requiring a completed generation artifact.
+        // Unavailable/unknown evidence keeps the charge held, never re-counts.
+        try { await reconcileTaskModelCountCharge(budget, lease, count); }
+        catch (error) {
+          if (!(error instanceof Error && 'code' in error
+            && ['AI_RESOURCE_UNAVAILABLE', 'AI_RESULT_UNKNOWN', 'UNAVAILABLE', 'PENDING_RECONCILIATION'].includes(String(error.code)))) throw error;
+        }
+      }
+    }
+    return ticket;
+  }
 
   async charges(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     step = structuredClone(step); lease = structuredClone(lease);
@@ -62,14 +88,16 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
       target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint } })) };
   }
 
-  async modelCharge(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+  async modelCharge(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal) {
     step = structuredClone(step); lease = structuredClone(lease);
     if (!this.invocations) throw fail();
     const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, 'write'));
     const stored = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId,
       id: step.registered.stepId, revision: step.registered.stepRevision, status: 'RUNNING', toolCode: step.plan.toolCode, toolVersion: step.plan.toolVersion } });
     if (!stored || (await this.catalog.resolve(step.plan.toolCode, step.plan.toolVersion))?.modelCall !== true) throw fail();
-    const prepared = structuredClone(await this.invocations.prepare(step, lease));
+    if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+    const prepared = structuredClone(await this.invocations.prepare(step, lease, signal));
+    if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
     const invocation = await this.db.aiGatewayInvocation.findFirst({ where: { id: prepared.invocationId, scopeId: access.scopeId, taskId: lease.taskId,
       runId: lease.runId, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint,
       leaseOwnerId: lease.holderId, fencingToken: lease.fencingToken, expiresAt: { gt: this.clock() } } });
@@ -81,6 +109,10 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
       target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint, gatewayInvocationId: invocation.id } };
   }
 
+  async prepareModelDispatch(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal) {
+    return this.invocations?.beforeDispatch ? [await this.invocations.beforeDispatch(request, budget, signal)] : [];
+  }
+
   async settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     ticket = structuredClone(ticket); step = structuredClone(step); lease = structuredClone(lease);
     const access = await this.scopes.resolve(lease.taskId, lease, 'write');
@@ -88,11 +120,11 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
       toolCode: step.plan.toolCode, toolVersion: step.plan.toolVersion, status: { in: ['SUCCEEDED', 'FAILED'] } } });
     if (!stored?.resultRef) throw fail();
     const rows = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId,
-      stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint }, take: 5 });
-    if (rows.length !== ticket.chargeIds.length || rows.length < 3 || rows.length > 4
+      stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint }, take: 6 });
+    if (rows.length !== ticket.chargeIds.length || !taskStepChargesValid(rows)
       || rows.some(row => !ticket.chargeIds.includes(row.chargeId))) throw fail();
     const current = await this.scopes.resolve(lease.taskId, lease, 'write');
     if (current.bindingKey !== access.bindingKey || current.scopeId !== access.scopeId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    return rows.map(row => ({ taskId: lease.taskId, lease: structuredClone(lease), chargeId: row.chargeId, evidenceRef: `${stored.resultRef}:${row.resource.toLowerCase()}` }));
+    return rows.map(row => ({ taskId: lease.taskId, lease: structuredClone(lease), chargeId: row.chargeId, evidenceRef: isTaskModelCountCharge(row) ? `count:${row.gatewayInvocationId}` : `${stored.resultRef}:${row.resource.toLowerCase()}` }));
   }
 }

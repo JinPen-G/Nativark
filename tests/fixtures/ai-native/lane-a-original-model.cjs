@@ -10,14 +10,15 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { AI_TOOL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness) => {
+exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness, planLimits = {}) => {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
     protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const tables = Object.fromEntries(['aiApprovedOrderSnapshot', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
     'aiApprovalConsumption', 'aiApprovalReprepare', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
     'rentalOrder', 'rentalQuote', 'rentalOrderIdempotencyRecord',
     'aiTaskQuoteSelection', 'aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
-    'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation'].map(key => [key, []]));
+    'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation',
+    'aiDataErasure', 'aiUsageReservation'].map(key => [key, []]));
   const h = await setup({ ...tables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
   if (prepareBusiness) await prepareBusiness(h.b);
   h.control.beforeRead = async (table, args) => {
@@ -38,7 +39,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     .replaceAll('tenant-a', 'tenant_001').replaceAll('synthetic-clarification', sceneCode)));
   const policy = h.state.aiTaskPlanPolicy.find(row => row.sceneCode === sceneCode);
   policy.allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }, ...clone(extraTools)];
-  policy.limits = { ...h.b.h.plan.limits, maxTotalMs: 30000, maxStepMs: 5000 };
+  policy.limits = { ...h.b.h.plan.limits, maxTotalMs: 30000, maxStepMs: 5000, ...planLimits };
   const command=h.command(sceneCode);
   if (quoteCandidate !== undefined) {
     assert.equal(sceneCode,'quote_clarification'); command.input={candidate:clone(quoteCandidate)};
@@ -88,7 +89,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     }, dispatch: async (call, id) => {
       await h.db.aiBudgetReservation.updateMany({ where: { id }, data: { dispatchState: 'dispatched' } });
       await financial.dispatch(call, id); execution.events.push('dispatch');
-    }, settle: async (call, id, _key, usage) => {
+    }, recordUsage: async (call, id, usage) => { await financial.recordUsage(call, id, usage); }, settle: async (call, id, _key, usage) => {
       await financial.recordUsage(call, id, usage);
       await h.db.aiBudgetReservation.updateMany({ where: { id }, data: { status: 'settled' } }); execution.events.push('settle');
     }, abandon: async (_call, id, reason) => {

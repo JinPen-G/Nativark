@@ -13,7 +13,9 @@ const unknownRead: Record<Method, NonNullable<AiTextCapabilityHttpErrorDraft['ne
   prepare: 'readOriginal', publish: 'readOriginal', readOriginal: 'readOriginal', createTask: 'readTask', readTask: 'readTask',
   start: 'reconcile', inspect: 'inspect', cancel: 'inspect', reconcile: 'reconcile', readCapabilityReceipt: 'readCapabilityReceipt', preflight: 'readCapabilityReceipt',
   readHistory: 'readHistory',
-  configureTaskAction: 'readTaskAction', readTaskAction: 'readTaskAction',
+  readAccounting: 'readAccounting', readAccountingOperation: 'readAccountingOperation',
+  releaseUnsent: 'readAccountingOperation', reconcileAccounting: 'readAccountingOperation',
+  configureTaskAction: 'readTaskActionReceipt', readTaskAction: 'readTaskAction', readTaskActionReceipt: 'readTaskActionReceipt',
 };
 const statuses = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403, AI_SCOPE_CHANGED: 403, AI_RESOURCE_UNAVAILABLE: 404,
   AI_REVISION_CONFLICT: 409, AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 } as const;
@@ -22,8 +24,9 @@ const gatewayCodes: Record<string, keyof typeof statuses> = { FORBIDDEN: 'AI_ACC
   CAPABILITY_UNSUPPORTED: 'AI_RESOURCE_UNAVAILABLE', BUDGET_UNAVAILABLE: 'AI_RESOURCE_UNAVAILABLE',
   ACCOUNTING_PENDING: 'AI_RESULT_UNKNOWN', CANCELLED: 'AI_RESULT_UNKNOWN' };
 
-/** Only register through the disabled-by-default HTTP module option. POST reads
- * carry keys in the body and never start tasks; no model tools are exposed. */
+/** Standard registration and standalone module both require explicit trusted
+ * probe configuration. POST reads carry original keys, never start tasks;
+ * management, original task policy and budget gates are not an enable flag. */
 @Controller(routes.basePath)
 export class TextCapabilityProbeController {
   constructor(@Inject(TEXT_CAPABILITY_PROBE_REQUESTS) private readonly requests: TextCapabilityProbeRequestFactory) {}
@@ -66,6 +69,8 @@ export class TextCapabilityProbeController {
   configureTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('configureTaskAction', request, body); }
   @Post(routes.readTaskAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('readTaskAction', request, body); }
+  @Post(routes.readTaskActionReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskActionReceipt(@Req() request: Request, @Body() body: unknown) { return this.call('readTaskActionReceipt', request, body); }
   @Post(routes.publish) @HttpCode(200) @Header('Cache-Control', 'no-store')
   publish(@Req() request: Request, @Body() body: unknown) { return this.call('publish', request, body); }
   @Post(routes.readOriginal) @HttpCode(200) @Header('Cache-Control', 'no-store')
@@ -90,6 +95,14 @@ export class TextCapabilityProbeController {
   readCapabilityReceipt(@Req() request: Request, @Body() body: unknown) { return this.call('readCapabilityReceipt', request, body); }
   @Post(routes.readHistory) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readHistory(@Req() request: Request, @Body() body: unknown) { return this.call('readHistory', request, body); }
+  @Post(routes.readAccountingOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readAccountingOperation(@Req() request: Request, @Body() body: unknown) { return this.call('readAccountingOperation', request, body); }
+  @Post(routes.readAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readAccounting(@Req() request: Request, @Body() body: unknown) { return this.call('readAccounting', request, body); }
+  @Post(routes.releaseUnsent) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  releaseUnsent(@Req() request: Request, @Body() body: unknown) { return this.call('releaseUnsent', request, body); }
+  @Post(routes.reconcileAccounting) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcileAccounting(@Req() request: Request, @Body() body: unknown) { return this.call('reconcileAccounting', request, body); }
   @Post(routes.preflight) @HttpCode(200) @Header('Cache-Control', 'no-store')
   preflight(@Req() request: Request, @Body() body: unknown) { return this.call('preflight', request, body); }
 }

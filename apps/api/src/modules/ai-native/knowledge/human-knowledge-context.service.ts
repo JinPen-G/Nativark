@@ -23,6 +23,14 @@ const clip = (text: string, limit: number) => {
 };
 type Entry = { sourceId: string; source: Source; snippet: string; contentFingerprint: string;
   snippetFingerprint: string; truncated: boolean; trust: 'untrusted_data' };
+const entrySchema = z.object({ sourceId: z.string().regex(/^[a-f0-9]{64}$/), source: documentSourceSchema,
+  snippet: z.string().min(1).max(2000), contentFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  snippetFingerprint: z.string().regex(/^[a-f0-9]{64}$/), truncated: z.boolean(), trust: z.literal('untrusted_data') }).strict();
+/** Persisted format validation only; current ACL/content checks remain in revalidate. */
+export const knowledgePreparedContextSchema = z.object({ requestId: id, observationId: id.optional(), queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  observedAt: z.string().datetime(), trust: z.literal('untrusted_data'), purpose: z.literal('context_only'),
+  status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10),
+  sections: z.object({ knowledge: z.literal('authorized_sources'), preferences: z.literal('optional_confirmed_preferences'), businessFacts: z.literal('core_authoritative_only') }).strict().optional() }).strict();
 
 /** Input preparation only: no model call, invocation registration, step hash,
  * URL fetch or authorization encoded in the model-visible content.
@@ -110,13 +118,7 @@ export class HumanKnowledgeContextService {
    * needs its own current authorization and configuration checks.
    */
   revalidate(value: unknown) {
-    const entrySchema = z.object({ sourceId: z.string().regex(/^[a-f0-9]{64}$/), source: documentSourceSchema,
-      snippet: z.string().min(1).max(2000), contentFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-      snippetFingerprint: z.string().regex(/^[a-f0-9]{64}$/), truncated: z.boolean(), trust: z.literal('untrusted_data') }).strict();
-    const input = parse(z.object({ requestId: id, observationId: id.optional(), queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-      observedAt: z.string().datetime(), trust: z.literal('untrusted_data'), purpose: z.literal('context_only'),
-      status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10),
-      sections: z.object({ knowledge: z.literal('authorized_sources'), preferences: z.literal('optional_confirmed_preferences'), businessFacts: z.literal('core_authoritative_only') }).strict().optional() }).strict(), value);
+    const input = parse(knowledgePreparedContextSchema, value);
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
     return this.human.session.run(async context => {
       // This is reuse of a recalled context, not just opening a known source.

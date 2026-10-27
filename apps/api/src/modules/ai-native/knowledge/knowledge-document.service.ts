@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
@@ -8,6 +9,11 @@ export class KnowledgeDocumentService {
     requiredPort(ports?.repository, ['read', 'operation', 'commit']);
     requiredPort(ports?.authorization, ['authorize']); requiredPort(ports?.clock, ['now']);
     requiredPort(ports?.files, ['read']); requiredPort(ports?.parser, ['parse']);
+  }
+
+  /** Supplied file service => the binding check is mandatory, not optional. */
+  private bindingCheckMandatory(): boolean {
+    return this.ports.attachmentBindingRequired === true;
   }
 
   async read(context: AiExecutionContext, documentId: string): Promise<KnowledgeRecord> {
@@ -70,10 +76,11 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId, creation: input });
-    // A missing byte/file source must not disable lawful metadata creation.
-    // When an attachment authority is supplied, direct create still enforces
-    // the same binding as prepareCreate; parsing remains unavailable without it.
-    if (typeof this.ports.files?.assertBound === 'function') {
+    // An absent byte/file source must not disable lawful metadata creation,
+    // but a SUPPLIED file service without its binding check may not admit an
+    // unverifiable attachment reference: create then enforces the same
+    // binding as prepareCreate and fails closed while the check is missing.
+    if (this.bindingCheckMandatory() || typeof this.ports.files?.assertBound === 'function') {
       await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     }
     const hash = operationFingerprint(context, ['create', input]);
@@ -85,7 +92,7 @@ export class KnowledgeDocumentService {
     }
     const document = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId, owner: grant.actor, scope: grant.scope, aclRevision: 1, title: input.title, publication: 'draft' as const, parsing: 'pending' as const, indexing: 'not_indexed' as const, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}) };
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
-    if (typeof this.ports.files?.assertBound === 'function') {
+    if (this.bindingCheckMandatory() || typeof this.ports.files?.assertBound === 'function') {
       await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     }
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
@@ -134,6 +141,7 @@ export class KnowledgeDocumentService {
     await this.save(stableContext, 'parse', before, pending, input.operationId, hash);
     assertStableContext();
     let chunks;
+    let contentHash: string | undefined;
     let failure: KnowledgeRecord['failure'];
     try {
       await authorize(this.ports.authorization, structuredClone(stableContext), { action: 'read_body', scope: structuredClone(stableContext.scope), document: structuredClone(pending.document), attachmentId: pending.document.attachmentId });
@@ -142,6 +150,7 @@ export class KnowledgeDocumentService {
       assertStableContext();
       if (!file || typeof file.mediaType !== 'string' || !(file.bytes instanceof Uint8Array)) throw new KnowledgeError('invalid_text');
       if (file.bytes.byteLength > 262144) throw new KnowledgeError('limit_exceeded');
+      contentHash = createHash('sha256').update(file.bytes).digest('hex');
       chunks = this.ports.parser.parse(structuredClone(pending.document), structuredClone(file));
       validateChunks(pending.document, chunks);
     } catch (error) {
@@ -150,8 +159,9 @@ export class KnowledgeDocumentService {
     }
     await authorize(this.ports.authorization, structuredClone(stableContext), { action: 'parse', scope: structuredClone(stableContext.scope), document: structuredClone(pending.document) });
     assertStableContext();
-    const next: KnowledgeRecord = { indexJob: pending.indexJob, revision: pending.revision + 1, document: { ...pending.document, parsing: failure ? (failure === 'parse_failed' ? 'failed' : 'rejected') : 'parsed' }, ...(failure ? { failure } : {}) };
-    const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed']), ...(failure ? { failure } : {}) }, next: structuredClone(next), ...(failure ? {} : { chunks: structuredClone(chunks) }), newVersion: false });
+    const next: KnowledgeRecord = { indexJob: pending.indexJob, revision: pending.revision + 1, document: { ...pending.document, parsing: failure ? (failure === 'parse_failed' ? 'failed' : 'rejected') : 'parsed' },
+      ...(contentHash ? { contentHash } : {}), ...(failure ? { failure } : {}) };
+    const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed', contentHash ?? null]), ...(failure ? { failure } : {}) }, next: structuredClone(next), ...(failure ? {} : { chunks: structuredClone(chunks) }), newVersion: false });
     assertStableContext();
     if (result !== 'committed') throw new KnowledgeError('conflict');
     return this.load(stableContext, input.documentId, 'parse');
@@ -178,7 +188,13 @@ export class KnowledgeDocumentService {
     check();
     if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
     if (!result) throw new KnowledgeCommitUnknownError();
-    if (result.fingerprint !== fingerprint(['parse-result', hash, result.failure ?? 'parsed'])) throw new KnowledgeError('conflict');
+    const expectedHash = after.contentHash === undefined
+      ? [fingerprint(['parse-result', hash, result.failure ?? 'parsed', null]),
+        fingerprint(['parse-result', hash, result.failure ?? 'parsed'])]
+      : [fingerprint(['parse-result', hash, result.failure ?? 'parsed', after.contentHash])];
+    // Old parse receipts can still be observed, but an unbound historical
+    // receipt never certifies bytes or makes legacy chunks newly retrievable.
+    if (!expectedHash.includes(result.fingerprint)) throw new KnowledgeError('conflict');
     if (after.parseOperationId || after.revision !== input.expectedRevision + 2 || after.document.publication !== 'draft') throw new KnowledgeError('conflict');
     const expected = result.failure ? result.failure === 'parse_failed' ? 'failed' : 'rejected' : 'parsed';
     if (after.document.parsing !== expected || after.failure !== result.failure) throw new KnowledgeError('unavailable');
