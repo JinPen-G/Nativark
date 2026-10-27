@@ -1,8 +1,8 @@
-import type { ColumnDef, HeaderContext } from "@tanstack/react-table";
+import type { CellContext, ColumnDef, HeaderContext, RowData } from "@tanstack/react-table";
 import type { RentalOrder } from "@rental-os/shared";
 import { formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
 import dayjs from "dayjs";
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { CalendarCheck2, ChevronDown, ChevronUp, CircleCheck, CircleDashed, CircleHelp, CircleX, ClipboardCheck, ClockAlert, Layers, ListTodo, LockKeyhole, LockOpen, PackageCheck, ReceiptText, Timer, TriangleAlert, UserX, Wallet, type LucideIcon } from "lucide-react";
 import { Button, DataTableColumnHeader, DataTableLeading, DataTableMoney, DataTableStatus, DataTableNote, Tooltip } from "@/components/ui";
 import { ADMIN_TABLE_COLUMN_WIDTH as columnWidth } from "@/app/designTokens";
@@ -15,6 +15,21 @@ import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import type { OrderActionPermissions } from "./orderQuickActions";
 import { orderStatusTone } from "./orderStatusSemantics";
 export { orderStatusTone } from "./orderStatusSemantics";
+
+declare module "@tanstack/react-table" {
+  interface ColumnMeta<TData extends RowData, TValue> {
+    orderCell?: (context: CellContext<TData, TValue>) => ReactNode;
+    orderHeader?: (context: HeaderContext<TData, TValue>) => ReactNode;
+  }
+}
+// The clock and permissions change render inputs, not React component types.
+// Keep avatars, disclosures and open header menus mounted across those updates.
+function OrderCell(context: CellContext<RentalOrder, unknown>) {
+  return context.column.columnDef.meta?.orderCell?.(context);
+}
+function OrderHeader(context: HeaderContext<RentalOrder, unknown>) {
+  return context.column.columnDef.meta?.orderHeader?.(context);
+}
 
 export const orderStatusLabels: Record<string, string> = { draft: "软预占", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待交付", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已关闭", cancelled: "已取消", no_show: "已爽约" };
 
@@ -127,7 +142,7 @@ function PlannedTime({ order, kind, now, t, locale }: { order: RentalOrder; kind
 /** Facts → current deadline → amount → status/action. Audit detail remains opt-in. */
 export function rentalOrderColumns({ t, locale, now, permissions, pickupLabel, returnLabel, navigate, labels }: OrderColumnContext): ColumnDef<RentalOrder, unknown>[] {
   const header = (id: string) => ({ column }: HeaderContext<RentalOrder, unknown>) => <DataTableColumnHeader column={column} label={labels[id]} />;
-  return [
+  const columns: ColumnDef<RentalOrder, unknown>[] = [
     { id: "orderNo", accessorKey: "orderNo", meta: { cellAlign: "middle" }, header: header("orderNo"), size: columnWidth.identifier, enableHiding: false, cell: ({ row }) => <div className={styles.cellStack}>
       <DataTableLeading><Button type="link" className={styles.orderLink} onClick={() => navigate(`/rental/orders/${row.original.id}`)}>{row.original.orderNo}</Button></DataTableLeading>
     </div> },
@@ -148,4 +163,14 @@ export function rentalOrderColumns({ t, locale, now, permissions, pickupLabel, r
     { id: "createdAt", accessorKey: "createdAt", meta: { cellAlign: "middle" }, header: header("createdAt"), size: columnWidth.dateTimeWithNote, cell: ({ row }) => <DataTableLeading>{row.original.createdAt && dayjs(row.original.createdAt).isValid() ? <time dateTime={row.original.createdAt} className={styles.plannedDate}><span>{dayjs(row.original.createdAt).format("YYYY-MM-DD")}</span><span className={styles.plannedClock}>{dayjs(row.original.createdAt).format("HH:mm")}</span></time> : <span className={styles.secondary}>—</span>}</DataTableLeading> },
     { id: "actions", header: labels.actions, meta: { cellAlign: "middle" }, size: columnWidth.actions, enableSorting: false, enableHiding: false, cell: ({ row }) => <DataTableLeading><RentalOrderRowActions order={row.original} permissions={permissions} pickupLabel={pickupLabel} returnLabel={returnLabel} t={t} navigate={navigate} /></DataTableLeading> },
   ];
+  for (const column of columns) {
+    const cell = typeof column.cell === "function" ? column.cell : undefined;
+    const heading = typeof column.header === "function" ? column.header : undefined;
+    // These definitions belong to this invocation; retain the ColumnDef union's
+    // required identifiers while attaching current inputs to stable renderers.
+    column.meta = { ...column.meta, orderCell: cell, orderHeader: heading };
+    if (cell) column.cell = OrderCell;
+    if (heading) column.header = OrderHeader;
+  }
+  return columns;
 }
