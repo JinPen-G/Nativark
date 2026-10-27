@@ -6,7 +6,7 @@ const setup = () => f.harness(Service, SecretBox), fail = (op, code) => assert.r
 test("empty tenant selects platform with no supplier fields and no ready claim", async () => {
   const x = setup(); assert.deepEqual(await x.service.selection(f.context), { mode: "platform_managed", revision: 0 });
   assert.equal((await x.service.get(f.context)).availability, "not_verified"); await x.service.changeMode(f.context, { mode: "platform_managed", expectedRevision: 0 });
-  assert.deepEqual(x.rows.get(f.context.tenantId), { tenantId: f.context.tenantId, mode: "platform_managed", revision: 1 });
+  assert.deepEqual(x.rows.get(f.context.tenantId), { tenantId: f.context.tenantId, mode: "platform_managed", serviceEnabled: false, revision: 1 });
 });
 test("legacy complete missing mode remains BYOK without rewriting", async () => {
   const x = setup(); await x.service.save(f.context, f.settings); const row = x.rows.get(f.context.tenantId); delete row.mode;

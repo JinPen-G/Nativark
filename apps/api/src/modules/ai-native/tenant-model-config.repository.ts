@@ -7,6 +7,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { AiModelConfigurationRevisionConflictError } from './model-config-compatibility';
 import type { GatewayContext } from './model-gateway.ports';
 import type { ModelConfigurationOperationWrite } from './model-configuration-operation';
+import { SECRET_BOX_ENVELOPE_PATTERN } from '../../common/secret-box';
 
 export type LegacyModelConfigurationSource = { id: string; tenantId: string; module: string; status: string;
   versionNo: number; updatedAt: Date; content: Prisma.JsonValue };
@@ -32,7 +33,7 @@ const recordSchema = z.object({
   mode: z.enum(['platform_managed', 'tenant_managed']).optional(),
   serviceEnabled: z.boolean().optional(),
   settings: tenantModelSettingsSchema.omit({ apiKey: true, expectedRevision: true, secretChange: true }).optional(),
-  credentialsEncrypted: z.string().max(65535).regex(/^(?:|v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/u).optional()
+  credentialsEncrypted: z.string().max(65535).refine(value => value === '' || SECRET_BOX_ENVELOPE_PATTERN.test(value)).optional()
 }).strict();
 export function checkedTenantModelRecord(value: unknown): TenantModelRecord {
   const parsed = recordSchema.safeParse(value);

@@ -11,10 +11,12 @@ import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMet
   type AiTaskClarificationObservationDraft, type AiTaskClarificationProgressDraft, type AiTaskClarificationReceiptQueryDraft } from "@rental-os/shared";
 import { currentSessionSignal } from "@/app/queryClient";
 import { http } from "./http";
+import { AI_EXECUTION_RESPONSE_TIMEOUT_MS } from "./aiRequestTiming";
 
 async function read<T>(action: Exclude<keyof typeof AI_TASK_CENTER_HTTP_DRAFT, 'basePath'>, data: unknown, signal: AbortSignal): Promise<T> {
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
-    data, { signal: AbortSignal.any([signal, currentSessionSignal()]) });
+    data, { signal: AbortSignal.any([signal, currentSessionSignal()]),
+      ...(['continue', 'continueInput'].includes(action) ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
   return result.data.data;
 }
 export const aiTaskCenterApi = Object.freeze({

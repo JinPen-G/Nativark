@@ -73,6 +73,7 @@ import { CustomerCorporateService } from "./customer-corporate.service";
 import { CustomerCorporateSettlementService } from "./customer-corporate-settlement.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   id: string;
@@ -768,7 +769,9 @@ export class PlatformService {
   ) {
     const security = this.normalizeSecurityBaseline(input);
     // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
-    const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
+    const config = this.useMysqlDataSource()
+      ? this.copySystemRulesConfig(await this.platformRepository.getSystemRules(PLATFORM_SUBJECT_TENANT_ID) ?? this.systemRulesConfig)
+      : this.copySystemRulesConfig();
     const next: SystemRulesConfig = {
       ...config,
       security,
@@ -873,17 +876,30 @@ export class PlatformService {
       "fleetCleaning",
       "calendarFixed",
       "calendarSpecial",
-      "push",
-      "aiModel"
+      "push"
     ]);
 
     if (!allowedSections.has(sectionKey)) {
       throw new BadRequestException("系统参数分区不存在");
     }
 
-    this.validateSystemRulesConfig(input.config);
+    assertNoLegacyAiCredentials(input.config);
+    // A section endpoint cannot overwrite another section or resurrect legacy AI.
+    const current = this.useMysqlDataSource()
+      ? await this.platformRepository.getSystemRules() ?? this.systemRulesConfig : this.systemRulesConfig;
+    const next = this.copySystemRulesConfig(current);
+    const incoming = structuredClone(input.config);
+    switch (sectionKey) {
+      case "memberRegister": case "memberPoints": next.member = incoming.member; break;
+      case "fleetMaintenance": next.fleet.maintenance = incoming.fleet.maintenance; break;
+      case "fleetCleaning": next.fleet.cleaning = incoming.fleet.cleaning; break;
+      case "calendarFixed": next.calendar.weekly = incoming.calendar.weekly; break;
+      case "calendarSpecial": next.calendar.specialDates = incoming.calendar.specialDates; break;
+      case "push": next.push = incoming.push; break;
+    }
+    this.validateSystemRulesConfig(next);
     const nextConfig = {
-      ...this.cloneSystemRulesConfig(input.config),
+      ...next,
       updatedAt: new Date().toISOString(),
       updatedBy: input.operator || "营运端"
     };
@@ -3062,6 +3078,14 @@ export class PlatformService {
   private cloneSystemRulesConfig(
     config: SystemRulesConfig = this.systemRulesConfig
   ): SystemRulesConfig {
+    const cloned = this.copySystemRulesConfig(config);
+    // Do not trust historical free-text logs, masked fields or unknown members
+    // to be safe. No old AI configuration is part of this public read surface.
+    cloned.aiModel = closedLegacyAiSettings();
+    return cloned;
+  }
+
+  private copySystemRulesConfig(config: SystemRulesConfig = this.systemRulesConfig): SystemRulesConfig {
     const cloned = JSON.parse(JSON.stringify(config)) as SystemRulesConfig;
     cloned.security = this.normalizeSecurityBaseline(cloned.security);
     return cloned;

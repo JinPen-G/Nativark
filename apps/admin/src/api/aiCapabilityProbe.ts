@@ -7,6 +7,7 @@ import { AI_TEXT_CAPABILITY_HTTP_DRAFT as routes, type AiTextCapabilityHttpRespo
 import { currentSessionSignal } from '@/app/queryClient';
 import { aiTaskCenterApi } from './aiTaskCenter';
 import { http } from './http';
+import { AI_EXECUTION_RESPONSE_TIMEOUT_MS } from './aiRequestTiming';
 
 export type CapabilityProbeAction = 'prepare' | 'publish' | 'readOriginal' | 'createTask' | 'readTask' | 'start' | 'inspect'
   | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory' | 'preflight' | 'readTaskAction' | 'configureTaskAction' | 'readTaskActionReceipt'
@@ -16,7 +17,8 @@ export const aiCapabilityProbeApi = Object.freeze({
   async call<K extends CapabilityProbeAction>(action: K, value: AiTextCapabilityPrepareRequestDraft | AiTextCapabilityCancelRequestDraft
     | AiTextCapabilityConfigureActionDraft | AiTextCapabilityActionRequestDraft | AiTextCapabilityAccountingOperationRequestDraft, signal: AbortSignal): Promise<AiTextCapabilityHttpResponsesDraft[K]> {
     const response = await http.post<ApiResult<AiTextCapabilityHttpResponsesDraft[K]>>(`/${routes.basePath}/${routes[action]}`, value,
-      { signal: AbortSignal.any([signal, currentSessionSignal()]), headers: { 'Cache-Control': 'no-store' } });
+      { signal: AbortSignal.any([signal, currentSessionSignal()]), headers: { 'Cache-Control': 'no-store' },
+        ...(action === 'start' ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
     return response.data.data;
   }
 });

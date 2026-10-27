@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import type { SecretBox } from '../../common/secret-box';
+import { SECRET_BOX_ENVELOPE_PATTERN, type SecretBox } from '../../common/secret-box';
 import type { AiScopeRepository } from './ai-scope.repository';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
@@ -33,7 +33,7 @@ const saveSchema = z.object({
 }).strict();
 const connectionSchema = z.object({ profileId: id, configRevision: revision,
   baseUrl: z.string().min(1).max(2048), maxOutputTokens: z.number().int().min(1).max(32768),
-  credentialsEncrypted: z.string().max(65535).regex(/^(?:v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)?$/u)
+  credentialsEncrypted: z.string().max(65535).refine(value => value === '' || SECRET_BOX_ENVELOPE_PATTERN.test(value))
 });
 const select = { profileId: true, configRevision: true, baseUrl: true, maxOutputTokens: true,
   credentialsEncrypted: true } satisfies Prisma.AiPlatformModelConnectionSelect;

@@ -189,12 +189,17 @@ export class OperationLogService {
 
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => {
-        const normalizedKey = key.toLowerCase();
+        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/gu, '');
         const shouldMask =
           normalizedKey.includes("password") ||
           normalizedKey.includes("token") ||
           normalizedKey.includes("apikey") ||
-          normalizedKey.includes("api_key") ||
+          normalizedKey.includes("credential") ||
+          normalizedKey.includes("authorization") ||
+          normalizedKey.includes("privatekey") ||
+          normalizedKey.includes("encryptionkey") ||
+          normalizedKey.includes("accesskey") ||
+          normalizedKey.includes("baseurl") ||
           normalizedKey.includes("secret") ||
           normalizedKey.includes("phone") ||
           normalizedKey.includes("identity") ||
