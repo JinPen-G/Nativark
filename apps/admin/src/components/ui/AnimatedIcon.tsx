@@ -27,6 +27,7 @@ import { Wallet as HugeWallet } from "./animated-icons/hugeicons/wallet";
 import { FolderOpen } from "./animated-icons/hugeicons/folder-open";
 import { Clock01 } from "./animated-icons/hugeicons/clock-01";
 import { Sparkles } from "./animated-icons/hugeicons/sparkles";
+import { WorkspaceCamera, WorkspaceVehicle, WorkspaceCamping, WorkspaceConstruction } from "./animated-icons/workspace-categories";
 
 const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: ChartColumn,
   file: FileText, tag: Tag, users: Users, settings: Settings,
@@ -34,10 +35,11 @@ const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: Ch
   download: Download, upload: Upload, dashboard: LayoutDashboard, report: HugeChart,
   orders: ClipboardList, pricing: CreditCard, inventory: Layers01, customers: HugeUsers,
   rules: Settings02, access: HugeShield, plugins: PlugZap, finance: HugeWallet,
-  folder: FolderOpen, schedule: Clock01, ai: Sparkles };
+  folder: FolderOpen, schedule: Clock01, ai: Sparkles,
+  camera: WorkspaceCamera, vehicle: WorkspaceVehicle, camping: WorkspaceCamping, construction: WorkspaceConstruction };
 export type AnimatedIconName = keyof typeof icons;
 
-/** Original Animate UI paths/variants; the host owns only interaction and accessibility.
+/** Animate UI icons and original library artwork adapters; the host owns interaction and accessibility.
  * Subscribe to the actual menu item/button, so its entire hit area triggers once.
  * No document scans, mutation observers, idle loops or extra focus stops. */
 export function AnimatedIcon({ name, busy = false, className, style, ...props }: HTMLAttributes<HTMLSpanElement> & { name: AnimatedIconName; busy?: boolean }) {

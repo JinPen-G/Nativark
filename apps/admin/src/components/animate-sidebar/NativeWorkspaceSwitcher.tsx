@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { UnfoldMoreIcon, Camera01Icon, Car01Icon, Layers01Icon } from "@hugeicons/core-free-icons";
+import { UnfoldMoreIcon } from "@hugeicons/core-free-icons";
+import { AnimatedIcon, type AnimatedIconName } from "@/components/ui/AnimatedIcon";
 import { useAdminBrandIcon } from "@/app/BrandIconProvider";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { useFeedback } from "@/components/ui";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "./runtime/sidebar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
+
+const categoryIcons: Record<string, AnimatedIconName> = { camera: "camera", vehicle: "vehicle", camping: "camping", construction: "construction" };
 
 export function NativeWorkspaceSwitcher() {
   const { isMobile, setOpenMobile } = useSidebar(), { t } = useLocale(), icon = useAdminBrandIcon();
@@ -33,10 +36,10 @@ export function NativeWorkspaceSwitcher() {
     </DropdownMenuTrigger>
     <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg" align="start" side={isMobile ? "bottom" : "right"} sideOffset={4}>
       <DropdownMenuGroup><DropdownMenuLabel className="text-xs text-muted-foreground">{t("经营空间")}</DropdownMenuLabel>
-        {workspaces.map(w => <DropdownMenuItem key={w.id} className="gap-2 p-2" disabled={switching} onClick={() => void change(w.id)}>
-          <div data-sidebar="workspace-icon" className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border">
-            <HugeiconsIcon icon={w.categoryCode === "camera" ? Camera01Icon : w.categoryCode === "vehicle" ? Car01Icon : Layers01Icon} strokeWidth={2} className="size-3.5 shrink-0" />
-          </div><span className="truncate">{t(w.name)}</span>
+        {workspaces.map(w => <DropdownMenuItem key={w.id} data-icon-hover="" className="gap-2 p-2" disabled={switching} onClick={() => void change(w.id)}>
+          <span data-sidebar="workspace-icon" className="flex size-6 shrink-0 items-center justify-center">
+            <AnimatedIcon name={categoryIcons[w.categoryCode] ?? "inventory"} style={{ fontSize: 20 }} />
+          </span><span className="truncate">{t(w.name)}</span>
         </DropdownMenuItem>)}
       </DropdownMenuGroup>
     </DropdownMenuContent>
