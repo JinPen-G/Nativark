@@ -3,6 +3,9 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiUsageSettingsDraft } from '@rental-os/shared';
 import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
 import { quantityAtoms, sameUnit } from './budget-quantity';
+import { assertPlatformCreditLimit } from './platform-credit-limit';
+import { byokMeterScene } from './byok-usage-meter';
+import { platformCreditScene } from './platform-credit-policy';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { BudgetSettingsOperation } from './budget.ports';
@@ -208,8 +211,19 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     const required = association.scope.kind === 'workspace' ? scopeKinds : association.scope.kind === 'tenant' ? scopeKinds.slice(0, 2) : scopeKinds.slice(0, 1);
     if (rows.length !== required.length || new Set(rows.map(row => row.id)).size !== rows.length
       || required.some(kind => rows.filter(row => row.scopeKind === kind).length !== 1)) throw new BudgetError('UNAVAILABLE');
+    const storedScene = rows[0]?.sceneCode;
+    const creditScene = platformCreditScene(sceneCode, association);
+    if (association.config.serviceMode === 'platform_managed' && rows.some(row => row.sceneCode === creditScene)) {
+      for (const row of rows) {
+        if (row.sceneCode !== (row.scopeKind === 'PLATFORM' ? sceneCode : creditScene)) throw new BudgetError('FORBIDDEN');
+        await this.assertScopeOwnership(tx, row, association);
+      }
+      return;
+    }
+    if (storedScene !== sceneCode && (association.config.serviceMode !== 'tenant_managed'
+      || storedScene !== byokMeterScene(sceneCode, association))) throw new BudgetError('FORBIDDEN');
     for (const row of rows) {
-      if (row.sceneCode !== sceneCode) throw new BudgetError('FORBIDDEN');
+      if (row.sceneCode !== storedScene) throw new BudgetError('FORBIDDEN');
       await this.assertScopeOwnership(tx, row, association);
     }
   }
@@ -299,9 +313,8 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     try {
       const result = structuredClone(await this.db.$transaction(async tx => {
         const rows = await this.lockPolicies(tx, quote.policies);
-        if (rows.some(row => row.sceneCode !== command.sceneCode)) throw new BudgetError('EXHAUSTED');
         if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
-        if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === command.sceneCode)) throw new BudgetError('FORBIDDEN');
+        if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === consumer.sceneCode)) throw new BudgetError('FORBIDDEN');
         await this.assertIntersection(tx, rows, quote.association, command.sceneCode);
         // Exact retries observe the original reservation BEFORE checking free
         // capacity: the first successful request may have taken the final unit.
@@ -322,6 +335,11 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           return replay;
         }
         const requested = quantityAtoms(quote.quantity);
+        if (quote.quantity.unit === 'money' && tenantId) {
+          // A tenant-owned provider is usage-only, never platform money billing.
+          if (quote.association.config.serviceMode !== 'platform_managed') throw new BudgetError('FORBIDDEN');
+          await assertPlatformCreditLimit(tx, tenantId, workspaceId, quote.quantity.currency, quote.quantity.amount);
+        }
         for (const row of rows) {
           const settings = policy(row).settings;
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
@@ -333,7 +351,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         }
         await revalidate();
         assertFresh();
-        const data = { id: randomUUID(), tenantId, workspaceId, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
+        const data = { id: randomUUID(), tenantId, workspaceId, billingMode: quote.association.config.serviceMode, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
         const created = await tx.aiBudgetReservation.create({ data, select: { id: true, tenantId: true, workspaceId: true, scopeId: true, scopeKind: true, sceneCode: true, actorId: true, requestId: true, runId: true, stepId: true, actionId: true, callId: true, idempotencyKey: true, configRevision: true, priceVersion: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, status: true, dispatchState: true, unknownReason: true, expiresAt: true, updatedAt: true } });
         const record = structuredClone(this.record(created, quote.association));
         await tx.aiBudgetAllocation.createMany({ data: rows.map(row => ({ reservationId: record.id, policyId: row.id, policyRevision: row.configRevision })) });

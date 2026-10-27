@@ -77,3 +77,4 @@ export * from "./ai-automation-event-task-http-draft";
 export * from "./ai-task-performance-draft";
 export * from "./ai-task-confirmation-history-draft";
 export * from "./ai-counting-http-draft";
+export * from "./ai-credit";

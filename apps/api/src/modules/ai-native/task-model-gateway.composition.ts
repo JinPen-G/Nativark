@@ -68,7 +68,7 @@ function checkedPricing(value: unknown) {
 }
 function taskPricing(db: PersistedTaskAuthorizationDependencies['db'], scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
   selection: PersistedTaskGatewayPricing, clock: () => Date) {
-  return selection.kind === 'recorded' ? new PrismaGatewayRecordedPricing(db, scopes, clock)
+  return selection.kind === 'recorded' ? new PrismaGatewayRecordedPricing(db, scopes, clock, true)
     : new PrismaGatewayCallPricing(db, scopes, selection.priceVersion, clock);
 }
 

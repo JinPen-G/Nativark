@@ -17,6 +17,11 @@ import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-
 import type { AiTaskRunnerRepositoryCommandFactory } from '../runner/ai-task-runner.repository-adapter';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { CurrentPersistentTaskAuthorization } from '../runner/authorized-persistent-task-input.composition';
+import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
+import { isGatewayConfig } from '../gateway-contract-validation';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
+import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 
 type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'db' | 'clock'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -61,9 +66,36 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const inputs = new TaskModelGatewayInputSource(input.db, source, authorization.execution, input.runtime,
     input.gatewayScene, input.priceVersion, clock, input.kind);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
-  const invocations = input.inputCounting
-    ? input.inputCounting.preparation(new PrismaTaskGatewayInvocationPreparation(bindings, inputs))
-    : new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
+  const plainInvocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
+  const countedInvocations = input.inputCounting?.preparation(plainInvocations);
+  const invocations: AiTaskModelInvocationPreparation = countedInvocations ? {
+    prepare: countedInvocations.prepare.bind(countedInvocations),
+    async beforeDispatch(request, budget, signal) {
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      if (request.resource !== 'calls' || request.target.kind !== 'step' || !request.target.gatewayInvocationId)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const snapshot = await budget.load(request.taskId, request.lease);
+      const principal = gatewayBudgetPrincipal(await authorization.execution.authorize(request.taskId));
+      const invocation = await input.db.aiGatewayInvocation.findFirst({ where: {
+        id: request.target.gatewayInvocationId, scopeId: snapshot.scopeId, taskId: request.taskId,
+        runId: request.lease.runId, stepId: request.target.stepId, actionId: request.target.actionId,
+        stepFingerprint: request.target.stepFingerprint, actorId: principal.actorId } });
+      if (!invocation || !isGatewayConfig(invocation.configuration)
+        || requestFingerprint(invocation.configuration) !== invocation.configurationHash)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      // BYOK has no monetary upper bound to publish or paid counting call to
+      // perform. Trust only the registered server configuration, never a UI
+      // mode. The original generation charge/Gateway gates remain in place.
+      if (invocation.configuration.serviceMode === 'tenant_managed') {
+        if (!('tenantId' in invocation.configuration) || invocation.configuration.tenantId !== principal.tenantId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return undefined;
+      }
+      if (!countedInvocations.beforeDispatch) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return countedInvocations.beforeDispatch(request, budget, signal);
+    }
+  } : plainInvocations;
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
     new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);
   const commands: AiTaskRunnerRepositoryCommandFactory = {

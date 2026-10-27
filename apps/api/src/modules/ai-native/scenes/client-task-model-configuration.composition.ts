@@ -50,7 +50,7 @@ function clientPricing(db: PrismaClient, scopes: Pick<AiScopeRepository, 'resolv
   if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
   const selection = Object.freeze(parsed.data);
   return { selection, pricing: selection.kind === 'recorded'
-    ? new PrismaGatewayRecordedPricing(db, scopes, clock)
+    ? new PrismaGatewayRecordedPricing(db, scopes, clock, true)
     : new PrismaGatewayCallPricing(db, scopes, selection.priceVersion, clock) };
 }
 

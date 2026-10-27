@@ -12,6 +12,7 @@ import { PrismaGatewayPricingRecords, gatewayPricingInvocationSelect, type Gatew
 import { priceGatewayTokens, priceGatewayTokenBound } from './gateway-pricing-evidence';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { quantityAtoms, sameUnit } from './budget-quantity';
+import { ensurePlatformCreditPolicy, platformCreditScene } from './platform-credit-policy';
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
@@ -22,8 +23,8 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
   private readonly records;
   private readonly bindings;
   constructor(private readonly db: GatewayPricingRecordDb & ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0]
-    & Pick<PrismaClient, 'aiBudgetPolicy'>, private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
-    private readonly clock: () => Date = () => new Date()) {
+    & Pick<PrismaClient, 'aiBudgetPolicy' | 'aiTenantAiAllowance'>, private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
+    private readonly clock: () => Date = () => new Date(), private readonly approvedCreditPolicies = false) {
     this.records = new PrismaGatewayPricingRecords(db);
     this.bindings = new PrismaGatewayInvocationBindings(db, scopes, clock);
   }
@@ -72,8 +73,13 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
       { kind: 'workspace' as const, tenantId: current.gateway.tenantId, workspaceId: current.gateway.workspaceId }]) {
       const columns = aiPersistenceScopeColumns(scope), canonical = await this.db.aiScope.findFirst({ where: columns });
       if (!canonical || Object.entries(columns).some(([name, expected]) => canonical[name as keyof typeof canonical] !== expected)) throw new BudgetError('UNAVAILABLE');
-      const key = { scopeId: canonical.id, scopeKind: columns.kind, sceneCode: command.sceneCode };
-      const policy = await this.db.aiBudgetPolicy.findFirst({ where: key });
+      const credit = this.approvedCreditPolicies && command.association.config.serviceMode === 'platform_managed'
+        && quantity.unit === 'money' && columns.kind !== 'PLATFORM';
+      const key = { scopeId: canonical.id, scopeKind: columns.kind,
+        sceneCode: credit ? platformCreditScene(command.sceneCode, command.association) : command.sceneCode };
+      const policy = credit && quantity.unit === 'money'
+        ? await ensurePlatformCreditPolicy(this.db, key, command.association, command.sceneCode, quantity.currency, grant.entitled)
+        : await this.db.aiBudgetPolicy.findFirst({ where: key });
       if (!policy || policy.scopeId !== key.scopeId || policy.scopeKind !== key.scopeKind || policy.sceneCode !== key.sceneCode
         || policy.unitKind !== quantity.unit || policy.priceVersion && policy.priceVersion !== invocation.priceVersion) throw new BudgetError('UNAVAILABLE');
       policies.push(key);

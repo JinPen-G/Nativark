@@ -16,7 +16,9 @@ export interface AiTaskToolResourceCatalog {
 export interface AiTaskModelInvocationPreparation {
   /** Registers the server-owned invocation after step start; never sends it. */
   prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, signal?: AbortSignal): Promise<{ invocationId: string }>;
-  beforeDispatch?(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal): Promise<string>;
+  /** Undefined means no extra counting call was needed; generation's own
+   * persisted CALLS charge and financial admission are still mandatory. */
+  beforeDispatch?(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal): Promise<string | undefined>;
 }
 const fail = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const uuid = (hash: string) => `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -110,7 +112,8 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
   }
 
   async prepareModelDispatch(request: AiTaskExecutionChargeRequest, budget: AiTaskExecutionBudgetPort, signal?: AbortSignal) {
-    return this.invocations?.beforeDispatch ? [await this.invocations.beforeDispatch(request, budget, signal)] : [];
+    const charge = await this.invocations?.beforeDispatch?.(request, budget, signal);
+    return charge === undefined ? [] : [charge];
   }
 
   async settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {

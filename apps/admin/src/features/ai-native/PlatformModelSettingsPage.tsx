@@ -11,6 +11,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { PLATFORM_MODEL_CAPABILITIES, PlatformModelSettingsSession } from "./platform-model-settings-session";
 import { safeDisplayText } from './safe-display';
 import { PlatformPriceReview } from './PlatformPriceReview';
+import { PlatformAiCreditSettings } from './AiCreditSettings';
 import { PlatformBudgetSettings } from './PlatformBudgetSettings';
 import { PlatformCapabilityObservation } from './PlatformCapabilityObservation';
 
@@ -37,6 +38,7 @@ export function PlatformModelSettingsPage() {
         disabled={!/^[A-Za-z0-9][\w.:-]{0,35}$/u.test(target)} onAction={async () => { setSelected(target); }} />
       {selected && <ProfileHost key={identityKey() + selected} profileId={selected} identity={identityKey()} />}
       <PlatformBudgetSettings key={`budget:${identityKey()}`} identity={identityKey()} />
+      <PlatformAiCreditSettings key={`credits:${identityKey()}`} identity={identityKey()} />
     </section> : <Alert type="warning" title={t("需要 SaaS 平台 AI 配置读取权限。")}/>}
   </>;
 }

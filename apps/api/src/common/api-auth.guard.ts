@@ -190,7 +190,10 @@ const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRe
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReadOperation,
   AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformReviewPrice, AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformPriceReviewReceipt]
   .map(operation => `POST /${AI_BUDGET_MANAGEMENT_HTTP_DRAFT.basePath}/${operation}`));
-const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRoutes.has(`${method.toUpperCase()} ${path}`);
+const creditTenantRoutes = new Set(['read', 'request', 'receipt', 'allocate', 'allocation-receipt', 'calls'].map(action => `POST /ai-native/credits/${action}`));
+const creditPlatformRoutes = new Set(['platform-read', 'platform-decide', 'platform-receipt'].map(action => `POST /ai-native/credits/${action}`));
+const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRoutes.has(`${method.toUpperCase()} ${path}`)
+  || creditPlatformRoutes.has(`${method.toUpperCase()} ${path}`);
 // Exact preparation transport only. Each request still verifies its stored
 // scene policy, original owner and actual business Guard/ALS. The R1 human
 // quote confirmation below has its own create permission, never order approval.
@@ -250,6 +253,9 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  const creditRoute = `${method.toUpperCase()} ${path}`;
+  if (creditTenantRoutes.has(creditRoute)) return ['system:params:manage'];
+  if (creditPlatformRoutes.has(creditRoute)) return [path.endsWith('/platform-decide') ? 'system:ai-provider:manage' : 'system:ai-provider:view'];
   const counting = countingRouteAccess.get(`${method.toUpperCase()} ${path}`);
   if (counting) return counting === 'management' ? ['system:params:manage'] : [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
   const platformProbePermission = platformCapabilityProbePermission(method, path);
@@ -973,6 +979,11 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    if ((path === '/ai-native/credits' || path.startsWith('/ai-native/credits/'))
+      && !creditTenantRoutes.has(`${request.method.toUpperCase()} ${path}`)
+      && !creditPlatformRoutes.has(`${request.method.toUpperCase()} ${path}`)) {
+      throw new ForbiddenException('AI 额度入口未登记该操作');
+    }
     if ((path === `/${AI_COUNTING_HTTP_DRAFT.basePath}` || path.startsWith(`/${AI_COUNTING_HTTP_DRAFT.basePath}/`))
       && !countingRouteAccess.has(`${request.method.toUpperCase()} ${path}`)) throw new ForbiddenException('计数入口未登记该操作');
     if (path === '/ai-native/platform-capability' || path.startsWith('/ai-native/platform-capability/')) {

@@ -8,6 +8,7 @@ import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord,
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import type { ModelUsage } from '../model-gateway.ports';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { byokMeterScene, ensureByokMeterPolicy } from './byok-usage-meter';
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _id, authorizedAt: _at, ...value } = context;
@@ -22,7 +23,8 @@ export class PrismaGatewayCallPricing implements BudgetQuotePort, GatewayActualU
   private readonly bindings;
   constructor(private readonly db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0]
     & Pick<PrismaClient, 'aiBudgetPolicy'>, private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
-    private readonly priceVersion: string, private readonly clock: () => Date = () => new Date()) {
+    private readonly priceVersion: string, private readonly clock: () => Date = () => new Date(),
+    private readonly automaticByokMetering = false) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u.test(priceVersion)
       || typeof db?.aiBudgetPolicy?.findFirst !== 'function') throw new BudgetError('UNAVAILABLE');
     this.bindings = new PrismaGatewayInvocationBindings(db, scopes, clock);
@@ -53,8 +55,10 @@ export class PrismaGatewayCallPricing implements BudgetQuotePort, GatewayActualU
       const columns = aiPersistenceScopeColumns(scope);
       const canonical = await this.db.aiScope.findFirst({ where: columns });
       if (!canonical || Object.entries(columns).some(([key, item]) => canonical[key as keyof typeof canonical] !== item)) throw new BudgetError('UNAVAILABLE');
-      const key = { scopeKind: columns.kind, scopeId: canonical.id, sceneCode: row.sceneCode };
-      const policy = await this.db.aiBudgetPolicy.findFirst({ where: key });
+      const metered = this.automaticByokMetering && command.association.config.serviceMode === 'tenant_managed';
+      const key = { scopeKind: columns.kind, scopeId: canonical.id, sceneCode: metered ? byokMeterScene(row.sceneCode, command.association) : row.sceneCode };
+      const policy = metered ? await ensureByokMeterPolicy(this.db, key, command.association, row.sceneCode, grant.entitled)
+        : await this.db.aiBudgetPolicy.findFirst({ where: key });
       if (!policy || policy.scopeKind !== key.scopeKind || policy.scopeId !== key.scopeId || policy.sceneCode !== key.sceneCode) throw new BudgetError('UNAVAILABLE');
       if (policy.unitKind !== 'calls' || policy.priceVersion && policy.priceVersion !== this.priceVersion) throw new BudgetError('UNAVAILABLE');
       policies.push(key);

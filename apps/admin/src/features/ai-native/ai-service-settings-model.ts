@@ -18,14 +18,15 @@ export interface AiSettingsValidation { ok: boolean; errors: Partial<Record<"pro
 
 export function fromAiServiceSummary(input: AiTenantModelSettingsSummaryDraft | null | undefined): AiServiceSettingsDraft {
   if (!input || input.mode === "platform_managed") return { mode: "platform_managed", enabled: input?.enabled === true, protocol: "", baseUrl: "", model: "", secretOperation: "retain", apiKeyDraft: "" };
-  return { mode: "tenant_managed", enabled: input.enabled === true, protocol: input.protocol, baseUrl: input.baseUrl, model: input.model, secretOperation: "retain", apiKeyDraft: "" };
+  return { mode: "tenant_managed", enabled: input.enabled === true, protocol: input.protocol, baseUrl: input.baseUrl, model: input.model,
+    secretOperation: input.credentialState === 'configured' ? 'retain' : 'replace', apiKeyDraft: "" };
 }
 
 export function setAiSettingsMode(current: AiServiceSettingsDraft, mode: AiSettingsMode): AiServiceSettingsDraft {
   if (mode === current.mode) return current;
   return mode === "platform_managed"
     ? { ...current, mode, secretOperation: "retain", apiKeyDraft: "" }
-    : { ...current, mode, secretOperation: "retain", apiKeyDraft: "" };
+    : { ...current, mode, secretOperation: "replace", apiKeyDraft: "" };
 }
 
 export function validateAiSettingsDraft(draft: AiServiceSettingsDraft): AiSettingsValidation {

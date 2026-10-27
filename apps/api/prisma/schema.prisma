@@ -170,6 +170,8 @@ model Tenant {
   adapterLogs                       ExternalAdapterLog[]
   integrationConfigs                TenantIntegrationConfig[]
   aiModelConfiguration              AiTenantModelConfiguration?
+  aiCreditAllowance                 AiTenantAiAllowance[]
+  aiCreditRequests                  AiTenantAiCreditRequest[]
   asyncJobs                         AsyncJob[]
   printJobs                         DocumentPrintJob[]
   integrationTboxDevices            TBoxDevice[]
@@ -631,6 +633,7 @@ model AiGatewayInvocation {
   @@unique([scopeId, callId], map: "ai_gateway_invocations_scope_call_key")
   @@unique([scopeId, stepId], map: "ai_gateway_invocations_scope_step_key")
   @@index([scopeId, taskId, runId], map: "ai_gateway_invocations_task_run_idx")
+  @@index([scopeId, createdAt, id], map: "ai_gateway_invocations_created_idx")
   @@map("ai_gateway_invocations")
 }
 
@@ -1591,6 +1594,8 @@ model AiBudgetPolicy {
 
 /// Durable reservation bound to server-side invocation identity.
 model AiBudgetReservation {
+  /// Immutable payer classification; unresolved legacy money remains held.
+  billingMode       String   @default("legacy_unknown") @db.VarChar(24)
   id              String   @id @default(uuid()) @db.VarChar(36)
   tenantId        String?  @db.VarChar(191)
   workspaceId     String?  @db.VarChar(191)
@@ -1633,7 +1638,50 @@ model AiBudgetReservation {
   @@unique([scopeId, scopeKind, callId], map: "ai_budget_reservation_call_key")
   @@index([scopeId, scopeKind, sceneCode, status], map: "ai_budget_reservation_policy_status_idx")
   @@index([tenantId, workspaceId, status], map: "ai_budget_reservation_scope_status_idx")
+  @@index([tenantId, unitKind, moneyCurrency, status], map: "ai_budget_reservation_credit_idx")
   @@map("ai_budget_reservations")
+}
+
+// Credit entitlement only. Consumption remains in the original budget ledger;
+// neither this allowance nor its approval receipt charges money a second time.
+model AiTenantAiAllowance {
+  tenantId       String
+  currency       String   @db.VarChar(3)
+  grantedAmount  Decimal  @default(0) @db.Decimal(24, 6)
+  allocationsJson Json
+  revision       Int      @default(1) @db.UnsignedInt
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, currency])
+  @@map("ai_tenant_ai_allowances")
+}
+
+model AiTenantAiCreditRequest {
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  tenantId        String
+  requestedBy     String    @db.VarChar(191)
+  operationKey    String    @db.VarChar(128)
+  requestHash     String    @db.Char(64)
+  currency        String    @db.VarChar(3)
+  requestedAmount Decimal   @db.Decimal(24, 6)
+  state           String    @default("pending") @db.VarChar(16)
+  revision        Int       @default(1) @db.UnsignedInt
+  grantedAmount   Decimal?  @db.Decimal(24, 6)
+  decidedBy       String?   @db.VarChar(191)
+  decisionOperationKey String? @db.VarChar(128)
+  decisionHash    String?   @db.Char(64)
+  decidedAt       DateTime? @db.DateTime(3)
+  createdAt       DateTime  @default(now()) @db.DateTime(3)
+  updatedAt       DateTime  @updatedAt @db.DateTime(3)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, requestedBy, operationKey], map: "ai_credit_request_operation_key")
+  @@unique([decidedBy, decisionOperationKey], map: "ai_credit_decision_operation_key")
+  @@index([tenantId, state, createdAt], map: "ai_credit_request_tenant_state_idx")
+  @@index([state, createdAt], map: "ai_credit_request_pending_idx")
+  @@map("ai_tenant_ai_credit_requests")
 }
 
 model AiBudgetLedgerEntry {

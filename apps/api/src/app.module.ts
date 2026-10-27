@@ -139,6 +139,8 @@ import { ClientTaskPolicyController } from './modules/ai-native/scenes/client-ta
 import { AI_NATIVE_CLIENT_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
+import { AiCreditController } from './modules/ai-native/budget/ai-credit.controller';
+import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
 
 @Module({
   imports: [
@@ -150,6 +152,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     DatabaseModule
   ],
   controllers: [
+    AiCreditController,
     InspectionRecognitionTaskController,
     StaffInspectionAccountingController,
     StaffInspectionTaskPolicyController,
@@ -225,6 +228,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     PlatformDemoRequestController
   ],
   providers: [
+    AiCreditService,
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,

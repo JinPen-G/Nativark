@@ -1,27 +1,27 @@
 /** Tenant configuration host. The server remains the permission/CAS authority;
  * this page cannot grant capabilities, initialize quotas or dispatch a model. */
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { aiModelSettingsApi } from "@/api/aiModelSettings";
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
-import { ActionButton, Alert } from "@/components/ui";
+import { ActionButton, Alert, Tabs } from "@/components/ui";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AiServiceSettingsCard } from "./AiServiceSettingsCard";
 import { ModelSettingsSession, type SettingsFeedback } from "./model-settings-session";
-import { TenantBudgetSettings } from "./TenantBudgetSettings";
-import { TenantPlatformRate } from './TenantPlatformRate';
-import { TenantByokRate } from './TenantByokRate';
+import { TenantAiCreditSettings } from './AiCreditSettings';
+import { AiCallRecords } from './AiCallRecords';
+import type { AiSettingsMode } from './ai-service-settings-model';
 import { CapabilityProbePanel } from './CapabilityProbePanel';
 import { DesktopBusinessPolicySettings } from '../agent-desktop/DesktopBusinessPolicySettings';
 
 const labels: Record<SettingsFeedback, string> = {
-  idle: "配置保存、真实能力验证与执行准入分别管理。",
-  saved: "AI 配置已保存；尚未自动验证能力或开放预算。",
+  idle: "选择 AI 服务并保存。平台 AI 的金额额度需向平台申请。",
+  saved: "AI 设置已保存。连接是否可用以实际验证结果为准。",
   recorded: "原保存收据已确认；请重新读取当前配置，历史收据不代表当前配置未变化。",
   unknown: "保存结果待核对。只能读取原操作收据，不能再次保存或更换操作编号重试。",
-  conflict: "配置修订已变化，请重新读取并确认；未覆盖其他人的修改。",
+  conflict: "设置已被其他管理员修改，请重新读取后确认。",
   denied: "当前无权读取或管理 AI 配置，已停止显示旧配置。",
   unavailable: "配置或收据暂不可用，请稍后重新读取；不代表保存未发生。",
   invalid: "输入未通过服务端校验，请检查配置。"
@@ -33,20 +33,31 @@ function contextKey() {
 export function AiModelSettingsPage() {
   const { t } = useLocale();
   const auth = useAuthStore();
+  const identity = contextKey();
+  const [selection, setSelection] = useState<{ identity: string; mode: AiSettingsMode } | null>(null);
+  const mode = selection?.identity === identity ? selection.mode : null;
+  const onModeChange = useCallback((mode: AiSettingsMode) => setSelection({ identity, mode }), [identity]);
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user?.id
     && !auth.user.isSaasAdmin && auth.hasPermission("system:params:manage");
   return <>
-    <PageHeader title={t("AI 服务设置")} description={t("平台统一服务或自定义 BYOK，预算和执行权限独立管理。")} />
-    {allowed ? <><TenantSettingsEditor key={contextKey()} tenantId={auth.tenant!.tenantId} identity={contextKey()} />
-      <TenantBudgetSettings key={`budget:${contextKey()}`} identity={contextKey()} />
-      <TenantPlatformRate key={`rate:${contextKey()}`} identity={contextKey()} />
-      <TenantByokRate key={`byok-rate:${contextKey()}`} tenantId={auth.tenant!.tenantId} identity={contextKey()} />
-      <CapabilityProbePanel key={`capability:${contextKey()}`} identity={contextKey()} />
-      <DesktopBusinessPolicySettings key={`desktop-policy:${contextKey()}`} identity={contextKey()} /></>
+    <PageHeader title={t("AI 服务设置")} description={t("选择平台 AI 或自带供应商，管理使用额度和查询调用记录。")} />
+    {allowed ? <Tabs key={identity} items={[
+      { key: 'settings', label: t('服务配置'), children: <>
+        <TenantSettingsEditor tenantId={auth.tenant!.tenantId} identity={identity} onModeChange={onModeChange} />
+        <details><summary>{t('高级连接验证与客户端权限')}</summary>
+          <CapabilityProbePanel identity={identity} />
+          <DesktopBusinessPolicySettings identity={identity} />
+        </details>
+      </> },
+      { key: 'credits', label: t('平台额度'), children: mode === 'tenant_managed'
+        ? <Alert type="info" title={t('自带供应商由供应商直接计费，无需申请平台额度。切换至平台 AI 后可在此申请。')} />
+        : <TenantAiCreditSettings identity={identity} /> },
+      { key: 'calls', label: t('调用记录'), children: <AiCallRecords identity={identity} /> }
+    ]} />
       : <Alert type="warning" title={t("需要当前经营空间及 AI 配置管理权限。")}/>}
   </>;
 }
-function TenantSettingsEditor({ tenantId, identity }: { tenantId: string; identity: string }) {
+function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: string; identity: string; onModeChange: (mode: AiSettingsMode) => void }) {
   const { t } = useLocale();
   const [reviewLegacy, setReviewLegacy] = useState(false);
   const session = useMemo(() => {
@@ -62,6 +73,7 @@ function TenantSettingsEditor({ tenantId, identity }: { tenantId: string; identi
       () => window.crypto.randomUUID(), storage, storageKey);
   }, [tenantId, identity]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
+  useEffect(() => { if (state.summary) onModeChange(state.summary.mode); }, [state.summary?.mode, onModeChange]);
   useEffect(() => { session.activate(); void session.load(); return () => session.dispose(); }, [session]);
   const legacy = state.legacy?.state === "review_required" && state.legacy.currentConfiguration === "absent" ? state.legacy : null;
   const showEditor = !!state.summary || !!legacy && reviewLegacy && legacy.supportedProtocol !== null;
@@ -84,6 +96,7 @@ function TenantSettingsEditor({ tenantId, identity }: { tenantId: string; identi
       {showEditor && <AiServiceSettingsCard summary={state.summary} configId={tenantId} expectedRevision={state.summary?.configRevision ?? 0}
         contextIdentity={identity} pending={state.busy} readOnly={!!state.pending}
         legacySource={!state.summary && legacy && reviewLegacy ? legacy.source : undefined}
+        onModeChange={onModeChange}
         onSave={input => session.save(input)} />}
     </QueryState>
   </section>;

@@ -24,6 +24,7 @@ import { type BudgetGatewayContext } from './budget-gateway-adapter';
 import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
 import { budgetSettingsOperationSchema, budgetSettingsReceiptSchema, settingsOperationId } from './budget-settings-operation';
 import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
+import { ServiceModePricing } from './service-mode-pricing';
 
 export function createPersistedGatewayBudget(input: {
   db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0]
@@ -40,13 +41,14 @@ export function createPersistedGatewayBudget(input: {
   clock?: () => Date;
 }) {
   const bindings = new PrismaGatewayInvocationBindings(input.db, input.scopes, input.clock);
-  const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, input.pricing, input.clock);
+  const pricing = new ServiceModePricing(input.db, input.scopes, input.pricing, input.clock);
+  const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, pricing, input.clock);
   const service = input.entitlements
     ? new BudgetService(new PrismaBudgetRepository(input.db, input.clock),
       new ServerBudgetAuthorityAdapter(input.authorization, input.entitlements, input.entitlementFeatureCode),
-      input.pricing, new PersistedBudgetEvidenceAdapter(facts), input.clock)
+      pricing, new PersistedBudgetEvidenceAdapter(facts), input.clock)
     : createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
-      quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
+      quotes: pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
   const selector = z.object({ scope: z.enum(['tenant', 'workspace']),
     sceneCode: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const write = selector.extend({ expectedRevision: z.number().int().min(0).max(4294967294), settings: z.unknown(),
@@ -56,6 +58,7 @@ export function createPersistedGatewayBudget(input: {
     return requestFingerprint({ context, scope: value.scope });
   };
   const target = async (value: z.infer<typeof selector>) => {
+    if (/^(byok-meter|platform-credit):/u.test(value.sceneCode)) throw new BudgetError('FORBIDDEN');
     const current = structuredClone(await input.scopes.resolveCurrent());
     if (current.context.actor.kind !== 'user' || current.context.audience !== 'operator'
       || current.context.scope.kind !== 'workspace' || current.scope.kind !== 'WORKSPACE'
@@ -342,7 +345,7 @@ export function createRecordedPricingGatewayAccountingRecovery(input: RecordedPr
 
 export function createRecordedPricingGatewayBudget(input: RecordedPricingAccountingDependencies
   & { pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
-  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock, true);
   const gateway = createPersistedGatewayBudget({ ...input, pricing });
   const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
     input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
