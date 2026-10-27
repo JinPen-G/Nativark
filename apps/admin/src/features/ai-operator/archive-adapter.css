@@ -1,4 +1,17 @@
 /* Host tokens only; source layout, stream, branches and step disclosure are retained. */
+.operator-context-header { border-bottom: 1px solid var(--border); }
+.operator-confirmation { border-radius: var(--rental-ui-radius-container); }
+.operator-confirmation > [class*="header"] { padding: var(--space-6) var(--space-6) var(--space-2); border-bottom: 0; }
+.operator-confirmation > [class*="body"] { padding: var(--space-3) var(--space-6) var(--space-6); }
+.operator-confirmation-title { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 16px; font-weight: 600; }
+.operator-confirmation-content { display: grid; gap: var(--space-5); }
+.operator-confirmation-description { margin: 0; font-size: var(--text-sm); line-height: 1.7; color: var(--foreground); }
+.operator-confirmation-facts { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-5); }
+.operator-confirmation-facts > div { min-width: 0; }
+.operator-confirmation-facts dt { margin-bottom: var(--space-1); font-size: var(--text-xs); color: var(--text-secondary); }
+.operator-confirmation-facts dd { margin: 0; font-size: var(--text-sm); color: var(--foreground); font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.operator-confirmation-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+.operator-confirmation-note { margin: 0; font-size: var(--text-xs); color: var(--text-secondary); }
 .operator-page, .operator-mobile-work {
   --operator-ink: var(--foreground);
   --operator-secondary: var(--text-secondary);

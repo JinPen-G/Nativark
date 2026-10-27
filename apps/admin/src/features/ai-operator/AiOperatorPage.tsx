@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, X } from "lucide-react";
+import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, ShieldCheck, X } from "lucide-react";
 import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
@@ -74,6 +74,7 @@ function WorkArea() {
   const [confirmOpen, setConfirmOpen] = useState(false), [notice, setNotice] = useState("");
   useEffect(() => { setConfirmOpen(false); setNotice(""); }, [thread.id, thread.artifact]);
   const artifact = thread.artifact;
+  const confirmation = artifact ? confirmationDetails(artifact) : null;
   const printable = artifact ? [artifact.title, artifact.summary, ...(artifact.metrics ?? []).map(item => `${item.label}：${item.value}`), artifact.columns.join(" | "), ...artifact.rows.map(row => row.join(" | ")), artifact.note].join("\n\n") : "";
   async function copy() { try { await navigator.clipboard.writeText(printable); setNotice("已复制示例结果"); } catch { setNotice("浏览器未允许复制，请使用下载"); } }
   function download() { if (!artifact) return; const url = URL.createObjectURL(new Blob([printable], { type: "text/plain;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${artifact.title}-示例.txt`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice("已下载示例结果"); }
@@ -88,10 +89,46 @@ function WorkArea() {
         {operator.capability.action && <Button type="primary" block disabled={Boolean(thread.receipt) || !operator.enabled} onClick={() => setConfirmOpen(true)}>{thread.receipt ? "已确认此示例" : operator.capability.action}</Button>}
         <p className="operator-caption" role="status">{thread.receipt || notice || artifact.note}</p></>}
     </footer>
-    <Modal open={confirmOpen} title="确认此演示结果" okText="确认并生成演示回执" onCancel={() => setConfirmOpen(false)} onOk={() => { operator.confirm(); setConfirmOpen(false); }}>
-      <p>将确认「{artifact?.title}」的示例内容。此操作只生成本地演示回执，不会创建订单、分派任务或扣款。</p>
+    <Modal open={confirmOpen} className="operator-confirmation" title={<span className="operator-confirmation-title"><ShieldCheck size={20} aria-hidden="true" />确认后继续执行</span>}
+      width={520} closable={false} footer={null} onCancel={() => setConfirmOpen(false)}>
+      {confirmation && <div className="operator-confirmation-content">
+        <p className="operator-confirmation-description">{confirmation.description}</p>
+        <dl className="operator-confirmation-facts">{confirmation.facts.map(fact => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+        <div className="operator-confirmation-actions"><Button autoFocus onClick={() => setConfirmOpen(false)}>返回核对</Button><Button type="primary" disabled={!operator.enabled || Boolean(thread.receipt) || thread.running} onClick={() => { operator.confirm(); setConfirmOpen(false); }}>{operator.capability.action ?? "确认此结果"}</Button></div>
+        <p className="operator-confirmation-note">本地演示：确认仅生成示例回执。</p>
+      </div>}
     </Modal>
   </section>;
+}
+/** Review the same result values shown in the workspace; never invent a second quote. */
+function confirmationDetails(artifact: OperatorArtifact) {
+  if (artifact.kind === "quote") return {
+    description: "将按当前资料准备预约草稿，关联客户、租期与报价。",
+    facts: [
+      { label: "租赁安排", value: artifact.rows[0]?.[1] ?? "待补充" },
+      { label: "租金", value: artifact.rows.find(row => row[0] === "租金")?.[2] ?? "待核对" },
+      { label: "可退押金", value: artifact.rows.find(row => row[0] === "可退押金")?.[2] ?? "待核对" },
+      { label: "待支付合计", value: artifact.metrics?.find(metric => metric.label === "示例待支付")?.value ?? "待核对" },
+    ],
+  };
+  if (artifact.kind === "tasks") return {
+    description: "将按交接清单准备履约任务并分派负责人，实际交付仍需门店核验。",
+    facts: [
+      { label: "交接事项", value: `${artifact.rows.length} 项` },
+      { label: "关联订单", value: artifact.rows.filter(row => row[0].startsWith("DEMO-")).map(row => row[0].split(" · ")[0]).join("、") || "待核对" },
+      { label: "负责人", value: [...new Set(artifact.rows.map(row => row[1]))].join("、") },
+      { label: "交付时间", value: artifact.rows.slice(0, 2).map(row => row[2]).join("、") },
+    ],
+  };
+  return {
+    description: "将按门店协同清单分派任务，保留对应负责人、计划时间与处理记录。",
+    facts: [
+      { label: "协同安排", value: `${artifact.rows.length} 项` },
+      { label: "涉及门店", value: [...new Set(artifact.rows.filter(row => row[0].includes(" · ")).map(row => row[0].split(" · ")[0]))].join("、") || "待核对" },
+      { label: "负责人", value: [...new Set(artifact.rows.map(row => row[1]))].join("、") },
+      { label: "计划时间", value: artifact.rows.map(row => row[2]).join("、") },
+    ],
+  };
 }
 function ArtifactView({ artifact }: { artifact: OperatorArtifact }) {
   const timeline = ["schedule", "tasks", "document"].includes(artifact.kind);
