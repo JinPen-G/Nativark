@@ -134,6 +134,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     const element = composer.current;
     if (element) { element.style.height = 'auto'; element.style.height = `${Math.min(element.scrollHeight, 160)}px`; }
   }, [draft]);
+  useEffect(() => { setDraft(''); setAttachments([]); setMenu(null); }, [activeId]);
   useLayoutEffect(() => {
     const element = thread.current;
     if (!element) return;
@@ -236,8 +237,13 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
   const consumedPrompt = useRef<string | null>(null);
   useEffect(() => {
     if (!queuedPrompt || queuedPrompt.chatId !== activeId || consumedPrompt.current === queuedPrompt.id) return;
-    consumedPrompt.current = queuedPrompt.id;
-    send(queuedPrompt.text); onQueuedPromptUsed?.();
+    // Defer until the mount commits. StrictMode's rehearsal cleanup must not
+    // abort the only copy of a queued automation demo before it can be retried.
+    const frame = requestAnimationFrame(() => {
+      consumedPrompt.current = queuedPrompt.id;
+      send(queuedPrompt.text); onQueuedPromptUsed?.();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [queuedPrompt?.id, activeId]);
   const copy = useCallback(async (text: string) => {
     try { await navigator.clipboard.writeText(text); setAnnouncement('已复制'); }
