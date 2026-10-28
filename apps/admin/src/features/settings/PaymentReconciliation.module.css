@@ -1,0 +1,25 @@
+.fileIdentity { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.fileIcon { flex: none; color: var(--text-secondary); }
+.fileCopy { display: grid; gap: var(--space-1); min-width: 0; }
+.fileCopy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--rental-typography-body-strong-weight, 600); }
+.fileCopy > span { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.result { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); font-variant-numeric: tabular-nums; }
+.result > span { color: var(--text-secondary); white-space: nowrap; }
+.result b { color: var(--foreground); font-weight: 500; }
+.result [data-attention] { color: var(--rental-status-warning-ink); }
+.result [data-attention] b { color: inherit; }
+.money { display: inline-flex; align-items: baseline; gap: var(--space-1); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.money small { color: var(--text-secondary); }
+.differences { overflow-wrap: anywhere; line-height: var(--rental-typography-body-line-height); }
+.reviewState { display: grid; justify-items: start; gap: var(--space-1); min-width: 0; }
+.reviewReason { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.detailNote { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.detailNote > svg { flex: none; margin-top: var(--space-1); }
+.importForm { display: grid; gap: var(--space-4); min-width: 0; }
+.uploadLabel > span:first-child { font-weight: 500; }
+.uploadLabel { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.importTools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.fileRequirements p { margin: 0; }
+.fileRequirements p + p { margin-top: var(--space-3); }
+.reviewContext { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); overflow-wrap: anywhere; }
+.operationError { margin: 0; color: var(--rental-status-error-ink); overflow-wrap: anywhere; }
