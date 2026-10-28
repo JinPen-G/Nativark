@@ -247,11 +247,17 @@ export class ClientChannelProfileService {
   }
 
   private async normalizeAdminLogin(value: AdminLoginBranding, tenantId: string): Promise<Prisma.InputJsonObject> {
-    const keys = ["backgroundImageUrl", "title", "description", "highlights", "footerText"];
+    const keys = ["backgroundImageUrl", "title", "description", "highlights", "footerText", "showTitle", "showDescription", "showHighlights", "showFooter"];
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) {
       throw new BadRequestException("登录页配置格式无效");
     }
     const copy: Record<string, Prisma.InputJsonValue> = {};
+    // Visibility is explicit; blank text retains its existing default fallback.
+    for (const key of ["showTitle", "showDescription", "showHighlights", "showFooter"] as const) {
+      if (value[key] === undefined) continue;
+      if (typeof value[key] !== "boolean") throw new BadRequestException("登录页显示设置必须为布尔值");
+      copy[key] = value[key];
+    }
     for (const [key, max, label] of [["title", 80, "登录页标题"], ["description", 300, "登录页说明"], ["footerText", 160, "登录页底部文字"]] as const) {
       const normalized = text(value[key], max, label);
       if (normalized) copy[key] = normalized;

@@ -157,8 +157,20 @@ test('login branding omission preserves, replacement clears fields, and empty ob
   assert.deepEqual((await f.channel.get(user)).adminLogin, {});
 });
 
+test('login visibility survives save and read without clearing copy, and can be restored', async () => {
+  const f = fixture();
+  const adminLogin = { title: '保留的自定义标题', showTitle: false, showDescription: false, showHighlights: false, showFooter: false };
+  await f.channel.save({ publishedWorkspaceIds: [], adminLogin }, user);
+  assert.deepEqual((await f.channel.get(user)).adminLogin, adminLogin);
+  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 18 }, user);
+  assert.deepEqual(f.state.appearance.adminLoginJson, adminLogin);
+  const restored = { ...adminLogin, showTitle: true };
+  await f.channel.save({ publishedWorkspaceIds: [], adminLogin: restored }, user);
+  assert.deepEqual((await f.channel.get(user)).adminLogin, restored);
+});
+
 test('login branding rejects malformed objects and oversized text before any write', async () => {
-  for (const adminLogin of [null, [], 'text', { unknown: 'x' }, { title: 42 }, { title: 'a'.repeat(81) }, { description: 'a'.repeat(301) }, { footerText: 'a'.repeat(161) }, { highlights: {} }, { highlights: [{}, {}, {}, {}] }, { highlights: [null] }, { highlights: [{ other: 'x' }] }, { highlights: [{ title: 'a'.repeat(25) }] }, { highlights: [{ description: 'a'.repeat(81) }] }]) {
+  for (const adminLogin of [null, [], 'text', { unknown: 'x' }, { showTitle: 'false' }, { showDescription: 0 }, { showHighlights: null }, { showFooter: [] }, { title: 42 }, { title: 'a'.repeat(81) }, { description: 'a'.repeat(301) }, { footerText: 'a'.repeat(161) }, { highlights: {} }, { highlights: [{}, {}, {}, {}] }, { highlights: [null] }, { highlights: [{ other: 'x' }] }, { highlights: [{ title: 'a'.repeat(25) }] }, { highlights: [{ description: 'a'.repeat(81) }] }]) {
     const f = fixture();
     await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin }, user), e => e.getStatus() === 400);
     assert.deepEqual(f.state.writes, []);

@@ -261,7 +261,7 @@ test("OpenAPI: 渠道配置与公开文档契约齐全，凭证 schema 不再含
 });
 
 test("bootstrap: admin login branding is web-only and independent of channel publication", async () => {
-  const adminLogin = { title: '租户标题', description: '租户说明', highlights: [{}, { title: '第二项' }], footerText: '底部文字' };
+  const adminLogin = { title: '租户标题', description: '租户说明', highlights: [{}, { title: '第二项' }], footerText: '底部文字', showTitle: false, showDescription: true, showHighlights: false, showFooter: false };
   for (const profile of [null, { ...publishedProfile, publishedWorkspaces: [] }, publishedProfile]) {
     const svc = bootstrapService({ tenant, profile, appearance: { adminLoginJson: adminLogin }, wechatChannel: null, websiteProfile: { enabled: false } });
     const web = await svc.channelBootstrap('demo', 'web');
@@ -273,6 +273,7 @@ test("bootstrap: admin login branding is web-only and independent of channel pub
   assert.equal((await empty.channelBootstrap('demo', 'web')).adminLogin, undefined);
   assert.equal(OPENAPI_DOCUMENT.components.schemas.AdminLoginBranding.additionalProperties, false);
   assert.equal(OPENAPI_DOCUMENT.components.schemas.AdminLoginBranding.properties.highlights.maxItems, 3);
+  for (const key of ["showTitle", "showDescription", "showHighlights", "showFooter"]) assert.equal(OPENAPI_DOCUMENT.components.schemas.AdminLoginBranding.properties[key].type, "boolean");
   assert.ok(OPENAPI_DOCUMENT.components.schemas.SaveClientChannelProfileRequest.properties.adminLogin);
   assert.ok(OPENAPI_DOCUMENT.components.schemas.ClientChannelBootstrapResponse.properties.adminLogin);
 });

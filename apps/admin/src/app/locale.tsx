@@ -472,6 +472,7 @@ const ENGLISH: Record<string, string> = {
   "暂未接入第三方授权，不会打开授权页面或建立登录会话。": "Third-party authorization is not connected. No authorization page or login session will open.",
   "租赁生意，\n有序运转。": "Your rentals,\nin good order.",
   "管理后台登录页": "Admin login page",
+  "文案留空使用默认内容；关闭对应开关可隐藏，已填写的内容会保留。仅影响后台登录页。": "Leave text blank to use defaults. Turn a section off to hide it without losing your text. Applies only to admin sign-in.",
   "仅影响管理后台登录页左侧，不影响客户官网。留空使用平台默认文案，上传或移除图片后请保存配置。": "Customize the left side of the admin login page without changing your customer website. Blank fields use platform defaults. Save after uploading or removing an image.",
   "左侧背景图": "Brand panel background",
   "建议使用竖版图片，主体居中；自动裁切并叠加深色遮罩。JPG/PNG/WebP，最大 2MB。": "Use a portrait image with the subject centered. The image is cropped automatically with a dark overlay. JPG, PNG or WebP, up to 2 MB.",

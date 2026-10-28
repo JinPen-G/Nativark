@@ -852,6 +852,11 @@ export interface SaveAccountAppearanceRequest {
 }
 
 export interface AdminLoginBranding {
+  /** Defaults to visible. Explicit false hides the section without restoring default text. */
+  showTitle?: boolean;
+  showDescription?: boolean;
+  showHighlights?: boolean;
+  showFooter?: boolean;
   backgroundImageUrl?: string;
   title?: string;
   description?: string;

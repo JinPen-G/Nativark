@@ -8,7 +8,7 @@ import { Alert, FileUpload, type FileUploadItem } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { ActionButton, Button, ColorPicker, RichTextEditor, SaveButton, Tabs } from "@/components/ui";
-import { useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useServerFormSync } from "@/app/useServerFormSync";
 import { isTransientRefreshError } from "@/app/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,6 +50,25 @@ function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { 
   );
 }
 
+/** Visible and hidden are separate from an empty field's default copy. */
+function LoginBrandingSection({ field, title, children }: {
+  field: "showTitle" | "showDescription" | "showHighlights" | "showFooter";
+  title: string; children: ReactNode;
+}) {
+  const { t } = useLocale();
+  const id = useId();
+  const enabled = Form.useWatch(["adminLogin", field]);
+  return <section className="login-brand-settings-section">
+    <div className="login-brand-settings-heading">
+      <label htmlFor={id}>{t(title)}</label>
+      <Form.Item name={["adminLogin", field]} valuePropName="checked" noStyle>
+        <Switch id={id} aria-label={t(title)} />
+      </Form.Item>
+    </div>
+    <fieldset disabled={enabled === false} className="login-brand-settings-fields">{children}</fieldset>
+  </section>;
+}
+
 function ProfileCard() {
   const { t } = useLocale();
   const [form] = Form.useForm<ProfileForm>();
@@ -77,6 +96,10 @@ function ProfileCard() {
       bannerTitle: data.bannerTitle,
       bannerSubtitle: data.bannerSubtitle,
       adminLogin: {
+        showTitle: data.adminLogin?.showTitle !== false,
+        showDescription: data.adminLogin?.showDescription !== false,
+        showHighlights: data.adminLogin?.showHighlights !== false,
+        showFooter: data.adminLogin?.showFooter !== false,
         backgroundImageUrl: data.adminLogin?.backgroundImageUrl ?? "",
         title: data.adminLogin?.title ?? "",
         description: data.adminLogin?.description ?? "",
@@ -141,37 +164,45 @@ function ProfileCard() {
         </Card>
 
         <Card size="small" title={t("管理后台登录页")} style={{ marginTop: 16 }}>
-          <Typography.Paragraph type="secondary">{t("仅影响管理后台登录页左侧，不影响客户官网。留空使用平台默认文案，上传或移除图片后请保存配置。")}</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">{t("文案留空使用默认内容；关闭对应开关可隐藏，已填写的内容会保留。仅影响后台登录页。")}</Typography.Paragraph>
           <Form.Item name={["adminLogin", "backgroundImageUrl"]} label={t("左侧背景图")}>
             <ImageUrlUpload scene="hero" previewHeight={160} hint="建议使用竖版图片，主体居中；自动裁切并叠加深色遮罩。JPG/PNG/WebP，最大 2MB。" />
           </Form.Item>
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}>
-              <Form.Item name={["adminLogin", "title"]} label={t("登录页标题")} rules={[{ max: 80 }]}>
-                <Input.TextArea rows={2} maxLength={80} placeholder={t(ADMIN_LOGIN_DEFAULTS.title)} />
-              </Form.Item>
+              <LoginBrandingSection field="showTitle" title="登录页标题">
+                <Form.Item name={["adminLogin", "title"]} rules={[{ max: 80 }]}>
+                  <Input.TextArea aria-label={t("登录页标题")} rows={2} maxLength={80} placeholder={t(ADMIN_LOGIN_DEFAULTS.title)} />
+                </Form.Item>
+              </LoginBrandingSection>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item name={["adminLogin", "description"]} label={t("登录页说明")} rules={[{ max: 300 }]}>
-                <Input.TextArea rows={3} maxLength={300} placeholder={t(ADMIN_LOGIN_DEFAULTS.description)} />
-              </Form.Item>
+              <LoginBrandingSection field="showDescription" title="登录页说明">
+                <Form.Item name={["adminLogin", "description"]} rules={[{ max: 300 }]}>
+                  <Input.TextArea aria-label={t("登录页说明")} rows={2} maxLength={300} placeholder={t(ADMIN_LOGIN_DEFAULTS.description)} />
+                </Form.Item>
+              </LoginBrandingSection>
             </Col>
           </Row>
-          <Row gutter={[16, 0]}>
-            {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
-              <Col xs={24} md={8} key={item.title}>
-                <Form.Item name={["adminLogin", "highlights", index, "title"]} label={`${t("底部介绍")} ${index + 1}`} rules={[{ max: 24 }]}>
-                  <Input maxLength={24} placeholder={t(item.title)} />
-                </Form.Item>
-                <Form.Item name={["adminLogin", "highlights", index, "description"]} label={t("介绍说明")} rules={[{ max: 80 }]}>
-                  <Input.TextArea rows={2} maxLength={80} placeholder={t(item.description)} />
-                </Form.Item>
-              </Col>
-            ))}
-          </Row>
-          <Form.Item name={["adminLogin", "footerText"]} label={t("底部补充文字")} rules={[{ max: 160 }]}>
-            <Input.TextArea rows={2} maxLength={160} placeholder={t(ADMIN_LOGIN_DEFAULTS.footerText)} />
-          </Form.Item>
+          <LoginBrandingSection field="showHighlights" title="底部介绍">
+            <Row gutter={[16, 0]}>
+              {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
+                <Col xs={24} md={8} key={item.title}>
+                  <Form.Item name={["adminLogin", "highlights", index, "title"]} label={`${t("底部介绍")} ${index + 1}`} rules={[{ max: 24 }]}>
+                    <Input maxLength={24} placeholder={t(item.title)} />
+                  </Form.Item>
+                  <Form.Item name={["adminLogin", "highlights", index, "description"]} label={t("介绍说明")} rules={[{ max: 80 }]}>
+                    <Input.TextArea rows={2} maxLength={80} placeholder={t(item.description)} />
+                  </Form.Item>
+                </Col>
+              ))}
+            </Row>
+          </LoginBrandingSection>
+          <LoginBrandingSection field="showFooter" title="底部补充文字">
+            <Form.Item name={["adminLogin", "footerText"]} rules={[{ max: 160 }]}>
+              <Input.TextArea aria-label={t("底部补充文字")} rows={2} maxLength={160} placeholder={t(ADMIN_LOGIN_DEFAULTS.footerText)} />
+            </Form.Item>
+          </LoginBrandingSection>
         </Card>
 
         <Card size="small" title={t("首页横幅（可选）")} style={{ marginTop: 16 }}>

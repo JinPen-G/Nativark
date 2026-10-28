@@ -416,6 +416,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AccountAppearanceProfile: objectOf({ themeColor: stringSchema, updatedAt: { type: "string", format: "date-time" } }, [], false),
   SaveAccountAppearanceRequest: objectOf({ themeColor: stringSchema }, [], false),
   AdminLoginBranding: objectOf({
+    showTitle: booleanSchema, showDescription: booleanSchema, showHighlights: booleanSchema, showFooter: booleanSchema,
     backgroundImageUrl: { type: "string", maxLength: 512 },
     title: { type: "string", maxLength: 80 },
     description: { type: "string", maxLength: 300 },

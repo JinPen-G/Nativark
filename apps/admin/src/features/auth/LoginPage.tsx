@@ -68,6 +68,10 @@ export function LoginPage() {
   const loginBrandName = publicBootstrap.data?.merchant.name?.trim() || ADMIN_BRAND_NAME;
   const loginBrandLogo = publicBootstrap.data?.merchant.logoUrl?.trim() || ADMIN_DEFAULT_LOGO;
   const loginBranding = publicBootstrap.data?.adminLogin;
+  const showBrandTitle = loginBranding?.showTitle !== false;
+  const showBrandDescription = loginBranding?.showDescription !== false;
+  const showBrandHighlights = loginBranding?.showHighlights !== false;
+  const showBrandFooter = loginBranding?.showFooter !== false;
   const backgroundPath = loginBranding?.backgroundImageUrl;
   const backgroundSrc = backgroundPath?.startsWith("/") ? `${apiAssetOrigin}${backgroundPath}` : backgroundPath;
 
@@ -138,26 +142,26 @@ export function LoginPage() {
         <main className="login-workspace">
           {/* 内层：更大圆角的登录卡片，左品牌、右表单；窄屏左栏隐藏，卡片退化为单栏。 */}
           <div className="login-card">
-            <aside className="login-card-brand" aria-labelledby="login-brand-heading">
+            <aside className="login-card-brand" aria-labelledby={showBrandTitle ? "login-brand-heading" : undefined} aria-label={showBrandTitle ? undefined : loginBrandName}>
               {backgroundSrc ? <LoginBackground key={`${effectiveTenantCode}:${backgroundSrc}`} src={backgroundSrc} /> : null}
               <div className={`login-brand login-brand--hero${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}>
                 <img src={loginBrandLogo} alt={loginBrandName} />
               </div>
-              <div className="login-card-brand-copy">
-                <h1 id="login-brand-heading" className="login-card-brand-title">{loginBranding?.title?.trim() || t(ADMIN_LOGIN_DEFAULTS.title)}</h1>
-                <p className="login-card-brand-tagline">{loginBranding?.description?.trim() || t(ADMIN_LOGIN_DEFAULTS.description)}</p>
-              </div>
-              <div className="login-card-brand-footer">
-                <dl className="login-brand-capabilities">
+              {(showBrandTitle || showBrandDescription) && <div className="login-card-brand-copy">
+                {showBrandTitle && <h1 id="login-brand-heading" className="login-card-brand-title">{loginBranding?.title?.trim() || t(ADMIN_LOGIN_DEFAULTS.title)}</h1>}
+                {showBrandDescription && <p className="login-card-brand-tagline">{loginBranding?.description?.trim() || t(ADMIN_LOGIN_DEFAULTS.description)}</p>}
+              </div>}
+              {(showBrandHighlights || showBrandFooter) && <div className="login-card-brand-footer">
+                {showBrandHighlights && <dl className="login-brand-capabilities">
                   {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
                     <div key={item.title}>
                       <dt>{loginBranding?.highlights?.[index]?.title?.trim() || t(item.title)}</dt>
                       <dd>{loginBranding?.highlights?.[index]?.description?.trim() || t(item.description)}</dd>
                     </div>
                   ))}
-                </dl>
-                <p className="login-brand-note">{loginBranding?.footerText?.trim() || t(ADMIN_LOGIN_DEFAULTS.footerText)}</p>
-              </div>
+                </dl>}
+                {showBrandFooter && <p className="login-brand-note">{loginBranding?.footerText?.trim() || t(ADMIN_LOGIN_DEFAULTS.footerText)}</p>}
+              </div>}
             </aside>
             <div className="login-card-form">
               {/* 窄屏才显示：左栏隐藏后，品牌标识挪到表单顶部。 */}

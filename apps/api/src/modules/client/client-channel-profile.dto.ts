@@ -38,6 +38,18 @@ export class AdminLoginHighlightInputDto {
 }
 
 export class AdminLoginBrandingDto implements AdminLoginBranding {
+  @IsOptional() @IsBoolean()
+  showTitle?: boolean;
+
+  @IsOptional() @IsBoolean()
+  showDescription?: boolean;
+
+  @IsOptional() @IsBoolean()
+  showHighlights?: boolean;
+
+  @IsOptional() @IsBoolean()
+  showFooter?: boolean;
+
   @IsOptional() @IsString() @MaxLength(512)
   backgroundImageUrl?: string;
 
