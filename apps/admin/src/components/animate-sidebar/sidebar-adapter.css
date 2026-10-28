@@ -3,6 +3,8 @@
 :root[data-theme="dark"] { --rental-sidebar-surface: oklch(0.205 0 0); }
 .native-admin-shell { background: var(--rental-sidebar-surface); }
 .rental-sidebar-colors { --sidebar: var(--rental-sidebar-surface); }
+/* Keep the native collapse hit target; the rounded workspace owns the visible edge. */
+.rental-sidebar-colors [data-sidebar="rail"]::after { display: none; }
 /* Brand/search and mode controls stay outside the menu's only scroll region. */
 .rental-sidebar-colors :is([data-sidebar="header"], [data-sidebar="footer"], .operator-mode-switch) { flex-shrink: 0; }
 /* App geometry roles only; preserved source classes, sizes and motion stay native. */
