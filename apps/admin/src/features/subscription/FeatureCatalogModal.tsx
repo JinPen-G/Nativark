@@ -1,3 +1,4 @@
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
@@ -22,6 +23,7 @@ const OWNERSHIP_OPTIONS = [{ value: FeatureOwnership.Standard, label: "基础版
 
 export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; entry: SubscriptionFeatureCatalogEntry | null; onClose: () => void }) {
   const { t } = useLocale();
+  const dismissal = useModalDismissal(open, onClose);
   const { message } = App.useApp();
   const [form] = Form.useForm<UpsertFeatureCatalogRequest>();
   const queryClient = useQueryClient();
@@ -33,7 +35,7 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
       message.success(t("已保存功能目录项"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "feature-catalog"] });
       void queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] });
-      onClose();
+      dismissal.dismiss();
     },
     onError: () => message.error(t("保存失败，请稍后重试"))
   });
@@ -43,8 +45,8 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
     : { defaultOwnership: FeatureOwnership.Pro, currentOwnership: FeatureOwnership.Pro, releaseStatus: FeatureReleaseStatus.Planned, categories: [] };
 
   return (
-    <Modal open={open} title={editing ? t("编辑功能目录项") : t("新增功能目录项")} okText={t("保存")} confirmLoading={mutation.isPending}
-      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={onClose} destroyOnHidden width={560}>
+    <Modal presentation="side" open={dismissal.visible} afterClose={dismissal.afterClose} title={editing ? t("编辑功能目录项") : t("新增功能目录项")} okText={t("保存")} confirmLoading={mutation.isPending}
+      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden width={560}>
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
         message={t("当前归属选「基础版」即把该 PRO 功能公共下放给基础版；修改归属不会把未交付功能改成已上线，也不得静默停用基础版既有承诺。")} />
       <Form<UpsertFeatureCatalogRequest> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>

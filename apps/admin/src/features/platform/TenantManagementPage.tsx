@@ -224,7 +224,7 @@ export function TenantManagementPage() {
         </ListSection>
       </QueryState>
 
-      <Drawer
+      <Drawer presentation={editor?.type === "create" ? "side" : "dialog"}
         title={editor?.type === "create" ? t("初始化 SaaS 租户") : editor?.type === "edit" ? t("编辑租户资料") : t("变更租户状态")}
         size={560}
         open={Boolean(editor)}
@@ -283,7 +283,7 @@ export function TenantManagementPage() {
         </QueryState>
       </Drawer>
 
-      <Drawer
+      <Drawer presentation="dialog"
         title={workspaceEditor?.type === "create" ? t("新增经营空间") : t("编辑经营空间")}
         size={520}
         open={Boolean(workspaceEditor)}

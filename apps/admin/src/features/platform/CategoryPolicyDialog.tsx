@@ -1,3 +1,4 @@
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { SaveButton } from "@/components/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Space } from "antd";
@@ -11,6 +12,7 @@ import type { CategoryVersionView, SaveCategoryOpeningRequest, SaveCategoryVersi
 
 export function CategoryPolicyDialog({ detail, version, saved, close }: { detail: CategoryGovernanceDetail; version?: CategoryVersionView; saved: () => void; close: () => void }) {
   const { t } = useLocale();
+  const dismissal = useModalDismissal(true, close);
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const directory = useQuery({ queryKey: ["platform-category-tenant-directory"], queryFn: categoryGovernanceApi.tenantDirectory });
@@ -19,7 +21,7 @@ export function CategoryPolicyDialog({ detail, version, saved, close }: { detail
   };
   const save = useMutation({
     mutationFn: (values: Record<string, unknown>) => version ? categoryGovernanceApi.policy(detail.code, version.id, values as unknown as SaveCategoryVersionPolicyRequest) : categoryGovernanceApi.opening(detail.code, values as unknown as SaveCategoryOpeningRequest),
-    onSuccess: () => { saved(); close(); message.success(t("政策已保存，已有空间绑定未改变")); },
+    onSuccess: () => { saved(); dismissal.dismiss(); message.success(t("政策已保存，已有空间绑定未改变")); },
     onError: (error) => message.error((error as { response?: { status?: number } }).response?.status === 409 ? t("政策修订冲突，输入已保留，请刷新后核对") : t("政策保存失败，输入已保留"))
   });
   const scopes = version ? ["none", "pilot", "all"] : ["unopened", "stopped", "pilot", "all"];
@@ -30,7 +32,7 @@ export function CategoryPolicyDialog({ detail, version, saved, close }: { detail
       <Form.Item name={idsKey} label={t("试点租户")} rules={[{ required: true, type: "array", min: 1, max: 200 }]}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={directory.data?.map((tenant) => ({ value: tenant.id, label: `${tenant.name} (${tenant.code})` }))} /></Form.Item> : <Form.Item name={idsKey} hidden><Select mode="multiple" /></Form.Item>}
     </Form.Item>
   </>;
-  return <Modal title={t(version ? "版本采用资格" : "品类新开通政策")} open footer={null} onCancel={() => { if (!save.isPending) close(); }} mask={{ closable: !save.isPending }}>
+  return <Modal title={t(version ? "版本采用资格" : "品类新开通政策")} open={dismissal.visible} afterClose={dismissal.afterClose} footer={null} onCancel={() => { if (!save.isPending) dismissal.dismiss(); }} mask={{ closable: !save.isPending }}>
     <Alert type="info" title={t("这里只修改开放政策，不修改发布正文、租户规则或已有空间绑定。停止新开通不会暂停既有经营。")} />
     <QueryState loading={directory.isLoading} error={directory.error}>
       <Form form={form} layout="vertical" initialValues={initial} disabled={save.isPending} onFinish={(values) => save.mutate({ ...values, expectedRevision: initial.expectedRevision })}>

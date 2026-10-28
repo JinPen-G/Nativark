@@ -66,7 +66,7 @@ export function CategoryGovernancePage() {
         </Form>
       </QueryState>
     </Modal>
-    <Modal title={t("品类版本")} open={Boolean(viewer) && !editor} footer={null} width="80%" onCancel={() => setViewer(undefined)}>
+    <Modal presentation="side" title={t("品类版本")} open={Boolean(viewer) && !editor} footer={null} width={960} onCancel={() => setViewer(undefined)}>
       <QueryState loading={viewed.isLoading} error={viewed.error}>
         <Table<CategoryVersionView> rowKey="id" onRefresh={() => viewed.refetch()} loading={viewed.isLoading} refreshing={viewed.isFetching} dataSource={viewed.data?.versions ?? []} scroll={{ x: 700 }} columns={[
           { title: t("版本"), dataIndex: "versionLabel", render: (value: string, row) => <Space>{value}{row.id === viewed.data?.recommendedVersionId && <Tag>{t("默认推荐版本")}</Tag>}</Space> },
@@ -80,7 +80,7 @@ export function CategoryGovernancePage() {
     </Modal>
     {editor && <CategoryDraftEditor key={editor.version.id} code={editor.code} initial={editor.version} editable={hasPermission(P.edit)} canPublish={hasPermission(P.publish)} saved={() => { void queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] }); }} close={() => setEditor(undefined)} />}
     {policyTarget && <QueryState loading={policyDetail.isLoading} error={policyDetail.error}>{policyDetail.data && <CategoryPolicyDialog key={`${policyTarget.code}:${policyTarget.version?.id ?? "opening"}`} detail={policyDetail.data} version={policyTarget.version} saved={() => { void queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] }); }} close={() => setPolicyTarget(undefined)} />}</QueryState>}
-    <Modal title={t("治理记录")} open={Boolean(auditCode) && hasPermission(P.audit)} footer={null} width="80%" onCancel={() => setAuditCode(undefined)}>
+    <Modal presentation="side" title={t("治理记录")} open={Boolean(auditCode) && hasPermission(P.audit)} footer={null} width={960} onCancel={() => setAuditCode(undefined)}>
       {hasPermission(P.audit) && <QueryState loading={audits.isLoading} error={audits.error}><Table rowKey="id" onRefresh={() => audits.refetch()} loading={audits.isLoading} refreshing={audits.isFetching} dataSource={audits.data ?? []} scroll={{ x: 650 }} columns={[
         { title: t("操作"), dataIndex: "action", render: (value: string) => t(({ draft_create: "创建草稿", draft_patch: "保存草稿", publish: "发布版本", draft_archive: "归档草稿", opening_policy: "新开通政策", version_policy: "版本采用资格" } as Record<string, string>)[value] ?? value) },
         { title: t("变更原因"), dataIndex: "reason" }, { title: t("操作人"), dataIndex: "actorId" },

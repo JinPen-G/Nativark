@@ -1,3 +1,4 @@
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
@@ -32,6 +33,7 @@ export function TenantFeatureGrantModal({
   onClose: () => void;
 }) {
   const { t } = useLocale();
+  const dismissal = useModalDismissal(open, onClose);
   const { message } = App.useApp();
   const [form] = Form.useForm<FormValues>();
   const queryClient = useQueryClient();
@@ -46,20 +48,20 @@ export function TenantFeatureGrantModal({
     onSuccess: () => {
       message.success(t(isRevoke ? "已撤销额外授权" : "已额外授权"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "platform-detail", tenantId] });
-      onClose();
+      dismissal.dismiss();
     },
     onError: (error) => message.error(subscriptionError(error))
   });
 
   return (
     <Modal
-      open={open}
+      open={dismissal.visible} afterClose={dismissal.afterClose}
       title={`${t(isRevoke ? "撤销额外授权" : "额外授权功能")}${feature ? `：${feature.name}` : ""}`}
       okText={t(isRevoke ? "确认撤销" : "确认授权")}
       okButtonProps={{ danger: isRevoke, disabled: !feature }}
       confirmLoading={mutation.isPending}
       onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))}
-      onCancel={onClose}
+      onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }}
       destroyOnHidden
     >
       <Alert

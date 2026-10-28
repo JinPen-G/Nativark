@@ -99,7 +99,7 @@ function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId
     </Card>
     {grant && <TenantFeatureGrantModal open mode={grant.mode} tenantId={tenantId} feature={grant.feature} expectedRevision={grant.revision} onClose={() => setGrant(null)} />}
     {handling && <RequestHandlingModal tenantId={tenantId} {...handling} onClose={() => setHandling(null)} />}
-    <Modal open={Boolean(details)} title={t("申请详情与处理过程")} footer={null} width={760} onCancel={() => setDetails(null)}>
+    <Modal presentation="side" open={Boolean(details)} title={t("申请详情与处理过程")} footer={null} width={880} onCancel={() => setDetails(null)}>
       {requests.find((r) => r.id === details) && <SubscriptionRequestDetails request={requests.find((r) => r.id === details)!} timeZone={overview.timeZone} />}
     </Modal>
   </Space>;

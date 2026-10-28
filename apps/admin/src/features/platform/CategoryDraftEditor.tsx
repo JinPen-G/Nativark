@@ -1,3 +1,4 @@
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { useState } from "react";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
@@ -117,6 +118,7 @@ function ValueEditor({ name, value, change, disabled, inspection = false }: { na
 
 export function CategoryDraftEditor({ code, initial, editable, canPublish, saved, close }: { code: string; initial: CategoryVersionView; editable: boolean; canPublish: boolean; saved: () => void; close: () => void }) {
   const { t } = useLocale();
+  const dismissal = useModalDismissal(true, close);
   const { message, modal } = App.useApp();
   const [version, setVersion] = useState(initial);
   const [section, setSection] = useState<CategoryDraftSection>("basic");
@@ -170,7 +172,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
     } catch { message.error(t("预览失败，请重试")); }
     finally { setBusy(false); }
   };
-  return <Modal title={`${t("品类版本")} ${version.versionLabel} · ${t("修订")} ${version.revision}`} open footer={null} width="90%" mask={{ closable: false }} onCancel={() => { if (!busy) guarded(close); }}>
+  return <Modal presentation="side" title={`${t("品类版本")} ${version.versionLabel} · ${t("修订")} ${version.revision}`} open={dismissal.visible} afterClose={dismissal.afterClose} footer={null} width="min(1280px, 96vw)" mask={{ closable: false }} onCancel={() => { if (!busy) guarded(dismissal.dismiss); }}>
     <UnsavedChangesGuard dirty={hasUnsavedInput} busy={busy} />
     <Alert type="info" showIcon title={t("每个页签只保存自己的草稿；保存不会发布或改变经营空间。已发布版本只读。")} />
     <Tabs activeKey={section} onChange={(key) => { if (!busy) guarded(() => { const next = key as CategoryDraftSection; setSection(next); setValues(project(version, next)); setDirty(false); setReason(""); setErrors([]); }); }} items={CATEGORY_DRAFT_SECTIONS.map((key) => ({ key, label: t(titles[key]) }))} />

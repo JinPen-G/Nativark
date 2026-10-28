@@ -199,7 +199,7 @@ export function OfficialCalendarSourcePage() {
           />
         </ListSection>
       </QueryState>
-      <Drawer
+      <Drawer presentation="dialog"
         title={sourceEditor ? `${t("编辑来源")}：${sourceEditor.name}` : t("登记官方来源")}
         open={sourceEditor !== undefined}
         onClose={() => setSourceEditor(undefined)}

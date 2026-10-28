@@ -1,3 +1,4 @@
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { InputNumber } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -18,6 +19,7 @@ interface FormValues { published: boolean; annualFee?: number | null; currency?:
 
 export function StandardPriceModal({ open, plan, current, onClose }: { open: boolean; plan: SubscriptionPlan | null; current: StandardPlanPricing | null; onClose: () => void }) {
   const { t } = useLocale();
+  const dismissal = useModalDismissal(open, onClose);
   const { message } = App.useApp();
   const [form] = Form.useForm<FormValues>();
   const queryClient = useQueryClient();
@@ -42,7 +44,7 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
       message.success(t("已保存标准价"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "standard-prices"] });
       void queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] });
-      onClose();
+      dismissal.dismiss();
     },
     onError: (error) => message.error(subscriptionError(error))
   });
@@ -57,8 +59,8 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
   };
 
   return (
-    <Modal open={open} title={`${t("设置标准年费")}：${plan ? t(PLAN_LABEL[plan]) : ""}`} okText={t("保存")} confirmLoading={mutation.isPending}
-      okButtonProps={{ disabled: !plan }} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={onClose} destroyOnHidden>
+    <Modal open={dismissal.visible} afterClose={dismissal.afterClose} title={`${t("设置标准年费")}：${plan ? t(PLAN_LABEL[plan]) : ""}`} okText={t("保存")} confirmLoading={mutation.isPending}
+      okButtonProps={{ disabled: !plan }} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden>
       <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t("未发布时不展示金额（显示「价格待公布」），不落 0 或虚构价；发布后才对租户显示标准年费。")} />
       <Form<FormValues> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>
         <Form.Item name="published" label={t("已发布正式价格")} valuePropName="checked"><Switch /></Form.Item>
