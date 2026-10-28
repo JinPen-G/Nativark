@@ -1,0 +1,19 @@
+{
+  "source": "https://uiarc.dev/components/drawer",
+  "upstreamFile": "packages/ui-arc/vendor/registry/components/drawer/drawer.tsx",
+  "upstreamSha256": "85e96248eaa2f6b46c33dd450943319ce504f2a42ca1ee10d013dd93b9114cfb",
+  "license": "UIArc MIT; original license and manifest in packages/ui-arc",
+  "integration": "TaskDrawer.tsx",
+  "adaptations": [
+    "ReactNode title and localized close label",
+    "Enter/exit lifecycle callbacks preserve retained forms until exit completes",
+    "Optional drag gate for task sheets with guarded dismissal",
+    "Shared task geometry, scroll and theme in OperationSheet / arc-bridge; original vendor unchanged"
+  ],
+  "selectionReference": [
+    "https://animate-ui.com/docs/primitives/base-ui/dialog",
+    "https://animate-ui.com/docs/primitives/base-ui/sheet",
+    "https://animate-ui.com/docs/primitives/base-ui/drawer"
+  ],
+  "compatibility": "Use the existing Radix overlay stack to preserve UIArc select/date portals and nested confirmations. Do not mix Base UI modal focus trapping with the existing Radix form portals."
+}

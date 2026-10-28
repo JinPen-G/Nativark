@@ -61,6 +61,9 @@
 .rental-arc-drawer { z-index: 920; }
 /* Radix tooltip portals must sit above both drawer and existing AntD modal layers. */
 :root [data-radix-popper-content-wrapper]:has([role="tooltip"]) { z-index: 1200 !important; }
+/* Select/date/menu portals are outside the modal DOM. Keep the original Radix
+   focus stack, but lift the popup layer above the task backdrop. */
+:root:has([data-rental-arc-modal][data-state="open"]) [data-radix-popper-content-wrapper] { z-index: 1200 !important; }
 .rental-arc-drawer > div:first-child { align-items: center; }
 .rental-arc-drawer > div:first-child > div:first-child { min-width: 0; flex: 1; }
 .rental-arc-drawer > div:first-child > button { order: 3; }
@@ -285,6 +288,13 @@
 .arc-form-section-fields { min-width: 0; }
 [data-rental-dialog-overlay] { z-index: 1099; }
 .rental-arc-modal[data-closable="false"] > [class*="header"] > button { display: none; }
-.arc-modal-footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+.rental-arc-modal { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--radius-panel); }
+.rental-arc-modal > div:last-child { display: flex; flex-direction: column; min-height: 0; padding: 0; }
+.arc-modal-mount, .arc-modal-portal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.arc-modal-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding: var(--rental-overlay-padding); }
+.arc-modal-footer { display: flex; flex: none; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin: 0; padding: var(--space-4) var(--rental-overlay-padding); border-top: 1px solid var(--border); }
+@media (max-width: 600px) {
+  .arc-modal-footer > button { flex: 1; }
+}
 .rental-loading-skeleton { width: min(100%, 28rem); }
 .arc-collapse-extra { flex: 0 0 auto; margin-inline-start: var(--space-3); }

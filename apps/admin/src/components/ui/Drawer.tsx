@@ -3,6 +3,8 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Drawer as ArcDrawer, DrawerContent } from "@/registry/components/drawer/drawer";
 import { useLocale } from "@/app/locale";
+import { Modal, type ModalPresentation } from "./Modal";
+import { Button } from "./Button";
 
 function HeaderActions({ children, closeLabel }: { children: ReactNode; closeLabel: string }) {
   const anchor = useRef<HTMLSpanElement>(null);
@@ -22,12 +24,28 @@ function HeaderActions({ children, closeLabel }: { children: ReactNode; closeLab
 }
 
 /** Arc owns entrance/exit/drag, backdrop, focus trap and Escape. The adapter preserves business headers and form popups. */
-export function Drawer(props: DrawerProps) {
+export function Drawer(props: DrawerProps & { presentation?: ModalPresentation }) {
   const { t } = useLocale();
   const popupAnchor = useRef<HTMLSpanElement>(null);
-  const { open, onClose, children, title, extra, size, width, height, placement = "right", className, styles, footer } = props;
+  const wasOpen = useRef(false);
+  const opener = useRef<HTMLElement | null>(null);
+  if (props.open && !wasOpen.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  wasOpen.current = Boolean(props.open);
+  const { open, onClose, children, title, extra, size, width, height, placement = "right", className, styles, footer, presentation = "side" } = props;
+  if (presentation !== "side" && props.getContainer === undefined && !props.loading && !props.rootStyle && !props.classNames && !props.closeIcon && props.mask !== false && typeof styles !== "function") {
+    const close = () => onClose?.({} as Parameters<NonNullable<DrawerProps["onClose"]>>[0]);
+    return <Modal presentation={presentation} open={open} title={title} width={typeof size === "number" ? size : width}
+      onCancel={close} destroyOnHidden={props.destroyOnHidden} forceRender={props.forceRender}
+      keyboard={props.keyboard} maskClosable={props.maskClosable} closable={props.closable}
+      afterOpenChange={props.afterOpenChange} zIndex={props.zIndex}
+      className={className} style={props.style} styles={typeof styles === "object" ? { body: styles.body, footer: styles.footer } : undefined}
+      footer={extra || footer ? <><Button onClick={close}>{t("取消")}</Button>{footer}{extra}</> : null}>{children}</Modal>;
+  }
   // Preserve keep-alive drawers and special shell/loading/custom-container behavior rather than silently changing it.
-  if (!props.destroyOnHidden || props.closable === false || props.mask === false || props.forceRender || props.loading || props.getContainer !== undefined || props.afterOpenChange || props.closeIcon || props.zIndex || props.rootStyle || props.classNames || typeof styles === "function" || styles?.header || styles?.mask || styles?.wrapper || styles?.root || typeof title !== "string") return <AntDrawer {...props} />;
+  if (!props.destroyOnHidden || props.closable === false || props.mask === false || props.forceRender || props.loading || props.getContainer !== undefined || props.afterOpenChange || props.closeIcon || props.zIndex || props.rootStyle || props.classNames || typeof styles === "function" || styles?.header || styles?.mask || styles?.wrapper || styles?.root || typeof title !== "string") {
+    const { presentation: _presentation, ...nativeProps } = props;
+    return <AntDrawer {...nativeProps} />;
+  }
   const dimension = typeof size === "number" ? size : size === "large" ? 736 : width ?? 480;
   return <ArcDrawer open={Boolean(open)} onOpenChange={next => { if (!next) onClose?.({} as Parameters<NonNullable<DrawerProps["onClose"]>>[0]); }}>
     <DrawerContent title={title} side={placement} className={["rental-arc-drawer", className].filter(Boolean).join(" ")} data-rental-arc-drawer=""
@@ -41,6 +59,7 @@ export function Drawer(props: DrawerProps) {
         if (props.keyboard === false || modalOpen || inlinePopupOpen) event.preventDefault();
       }}
       onInteractOutside={event => { if (props.maskClosable === false) event.preventDefault(); }}
+      onCloseAutoFocus={event => { if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus({ preventScroll: true }); } }}
       aria-describedby={undefined}>
       <ConfigProvider getPopupContainer={trigger => trigger?.closest<HTMLElement>('[data-rental-arc-drawer]') ?? popupAnchor.current?.closest<HTMLElement>('[data-rental-arc-drawer]') ?? document.body}>
         <span hidden ref={popupAnchor} />

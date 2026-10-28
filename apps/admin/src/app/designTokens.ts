@@ -22,6 +22,8 @@ export const ADMIN_CONTROL_WIDTH = { search: 320, searchMin: 240, select: 192, f
 /** List queries use compact role widths; form grids retain their existing sizing. */
 export const ADMIN_LIST_CONTROL_WIDTH = { ...ADMIN_CONTROL_WIDTH, search: 280, searchMin: 200, select: 160, date: 160, dateRange: 256, selectWide: 224 } as const;
 export const ADMIN_CONTROL_PADDING = { small: 8, default: 12, large: 16 } as const;
+/** Task surfaces: compact decisions, contextual editing, file workflows. */
+export const ADMIN_OVERLAY_METRICS = { dialogWidth: 520, sideWidth: 720, bottomWidth: 720, padding: 24, viewportInset: 32 } as const;
 /** Original segmented track has 3px padding plus a 1px frame on each side. */
 export const ADMIN_SEGMENTED_METRICS = { frameInset: 8 } as const;
 /** Original TabsList has 4px padding and a 1px frame on each side. */
@@ -175,6 +177,9 @@ export function applyAdminRadiusTokens(root: HTMLElement, radii: AdminRadiusGrou
   const small = Math.max(4, Math.round(button * 0.75));
   const inputRadii = resolveAdminInputRadii(input);
   const values: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(ADMIN_OVERLAY_METRICS).map(([role, value]) => [
+      `--rental-overlay-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, px(value),
+    ])),
     "--rental-ui-radius-container": px(container),
     "--rental-ui-radius-button": px(button),
     "--rental-ui-radius-input": px(input),
