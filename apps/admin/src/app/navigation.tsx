@@ -96,7 +96,7 @@ export const APP_ROUTES = {
   platformOfficialCalendars: { path: "/platform/official-calendars", label: "公共官方日历", permission: "system:calendar-source:manage", audience: "saas", icon: <CalendarOutlined />, menu: true },
   // SUB-02/03 版本订阅：租户端「版本与订阅」(rental-os:subscription:view 进入、:manage 办理) + PRO 介绍/申请详情；平台端「租户订阅」用 system:tenant:subscription:manage（复用 system:tenant: 前缀，走既有 SaaS 管理员放行，无需改 authStore）。权限码与服务端守卫严格同名，legacyPermissions 留空。
   subscription: { path: "/settings/subscription", label: "版本与订阅", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined />, menu: true },
-  subscriptionPro: { path: "/settings/subscription/pro", label: "PRO 介绍", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
+  subscriptionPro: { path: "/settings/subscription/pro", label: "版本对比", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
   subscriptionRequestDetail: { path: "/settings/subscription/requests/:id", label: "申请详情", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
   platformSubscriptions: { path: "/platform/subscriptions", label: "租户订阅", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined />, menu: true },
   platformSubscriptionDetail: { path: "/platform/subscriptions/:id", label: "租户订阅详情", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined /> },

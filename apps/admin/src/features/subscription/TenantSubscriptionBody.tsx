@@ -56,7 +56,7 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
           { key: "handled", label: "办理日期", value: formatSubscriptionDate(overview.handledAt, overview.timeZone, t) }
         ]} />
         <Space wrap className={styles.actions}>
-          <Button onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t(isPro ? "查看 PRO 权益" : "了解 PRO")}<RightOutlined /></Button>
+          <Button onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t("版本对比")}<RightOutlined /></Button>
           {!isPro && requestButton(SubscriptionRequestType.UpgradeConsult, "升级咨询", true)}
           {requestButton(isPro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard, "续费")}
           {isPro && requestButton(SubscriptionRequestType.NextStandard, "申请下期基础版")}

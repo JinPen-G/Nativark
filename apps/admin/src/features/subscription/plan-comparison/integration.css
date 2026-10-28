@@ -1,0 +1,5 @@
+.subscription-comparison-feature { min-width: 0; overflow-wrap: anywhere; }
+.subscription-comparison-feature small { display: block; margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-xs); }
+.subscription-price-currency { align-self: flex-end; padding-bottom: .15em; margin-right: var(--space-1); font-size: var(--text-sm); font-family: var(--font-body); letter-spacing: var(--tracking-body); }
+.subscription-price-note { margin-bottom: var(--space-3); color: var(--text-secondary); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.subscription-comparison-empty { padding: var(--space-5) var(--space-4); text-align: center; color: var(--text-secondary); }
