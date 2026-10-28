@@ -49,7 +49,7 @@ export function groupTodos(todos: RentalWorkbenchTodo[]): Notice[] {
     const first = items[0];
     const review = items.some(i => ['fee_review', 'offline_payment_pending', 'no_show_confirmation'].includes(i.type));
     return {
-      id: `todo:${id}`, events: items.map(item => `${item.type}:${item.id}`),
+      id: `todo:${id}`, events: items.map(item => `${item.type}:${item.id}${item.type === 'work_order' ? `:${item.priority}` : ''}`),
       category: items.every(i => i.type === 'notification_failure') ? 'system' : review ? 'review' : 'business',
       title: items.length === 1 ? first.title : `${first.orderNo ?? first.title} · ${items.length}`,
       description: items.map(item => items.length > 1 ? `${item.title}：${item.description}` : item.description).join('\n'),

@@ -15,6 +15,7 @@ import type { Notice } from './model';
 
 class AssignmentError extends Error { constructor(message: string, readonly unknownOutcome: boolean, readonly owner?: string, readonly epoch?: number) { super(message); } }
 const assignmentLocks = new Set<string>();
+const uncertainAssignments = new Set<string>();
 const scope = () => { const s = useAuthStore.getState(); return JSON.stringify([s.user?.id, s.tenant?.tenantId, s.currentWorkspaceId]); };
 
 /** Additive business slot: original read/folder/dismiss controls stay in their source components. */
@@ -53,35 +54,40 @@ function WorkOrderActions({ item }: { item: Notice }) {
   const auth = useAuthStore(), tr = useNotificationText(), client = useQueryClient(), inbox = useNotifications();
   const [editing, setEditing] = useState(false), [assignee, setAssignee] = useState<string>(), [version, setVersion] = useState<string>();
   const owner = scope(), mutationKey = ['notifications', 'assignment', owner, item.workOrderId];
+  const operationKey = `${owner}:${item.workOrderId}`;
   const canView = auth.sessionVerified && auth.hasPermission('rental-core:maintenance:view');
   const canManage = canView && auth.hasPermission('rental-core:maintenance:manage');
   const records = useQuery({ queryKey: ['notifications', 'work-order-context', owner, auth.user], queryFn: () => rentalCoreApi.workOrders(), enabled: canView });
-  const row = !records.isError || isTransientRefreshError(records.error) ? records.data?.find(value => value.id === item.workOrderId) : undefined;
+  const row = (!records.isError || isTransientRefreshError(records.error)) && Array.isArray(records.data) ? records.data.find(value => value.id === item.workOrderId) : undefined;
   const eligibleStatus = !!row && ['pending', 'in_progress'].includes(row.status);
   const assignees = useQuery({ queryKey: ['notifications', 'assignees', owner, auth.user, row?.locationId],
     queryFn: () => rentalCoreApi.workOrderAssignees(row!.locationId), enabled: canManage && eligibleStatus });
-  const candidates = !assignees.isError || isTransientRefreshError(assignees.error) ? assignees.data ?? [] : [];
+  const candidates = (!assignees.isError || isTransientRefreshError(assignees.error)) && Array.isArray(assignees.data) ? assignees.data : [];
   const busy = useIsMutating({ mutationKey }) > 0;
-  const unknown = useMutationState({ filters: { mutationKey }, select: mutation => mutation.state.error instanceof AssignmentError && mutation.state.error.unknownOutcome }).some(Boolean);
+  const unknownInCache = useMutationState({ filters: { mutationKey }, select: mutation => mutation.state.error instanceof AssignmentError && mutation.state.error.unknownOutcome }).some(Boolean);
+  const unknown = uncertainAssignments.has(operationKey) || unknownInCache;
   const assign = useMutation({ mutationKey, retry: false,
     mutationFn: async (target: string) => {
       const expectedScope = scope(), epoch = currentSessionEpoch(), lock = `${expectedScope}:${item.workOrderId}`;
       const live = () => scope() === expectedScope && currentSessionEpoch() === epoch && useAuthStore.getState().hasPermission('rental-core:maintenance:manage');
-      if (assignmentLocks.has(lock) || unknown) throw new AssignmentError(tr('An action is already pending.'), false);
+      if (assignmentLocks.has(lock) || uncertainAssignments.has(lock) || unknown) throw new AssignmentError(tr('An action is already pending.'), false);
       assignmentLocks.add(lock); let sent = false;
       try {
         if (!live() || !row || !target) throw new Error(tr('This action is no longer available.'));
-        const current = (await rentalCoreApi.workOrders()).find(value => value.id === row.id);
+        const rows = await rentalCoreApi.workOrders();
+        const current = Array.isArray(rows) ? rows.find(value => value.id === row.id) : undefined;
         if (!live()) throw new Error(tr('This action is no longer available.'));
         if (!current || current.workspaceId !== useAuthStore.getState().currentWorkspaceId || !['pending', 'in_progress'].includes(current.status)
           || current.updatedAt !== (editing ? version : row.updatedAt)) throw new Error(tr('The work order changed. Review it again.'));
         const available = await rentalCoreApi.workOrderAssignees(current.locationId);
-        if (!live() || !available.some(person => person.id === target)) throw new Error(tr('This assignee is no longer available.'));
+        if (!live() || !Array.isArray(available) || !available.some(person => person.id === target)) throw new Error(tr('This assignee is no longer available.'));
         const result = current.assigneeId === target ? current : await (sent = true, rentalCoreApi.assignWorkOrder(current.id, { assigneeId: target }));
+        if (!result || result.id !== current.id || result.workspaceId !== current.workspaceId || result.assigneeId !== target) throw new AssignmentError(tr('Assignment result is unknown. Check the work order before trying again.'), true, expectedScope, epoch);
         return { result, expectedScope, epoch };
       } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status;
         const uncertain = sent && (!status || status >= 500 || status === 408);
+        if (uncertain) uncertainAssignments.add(lock);
         throw new AssignmentError(uncertain ? tr('Assignment result is unknown. Check the work order before trying again.') : error instanceof Error ? error.message : tr('Assignment failed.'), uncertain, expectedScope, epoch);
       } finally { assignmentLocks.delete(lock); }
     },
@@ -103,7 +109,7 @@ function WorkOrderActions({ item }: { item: Notice }) {
       </div>
       {editing && <form className="notification-inline-form" onSubmit={event => { event.preventDefault(); if (assignee) assign.mutate(assignee); }}>
         <label>{tr('Assignee')}<Select aria-label={tr('Assignee')} value={assignee} onChange={value => setAssignee(value as string)} disabled={busy || unknown}
-          options={candidates.map(person => ({ value: person.id, label: person.displayName }))} /></label>
+          options={candidates.map(person => ({ value: person.id, label: `${person.displayName} · ${person.account}` }))} /></label>
         <div className="notification-business-buttons"><Button size="small" htmlType="button" disabled={busy} onClick={() => setEditing(false)}>{tr('Cancel')}</Button><Button type="primary" size="small" htmlType="submit" loading={busy} disabled={!assignee || unknown}>{tr('Confirm assignment')}</Button></div>
       </form>}
     </>}

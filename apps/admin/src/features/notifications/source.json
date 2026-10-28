@@ -15,5 +15,9 @@
     "Original CSS retained byte for byte.",
     "Adapters supply scoped messages, callbacks, locale, theme and effective motion preference.",
     "Avatar replaces Next Image with a native image while retaining source load/fallback behavior."
+  ],
+  "authorizedExtensions": [
+    "User explicitly authorized inline business handling and a Pending classification on 2026-10-28.",
+    "Original controls and motion are preserved; business UI is supplied through additive detail slots."
   ]
 }
