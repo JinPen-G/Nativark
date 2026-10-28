@@ -1007,11 +1007,13 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .password-change-panel .ant-alert { margin: 20px 0; }
 
 /* 外层：原有的带留白/圆角/描边视口容器（login-stage 6px 内边距 + login-frame 14px 圆角），保持不变。 */
-.login-stage { min-height: 100vh; padding: 6px; background: var(--rental-color-fill-tertiary); }
+.login-stage { height: 100dvh; min-height: 0; padding: 6px; background: var(--rental-color-fill-tertiary); }
 .login-frame {
   position: relative;
   display: grid;
-  height: calc(100vh - 12px);
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--rental-color-border-secondary);
   border-radius: 14px;
@@ -1021,37 +1023,39 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .login-appearance { position: absolute; z-index: 1; top: 14px; right: 16px; }
 .login-workspace {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-  overflow-y: auto;
+  min-width: 0;
+  overflow: hidden;
   /* Keep the tab strip's page coordinates stable while login methods change
      content height. Vertical centring/scroll anchoring moves the entire strip
      underneath UIArc's shared-layout selection animation. */
   align-items: start;
   justify-items: center;
   overflow-anchor: none;
-  scrollbar-gutter: stable;
-  padding: 64px 32px 40px;
+  /* The viewport owns the limit; only the form scrolls when content grows. */
+  padding: clamp(48px, 6dvh, 64px) clamp(16px, 3vw, 32px) clamp(16px, 4dvh, 40px);
   background: var(--rental-color-bg-layout);
 }
 
 .login-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   width: min(1080px, 100%);
+  height: min(760px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--rental-color-border-secondary);
   border-radius: 24px;
   background: var(--rental-color-bg-container);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 12px 32px rgba(0, 0, 0, .08);
 }
-/* Verification forms share the measured password-card height; their content
-   scrolls inside the existing right column instead of resizing the card. */
-.login-card--fixed { grid-template-rows: minmax(0, 1fr); }
-.login-card--fixed .login-card-form { min-height: 0; max-height: 100%; }
 @media (min-width: 880px) {
   .login-card {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
-    min-height: clamp(580px, 74vh, 680px);
   }
 }
 .login-card-brand {
@@ -1062,9 +1066,10 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   position: relative;
   isolation: isolate;
   display: none;
-  grid-template-rows: auto 1fr auto;
-  gap: 48px;
-  padding: 44px clamp(28px, 3.5vw, 48px) 36px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  gap: clamp(16px, 4dvh, 48px);
+  padding: clamp(24px, 4dvh, 44px) clamp(28px, 3.5vw, 48px) clamp(20px, 3.3dvh, 36px);
   color: var(--login-brand-heading);
   background: var(--login-brand-surface);
 }
@@ -1084,7 +1089,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   background: #ffffff;
   object-position: center;
 }
-.login-card-brand-copy { align-self: center; min-width: 0; padding: 12px 0; }
+.login-card-brand-copy { align-self: center; min-width: 0; min-height: 0; max-height: 100%; overflow-y: auto; padding: 12px 0; scrollbar-width: thin; }
 .login-card-brand-title {
   margin: 0 0 24px;
   color: var(--login-brand-heading);
@@ -1127,10 +1132,15 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   font-size: 12px;
   line-height: 1.75;
 }
-.login-card-form { min-width: 0; align-self: start; overflow-y: auto; scrollbar-gutter: stable; padding: 48px clamp(32px, 4.5vw, 64px); }
+.login-card-form { min-width: 0; min-height: 0; height: 100%; align-self: stretch; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scrollbar-width: thin; padding: clamp(24px, 4dvh, 48px) clamp(32px, 4.5vw, 64px); }
 @media (max-width: 879px) {
   .login-card { max-width: 520px; }
-  .login-card-form { padding: 40px 28px; }
+  .login-card-form { padding: clamp(24px, 4dvh, 40px) 28px; }
+}
+
+@media (max-height: 640px) {
+  .login-card-brand { grid-template-rows: auto minmax(0, 1fr); }
+  .login-card-brand-footer { display: none; }
 }
 
 .login-brand { display: flex; align-items: center; margin-bottom: 20px; color: var(--rental-color-text-heading); }
@@ -1169,7 +1179,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 /* The original step's transform/filter creates a stacking context. Lift both
    integration ancestors while the country picker is open so its source popup
    stays above the back button and sibling provider buttons, without changing
-   the vendor animation or the fixed login-card height. */
+   the vendor animation or the viewport-bounded login-card height. */
 .login-code-preview:has(.arc-phone-field [data-open]),
 .login-preview-viewport:has(.arc-phone-field [data-open]) {
   position: relative;
@@ -1220,14 +1230,14 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   .arc-form.ant-form-inline > .arc-form-item > .ant-form-item-row > .ant-form-item-control { min-width: 0; max-width: 100%; width: 100%; }
   .app-frame-stage,
   .login-stage { padding: 0; }
-  .app-shell,
-  .login-frame { height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .app-shell { height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .login-frame { height: 100%; border: 0; border-radius: 0; box-shadow: none; }
   .app-workspace { margin: 0; border: 0; border-radius: 0; }
-  .login-workspace { padding: 16px; }
+  .login-workspace { padding: 64px 16px 16px; }
   .sider-drawer-trigger { top: 8px; left: 8px; }
   /* 窄屏内层卡片贴边留白收窄、去描边/阴影，避免"外框里还套一层卡片框"的双重边界感。 */
   .login-card { border: 0; box-shadow: none; border-radius: 0; }
-  .login-card-form { padding: 28px 20px; }
+  .login-card-form { padding: 24px clamp(8px, 3vw, 20px); }
 }
 
 /* SPACE-05：经营空间切换器的下拉项样式在 .sider-workspace 一节，此处不再重复。 */
