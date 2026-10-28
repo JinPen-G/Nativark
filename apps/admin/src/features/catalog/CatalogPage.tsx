@@ -152,7 +152,7 @@ export function CatalogPage() {
       <ListSection controls={<><SearchField label={t("搜索商品型号")} placeholder={t("搜索编码、名称或规格")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
 
         <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error}>
-          <Table<RentalItemGroup> rowKey="id" onRefresh={() => groups.refetch()} loading={groups.isLoading} refreshing={groups.isFetching} dataSource={rows} scroll={{ x: 960 }}
+          <Table<RentalItemGroup> emptyScene={keyword.trim() ? 'search' : 'empty'} rowKey="id" onRefresh={() => groups.refetch()} loading={groups.isLoading} refreshing={groups.isFetching} dataSource={rows} scroll={{ x: 960 }}
             {...catalogCapabilities(t, groupFields, () => queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] }), category?.supportedInventoryModes ?? [], presentation?.fixedInventoryMode, presentation?.fixedUnit)}
             cardView={catalogCards({ t, fields: groupFields, summaryFields, pricingGroups: pricingGroups.data ?? [], canManage, edit: openEditor, risk: row => riskLevelLabels(String(row.attributes.securityRiskLevel ?? ""), locale, t) })} columns={[
             { title: t("照片"), width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },

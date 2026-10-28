@@ -1,5 +1,5 @@
 import { toDisplayTask, type DisplayTask } from "./display-models";
-import { Button } from "@/components/ui";
+import { Button, EmptyScene } from "@/components/ui";
 import styles from './AiManagement.module.css';
 export interface TaskListProps {
   tasks?: readonly unknown[];
@@ -60,7 +60,7 @@ export function TaskList({
     );
   }
   const rows: DisplayTask[] = (tasks ?? []).map(toDisplayTask);
-  if (!rows.length) return <p className={styles.empty} role="status">{t("暂无 AI 任务")}</p>;
+  if (!rows.length) return <EmptyScene compact scene="empty" title={t("暂无 AI 任务")} />;
   return (
     <section aria-label={t("AI 任务列表")} aria-busy={paging}>
       {loading && <p role="status" aria-live="polite">正在刷新任务…</p>}

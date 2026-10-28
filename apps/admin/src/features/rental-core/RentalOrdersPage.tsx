@@ -4,7 +4,7 @@ import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE } from "@rental-os/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Tag } from "antd";
 import { getCoreRowModel, useReactTable, type SortingState, type VisibilityState } from "@tanstack/react-table";
-import { Checkbox } from "@/components/ui";
+import { Checkbox, EmptyScene } from "@/components/ui";
 import { Alert, DataTable, ListTransferTools, ListSelectionBar, type ListExport, dataTableSelectionColumn, useDataTableSelection, DataTableToolbar, ListFilterItem, Button, DatePicker, Pagination, SearchField, Segmented, Select, Tooltip } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
@@ -164,7 +164,8 @@ export function RentalOrdersPage() {
       {(!orders.isError || rows.length > 0) &&
         <DataTable compactHeader table={table} caption={t("租赁订单")} busy={orders.isPlaceholderData} refreshing={orders.isFetching} loading={orders.isLoading} animated
           motionScope={JSON.stringify([selectionScope, page, pageSize, assignment, keyword, status, query.from, query.to, pendingFeeOnly])}
-          empty={t(hasFilters ? "没有符合筛选条件的订单" : "暂无订单")}
+          empty={<EmptyScene compact scene={hasFilters ? 'search' : 'empty'} title={t(hasFilters ? "没有符合筛选条件的订单" : "暂无订单")}
+            action={hasFilters ? <Button onClick={clearFilters}>{t('清除筛选')}</Button> : undefined} />}
           footer={<><Pagination current={page} pageSize={pageSize} total={total} showSizeChanger disabled={waitingForRows}
             showTotal={(count) => t(count === 1 ? "共 1 单" : "共 {count} 单", { count })}
             onChange={(nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); }} /></>} />}

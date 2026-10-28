@@ -120,7 +120,7 @@ export function PaymentReconciliationPage() {
           rowKey="id"
           onRefresh={() => batches.refetch()} loading={batches.isLoading} refreshing={batches.isFetching} dataSource={batchFilter.rows}
           pagination={batchFilter.pagination}
-          locale={{ emptyText: <Empty description={t("当前经营空间还没有导入对账文件")} /> }}
+          locale={{ emptyText: <Empty scene="empty" compact description={t("当前经营空间还没有导入对账文件")} /> }}
           columns={[
             { title: t("平台"), dataIndex: "provider", render: (value: string) => t(providerLabels[value] ?? value) },
             { title: t("文件"), dataIndex: "fileName", ellipsis: true },

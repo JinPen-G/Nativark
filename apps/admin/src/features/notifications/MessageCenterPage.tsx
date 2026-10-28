@@ -3,6 +3,7 @@ import { Bell, ClipboardCheck, ClipboardList, Sparkles, Wrench } from 'lucide-re
 import { useLocale } from '@/app/locale';
 import { resolveAdminBrandName } from '@/app/branding';
 import { useAuthStore } from '@/features/auth/authStore';
+import { EmptyScene } from '@/components/ui';
 import { NoticeActions } from "./NoticeActions";
 import { InboxTriage, type Message } from './archive/inbox-triage/InboxTriage';
 import { useNotifications } from './NotificationProvider';
@@ -29,6 +30,7 @@ export default function MessageCenterPage() {
   return <div className="notification-page">
     <InboxTriage messages={messages} onMessageChange={(item, patch) => inbox.update(item.id, { folder: patch.folder, read: patch.unread === undefined ? undefined : !patch.unread })}
       renderDetails={item => <NoticeActions id={item.id} surface="inbox" />}
+      renderEmpty={(title, description, action, caughtUp) => <EmptyScene compact scene={caughtUp ? "inbox" : "empty"} title={title} description={description} action={action} />}
       onRestore={item => inbox.restore(item.id, item.restoreData as PersonalEntry | undefined)}
       feedback={inbox.error ? tr('Messages could not be refreshed.') : !inbox.storageAvailable ? tr('Session only') : undefined}
       emptyText={inbox.loading && messages.length === 0 ? tr('Reading messages…') : inbox.error && messages.length === 0 ? tr('Messages could not be loaded.') : undefined}

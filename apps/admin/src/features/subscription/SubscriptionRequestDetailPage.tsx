@@ -43,7 +43,7 @@ export function SubscriptionRequestDetailPage() {
     extra={<Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" showIcon message={subscriptionError(query.error, t("申请详情加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
-        : !request ? <Empty description={t("未找到当前租户的申请")} />
+        : !request ? <Empty scene="map" description={t("未找到当前租户的申请")} />
         : <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert type="info" showIcon message={t("申请不等于开通；实际以平台核实到账并保存版本与期限为准，办理结果会显示真实生效时间。")} />
           <ListSection title={t("申请与处理过程")}><SubscriptionRequestDetails request={request} timeZone={query.data?.overview.timeZone} /></ListSection>

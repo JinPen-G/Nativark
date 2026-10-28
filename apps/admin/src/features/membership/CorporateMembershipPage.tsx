@@ -405,7 +405,7 @@ export function CorporateMembershipPage() {
     <PageHeader title={t("企业会员管理")} description={t("企业资料在租户内共享；会员状态变更影响全部空间。")} extra={<Button type="primary" disabled={!canManage} onClick={() => openCorporate()}>{t("新增企业会员")}</Button>} />
 
     <ListSection controls={<ListFilters filter={corporateFilter} placeholder="企业、联系人或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}>
-      <Table<CorporateMembershipMember>
+      <Table<CorporateMembershipMember> emptyScene={corporateFilter.keyword || corporateFilter.status ? "search" : "empty"}
         importConfig={corporateImport(t, () => corporates.refetch({ throwOnError: true }))}
         exportConfig={{ filename: t("企业会员"), fields: [{ label: t("企业"), value: row => row.corporateName }, { label: t("联系人"), value: row => row.name }, { label: t("联系电话"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => corporates.refetch()} loading={corporates.isLoading} refreshing={corporates.isFetching} dataSource={corporateFilter.rows} pagination={corporateFilter.pagination} columns={[
         { title: t("企业"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.corporateName ?? row.name} type="corporate" phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> },
