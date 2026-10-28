@@ -109,8 +109,8 @@ function ShellContents({ children }: { children: ReactNode }) {
       <SidebarHeader><NativeWorkspaceSwitcher />
         <SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")} placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
       </SidebarHeader>
+      {canUseOperator && <OperatorModeSwitch ai={aiMode} onChange={next => { setQuery(""); navigation.fromSidebar(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(`${route.path}/`)) ? lastAdminPath.current : routes[0]?.path ?? "/"); }} />}
       <SidebarContent ref={navRef}>
-        {canUseOperator && <OperatorModeSwitch ai={aiMode} onChange={next => { setQuery(""); navigation.fromSidebar(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(`${route.path}/`)) ? lastAdminPath.current : routes[0]?.path ?? "/"); }} />}
         {aiMode ? <AiOperatorNavigation query={query} /> : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} />}
       </SidebarContent>
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />

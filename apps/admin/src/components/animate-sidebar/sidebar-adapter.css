@@ -3,6 +3,8 @@
 :root[data-theme="dark"] { --rental-sidebar-surface: oklch(0.205 0 0); }
 .native-admin-shell { background: var(--rental-sidebar-surface); }
 .rental-sidebar-colors { --sidebar: var(--rental-sidebar-surface); }
+/* Brand/search and mode controls stay outside the menu's only scroll region. */
+.rental-sidebar-colors :is([data-sidebar="header"], [data-sidebar="footer"], .operator-mode-switch) { flex-shrink: 0; }
 /* App geometry roles only; preserved source classes, sizes and motion stay native. */
 .rental-sidebar-colors :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"], [data-slot="sidebar-trigger"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"]) {
   border-radius: var(--rental-ui-radius-button);

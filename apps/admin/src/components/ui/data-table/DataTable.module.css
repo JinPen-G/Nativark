@@ -65,6 +65,11 @@
 .scroll { position: relative; overflow: auto; max-width: 100%; isolation: isolate; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); container: table-viewport / inline-size; }
 .table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); }
 .table th, .table td { padding: var(--space-3); text-align: start; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+/* Wrapping Space still gives its items an intrinsic minimum; constrain legacy
+   tag groups so long names grow the row instead of painting across columns. */
+.table td :global(.ant-space), .table td :global(.ant-space-item) { min-width: 0; max-width: 100%; }
+.table td :global(.ant-tag) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.table td :global(.ant-space-item) > :global(.ant-tag) { margin-inline-end: 0; }
 .table th { height: var(--table-header-height); padding-block: var(--space-1); color: var(--text-secondary); font-weight: 500; vertical-align: middle; }
 .table tr > :first-child { padding-inline-start: var(--space-4); }
 .table tr > :last-child { padding-inline-end: var(--space-4); }
