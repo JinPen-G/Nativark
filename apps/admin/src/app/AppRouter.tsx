@@ -47,6 +47,7 @@ const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
 const AiModelSettingsPage = lazy(() => import("@/features/ai-native/AiModelSettingsPage").then((module) => ({ default: module.AiModelSettingsPage })));
+const ClientAuthorizationPage = lazy(() => import("@/features/agent-desktop/ClientAuthorizationPage").then((module) => ({ default: module.ClientAuthorizationPage })));
 const TaskCenterPage = lazy(() => import("@/features/ai-native/TaskCenterPage").then((module) => ({ default: module.TaskCenterPage })));
 const PlatformModelSettingsPage = lazy(() => import("@/features/ai-native/PlatformModelSettingsPage").then((module) => ({ default: module.PlatformModelSettingsPage })));
 const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
@@ -137,6 +138,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
             <Route path={APP_ROUTES.aiSettings.path} element={guard(APP_ROUTES.aiSettings, <AiModelSettingsPage />)} />
+            <Route path={APP_ROUTES.clientAuthorization.path} element={guard(APP_ROUTES.clientAuthorization, <ClientAuthorizationPage />)} />
             <Route path={APP_ROUTES.aiTasks.path} element={guard(APP_ROUTES.aiTasks, <TaskCenterPage />)} />
             <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
             <Route path={APP_ROUTES.appearance.path} element={guard(APP_ROUTES.appearance, <AppearancePage />)} />

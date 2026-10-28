@@ -6,7 +6,7 @@ import { currentSessionEpoch } from '@/app/queryClient';
 import { useLocale } from '@/app/locale';
 import { ActionButton, Alert, ConfirmAction, Select } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
-import { CapabilityProbeSession, PROBE_CAPABILITIES } from './capability-probe-session';
+import { CapabilityProbeSession, PROBE_CAPABILITIES, PROBE_TASK_ACTIONS } from './capability-probe-session';
 import { safeDisplayText } from './safe-display';
 import { formatUsageQuantity } from './usage-quantity';
 import { formatTimestamp } from './formatters';
@@ -19,8 +19,7 @@ const messages = { idle: '先准备原验证请求；能力种类仍受服务器
   invalid: '当前输入或办理顺序无效，请核对能力、原请求与当前任务状态。',
   unavailable: '验证配置、正式政策、当前模型或预算依赖不可用；没有默认放行或供应商回退。' };
 // These are existing server template codes, not caller-defined permissions.
-const policyActions = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run',
-  'release_run', 'transition_task', 'request_input'] as const;
+const policyActions = PROBE_TASK_ACTIONS;
 export function CapabilityProbePanel({ identity }: { identity: string }) {
   const { t } = useLocale(), label = useId();
   const [capability, setCapability] = useState<(typeof PROBE_CAPABILITIES)[number]>('text'), [operation, setOperation] = useState<string>('read_metadata');

@@ -13,17 +13,16 @@ import { ModelSettingsSession, type SettingsFeedback } from "./model-settings-se
 import { TenantAiCreditSettings } from './AiCreditSettings';
 import { AiCallRecords } from './AiCallRecords';
 import type { AiSettingsMode } from './ai-service-settings-model';
-import { CapabilityProbePanel } from './CapabilityProbePanel';
-import { DesktopBusinessPolicySettings } from '../agent-desktop/DesktopBusinessPolicySettings';
+import { AiConnectionCheck } from './AiConnectionCheck';
 
 const labels: Record<SettingsFeedback, string> = {
   idle: "选择 AI 服务并保存。平台 AI 的金额额度需向平台申请。",
-  saved: "AI 设置已保存。连接是否可用以实际验证结果为准。",
-  recorded: "原保存收据已确认；请重新读取当前配置，历史收据不代表当前配置未变化。",
-  unknown: "保存结果待核对。只能读取原操作收据，不能再次保存或更换操作编号重试。",
+  saved: "AI 设置已保存。",
+  recorded: "上次保存结果已确认，请刷新查看当前设置。",
+  unknown: "上次保存结果尚未确认，请先核对保存结果，不要重复提交。",
   conflict: "设置已被其他管理员修改，请重新读取后确认。",
-  denied: "当前无权读取或管理 AI 配置，已停止显示旧配置。",
-  unavailable: "配置或收据暂不可用，请稍后重新读取；不代表保存未发生。",
+  denied: "当前没有管理 AI 设置的权限。",
+  unavailable: "AI 设置暂不可用，请稍后刷新；保存过的设置不会因此被删除。",
   invalid: "输入未通过服务端校验，请检查配置。"
 };
 function contextKey() {
@@ -44,10 +43,6 @@ export function AiModelSettingsPage() {
     {allowed ? <Tabs key={identity} items={[
       { key: 'settings', label: t('服务配置'), children: <>
         <TenantSettingsEditor tenantId={auth.tenant!.tenantId} identity={identity} onModeChange={onModeChange} />
-        <details><summary>{t('高级连接验证与客户端权限')}</summary>
-          <CapabilityProbePanel identity={identity} />
-          <DesktopBusinessPolicySettings identity={identity} />
-        </details>
       </> },
       { key: 'credits', label: t('平台额度'), children: mode === 'tenant_managed'
         ? <Alert type="info" title={t('自带供应商由供应商直接计费，无需申请平台额度。切换至平台 AI 后可在此申请。')} />
@@ -78,11 +73,11 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
   const legacy = state.legacy?.state === "review_required" && state.legacy.currentConfiguration === "absent" ? state.legacy : null;
   const showEditor = !!state.summary || !!legacy && reviewLegacy && legacy.supportedProtocol !== null;
   return <section aria-label={t("AI 服务设置")} aria-busy={state.busy}>
-    <Alert type={state.feedback === "saved" || state.feedback === "recorded" ? "success"
-      : ["denied", "invalid", "conflict"].includes(state.feedback) ? "error" : "info"} title={t(labels[state.feedback])} />
+    {state.feedback !== 'idle' && <Alert type={state.feedback === "saved" || state.feedback === "recorded" ? "success"
+      : ["denied", "invalid", "conflict"].includes(state.feedback) ? "error" : "info"} title={t(labels[state.feedback])} />}
     <div className="panel-toolbar">
-      <ActionButton label={t("重新读取当前配置")} successLabel={t("读取已结束")} disabled={state.busy} onAction={() => session.load()} />
-      {state.pending && <ActionButton label={t("核对原保存收据")} successLabel={t("核对已结束")} disabled={state.busy} onAction={() => session.reconcile()} />}
+      <ActionButton label={t("刷新设置")} successLabel={t("已刷新")} disabled={state.busy} onAction={() => session.load()} />
+      {state.pending && <ActionButton label={t("核对上次保存结果")} successLabel={t("核对已结束")} disabled={state.busy} onAction={() => session.reconcile()} />}
     </div>
     {state.pending && <p role="status">{t("原操作编号")}: <code>{state.pending.operationKey}</code>。{t("当前配置读取不能证明原保存是否成功。")}</p>}
     <QueryState loading={state.busy && !state.summary && !state.legacy}>
@@ -98,6 +93,8 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
         legacySource={!state.summary && legacy && reviewLegacy ? legacy.source : undefined}
         onModeChange={onModeChange}
         onSave={input => session.save(input)} />}
+      {state.summary?.mode === 'tenant_managed' && <AiConnectionCheck identity={identity}
+        configurationRevision={state.summary.configRevision} disabled={state.busy || !!state.pending || !state.summary.enabled} />}
     </QueryState>
   </section>;
 }

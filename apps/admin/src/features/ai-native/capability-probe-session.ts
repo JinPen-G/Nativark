@@ -11,6 +11,9 @@ import type { CapabilityProbeAction, aiCapabilityProbeApi } from '@/api/aiCapabi
 import { isUsageQuantity } from './usage-quantity';
 
 type Capability = NonNullable<AiTextCapabilityPrepareRequestDraft['capability']>;
+export const PROBE_TASK_ACTIONS = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run',
+  'release_run', 'transition_task', 'request_input'] as const;
+export type ConnectionCheck = { state: 'supported' | 'unsupported' | 'pending' | 'stale'; checkedAt: string | null };
 type Write = 'publish' | 'createTask' | 'start' | 'cancel' | 'reconcile' | 'readCapabilityReceipt' | 'configureTaskAction'
   | 'releaseUnsent' | 'reconcileAccounting';
 type PolicyWrite = { taskId: string; operation: string; expectedRevision: number | null };
@@ -88,6 +91,48 @@ export class CapabilityProbeSession {
   prepare = (capability: Capability) => this.run('prepare', capability);
   act = (action: Exclude<CapabilityProbeAction, 'prepare'>, operation?: string) => this.run(action, undefined, operation);
   readCancellationReceipt = () => this.run('readCancellationReceipt');
+  /** One explicit human test request. Only this original probe task receives
+   * missing server-owned action templates; existing policies are never replaced.
+   * A prior start/uncertain write is observation-only, never another dispatch. */
+  async testConnection(configurationRevision: number): Promise<ConnectionCheck> {
+    if (!revision(configurationRevision) || this.state.locked || this.state.journal?.uncertain
+      || this.state.journal?.started) throw Error('AI_RESULT_UNKNOWN');
+    if (this.state.journal && this.state.journal.capability !== 'text') throw Error('AI_RESOURCE_UNAVAILABLE');
+    await this.prepare('text');
+    if (this.state.prepared?.configurationRevision !== configurationRevision) throw Error('AI_CONFIGURATION_CHANGED');
+    await this.act('publish');
+    await this.act('createTask');
+    for (const operation of PROBE_TASK_ACTIONS) {
+      await this.act('readTaskAction', operation);
+      if (this.state.policy?.operation !== operation) throw Error('AI_RESOURCE_UNAVAILABLE');
+      if (this.state.policy.revision === null) await this.act('configureTaskAction', operation);
+    }
+    await this.act('start');
+    return this.observeConnection(configurationRevision);
+  }
+  async observeConnection(configurationRevision: number): Promise<ConnectionCheck> {
+    const pending = this.state.journal;
+    if (!pending || !revision(configurationRevision)) throw Error('AI_RESOURCE_UNAVAILABLE');
+    if (pending.capability !== 'text') { await this.act('readHistory'); return { state: 'pending', checkedAt: null }; }
+    // These reads may clear only the matching original metadata receipt. They
+    // cannot resume a model call, clear a missing receipt or invent a new key.
+    if (pending.uncertain === 'publish') await this.act('readOriginal');
+    else if (pending.uncertain === 'createTask') await this.act('readTask');
+    else if (pending.uncertain === 'configureTaskAction') await this.act('readTaskActionReceipt');
+    if (this.state.journal?.uncertain || !this.state.journal?.started) {
+      await this.act('readHistory');
+      return { state: 'pending', checkedAt: null };
+    }
+    await this.act('readCapabilityReceipt');
+    const receipt = this.state.receipt;
+    if (!receipt || receipt.configurationRevision !== configurationRevision
+      || !receipt.expiresAt || Date.parse(receipt.expiresAt) <= Date.now()) return { state: 'stale', checkedAt: receipt?.checkedAt ?? null };
+    if (receipt.status === 'unsupported') return { state: 'unsupported', checkedAt: receipt.checkedAt };
+    await this.act('preflight');
+    const current = this.state.preflight;
+    return { state: receipt.status === 'supported' && receipt.mode === 'live' && current?.allowed
+      && !current.missing && !current.stale ? 'supported' : 'pending', checkedAt: receipt.checkedAt };
+  }
   private async run(action: CapabilityProbeAction | 'readCancellationReceipt', capability?: Capability, operation?: string) {
     if (this.flight) throw Error('AI_BUSY');
     const c = new AbortController(), g = this.generation; this.flight = c;
