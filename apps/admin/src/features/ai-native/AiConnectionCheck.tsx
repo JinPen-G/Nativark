@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { aiCapabilityProbeApi } from '@/api/aiCapabilityProbe';
 import { currentSessionEpoch } from '@/app/queryClient';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { CapabilityProbeSession, type ConnectionCheck } from './capability-probe-session';
+import styles from './AiManagement.module.css';
 
 export function AiConnectionCheck({ identity, configurationRevision, disabled }: {
   identity: string; configurationRevision: number; disabled: boolean;
@@ -37,13 +38,13 @@ export function AiConnectionCheck({ identity, configurationRevision, disabled }:
     } catch { setFailed(true); throw Error(t('连接检测尚未确认，请查看提示。')); }
     finally { setWorking(false); }
   };
-  return <section aria-label={t('连接检测')} aria-busy={busy}>
-    <p className="muted">{t('检测已保存配置的文本回复能力，可能产生供应商 Token 用量。其他能力由系统单独检查。')}</p>
-    <div className="panel-toolbar">
+  return <section className={styles.section} aria-label={t('连接检测')} aria-busy={busy}>
+    <div className={styles.toolbar}>
       {!journal?.started && <ConfirmAction tone="neutral" label={t(journal ? '继续连接检测' : '测试连接')}
         prompt={t('使用已保存的 AI 配置发送一条测试消息？费用由你的供应商收取，不会执行租赁业务操作。')}
         doneLabel={t('检测请求已返回')} disabled={disabled || busy || uncertain} onConfirm={() => perform(false)} />}
       {journal && <ActionButton label={t('查看检测结果')} disabled={busy} onAction={() => perform(true)} />}
+      <span className={styles.help}>{t('测试可能产生供应商费用。')}</span>
     </div>
     {disabled && <p className="muted">{t('请先启用并保存供应商配置。')}</p>}
     {visible && <Alert type={visible.state === 'supported' ? 'success' : 'warning'} title={t(

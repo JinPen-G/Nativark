@@ -5,9 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiTaskSnapshotDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { currentSessionEpoch } from "@/app/queryClient";
-import { useLocale } from "@/app/locale";
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { PageHeader } from "@/components/PageHeader";
-import { ActionButton, Alert, Select } from "@/components/ui";
+import { ActionButton, Alert, Select, Accordion } from "@/components/ui";
+import { ListTodo } from 'lucide-react';
+import styles from './AiManagement.module.css';
 import { useAuthStore } from "@/features/auth/authStore";
 import { AiTaskWorkbench, type AiTaskDetailReader } from "./AiTaskWorkbench";
 import { safeDisplayText } from "./safe-display";
@@ -33,7 +35,7 @@ export function TaskCenterPage() {
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
     && AI_TASK_CENTER_ENTRY_PERMISSIONS.some(auth.hasPermission);
   return <>
-    <PageHeader title={t("AI 任务中心")} description={t("读取本人当前空间任务。历史结果不授予新执行权限。")} />
+    <PageHeader title={t("AI 任务中心")} />
     {allowed ? <TaskCenterReader key={identityKey()} identity={identityKey()} tenantId={auth.tenant!.tenantId} workspaceId={auth.currentWorkspaceId!} />
       : <Alert type="warning" title={t("当前没有任务中心读取入口权限。")}/>}
   </>;
@@ -153,47 +155,48 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     const code = (follow.error as { response?: { status?: number } })?.response?.status;
     if (code === 401 || code === 403) setOpened(false);
   } }, [query.error, followFailed, originalPage, selected, selectedVisible]);
-  return <section aria-label={t("AI 任务观察")}>
-    <Alert type="info" title={t("观察本人任务；批准和继续分别明确确认，不自动运行或重新派发。")}
-      description={t("首次进入不请求 AI 数据；点击读取后按当前权限查询。切换空间或身份后清空当前视图，人工业务页面始终保留。")}/>
-    <div className="panel-toolbar">
-      <ActionButton label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}
-        onAction={async () => { stopFollowing(); setLiveSnapshot(null); setFollowError(false); setSelected(null); if (!opened) setOpened(true); await query.refetch({ throwOnError: true }); }} />
+  return <section className={styles.stack} aria-label={t("AI 任务观察")}>
+    <div className={styles.toolbar}>
       <Select aria-label={t("任务状态")} value={status} disabled={!opened || query.isFetching}
         options={[{ value: "all", label: t("全部状态") }, ...AI_TASK_STATUSES_DRAFT.map(value => ({ value, label: t(statusLabels[value]) }))]}
         onChange={value => { stopFollowing(); setLiveSnapshot(null); setSelected(null); setStatus(String(value)); setPage(1); setCursors([null]); }} />
+      <ActionButton className={styles.toolbarEnd} variant={opened ? 'secondary' : 'primary'} label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}
+        onAction={async () => { stopFollowing(); setLiveSnapshot(null); setFollowError(false); setSelected(null); if (!opened) setOpened(true); await query.refetch({ throwOnError: true }); }} />
     </div>
-    {opened && visible && selected && <div className="panel-toolbar">
-      <ActionButton label={t(followTask === selected ? '停止跟随当前任务' : '跟随当前任务状态')}
+    {!opened && <div className={styles.empty}><ListTodo size={28} aria-hidden="true" /><strong>{t('查看我的任务')}</strong><span className={styles.help}>{t('读取任务，查看进度与待办事项。')}</span></div>}
+    {opened && visible && selected && <div className={styles.toolbar}>
+      <ActionButton variant="secondary" label={t(followTask === selected ? '停止刷新状态' : '自动刷新状态')}
         successLabel={t('只读跟随设置已更新')} onAction={async () => {
           if (followTask === selected) { stopFollowing(); return; }
           stopFollowing(); setFollowError(false); followOwner.current = { active: true, reads: 0, deadline: performance.now() + 600000 };
           setFollowEpoch(value => value + 1); setFollowTask(selected);
         }} />
-      <span role="status">{t(followFailed ? '状态读取失败，已停止；旧详情已清除，请手动重读。'
-        : '主动开启后每3秒读取当前任务，最多200次或10分钟；终态、页面隐藏或切换后停止。不执行或重派任务。')}</span>
+      <span className={styles.help} role="status">{t(followFailed ? '状态读取失败，已停止；旧详情已清除，请手动重读。'
+        : followTask === selected ? '每3秒更新，最长10分钟；任务结束后停止。' : '仅更新所选任务的状态。')}</span>
     </div>}
     {(followFailed || followError) && <Alert type="warning" title={t('任务状态当前不可读取，已停止跟随并清除详情；请核对权限后重新读取。')} />}
-    {opened && <AiTaskWorkbench context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
+    {opened && <AiTaskWorkbench translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
+      statusLabels={Object.fromEntries((data?.items ?? []).map(row => [row.taskId, t(statusLabels[row.status])]))}
       selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
       onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}
       tasks={(data?.items ?? []).map(row => ({ id: row.taskId, status: displayStatus(row.status), scene: safeDisplayText(row.sceneCode), updatedAt: row.updatedAt }))}
       loading={query.isFetching} paging={query.isFetching} page={page} hasNext={!!data?.nextCursor}
+      forbidden={[401, 403].includes((query.error as { response?: { status?: number } } | null)?.response?.status ?? 0)}
       error={query.error ? t("当前任务不可读取，请重新核对权限或稍后重试。") : null}
+      detailActions={visible && !followFailed && selected && data?.items.some(row => row.taskId === selected) ? <Accordion key={selected}
+        defaultOpen={data.items.find(row => row.taskId === selected)?.status === 'waiting_confirmation' ? 0 : data.items.find(row => row.taskId === selected)?.status === 'waiting_input' ? 1 : -1}
+        items={[
+          { key: 'approval', title: t('人工确认'), content: <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
+            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
+          { key: 'input', title: t('补充信息'), content: <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
+            onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
+          { key: 'cancel', title: t('取消任务'), content: <TaskCancellation key={`stop:${selected}`} taskId={selected} identity={identity} current={current}
+            onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
+          { key: 'usage', title: t('用量记录'), content: <TaskUsageObservation key={selected} taskId={selected} current={current}
+            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> }
+        ]} /> : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
         stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} />}
-    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
-      && <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
-        onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} />}
-    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
-      && <TaskCancellation key={`stop:${selected}`} taskId={selected} identity={identity} current={current}
-        onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} />}
-    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
-      && <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
-        onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
-    {opened && visible && !followFailed && selected && data?.items.some(row => row.taskId === selected)
-      && <TaskUsageObservation key={selected} taskId={selected} current={current}
-        onAccessDenied={() => { setSelected(null); setOpened(false); }} />}
   </section>;
 }

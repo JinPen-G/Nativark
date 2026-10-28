@@ -1,4 +1,5 @@
 import { toDisplayStep, type DisplayStep } from "./display-models";
+import styles from './AiManagement.module.css';
 export interface TaskTimelineProps {
   taskId: string;
   steps?: readonly unknown[];
@@ -22,12 +23,12 @@ export function TaskTimeline({ taskId, steps }: TaskTimelineProps) {
     .filter((step) => step.taskId === taskId);
   if (!rows.length) return <p role="status">暂无步骤</p>;
   return (
-    <ol aria-label="任务步骤时间线">
+    <ol className={styles.timeline} aria-label="任务步骤时间线">
       {rows.map((step) => (
         <li key={step.id}>
           <strong>{step.availability === "unavailable" ? "无法识别／待刷新（待核对）" : labels[step.status]}</strong>
           <span>{step.action}</span>
-          <time>{step.occurredAt ?? "时间不可用"}</time>
+          {step.occurredAt && <time dateTime={step.occurredAt}>{step.occurredAt}</time>}
         </li>
       ))}
     </ol>

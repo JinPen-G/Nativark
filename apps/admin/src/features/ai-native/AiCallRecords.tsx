@@ -5,9 +5,10 @@ import type { AiTenantCallRecord, AiTenantCallRecords } from '@rental-os/shared'
 import { aiCreditApi } from '@/api/aiCredit';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { APP_ROUTES } from '@/app/navigation';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { useAuthStore } from '@/features/auth/authStore';
-import { ActionButton, Alert, DatePicker, Select, Table } from '@/components/ui';
+import { ActionButton, Alert, DatePicker, ListFilterItem, Select, Table } from '@/components/ui';
+import styles from './AiManagement.module.css';
 const states = { registered: '已登记', reserved: '待派发', dispatched: '已派发，待核对', settled: '已结算', cancelled: '派发前取消', unknown: '结果待核对' };
 export function AiCallRecords({ identity }: { identity: string }) {
   const { t } = useLocale(), field = useId(), alive = useRef(true), epoch = useRef(currentSessionEpoch());
@@ -49,30 +50,28 @@ export function AiCallRecords({ identity }: { identity: string }) {
       ? t('供应商直接计费') : row.amount !== null && row.currency ? `${row.currency} ${row.amount}` : t('待核对') },
     { title: t('关联任务'), dataIndex: 'taskId', key: 'task', render: (value: string) => <code>{value}</code> }
   ], [t]);
-  return <section aria-label={t('AI 调用记录')} aria-busy={busy}>
-    <p>{t('查看本租户各空间的实际调用记录。自带供应商只记录用量；未知用量不记为零。记录不包含密钥、提示词或业务原文。')}</p>
-    <div className="panel-toolbar">
-      <label htmlFor={`${field}-days`}>{t('时间范围')}</label>
-      <Select id={`${field}-days`} value={days} disabled={busy} options={[1, 7, 31].map(value => ({ value, label: t(`最近 ${value} 天`) }))}
-        onChange={value => { setPeriod(null); setRangeError(false); setDays(Number(value)); }} />
+  const filters = <>
+    <ListFilterItem label={t('时间范围')} priority active={days !== 7}>
+      <Select id={`${field}-days`} aria-label={t('时间范围')} value={days} disabled={busy} options={[1, 7, 31].map(value => ({ value, label: t(`最近 ${value} 天`) }))}
+        onChange={value => { setPeriod(null); setRangeError(false); setDays(Number(value)); }} /></ListFilterItem>
+    <ListFilterItem label={t('自定义日期')} width="dateRange" active={!!period}>
       <DatePicker.RangePicker showTime value={period} disabled={busy} allowClear
         placeholder={[t('自定义开始时间'), t('自定义结束时间')]} onChange={value => {
           if (!value?.[0] || !value[1]) { setPeriod(null); setRangeError(false); return; }
           const duration = value[1].valueOf() - value[0].valueOf();
           if (duration <= 0 || duration > 31 * 86400000 || value[1].valueOf() > Date.now() + 60000) { setRangeError(true); return; }
           setRangeError(false); setPeriod([value[0], value[1]]);
-        }} />
-      <label htmlFor={`${field}-mode`}>{t('服务来源')}</label>
-      <Select id={`${field}-mode`} value={mode} disabled={busy} options={[{ value: 'all', label: t('全部') },
-        { value: 'platform_managed', label: t('平台 AI') }, { value: 'tenant_managed', label: t('自带供应商') }]} onChange={value => setMode(String(value))} />
-      <ActionButton label={t('刷新记录')} disabled={busy} onAction={() => load()} />
-      <Link to={APP_ROUTES.aiTasks.path}>{t('打开 AI 任务中心')}</Link>
-    </div>
+        }} /></ListFilterItem>
+    <ListFilterItem label={t('服务来源')} active={mode !== 'all'}>
+      <Select id={`${field}-mode`} aria-label={t('服务来源')} value={mode} disabled={busy} options={[{ value: 'all', label: t('全部') },
+        { value: 'platform_managed', label: t('平台 AI') }, { value: 'tenant_managed', label: t('自带供应商') }]} onChange={value => setMode(String(value))} /></ListFilterItem>
+  </>;
+  return <section className={styles.section} aria-label={t('AI 调用记录')} aria-busy={busy}>
     {rangeError && <Alert type="warning" title={t('请选择不超过 31 天且不晚于当前时间的历史区间。')} />}
     {error && <Alert type="warning" title={t('调用记录暂不可用，或当前没有租户管理员权限。旧记录已清除。')} />}
     <Table<AiTenantCallRecord> rowKey="id" columns={columns} dataSource={data?.records ?? []} pagination={false}
-      loading={busy && !data} scroll={{ x: 'max-content' }} />
-    {data && !data.records.length && <p>{t('所选范围内暂无调用记录。')}</p>}
+      toolbar={filters} onRefresh={() => load()} loading={busy && !data} scroll={{ x: 'max-content' }} />
+    <Link to={APP_ROUTES.aiTasks.path}>{t('打开 AI 任务中心')}</Link>
     {data?.nextCursor && <ActionButton label={t('下一页')} disabled={busy} onAction={() => load(data.nextCursor!)} />}
   </section>;
 }

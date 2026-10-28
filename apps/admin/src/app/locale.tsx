@@ -12,6 +12,8 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "AI 服务设置": "AI settings",
+  "AI 任务中心": "AI tasks",
   "可用模型": "Available models",
   "默认模型": "Default model",
   "选择模型或输入模型 ID，最多 20 个": "Select or enter model IDs (up to 20)",

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { type AiTaskBudgetUsagePageDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { ActionButton, Alert } from "@/components/ui";
-import { useLocale } from "@/app/locale";
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
 
@@ -41,8 +41,7 @@ export function TaskUsageObservation({ taskId, current, onAccessDenied }: { task
     finally { if (request.current === controller) request.current = null; }
   };
   return <section aria-label={t("原AI用量账本")}>
-    <h3>{t("原AI用量账本")}</h3>
-    <p>{t("仅当前页原记录，不是任务总费用或供应商账单。没有记录不等于未消耗；读取不执行退款、结算或重新派发。")}</p>
+    <p className="muted">{t("仅显示本页用量，不代表任务总费用或供应商账单。")}</p>
     <div className="panel-toolbar">
       <ActionButton label={t(page ? "重读首页" : "读取原用量")} pendingLabel={t("读取中…")} onAction={() => read()} />
       {page?.nextAfter && <ActionButton label={t("下一页原记录")} pendingLabel={t("读取中…")} onAction={() => read(page.nextAfter!)} />}

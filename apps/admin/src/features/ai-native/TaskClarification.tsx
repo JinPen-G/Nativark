@@ -5,7 +5,7 @@ import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputS
   validateAiTaskInputAnswersDraft, type AiTaskClarificationObservationDraft,
   type AiTaskClarificationProgressDraft, type AiTaskInputSubmissionDraft, type AiTaskClarificationReceiptQueryDraft } from '@rental-os/shared';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
 import { safeDisplayText } from './safe-display';
 import { formatTimestamp } from './formatters';
@@ -124,8 +124,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
   };
   const expired = !!input && Date.parse(input.expiresAt) <= Date.now();
   return <section aria-label={t('原任务补充信息')} style={{ overflowWrap: 'anywhere' }}>
-    <h3>{t('原任务补充信息')}</h3>
-    <p id={`${label}-help`}>{t('仅回答服务器登记的问题。提交会尝试继续原任务，可能产生模型用量；不代表批准建单、支付或业务已执行。')}</p>
+    <p className="muted" id={`${label}-help`}>{t('提交回答会尝试继续原任务，可能产生模型用量。')}</p>
     <div className="panel-toolbar">
       <ActionButton label={t('读取当前问题')} pendingLabel={t('读取中…')} disabled={busy} onAction={() => run('read')} />
       {(original || saved && saved !== 'invalid') && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}

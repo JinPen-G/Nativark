@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { ActionButton, Alert } from "@/components/ui";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ActionButton, Alert, Accordion } from "@/components/ui";
+import styles from './AiManagement.module.css';
 import { TaskList } from "./TaskList";
 import { TaskTimeline } from "./TaskTimeline";
 import { MissingFieldsPanel, type MissingField } from "./MissingFieldsPanel";
@@ -52,6 +53,9 @@ export type AiTaskDetailReader = (
 ) => Promise<AiTaskDetailProjection>;
 
 export interface AiTaskWorkbenchProps {
+  detailActions?: ReactNode;
+  translate?: (text: string) => string;
+  statusLabels?: Readonly<Record<string, string>>;
   tasks?: readonly unknown[];
   loading?: boolean;
   paging?: boolean;
@@ -83,6 +87,9 @@ type DetailState = "idle" | "unavailable" | "loading" | "ready" | "failed" | "hi
  * the host owns authorization, transport, task state and mutation idempotency.
  */
 export function AiTaskWorkbench({
+  detailActions,
+  translate: t = text => text,
+  statusLabels,
   tasks,
   loading = false,
   paging = false,
@@ -223,6 +230,8 @@ export function AiTaskWorkbench({
     <section aria-label="AI 任务工作台" data-ai-workbench="feature-local">
       <TaskList
         tasks={tasks}
+        translate={t}
+        statusLabels={statusLabels}
         loading={loading}
         paging={paging}
         error={error}
@@ -234,8 +243,8 @@ export function AiTaskWorkbench({
         onPageChange={onPageChange}
         onRetry={onRetry}
       />
-      <section aria-label="AI 任务详情" aria-busy={detailState === "loading"}>
-        <h2>{title}</h2>
+      {taskId && <section className={styles.taskDetail} aria-label={t("AI 任务详情")} aria-busy={detailState === "loading"}>
+        <h2>{t(title)}</h2>
         {detailState === "failed" && taskId && onResync && (
           <ActionButton
             label="重新读取"
@@ -252,18 +261,16 @@ export function AiTaskWorkbench({
                 action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
               />
             )}
-            {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
             {detailSynchronized && typeof currentDetail.modelText === "string" && <ModelText text={currentDetail.modelText} />}
-            {detailSynchronized && readConfirmation && currentDetail.confirmationSteps?.slice(0, 20).map(step =>
+            {detailSynchronized && <Accordion items={[
+              { key: 'steps', title: t('执行步骤'), content: <TaskTimeline taskId={taskId} steps={currentDetail.steps} /> },
+              ...(readConfirmation && currentDetail.confirmationSteps?.length ? [{ key: 'confirmation', title: t('确认记录'), content: <>{currentDetail.confirmationSteps.slice(0, 20).map(step =>
               <ConfirmationHistory key={`${identity}:${step.runId}:${step.stepId}`} taskId={taskId} {...step} read={readConfirmation} />)}
-            {detailSynchronized && (currentDetail.confirmationSteps?.length ?? 0) > 20 && <p role="status">仅展示前20个确认步骤，其他记录未加载。</p>}
-            {detailSynchronized && currentDetail.factRows && <section aria-label="当前受权事实">
-              <h3>当前受权事实（非模型生成）</h3>
-              <dl>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
+              {(currentDetail.confirmationSteps.length > 20) && <p role="status">仅展示前20个确认步骤，其他记录未加载。</p>}</> }] : []),
+              ...(currentDetail.factRows ? [{ key: 'facts', title: t('任务信息'), content: <dl className={styles.facts}>{currentDetail.factRows.slice(0, 24).map((row, index) => <div key={index}>
                 <dt>{safeDisplayText(row.label, 100)}</dt><dd style={{ overflowWrap: "anywhere" }}>{safeDisplayText(row.value, 1000)}</dd>
-              </div>)}</dl>
-              <p>读取事实不代表模型已执行、审批已通过、资金已结算或业务已完成。未加载的资料请在原页面核对。</p>
-            </section>}
+              </div>)}</dl> }] : [])
+            ]} />}
             {detailSynchronized && currentDetail.fields && <MissingFieldsPanel fields={currentDetail.fields} draft={currentDetail.draft ?? {}} readOnly />}
             {detailSynchronized && currentDetail.proposal && <ProposalPreview proposal={currentDetail.proposal} />}
             {detailSynchronized && currentDetail.proposalRef && (
@@ -292,7 +299,8 @@ export function AiTaskWorkbench({
           </>
         )}
         {detailState === "unavailable" && <Alert type="warning" message="宿主未提供任务详情读取能力；不会自动请求或补造结果。" />}
-      </section>
+        {detailActions}
+      </section>}
     </section>
   );
 }

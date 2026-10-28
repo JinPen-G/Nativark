@@ -1,5 +1,6 @@
 import { toDisplayTask, type DisplayTask } from "./display-models";
 import { Button } from "@/components/ui";
+import styles from './AiManagement.module.css';
 export interface TaskListProps {
   tasks?: readonly unknown[];
   loading?: boolean;
@@ -12,6 +13,8 @@ export interface TaskListProps {
   onRetry?: () => void;
   selectedTaskId?: string | null;
   onSelectTask?: (taskId: string) => void;
+  translate?: (text: string) => string;
+  statusLabels?: Readonly<Record<string, string>>;
 }
 const labels: Record<DisplayTask["status"], string> = {
   registered: "已登记",
@@ -24,6 +27,7 @@ const labels: Record<DisplayTask["status"], string> = {
   cancelled: "已取消",
   unknown: "待核对",
 };
+const scenes: Record<string, string> = { order_explanation: '订单解读', opening_diagnosis: '开业诊断', quote_clarification: '报价说明' };
 export function TaskList({
   tasks,
   loading = false,
@@ -36,6 +40,8 @@ export function TaskList({
   onRetry,
   selectedTaskId = null,
   onSelectTask,
+  translate: t = text => text,
+  statusLabels,
 }: TaskListProps) {
   const currentPage = Number.isSafeInteger(page) && page > 0 ? page : 1;
   if (loading && !tasks)
@@ -44,7 +50,7 @@ export function TaskList({
         首次加载中…
       </p>
     );
-  if (forbidden) return <p role="status">无权限查看 AI 任务</p>;
+  if (forbidden) return <p className={styles.empty} role="status">{t("无权限查看 AI 任务")}</p>;
   if (error && (!tasks || tasks.length === 0)) {
     return (
       <div>
@@ -54,43 +60,46 @@ export function TaskList({
     );
   }
   const rows: DisplayTask[] = (tasks ?? []).map(toDisplayTask);
-  if (!rows.length) return <p role="status">暂无 AI 任务</p>;
+  if (!rows.length) return <p className={styles.empty} role="status">{t("暂无 AI 任务")}</p>;
   return (
-    <section aria-label="AI 任务列表" aria-busy={paging}>
+    <section aria-label={t("AI 任务列表")} aria-busy={paging}>
       {loading && <p role="status" aria-live="polite">正在刷新任务…</p>}
       {error && <p role="alert">任务列表刷新失败：{error}{onRetry && <Button onClick={onRetry}>重试</Button>}</p>}
-      <ul>
+      <ul className={styles.taskList}>
         {rows.map((task) => (
-          <li key={task.id}>
+          <li key={task.id} data-selected={selectedTaskId === task.id || undefined}>
+            <div className={styles.taskIdentity}>
             {onSelectTask ? (
               <Button
-                type={selectedTaskId === task.id ? "primary" : "default"}
+                type="text"
+                title={task.id}
+                aria-label={`${t(scenes[task.scene] ?? task.scene)} · ${task.id}`}
                 disabled={task.availability !== "available"}
                 onClick={() => onSelectTask(task.id)}
                 aria-pressed={selectedTaskId === task.id}
               >
-                {task.id}
+                {t(scenes[task.scene] ?? task.scene)}
               </Button>
-            ) : <span>{task.id}</span>}
-            <span>{task.scene}</span>
-            <span>{labels[task.status]}</span>
-            <time>{task.updatedAt ?? "更新时间不可用"}</time>
+            ) : <strong>{t(scenes[task.scene] ?? task.scene)}</strong>}
+            <span className={styles.help} title={task.id}>{task.id}</span></div>
+            <span className={styles.status} data-tone={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'danger' : ['waiting','unknown','partially_succeeded'].includes(task.status) ? 'warning' : task.status === 'running' ? 'info' : undefined}>{statusLabels?.[task.id] ?? t(labels[task.status])}</span>
+            <time dateTime={task.updatedAt ?? undefined} title={task.updatedAt ?? undefined}>{task.updatedAt ? new Date(task.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : t("更新时间不可用")}</time>
           </li>
         ))}
       </ul>
-      <nav aria-label="任务分页">
+      <nav className={styles.taskPager} aria-label={t("任务分页")}>
         <Button
           disabled={!onPageChange || currentPage <= 1 || paging}
           onClick={() => onPageChange?.(currentPage - 1)}
         >
-          上一页
+          {t("上一页")}
         </Button>
-        <span>第 {currentPage} 页</span>
+        <span>{t("第")} {currentPage} {t("页")}</span>
         <Button
           disabled={!onPageChange || !hasNext || paging}
           onClick={() => onPageChange?.(currentPage + 1)}
         >
-          下一页
+          {t("下一页")}
         </Button>
         {paging && <span role="status">分页加载中…</span>}
       </nav>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { aiModelSettingsApi } from "@/api/aiModelSettings";
 import { currentSessionEpoch } from "@/app/queryClient";
-import { useLocale } from "@/app/locale";
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { ActionButton, Alert, Tabs } from "@/components/ui";
@@ -14,6 +14,7 @@ import { TenantAiCreditSettings } from './AiCreditSettings';
 import { AiCallRecords } from './AiCallRecords';
 import type { AiSettingsMode } from './ai-service-settings-model';
 import { AiConnectionCheck } from './AiConnectionCheck';
+import styles from './AiManagement.module.css';
 
 const labels: Record<SettingsFeedback, string> = {
   idle: "选择 AI 服务并保存。平台 AI 的金额额度需向平台申请。",
@@ -39,13 +40,13 @@ export function AiModelSettingsPage() {
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user?.id
     && !auth.user.isSaasAdmin && auth.hasPermission("system:params:manage");
   return <>
-    <PageHeader title={t("AI 服务设置")} description={t("选择平台 AI 或自带供应商，管理使用额度和查询调用记录。")} />
+    <PageHeader title={t("AI 服务设置")} />
     {allowed ? <Tabs key={identity} items={[
       { key: 'settings', label: t('服务配置'), children: <>
         <TenantSettingsEditor tenantId={auth.tenant!.tenantId} identity={identity} onModeChange={onModeChange} />
       </> },
       { key: 'credits', label: t('平台额度'), children: mode === 'tenant_managed'
-        ? <Alert type="info" title={t('自带供应商由供应商直接计费，无需申请平台额度。切换至平台 AI 后可在此申请。')} />
+        ? <p className={styles.help}>{t('自带供应商直接计费；平台额度仅用于平台 AI。')}</p>
         : <TenantAiCreditSettings identity={identity} /> },
       { key: 'calls', label: t('调用记录'), children: <AiCallRecords identity={identity} /> }
     ]} />
@@ -72,13 +73,14 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
   useEffect(() => { session.activate(); void session.load(); return () => session.dispose(); }, [session]);
   const legacy = state.legacy?.state === "review_required" && state.legacy.currentConfiguration === "absent" ? state.legacy : null;
   const showEditor = !!state.summary || !!legacy && reviewLegacy && legacy.supportedProtocol !== null;
-  return <section aria-label={t("AI 服务设置")} aria-busy={state.busy}>
+  const refreshActions = <div className={styles.toolbar}>
+    <ActionButton variant="secondary" label={t("刷新设置")} successLabel={t("已刷新")} disabled={state.busy} onAction={() => session.load()} />
+    {state.pending && <ActionButton label={t("核对上次保存结果")} successLabel={t("核对已结束")} disabled={state.busy} onAction={() => session.reconcile()} />}
+  </div>;
+  return <section className={styles.stack} aria-label={t("AI 服务设置")} aria-busy={state.busy}>
     {state.feedback !== 'idle' && <Alert type={state.feedback === "saved" || state.feedback === "recorded" ? "success"
       : ["denied", "invalid", "conflict"].includes(state.feedback) ? "error" : "info"} title={t(labels[state.feedback])} />}
-    <div className="panel-toolbar">
-      <ActionButton label={t("刷新设置")} successLabel={t("已刷新")} disabled={state.busy} onAction={() => session.load()} />
-      {state.pending && <ActionButton label={t("核对上次保存结果")} successLabel={t("核对已结束")} disabled={state.busy} onAction={() => session.reconcile()} />}
-    </div>
+    {!showEditor && refreshActions}
     {state.pending && <p role="status">{t("原操作编号")}: <code>{state.pending.operationKey}</code>。{t("当前配置读取不能证明原保存是否成功。")}</p>}
     <QueryState loading={state.busy && !state.summary && !state.legacy}>
       {legacy && <>
@@ -88,7 +90,7 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
         {legacy.supportedProtocol === null ? <p role="status">{t("旧协议无法受控转换，需由管理员处理；没有自动替换。")}</p>
           : !reviewLegacy && <ActionButton label={t("审阅并准备停用替换")} successLabel={t("待填写并保存")} disabled={state.busy || !!state.pending} onAction={async () => { setReviewLegacy(true); }} />}
       </>}
-      {showEditor && <AiServiceSettingsCard summary={state.summary} configId={tenantId} expectedRevision={state.summary?.configRevision ?? 0}
+      {showEditor && <AiServiceSettingsCard headerActions={refreshActions} summary={state.summary} configId={tenantId} expectedRevision={state.summary?.configRevision ?? 0}
         contextIdentity={identity} pending={state.busy} readOnly={!!state.pending}
         legacySource={!state.summary && legacy && reviewLegacy ? legacy.source : undefined}
         onModeChange={onModeChange}

@@ -5,7 +5,7 @@ import { AI_PROPOSAL_DRAFT_VERSION, type AiTaskDecisionQueryDraft, type AiTaskHu
   type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft,
   type AiTaskHumanContinueDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
-import { useLocale } from "@/app/locale";
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
 import { safeDisplayText } from "./safe-display";
 import { formatAmount, formatTimestamp } from "./formatters";
@@ -176,8 +176,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     } else throw Error("AI_RESULT_UNKNOWN");
   }, true);
   return <section aria-label={t("原提案人工审阅")} aria-busy={busy}>
-    <h3>{t("原提案人工审阅")}</h3>
-    <p>{t("服务器按原任务定位提案并复验业务权限。批准只记录人类决定；另行确认继续后，由既有运行器和Core办理，最后独立核对业务收据。")}</p>
+    <p className="muted">{t("批准与继续执行分开确认。")}</p>
     <div className="panel-toolbar">
       <ActionButton label={t("读取原业务步骤")} disabled={busy || !!original || !!continuation} onAction={readSteps} />
       {!!steps.length && <><label id={labelId}>{t("原业务步骤")}</label><Select aria-labelledby={labelId} value={selected}

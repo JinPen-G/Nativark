@@ -3,7 +3,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { AiCreditRequest, AiCreditSummary } from '@rental-os/shared';
 import { aiCreditApi } from '@/api/aiCredit';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
+import styles from './AiManagement.module.css';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
@@ -105,37 +106,36 @@ export function TenantAiCreditSettings({ identity }: { identity: string }) {
     if (result.state === 'unknown') { setMessage(t('尚不能确认原分配是否保存，请保留原编号。')); return; }
     window.sessionStorage.removeItem(allocationStorage); setAllocationPending(null); await load();
   };
-  return <section aria-label={t('平台 AI 额度')}>
-    <h3>{t('平台 AI 额度')}</h3>
-    <p>{t('向平台申请使用金额，由 SaaS 管理员审批；获批后可在总额度内分配各空间上限。额度为累计上限，不自动按月重置。')}</p>
+  return <section className={`${styles.editor} ${styles.section}`} aria-label={t('平台 AI 额度')}>
+    <p className={styles.help}>{t('额度为累计上限，不按月重置。')}</p>
     {message && <Alert type="info" title={message} />}
-    <ActionButton label={t('刷新额度')} disabled={busy} onAction={load} />
+    <div className={styles.toolbar}><ActionButton variant="secondary" label={t('刷新额度')} disabled={busy} onAction={load} /></div>
     {summary && <>
-      <p><label htmlFor={`${field}-currency`}>{t('计费币种')}</label></p>
+      {(summary.currencies.length > 0 || summary.balances.length > 0) && <div className={`${styles.field} ${styles.compactField}`}><label htmlFor={`${field}-currency`}>{t('计费币种')}</label>
       <Select id={`${field}-currency`} value={selectedCurrency || undefined} disabled={busy || !!pending}
         options={[...new Set([...summary.currencies, ...summary.balances.map(row => row.currency)])].map(value => ({ value, label: value }))}
-        onChange={value => { setCurrency(String(value)); setLimits({}); }} />
-      {balance && <dl>
-        <dt>{t('平台已批准总额')}</dt><dd>{balance.currency} {money(balance.grantedAmount)}</dd>
-        <dt>{t('已使用')}</dt><dd>{balance.currency} {money(balance.spentAmount)}</dd>
-        <dt>{t('待结算占用')}</dt><dd>{balance.currency} {money(balance.heldAmount)}</dd>
-        <dt>{t('剩余可用')}</dt><dd>{balance.currency} {money(balance.availableAmount)}</dd>
+        onChange={value => { setCurrency(String(value)); setLimits({}); }} /></div>}
+      {balance && <dl className={styles.facts}>
+        <div><dt>{t('平台已批准总额')}</dt><dd>{balance.currency} {money(balance.grantedAmount)}</dd></div>
+        <div><dt>{t('已使用')}</dt><dd>{balance.currency} {money(balance.spentAmount)}</dd></div>
+        <div><dt>{t('待结算占用')}</dt><dd>{balance.currency} {money(balance.heldAmount)}</dd></div>
+        <div><dt>{t('剩余可用')}</dt><dd>{balance.currency} {money(balance.availableAmount)}</dd></div>
       </dl>}
       {!summary.currencies.length && <Alert type="info" title={t('平台尚未发布可申请的 AI 计费配置，请联系 SaaS 管理员。')} />}
-      <p><label htmlFor={`${field}-amount`}>{t('申请增加额度')}</label></p>
+      {summary.currencies.length > 0 && <div className={styles.requestRow}><div className={styles.field}><label htmlFor={`${field}-amount`}>{t('申请增加额度')}</label>
       <Input id={`${field}-amount`} inputMode="decimal" value={amount} maxLength={25} disabled={busy || !!pending}
-        onChange={event => setAmount(event.target.value)} />
+        onChange={event => setAmount(event.target.value)} /></div>
       <ActionButton label={t('提交额度申请')} successLabel={t('申请已提交，等待审批')}
-        disabled={busy || !!pending || !summary.currencies.includes(selectedCurrency) || !amount} onAction={apply} />
+        disabled={busy || !!pending || !summary.currencies.includes(selectedCurrency) || !amount} onAction={apply} /></div>}
       {balance && <>
         <h4>{t('空间金额上限')}</h4>
-        <p>{t('所有空间上限合计不能超过平台批准总额，已使用和待核对的金额不能被清零。')}</p>
-        {summary.workspaces.map(space => <div key={space.id}>
+        <p className={styles.help}>{t('各空间上限合计不得超过批准总额；已使用及待核对金额仍计入占用。')}</p>
+        <ul className={styles.allocations}>{summary.workspaces.map(space => <li key={space.id}>
           <label htmlFor={`${field}-${space.id}`}>{space.name}</label>
           <Input id={`${field}-${space.id}`} inputMode="decimal" maxLength={25} disabled={busy || allocationUnknown}
             value={limits[`${balance.currency}:${balance.revision}:${space.id}`] ?? balance.allocations.find(row => row.workspaceId === space.id)?.amount ?? '0'}
             onChange={event => setLimits(previous => ({ ...previous, [`${balance.currency}:${balance.revision}:${space.id}`]: event.target.value }))} />
-        </div>)}
+        </li>)}</ul>
         <ActionButton label={t('保存空间上限')} successLabel={t('空间上限已保存')} disabled={busy || allocationUnknown} onAction={allocate} />
       </>}
       {!!summary.requests.length && <><h4>{t('近期申请')}</h4><ul>{summary.requests.map(row => <li key={row.id}>

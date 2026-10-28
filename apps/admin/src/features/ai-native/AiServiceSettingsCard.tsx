@@ -1,11 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ActionButton, Alert, Input, Segmented, Select, Switch } from "@/components/ui";
 import type { AiLegacyModelConfigurationReferenceDraft, AiTenantModelSettingsSummaryDraft, AiProviderDiscoveryInputDraft, AiProviderDiscoveryResultDraft, AiProviderDiscoveryProtocol } from "@rental-os/shared";
-import { useLocale } from "@/app/locale";
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { fromAiServiceSummary, setAiSettingsMode, toAiSettingsInput, validateAiSettingsDraft, type AiServiceSettingsDraft, type AiSettingsMode } from "./ai-service-settings-model";
 import { SettingsSaveSession } from "./settings-save-session";
+import styles from './AiManagement.module.css';
 
 export interface AiServiceSettingsCardProps {
+  headerActions?: ReactNode;
   summary?: AiTenantModelSettingsSummaryDraft | null;
   configId: string;
   expectedRevision: number;
@@ -22,7 +24,7 @@ export interface AiServiceSettingsCardProps {
 }
 
 /** Feature-local preparation card. It has no transport, storage or route side effects. */
-export function AiServiceSettingsCard({ summary, configId, expectedRevision, contextIdentity, readOnly = false, pending = false, error, onSave, legacySource, onModeChange, onDiscover }: AiServiceSettingsCardProps) {
+export function AiServiceSettingsCard({ headerActions, summary, configId, expectedRevision, contextIdentity, readOnly = false, pending = false, error, onSave, legacySource, onModeChange, onDiscover }: AiServiceSettingsCardProps) {
   const { t } = useLocale();
   const fieldId = useId();
   const identity = JSON.stringify([contextIdentity, configId, expectedRevision, summary ?? null, legacySource ?? null]);
@@ -49,6 +51,7 @@ export function AiServiceSettingsCard({ summary, configId, expectedRevision, con
     setEditor({ identity, draft: next }); setFeedback({ identity, state: "idle" }); if (next.mode !== draft.mode) onModeChange?.(next.mode); };
   const discoveryState = discovery.identity === identity ? discovery : { identity };
   const models = draft.models ?? (draft.model ? [draft.model] : []);
+  const showValidation = !validation.ok && Boolean(draft.baseUrl || draft.apiKeyDraft || models.length);
   const canDiscover = !!onDiscover && !disabled && !legacySource && !flight.current && !validation.errors.baseUrl && !validation.errors.protocol
     && (draft.secretOperation === 'replace' ? !validation.errors.apiKey : draft.secretOperation === 'retain' && summary?.mode === 'tenant_managed'
       && summary.credentialState === 'configured' && draft.baseUrl.replace(/\/+$/u, '') === summary.baseUrl.replace(/\/+$/u, ''));
@@ -78,52 +81,51 @@ export function AiServiceSettingsCard({ summary, configId, expectedRevision, con
     });
   };
   const mode: AiSettingsMode = draft.mode;
-  return <section aria-label="AI 服务设置摘要" data-ai-service-settings="feature-local">
-    <h3>{t("AI 服务")}</h3>
-    <Segmented aria-label={t("AI 服务模式")} value={mode} disabled={disabled || !!legacySource} options={[{ value: "platform_managed", label: t("Rental OS AI（推荐）") }, { value: "tenant_managed", label: t("自带 AI 供应商") }]} onChange={value => update(setAiSettingsMode(draft, value as AiSettingsMode))} />
-    <p><label htmlFor={`${fieldId}-enabled`}>{t("启用 AI 服务配置")}</label> <Switch id={`${fieldId}-enabled`} checked={draft.enabled} disabled={disabled || !!legacySource || draft.secretOperation === "clear"} onChange={value => update({ ...draft, enabled: value })} /></p>
-    <p className="muted">{t("AI 只能使用当前账号获准的业务功能。保存连接信息不代表连接验证成功。")}</p>
-    {dirty && <p role="status">{t("修改尚未保存；切换模式不会自动保存或删除现有 BYOK 配置。")}</p>}
+  return <section className={styles.editor} aria-label="AI 服务设置摘要" data-ai-service-settings="feature-local">
+    <div className={styles.toolbar}><Segmented aria-label={t("AI 服务模式")} value={mode} disabled={disabled || !!legacySource} options={[{ value: "platform_managed", label: t("Rental OS AI（推荐）") }, { value: "tenant_managed", label: t("自带 AI 供应商") }]} onChange={value => update(setAiSettingsMode(draft, value as AiSettingsMode))} /><div className={styles.toolbarEnd}>{headerActions}</div></div>
+    <div className={styles.serviceRow}>
+      <div className={styles.enable}><label htmlFor={`${fieldId}-enabled`}>{t("启用 AI 服务")}</label> <Switch id={`${fieldId}-enabled`} checked={draft.enabled} disabled={disabled || !!legacySource || draft.secretOperation === "clear"} onChange={value => update({ ...draft, enabled: value })} /></div>
+      <span className={styles.status} role="status">{t(!draft.enabled ? "未启用" : summary?.mode === 'platform_managed' && summary.availability === "ready" && !dirty ? "服务可用" : summary?.mode === 'platform_managed' && summary.availability === "unavailable" && !dirty ? "服务不可用" : "服务未验证")}</span>
+    </div>
     {mode === "platform_managed" ? <>
-      <p>{t("平台统一提供 AI；无需填写供应商、模型、Base URL 或密钥。")}</p>
-      <p>{t("向平台申请金额额度，经 SaaS 管理员批准后，由租户管理员分配空间上限。供应商和费率由平台维护。")}</p>
-      <p role="status">{t(!draft.enabled ? "未启用" : summary?.mode === "platform_managed" && summary.availability === "ready" ? "服务可用" : summary?.mode === "platform_managed" && summary.availability === "unavailable" ? "服务不可用" : "服务未验证")}</p>
-    </> : <div aria-label="自定义 AI 服务配置">
-      <p>{t("费用直接向您的供应商结算；Rental OS 记录 Token 用量，不要求填写供应商费率。")}</p>
-      <p><label htmlFor={`${fieldId}-protocol`}>{t("协议")}</label></p>
+      <p className={styles.help}>{t("模型服务由平台提供，使用额度在“平台额度”中申请。")}</p>
+    </> : <div className={styles.formGrid} aria-label="自定义 AI 服务配置">
+      <p className={`${styles.help} ${styles.full}`}>{t("费用由供应商收取，平台记录 Token 用量。")}</p>
+      <div className={styles.field}><label htmlFor={`${fieldId}-protocol`}>{t("协议")}</label>
       <Select id={`${fieldId}-protocol`} value={draft.protocol || undefined} disabled={disabled || !!legacySource} aria-describedby={`${fieldId}-errors`} options={[
         { value: "openai_chat_completions", label: "OpenAI Chat Completions" }, { value: "openai_responses", label: "OpenAI Responses" }, { value: "anthropic_messages", label: "Anthropic Messages" }
-      ]} onChange={value => update({ ...draft, protocol: String(value) })} />
-      <p><label htmlFor={`${fieldId}-url`}>Base URL</label></p>
-      <Input id={`${fieldId}-url`} autoComplete="off" placeholder={draft.protocol === 'anthropic_messages' ? 'https://api.example.com' : 'https://api.example.com/v1'} value={draft.baseUrl} maxLength={2048} disabled={disabled} aria-invalid={!!validation.errors.baseUrl} aria-describedby={`${fieldId}-errors`} onChange={event => update({ ...draft, baseUrl: event.target.value })} />
-      <p><label htmlFor={`${fieldId}-models`}>{t("可用模型")}</label></p>
+      ]} onChange={value => update({ ...draft, protocol: String(value) })} /></div>
+      <div className={styles.field}><label htmlFor={`${fieldId}-url`}>Base URL</label>
+      <Input id={`${fieldId}-url`} autoComplete="off" placeholder={draft.protocol === 'anthropic_messages' ? 'https://api.example.com' : 'https://api.example.com/v1'} value={draft.baseUrl} maxLength={2048} disabled={disabled} aria-invalid={showValidation && !!validation.errors.baseUrl} aria-describedby={showValidation ? `${fieldId}-errors` : undefined} onChange={event => update({ ...draft, baseUrl: event.target.value })} />
+      </div>
+      <div className={styles.field}><span>{t("密钥操作")}</span><Segmented aria-label={t("密钥操作")} value={draft.secretOperation} disabled={disabled || !!legacySource} options={[{ value: "retain", label: t("保留现有密钥") }, { value: "replace", label: t("替换密钥") }, { value: "clear", label: t("清除密钥") }]} onChange={value => update({ ...draft, secretOperation: value as AiServiceSettingsDraft["secretOperation"], enabled: value === "clear" ? false : draft.enabled, apiKeyDraft: "" })} /></div>
+      {draft.secretOperation === "replace" && <div className={styles.field}><label htmlFor={`${fieldId}-key`}>API Key</label><Input id={`${fieldId}-key`} type="password" autoComplete="new-password" value={draft.apiKeyDraft} maxLength={8192} disabled={disabled} aria-invalid={showValidation && !!validation.errors.apiKey} aria-describedby={showValidation ? `${fieldId}-errors` : undefined} onChange={event => update({ ...draft, apiKeyDraft: event.target.value })} /></div>}
+      <div className={`${styles.field} ${styles.full}`}><label htmlFor={`${fieldId}-models`}>{t("可用模型")}</label>
       <Select id={`${fieldId}-models`} mode="tags" value={models} disabled={disabled} aria-label={t('可用模型')} style={{ width: '100%' }}
         tokenSeparators={[',', '，']} maxCount={20} placeholder={t('选择模型或输入模型 ID，最多 20 个')}
         options={[...new Set([...(discoveryState.result?.models ?? []), ...models])].map(value => ({ value, label: value }))}
         onChange={value => { const chosen = value as string[]; update({ ...draft, models: chosen, model: chosen.includes(draft.model) ? draft.model : chosen[0] ?? '' }); }} />
-      <p><label htmlFor={`${fieldId}-model`}>{t("默认模型")}</label></p>
+      </div>
+      <div className={styles.field}><label htmlFor={`${fieldId}-model`}>{t("默认模型")}</label>
       <Select id={`${fieldId}-model`} value={models.includes(draft.model) ? draft.model : undefined} disabled={disabled || !models.length}
-        options={models.map(value => ({ value, label: value }))} onChange={value => update({ ...draft, model: String(value) })} />
-      <p>{t("密钥操作")}</p><Segmented aria-label={t("密钥操作")} value={draft.secretOperation} disabled={disabled || !!legacySource} options={[{ value: "retain", label: t("保留现有密钥") }, { value: "replace", label: t("替换密钥") }, { value: "clear", label: t("清除密钥") }]} onChange={value => update({ ...draft, secretOperation: value as AiServiceSettingsDraft["secretOperation"], enabled: value === "clear" ? false : draft.enabled, apiKeyDraft: "" })} />
-      {draft.secretOperation === "replace" && <><p><label htmlFor={`${fieldId}-key`}>API Key</label></p><Input id={`${fieldId}-key`} type="password" autoComplete="new-password" value={draft.apiKeyDraft} maxLength={8192} disabled={disabled} aria-invalid={!!validation.errors.apiKey} aria-describedby={`${fieldId}-errors`} onChange={event => update({ ...draft, apiKeyDraft: event.target.value })} /></>}
-      {onDiscover && <div className="panel-toolbar" style={{ justifyContent: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
-        <ActionButton label={t('获取模型')} pendingLabel={t('正在获取…')} disabled={!canDiscover || discoveryState.busy} onAction={() => discover('models')} />
-        <ActionButton label={t('识别协议类型')} pendingLabel={t('正在识别…')} disabled={!canDiscover || discoveryState.busy} onAction={() => discover('detect')} />
+        options={models.map(value => ({ value, label: value }))} onChange={value => update({ ...draft, model: String(value) })} /></div>
+      {onDiscover && <div className={styles.toolbar}>
+        <ActionButton variant="secondary" label={t('获取模型')} pendingLabel={t('正在获取…')} disabled={!canDiscover || discoveryState.busy} onAction={() => discover('models')} />
+        <ActionButton variant="secondary" label={t('识别协议类型')} pendingLabel={t('正在识别…')} disabled={!canDiscover || discoveryState.busy} onAction={() => discover('detect')} />
       </div>}
-      {discoveryState.result && <div role="status">
+      {discoveryState.result && <div className={`${styles.section} ${styles.full}`} role="status">
         <p>{t(discoveryState.result.state === 'listed' ? '模型列表已获取，请选择要使用的模型。' : discoveryState.result.state === 'empty'
           ? '供应商返回了空列表，可以手动填写模型 ID。' : discoveryState.result.state === 'authentication_failed'
             ? '供应商未接受当前密钥，请核对密钥和地址。' : '供应商未提供可读取的模型列表，可以手动填写。')}</p>
         {discoveryState.result.truncated && <p>{t('这里只显示前 200 个模型；其他模型可手动填写。')}</p>}
         {discoveryState.result.protocols.some(p => p.state === 'candidate') && <p>{t('可能兼容的协议')}：{discoveryState.result.protocols.filter(p => p.state === 'candidate').map(p => p.protocol === 'anthropic_messages' ? 'Anthropic Messages' : p.protocol === 'openai_responses' ? 'OpenAI Responses' : 'OpenAI Chat Completions').join(' / ')}</p>}
-        <p className="muted">{t('模型列表不能证明协议可调用。请选择协议并保存，再用“测试连接”验证，不会自动改动你的选择。')}</p>
+        <p className={styles.help}>{t('获取模型后，请保存并测试连接。')}</p>
       </div>}
-      {discoveryState.failed && <p role="alert">{t('暂时无法获取供应商信息，请核对地址和密钥，也可以手动填写模型。')}</p>}
-      {!validation.ok && <div id={`${fieldId}-errors`} role="status"><Alert type="warning" title={t("配置尚未满足保存条件")} description={Object.values(validation.errors).map(value => t(value)).join("；")} /></div>}
+      {discoveryState.failed && <p className={styles.full} role="alert">{t('暂时无法获取供应商信息，请核对地址和密钥，也可以手动填写模型。')}</p>}
+      {showValidation && <div className={styles.full} id={`${fieldId}-errors`} role="status"><Alert type="warning" title={t("请完善配置")} description={Object.values(validation.errors).map(value => t(value)).join("；")} /></div>}
     </div>}
     {error || currentState === "failed" ? <Alert type="error" title={t("AI 设置保存未确认，请核对原操作收据、修订与权限。请勿盲目重试。")}/> : null}
-    {currentState === "request_finished" && <p role="status">{t("保存请求已返回，能力验证状态未改变。")}</p>}
     {!onSave && <p role="status">{t("保存能力未提供，当前配置不会写入。")}</p>}
-    {onSave && <ActionButton label={t("保存 AI 设置")} successLabel={t("请求已返回")} pendingLabel={t("保存中…")} disabled={disabled || discoveryState.busy || !validation.ok} onAction={save} />}
+    {onSave && <div className={styles.actions}><ActionButton label={t("保存 AI 设置")} successLabel={t("请求已返回")} pendingLabel={t("保存中…")} disabled={disabled || discoveryState.busy || !validation.ok} onAction={save} />{dirty && <span className={styles.help} role="status">{t("更改尚未保存")}</span>}</div>}
   </section>;
 }

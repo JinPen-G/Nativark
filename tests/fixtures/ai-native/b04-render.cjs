@@ -11,6 +11,8 @@ require.extensions['.ts'] = function featureTsExtension(module, filename) {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
 require.extensions['.tsx'] = require.extensions['.ts'];
+// Feature layout modules have no behavior in this offline renderer.
+require.extensions['.css'] = module => { module.exports = { __esModule: true, default: new Proxy({}, { get: (_target, name) => String(name) }) }; };
 /** Offline transpilation of feature source; React itself is the installed real runtime. */
 exports.loadFeature = function loadFeature(name) {
   const filename = path.resolve(root, name);

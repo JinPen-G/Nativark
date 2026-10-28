@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AiTaskStopQueryDraft, AiTaskStopObservationDraft } from '@rental-os/shared';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { validateTaskCenterSnapshot } from './task-center-reader';
 
@@ -77,8 +77,7 @@ export function TaskCancellation({ taskId, identity, current, onAccessDenied }: 
     } finally { if (request.current === controller) request.current = null; if (same()) setPending(false); }
   };
   return <section aria-label={t('原任务停止请求')}>
-    <h3>{t('原任务停止请求')}</h3>
-    <p>{t('仅请求停止新的自动步骤。已发生的外部操作仍须核对，不承诺撤销、回滚或退额；缺正式原任务或动作权限时不可办理。')}</p>
+    <p className="muted">{t('停止后不再启动新步骤；已发生的操作不会自动撤销或退款。')}</p>
     <div className="panel-toolbar">
       <ActionButton label={t('读取停止目标')} pendingLabel={t('读取中…')} disabled={pending || !!original} onAction={() => run('prepare')} />
       {target && <ConfirmAction label={t('请求停止原任务')} prompt={t('确认请求停止？已派发或已提交的业务不会因此回滚。')}

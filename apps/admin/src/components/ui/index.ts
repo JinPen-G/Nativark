@@ -8,6 +8,7 @@ export { Empty } from "./Empty";
 export { Skeleton } from "./Skeleton";
 export { Radio } from "./Radio";
 export { Collapse } from "./Collapse";
+export { Accordion } from "./Accordion";
 export { Dropdown } from "./Dropdown";
 export { Drawer } from "./Drawer";
 export { Tabs } from "./Tabs";

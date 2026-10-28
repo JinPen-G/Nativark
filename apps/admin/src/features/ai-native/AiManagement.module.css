@@ -1,0 +1,59 @@
+/* Feature layout only: controls, overlays and motion retain their shared owners. */
+.stack { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.toolbar > :global(.arc-select-field), .toolbar > :global(.ant-select) { flex: 0 1 var(--rental-list-control-width-select); width: var(--rental-list-control-width-select); min-width: 0; max-width: 100%; }
+.toolbarEnd { margin-inline-start: auto; }
+.compactField { max-width: var(--rental-list-control-width-select); }
+.editor { display: flex; flex-direction: column; gap: var(--space-4); max-width: 54rem; min-width: 0; }
+.serviceRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-3); border-bottom: 1px solid var(--border); }
+.enable { display: inline-flex; align-items: center; gap: var(--space-2); }
+.help { margin: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.status { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-2); border-radius: var(--rental-table-status-radius-max); background: var(--rental-status-neutral-surface); color: var(--rental-status-neutral-ink); font-size: var(--rental-typography-meta-size); font-weight: 500; }
+.status[data-tone="success"] { color: var(--rental-status-success-ink); background: var(--rental-status-success-surface); }
+.status[data-tone="warning"] { color: var(--rental-status-warning-ink); background: var(--rental-status-warning-surface); }
+.status[data-tone="danger"] { color: var(--rental-status-error-ink); background: var(--rental-status-error-surface); }
+.status[data-tone="info"] { color: var(--rental-status-info-ink); background: var(--rental-status-info-surface); }
+.formGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); min-width: 0; }
+.formGrid > .toolbar { align-self: end; }
+.field { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); min-width: 0; }
+.field > :global(.arc-form-field), .field > :global(.arc-select-field), .field > :global(.ant-select) { width: 100%; min-width: 0; max-width: 100%; }
+.full { grid-column: 1 / -1; min-width: 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.section { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.section :is(h2,h3,h4), .stack :is(h2,h3,h4) { margin: 0; font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); font-weight: var(--rental-typography-section-title-weight); }
+.facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-5); margin: 0; }
+.facts > div { min-width: 0; }
+.facts dt { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.facts dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.requestRow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); }
+.requestRow .field { flex: 0 1 20rem; }
+.allocations { display: flex; flex-direction: column; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
+.allocations li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding-block: var(--space-2); border-bottom: 1px solid var(--border); }
+.allocations label { flex: 1; min-width: 0; }
+.allocations :global(.arc-form-field) { max-width: 12rem; }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-6) var(--space-4); text-align: center; color: var(--text-secondary); }
+.empty svg { color: var(--text-muted); }
+.empty strong { color: var(--foreground); font-weight: 500; }
+.taskList { margin: 0; padding: 0; list-style: none; }
+.taskList li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(8rem, auto); align-items: center; gap: var(--space-4); padding: var(--space-3); border-bottom: 1px solid var(--border); border-radius: var(--rental-ui-radius-button); }
+.taskList li[data-selected] { background: color-mix(in oklab, var(--accent) 8%, var(--surface)); }
+.taskIdentity { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+.taskIdentity > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskIdentity > button { max-width: 100%; }
+.taskList time { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.taskPager { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-3); }
+.taskDetail { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); min-width: 0; }
+.taskDetail > section { min-width: 0; }
+.taskDetail section[aria-label] > p:first-child { margin-top: 0; }
+.taskDetail h2 { margin: 0; font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); }
+.taskDetail h3 { font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); }
+.timeline { list-style: none; display: flex; flex-direction: column; margin: 0; padding: 0; }
+.timeline li { display: grid; grid-template-columns: minmax(7rem, auto) minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding-block: var(--space-3); border-bottom: 1px solid var(--border); }
+.timeline span { overflow-wrap: anywhere; color: var(--text-secondary); }
+.timeline time { color: var(--text-muted); font-size: var(--rental-typography-meta-size); }
+@media (max-width: 767px) {
+  .formGrid, .facts { grid-template-columns: minmax(0, 1fr); }
+  .taskList li { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+  .taskList time { grid-column: 1 / -1; }
+  .timeline li { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+}
