@@ -1,0 +1,72 @@
+{
+  "zh": {
+    "Index": {"harnessWhyTitle": "经营不断拓展，业务由你掌握"},
+    "Capabilities": {
+      "plugins": {"title": "按需连接业务能力", "description": "启用平台已开放的业务能力，通过对话配置提醒和通知，在你的权限范围内，让经营方式更合适。", "imageAlt": "Rental OS 归还提醒配置演示"},
+      "deliverables": {"title": "不止回答，交付结果", "description": "准备预约报价、交接清单与经营报表，直接预览业务成果，并通过对话继续完善。"},
+      "workflow": {"title": "重复事务，自动推进", "description": "让经营简报、归还跟进和每周复盘按计划推进。掌握关键进展，需要你决定时再请求确认。"},
+      "trace": {"title": "每次执行，有据可查", "description": "从理解需求、查询库存到确认提交，查看业务依据、操作过程与执行回执，每一步都清楚。", "imageAlt": "Rental OS 预约业务执行轨迹演示"}
+    },
+    "PluginsPreview": {
+      "accessibleLabel": "归还提醒配置演示：检查租户可用能力与权限，配置提醒时间及渠道，确认后展示示例启用状态。不新增租赁品类，不实际发送通知。",
+      "prompt": "帮我启用归还提醒，每天下午四点提醒门店负责人。",
+      "creatorMode": "业务配置", "working": "正在连接业务能力", "finished": "配置方案已准备", "completion": "提醒时间与渠道已整理好，核对后确认启用。",
+      "tools": {"skill": "读取能力", "read": "核对权限", "think": "整理方案", "providers": "检查渠道", "query": "查询设置", "write": "准备配置", "toolCall": "生成草稿", "edit": "补充规则", "verify": "等待确认"},
+      "toolSummaries": {"capability": "归还提醒 · 平台已开放", "permission": "当前门店 · 租户可配置", "plan": "沿用原业务规则，不新增品类", "providers": "可用渠道：站内通知", "settings": "读取已有提醒配置", "time": "每天 16:00", "channel": "站内通知", "draft": "生成待确认的提醒方案", "recipient": "门店负责人", "verify": "仅准备配置，不会发送提醒"},
+      "plugins": "业务能力", "official": "平台已开放", "installed": "待确认配置", "experimental": "可配置",
+      "team": {"name": "门店协同"}, "review": {"name": "操作确认"}, "schedule": {"name": "定时提醒"}, "voice": {"name": "语音输入"}, "terminal": {"name": "订单查询"}, "loop": {"name": "库存跟进"}, "subagent": {"name": "任务分派"}, "pomodoro": {"name": "归还提醒"},
+      "reminderTime": "每天 16:00", "channel": "站内通知", "recipient": "门店负责人", "confirm": "确认启用", "enabledDemo": "已启用 · 演示", "demoNote": "仅演示，不发送真实通知", "reset": "重新配置"
+    },
+    "DeliverablesPreview": {
+      "accessibleLabel": "业务成果演示：报价单、交接清单与经营报表卡片轮播，可选择文件查看示例内容。",
+      "wordName": "设备交接清单.docx", "wordType": "交接文档", "excelName": "经营分析报表.xlsx", "excelType": "经营报表", "htmlName": "预约资料.html", "htmlType": "预约详情", "typescriptName": "设备验收清单.pdf", "typescriptType": "验收记录", "pythonName": "门店待办.xlsx", "pythonType": "协同清单", "pdfName": "预约报价单.pdf", "pdfType": "租赁报价", "markdownName": "经营复盘.md", "markdownType": "经营记录", "reviewTab": "业务成果预览",
+      "sample": "示例数据 · 非实际业务凭证", "preview": "预览", "returnList": "返回文件", "customer": "客户", "customerValue": "林先生", "period": "租期", "periodValue": "周六至周日 · 2 天", "item": "摄影设备套装 × 2", "rental": "租金", "deposit": "可退押金", "total": "合计", "checklist": "交接检查项", "check1": "机身、镜头与配件核对", "check2": "设备状态与交接照片", "check3": "领取人与归还安排确认", "reportTitle": "本周经营概览", "report1": "预约与交付记录已整理", "report2": "设备利用情况待复核", "report3": "异常与待办关联原订单", "detailsTitle": "业务资料", "detail1": "客户、租期与资源关联", "detail2": "处理人与操作记录可查看", "detail3": "确认后再进入正式业务流程"
+    },
+    "WorkflowPreview": {
+      "accessibleLabel": "自动化计划演示：每周经营复盘、晨间简报和归还跟进的计划草稿、触发结果与任务卡片。不创建真实计划或执行真实业务。",
+      "working": "正在准备自动化方案", "finished": "计划草稿已准备", "toolTitle": "准备任务计划", "scheduled": "待确认启用", "open": "查看方案",
+      "scenarios": {
+        "report": {"title": "每周经营复盘", "prompt": "整理本周预约、交付与结算记录，生成经营复盘。", "request": "每周五 17:00，整理本周经营情况，把需要我决定的事列出来。", "confirmation": "「每周经营复盘」计划已准备，确认启用后按周执行。"},
+        "sales": {"title": "晨间经营简报", "prompt": "汇总今日交付、归还与门店待办，生成晨间简报。", "request": "每天 09:00，告诉我今天有哪些交付、归还和需要关注的事。", "confirmation": "「晨间经营简报」计划已准备，确认启用后按日执行。"},
+        "tests": {"title": "归还与验收跟进", "prompt": "整理本周到期归还与待验收订单，生成跟进清单。", "request": "每周一 10:00，整理本周要归还的订单，提醒我安排验收。", "confirmation": "「归还与验收跟进」计划已准备，确认启用后按周执行。"}
+      },
+      "planHeading": "自动化计划 · 示例", "confirm": "确认启用计划", "enabledDemo": "计划已启用 · 演示", "demoNote": "不会创建真实计划或发送通知", "close": "返回演示"
+    },
+    "TracePreview": {
+      "accessibleLabel": "预约执行轨迹演示：理解需求、核对权限、查询库存、生成报价、用户确认、提交预约与返回回执，可点击步骤查看依据。没有真实业务调用。",
+      "systemPrompt": "业务范围：当前租户 / 中心店，操作沿用正式权限。", "userTask": "为林先生准备周末两套摄影设备的预约与报价。", "runtimeContext": "已关联客户、租期与门店，敏感操作需用户确认。", "assistantPlan": "先查询可租库存，再读取计价依据，准备预约草稿。", "firstDone": "预约资料与报价已准备，等待用户确认。", "userFollowUp": "确认按这个方案提交预约。", "assistantSummary": "已收到用户确认，按原业务流程提交预约。", "assistantWrapUp": "示例预约记录已返回，可通过回执追溯处理过程。", "tab": {"summary": "依据", "payload": "参数", "result": "回执", "schema": "权限", "timing": "计时"}, "kind": {"system": "范围", "user": "用户", "context": "业务", "assistant": "AI", "tool": "操作"}, "assistantMessage": "业务执行", "sessionTimestamps": "执行记录", "sample": "业务执行示例 · 无真实调用", "reviewStep": "查看步骤依据", "resume": "继续自动演示"
+    }
+  },
+  "en": {
+    "Index": {"harnessWhyTitle": "Your business grows. You stay in control."},
+    "Capabilities": {
+      "plugins": {"title": "Connect the capabilities you need", "description": "Configure reminders and notifications through conversation, using capabilities enabled by the platform and permitted for your role.", "imageAlt": "Rental OS return reminder configuration demo"},
+      "deliverables": {"title": "Beyond answers. Real work products.", "description": "Prepare quotes, handover checklists and business reports. Preview the results and refine them through conversation."},
+      "workflow": {"title": "Keep recurring work moving", "description": "Schedule operations briefs, return follow-ups and weekly reviews. Stay informed, with confirmation when a decision is yours."},
+      "trace": {"title": "Every action, traceable", "description": "From understanding a request to confirming a booking, review the business evidence, actions and receipts behind every step.", "imageAlt": "Rental OS booking execution trace demo"}
+    },
+    "PluginsPreview": {
+      "accessibleLabel": "Return reminder demo: check tenant capabilities and permissions, prepare the time and channel, then confirm a sample configuration. No category is created or notification sent.",
+      "prompt": "Enable return reminders for location owners every day at 4 pm.", "creatorMode": "Business configuration", "working": "Connecting business capabilities", "finished": "Configuration ready", "completion": "The time and channel are ready. Review and confirm to enable.",
+      "tools": {"skill": "Capabilities", "read": "Permissions", "think": "Plan", "providers": "Channels", "query": "Settings", "write": "Prepare", "toolCall": "Draft", "edit": "Rules", "verify": "Review"},
+      "toolSummaries": {"capability": "Return reminders · Platform-enabled", "permission": "Current location · Tenant-configurable", "plan": "Existing rules only; no new categories", "providers": "Available channel: in-app", "settings": "Read existing reminder settings", "time": "Daily at 16:00", "channel": "In-app notification", "draft": "Prepare a reminder configuration for review", "recipient": "Location owners", "verify": "Configuration only; no notifications sent"},
+      "plugins": "Business capabilities", "official": "Platform-enabled", "installed": "Configuration for review", "experimental": "Configurable", "team": {"name": "Location coordination"}, "review": {"name": "Action confirmation"}, "schedule": {"name": "Scheduled reminders"}, "voice": {"name": "Voice input"}, "terminal": {"name": "Order lookup"}, "loop": {"name": "Inventory follow-up"}, "subagent": {"name": "Task assignment"}, "pomodoro": {"name": "Return reminders"},
+      "reminderTime": "Daily at 16:00", "channel": "In-app notification", "recipient": "Location owners", "confirm": "Confirm & enable", "enabledDemo": "Enabled · Demo", "demoNote": "Demo only. No notifications sent.", "reset": "Configure again"
+    },
+    "DeliverablesPreview": {
+      "accessibleLabel": "Business output demo: quote, handover checklist and report cards rotate. Select a file to preview its sample content.", "wordName": "Handover checklist.docx", "wordType": "Handover document", "excelName": "Operations report.xlsx", "excelType": "Business report", "htmlName": "Booking details.html", "htmlType": "Booking details", "typescriptName": "Inspection checklist.pdf", "typescriptType": "Inspection record", "pythonName": "Location tasks.xlsx", "pythonType": "Team task list", "pdfName": "Rental quote.pdf", "pdfType": "Rental quote", "markdownName": "Weekly review.md", "markdownType": "Business review", "reviewTab": "Business output preview", "sample": "Sample data · Not a business document", "preview": "Preview", "returnList": "Back to files", "customer": "Customer", "customerValue": "Alex", "period": "Period", "periodValue": "Saturday–Sunday · 2 days", "item": "Camera kit × 2", "rental": "Rental", "deposit": "Refundable deposit", "total": "Total", "checklist": "Handover checks", "check1": "Bodies, lenses and accessories", "check2": "Condition and handover photos", "check3": "Recipient and return arrangements", "reportTitle": "Weekly operations overview", "report1": "Booking and handover records prepared", "report2": "Asset utilization ready for review", "report3": "Exceptions linked to original orders", "detailsTitle": "Business details", "detail1": "Customer, dates and resources linked", "detail2": "Owners and work history available", "detail3": "Confirm before business submission"
+    },
+    "WorkflowPreview": {
+      "accessibleLabel": "Automation demo: weekly reviews, morning briefs and return follow-ups are prepared as plans for confirmation. No real task is scheduled or executed.", "working": "Preparing an automation plan", "finished": "Plan ready for review", "toolTitle": "Prepare schedule", "scheduled": "Awaiting confirmation", "open": "Review plan",
+      "scenarios": {
+        "report": {"title": "Weekly business review", "prompt": "Review this week’s bookings, handovers and settlements.", "request": "Every Friday at 17:00, review the business and list decisions that need me.", "confirmation": "Weekly business review is prepared. Confirm to enable the weekly schedule."},
+        "sales": {"title": "Morning operations brief", "prompt": "Summarize today’s handovers, returns and location tasks.", "request": "Every day at 09:00, show me today’s handovers, returns and priorities.", "confirmation": "Morning operations brief is prepared. Confirm to enable the daily schedule."},
+        "tests": {"title": "Return & inspection follow-up", "prompt": "Review this week’s due returns and outstanding inspections.", "request": "Every Monday at 10:00, list upcoming returns and help plan inspections.", "confirmation": "Return follow-up is prepared. Confirm to enable the weekly schedule."}
+      },
+      "planHeading": "Automation plan · Sample", "confirm": "Confirm schedule", "enabledDemo": "Schedule enabled · Demo", "demoNote": "No real schedule or notification is created.", "close": "Back to demo"
+    },
+    "TracePreview": {
+      "accessibleLabel": "Booking trace demo: review scope, stock, quote, user confirmation, booking submission and a sample receipt. Select steps to inspect evidence. No real calls are made.", "systemPrompt": "Business scope: current tenant / Central location; existing permissions apply.", "userTask": "Prepare a weekend booking and quote for Alex: two camera kits.", "runtimeContext": "Customer, dates and location linked. Sensitive actions require confirmation.", "assistantPlan": "Check availability and pricing evidence, then prepare a booking draft.", "firstDone": "Booking and quote ready for user confirmation.", "userFollowUp": "Confirm this plan and submit the booking.", "assistantSummary": "User confirmation received. Submit through the business workflow.", "assistantWrapUp": "Sample booking receipt returned. The execution remains traceable.", "tab": {"summary": "Evidence", "payload": "Input", "result": "Receipt", "schema": "Permissions", "timing": "Timing"}, "kind": {"system": "Scope", "user": "User", "context": "Context", "assistant": "AI", "tool": "Action"}, "assistantMessage": "Business execution", "sessionTimestamps": "Execution log", "sample": "Illustrative flow · No real calls", "reviewStep": "Review step evidence", "resume": "Resume animation"
+    }
+  }
+}

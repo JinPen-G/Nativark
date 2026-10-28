@@ -1,0 +1,29 @@
+{
+  "name": "@rental-os/website-next",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack --hostname 127.0.0.1 --port 8140",
+    "build": "next build --webpack && node tools/prepare-export.mjs",
+    "start": "node tools/serve-export.mjs",
+    "preview": "node tools/serve-export.mjs",
+    "check:source": "node tools/check-source.mjs"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "next-intl": "4.14.9",
+    "framer-motion": "13.4.6",
+    "@react-three/fiber": "9.8.2",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.28.0",
+    "@babel/traverse": "^7.28.0",
+    "@babel/generator": "^7.28.0",
+    "@babel/types": "^7.28.0",
+    "prettier": "^3.3.3"
+  }
+}

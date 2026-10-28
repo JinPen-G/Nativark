@@ -1,0 +1,482 @@
+{
+  "source": "../deepseek-harness-clone",
+  "method": "One-time AST JSX recovery, component boundary extraction and manual native Next.js integrations",
+  "runtimeUsesMirror": false,
+  "originalFiles": [
+    {
+      "url": "https://www.deepseek.com/harness/index.txt",
+      "path": "harness/index.txt",
+      "bytes": 38233,
+      "sha256": "a0acc55cee9bbafec62e3098bdee9a1e497ed8f996fb3b4e381beda954ed49f7"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/privacy/",
+      "path": "harness/privacy/index.html",
+      "bytes": 145415,
+      "sha256": "ed817d7f189612a559dd26bfac3e1e75b3b2a0c9944bc72b995b9214d564194a"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/terms-of-use/index.txt",
+      "path": "harness/terms-of-use/index.txt",
+      "bytes": 65280,
+      "sha256": "c247d961dc83442b0d9200c7727bad45f4bf0eb5bc5bd4f307c44212df3f4847"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/terms-of-use/",
+      "path": "harness/terms-of-use/index.html",
+      "bytes": 142813,
+      "sha256": "f3af2872c1e95ecbff01f0aa3c2f4300f5e0ea0aeb9406f524ef1b1a9355ff96"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/",
+      "path": "harness/index.html",
+      "bytes": 206775,
+      "sha256": "7e4f7c9b476a3e2f90e53895b9291d4c6b62fb8274357ca7e23921b01d1553d7"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/privacy/index.txt",
+      "path": "harness/privacy/index.txt",
+      "bytes": 66463,
+      "sha256": "539ea199849c74276868cd7263ab56ed6f11dcaeb58dc2d60f856ccc9c898852"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/index.txt",
+      "path": "en/harness/index.txt",
+      "bytes": 36022,
+      "sha256": "1e567b9be6fa8b6841fc5131830722e3fd8529231b889730c46f4ce1c1d701b4"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/privacy/",
+      "path": "en/harness/privacy/index.html",
+      "bytes": 122933,
+      "sha256": "76730f0b1e163a8b6e48f25cbf375ef599da30e90fc00d7c0b674edc74b71994"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/terms-of-use/",
+      "path": "en/harness/terms-of-use/index.html",
+      "bytes": 144972,
+      "sha256": "45e0aa2520c498a0616cafa84e2d1aa037e96562af96342617cf9060f51ca7fb"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/terms-of-use/index.txt",
+      "path": "en/harness/terms-of-use/index.txt",
+      "bytes": 66646,
+      "sha256": "f0e3e0cce7e9f49b7565c3f2378afaa6496ba7631709d010bc65013bed3d3100"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/privacy/index.txt",
+      "path": "en/harness/privacy/index.txt",
+      "bytes": 55659,
+      "sha256": "974681c9b98f39adc2892ff989d15e6f19fd2479a752dc1179310c2ec8f0b7cf"
+    },
+    {
+      "url": "https://www.deepseek.com/en/harness/",
+      "path": "en/harness/index.html",
+      "bytes": 204266,
+      "sha256": "27eb57247fdd515887dd48c832a28a78fac922d89fd17fa8e34ee04deca0bf1c"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/qr-wechat.png",
+      "path": "harness/images/qr-wechat.png",
+      "bytes": 14947,
+      "sha256": "10cc748b634b0d9ab65cf625ddd42dbef4f403b9be2e08e8f04581fa9f9fd924"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/feat-plugins-en.webp",
+      "path": "harness/images/feat-plugins-en.webp",
+      "bytes": 87434,
+      "sha256": "bd8b4f698246a548e07f982294849364c9f87cced83d46f4dd0d6d9783b5e24e"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/deepseek-harness-social.jpg",
+      "path": "harness/images/deepseek-harness-social.jpg",
+      "bytes": 81924,
+      "sha256": "fc92888efe0f1a66c4acf94deced40381ff24f435b12b43f5692c0a98a226376"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/feat-trace-en.webp",
+      "path": "harness/images/feat-trace-en.webp",
+      "bytes": 326206,
+      "sha256": "dae69a9bef22b4734d4e10817fb1af7fa6c2d44c91a86e10f0f3642bcc573276"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/feat-plugins-zh.webp",
+      "path": "harness/images/feat-plugins-zh.webp",
+      "bytes": 73284,
+      "sha256": "f8fa9e6a600c287062b62a4fe3fe67c3b65a7cfee2862427723134bf1a3875a6"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/images/feat-trace-zh.webp",
+      "path": "harness/images/feat-trace-zh.webp",
+      "bytes": 215432,
+      "sha256": "8a8b3d9fcbe1e535c567b59bd2c4dc0e50167e0fc02a803951a881f5b34975b5"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/webpack-a91562b3fbb1b679.js",
+      "path": "_next/static/chunks/webpack-a91562b3fbb1b679.js",
+      "bytes": 10812,
+      "sha256": "5010804bdf5a630cd18050fa03f0e2d73dc096ee5850b5fffaf7a6b9f02ea284"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/css/826310b8bcf73c16.css",
+      "path": "_next/static/css/826310b8bcf73c16.css",
+      "bytes": 27980,
+      "sha256": "861be216b7e8af62761ccf464e5b8ede7e910cda090a67c4a89a941c35854b74"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/css/aa0e993381ed79dc.css",
+      "path": "_next/static/css/aa0e993381ed79dc.css",
+      "bytes": 1140,
+      "sha256": "28588cc57490f8c1f54187e0304642f0755ef85fd7426fab395f698ea058e6b2"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/css/b39dbc256e52a1dc.css",
+      "path": "_next/static/css/b39dbc256e52a1dc.css",
+      "bytes": 80956,
+      "sha256": "e8123f2e4beeb059414b3dad19a6d2ad0004ccf66fc1e3fcb2ab9a88efb915ab"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/css/016c507a691d5741.css",
+      "path": "_next/static/css/016c507a691d5741.css",
+      "bytes": 7642,
+      "sha256": "c832ed493332c6740c8a723127b92a9500521e0e1c0140640cf2b58b11ae2074"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/86b88eeb-5b86058878847f6a.js",
+      "path": "_next/static/chunks/86b88eeb-5b86058878847f6a.js",
+      "bytes": 171906,
+      "sha256": "b07c8e05ab1102f4980e72efadefceec5f0775dbf1e8d161338b4509c649fe02"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/1835-f521304a15b83224.js",
+      "path": "_next/static/chunks/1835-f521304a15b83224.js",
+      "bytes": 7740,
+      "sha256": "9d65ca420300112acf26929ae764b2615592b8223420f3bb172e5d418f9b2cd8"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/not-found-82b85b630d8e956c.js",
+      "path": "_next/static/chunks/app/not-found-82b85b630d8e956c.js",
+      "bytes": 4716,
+      "sha256": "d1ebc82ce88c35355b103812112b6cba9bb913336a6bc18554ccdf7ec225931e"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/layout-9831ea5866977693.js",
+      "path": "_next/static/chunks/app/layout-9831ea5866977693.js",
+      "bytes": 521,
+      "sha256": "1e9fa6807020b91175d148308d5db41f34252ab48a355fc31d9f8a58de51e829"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/1563-d3f244478cac7e75.js",
+      "path": "_next/static/chunks/1563-d3f244478cac7e75.js",
+      "bytes": 18068,
+      "sha256": "eb66d386c7c2b8b3de78f318951fe81ae298b5479f5f6bbdd86cb7b6eef1a95b"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/main-app-968203301d1a6d3c.js",
+      "path": "_next/static/chunks/main-app-968203301d1a6d3c.js",
+      "bytes": 475,
+      "sha256": "9a3d13685a9adc04dab664c1c3f9e5d9bd3f7e9160ed8e17c50d9609af30ef09"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/9164-9f2478a2648a9516.js",
+      "path": "_next/static/chunks/9164-9f2478a2648a9516.js",
+      "bytes": 110330,
+      "sha256": "82e68029386d7120f089b6db672363e6ae37dcce81fe91c70ea57ff58986a0ca"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/8555-7c9518c428e988c2.js",
+      "path": "_next/static/chunks/8555-7c9518c428e988c2.js",
+      "bytes": 35916,
+      "sha256": "559a41a2bb154c55ec1d5a225b02db62b8e51a6d0bcb3df58383597b7a929b40"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/layout-83530bd494f12e6d.js",
+      "path": "_next/static/chunks/app/[locale]/layout-83530bd494f12e6d.js",
+      "bytes": 8352,
+      "sha256": "3de9e1006febbea3e86abbde0b6f8a4bd99bcc591ef5b56dea521c8a4a0209a7"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/9540-dc2f72c99f6e1a0a.js",
+      "path": "_next/static/chunks/9540-dc2f72c99f6e1a0a.js",
+      "bytes": 32348,
+      "sha256": "b54cc0d9b5aa66748700f1cd66021423e9f541ed374e561b63edc7c3e4dbd3f7"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/7591-a9eaac0cc94f9f3e.js",
+      "path": "_next/static/chunks/7591-a9eaac0cc94f9f3e.js",
+      "bytes": 122834,
+      "sha256": "c0cd38c9a6e86e77bbe37b413fec8cbb697308a3938591f11e3fd3137c177a65"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/3743-7c4be9ad33829b7f.js",
+      "path": "_next/static/chunks/3743-7c4be9ad33829b7f.js",
+      "bytes": 132768,
+      "sha256": "f2e83bdc66fd02d5172af4508dbe9a31eb8958674232ccb2000c62b6f19483a3"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/6872-942bc441684cc23b.js",
+      "path": "_next/static/chunks/6872-942bc441684cc23b.js",
+      "bytes": 151179,
+      "sha256": "f46c653b9dfd5cb9ced744d10eac72ba29c651ffd4f0e1a5a27148279b3ec0f5"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/6336-e0040a1eb23dd92b.js",
+      "path": "_next/static/chunks/6336-e0040a1eb23dd92b.js",
+      "bytes": 24676,
+      "sha256": "302a4dd841b8412afae2c9fa42fc4d7f80a84f857be5b49a2bcc31e133696229"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/template-4dc2bb6be23dc661.js",
+      "path": "_next/static/chunks/app/[locale]/template-4dc2bb6be23dc661.js",
+      "bytes": 5057,
+      "sha256": "6eaca21779e60b3cfc43f9a6f0d1ba8c0138eabf110eb410403fccdeb34afd1b"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/1798-9243f5e9edc77fbb.js",
+      "path": "_next/static/chunks/1798-9243f5e9edc77fbb.js",
+      "bytes": 44028,
+      "sha256": "52526153e49eb35f904cd614a1dfe1585cdbfaad91c19dfce8f2354947add939"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/not-found-61a27b165a778020.js",
+      "path": "_next/static/chunks/app/[locale]/not-found-61a27b165a778020.js",
+      "bytes": 4712,
+      "sha256": "82bb799b9b863858e0df6c52f671678cf98b97d4b4e5bb109309921b74be9143"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/favicon.svg",
+      "path": "harness/favicon.svg",
+      "bytes": 3864,
+      "sha256": "d19b62d73c8db53d5a241dfb4adbc7cad259557e5da8da6587a86d7dd4b06382"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/harness/privacy/page-ad2fb6d58333a593.js",
+      "path": "_next/static/chunks/app/[locale]/harness/privacy/page-ad2fb6d58333a593.js",
+      "bytes": 2960,
+      "sha256": "1d01b433d78d6ca4afe09eccd788c57b28bc2a0d7727c96afc8327673bc03c37"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/excel.svg",
+      "path": "harness/icons/file-types/excel.svg",
+      "bytes": 1851,
+      "sha256": "2f3f144010d254b1545ed821759a7c807606a64efca8bd90b18776bcbf15b1ff"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/html.svg",
+      "path": "harness/icons/file-types/html.svg",
+      "bytes": 2777,
+      "sha256": "72f25759a044b1aea488a054e204691e0cc70721c1e56c20559de61a87379a9a"
+    },
+    {
+      "url": "https://www.deepseek.com/favicon.ico",
+      "path": "favicon.ico",
+      "bytes": 209762,
+      "sha256": "30a4420e6e4dcb17fd7de560c5004346c2bc8cd971d2d5f5ee15326603e51321"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/word.svg",
+      "path": "harness/icons/file-types/word.svg",
+      "bytes": 1517,
+      "sha256": "1a083627487b74922f95c4fc4dae054d73510834e0ab2f72289d2dedf5808503"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/harness/terms-of-use/page-5472ba19dfd62643.js",
+      "path": "_next/static/chunks/app/[locale]/harness/terms-of-use/page-5472ba19dfd62643.js",
+      "bytes": 2960,
+      "sha256": "d5f4c0e50b91ed41c53ac9cffd4cd6310c0c815fd9767102664c73825790724b"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/polyfills-c67a75d1b6f99dc8.js",
+      "path": "_next/static/chunks/polyfills-c67a75d1b6f99dc8.js",
+      "bytes": 91460,
+      "sha256": "0225eb034d024a03bdc90ea6c79f56193662e7c3eee909696298820e517cbb83"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/typescript.svg",
+      "path": "harness/icons/file-types/typescript.svg",
+      "bytes": 1372,
+      "sha256": "f1102e986864f0edb50c0b2addcbc3e8dadee7db1fbd208bf45dc51e2ea7de65"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/8809-44db951c56e60f28.js",
+      "path": "_next/static/chunks/8809-44db951c56e60f28.js",
+      "bytes": 12373,
+      "sha256": "391a14b90d038481bcf67b3e0741ba6cda348d15d26f2575e92514cff85249cc"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/pdf.svg",
+      "path": "harness/icons/file-types/pdf.svg",
+      "bytes": 2638,
+      "sha256": "b0ab99cc812ef34d8eaa77c06b6832cc0e1f0246088b78875423b438d10f16a4"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/markdown.svg",
+      "path": "harness/icons/file-types/markdown.svg",
+      "bytes": 2125,
+      "sha256": "0c6126931a57540050771620a440aba5ccc4d26e4511530ad3a24f123897637f"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/icons/file-types/python.svg",
+      "path": "harness/icons/file-types/python.svg",
+      "bytes": 2478,
+      "sha256": "473b1f8f8812cb063c7db2f5d7359302e922c4b5f6b7e7e5d68bda69c3475c1f"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/css/5adb47a13a2794be.css",
+      "path": "_next/static/css/5adb47a13a2794be.css",
+      "bytes": 70954,
+      "sha256": "ac26a538f44f950dfd00dbe0f07be8f2a1680d10b93513040e0a2462178864ca"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/app/%5Blocale%5D/harness/page-3efdafc368216782.js",
+      "path": "_next/static/chunks/app/[locale]/harness/page-3efdafc368216782.js",
+      "bytes": 119789,
+      "sha256": "887224a6c256b0d9ffc4b4a62d173748c604f8caa4abcd9fbd4352087d937588"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/dm-sans-500.woff2",
+      "path": "fonts/dm-sans-500.woff2",
+      "bytes": 14304,
+      "sha256": "19bf1984956517c35c2bd35b6cdedac12a21d6fcd3596c614ecdfb88b648909d"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/montserrat-500.woff2",
+      "path": "fonts/montserrat-500.woff2",
+      "bytes": 18748,
+      "sha256": "2b53300fb9471520df2f4905847fb7a209879b2029ae893c05c6ee346b1320cd"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/montserrat.woff2",
+      "path": "fonts/montserrat.woff2",
+      "bytes": 18780,
+      "sha256": "e66bcd2761ab6924b25ce70dafe10e57a39193c4fea1516730bd9cb5240af6c8"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/dm-sans-400.woff2",
+      "path": "fonts/dm-sans-400.woff2",
+      "bytes": 14200,
+      "sha256": "4ab51eb2cd7305d177187908d6397474d4520663f6c6e572feb0a64f4fa80006"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/dm-sans-700.woff2",
+      "path": "fonts/dm-sans-700.woff2",
+      "bytes": 14348,
+      "sha256": "35c5efa0e5daa52ee5c6500f5be354bf751fb65c4e49e1d6806c6eb5883e8fe9"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/host-grotesk-latin-ext.woff2",
+      "path": "harness/fonts/host-grotesk-latin-ext.woff2",
+      "bytes": 11840,
+      "sha256": "ad1af424e01f4bc276faddfc70ada26f7af4c4ef168bdf34848b7210b7c9e69f"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/fragment-mono-latin.woff2",
+      "path": "harness/fonts/fragment-mono-latin.woff2",
+      "bytes": 15176,
+      "sha256": "4f4dc27f4a770c0d02fde800daa836c8adc0d1e423b28da74baaf0d1cc3ab96c"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/host-grotesk-italic-latin-ext.woff2",
+      "path": "harness/fonts/host-grotesk-italic-latin-ext.woff2",
+      "bytes": 12896,
+      "sha256": "d311bbf506a61f93218f9728f20d2a3abaf540719c15281c5c0ef2d3479f3238"
+    },
+    {
+      "url": "https://www.deepseek.com/fonts/montserrat-600.woff2",
+      "path": "fonts/montserrat-600.woff2",
+      "bytes": 18688,
+      "sha256": "d857325c360f7128b347ca924c1974967aaa886ba47dad22e4042d6c38b26a83"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/host-grotesk-italic-latin.woff2",
+      "path": "harness/fonts/host-grotesk-italic-latin.woff2",
+      "bytes": 22012,
+      "sha256": "7e958f70790b9569d41776d6c85a0198f581a5da018613d721a9eaa1bb0309da"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/host-grotesk-latin.woff2",
+      "path": "harness/fonts/host-grotesk-latin.woff2",
+      "bytes": 20196,
+      "sha256": "5662dcd15d8c7dc5bf2168baa71072e509c5b97167554b861293f68e1aa6dde8"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/759.d97c52c2897feba8.js",
+      "path": "_next/static/chunks/759.d97c52c2897feba8.js",
+      "bytes": 7099,
+      "sha256": "c723b212b913b93709cd0932aaf3c30d2187941b88c8325307e1769535bc1eb6"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/6893.4b980d72022f1be5.js",
+      "path": "_next/static/chunks/6893.4b980d72022f1be5.js",
+      "bytes": 1735,
+      "sha256": "b14768c7a7da1f1cdd6fc899f506eea9075bed2d724673d7d7cb6cbc7e8cd3f9"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/9265.53668a0802f129dc.js",
+      "path": "_next/static/chunks/9265.53668a0802f129dc.js",
+      "bytes": 17020,
+      "sha256": "93f1d74326aeb23c3fcedfd15451b731e682f67a14d9b0e97081d9d5aca80871"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/1486.6291caeba5e678f9.js",
+      "path": "_next/static/chunks/1486.6291caeba5e678f9.js",
+      "bytes": 16990,
+      "sha256": "e8a33c1879c284bc2954476ee5b25b89315ad26116917cd12089d6a338a53f94"
+    },
+    {
+      "url": "https://www.deepseek.com/harness/fonts/fragment-mono-latin-ext.woff2",
+      "path": "harness/fonts/fragment-mono-latin-ext.woff2",
+      "bytes": 7260,
+      "sha256": "e3085219252209a8d4128f90ff6d793315c752f73a979082d1d85d9cb46f63a4"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/113.ba64441de1f6c0e4.js",
+      "path": "_next/static/chunks/113.ba64441de1f6c0e4.js",
+      "bytes": 1690,
+      "sha256": "e60339e12b8259503758ca675a7d8bbe540d67add9532187e4b9e100755c651e"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/8091.573531f4257c3cd0.js",
+      "path": "_next/static/chunks/8091.573531f4257c3cd0.js",
+      "bytes": 131068,
+      "sha256": "cc57d4c1634339493b851ade4d38885ed83e879fd23bce42dc8c3b055f198158"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/5565.779b207d687b6031.js",
+      "path": "_next/static/chunks/5565.779b207d687b6031.js",
+      "bytes": 7978,
+      "sha256": "d09b1e3dc16552bd9e982fe9ab29886b8dc0a585bf6ea895c99c2a8e35e559e6"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/7386dc53.5bf20d414744188e.js",
+      "path": "_next/static/chunks/7386dc53.5bf20d414744188e.js",
+      "bytes": 685386,
+      "sha256": "19e84ed3c67895b0ae4dabb09d52e25d89865208b46a38a682ea76e5acfb7b3b"
+    },
+    {
+      "url": "https://www.deepseek.com/_next/static/chunks/334.77586e361af4012d.js",
+      "path": "_next/static/chunks/334.77586e361af4012d.js",
+      "bytes": 7434,
+      "sha256": "8968f26cebf465c99a29bd7ccd9d3a7af701d60d88cd7f5069075f0cb505477e"
+    }
+  ],
+  "components": [
+    "components/shared/Heading.jsx",
+    "components/effects/HeroBackground.jsx",
+    "components/shared/CapabilityIcons.jsx",
+    "components/shared/styleNames.js",
+    "components/demos/BusinessPreview.jsx",
+    "components/sections/HeroSection.jsx",
+    "components/shared/demoData.jsx",
+    "components/demos/ReturnReminderDemo.jsx",
+    "components/demos/DeliverablesDemo.jsx",
+    "components/demos/ScheduledOperationsDemo.jsx",
+    "components/demos/ExecutionTraceDemo.jsx",
+    "components/sections/CapabilitiesSection.jsx",
+    "components/sections/DeploymentSection.jsx",
+    "components/effects/InteractiveGrid.jsx",
+    "components/LandingPage.jsx",
+    "components/sections/PartnershipSection.jsx",
+    "components/sections/SiteFooter.jsx"
+  ]
+}

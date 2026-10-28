@@ -1,5 +1,5 @@
 import { createContext, useContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { fromMessages, visibleMessages, type ChatConversation, type ChatRespond, type ChatModel } from "./archive/ai-chat/chat-state";
+import { appendNode, ROOT, fromMessages, visibleMessages, type ChatConversation, type ChatRespond, type ChatModel } from "./archive/ai-chat/chat-state";
 import type { AgentRunState } from "./archive/agent-run/agent-run-state";
 import { OPERATOR_MODELS, demoAnswer, demoPause, demoResources, demoSteps, demoTool } from "./demo-response";
 import { APP_ROUTES, canAccessRoute } from "@/app/navigation";
@@ -7,7 +7,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { OPERATOR_CAPABILITIES, exampleArtifact, type OperatorArtifact } from "./capabilities";
 
 export type OperatorView = "chat" | "plugins" | "automations";
-interface ThreadDetails { capabilityId: string; artifact?: OperatorArtifact; step: number; running: boolean; receipt?: string; run?: AgentRunState; runId?: string; runModel?: ChatModel }
+interface ThreadDetails { capabilityId: string; artifact?: OperatorArtifact; step: number; running: boolean; receipt?: string; run?: AgentRunState; runId?: string; runModel?: ChatModel; revisionRequest?: string }
 export interface OperatorTask { id: string; name: string; capabilityId: string; frequency: "daily" | "weekdays" | "weekly"; time: string; prompt: string; enabled: boolean }
 const id = () => crypto.randomUUID();
 function useOperatorState() {
@@ -64,6 +64,15 @@ function useOperatorState() {
     if (!target || target.capabilityId !== capability.id || !available.some(item => item.id === target.capabilityId)) return;
     activateConversation(threadId, target.capabilityId);
   }
+  function canUseCapability(capabilityId: string) {
+    const selected = available.find(item => item.id === capabilityId), session = useAuthStore.getState();
+    const route = selected && Object.values(APP_ROUTES).find(item => item.path === selected.route);
+    return !!route && canAccessRoute(route, session.hasPermission, session.hasCapability, session.tenant?.categoryCode, !!session.user?.isSaasAdmin, session.hasTenantMembershipPermission);
+  }
+  function openConversation(threadId: string) {
+    const target = threadsRef.current.find(thread => thread.id === threadId);
+    if (target && canUseCapability(target.capabilityId)) activateConversation(threadId, target.capabilityId);
+  }
   function chooseCapability(capabilityId: string) {
     if (!available.some(item => item.id === capabilityId)) return;
     const remembered = lastConversation.current.get(capabilityId);
@@ -90,7 +99,7 @@ function useOperatorState() {
     };
     const prompt = messages.filter(message => message.role === "user").at(-1)?.content ?? selected.name;
     setChats(previous => previous.map(chat => chat.id === threadId ? { ...chat, title: prompt.slice(0, 26) || "附件演示" } : chat));
-    patch(threadId, previous => ({ ...previous, running: true, artifact: undefined, receipt: undefined, runId }));
+    patch(threadId, previous => ({ ...previous, running: true, artifact: undefined, receipt: undefined, revisionRequest: undefined, runId }));
     try {
       publish(0);
       yield { type: "reasoning", delta: `本地执行摘要：确定${selected.name}的资料范围，读取示例记录，核对关联规则，再整理可核对的结果。` };
@@ -127,15 +136,29 @@ function useOperatorState() {
     const chatId = createConversation(task.capabilityId);
     setQueuedPrompt({ id: id(), text: task.prompt, chatId });
   }
-  function confirm() {
-    if (!active.artifact || active.running) return;
-    patch(activeId, thread => ({ ...thread, receipt: `演示回执 · ${new Date().toLocaleTimeString("zh-CN", { hour12: false })} · 已确认此示例，未提交真实业务。` }));
+  function confirmConversation(threadId: string, expectedRunId?: string) {
+    const target = threadsRef.current.find(thread => thread.id === threadId);
+    if (!target?.artifact || target.running || target.receipt || target.revisionRequest || target.runId !== expectedRunId
+      || !available.some(item => item.id === target.capabilityId && item.action) || !canUseCapability(target.capabilityId)) return false;
+    patch(threadId, thread => ({ ...thread, receipt: `演示回执 · ${new Date().toLocaleTimeString("zh-CN", { hour12: false })} · 已确认此示例，未提交真实业务。` }));
+    return true;
   }
+  function requestConversationChanges(threadId: string, expectedRunId: string | undefined, note: string) {
+    const target = threadsRef.current.find(thread => thread.id === threadId), text = note.trim();
+    if (!text || text.length > 1000 || !target?.artifact || target.running || target.receipt || target.runId !== expectedRunId
+      || !available.some(item => item.id === target.capabilityId && item.action)) return false;
+    setChats(previous => previous.map(chat => chat.id === threadId ? appendNode(chat, {
+      id: id(), role: "user", content: `请补充：${text}`, parent: visibleMessages(chat).at(-1)?.id ?? ROOT,
+    }) : chat));
+    patch(threadId, thread => ({ ...thread, revisionRequest: text }));
+    return true;
+  }
+  function confirm() { confirmConversation(activeId, active.runId); }
   function togglePlugin(capabilityId: string, next: boolean) {
     if (!next && active.capabilityId === capabilityId) cancel();
     setDisabled(previous => next ? previous.filter(value => value !== capabilityId) : [...new Set([...previous, capabilityId])]);
   }
-  return { permitted, available, disabled, togglePlugin, chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, capabilityThreads, threads, active, capability, enabled, view, setView, createConversation, selectConversation, chooseCapability, cancel, confirm, tasks, setTasks, runTask };
+  return { permitted, available, disabled, togglePlugin, chats, setChats, objectUrls, activeId, queuedPrompt, setQueuedPrompt, respond, capabilityThreads, threads, active, capability, enabled, view, setView, createConversation, selectConversation, openConversation, chooseCapability, cancel, confirm, confirmConversation, requestConversationChanges, tasks, setTasks, runTask };
 }
 type OperatorState = ReturnType<typeof useOperatorState>;
 const OperatorContext = createContext<OperatorState | null>(null);

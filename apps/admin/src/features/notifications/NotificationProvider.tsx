@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { isTransientRefreshError } from '@/app/queryClient';
 import { rentalCoreApi } from '@/api/rentalCore';
 import { APP_ROUTES } from '@/app/navigation';
 import { useAuthStore } from '@/features/auth/authStore';
@@ -34,7 +35,7 @@ function useMessages() {
     catch { setStorageAvailable(false); }
   }, [storageKey, personal]);
   const notices = useMemo(() => {
-    const business = enabled ? groupTodos(query.data?.items ?? []) : [];
+    const business = enabled && (!query.isError || isTransientRefreshError(query.error)) ? groupTodos(query.data?.items ?? []) : [];
     const ai: Notice[] = [];
     for (const thread of operator.threads) {
       const capability = operator.available.find(item => item.id === thread.capabilityId);
@@ -42,11 +43,11 @@ function useMessages() {
       const event = `ai:${thread.id}:${thread.runId}`;
       if (!aiTimes.current.has(event)) aiTimes.current.set(event, new Date().toISOString());
       ai.push({ id: event, events: [event], category: 'ai', title: thread.artifact.title,
-        description: thread.artifact.summary, createdAt: aiTimes.current.get(event)!, priority: 'normal',
+        description: thread.revisionRequest ? `待补充：${thread.revisionRequest}\n${thread.artifact.summary}` : thread.artifact.summary, createdAt: aiTimes.current.get(event)!, priority: 'normal',
         pending: Boolean(capability.action && !thread.receipt), href: APP_ROUTES.aiOperator.path, threadId: thread.id, demo: true });
     }
     return [...business, ...ai].sort((a, b) => Number(b.priority === 'high') - Number(a.priority === 'high') || b.createdAt.localeCompare(a.createdAt));
-  }, [enabled, query.data, operator.threads, operator.available]);
+  }, [enabled, query.data, query.isError, query.error, operator.threads, operator.available]);
   const messages = useMemo(() => notices.map(item => ({ ...item, ...messageState(item, personal[item.id]) })), [notices, personal]);
   useEffect(() => {
     if (enabled && !query.isSuccess) return;

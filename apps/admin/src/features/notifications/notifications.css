@@ -24,3 +24,17 @@
 .rental-notification-panel { border-radius: var(--rental-ui-radius-container); font-family: inherit; }
 .rental-notification-panel button { border-radius: var(--rental-ui-radius-button); }
 .rental-notification-panel p { white-space: pre-line; overflow-wrap: anywhere; }
+.notification-business { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin-block: 12px 8px; padding-block: 10px; border-block: 1px solid var(--rental-color-border-secondary); }
+.notification-business-buttons, .notification-business-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.notification-facts { display: grid; gap: 6px; margin: 0; font-size: 12px; }
+.notification-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.notification-facts dt { flex: none; color: var(--rental-color-text-secondary); font-weight: 400; }
+.notification-facts dd { margin: 0; min-width: 0; text-align: end; overflow-wrap: anywhere; color: var(--rental-color-text); }
+.notification-inline-form, .notification-inline-review { display: grid; gap: 8px; min-width: 0; }
+.notification-inline-form label { display: grid; gap: 6px; color: var(--rental-color-text-secondary); font-size: 12px; }
+.notification-business .notification-action-status { margin: 0; color: var(--rental-color-text-secondary); font-size: 12px; }
+.notification-business [role="alert"] { color: var(--rental-status-danger-ink); }
+.notification-business .notification-inline-review p { margin: 0; font-size: 12px; }
+.notification-business .arc-select-field { width: 100%; }
+.rental-inbox .inbox-triage_titleRow__hhNXV { flex-wrap: wrap; }
+.rental-inbox .notification-pending-filter { margin-left: 0; }

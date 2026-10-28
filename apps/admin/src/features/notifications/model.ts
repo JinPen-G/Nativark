@@ -5,7 +5,7 @@ export type Category = 'business' | 'review' | 'ai' | 'system';
 export interface Notice {
   id: string; events: string[]; category: Category; title: string; description: string;
   createdAt: string; priority: 'high' | 'normal'; pending: boolean;
-  href: string; threadId?: string; demo?: boolean; orderNo?: string;
+  href: string; threadId?: string; demo?: boolean; orderNo?: string; workOrderId?: string;
 }
 export interface PersonalEntry {
   read: boolean; folder: Folder; events: string[]; updatedAt: number;
@@ -55,6 +55,7 @@ export function groupTodos(todos: RentalWorkbenchTodo[]): Notice[] {
       description: items.map(item => items.length > 1 ? `${item.title}：${item.description}` : item.description).join('\n'),
       createdAt: items.map(i => i.createdAt).sort().at(-1) ?? '',
       priority: first.priority, pending: true, href: first.href, orderNo: first.orderNo,
+      workOrderId: items.every(item => item.type === 'work_order') ? first.workOrderId : undefined,
     } satisfies Notice;
   });
 }

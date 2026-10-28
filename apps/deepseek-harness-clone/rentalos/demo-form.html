@@ -1,0 +1,102 @@
+<dialog
+      class="demo-dialog" data-theme="dark"
+      id="demo-request"
+      aria-labelledby="demo-title"
+      aria-describedby="demo-intro"
+    >
+      <button
+        class="demo-close"
+        type="button"
+        data-demo-close
+        aria-label="关闭预约表单"
+        data-i18n-aria="demo.close"
+      >
+        ×
+      </button>
+      <h2 id="demo-title" data-i18n="cta.demo">预约演示</h2>
+      <p id="demo-intro" data-i18n="demo.intro">
+        留下联系方式，我们与你沟通业务需求和演示安排。
+      </p>
+      <form id="demo-form" novalidate>
+        <fieldset class="demo-fields" id="demo-fields">
+          <label for="demo-name"
+            ><span data-i18n="demo.name">姓名（必填）</span>
+            <input
+              id="demo-name"
+              name="name"
+              autocomplete="name"
+              maxlength="80"
+              required
+            />
+          </label>
+          <div class="demo-contact-row">
+            <label for="demo-contact-type"
+              ><span data-i18n="demo.type">联系类型</span>
+              <select id="demo-contact-type" name="contactType">
+                <option value="phone" data-i18n="demo.phone">手机</option>
+                <option value="email" data-i18n="demo.email">邮箱</option>
+                <option value="wechat" data-i18n="demo.wechat">微信</option>
+              </select>
+            </label>
+            <label for="demo-contact"
+              ><span data-i18n="demo.contact">联系方式（必填）</span>
+              <input
+                id="demo-contact"
+                name="contactValue"
+                type="tel"
+                autocomplete="tel"
+                maxlength="160"
+                required
+              />
+            </label>
+          </div>
+          <label for="demo-company"
+            ><span data-i18n="demo.company">公司 / 门店名称（选填）</span>
+            <input
+              id="demo-company"
+              name="company"
+              autocomplete="organization"
+              maxlength="120"
+            />
+          </label>
+          <label for="demo-message"
+            ><span data-i18n="demo.message">想了解什么？（选填）</span>
+            <textarea
+              id="demo-message"
+              name="message"
+              rows="3"
+              maxlength="1000"
+            ></textarea>
+          </label>
+          <p class="demo-privacy" data-i18n="demo.privacy">
+            提交即表示你同意 Rental OS
+            使用以上信息联系你，沟通本次演示；不会自动注册账号或订阅营销消息。
+          </p>
+        </fieldset>
+        <p
+          class="demo-feedback"
+          id="demo-feedback"
+          role="status"
+          aria-live="polite"
+          tabindex="-1"
+        ></p>
+        <button class="button dark demo-submit" type="submit" id="demo-submit">
+          <span data-i18n="demo.submit">提交预约</span>
+        </button>
+      </form>
+      <div
+        class="demo-success"
+        id="demo-success"
+        hidden
+        tabindex="-1"
+        role="status"
+      >
+        <h3 data-i18n="demo.successTitle">预约已收到</h3>
+        <p data-i18n="demo.successBody">
+          我们会通过你留下的联系方式与你沟通，确定演示时间。
+        </p>
+        <button class="button dark" type="button" data-demo-close>
+          <span data-i18n="demo.done">完成</span>
+        </button>
+      </div>
+    </dialog>

@@ -1,0 +1,39 @@
+.rentalos-download {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.rentalos-download-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 260px;
+  z-index: 70;
+  padding: 8px;
+}
+.rentalos-download-options.is-end {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.rentalos-download-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 14px;
+  color: var(--ds-color-text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.ds-locale-toggle-item:focus-visible,
+.rentalos-download button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+@media (max-width: 639px) {
+  .rentalos-download-options {
+    min-width: 240px;
+  }
+}

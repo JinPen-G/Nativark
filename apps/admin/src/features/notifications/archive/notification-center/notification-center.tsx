@@ -17,6 +17,7 @@ export interface NotificationItem {
   description?: string;
   time: string;
   read?: boolean;
+  pending?: boolean;
   tone?: "info" | "success" | "warning";
   /** A local portrait asset for person-generated updates. */
   actor?: { name: string; photo: string };
@@ -32,9 +33,10 @@ export interface NotificationCenterProps {
   avoidCollisions?: boolean;
   summaryText?: string;
   emptyText?: string;
+  renderDetails?: (item: NotificationItem) => ReactNode;
 }
 
-type View = "all" | "unread";
+type View = "all" | "unread" | "pending";
 
 const enter: Transition = { duration: motionTokens.duration.standard, ease: [...motionTokens.ease.enter] };
 const exitFast: Transition = { duration: motionTokens.duration.fast, ease: [...motionTokens.ease.standard] };
@@ -110,7 +112,7 @@ function NotificationVisual({ item }: { item: NotificationItem }) {
   </span>;
 }
 
-export function NotificationCenter({ notifications: initial, label = "Notifications", onReadChange, onDismiss, open, onOpenChange, avoidCollisions = true, summaryText, emptyText }: NotificationCenterProps) {
+export function NotificationCenter({ notifications: initial, label = "Notifications", onReadChange, onDismiss, open, onOpenChange, avoidCollisions = true, summaryText, emptyText, renderDetails }: NotificationCenterProps) {
   const reduce = useReducedMotion(), reduced = usePrefersReducedMotion(), tr = useNotificationText();
   useEffect(() => { setItems(initial); }, [initial]);
   const layoutId = useId();
@@ -122,10 +124,11 @@ export function NotificationCenter({ notifications: initial, label = "Notificati
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const allTabRef = useRef<HTMLButtonElement>(null);
   const unreadTabRef = useRef<HTMLButtonElement>(null);
+  const pendingTabRef = useRef<HTMLButtonElement>(null);
   const isOpen = open ?? internalOpen;
   const unreadCount = useMemo(() => items.filter((item) => !item.read).length, [items]);
   const readCount = items.length - unreadCount;
-  const visible = view === "unread" ? items.filter((item) => !item.read) : items;
+  const visible = view === "unread" ? items.filter((item) => !item.read) : view === "pending" ? items.filter(item => item.pending) : items;
   const summary = summaryText ?? (unreadCount ? tr("{count} updates waiting for you", { count: unreadCount }) : tr("You’re all caught up"));
 
   function setOpen(next: boolean) {
@@ -151,7 +154,7 @@ export function NotificationCenter({ notifications: initial, label = "Notificati
     setBulk(true);
     setItems((current) => current.map((item) => ({ ...item, read: true })));
     setExpandedId(null);
-    requestAnimationFrame(() => (view === "unread" ? unreadTabRef : allTabRef).current?.focus());
+    requestAnimationFrame(() => (view === "unread" ? unreadTabRef : view === "pending" ? pendingTabRef : allTabRef).current?.focus());
   }
 
   function dismiss(item: NotificationItem) {
@@ -190,13 +193,13 @@ export function NotificationCenter({ notifications: initial, label = "Notificati
 
         <div className={styles.toolbar}>
           <div className={styles.viewSwitch} role="group" aria-label={tr('Show notifications')}>
-            {(["all", "unread"] as const).map((next) => <button key={next} ref={next === "unread" ? unreadTabRef : allTabRef} type="button" className={view === next ? styles.viewActive : undefined} aria-pressed={view === next} onClick={() => { setBulk(false); setView(next); setExpandedId(null); }}>{view === next && <motion.span className={styles.viewHighlight} layoutId={`${layoutId}-view`} transition={reduce ? instant : motionTokens.spring.morph} />}<span>{tr(next === "all" ? "All" : "Unread")}</span></button>)}
+            {(["all", "unread", "pending"] as const).map((next) => <button key={next} ref={next === "unread" ? unreadTabRef : next === "pending" ? pendingTabRef : allTabRef} type="button" className={view === next ? styles.viewActive : undefined} aria-pressed={view === next} onClick={() => { setBulk(false); setView(next); setExpandedId(null); }}>{view === next && <motion.span className={styles.viewHighlight} layoutId={`${layoutId}-view`} transition={reduce ? instant : motionTokens.spring.morph} />}<span>{tr(next === "all" ? "All" : next === "unread" ? "Unread" : "Pending")}</span></button>)}
           </div>
-          <AnimatePresence initial={false}>{unreadCount > 0 && <motion.button key="mark-all" type="button" className={styles.markAll} onClick={markAllRead} initial={reduce ? { opacity: 0 } : { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)` }} animate={{ opacity: 1, filter: "blur(0px)" }} exit={reduce ? fadeOut : { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)`, transition: exitFast }} transition={reduce ? instant : enter}><CheckCheck size={15} strokeWidth={1.75} aria-hidden="true" /><span>{tr("Mark all read")}</span></motion.button>}</AnimatePresence>
+          <AnimatePresence initial={false}>{unreadCount > 0 && <motion.button key="mark-all" type="button" className={styles.markAll} aria-label={tr("Mark all read")} onClick={markAllRead} initial={reduce ? { opacity: 0 } : { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)` }} animate={{ opacity: 1, filter: "blur(0px)" }} exit={reduce ? fadeOut : { opacity: 0, filter: `blur(${motionTokens.blur.subtle}px)`, transition: exitFast }} transition={reduce ? instant : enter}><CheckCheck size={15} strokeWidth={1.75} aria-hidden="true" /><span>{tr("Mark all read")}</span></motion.button>}</AnimatePresence>
         </div>
 
         {/* Rows collapse their own height on the way out, so the list and the panel close the gap together. */}
-        <div className={styles.list} role="list" aria-label={tr(view === "all" ? "All notifications" : "Unread notifications")}>
+        <div className={styles.list} role="list" aria-label={tr(view === "all" ? "All notifications" : view === "unread" ? "Unread notifications" : "Pending notifications")}>
           <AnimatePresence initial={false} custom={bulk}>
             {visible.map((item, index) => <motion.div key={item.id} role="listitem" className={styles.row} custom={bulk}
               variants={{ exit: (isBulk: boolean) => reduce ? fadeOut : { height: 0, opacity: 0, transition: { height: { ...motionTokens.spring.smooth, delay: isBulk ? cascade(index) : 0 }, opacity: { ...exitFast, delay: isBulk ? cascade(index) : 0 } } } }}
@@ -217,6 +220,7 @@ export function NotificationCenter({ notifications: initial, label = "Notificati
                 <AnimatePresence initial={false}>
                   {expandedId === item.id && <motion.div className={styles.details} initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={reduce ? fadeOut : { height: 0, opacity: 0, transition: { height: motionTokens.spring.smooth, opacity: exitFast } }} transition={height}>
                     <p>{item.description ?? (item.actor ? `${item.actor.name} shared an update with you.` : tr("This update is ready to review."))}</p>
+                    {renderDetails?.(item)}
                     <div className={`${styles.itemActions} notification-item-actions`}>
                       <button type="button" onClick={() => toggleRead(item)}><MorphWidth reduce={reduce} morphKey={item.read ? "read" : "unread"}>
                         <span className={styles.actionIcon}><AnimatePresence mode="popLayout" initial={false}><Swap key={item.read ? "unread" : "read"} className={styles.actionGlyph} initial={reduce ? { opacity: 0 } : iconIn} animate={shown} exit={reduce ? fadeOut : { ...iconIn, transition: exitFast }} transition={reduce ? instant : motionTokens.spring.snappy}>{item.read ? <CircleDot size={14} strokeWidth={1.75} aria-hidden="true" /> : <Check size={14} strokeWidth={1.75} aria-hidden="true" />}</Swap></AnimatePresence></span>
@@ -230,7 +234,7 @@ export function NotificationCenter({ notifications: initial, label = "Notificati
             </motion.div>)}
             {/* The empty state opens its height on the same spring the rows close on, so the panel morphs between them instead of stacking both. */}
             {visible.length === 0 && <motion.div key="empty" className={styles.emptyFrame} initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={reduce ? fadeOut : { height: 0, opacity: 0, transition: { height: motionTokens.spring.smooth, opacity: exitFast } }} transition={reduce ? instant : { height: motionTokens.spring.smooth, opacity: { ...enter, delay: motionTokens.duration.fast } }}>
-              <motion.div className={styles.empty} initial={reduce ? false : { y: 6 }} animate={{ y: 0 }} transition={reduce ? instant : { ...enter, delay: motionTokens.duration.fast }}><CircleCheck size={24} strokeWidth={1.5} aria-hidden="true" /><strong><SwapText reduce={reduce}>{emptyText ?? tr(view === "unread" ? "Nothing unread" : "All clear")}</SwapText></strong><p><SwapText reduce={reduce}>{emptyText ? "" : tr(view === "unread" ? "You’ve seen every update." : "New updates will appear here.")}</SwapText></p>{view === "unread" && items.length > 0 && <button type="button" onClick={() => { setBulk(false); setView("all"); }}>{tr("View all updates")}</button>}</motion.div>
+              <motion.div className={styles.empty} initial={reduce ? false : { y: 6 }} animate={{ y: 0 }} transition={reduce ? instant : { ...enter, delay: motionTokens.duration.fast }}><CircleCheck size={24} strokeWidth={1.5} aria-hidden="true" /><strong><SwapText reduce={reduce}>{emptyText ?? tr(view === "pending" ? "No pending tasks" : view === "unread" ? "Nothing unread" : "All clear")}</SwapText></strong><p><SwapText reduce={reduce}>{emptyText ? "" : tr(view === "pending" ? "Tasks that need action appear here." : view === "unread" ? "You’ve seen every update." : "New updates will appear here.")}</SwapText></p>{view === "unread" && items.length > 0 && <button type="button" onClick={() => { setBulk(false); setView("all"); }}>{tr("View all updates")}</button>}</motion.div>
             </motion.div>}
           </AnimatePresence>
         </div>

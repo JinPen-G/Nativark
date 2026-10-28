@@ -1,0 +1,154 @@
+{
+  "zh": {
+    "harnessHeaderDownload": "预约演示",
+    "harnessDemoAction": "预约演示",
+    "harnessDownloadDevelopment": "开发中",
+    "harnessHeroTitlePre": "Rental OS",
+    "harnessHeroDesc": "无论管理日常租赁、协同多家门店，还是拓展自己的租赁品类，都可以从这里开始。",
+    "harnessHeroDesc2": "Rental OS 面向多品类租赁业务，以可灵活扩展的 Rental Core，连接预约、库存、履约与结算。",
+    "harnessUseTitle": "按你的方式，部署 Rental OS",
+    "harnessUse1Label": "云端使用",
+    "harnessUse1Desc": "无需维护服务器，即可使用 Rental OS。通过浏览器进入业务空间，让 AI 管理与传统后台协同工作。\n\n按需启用附加能力，持续适配业务发展。",
+    "harnessUse1Action": "预约演示",
+    "harnessUse1Inquiry": "我想了解 Rental OS 云端使用，并预约产品演示。",
+    "harnessUse2Label": "私有化部署",
+    "harnessUse2Desc": "将 Rental OS 部署到企业自己的环境，按需定制业务功能与系统集成。\n\n基于 Rental Core 扩展附加能力，适配不同的经营需求。",
+    "harnessUse2Action": "咨询部署方案",
+    "harnessUse2Inquiry": "我想咨询 Rental OS 私有化部署、功能定制与系统集成方案。",
+    "harnessCtaTitle": "一起拓展租赁的可能",
+    "harnessCtaDesc": "我们期待与行业伙伴、开发者和服务商一起，将真实的租赁经验，转化为可复用的业务能力。围绕 Rental Core，连接行业场景、定制功能与系统集成，共同构建更灵活的租赁经营方式。",
+    "harnessPartner1Action": "洽谈合作",
+    "harnessPartner1Inquiry": "我想与 Rental OS 洽谈合作，交流租赁业务与合作方向。",
+    "harnessPartner2Action": "行业解决方案",
+    "harnessPartner2Inquiry": "我想了解 Rental OS 的行业解决方案，交流我们所在品类的租赁经营需求。",
+    "harnessPartner3Action": "定制与集成",
+    "harnessPartner3Inquiry": "我想咨询 Rental OS 的功能定制与系统集成方案。",
+    "harnessPartner4Action": "附加能力共建",
+    "harnessPartner4Inquiry": "我想围绕 Rental Core 共建附加能力，交流可复用业务功能的合作。"
+  },
+  "en": {
+    "harnessHeaderDownload": "Book a demo",
+    "harnessDemoAction": "Book a demo",
+    "harnessDownloadDevelopment": "In development",
+    "harnessHeroTitlePre": "Rental OS",
+    "harnessHeroDesc": "Everyday rentals, multiple locations, or your next rental category—it starts here.",
+    "harnessHeroDesc2": "Rental OS brings multi-category rental businesses together, with an extensible Rental Core that connects bookings, inventory, fulfillment, and settlement.",
+    "harnessUseTitle": "Deploy Rental OS your way",
+    "harnessUse1Label": "Cloud access",
+    "harnessUse1Desc": "Use Rental OS without maintaining servers. Open your workspace in a browser, with AI-led operations and the traditional console working together.\n\nEnable additional capabilities as your business grows.",
+    "harnessUse1Action": "Book a demo",
+    "harnessUse1Inquiry": "I would like to explore Rental OS cloud access and book a product demo.",
+    "harnessUse2Label": "Private deployment",
+    "harnessUse2Desc": "Deploy Rental OS in your own environment, with tailored business features and system integrations.\n\nExtend your operations with additional capabilities built on Rental Core.",
+    "harnessUse2Action": "Discuss deployment",
+    "harnessUse2Inquiry": "I would like to discuss Rental OS private deployment, custom features and system integrations.",
+    "harnessCtaTitle": "Expand what rental can be, together",
+    "harnessCtaDesc": "We welcome industry partners, developers and service providers to turn real rental experience into reusable business capabilities. Around Rental Core, we connect industry needs, custom features and system integrations to build more flexible ways to run a rental business.",
+    "harnessPartner1Action": "Discuss a partnership",
+    "harnessPartner1Inquiry": "I would like to discuss a partnership with Rental OS and explore opportunities in the rental industry.",
+    "harnessPartner2Action": "Industry solutions",
+    "harnessPartner2Inquiry": "I would like to explore Rental OS industry solutions and discuss the needs of our rental category.",
+    "harnessPartner3Action": "Customization & integrations",
+    "harnessPartner3Inquiry": "I would like to discuss custom features and system integrations for Rental OS.",
+    "harnessPartner4Action": "Build add-on capabilities",
+    "harnessPartner4Inquiry": "I would like to collaborate on add-on capabilities for Rental Core and explore reusable business features."
+  },
+  "demo": {
+    "demo.close": {
+      "zh": "关闭预约表单",
+      "en": "Close demo request"
+    },
+    "demo.intro": {
+      "zh": "留下联系方式，我们与你沟通业务需求和演示安排。",
+      "en": "Leave your contact details so we can discuss your business and arrange a demo."
+    },
+    "demo.name": {
+      "zh": "姓名（必填）",
+      "en": "Name (required)"
+    },
+    "demo.type": {
+      "zh": "联系类型",
+      "en": "Contact method"
+    },
+    "demo.phone": {
+      "zh": "手机",
+      "en": "Phone"
+    },
+    "demo.email": {
+      "zh": "邮箱",
+      "en": "Email"
+    },
+    "demo.wechat": {
+      "zh": "微信",
+      "en": "WeChat"
+    },
+    "demo.contact": {
+      "zh": "联系方式（必填）",
+      "en": "Contact details (required)"
+    },
+    "demo.company": {
+      "zh": "公司 / 门店名称（选填）",
+      "en": "Company / store (optional)"
+    },
+    "demo.message": {
+      "zh": "想了解什么？（选填）",
+      "en": "What would you like to explore? (optional)"
+    },
+    "demo.privacy": {
+      "zh": "提交即表示你同意 Rental OS 使用以上信息联系你，沟通本次演示；不会自动注册账号或订阅营销消息。",
+      "en": "By submitting, you agree that Rental OS may use these details to contact you about this demo. This does not create an account or subscribe you to marketing."
+    },
+    "demo.submit": {
+      "zh": "提交预约",
+      "en": "Request a demo"
+    },
+    "demo.submitting": {
+      "zh": "正在提交…",
+      "en": "Sending…"
+    },
+    "demo.successTitle": {
+      "zh": "预约已收到",
+      "en": "Request received"
+    },
+    "demo.successBody": {
+      "zh": "我们会通过你留下的联系方式与你沟通，确定演示时间。",
+      "en": "We will contact you using the details you provided to arrange a demo time."
+    },
+    "demo.done": {
+      "zh": "完成",
+      "en": "Done"
+    },
+    "demo.requiredName": {
+      "zh": "请填写姓名。",
+      "en": "Enter your name."
+    },
+    "demo.invalidContact": {
+      "zh": "请检查联系方式：手机需 7–20 位数字，邮箱需完整地址，微信需 3–80 位字母、数字、下划线或短横线。",
+      "en": "Check your contact details: phone numbers need 7–20 digits; email needs a full address; WeChat IDs need 3–80 letters, digits, underscores or hyphens."
+    },
+    "demo.invalidFields": {
+      "zh": "请检查填写内容和长度后重试。",
+      "en": "Check the form fields and their length, then try again."
+    },
+    "demo.unconfigured": {
+      "zh": "预约服务尚未配置，请稍后再试。",
+      "en": "Demo requests are not configured yet. Please try again later."
+    },
+    "demo.networkError": {
+      "zh": "暂时无法确认提交结果，请重试；重复点击不会重复登记同一份预约。",
+      "en": "We could not confirm your submission. Please retry; retrying this request will not create a duplicate."
+    },
+    "demo.rateLimited": {
+      "zh": "提交过于频繁，请 10 分钟后重试。",
+      "en": "Too many requests. Please try again in 10 minutes."
+    },
+    "demo.conflict": {
+      "zh": "提交标识已更新，请再次提交。",
+      "en": "The request reference has been renewed. Please submit again."
+    },
+    "cta.demo": {
+      "zh": "预约演示",
+      "en": "Book a demo"
+    }
+  }
+}

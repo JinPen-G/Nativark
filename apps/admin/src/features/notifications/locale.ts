@@ -28,6 +28,18 @@ const labels: Record<string, string> = {
   'Messages could not be loaded.': '暂时无法读取消息，请重试。', Retry: '重试',
   'Saved on this device': '个人消息状态保存在本机', 'Session only': '本机存储不可用，状态仅本次会话有效',
   'Local AI demo': 'AI 本地演示', 'Pending': '待处理',
+  'Pending notifications': '待处理消息', 'No pending tasks': '暂无待处理事项', 'Tasks that need action appear here.': '需要处理的事项会显示在这里。',
+  'Work order': '工单', Assignee: '处理人', Unassigned: '未派工', Claim: '领取工单', Assign: '派工', Reassign: '转交',
+  'Confirm assignment': '确认派工', Cancel: '取消', Back: '返回核对', 'Assignment updated.': '派工已更新。', 'Assignment failed.': '派工失败。',
+  'An action is already pending.': '该操作正在处理中，请勿重复提交。', 'This action is no longer available.': '当前操作已不可用，请重新核对。',
+  'The work order changed. Review it again.': '工单已更新，请重新核对后操作。', 'This assignee is no longer available.': '该处理人当前不可选，请重新选择。',
+  'Assignment result is unknown. Check the work order before trying again.': '派工结果尚未确认，请先进入工单核对，避免重复提交。',
+  'Work order details are unavailable.': '暂时无法读取工单资料。', 'Reading work order…': '正在读取工单…',
+  'Review draft': '核对草稿', 'Needs more info': '需要补充', 'Download demo result': '下载示例结果', 'Confirm demo draft': '确认示例草稿',
+  'This draft changed. Review it again.': '草稿已更新，请重新核对。', 'What needs to change?': '需要补充的内容', 'Save request': '记录补充要求',
+  'Request saved in the conversation. Local demo only.': '补充要求已记录到原对话，仅本地演示，尚未自动执行。',
+  '租赁安排': 'Rental', '租金': 'Rental charge', '可退押金': 'Refundable deposit', '待支付合计': 'Total due', '交接事项': 'Handover items',
+  '关联订单': 'Orders', '负责人': 'Assignees', '交付时间': 'Handover time', '协同安排': 'Tasks', '涉及门店': 'Locations', '计划时间': 'Schedule',
 };
 export function useNotificationText() {
   const { locale } = useLocale();
