@@ -23,6 +23,7 @@ export const tenantModelProtocols = NATIVE_MODEL_PROTOCOLS;
 export const tenantModelSettingsSchema = z.object({
   enabled: z.boolean().default(false), protocol: z.enum(tenantModelProtocols),
   baseUrl: z.string().min(1).max(2048), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
+  models: z.array(z.string().min(1).max(256).regex(/^[\w./:-]+$/u)).min(1).max(20).refine(values => new Set(values).size === values.length).optional(),
   apiKey: z.string().min(1).max(8192).regex(/^[^\r\n]+$/u).optional(),
   secretChange: z.discriminatedUnion("operation", [z.object({ operation: z.literal("retain") }).strict(), z.object({ operation: z.literal("replace"), apiKey: z.string().min(1).max(8192).regex(/^[^\r\n]+$/u) }).strict(), z.object({ operation: z.literal("clear") }).strict()]).optional(),
   timeoutMs: z.number().int().min(1000).max(120000).default(30000),
@@ -97,6 +98,7 @@ export class TenantModelConfigService {
     if (!record.settings) return record;
     const parsed = settingsSchema.omit({ apiKey: true, expectedRevision: true, secretChange: true }).safeParse(record.settings);
     if (!parsed.success || !Number.isSafeInteger(record.revision) || record.revision < 1 || record.revision >= Number.MAX_SAFE_INTEGER || typeof record.credentialsEncrypted !== "string") throw new ModelGatewayError("CONFIG_INVALID");
+    if (parsed.data.models && !parsed.data.models.includes(parsed.data.model)) throw new ModelGatewayError('CONFIG_INVALID');
     return { ...record, settings: parsed.data };
   }
 
@@ -149,6 +151,7 @@ export class TenantModelConfigService {
 
   private prepareTenantSettings(tenantId: string, previous: TenantModelRecord | null, input: z.infer<typeof settingsSchema>) {
     const { apiKey, secretChange, expectedRevision: _, ...settings } = input;
+    if (settings.models && !settings.models.includes(settings.model)) throw new ModelGatewayError('INVALID_REQUEST');
     if (apiKey !== undefined && secretChange !== undefined) throw new ModelGatewayError("CONFIG_INVALID");
     const suppliedKey = secretChange?.operation === "replace" ? secretChange.apiKey : apiKey;
     if (suppliedKey !== undefined && !/^[\x21-\x7e]{1,8192}$/.test(suppliedKey.trim())) throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE");
@@ -176,7 +179,8 @@ export class TenantModelConfigService {
       catch { credentialState = 'rotation_required'; }
     }
     return { ...base, enabled: base.enabled && record.settings.enabled, mode: 'tenant_managed',
-      protocol: record.settings.protocol, baseUrl: record.settings.baseUrl, model: record.settings.model, credentialState };
+      protocol: record.settings.protocol, baseUrl: record.settings.baseUrl, model: record.settings.model,
+      ...(record.settings.models ? { models: [...record.settings.models] } : {}), credentialState };
   }
 
   /** Existing C07 management projection; identity comes from the actual request
@@ -229,7 +233,7 @@ export class TenantModelConfigService {
       serviceEnabled: input.enabled, revision: input.expectedRevision + 1 };
     if (input.mode === 'tenant_managed') {
       const parsed = settingsSchema.safeParse({ ...(previous?.settings ?? {}), enabled: input.enabled,
-        protocol: input.protocol, baseUrl: input.baseUrl, model: input.model,
+        protocol: input.protocol, baseUrl: input.baseUrl, model: input.model, ...(input.models ? { models: input.models } : {}),
         secretChange: input.secretChange, expectedRevision: input.expectedRevision });
       if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
       const prepared = this.prepareTenantSettings(context.tenantId, previous, parsed.data);
@@ -282,7 +286,7 @@ export class TenantModelConfigService {
     if (!record || tenantModelMode(record) !== "tenant_managed") throw new ModelGatewayError("PROVIDER_UNAVAILABLE");
     if (!record.settings) throw new ModelGatewayError("CONFIG_INVALID");
     return { enabled: tenantModelServiceEnabled(record) && record.settings.enabled, provider: record.settings.protocol,
-      baseUrl: normalizeTenantModelBaseUrl(record.settings.baseUrl), allowedModels: [record.settings.model],
+      baseUrl: normalizeTenantModelBaseUrl(record.settings.baseUrl), allowedModels: [...(record.settings.models ?? [record.settings.model])],
       credentialRef: this.reference(record), timeoutMs: record.settings.timeoutMs,
       maxConcurrent: record.settings.maxConcurrent, maxOutputTokens: record.settings.maxOutputTokens };
   }
@@ -305,6 +309,36 @@ export class TenantModelConfigService {
 
   async selection(context: WorkspaceGatewayContext) { return this.select(context, 'read'); }
   async selectionForInvocation(context: WorkspaceGatewayContext) { return this.select(context, 'invoke'); }
+
+  /** Management diagnostics may reuse a saved secret only at the exact saved
+   * destination and revision, even while disabled. No secret readback or grant
+   * to dispatch. Every network boundary rechecks current identity/config. */
+  async inspectProvider<T>(context: WorkspaceGatewayContext, input: import('@rental-os/shared').AiProviderDiscoveryInputDraft,
+    inspect: (key: string, current: () => Promise<void>) => Promise<T>): Promise<T> {
+    context = await this.authorize(context, 'manage');
+    input = structuredClone(input);
+    const baseUrl = normalizeTenantModelBaseUrl(input.baseUrl);
+    const before = await this.readRecord(context.tenantId);
+    if ((before?.revision ?? 0) !== input.expectedRevision) throw new AiModelConfigurationRevisionConflictError();
+    let key: string;
+    if (input.secretChange.operation === 'replace') key = input.secretChange.apiKey;
+    else {
+      if (!before?.settings || tenantModelMode(before) !== 'tenant_managed'
+        || normalizeTenantModelBaseUrl(before.settings.baseUrl) !== baseUrl) throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
+      key = this.decrypt(before);
+    }
+    if (!/^[\x21-\x7e]{1,8192}$/u.test(key)) throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
+    const current = async () => {
+      await this.authorize(context, 'manage');
+      const latest = await this.readRecord(context.tenantId);
+      await this.authorize(context, 'manage');
+      if (requestFingerprint(latest) !== requestFingerprint(before)) throw new AiModelConfigurationRevisionConflictError();
+    };
+    await current();
+    const result = await inspect(key, current);
+    await current();
+    return result;
+  }
 
   /** Server application policy entry, not a model capability claim or public DTO.
    * Only the atomic config/Profile adapter can implement this operation. */

@@ -12,6 +12,23 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "可用模型": "Available models",
+  "默认模型": "Default model",
+  "选择模型或输入模型 ID，最多 20 个": "Select or enter model IDs (up to 20)",
+  "请选择最多 20 个模型，并指定其中一个作为默认模型": "Select up to 20 models and choose one as the default",
+  "请先填写有效的协议、Base URL 和密钥。": "Enter a valid protocol, base URL and API key first.",
+  "获取模型": "Fetch models",
+  "正在获取…": "Fetching…",
+  "识别协议类型": "Identify API family",
+  "正在识别…": "Identifying…",
+  "模型列表已获取，请选择要使用的模型。": "Model list loaded. Select the models you want to use.",
+  "供应商返回了空列表，可以手动填写模型 ID。": "The provider returned an empty list. You can enter model IDs manually.",
+  "供应商未接受当前密钥，请核对密钥和地址。": "The provider rejected authentication. Check the API key and base URL.",
+  "供应商未提供可读取的模型列表，可以手动填写。": "No readable model list is available. Enter model IDs manually.",
+  "这里只显示前 200 个模型；其他模型可手动填写。": "Only the first 200 models are shown. Other model IDs can be entered manually.",
+  "可能兼容的协议": "Possible compatible APIs",
+  "模型列表不能证明协议可调用。请选择协议并保存，再用“测试连接”验证，不会自动改动你的选择。": "A model list does not verify inference support. Select an API, save, then use Test connection. Your choice will not be changed automatically.",
+  "暂时无法获取供应商信息，请核对地址和密钥，也可以手动填写模型。": "Could not read provider information. Check the URL and key, or enter model IDs manually.",
   "供应商名称": "Provider name",
   "接口协议": "API protocol",
   "已刷新": "Refreshed",

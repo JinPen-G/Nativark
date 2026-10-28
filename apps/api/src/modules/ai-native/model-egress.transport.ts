@@ -9,13 +9,13 @@ const nativeTransports = new WeakSet<object>();
 export function modelEgressEvidence(transport: ModelJsonTransport): 'live' | 'mock' {
   return nativeTransports.has(transport) ? 'live' : 'mock';
 }
-export function createNativeModelEgressTransport() {
+export function createNativeModelEgressTransport(timeoutMs = 30000) {
   const transport = new ModelEgressTransport({
     resolve: hostname => import('node:dns/promises').then(dns => dns.lookup(hostname, { all: true, verbatim: true })),
     request: (options, response) => require('node:https').request(options, response),
     now: Date.now, setTimer: (callback, delay) => setTimeout(callback, delay),
     clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>)
-  });
+  }, timeoutMs);
   nativeTransports.add(transport);
   return Object.freeze(transport);
 }
@@ -33,6 +33,18 @@ export class ModelEgressTransport implements ModelJsonTransport {
   }
   async post(input: Parameters<ModelJsonTransport["post"]>[0]): Promise<{ status: number; body: string }> {
     return this.performPost(input);
+  }
+  /** Authenticated model-directory GET. Fixed by the setup service, not an
+   * arbitrary URL tool; identical DNS pinning, TLS, deadlines and byte caps. */
+  async getModelDirectory(input: Omit<Parameters<ModelJsonTransport['post']>[0], 'body' | 'redirects'>) {
+    const headers = input.headers;
+    const bearer = Object.keys(headers).length === 2 && Object.keys(headers).every(k => ['Authorization', 'Content-Type'].includes(k))
+      && /^Bearer [\x21-\x7e]{1,8192}$/u.test(headers.Authorization ?? '');
+    const messages = Object.keys(headers).length === 3 && Object.keys(headers).every(k => ['x-api-key', 'anthropic-version', 'Content-Type'].includes(k))
+      && /^[\x21-\x7e]{1,8192}$/u.test(headers['x-api-key'] ?? '') && headers['anthropic-version'] === '2023-06-01';
+    if ((!bearer && !messages) || headers['Content-Type'] !== 'application/json'
+      || !new URL(input.url).pathname.endsWith('/models')) throw new ModelGatewayError('CONFIG_INVALID');
+    return this.performPost({ ...input, body: '', redirects: 'error' }, undefined, undefined, undefined, undefined, 'GET');
   }
   /** Signed object reads share address pinning/TLS/limits, not model auth or
    * invocation authority. No redirects, ambient credentials or GET body. */

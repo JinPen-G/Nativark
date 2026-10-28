@@ -31,6 +31,7 @@ export { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from "./ai-quote-selection-draft-sch
 export * from "./ai-gateway-draft";
 export * from "./ai-knowledge-draft";
 export * from "./ai-usage-draft";
+export * from "./ai-provider-discovery-draft";
 export * from "./ai-events-draft";
 export * from "./ai-inspection-draft";
 export * from "./ai-inspection-persistence";

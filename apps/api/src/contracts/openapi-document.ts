@@ -13,6 +13,7 @@ import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/
 import { AI_BUDGET_MANAGEMENT_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_CREDIT_COMPONENT_SCHEMAS, AI_CREDIT_OPERATIONS } from './ai-credit';
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
   AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
@@ -2317,6 +2318,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     tag: 'AI Native', operationId: 'readCurrentTenantModelSettings', permissions: ['system:params:manage'],
     summary: 'Current tenant only. New tenant returns platform product default at revision zero with execution disabled. Masked configuration is not capability, budget or connection verification.',
     requestSchema: objectOf({}, [], false), responseSchema: 'AiTenantModelSettingsSummaryDraft' },
+  ...(['discoverModels', 'detectProtocols'] as const).map(action => ({
+    method: 'post' as const, path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT[action]}`,
+    tag: 'AI Native', operationId: action === 'discoverModels' ? 'discoverTenantProviderModels' : 'identifyTenantProviderProtocolFamily',
+    permissions: ['system:params:manage'],
+    summary: 'Explicit metadata GET only, no prompts or model inference. Exact current destination/revision for retained encrypted credentials; fresh temporary credentials are write-only. Public HTTPS/DNS pinning, no redirects, bounded response. Candidates never attest Chat/Responses/Messages capability; verify saved configuration through original probe task.',
+    // JSON-Schema branch inference adds optional undefined keys to the TS union;
+    // the shared, closed wire schemas themselves contain no such values.
+    requestSchema: AI_PROVIDER_DISCOVERY_INPUT_SCHEMA as SchemaObject, responseSchema: AI_PROVIDER_DISCOVERY_RESULT_SCHEMA
+  })),
   { method: 'post', path: `/api/${AI_MODEL_SETTINGS_HTTP_DRAFT.basePath}/${AI_MODEL_SETTINGS_HTTP_DRAFT.save}`,
     tag: 'AI Native', operationId: 'saveCurrentTenantModelSettings', permissions: ['system:params:manage'],
     summary: 'One expectedRevision CAS saves mode/service gate and retained or explicitly changed BYOK credential with its Profile. configId is the current tenant configuration, not a provider Profile. Uncertain acknowledgement must be observed, never retried with a new revision; current read is not an original operation receipt. Does not grant budget or execution.',

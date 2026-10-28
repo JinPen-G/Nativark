@@ -23,7 +23,11 @@ export function settingsSummary(value: unknown, tenantId: string): AiTenantModel
   if (value.mode !== "tenant_managed" || value.configRevision < 1 || !text(value.protocol, 128) || !text(value.model)
     || !text(value.baseUrl, 2048) || !/^https:\/\/[^/@?#\s]+(?:\/[^?#\s]*)?$/u.test(value.baseUrl)
     || !["configured", "missing", "rotation_required"].includes(String(value.credentialState))) return invalid();
+  if (value.models !== undefined && (!Array.isArray(value.models) || value.models.length < 1 || value.models.length > 20
+    || new Set(value.models).size !== value.models.length || !value.models.includes(value.model)
+    || value.models.some(model => typeof model !== 'string' || !/^[\w./:-]{1,256}$/u.test(model)))) return invalid();
   return { ...base, mode: "tenant_managed", protocol: value.protocol, model: value.model, baseUrl: value.baseUrl,
+    ...(Array.isArray(value.models) ? { models: [...value.models] as string[] } : {}),
     credentialState: value.credentialState as "configured" | "missing" | "rotation_required" };
 }
 

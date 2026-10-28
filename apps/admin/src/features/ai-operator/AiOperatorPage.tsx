@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { aiModelSettingsApi } from '@/api/aiModelSettings';
+import { settingsSummary } from '@/features/ai-native/model-settings-session';
+import { currentSessionEpoch } from '@/app/queryClient';
+import type { ChatModel } from './archive/ai-chat/chat-state';
 import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, ShieldCheck, X } from "lucide-react";
 import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
@@ -18,6 +22,29 @@ import "./ai-operator.css";
 import "./archive-adapter.css";
 
 const frequencyLabels = { daily: "每天", weekdays: "工作日", weekly: "每周一" };
+/** Only safe configured model labels enter the composer. This page still uses
+ * the explicit local demo responder; selection is not a dispatch/config grant.
+ * Original messages/runs retain the model snapshot captured when submitted. */
+function useConfiguredChatModels() {
+  const auth = useAuthStore(), owner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user]);
+  const [result, setResult] = useState<{ owner: string; models: ChatModel[]; defaultModel: string } | null>(null);
+  const permitted = !!auth.token && !auth.user?.isSaasAdmin && auth.hasPermission('system:params:manage');
+  useEffect(() => {
+    let active = true; const epoch = currentSessionEpoch(), tenantId = auth.tenant?.tenantId;
+    if (permitted && tenantId) void aiModelSettingsApi.read().then(value => {
+      const now = useAuthStore.getState();
+      if (!active || epoch !== currentSessionEpoch() || !now.hasPermission('system:params:manage')
+        || owner !== JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user])) return;
+      const summary = settingsSummary(value, tenantId);
+      if (summary.mode !== 'tenant_managed' || !summary.enabled || summary.credentialState !== 'configured') { setResult(null); return; }
+      const id = (model: string) => `configured:${summary.configRevision}:${model}`;
+      setResult({ owner, models: (summary.models ?? [summary.model]).map(model => ({ id: id(model), name: model,
+        note: '租户已配置 · 当前聊天仍为本地演示' })), defaultModel: id(summary.model) });
+    }).catch(() => { if (active) setResult(null); });
+    return () => { active = false; };
+  }, [owner, permitted, auth.token]);
+  return permitted && result?.owner === owner ? result : { models: OPERATOR_MODELS, defaultModel: 'everyday' };
+}
 function useNarrow() {
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 1050px)").matches);
   useEffect(() => { const media = matchMedia("(max-width: 1050px)"); const change = () => setNarrow(media.matches); media.addEventListener("change", change); change(); return () => media.removeEventListener("change", change); }, []);
@@ -34,6 +61,7 @@ export function AiOperatorPage() {
 }
 function OperatorChat() {
   const operator = useOperator(), narrow = useNarrow();
+  const configured = useConfiguredChatModels();
   const [workOpen, setWorkOpen] = useState(!narrow), [mobileOpen, setMobileOpen] = useState(false);
   const split = useRef<HTMLDivElement>(null);
   function toggleWork() {
@@ -54,7 +82,7 @@ function OperatorChat() {
           <AiChat className="operator-archive-chat"
             store={{ chats: operator.chats, setChats: operator.setChats, activeId: operator.activeId, objectUrls: operator.objectUrls, setActiveId: operator.selectConversation }}
             historyConversationIds={operator.capabilityThreads.map(thread => thread.id)}
-            respond={operator.respond} autoPlay={false} models={OPERATOR_MODELS} defaultModel="everyday"
+            respond={operator.respond} autoPlay={false} models={configured.models} defaultModel={configured.defaultModel}
             disabled={!operator.enabled} greeting={operator.capability.description} placeholder={`描述${operator.capability.name}相关的工作，或继续补充要求…`}
             suggestions={[{ label: operator.capability.prompt, icon: "activity" }]}
             onNewChat={() => operator.createConversation(operator.capability.id)}

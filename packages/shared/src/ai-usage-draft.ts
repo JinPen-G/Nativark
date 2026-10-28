@@ -21,7 +21,7 @@ interface AiTenantModelSettingsInputBaseDraft {
 }
 export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraft & (
   | { mode: "platform_managed" }
-  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string;
+  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; models?: string[];
   /** Explicit reviewed replacement: revision zero, a fresh key, disabled
    * service and an original operationKey. Never import a masked credential. */
   legacySource?: AiLegacyModelConfigurationReferenceDraft;
@@ -37,11 +37,12 @@ interface AiTenantModelSettingsSummaryBaseDraft {
 }
 export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBaseDraft & (
   | { mode: "platform_managed"; serviceName: "Rental OS AI"; routing: "automatic"; availability: "ready" | "unavailable" | "not_verified" }
-  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; credentialState: "configured" | "missing" | "rotation_required" }
+  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; models?: string[]; credentialState: "configured" | "missing" | "rotation_required" }
 );
 /** Management only. No model request, secret readback, tenant or actor override. */
 export const AI_MODEL_SETTINGS_HTTP_DRAFT = Object.freeze({
-  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation', legacy: 'legacy'
+  basePath: 'ai-native/model-settings', method: 'POST', read: 'read', save: 'save', operation: 'operation', legacy: 'legacy',
+  discoverModels: 'models', detectProtocols: 'detect-protocols'
 } as const);
 /** Platform manager resource, never tenant-side configuration or dispatch.
  * URL profile identity is validated separately; a body cannot override it. */

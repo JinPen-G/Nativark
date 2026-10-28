@@ -9,6 +9,7 @@ export interface AiServiceSettingsDraft {
   protocol: string;
   baseUrl: string;
   model: string;
+  models?: string[];
   secretOperation: SecretOperation;
   /** Write-only input. Never rendered back or persisted by this feature-local adapter. */
   apiKeyDraft: string;
@@ -18,7 +19,7 @@ export interface AiSettingsValidation { ok: boolean; errors: Partial<Record<"pro
 
 export function fromAiServiceSummary(input: AiTenantModelSettingsSummaryDraft | null | undefined): AiServiceSettingsDraft {
   if (!input || input.mode === "platform_managed") return { mode: "platform_managed", enabled: input?.enabled === true, protocol: "", baseUrl: "", model: "", secretOperation: "retain", apiKeyDraft: "" };
-  return { mode: "tenant_managed", enabled: input.enabled === true, protocol: input.protocol, baseUrl: input.baseUrl, model: input.model,
+  return { mode: "tenant_managed", enabled: input.enabled === true, protocol: input.protocol, baseUrl: input.baseUrl, model: input.model, models: [...(input.models ?? [input.model])],
     secretOperation: input.credentialState === 'configured' ? 'retain' : 'replace', apiKeyDraft: "" };
 }
 
@@ -35,6 +36,9 @@ export function validateAiSettingsDraft(draft: AiServiceSettingsDraft): AiSettin
   if (!["openai_chat_completions", "openai_responses", "anthropic_messages"].includes(draft.protocol)) errors.protocol = "请选择已支持的协议";
   if (!/^https:\/\/[^/@?#\s]+(?:\/[^?#\s]*)?$/u.test(draft.baseUrl.trim()) || draft.baseUrl.length > 2048) errors.baseUrl = "Base URL 必须使用 HTTPS，且不能包含凭据、查询或片段";
   if (!/^[\w./:-]{1,256}$/u.test(draft.model.trim())) errors.model = "请填写有效模型标识";
+  const models = draft.models ?? [draft.model.trim()];
+  if (models.length < 1 || models.length > 20 || new Set(models).size !== models.length || !models.includes(draft.model.trim())
+    || models.some(model => !/^[\w./:-]{1,256}$/u.test(model))) errors.model = "请选择最多 20 个模型，并指定其中一个作为默认模型";
   if (draft.secretOperation === "replace" && !/^[\x21-\x7e]{1,8192}$/u.test(draft.apiKeyDraft)) errors.apiKey = "替换密钥时必须输入新密钥，不含空格或换行";
   return { ok: Object.keys(errors).length === 0, errors };
 }
@@ -46,6 +50,7 @@ export function toAiSettingsInput(draft: AiServiceSettingsDraft, configId: strin
   return {
     draftVersion: "ain-c07-draft-2", configId, expectedRevision, enabled: draft.secretOperation === "clear" ? false : draft.enabled, mode: "tenant_managed",
     protocol: draft.protocol.trim(), baseUrl: draft.baseUrl.trim(), model: draft.model.trim(),
+    models: [...(draft.models ?? [draft.model.trim()])],
     secretChange: draft.secretOperation === "replace" ? { operation: "replace", apiKey: draft.apiKeyDraft } : { operation: draft.secretOperation },
   };
 }

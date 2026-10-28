@@ -52,6 +52,7 @@ import { BudgetError } from './budget/budget.ports';
 import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
 import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
 import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } from './model-settings.application';
+import { createNativeModelEgressTransport } from './model-egress.transport';
 import { AI_NATIVE_TASK_CENTER_REQUESTS, composeRequestBoundTaskCenter } from './task-center.application';
 import { AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, composeRequestBoundPlatformModelSettings } from './platform-model-settings.application';
 import { HumanMemoryManagementRequestFactory } from './knowledge/human-memory-management.composition';
@@ -180,7 +181,7 @@ export const AI_NATIVE_CLIENT_POLICY_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox) =>
-    composeRequestBoundModelSettings({ db, auth, guard, secrets })
+    composeRequestBoundModelSettings({ db, auth, guard, secrets, discovery: createNativeModelEgressTransport(5000) })
 };
 export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {

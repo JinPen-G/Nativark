@@ -92,6 +92,7 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
         contextIdentity={identity} pending={state.busy} readOnly={!!state.pending}
         legacySource={!state.summary && legacy && reviewLegacy ? legacy.source : undefined}
         onModeChange={onModeChange}
+        onDiscover={aiModelSettingsApi.discover}
         onSave={input => session.save(input)} />}
       {state.summary?.mode === 'tenant_managed' && <AiConnectionCheck identity={identity}
         configurationRevision={state.summary.configRevision} disabled={state.busy || !!state.pending || !state.summary.enabled} />}
