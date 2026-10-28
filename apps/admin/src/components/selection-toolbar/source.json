@@ -1,0 +1,10 @@
+{
+  "sourceRoot": "D:/工作文件/uiarc-pro-archive/preview/src/components/selection-toolbar",
+  "documentation": "D:/工作文件/uiarc-pro-archive/preview/public/docs/selection-toolbar.md",
+  "sourceSha256": {
+    "integration.css": "edb5518d500eadb29c39ba548c33b3810919aca16b2db3c826c631d4321f8bea",
+    "original.css": "be6fa4a87ace8ac8852b82086491dc83a3581747c1bcd9e771edbe690046ed6c",
+    "SelectionToolbar.tsx": "2c1bad052ad9dab0928cfbe0b4fa9bc3f203deb375710511e17d4ddad18feeae"
+  },
+  "notes": "Local restored component, not official Pro TSX. CSS is copied byte-for-byte. Optional integration props add localization, busy/disabled state, inert exit and the shared motion policy; default rendering and animation remain the supplied implementation."
+}

@@ -1,6 +1,6 @@
 /** Optional list capabilities. Domain pages choose fields and legal actions; this layer never invents writes. */
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
-import { Grid2X2, Rows3, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Grid2X2, Rows3 } from "lucide-react";
 import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -12,11 +12,9 @@ import { Segmented } from "../Segmented";
 import { CSV_LIMITS, ListPreflightError, downloadCsv, exportRows, importRecords, type ListExport, type ListImport } from "./listTransfer";
 import styles from "./ListCapabilities.module.css";
 import { RecordCard, type RecordCardConfig } from "./RecordCard";
-import { AnimatePresence, usePresence } from "motion/react";
-import { Slide } from "@animate-ui/react/primitives/effects/slide";
-import { motionTokens, useTempoTransition } from "@animate-ui/react/utils/motion";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
-import { ADMIN_CONTENT_MOTION } from "@/app/designTokens";
+import { SelectionToolbar } from "@/components/selection-toolbar/archive/SelectionToolbar";
+import "@/components/selection-toolbar/adapter.css";
 
 export function listIdentity() {
   const state = useAuthStore.getState();
@@ -133,21 +131,9 @@ function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImp
   </Modal>;
 }
 
-function SelectionBarSurface({ children, barRef, label }: { children: ReactNode; barRef: Ref<HTMLDivElement>; label: string }) {
-  const [present, remove] = usePresence();
-  const reduced = usePrefersReducedMotion();
-  const transition = useTempoTransition(motionTokens.transition.fade);
-  useEffect(() => { if (!present && reduced) remove?.(); }, [present, reduced, remove]);
-  return <Slide ref={barRef} direction="up" offset={ADMIN_CONTENT_MOTION.selectionOffset} data-list-selection-bar="" className={styles.bar}
-    transition={transition}
-    animate={present ? "visible" : "hidden"}
-    onAnimationComplete={definition => { if (!present && definition === "hidden") remove?.(); }}
-    variants={{ hidden: { opacity: 0, y: reduced ? 0 : ADMIN_CONTENT_MOTION.selectionOffset }, visible: { opacity: 1, y: 0 } }}
-    inert={!present || undefined} aria-hidden={!present || undefined} role="region" aria-label={label}>{children}</Slide>;
-}
-
 export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, onSelectPage }: { rows: T[]; clear: () => void; config?: ListExport<T>; actions?: ListBatchAction<T>[]; busy?: boolean; onSelectPage?: () => void }) {
   const { t } = useLocale();
+  const reduced = usePrefersReducedMotion();
   const [action, setAction] = useState<ListBatchAction<T>>(), [reason, setReason] = useState("");
   const [actionOpen, setActionOpen] = useState(false);
   const [actionRows, setActionRows] = useState<T[]>([]);
@@ -190,12 +176,21 @@ export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, o
     } finally { locked.current = false; setRunning(false); }
   }
   return <>
-    <AnimatePresence initial={false}>{!!rows.length && <SelectionBarSurface key="selection" barRef={barRef} label={t("批量操作")}><span role="status">{t("已选择")} {rows.length}</span>
-      {onSelectPage && <Button type="text" size="small" disabled={busy || running} onClick={onSelectPage}>{t("选择当前页")}</Button>}
-      {config && <Button size="small" disabled={busy || running} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}>{t("导出所选")}</Button>}
-      {actions.filter(item => item.allowed()).map(item => <Button key={item.key} size="small" danger={item.danger} disabled={busy || running || !rows.some(item.eligible)} onClick={() => { setAction(item); setActionOpen(true); setActionRows([...rows]); setReason(""); setResults([]); }}>{t(item.label)}</Button>)}
-      <Button type="text" size="small" disabled={running} aria-label={t("清除选择")} icon={<X size={16} aria-hidden="true" />} onClick={clear} />
-    </SelectionBarSurface>}</AnimatePresence>
+    <div ref={barRef} data-list-selection-bar="" className={`${styles.selectionHost} rental-selection-toolbar`}>
+      <SelectionToolbar count={rows.length} countPrefix={`${t("已选择")} `} toolbarLabel={t("批量操作")} clearLabel={t("清除选择")}
+        busy={busy || running} clearDisabled={running} reducedMotion={reduced} onClear={() => {
+          const host = barRef.current?.parentElement;
+          const returnFocus = barRef.current?.contains(document.activeElement);
+          clear();
+          if (returnFocus) requestAnimationFrame(() => host?.querySelector<HTMLElement>('button[role="checkbox"]:not(:disabled), input[type="checkbox"]:not(:disabled)')?.focus({ preventScroll: true }));
+        }} actions={[
+          ...(onSelectPage ? [{ label: t("选择当前页"), disabled: busy || running, onClick: onSelectPage }] : []),
+          ...(config ? [{ label: t("导出所选"), icon: <AnimatedIcon name="download" />, disabled: busy || running, onClick: () => exportRows(config, rows) }] : []),
+          ...actions.filter(item => item.allowed()).map(item => ({ label: t(item.label), destructive: item.danger,
+            disabled: busy || running || !rows.some(item.eligible),
+            onClick: () => { setAction(item); setActionOpen(true); setActionRows([...rows]); setReason(""); setResults([]); } }))
+        ]} />
+    </div>
     {action && <Modal open={actionOpen} afterClose={() => setAction(undefined)} title={t(action.label)} closable={!running} maskClosable={!running} keyboard={!running} onCancel={() => { if (!running) setActionOpen(false); }} footer={<>
       <Button disabled={running} onClick={() => setActionOpen(false)}>{t("关闭")}</Button>
       {!!results.length && <Button disabled={running} onClick={() => downloadCsv(t("批量操作结果"), [["row", "key", "status", "error"], ...results.map(item => [item.row, item.name, t(labels[item.status]), item.error ?? ""])])}>{t("下载结果")}</Button>}
