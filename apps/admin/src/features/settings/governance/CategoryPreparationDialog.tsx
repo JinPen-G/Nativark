@@ -77,7 +77,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
   return <>
     <UnsavedChangesGuard dirty={open && dirty} busy={busy} />
     <Button onClick={() => setOpen(true)}>{t("准备品类版本资料")}</Button>
-    <Modal title={t("品类版本预备资料")} open={open} footer={null} width="90%" mask={{ closable: false }} onCancel={() => guarded(() => setOpen(false))}>
+    <Modal presentation="side" title={t("品类版本预备资料")} open={open} footer={null} width={960} mask={{ closable: false }} onCancel={() => guarded(() => setOpen(false))}>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Alert type="info" showIcon title={t("这里只保存候选资料，不切换品类版本、不修改当前价格与规则。正式采用尚未开放。")} />
         <Select aria-label={t("版本操作")} disabled={busy} value={operation} options={[{ value: "upgrade", label: t("升级") }, { value: "restore", label: t("恢复旧版") }]} onChange={(next) => guarded(() => { setOperation(next); setTargetId(undefined); setEntityId(undefined); })} />

@@ -12,6 +12,8 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "导入": "Import",
+  "结果": "Result",
   "全部匹配": "Matched",
   "差异已处理": "Reviewed",
   "查看明细": "View entries",

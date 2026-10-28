@@ -144,7 +144,7 @@ export function PersonalMembershipPage() {
         <Button disabled={!canGrant} onClick={() => { setSelected(detailMember); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
       </>}
     />}
-    <Drawer title={drawer === "create" ? t("新增个人会员") : drawer === "edit" ? t("编辑个人会员") : drawer === "password" ? t("设置临时密码") : drawer === "qualification" ? t("提交品类证件") : drawer === "grant" ? t("授予会员方案") : t("证件类型配置")} size={520} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
+    <Drawer presentation={drawer === "password" ? "dialog" : "side"} title={drawer === "create" ? t("新增个人会员") : drawer === "edit" ? t("编辑个人会员") : drawer === "password" ? t("设置临时密码") : drawer === "qualification" ? t("提交品类证件") : drawer === "grant" ? t("授予会员方案") : t("证件类型配置")} size={520} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
       {(drawer === "create" || drawer === "edit" || drawer === "password") && <Form layout="vertical" form={form} disabled={drawer === "password" ? !canManageAccount : !canManage} onFinish={(values) => drawer === "create" ? canManage && create.mutate(values) : drawer === "edit" ? canManage && edit.mutate(values) : canManageAccount && password.mutate(values)}>
         {drawer !== "password" && <><Form.Item label={t("姓名")} name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label={t("手机号")} name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? t("留空则保持现有手机号") : undefined} /></Form.Item><Form.Item label={t("邮箱")} name="email"><Input /></Form.Item><Form.Item label={t("性别")} name="gender"><Select allowClear options={CUSTOMER_GENDERS.map((value) => ({ value, label: t(CUSTOMER_GENDER_LABELS[value]) }))} /></Form.Item><Form.Item label={t("生日")} name="birthday"><Input placeholder="YYYY-MM-DD" /></Form.Item><Form.Item label={t("来源渠道")} name="sourceChannel"><Select allowClear options={CUSTOMER_SOURCE_CHANNELS.map((value) => ({ value, label: t(CUSTOMER_SOURCE_CHANNEL_LABELS[value]) }))} /></Form.Item><Form.Item label={t("常驻城市")} name="region"><Input placeholder={t("如 上海")} /></Form.Item><Form.Item label={t("证件号")} name="identityNo"><Input placeholder={t("仅保存脱敏展示值")} /></Form.Item></>}
         {drawer === "create" && canManageAccount && <Form.Item label={t("临时密码（可选）")} name="temporaryPassword" rules={[{ min: 8 }]}><Input.Password /></Form.Item>}
@@ -197,7 +197,7 @@ export function PersonalMembershipPage() {
       </QueryState>}
       {drawer === "types" && <QualificationTypesEditor />}
     </Drawer>
-    <Drawer
+    <Drawer presentation="dialog"
       title={statusScope === "account" ? t("账号状态 / 注销") : t("租户会员状态")}
       size={520}
       open={Boolean(statusTarget && statusScope)}
@@ -234,7 +234,7 @@ export function PersonalMembershipPage() {
         <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true, message: t("状态变更必须填写原因") }]}><Input.TextArea rows={3} maxLength={500} showCount placeholder={t("例如：客户逾期未归还，暂停租户全部空间的新业务资格")} /></Form.Item>
       </Form>
     </Drawer>
-    <Drawer title={`${t("撤销会员方案")}: ${revokeTarget?.snapshot.planName ?? ""}`} size={520} open={Boolean(revokeTarget)} onClose={() => { setRevokeTarget(undefined); revokeForm.resetFields(); }} destroyOnHidden>
+    <Drawer presentation="dialog" title={`${t("撤销会员方案")}: ${revokeTarget?.snapshot.planName ?? ""}`} size={520} open={Boolean(revokeTarget)} onClose={() => { setRevokeTarget(undefined); revokeForm.resetFields(); }} destroyOnHidden>
       <Form form={revokeForm} layout="vertical" disabled={!canGrant} onFinish={(values) => canGrant && revokeTarget && revoke.mutate({ assignmentId: revokeTarget.id, reason: values.reason })}><Form.Item name="reason" label={t("撤销原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={4} /></Form.Item><Button type="primary" danger htmlType="submit" disabled={!canGrant} loading={revoke.isPending}>{t("确认撤销")}</Button></Form>
     </Drawer>
   </QueryState>;

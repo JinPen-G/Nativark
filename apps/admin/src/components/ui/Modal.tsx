@@ -1,6 +1,6 @@
 import { ConfigProvider, Modal as AntModal, type ModalProps } from "antd";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Dialog, DialogContent } from "./Dialog";
 import { Button } from "./Button";
 import { ActionButton } from "./ActionButton";
@@ -22,6 +22,7 @@ export function Modal(props: ModalProps & { onConfirm?: () => Promise<unknown>; 
   if (props.open && !wasOpen.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   wasOpen.current = Boolean(props.open);
   useEffect(() => { if (props.open) setRetained(true); }, [props.open]);
+  useLayoutEffect(() => { host.inert = !props.open; }, [host, props.open]);
   const { open, children, title, footer, confirmLoading, onCancel, onOk, styles, presentation = "dialog",
     width = presentation === "dialog" ? ADMIN_OVERLAY_METRICS.dialogWidth : presentation === "side" ? ADMIN_OVERLAY_METRICS.sideWidth : ADMIN_OVERLAY_METRICS.bottomWidth } = props;
   // These contracts cannot be represented by the public Dialog without dropping behavior.

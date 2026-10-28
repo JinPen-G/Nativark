@@ -65,6 +65,7 @@
    focus stack, but lift the popup layer above the task backdrop. */
 :root:has([data-rental-arc-modal][data-state="open"]) [data-radix-popper-content-wrapper] { z-index: 1200 !important; }
 .rental-arc-drawer > div:first-child { align-items: center; }
+.rental-arc-drawer > div:first-child { padding: var(--space-4) var(--rental-overlay-padding); }
 .rental-arc-drawer > div:first-child > div:first-child { min-width: 0; flex: 1; }
 .rental-arc-drawer > div:first-child > button { order: 3; }
 .arc-drawer-actions { display: flex; align-items: center; gap: 8px; order: 2; }
@@ -289,6 +290,7 @@
 [data-rental-dialog-overlay] { z-index: 1099; }
 .rental-arc-modal[data-closable="false"] > [class*="header"] > button { display: none; }
 .rental-arc-modal { display: flex; flex-direction: column; overflow: hidden; border-radius: var(--radius-panel); }
+.rental-arc-modal > div:first-child { padding: var(--space-4) var(--rental-overlay-padding); }
 .rental-arc-modal > div:last-child { display: flex; flex-direction: column; min-height: 0; padding: 0; }
 .arc-modal-mount, .arc-modal-portal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .arc-modal-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding: var(--rental-overlay-padding); }

@@ -984,7 +984,7 @@ export function RentalOrderDetailPage() {
     </div> },
   ]} />
 </div>}</QueryState>
-     <Modal title={inspectionReturnItems?.length ? t("部分归还检查") : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>
+     <Modal presentation="side" title={inspectionReturnItems?.length ? t("部分归还检查") : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>
       {inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => {
         const { attachmentsText, exceptionCode, exceptionDescription, exceptionAllocationId, exceptionChargeAmount, ...results } = values as Record<string, unknown> & { attachmentsText?: string; exceptionCode?: string; exceptionDescription?: string; exceptionAllocationId?: string; exceptionChargeAmount?: number };
         const textEvidence = attachmentsText?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean) ?? [];
@@ -1008,7 +1008,7 @@ export function RentalOrderDetailPage() {
         {inspection.stage === "return" && <Card size="small" title={t("异常与损坏建议（可选)")}><Alert type="info" showIcon title={t("检查员只记录事实和建议损失额，不会直接向客户计费。")} style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label={t("异常编码")}><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label={t("异常说明")}><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionAllocationId" label={t("关联实物/分配项")} extra={t("不选择时按本批全部归还资源处理")}><Select allowClear placeholder={t("选择本次归还的具体资源")} options={(detail?.allocations ?? []).filter((allocation) => allocation.status === "picked_up" && (!inspectionReturnItems?.length || inspectionReturnItems.some((item) => item.allocationId === allocation.id))).map((allocation) => ({ value: allocation.id, label: `${allocation.assetNo ?? groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${allocation.id}` }))} /></Form.Item><Form.Item name="exceptionChargeAmount" label={t("建议损失金额")}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}
       </Form>}
      </Modal>
-     <Modal title={t("续租 / 延期")} open={extensionOpen} onCancel={() => { setExtensionOpen(false); setExtensionPreview(undefined); }} destroyOnHidden width={640}
+     <Modal presentation="side" title={t("续租 / 延期")} open={extensionOpen} onCancel={() => { setExtensionOpen(false); setExtensionPreview(undefined); }} destroyOnHidden width={640}
       footer={[
         <Button key="cancel" onClick={() => { setExtensionOpen(false); setExtensionPreview(undefined); }}>{t("取消")}</Button>,
         <Button key="preview" loading={previewExtension.isPending} onClick={() => extensionForm.validateFields().then((values) => previewExtension.mutate(values))}>{t("试算费用")}</Button>,
@@ -1052,7 +1052,7 @@ export function RentalOrderDetailPage() {
         </ListSection>}
       </Form>
     </Modal>
-    <Modal
+    <Modal presentation="side"
       title={t("办理取货后换货")}
       open={postPickupExchangeOpen}
       onCancel={() => { setPostPickupExchangeOpen(false); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); postPickupExchangeForm.resetFields(); }}
@@ -1158,7 +1158,7 @@ export function RentalOrderDetailPage() {
         </Card>}
       </Form>
     </Modal>
-    <Modal
+    <Modal presentation="side"
       title={t("部分取消商品 / 服务")}
       open={partialCancelOpen}
       onCancel={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}
@@ -1259,7 +1259,7 @@ export function RentalOrderDetailPage() {
       </Form>
     </Modal>
     <Modal title={t("替换套装组成")} open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onConfirm={() => substitutionForm.validateFields().then((values) => substitute.mutateAsync(values))} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label={t("当前组成")}><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label={t("替代商品")} rules={[{ required: true }]}><Select options={substitutionOptions} placeholder={t("选择同一替代组的候选商品")} /></Form.Item></Form></Modal>
-    <Modal title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("部分归还检查") : t("部分归还")} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("选择本批归还项后，下一步填写归还检查。") : t("本批实物会直接释放；最后一批仍须使用整单归还。")} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: "var(--rental-control-width-wide)" }} placeholder={t("选择待归还资产或数量项")} options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${t("剩余")} ${allocation.quantity}` }))} /></Form.Item><Form.Item name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "var(--rental-control-width-compact)" }} /></Form.Item><Button type="text" danger aria-label={t("移除归还项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("增加归还项")}</Button></Space>}</Form.List></Form></Modal>
+    <Modal presentation="side" title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("部分归还检查") : t("部分归还")} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("选择本批归还项后，下一步填写归还检查。") : t("本批实物会直接释放；最后一批仍须使用整单归还。")} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: "var(--rental-control-width-wide)" }} placeholder={t("选择待归还资产或数量项")} options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${t("剩余")} ${allocation.quantity}` }))} /></Form.Item><Form.Item name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "var(--rental-control-width-compact)" }} /></Form.Item><Button type="text" danger aria-label={t("移除归还项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("增加归还项")}</Button></Space>}</Form.List></Form></Modal>
     <Modal title={fundingOperation ? `${t(FUNDING_ACTION_LABELS[fundingOperation.action])}${t(FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument])}（${t("模拟")}）` : t("模拟资金操作")} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onConfirm={() => fundingForm.validateFields().then((values) => fundingAction.mutateAsync(values))} confirmLoading={fundingAction.isPending} destroyOnHidden>
       <Alert type="warning" showIcon title={t("本操作仅写入模拟资金流水，不会发起真实扣款或冻结。")} style={{ marginBottom: 16 }} />
       <Form form={fundingForm} layout="vertical" onFinish={(values) => fundingAction.mutate(values)}>
@@ -1269,7 +1269,7 @@ export function RentalOrderDetailPage() {
         <Form.Item name="reason" label={t("操作原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("审核检查异常")} open={Boolean(exceptionReview)} onCancel={() => { setExceptionReview(undefined); exceptionReviewForm.resetFields(); }} onConfirm={() => exceptionReviewForm.validateFields().then((values) => reviewException.mutateAsync(values))} confirmLoading={reviewException.isPending} destroyOnHidden>
+    <Modal presentation="side" title={t("审核检查异常")} open={Boolean(exceptionReview)} onCancel={() => { setExceptionReview(undefined); exceptionReviewForm.resetFields(); }} onConfirm={() => exceptionReviewForm.validateFields().then((values) => reviewException.mutateAsync(values))} confirmLoading={reviewException.isPending} destroyOnHidden>
       <Alert type="info" showIcon title={exceptionReview?.description} description={`${t("检查员建议费用：")}${exceptionReview?.suggested === undefined ? t("未填写") : money(exceptionReview.suggested)}。${t("最终费用由具备结算权限的人员确认。")}`} style={{ marginBottom: 16 }} />
       <Form form={exceptionReviewForm} layout="vertical" onFinish={(values) => reviewException.mutate(values)}>
         <Form.Item name="decision" label={t("审核结论")} rules={[{ required: true }]}><Select options={[{ value: "approved", label: t("通过并计费") }, { value: "rejected", label: t("驳回，不计费") }]} /></Form.Item>

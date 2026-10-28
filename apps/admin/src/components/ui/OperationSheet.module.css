@@ -1,4 +1,4 @@
-/* Original UIArc edge motion stays intact. Task sheets use guarded dismissal rather than swipe dismissal. */
+/* Original UIArc edge motion stays intact. Busy imports disable swipe dismissal. */
 .popup { z-index: 1100; display: flex; flex-direction: column; min-width: 0; max-width: 100vw; height: 100dvh; max-height: 100dvh; overflow: hidden; border-radius: var(--radius-panel) 0 0 var(--radius-panel); }
 .popup[data-side="bottom"] { inset: auto 0 0; margin-inline: auto; height: auto; max-width: min(var(--rental-overlay-bottom-width), calc(100vw - var(--rental-overlay-viewport-inset))); max-height: calc(100dvh - var(--rental-overlay-viewport-inset)); border-radius: var(--radius-panel) var(--radius-panel) 0 0; }
 .popup > div:first-child { flex: none; padding: var(--space-4) var(--rental-overlay-padding); }

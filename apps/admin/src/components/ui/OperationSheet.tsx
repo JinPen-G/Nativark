@@ -24,7 +24,8 @@ interface OperationSheetProps {
 export function OperationSheet({ open, title, side, width, style, backdropStyle, className, keyboard, maskClosable, closable, onClose, onCloseAutoFocus, onOpenChangeComplete, children }: OperationSheetProps) {
   const { t } = useLocale();
   return <Drawer open={open} onOpenChange={next => { if (!next) onClose(); }}>
-    <DrawerContent title={title} closeLabel={t("关闭")} side={side} dragEnabled={false}
+    <DrawerContent title={title} closeLabel={t("关闭")} side={side}
+      dragEnabled={side === "bottom" && closable !== false && keyboard !== false && maskClosable !== false}
       data-rental-operation-sheet="" data-rental-arc-modal="" data-closable={closable === false ? "false" : "true"}
       aria-describedby={undefined} className={[styles.popup, "rental-operation-sheet", className].filter(Boolean).join(" ")}
       style={{ width, ...style }} overlayStyle={{ zIndex: 1099, ...backdropStyle }}

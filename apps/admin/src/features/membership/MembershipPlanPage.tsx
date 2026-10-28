@@ -234,7 +234,7 @@ export function MembershipPlanPage() {
         </Space> },
       ]} />
     </Drawer>
-    <Drawer title={versionAction?.kind === "disable" ? `${t("停用")} ${versionAction.planName} v${versionAction.version}` : `${t("恢复")} ${versionAction?.planName ?? t("会员方案")} v${versionAction?.version ?? ""}`} size={520} open={Boolean(versionAction)} onClose={() => { setVersionAction(undefined); actionForm.resetFields(); }} destroyOnHidden>
+    <Drawer presentation="dialog" title={versionAction?.kind === "disable" ? `${t("停用")} ${versionAction.planName} v${versionAction.version}` : `${t("恢复")} ${versionAction?.planName ?? t("会员方案")} v${versionAction?.version ?? ""}`} size={520} open={Boolean(versionAction)} onClose={() => { setVersionAction(undefined); actionForm.resetFields(); }} destroyOnHidden>
       <Form form={actionForm} layout="vertical" disabled={!canPublish} onFinish={(values) => { void submitVersionAction(values).catch(() => undefined); }}>
         <Form.Item name="reason" label={versionAction?.kind === "disable" ? t("停用原因") : t("恢复原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={4} /></Form.Item>
         <SaveButton form={actionForm} disabled={!canPublish} pending={disable.isPending || restore.isPending} label={versionAction?.kind === "disable" ? t("确认停用") : t("生成恢复草稿")} onSave={submitVersionAction} />

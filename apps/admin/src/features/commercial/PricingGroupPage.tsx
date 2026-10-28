@@ -277,7 +277,7 @@ export function PricingGroupPage() {
         <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
       </Form>
     </Drawer>
-    <Drawer
+    <Drawer presentation="dialog"
       title={`${t("押金/预授权费率")} · ${securityEditing?.name ?? ""}`}
       size={640}
       open={securityOpen}

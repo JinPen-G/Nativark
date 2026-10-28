@@ -156,7 +156,7 @@ export function PaymentReconciliationPage() {
         </ListSection>}
       </QueryState>
     </RecordDetailLayout>}
-    <Drawer destroyOnHidden title={t("导入对账文件")} size={520} open={importOpen}
+    <Drawer presentation="bottom" destroyOnHidden title={t("导入对账文件")} size={520} open={importOpen}
       onClose={() => { if (!importStatement.isPending) setImportOpen(false); }} keyboard={!importStatement.isPending} maskClosable={!importStatement.isPending}
       extra={<ActionButton label={t("导入并核对")} pendingLabel={t("导入中")} disabled={!fileList.length} pending={importStatement.isPending} onAction={() => importStatement.mutateAsync()} />}>
       <Form layout="vertical" className={styles.importForm}>
@@ -173,7 +173,7 @@ export function PaymentReconciliationPage() {
         <p className={styles.detailNote}><Info size={14} aria-hidden="true" />{t("导入仅生成核对记录，不修改支付或退款事实。")}</p>
       </Form>
     </Drawer>
-    <Drawer destroyOnHidden title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} keyboard={!reviewLine.isPending} maskClosable={!reviewLine.isPending} onClose={() => { if (!reviewLine.isPending) setReviewTarget(undefined); }} extra={<SaveButton label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
+    <Drawer presentation="dialog" destroyOnHidden title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} keyboard={!reviewLine.isPending} maskClosable={!reviewLine.isPending} onClose={() => { if (!reviewLine.isPending) setReviewTarget(undefined); }} extra={<SaveButton label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
       <Form form={reviewForm} layout="vertical" onFinish={(values) => reviewLine.mutate(values)}>
         <div className={styles.reviewContext}>
           <strong>{t("第")} {reviewTarget?.line.rowNumber} {t("行")} · {reviewTarget?.line.merchantOrderNo}</strong>

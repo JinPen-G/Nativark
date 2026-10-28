@@ -113,7 +113,7 @@ function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImp
     } catch (issue) { setError(t(issue instanceof Error ? issue.message : "操作失败")); }
     finally { locked.current = false; setBusy(false); }
   }
-  return <Modal open={open} afterClose={onClosed} title={t("导入资料")} onCancel={() => { if (!busy) onClose(); }} closable={!busy} maskClosable={!busy} keyboard={!busy} footer={<>
+  return <Modal presentation="bottom" open={open} afterClose={onClosed} title={t("导入资料")} onCancel={() => { if (!busy) onClose(); }} closable={!busy} maskClosable={!busy} keyboard={!busy} footer={<>
     <Button disabled={busy} onClick={onClose}>{t("关闭")}</Button>
     {finished ? <Button onClick={() => downloadCsv(`${config.filename}-${t("导入结果")}`, [["row", "key", "status", "error"], ...items.map(item => [item.row, item.name, t(labels[item.status]), item.error ?? ""])])}>{t("下载结果")}</Button>
       : <Button type="primary" loading={busy} disabled={!allowed() || !items.some(item => item.status === "ready") || items.some(item => item.status === "invalid")} onClick={() => void submit()}>{t("确认导入")}</Button>}
