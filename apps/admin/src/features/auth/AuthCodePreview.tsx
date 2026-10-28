@@ -21,12 +21,12 @@ const PREVIEW_CODE = "123456";
 
 /** UI-only boundary: no API imports, authentication, credential storage or password mutation. */
 export function AuthCodePreview({ mode, tenantCode = "", tenantLocked, onTenantChange, onBack }: {
-  mode: Channel | "reset"; tenantCode?: string; tenantLocked: boolean;
+  mode: "code" | "reset"; tenantCode?: string; tenantLocked: boolean;
   onTenantChange: (value: string) => void; onBack: () => void;
 }) {
   const { t } = useLocale();
   const reduce = Boolean(useReducedMotion());
-  const [channel, setChannel] = useState<Channel>(mode === "email" ? "email" : "phone");
+  const [channel, setChannel] = useState<Channel>("phone");
   const [stage, setStage] = useState<Stage>("identity");
   const [direction, setDirection] = useState(1);
   const [address, setAddress] = useState("");
@@ -64,9 +64,15 @@ export function AuthCodePreview({ mode, tenantCode = "", tenantLocked, onTenantC
   const custom = { direction, reduce };
   return <section className="login-code-preview" aria-label={t(reset ? "找回密码预览" : "验证码登录预览")}>
     <Alert type="info" title={t("仅前端预览，暂未接入验证码服务")} description={t("不会发送短信或邮件，不会登录账号，也不会修改真实密码。")} />
-    {reset && stage === "identity" && <Segmented value={channel} onChange={value => { setChannel(value as Channel); setAddress(""); setPhoneValid(false); clearVerification(); }} options={[{ value: "phone", label: t("手机验证") }, { value: "email", label: t("邮箱验证") }]} />}
+    {stage === "identity" && <Segmented aria-label={t("接收方式")} value={channel} onChange={value => {
+      setDirection(value === "email" ? 1 : -1);
+      setChannel(value as Channel);
+      setAddress("");
+      setPhoneValid(false);
+      clearVerification();
+    }} options={[{ value: "phone", label: t("短信") }, { value: "email", label: t("邮箱") }]} />}
     <div className="login-preview-viewport"><AnimatePresence initial={false} mode="wait" custom={custom}>
-      <motion.div key={stage} custom={custom} variants={stepMotion} initial="enter" animate="center" exit="exit" onAnimationComplete={() => {
+      <motion.div key={`${stage}:${channel}`} custom={custom} variants={stepMotion} initial="enter" animate="center" exit="exit" onAnimationComplete={() => {
         const preview = document.querySelector(".login-code-preview");
         // Keep keyboard focus without moving the login scroller mid-transition.
         if (stage === "done") preview?.querySelector<HTMLElement>(".login-preview-result")?.focus({ preventScroll: true });

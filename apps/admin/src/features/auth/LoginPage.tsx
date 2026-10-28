@@ -51,7 +51,7 @@ export function LoginPage() {
   const [resettingDemoPassword, setResettingDemoPassword] = useState(false);
   const [demoAccountsOpen, setDemoAccountsOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>(undefined);
-  const [loginMode, setLoginMode] = useState<"password" | "phone" | "email" | "reset">("password");
+  const [loginMode, setLoginMode] = useState<"password" | "code" | "reset">("password");
   const [loggingIn, setLoggingIn] = useState(false);
   const [providerPreview, setProviderPreview] = useState<string>();
   const watchedTenantCode = Form.useWatch("tenantCode", form)?.trim().toLowerCase();
@@ -167,7 +167,7 @@ export function LoginPage() {
                 <Typography.Paragraph type="secondary">{t(loginMode === "reset" ? "通过手机号或邮箱验证找回密码（前端预览）。" : "使用租户账号进入对应品类的租赁工作区。")}</Typography.Paragraph>
               </div>
               {loginMode !== "reset" && <div className="login-methods"><Segmented value={loginMode} disabled={loggingIn} onChange={value => switchLoginMode(value as typeof loginMode)} options={[
-                { value: "password", label: t("账号密码") }, { value: "phone", label: t("短信验证码") }, { value: "email", label: t("邮箱验证码") }
+                { value: "password", label: t("账号密码") }, { value: "code", label: t("验证码") }
               ]} /></div>}
               {tenantLockedButUnresolved ? (
                 <Alert
