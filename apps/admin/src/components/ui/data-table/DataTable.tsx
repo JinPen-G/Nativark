@@ -12,6 +12,7 @@ import { Check, ChevronDown, ChevronsUpDown, ChevronUp, EyeOff, Search, Settings
 import { useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type TdHTMLAttributes, type ReactNode } from "react";
 import { useLocale } from "@/app/locale";
 import { Button } from "../Button";
+import { EmptyScene, type EmptySceneKind } from '../EmptyScene';
 import { ADMIN_LOADING_METRICS } from "@/app/designTokens";
 import { TableSkeletonCell } from "../../loading/LoadingSkeleton";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion, type HTMLMotionProps } from "motion/react";
@@ -98,11 +99,11 @@ function CellContent<T>({ cell, animated, paused }: { cell: Cell<T, unknown>; an
     renderNumber={config.renderNumber ? formatted => config.renderNumber!(formatted, row) : undefined} paused={paused}>{content}</DataTableCellMotion>;
 }
 
-export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, footer, animated = false, motionScope = "", compactHeader = false, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
+export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, emptyScene = 'empty', footer, animated = false, motionScope = "", compactHeader = false, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
   table: TanstackTable<T>; caption: string; busy?: boolean; loading?: boolean;
   /** Background revalidation is not placeholder data or a blocking load. */
   refreshing?: boolean;
-  empty: ReactNode; footer?: ReactNode; animated?: boolean;
+  empty: ReactNode; emptyScene?: EmptySceneKind; footer?: ReactNode; animated?: boolean;
   /** Reset motion history on page/filter/scope changes; placeholder data is paused by busy. */
   motionScope?: string;
   compactHeader?: boolean;
@@ -157,7 +158,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
               </td>; })}
             </motion.tr>, row.getIsExpanded() && renderExpanded ? <motion.tr key={`${row.id}-detail`} className={styles.expandedRow}
               initial={suppress ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={suppress ? { duration: 0 } : expandedTransition}>
-              <td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></motion.tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}><div className={styles.emptyContent}>{empty}</div></td></tr>}
+              <td colSpan={Math.max(1, columns.length)}>{renderExpanded(row)}</td></motion.tr> : null]) : <tr key="empty"><td colSpan={Math.max(1, columns.length)} className={styles.empty}><div className={styles.emptyContent}>{typeof empty === "string" ? <EmptyScene compact scene={emptyScene} title={empty} /> : empty}</div></td></tr>}
           </AnimatePresence>}
         </tbody></LayoutGroup>
       </table>

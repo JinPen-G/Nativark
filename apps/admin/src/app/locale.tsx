@@ -12,6 +12,7 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "网络连接已断开": "You are offline",
   "AI 服务设置": "AI settings",
   "AI 任务中心": "AI tasks",
   "可用模型": "Available models",

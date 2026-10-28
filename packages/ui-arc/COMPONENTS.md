@@ -147,7 +147,7 @@
 | changelog-feed | 已下载备用 | — |
 | sign-in | 已下载备用 | — |
 | page-header | 已下载备用 | — |
-| empty-states | 已下载备用 | — |
+| empty-states | 已适配：独立场景、共享空列表 | `components/ui/EmptyScene.tsx`, `components/ui/empty-scene/` |
 | login-centered | 已引用（可能含兼容分支） | `features/auth/AuthCodePreview.tsx`<br>`features/auth/LoginPage.tsx` |
 | site-header | 已下载备用 | — |
 | site-footer | 已下载备用 | — |

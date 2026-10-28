@@ -5,6 +5,7 @@ export { UserMenu } from "./UserMenu";
 export { Modal } from "./Modal";
 export { App } from "./App";
 export { Empty } from "./Empty";
+export { EmptyScene, type EmptySceneKind, type EmptySceneProps } from "./EmptyScene";
 export { Skeleton } from "./Skeleton";
 export { Radio } from "./Radio";
 export { Collapse } from "./Collapse";

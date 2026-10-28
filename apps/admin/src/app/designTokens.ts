@@ -52,6 +52,7 @@ export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, acc
 export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, expandWidth: 52 } as const;
 /** Structural loading geometry; controls/type/colors continue to use their existing roles. */
 export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: 80, textRadius: 4 } as const;
+export const ADMIN_EMPTY_METRICS = { artWidth: 240, artCompactWidth: 144 } as const;
 export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 240, bulkMaxWidth: 760, previewMaxHeight: 320 } as const;
 export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
@@ -245,6 +246,8 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-navigation-easing": ADMIN_NAVIGATION_MOTION.easing,
     "--rental-navigation-retreat-scale": String(ADMIN_NAVIGATION_MOTION.retreatScale),
     "--rental-navigation-retreat-opacity": String(ADMIN_NAVIGATION_MOTION.retreatOpacity),
+    "--rental-empty-art-width": px(ADMIN_EMPTY_METRICS.artWidth),
+    "--rental-empty-art-compact-width": px(ADMIN_EMPTY_METRICS.artCompactWidth),
     "--rental-icon-control-size": px(ADMIN_ICON_METRICS.controlSize),
     "--rental-icon-control-stroke": String(ADMIN_ICON_METRICS.controlStroke),
     "--rental-icon-title-size": px(ADMIN_ICON_METRICS.titleSize),

@@ -24,6 +24,7 @@ import { ListCards, ListSelectionBar, ListTransferTools, ListViewSwitch, type Li
 import type { ListExport, ListImport } from "./data-table/listTransfer";
 import capabilityStyles from "./data-table/ListCapabilities.module.css";
 import { ContentTransition } from "../workspace/ContentTransition";
+import type { EmptySceneKind } from './EmptyScene';
 
 export type BusinessTableProps<T extends object> = TableProps<T> & {
   /** Same-query revalidation keeps rows and local drafts mounted and visible. */
@@ -36,6 +37,7 @@ export type BusinessTableProps<T extends object> = TableProps<T> & {
   /** Search/filters share one responsive row with the standard table tools. */
   toolbar?: ReactNode;
   toolbarNote?: ReactNode;
+  emptyScene?: EmptySceneKind;
   exportConfig?: ListExport<T>;
   importConfig?: ListImport<unknown>;
   cardView?: ListCard<T> & { defaultView?: "list" | "cards" };
@@ -244,7 +246,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
     <ContentTransition value={view}>{props.cardView && view === "cards" && source.length > 0 ? <><ListCards key={identity} rows={pageRows} config={props.cardView} busy={loading} canSelect={row => !selectionConfig?.getCheckboxProps?.(row)?.disabled} getKey={row => String(getKey(row, source.indexOf(row)))} selected={new Set(Object.keys(selectedState).filter(key => selectedState[key]))}
       onSelect={selectable ? (row, checked) => { const id = String(getKey(row, source.indexOf(row))); if (!selectionConfig?.getCheckboxProps?.(row)?.disabled) updateSelection({ ...selectedState, [id]: checked }); } : undefined} />{pager}</> :
     <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0} refreshing={props.refreshing}
-      empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.scroll?.x === true ? undefined : props.scroll?.x}
+      emptyScene={props.emptyScene} empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.scroll?.x === true ? undefined : props.scroll?.x}
       showHeader={props.showHeader} animated motionScope=""
       rowProps={row => {
         const attributes = props.onRow?.(row.original, row.index) ?? {};
