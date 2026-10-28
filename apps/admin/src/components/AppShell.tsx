@@ -85,7 +85,7 @@ function ShellContents({ children }: { children: ReactNode }) {
   const detailRoute = Object.values(APP_ROUTES).find(route => matchPath(route.path, location.pathname)
     && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
   const breadcrumbItems = [
-    ...(current.section ? [{ title: <span className="breadcrumb-section">{current.section.icon}{t(current.section.label)}</span> }] : []),
+    ...(current.section ? [{ title: <span className="breadcrumb-section">{t(current.section.label)}</span> }] : []),
     { title: detailRoute && detailRoute.path !== current.route?.path && current.route
       ? <button type="button" className="breadcrumb-link" onClick={() => navigate(current.route!.path)}>{t(current.route.label)}</button>
       : t(current.route?.label ?? detailRoute?.label ?? "工作台") },
