@@ -24,7 +24,7 @@ export function NoticeActions({ id, surface = 'popup' }: { id: string; surface?:
   const item = inbox.messages.find(message => message.id === id);
   if (!item) return null;
   const href = allowedHref(item, auth);
-  return <div className="notification-business">
+  return <div className={`notification-business notification-business--${surface}`}>
     {item.workOrderId && <WorkOrderActions item={item} />}
     {item.threadId && <AiDraftActions item={item} />}
     <div className="notification-business-links"><Button size="small" disabled={!href} icon={<ArrowUpRight size={14} />} onClick={() => {

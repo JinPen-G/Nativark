@@ -1,6 +1,7 @@
 /* Supplied source geometry/motion is retained; only host tokens and integration slots differ. */
 .notification-page { min-width: 0; }
 .notification-page .rental-inbox.triage-local {
+  width: 100%;
   --triage-accent: var(--rental-color-primary);
   --triage-border: var(--rental-color-border-secondary);
   --triage-border-strong: var(--rental-color-border);
@@ -38,3 +39,13 @@
 .notification-business .arc-select-field { width: 100%; }
 .rental-inbox .inbox-triage_titleRow__hhNXV { flex-wrap: wrap; }
 .rental-inbox .notification-pending-filter { margin-left: 0; }
+/* Business details occupy one readable column within the original expansion. */
+.notification-business--inbox { max-width: 65ch; display: block; border: 0; padding: 0; margin-block: var(--space-3) 0; }
+.notification-business--inbox > * + * { margin-top: var(--space-3); }
+.notification-business--inbox .notification-facts { gap: var(--space-2); }
+.notification-business--inbox .notification-facts > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: var(--space-3); }
+.notification-business--inbox .notification-facts dd { text-align: start; }
+.notification-business--inbox > .notification-business-buttons { display: inline-flex; margin-right: var(--space-2); }
+.notification-business--inbox > .notification-business-links { display: inline-flex; }
+.rental-inbox .inbox-triage_trigger__d9cSf { text-align: start; }
+.rental-inbox .inbox-triage_subject__nuRkE { color: var(--triage-foreground); }

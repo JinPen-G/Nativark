@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Bell, ClipboardCheck, Sparkles, Wrench } from 'lucide-react';
+import { Bell, ClipboardCheck, ClipboardList, Sparkles, Wrench } from 'lucide-react';
 import { useLocale } from '@/app/locale';
 import { resolveAdminBrandName } from '@/app/branding';
 import { useAuthStore } from '@/features/auth/authStore';
@@ -18,10 +18,11 @@ export default function MessageCenterPage() {
   const auth = useAuthStore();
   useEffect(() => { document.title = `${tr('Message center')} · ${resolveAdminBrandName(auth.tenant, auth.user)}`; }, [locale, auth.tenant, auth.user]);
   const messages = useMemo(() => inbox.messages.map(item => {
-    const Icon = icons[item.category];
-    return { id: item.id, sender: tr(categories[item.category]), subject: `${item.demo ? `${tr('Local AI demo')} · ` : ''}${item.title}`,
-      preview: item.demo ? `${tr('Local AI demo')} · ${item.description}` : item.orderNo ? `${item.orderNo} · ${item.description}` : item.description,
-      body: item.description, time: formatNoticeTime(item.createdAt, locale), icon: <Icon size={18} />,
+    const Icon = item.workOrderId ? Wrench : item.orderNo ? ClipboardList : icons[item.category];
+    const description = item.description.replace(/\bappearance_damage\b/g, tr('Appearance damage'));
+    return { id: item.id, sender: item.orderNo ?? tr(item.workOrderId ? 'Work order' : categories[item.category]), subject: item.title,
+      preview: item.demo ? `${tr('Local AI demo')} · ${description}` : description,
+      body: description, time: formatNoticeTime(item.createdAt, locale), icon: <Icon size={18} />,
       unread: !item.read, pending: item.pending, folder: item.folder, restoreData: inbox.personal[item.id],
     } satisfies Message;
   }), [inbox.messages, inbox.personal, locale]);

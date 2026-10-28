@@ -29,7 +29,7 @@ const labels: Record<string, string> = {
   'Saved on this device': '个人消息状态保存在本机', 'Session only': '本机存储不可用，状态仅本次会话有效',
   'Local AI demo': 'AI 本地演示', 'Pending': '待处理',
   'Pending notifications': '待处理消息', 'No pending tasks': '暂无待处理事项', 'Tasks that need action appear here.': '需要处理的事项会显示在这里。',
-  'Work order': '工单', Assignee: '处理人', Unassigned: '未派工', Claim: '领取工单', Assign: '派工', Reassign: '转交',
+  'Work order': '工单', 'Appearance damage': '外观损伤', Assignee: '处理人', Unassigned: '未派工', Claim: '领取工单', Assign: '派工', Reassign: '转交',
   'Confirm assignment': '确认派工', Cancel: '取消', Back: '返回核对', 'Assignment updated.': '派工信息已确认。', 'Assignment failed.': '派工失败。',
   'An action is already pending.': '该操作正在处理中，请勿重复提交。', 'This action is no longer available.': '当前操作已不可用，请重新核对。',
   'The work order changed. Review it again.': '工单已更新，请重新核对后操作。', 'This assignee is no longer available.': '该处理人当前不可选，请重新选择。',
