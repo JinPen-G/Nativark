@@ -28,14 +28,14 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
   const editing = Boolean(entry);
 
   const mutation = useMutation({
-    // contentVersion（§3.3 介绍内容版本）不在本表单维护，编辑时原样带回，避免整体 PUT 把它清空。
-    mutationFn: (values: UpsertFeatureCatalogRequest) => subscriptionApi.upsertFeatureCatalog(values.code, { ...values, contentVersion: entry?.contentVersion }),
+    mutationFn: (values: UpsertFeatureCatalogRequest) => subscriptionApi.upsertFeatureCatalog(values.code, values),
     onSuccess: () => {
       message.success(t("已保存功能目录项"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "feature-catalog"] });
+      void queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] });
       onClose();
     },
-    onError: () => message.error(t("保存失败，请稍后重试（后端服务联调中）"))
+    onError: () => message.error(t("保存失败，请稍后重试"))
   });
 
   const initialValues: Partial<UpsertFeatureCatalogRequest> = entry
@@ -62,9 +62,10 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
         <Form.Item name="releaseStatus" label={t("上线状态")} rules={[{ required: true }]}>
           <Select options={Object.values(FeatureReleaseStatus).map((value) => ({ value, label: t(RELEASE_STATUS_LABEL[value]) }))} />
         </Form.Item>
-        <Form.Item name="valueText" label={t("客户价值")}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
+        <Form.Item name="valueText" label={t("权益说明")}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
         <Form.Item name="prerequisiteText" label={t("前提条件")}><Input maxLength={200} /></Form.Item>
         <Form.Item name="externalFeeNote" label={t("外部费用说明")}><Input maxLength={200} /></Form.Item>
+        <Form.Item name="contentVersion" label={t("介绍内容版本")}><Input maxLength={64} /></Form.Item>
         <Form.Item name="reason" label={t("变更原因")}><Input maxLength={200} /></Form.Item>
       </Form>
     </Modal>

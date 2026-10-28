@@ -123,4 +123,3 @@ export function PlanComparison({ features, prices, currentPlan, onAction, action
 }
 
 export default PlanComparison;
-

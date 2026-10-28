@@ -139,7 +139,7 @@
 | slot-text | 已下载备用 | — |
 | signup-form | 已下载备用 | — |
 | logo-marquee | 已下载备用 | — |
-| plan-comparison | 已下载备用 | — |
+| plan-comparison | 已适配：租户对比与 SaaS 配置预览 | `features/subscription/plan-comparison/PlanComparison.tsx` |
 | command-palette | 已下载备用 | — |
 | notification-center | 已下载备用 | — |
 | file-upload | 已引用（可能含兼容分支） | `components/ui/FileUpload.tsx`<br>`components/ui/Upload.tsx` |

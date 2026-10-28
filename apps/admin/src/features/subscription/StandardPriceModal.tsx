@@ -41,6 +41,7 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
     onSuccess: () => {
       message.success(t("已保存标准价"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "standard-prices"] });
+      void queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] });
       onClose();
     },
     onError: (error) => message.error(subscriptionError(error))
