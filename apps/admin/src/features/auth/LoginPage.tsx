@@ -16,6 +16,7 @@ import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_LOGIN_DEFAULTS, applyAdminF
 import { apiAssetOrigin } from "@/api/http";
 import { useLocale } from "@/app/locale";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { api } from "@/api/platform";
 import { useAuthStore } from "./authStore";
 
@@ -138,7 +139,7 @@ export function LoginPage() {
     <div className="login-stage">
       {/* 外层：原有的带留白/圆角/描边的视口容器，保持不变。 */}
       <div className="login-frame">
-        <div className="login-appearance"><AppearanceSwitcher iconOnly /></div>
+        <div className="login-appearance"><LanguageSwitcher /><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           {/* 内层：更大圆角的登录卡片，左品牌、右表单；窄屏左栏隐藏，卡片退化为单栏。 */}
           <div className="login-card">
