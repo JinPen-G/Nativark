@@ -9,6 +9,8 @@ import { useLocale } from "@/app/locale";
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
+import { NotificationProvider } from "@/features/notifications/NotificationProvider";
+import { HeaderNotifications } from "@/features/notifications/HeaderNotifications";
 import { WorkspaceClock } from "./WorkspaceClock";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
@@ -27,6 +29,9 @@ import "./animate-sidebar/sidebar-adapter.css";
 
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
+  return <OperatorProvider><NotificationProvider><AppShellLayout>{children}</AppShellLayout></NotificationProvider></OperatorProvider>;
+}
+function AppShellLayout({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
   if (rentalDesktopHost()) {
     return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
@@ -36,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
   return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
-    <OperatorProvider><ShellContents>{children}</ShellContents></OperatorProvider>
+    <ShellContents>{children}</ShellContents>
   </SidebarProvider></div></div></TooltipProvider>;
 }
 
@@ -118,7 +123,7 @@ function ShellContents({ children }: { children: ReactNode }) {
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
-          <Tooltip title={t("通知入口预留，暂未接入")}><Button type="text" size="small" className="workspace-notifications" aria-label={t("通知")} aria-disabled="true" icon={<Bell size={19} strokeWidth={1.75} />} /></Tooltip>
+          <HeaderNotifications />
         </div>
       </header>
       <div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>

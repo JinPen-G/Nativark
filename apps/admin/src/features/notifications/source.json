@@ -1,0 +1,19 @@
+{
+  "sources": {
+    "inbox": "D:/工作文件/uiarc-pro-archive/preview/src/components/inbox-triage",
+    "popup": "packages/ui-arc/vendor/registry/components/notification-center",
+    "avatar": "packages/ui-arc/vendor/registry/components/avatar"
+  },
+  "stylesSHA256": {
+    "inbox/integration.css": "800db82128f706ed331c816a0d090ed25fbeaf336d246462e9db2b060ab0bd29",
+    "inbox/original.css": "240e6cd05a39eeb1f2560a7e8d98d6b7a53320a6b7119fcbc7fd5b003d88ed5f",
+    "popup/notification-center.module.css": "039edf0321885f4354a3f5427cdf9eff452d4b68b312f8b590bf252a59dc31c9",
+    "avatar/avatar.module.css": "a509d37eaee61f6d7938a42d6b1f21f78553c8361dd24e2fdf40d09c1253dcc0"
+  },
+  "notes": [
+    "Inbox triage is the supplied local restoration, not a claim of official Pro TSX.",
+    "Original CSS retained byte for byte.",
+    "Adapters supply scoped messages, callbacks, locale, theme and effective motion preference.",
+    "Avatar replaces Next Image with a native image while retaining source load/fallback behavior."
+  ]
+}

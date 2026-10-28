@@ -1,0 +1,26 @@
+/* Supplied source geometry/motion is retained; only host tokens and integration slots differ. */
+.notification-page { min-width: 0; }
+.notification-page .rental-inbox.triage-local {
+  --triage-accent: var(--rental-color-primary);
+  --triage-border: var(--rental-color-border-secondary);
+  --triage-border-strong: var(--rental-color-border);
+  --triage-border-subtle: var(--rental-color-border-secondary);
+  --triage-foreground: var(--rental-color-text);
+  --triage-surface: var(--rental-color-bg-container);
+  --triage-surface-muted: var(--rental-color-fill-tertiary);
+  --triage-text-muted: var(--rental-color-text-secondary);
+  --triage-text-secondary: var(--rental-color-text-secondary);
+  --font-body: inherit;
+  border-radius: var(--rental-ui-radius-container);
+  font-family: inherit;
+}
+.rental-inbox .inbox-triage_avatar___u3PF { display: grid; place-items: center; border-radius: var(--rental-ui-radius-button); color: var(--rental-color-text-secondary); }
+.rental-inbox .inbox-triage_detailInner__5RrOP p { white-space: pre-line; overflow-wrap: anywhere; }
+.notification-page .triage-action { border-radius: var(--rental-ui-radius-button); }
+.notification-page .triage-action:disabled, .rental-notification-panel button:disabled { opacity: .45; cursor: not-allowed; }
+.native-workspace-context .notification-bell { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--rental-color-text-secondary); border-radius: var(--rental-ui-radius-button); }
+.native-workspace-context .notification-bell:hover { background: transparent; color: var(--rental-color-text); }
+.notification-bell .notification-count { background: var(--rental-color-primary); color: var(--rental-color-text-light-solid, #fff); border-color: var(--rental-color-bg-container); }
+.rental-notification-panel { border-radius: var(--rental-ui-radius-container); font-family: inherit; }
+.rental-notification-panel button { border-radius: var(--rental-ui-radius-button); }
+.rental-notification-panel p { white-space: pre-line; overflow-wrap: anywhere; }

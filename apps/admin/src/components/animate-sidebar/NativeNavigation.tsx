@@ -35,7 +35,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
     containerClassName="rental-sidebar-navigation" className="rental-sidebar-route-highlight">
     {overview && <SidebarGroup><SidebarGroupLabel>{t(overview.label)}</SidebarGroupLabel><SidebarMenu>
       {overview.routes.map(route => <SidebarMenuItem key={route.path}><HighlightItem value={route.path} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton data-route={route.path} data-sound="page" aria-current={selectedKey === route.path ? "page" : undefined} isActive={selectedKey === route.path} tooltip={t(route.label)} onClick={() => onNavigate(route.path)}>
-        <AnimatedIcon name={route.path === "/workbench" ? "dashboard" : "report"} /><span>{t(menuRouteLabel(route.path, route.label))}</span>
+        <AnimatedIcon name={route.path === "/workbench" ? "dashboard" : route.path === "/notifications" ? "messages" : "report"} /><span>{t(menuRouteLabel(route.path, route.label))}</span>
       </SidebarMenuButton></div></HighlightItem></SidebarMenuItem>)}
     </SidebarMenu></SidebarGroup>}
     {visible.some(s => s.key !== "overview") && <SidebarGroup><SidebarGroupLabel>{t("业务管理")}</SidebarGroupLabel><SidebarMenu>

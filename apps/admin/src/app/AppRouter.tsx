@@ -13,6 +13,7 @@ import { DesktopSessionBridge } from "@/features/agent-desktop/DesktopSessionBri
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
+const MessageCenterPage = lazy(() => import("@/features/notifications/MessageCenterPage"));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
 const AiOperatorPage = lazy(() => import("@/features/ai-operator/AiOperatorPage").then((module) => ({ default: module.AiOperatorPage })));
 const WorkspaceOperationReportPage = lazy(() => import("@/features/reports/WorkspaceOperationReportPage").then((module) => ({ default: module.WorkspaceOperationReportPage })));
@@ -113,6 +114,7 @@ function ProtectedRoutes() {
           <WorkspaceRouteReady>
           <Routes>
             <Route path="/" element={<DefaultRoute />} />
+            <Route path={APP_ROUTES.notifications.path} element={guard(APP_ROUTES.notifications, <MessageCenterPage />)} />
             <Route path={APP_ROUTES.workbench.path} element={guard(APP_ROUTES.workbench, <WorkbenchPage />)} />
             <Route path={APP_ROUTES.aiOperator.path} element={guard(APP_ROUTES.aiOperator, <AiOperatorPage />)} />
             <Route path={APP_ROUTES.operationReport.path} element={guard(APP_ROUTES.operationReport, <WorkspaceOperationReportPage />)} />

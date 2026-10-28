@@ -1191,6 +1191,7 @@ const ENGLISH: Record<string, string> = {
   "通知": "Notifications",
   "通知中心尚未接入": "Notifications not connected",
   "页面说明": "Page information",
+  "消息中心": "Messages",
   "工作台": "Workspace",
   "租赁运营台": "Rental operations",
   "运营用户": "Staff",

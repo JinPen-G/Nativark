@@ -33,6 +33,7 @@ export const APP_ROUTES = {
   workbench: { path: "/workbench", label: "运营概览", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
+  notifications: { path: "/notifications", label: "消息中心", permission: "", audience: "tenant", icon: <FileTextOutlined />, menu: true },
   operationReport: { path: "/reports/operations", label: "经营报表", permission: "rental-os:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
   // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
   // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
@@ -104,7 +105,7 @@ export const APP_ROUTES = {
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "platform-rental-core", label: "租赁内核", icon: <ControlOutlined />, routes: [APP_ROUTES.platformCategories, APP_ROUTES.platformCategoryCapabilities] },
-  { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport] },
+  { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport, APP_ROUTES.notifications] },
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },

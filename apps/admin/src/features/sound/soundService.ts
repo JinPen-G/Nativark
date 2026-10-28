@@ -40,7 +40,7 @@ function focused(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus();
 }
 
-/** 显式结果入口。当前没有收件箱，不能把发送日志传入来模拟新消息。 */
+/** 显式结果入口。收件箱只对首次快照之后的新事项发声，不能把发送日志冒充收件消息。 */
 export async function emitSoundEvent(event: SoundEvent): Promise<boolean> {
   const expectedScope = scope;
   if (!expectedScope || event.key !== expectedScope.key || event.epoch !== expectedScope.epoch || !event.id) return false;

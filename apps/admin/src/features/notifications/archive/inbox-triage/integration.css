@@ -1,0 +1,21 @@
+/* Scope the archived variables to this component; the host may provide theme values. */
+.triage-local { --accent:var(--triage-accent,oklch(33% 0 0)); --border:var(--triage-border,oklch(93.5% 0 0)); --border-strong:var(--triage-border-strong,oklch(82% 0 0)); --border-subtle:var(--triage-border-subtle,oklch(96.5% 0 0)); --duration-fast:.16s; --duration-standard:.24s; --ease-standard:cubic-bezier(.22,1,.36,1); --font-body:var(--font-inter,Inter,sans-serif); --foreground:var(--triage-foreground,#202020); --surface:var(--triage-surface,#fff); --surface-muted:var(--triage-surface-muted,#f7f7f7); --text-muted:var(--triage-text-muted,#737373); --text-secondary:var(--triage-text-secondary,#666); --leading-body:1.4; --text-sm:14px; --text-xs:12px; --tracking-body:-.01em; }
+[data-theme="dark"] .triage-local { --triage-accent:#ededed; --triage-border:#2e2e2e; --triage-border-strong:#555; --triage-border-subtle:#2a2a2a; --triage-foreground:#ededed; --triage-surface:#1a1a1a; --triage-surface-muted:#242424; --triage-text-muted:#a0a0a0; --triage-text-secondary:#b5b5b5; }
+.triage-local, .triage-local *, .triage-local *::before, .triage-local *::after { box-sizing:border-box; }
+.triage-local .inbox-triage_avatar___u3PF { display:block; width:28px; height:28px; object-fit:cover; border-radius:50%; background:var(--surface-muted); }
+.triage-local .triage-action { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:36px; padding:0 12px; border:1px solid var(--border); border-radius:18px; background:var(--surface); color:var(--foreground); font:inherit; cursor:pointer; }
+.triage-local .triage-action + .triage-action, .triage-local .triage-undo { border-color:transparent; background:transparent; color:var(--text-secondary); }
+.triage-local .triage-action:hover { background:var(--surface-muted); }
+.triage-local button:focus-visible { outline:2px solid var(--foreground); outline-offset:-2px; }
+.triage-local .inbox-triage_panel__7WRkk { min-width:0; }
+.triage-local .inbox-triage_quick__yKPvs:focus-within { display:flex; opacity:1; pointer-events:auto; }
+.triage-local .inbox-triage_tabs__fJaJq { position:relative; }
+.triage-local .triage-indicator { left:0; right:auto; transition:transform .48s cubic-bezier(.22,1,.36,1),width .48s cubic-bezier(.22,1,.36,1); pointer-events:none; }
+.triage-local .triage-exit { display:grid; grid-template-rows:1fr; animation:triage-leave .7s cubic-bezier(.22,1,.36,1) forwards; pointer-events:none; }
+.triage-local .triage-exit > div { min-height:0; overflow:hidden; }
+.triage-local .inbox-triage_statusText__0hyMA { animation:triage-status .24s cubic-bezier(.22,1,.36,1) both; }
+@container triage (max-width:560px) { .triage-local .inbox-triage_hintNarrow__Wj91t { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } }
+@keyframes triage-leave { to { grid-template-rows:0fr; opacity:0; } }
+@keyframes triage-status { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+@media (prefers-reduced-motion:reduce) { .triage-local .triage-indicator { transition:none; } .triage-local .inbox-triage_statusText__0hyMA { animation:none; } }
+.triage-local ::selection { background:var(--foreground); color:var(--surface); }
