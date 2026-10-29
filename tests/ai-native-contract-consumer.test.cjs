@@ -15,7 +15,8 @@ const invalid = (name, value) => assert.equal(validators[name](value), false, `$
 
 test("workbench display protocol keeps code inert and sandbox candidates distinct from trusted human actions", () => {
   const shared = require('@rental-os/shared'), { createHash } = require('node:crypto');
-  const { inspectAiWorkbenchPresentation, inspectAiWorkbenchMessage } = require('../apps/api/src/modules/ai-native/workbench-display.contract');
+  const { inspectAiWorkbenchPresentation, inspectAiWorkbenchMessage, inspectAiWorkbenchContext,
+    inspectAiWorkbenchFieldMaterial, inspectAiWorkbenchHostDraft, inspectAiWorkbenchControl } = require('../apps/api/src/modules/ai-native/workbench-display.contract');
   const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
   const { AI_WORKBENCH_DISPLAY_SCHEMAS: leaf, AI_WORKBENCH_DISPLAY_DRAFT_VERSION: version, AI_WORKBENCH_DISPLAY_LIMITS: limits } = shared;
   const deps = { AiSceneRequestReadDraft: shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft,
@@ -72,6 +73,48 @@ test("workbench display protocol keeps code inert and sandbox candidates distinc
   for (const kind of ['approve', 'submit', 'cancel_task', 'navigate', 'fetch', 'tool']) rejected({ ...base, kind });
   assert.throws(() => inspectAiWorkbenchMessage(candidate, { ...current, lastSequence: 1 }), { code: 'AI_INVALID_INPUT' });
   assert.throws(() => inspectAiWorkbenchMessage(candidate, { ...current, input: undefined }), { code: 'AI_INVALID_INPUT' });
+  const contextVersion = shared.AI_WORKBENCH_CONTEXT_DRAFT_VERSION, { presentationRevision, ...materialBinding } = binding;
+  const context = { draftVersion: contextVersion, binding: materialBinding, scope: f.scope, purpose: 'explanation',
+    capability: { code: binding.capabilityCode, version: binding.capabilityVersion, prompt: { status: 'unavailable', reason: 'not_recorded' }, tools: ['rental.order.explain'] },
+    history: { coverage: 'bounded_authorized_references', references: [], persistentConstraints: { humanInputReceipts: [], pendingInputRequests: [], unknownOperations: ['original-unknown'] },
+      expiresAt: packet.retention.expiresAt, aclRevision: 'acl-1', policyVersion: 'policy-1' }, authority: 'none_reauthorize_before_consumption' };
+  assert.deepEqual(inspectAiWorkbenchContext(context, context, lifetime.now), context);
+  assert.throws(() => inspectAiWorkbenchContext({ ...context, history: { ...context.history,
+    persistentConstraints: { ...context.history.persistentConstraints, unknownOperations: [] } } }, context, lifetime.now), { code: 'AI_INVALID_INPUT' });
+  const fieldMaterial = { draftVersion: contextVersion, binding: materialBinding, fieldRevision: 1, contract: current.input.contract,
+    fields: [{ fieldId: 'quantity', editable: true, sourceId: 'source-a', defaultValue: { status: 'provided', value: 1 } }],
+    sources: [{ sourceId: 'source-a', reference: f.fact }], retention: { expiresAt: packet.retention.expiresAt, aclRevision: 'acl-1', policyVersion: 'policy-1' },
+    authority: 'original_business_rules_not_model_rules' };
+  assert.deepEqual(inspectAiWorkbenchFieldMaterial(fieldMaterial, fieldMaterial, lifetime.now), fieldMaterial);
+  const badDefault = { ...fieldMaterial, fields: [{ ...fieldMaterial.fields[0], defaultValue: { status: 'provided', value: 11 } }] };
+  assert.throws(() => inspectAiWorkbenchFieldMaterial(badDefault, badDefault, lifetime.now), { code: 'AI_INVALID_INPUT' });
+  const draft = { draftVersion: contextVersion, binding: materialBinding, fieldRevision: 1, draftId: 'draft-a', revision: 1,
+    answers: [{ fieldId: 'quantity', value: 2 }], inputOrigin: { kind: 'candidate', humanChoice: 'not_attested' }, status: 'unsubmitted', preparation: 'not_attempted', approval: 'not_granted' };
+  assert.deepEqual(inspectAiWorkbenchHostDraft(draft, fieldMaterial, null), draft);
+  assert.throws(() => inspectAiWorkbenchHostDraft(draft, fieldMaterial, { draftId: draft.draftId, revision: 1 }), { code: 'AI_INVALID_INPUT' });
+  const humanDraft = { ...draft, inputOrigin: { kind: 'original_human_receipt', receiptId: 'human-a' } };
+  const receipt = { receiptId: 'human-a', binding: materialBinding, fieldRevision: 1, answers: draft.answers };
+  assert.throws(() => inspectAiWorkbenchHostDraft(humanDraft, fieldMaterial, null, []), { code: 'AI_INVALID_INPUT' });
+  assert.deepEqual(inspectAiWorkbenchHostDraft(humanDraft, fieldMaterial, null, [receipt]), humanDraft);
+  assert.throws(() => inspectAiWorkbenchHostDraft({ ...humanDraft, answers: [{ fieldId: 'quantity', value: 3 }] }, fieldMaterial, null, [receipt]), { code: 'AI_INVALID_INPUT' });
+  assert.throws(() => inspectAiWorkbenchHostDraft(draft, { ...fieldMaterial, fields: [{ ...fieldMaterial.fields[0], editable: false }] }, null), { code: 'AI_INVALID_INPUT' });
+  const controlState = { binding, unknownOriginalOperation: false, assembledControls: ['stop_reply', 'reformat', 'regenerate_explanation', 'reprepare'], draft };
+  for (const kind of controlState.assembledControls) {
+    const intent = { draftVersion: contextVersion, binding, operationKey: `control-${kind}`, kind, ...(kind === 'reprepare' ? { draft } : {}) };
+    const result = inspectAiWorkbenchControl(intent, controlState);
+    assert.equal(result.execution, 'intent_only_not_dispatched');
+    assert.equal(inspectAiWorkbenchControl(intent, { ...controlState, unknownOriginalOperation: true }).status, 'blocked');
+    assert.equal(inspectAiWorkbenchControl(intent, { ...controlState, assembledControls: [] }).status, 'unavailable');
+  }
+  const contextSchemas = shared.AI_WORKBENCH_CONTEXT_SCHEMAS;
+  const contextDependencies = { ...leaf, ...deps, ...shared.AI_SCOPE_DRAFT_SCHEMAS, ...shared.AI_TASK_INPUT_DRAFT_SCHEMAS,
+    AiFactReference: OPENAPI_DOCUMENT.components.schemas.AiFactReference };
+  f.checkClosed(contextSchemas, { ...contextDependencies, ...contextSchemas });
+  const contextValidators = f.validatorsFor(contextSchemas, contextDependencies);
+  assert.equal(contextValidators.AiWorkbenchContextDraft(context), true);
+  assert.equal(contextValidators.AiWorkbenchHostDraft({ ...draft, actor: 'forged' }), false);
+  assert.equal(contextValidators.AiWorkbenchControlIntentDraft({ draftVersion: 'old', binding, kind: 'stop_reply', operationKey: 'stop' }), false);
+  for (const [name, schema] of Object.entries(contextSchemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
   assert.deepEqual(f.compileConsumer(`import type { AiWorkbenchSandboxMessageDraft, AiWorkbenchMessageObservationDraft } from '../packages/shared/src';
     declare const message: AiWorkbenchSandboxMessageDraft;
     // @ts-expect-error sandbox does not carry an approval decision

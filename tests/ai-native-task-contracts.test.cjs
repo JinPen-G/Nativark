@@ -35,8 +35,9 @@ function localRefs(value) {
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
     key === "$ref" ? child.replace("#/components/schemas/", "urn:rental:c04:") : localRefs(child)]));
 }
-for (const [name, schema] of Object.entries({ ...foundation, ...schemas })) ajv.addSchema({ ...localRefs(schema), $id: `urn:rental:c04:${name}` }, name);
-const validators = Object.fromEntries(Object.keys(schemas).map(name => [name, ajv.getSchema(name)]));
+const leaves = Object.assign({}, ...Object.entries(shared).filter(([name, value]) => name.endsWith('SCHEMAS') && value && typeof value === 'object').map(([, value]) => value));
+for (const [name, schema] of Object.entries({ ...leaves, ...foundation, ...schemas })) ajv.addSchema({ ...localRefs(schema), $id: `urn:rental:c04:${name}` }, name);
+const validators = new Proxy({}, { get: (_target, name) => ajv.getSchema(name) });
 const valid = (name, value) => assert.equal(validators[name](value), true, ajv.errorsText(validators[name].errors));
 const invalid = (name, value) => assert.equal(validators[name](value), false, `${name} accepted invalid input`);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -70,10 +71,17 @@ const request = (from, to) => ({ contractVersion: version, taskId: "task1", expe
 
 for (const [name, outcome] of Object.entries(outcomes)) test(`step outcome ${name} compiles as a strict schema branch`, () => valid("AiStepOutcomeDraft", outcome));
 
-test("C04 components are published without a route or worker", () => {
+test("C04 component publication has no route-registration or worker side effects", () => {
   for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], schema);
-  assert.ok(API_CONTRACT_OPERATIONS.every(row => !/\/ai(?:-native)?\//u.test(row.path)));
-  assert.ok(!fs.readFileSync(path.join(root, "apps/api/src/app.module.ts"), "utf8").includes("ai-native"));
+  // Existing authorized AI routes are valid. Publishing schema alone must not
+  // register a route/worker; assert the schema module's actual imports instead
+  // of the obsolete pre-implementation premise that the whole app has no AI.
+  const source = fs.readFileSync(path.join(root, 'apps/api/src/contracts/ai-task-draft-schemas.ts'), 'utf8');
+  assert.ok(!/@Controller|@Module|@Post|setInterval|createServer|\.listen\(/u.test(source));
+  const imports = [...source.matchAll(/from\s+["']([^"']+)["']/gu)].map(match => match[1]);
+  assert.deepEqual(imports, ['@rental-os/shared', './openapi-document', '@rental-os/shared', './ai-leaf-openapi']);
+  assert.ok(/import type \{ SchemaObject \} from ["']\.\/openapi-document["']/u.test(source));
+  assert.equal(API_CONTRACT_OPERATIONS.some(row => /\/ai-native\//u.test(row.path)), true);
   valid("AiTaskStateDraft", state());
   valid("AiTaskTransitionRequestDraft", request("running", "waiting_input"));
   valid("AiTaskTransitionDecisionDraft", { allowed: true, nextRevision: 4 });

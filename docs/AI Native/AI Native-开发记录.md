@@ -11,7 +11,7 @@
 | 任务 | 已有实现/消费依据 | 仍需完成或验证 |
 | --- | --- | --- |
 | AIN-01 基线盘点 | 15项工具/权限/副作用盘点、四品类参考流程；38/38基线测试、16组参考断言、已复核八条真实API/重启/A27-A28及迁移证据；测试验收已归档 | 100%；不要求真人样本/签字。原Core缺口及旧B02完整升级仍归原实现任务，不代表目录中全部能力上线 |
-| AIN-02 公共契约 | shared版本化叶子及OpenAPI；原请求/报价/设置/automation、材料/模型/复合观察、固定订单17动作、知识政策目标4路、员工任务/政策16路、客户政策/计划5路、员工草稿/识别/提交21路、品类草稿5路及完整Core续租预览已接命名合同与出口校验；展示协议纯校验、独立对话metadata/原请求受理/轮次CAS、清理后Task定位及固定原模型结果11路合同已接 | 对话完整消息/有来源长上下文、实际提示词版本、可信输入、隔离/产物生产消费生命周期仍缺；全端兼容/冻结和适用验证未齐，保持75%，对话受理或历史结果读取不自动启动Task/模型 |
+| AIN-02 公共契约 | shared版本化叶子及OpenAPI；原请求/报价/设置/automation、材料/模型/复合观察、固定订单17动作、知识政策目标4路、员工任务/政策16路、客户政策/计划5路、员工草稿/识别/提交21路、品类草稿5路及完整Core续租预览已接命名合同与出口校验；展示协议纯校验、独立对话metadata/原请求受理/轮次CAS、清理后Task定位及固定原模型结果11路合同已接 | 新context v1已补能力/提示词来源、字段材料/宿主草稿及控制失效合同；原政策/隐私8路收稳。AIN-02剩余四端正式出口整改、消费者编译/兼容证据及跨AI整体冻结，保持75%；长对话/实际提示词记录生产和真实隔离运行归原后继任务，不把pure协议称为执行通过 |
 | AIN-03 持久化 | 原task/run/input/phase/proposal/approval、预算、知识/记忆仓储；标准消费者；此前227迁移全链及局部非空对齐演练保留；新增对话/轮次/操作三表与原请求同事务关联，隔离schema/diff及SQL逐项一致 | 保持原G3/75%；新增对话迁移未执行，私有generate不等于真库迁移；此前真实结果不等于全部历史兼容、回退、索引/并发/崩溃恢复，旧B02与全量G4仍缺 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；原结果复验当前权限与事实，身份适配新增Auth返回后的凭据关闭/token/audience核对 | 全身份/地点/撤权真实等价仍待验；执行动作仍须有效原输入，未知动作拒绝，关联requestId不是授权修订 |
 | AIN-05 Gateway | 原平台/BYOK、唯一invocation/dispatch及原账；管理计数标准加密请求、任务内部recorded计数/上界与生成消费已接，平台探测Controller/provider亦已接，默认关闭 | 平台正式audit生产、已实现协议真实连接/必需能力/用量、完整场景变体仍缺；Embedding/Reasoning缺客观能力生产，不以默认关闭或模拟能力报100% |
@@ -63,6 +63,17 @@
 | ENTRY-16 | 时间/语言/可访问性规范及基础呈现 | 键盘、读屏、系统字号与时区真实验证 |
 | ENTRY-17 | 审计引用、保留/删除及恢复屏障实现 | 外部存储/副本/导出、删除传播及操作验收 |
 | ENTRY-18 | 固定交付、依赖与未验边界分层 | 完整增量组合/独立交接 |
+
+## AIN-02 上下文、字段草稿及既有政策/隐私合同收口（2026-10-30）
+
+- **固定基线与范围：** foundation分支`ai/ai-native-contracts-s01-20261002`，开工HEAD为`088153af`、暂存/工作树为空，无merge/cherry-pick；上轮未提交的原政策5路与隐私3路已在整合成果中保留。本轮只继续AIN-02，未扩到原运行器/UI/业务执行。新增协议从[shared正式出口](../../packages/shared/src/index.ts)→[展示合同](../../packages/shared/src/ai-workbench-display-draft.ts)→[纯校验](../../apps/api/src/modules/ai-native/workbench-display.contract.ts)→[OpenAPI组件](../../apps/api/src/contracts/ai-leaf-components.ts)发布，不建立第二驱动或注册展示执行路由。
+- **合同边界：** 既有`ain-workbench-display-draft-1`与`ain-conversation-draft-2`保持；新增加法`ain-workbench-context-draft-1`，能力/用途/当前scope、原请求/材料/输入绑定及有界历史引用与持久人类输入/待答/unknown定位分开。提示词有原注册计划记录才可标recorded，缺真实记录明确unavailable。字段合同直接复用原`AiTaskInputContractDraft`，规则、默认值及来源来自原准备，不允许模型新增规则或编辑金额。宿主未提交草稿按revision CAS，沙箱值仍candidate；人类来源必须另取原收据，核对同binding/fieldRevision/answers，不以任意receiptId或来源标记授人类选择。纯控制意图区分stop_reply/reformat/regenerate_explanation/reprepare：无原host不可用，unknown先核对，停止交付不证明任务取消/零消耗，模型仍需原Gateway/累计资源，排版不重办业务，新输入不混旧金额。
+- **既有8路：** [原政策5路](../../packages/shared/src/ai-original-policy-http-draft.ts)与[隐私3路](../../packages/shared/src/ai-retention-http-draft.ts)均有命名请求/闭合返回、原命令绑定和OpenAPI；前者保留原CAS/模板权限，不授派发或批准；后者沿原full-workspace authority/hold/清理收据。隐私响应Date仅按JSON转换，不剥未知字段或补默认；转换另加节点/深度上限，坏清理输出保持unknown、只读坏输出不可用。原政策前阶段1/1保留，本轮未反复重跑。实际[公开映射406路/无未命名GenericObject或缺失引用](../../output/ain02-20261030/publication.log)通过；该检查不证明所有DTO语义/Guard或整项完成。
+- **必要验证及修复：** 复用三个既有测试文件，仅注册展示合同、retention Controller原清理/收据和C04出版三项。首两次执行退出7，分别为脚本遗漏装饰器配置及叠加ts-node把产物重编译，修验证装配为单次register；第三次2/3，隐私夹具未填真实Prisma `erasedAt:null`默认导致候选页为空，补该数据库默认而不改生产规则/删断言。最终[3/3、fail/cancel/skip/todo=0](../../output/ain02-20261030/check-fourth.log)、退出0。C04旧“全仓无AI路由”前提改为schema模块自身无执行/注册副作用和固定导入，原状态/错误/角色安全目的保留，不删除负例。
+- **类型与包产物：** 原`output/conversation-20261029/isolated-prisma/generated-final`落后于本次已整合的额度schema，首次[771 roots/38诊断](../../output/ain02-20261030/types.log)为缺额度模型/billingMode；不把旧类型绿色当当前证据。沿原隔离工具链仅将当前schema generate到新`output/ain02-20261030/prisma-current/generated`，[生成退出0](../../output/ain02-20261030/prisma-current/generate.log)，没有validate/diff/migrate或覆盖installed/shared client。当前[API/shared noEmit 771 roots/0诊断](../../output/ain02-20261030/types-current.log)、退出0。原shared主入口与agent-desktop出口只emit到新output包，[包运行出口及declaration消费者通过](../../output/ain02-20261030/package.log)、退出0；不写共享dist、不安装依赖。源码/日志/失败/前像均保留。
+- **独立代码review：** 一次不递归、5次Read/Grep的独立AI覆盖新增shared类型/schema、4个inspect函数、隐私wire及C04出版断言，未发现本片确定缺陷；没有运行测试、业务或真实环境，不外推为全专项审查。另一次四端静态核对确认原实际后台任务中心/员工检查/客户与官网Booking消费存在，但发现官网`authClient.ts/booking-handoff.ts/BookingHandoffPanel.tsx/RemoteBooking.tsx`及后台`order-facts-display.ts/CapabilityStatus.tsx/AiServiceSummary.tsx`仍绕过shared正式出口，已通知客户端写入线整改；其意见不是客户端作者已确认。独立核对不确认当前AIN-02整体冻结。
+- **兼容/升级及门槛：** 原持久化C01/C02/C04/scene/input/approval/Booking版本不变，不原地改历史含义；未知版本拒绝，新context为可选加法，旧host未装配继续受权结构化/人工出口，不把旧载荷升级成可信人类输入或执行。正式升级时各端从shared包同版更新，核对实际DTO/出口后显式启用；回退保留原receipt/材料，停止新context消费/代码执行而非重派模型或业务。当前无两版并行执行兼容期，支持上述现有固定版本和加法context v1，旧/未知context不能自动转换；需要扩版本时另核wire兼容，不改原对象。AIN-02保持75%：本任务真正剩余为四端正式出口整改、实际消费者编译与成功/拒绝/失效/断线/旧协议证据、跨AI整体冻结记录；完整长对话/数据库迁移/真实沙箱仍归原映射后继任务，不将其全文倒用为本合同的前置，也不把本片pure检查声称它们通过。达到02门槛即停止，不接下一任务。
+- **操作及未验：** `node output/ain02-20261030/check.cjs`、同脚本`types/publication`、`node output/ain02-20261030/generate-types.cjs`、`node output/ain02-20261030/package-check.cjs`均固定offline URL、绝对audit/writeRoot/TEMP/TMP/cache并禁compile cache；源码差异检查退出0。未启服务、读.env、监听HTTP、连接真DB/DNS/模型/支付/对象存储、迁移/推送/部署或生产启用，未验浏览器/微信/供应商，不要求人工验收。并行MCP文件不接管/暂存；[收口文档检查](../../output/ain02-20261030/docs.log)为11/11文件、3处原文档导航历史归档链接缺失，退出1；本片新增记录链接已单独通过，未修改导航或删除历史链接使其变绿。本阶段按下述文件历史固定提交，提交后仅复核实际OpenAPI映射与提交差异，不扩大回归；AIN-02不以WIP或本片提交计整项100%。
 
 ## 对话关联原模型结果的只读消费（2026-10-29）
 
