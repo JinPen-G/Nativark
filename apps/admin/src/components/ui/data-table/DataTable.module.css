@@ -69,6 +69,14 @@
 .root[data-column-layout="content"] .table :is(th, td) { padding-inline: var(--space-2); }
 .root[data-column-layout="content"] .table tr > :first-child { padding-inline-start: var(--space-4); }
 .root[data-column-layout="content"] .table tr > :last-child { padding-inline-end: var(--space-4); }
+.root[data-column-layout="content"] .table tr > :last-child[data-pinned="right"] { padding-inline-end: var(--space-2); }
+.table td[data-content-compact], .table td[data-content-compact] :global(.ant-tag) { white-space: nowrap; }
+/* Equal optical gutters: the menu's native 32px target has 8px internal inset.
+   Match that inset on the primary action; distribute spare space between them. */
+.root[data-column-layout="content"] .table tr > td:last-child[data-column-id="actions"] { padding-inline: var(--space-1); }
+.root[data-column-layout="content"] .table tr > th:last-child[data-column-id="actions"] { padding-inline: var(--space-3); }
+.root[data-column-layout="content"] .table td[data-column-id="actions"] .rowActions { width: 100%; justify-content: space-between; gap: var(--space-1); }
+.root[data-column-layout="content"] .table td[data-column-id="actions"] .rowPrimary { flex: 1; padding-inline-start: var(--space-2) !important; }
 .legacyContent { min-width: 0; max-width: 100%; }
 .legacyContent :global(.ant-table-cell) { padding-inline: var(--space-2); overflow-wrap: anywhere; }
 .legacyContent :global(.ant-table-cell:first-child) { padding-inline-start: var(--space-4); }

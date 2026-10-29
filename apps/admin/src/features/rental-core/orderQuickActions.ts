@@ -11,8 +11,8 @@ export interface OrderActionPermissions {
   cancel: boolean;
 }
 export const ORDER_QUICK_ACTION_LABELS: Record<OrderQuickAction, string> = {
-  confirm: "确认订单并核销优惠券", allocation: "分配 / 锁定", pickup: "办理领取",
-  return: "办理归还", extend: "续租 / 延期", settle: "结算并关闭订单", cancel: "取消并按规则计费",
+  confirm: "确认订单并核销优惠券", allocation: "资源分配", pickup: "办理领取",
+  return: "办理归还", extend: "办理续租", settle: "结算并关闭订单", cancel: "取消并按规则计费",
 };
 export function parseOrderQuickAction(value: string | null): OrderQuickAction | undefined {
   return value && Object.hasOwn(ORDER_QUICK_ACTION_LABELS, value) ? value as OrderQuickAction : undefined;

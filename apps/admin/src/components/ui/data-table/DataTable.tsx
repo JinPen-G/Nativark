@@ -82,6 +82,8 @@ type ContentLayout = {
   minimumWidths?: Readonly<Record<string, number>>;
 };
 const DEFAULT_CONTENT_LAYOUT: ContentLayout = { compactColumns: ["select", "expand", "actions"] };
+// Use layout pixels, not a transformed rect during the route's scale transition.
+const layoutWidth = (element: HTMLElement) => Number.parseFloat(getComputedStyle(element).width) || element.offsetWidth;
 
 function pinningStyle<T>(column: Column<T>, contentLayout: ContentLayout | false, index: number): CSSProperties {
   const pinned = column.getIsPinned();
@@ -135,6 +137,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   const columns = table.getVisibleLeafColumns();
   const allColumns = table.getAllLeafColumns();
   const columnStyle = (column: Column<T>) => pinningStyle(column, contentLayout, allColumns.indexOf(column));
+  const compactColumn = (column: Column<T>) => Boolean(contentLayout && (contentLayout.compactColumns.includes(column.id) || column.columnDef.meta?.contentSizing?.compact));
   const tableMinWidth = minWidth ?? (contentLayout ? "100%" : table.getTotalSize());
   const rootRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -146,9 +149,9 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   const measurePinning = () => {
     const root = rootRef.current, element = tableRef.current;
     if (!contentLayout || !root || !element) return;
-    const widths = new Map(Array.from(element.querySelectorAll<HTMLTableCellElement>("thead th[data-column-id]")).map(cell => [cell.dataset.columnId, cell.getBoundingClientRect().width]));
+    const widths = new Map(Array.from(element.querySelectorAll<HTMLTableCellElement>("thead th[data-column-id]")).map(cell => [cell.dataset.columnId, layoutWidth(cell)]));
     if (!widths.size) {
-      element.querySelectorAll<HTMLTableCellElement>("tbody tr:first-child td[data-column-id]").forEach(cell => widths.set(cell.dataset.columnId, cell.getBoundingClientRect().width));
+      element.querySelectorAll<HTMLTableCellElement>("tbody tr:first-child td[data-column-id]").forEach(cell => widths.set(cell.dataset.columnId, layoutWidth(cell)));
     }
     for (const side of ["left", "right"] as const) {
       const pinned = columns.filter(column => column.getIsPinned() === side);
@@ -181,11 +184,11 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
       // Copy the current geometry only while the existing refresh overlay is shown.
       const sourceTable = header.closest("table"), placeholder = overlay.querySelector("table");
       if (!sourceTable || !placeholder) return;
-      const width = `${sourceTable.getBoundingClientRect().width}px`;
+      const width = `${layoutWidth(sourceTable)}px`;
       overlay.style.width = width;
       placeholder.style.width = width;
       placeholder.style.tableLayout = "fixed";
-      const widths = new Map(Array.from(header.querySelectorAll<HTMLTableCellElement>("th[data-column-id]")).map(cell => [cell.dataset.columnId, cell.getBoundingClientRect().width]));
+      const widths = new Map(Array.from(header.querySelectorAll<HTMLTableCellElement>("th[data-column-id]")).map(cell => [cell.dataset.columnId, layoutWidth(cell)]));
       overlay.querySelectorAll<HTMLTableCellElement>("td[data-column-id]").forEach(cell => {
         const size = widths.get(cell.dataset.columnId);
         if (size != null) cell.style.width = `${size}px`;
@@ -219,7 +222,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
               exit={suppress ? { opacity: 0 } : MOTIQ_TABLE_MOTION.exit}
               transition={suppress ? { duration: 0 } : MOTIQ_TABLE_MOTION.transition}
               data-state={row.getIsSelected() ? "selected" : undefined} data-row-id={row.id} aria-selected={table.options.enableRowSelection ? row.getIsSelected() : undefined}>
-              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...columnStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
+              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...columnStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-content-compact={compactColumn(cell.column) || undefined} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />
               </td>; })}
             </motion.tr>, row.getIsExpanded() && renderExpanded ? <motion.tr key={`${row.id}-detail`} className={styles.expandedRow}

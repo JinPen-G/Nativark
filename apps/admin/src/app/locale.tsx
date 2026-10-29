@@ -1346,6 +1346,8 @@ const ENGLISH: Record<string, string> = {
   "待人工处理": "Needs review",
   "查看": "View",
   "分配 / 锁定": "Allocate / lock",
+  "资源分配": "Allocate stock",
+  "办理续租": "Extend rental",
   "办理领取": "Check out",
   "办理归还": "Check in",
   "查看详情": "Details",

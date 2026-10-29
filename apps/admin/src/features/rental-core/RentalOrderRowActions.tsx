@@ -16,7 +16,9 @@ export function RentalOrderRowActions({ order, permissions, navigate, t, pickupL
   const handoverLabel = (label: string) => {
     const source = `办理${label}`;
     const translated = t(source);
-    return translated !== source ? translated : `${t("办理")} ${t(label)}`;
+    if (translated !== source) return translated;
+    const prefix = t("办理");
+    return `${prefix}${/\p{Script=Han}/u.test(prefix) ? "" : " "}${t(label)}`;
   };
   const actions = available.actions.map(id => ({ id, icon: icons[id], danger: id === "cancel",
     label: id === "pickup" ? handoverLabel(pickupLabel) : id === "return" ? handoverLabel(returnLabel) : t(ORDER_QUICK_ACTION_LABELS[id]),
