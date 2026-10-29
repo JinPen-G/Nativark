@@ -12,7 +12,7 @@ export const ADMIN_LOGIN_DEFAULTS = {
   highlights: [
     { title: "Rental Agent", description: "统筹资源与任务" },
     { title: "Copilot", description: "辅助日常管理" },
-    { title: "多品类经营", description: "一套系统，统一管理" }
+    { title: "多工作空间", description: "一次登录，自如切换" }
   ],
   footerText: "rentalOS · 租赁操作系统"
 } as const;

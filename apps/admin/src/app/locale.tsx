@@ -604,6 +604,8 @@ const ENGLISH: Record<string, string> = {
   "辅助日常管理": "Everyday assistance",
   "多品类经营": "Multi-category",
   "一套系统，统一管理": "One system, all categories",
+  "多工作空间": "Workspaces",
+  "一次登录，自如切换": "Sign in once. Switch freely.",
   "rentalOS · 租赁操作系统": "rentalOS · The rental operating system",
   "选择日期": "Choose date",
   "秒": "Seconds",
