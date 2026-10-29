@@ -1,5 +1,5 @@
-/** One tenant/theme-aware image source for sidebar identity and the browser tab.
- * Tenant/session changes ignore stale SVG inspections; failures share the default fallback. */
+/** Shared tenant artwork, with independent site and browser-tab contrast.
+ * Stale SVG inspections are ignored; favicon failures cannot change the sidebar logo. */
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useAppearance } from "./theme";
@@ -17,7 +17,17 @@ export function BrandIconProvider({ children }: { children: ReactNode }) {
   const scope = JSON.stringify([user?.id, user?.isSaasAdmin, tenant?.tenantId, source]);
   const [inspection, setInspection] = useState<{ scope: string; svg?: string }>();
   const [failedScope, setFailedScope] = useState<string>();
+  const [faviconFailedScope, setFaviconFailedScope] = useState<string>();
+  const [browserDark, setBrowserDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const fallback = useMemo(() => defaultAdminBrandIcon(mode === "dark"), [mode]);
+  useEffect(() => {
+    // Browser chrome can remain light while the operator chooses a dark site theme.
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setBrowserDark(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   useEffect(() => {
     if (source === ADMIN_DEFAULT_MARK || !isSvgBrandIcon(source)) return;
     const controller = new AbortController();
@@ -34,6 +44,13 @@ export function BrandIconProvider({ children }: { children: ReactNode }) {
       isPlatformMark: source === ADMIN_DEFAULT_MARK || failedScope === scope,
       onError: () => { if (source !== ADMIN_DEFAULT_MARK) setFailedScope(scope); } };
   }, [source, scope, inspection, failedScope, fallback, mode]);
-  useEffect(() => applyAdminFavicon(icon.src, icon.onError), [icon]);
+  const favicon = useMemo(() => {
+    const original = source === ADMIN_DEFAULT_MARK || faviconFailedScope === scope ? defaultAdminBrandIcon(browserDark) : source;
+    const svg = inspection?.scope === scope && faviconFailedScope !== scope ? inspection.svg : undefined;
+    return svg ? adaptMonochromeBrandSvg(svg, browserDark) ?? original : original;
+  }, [source, scope, inspection, faviconFailedScope, browserDark]);
+  useEffect(() => applyAdminFavicon(favicon, () => {
+    if (source !== ADMIN_DEFAULT_MARK) setFaviconFailedScope(scope);
+  }), [favicon, source, scope]);
   return <BrandIconContext.Provider value={icon}>{children}</BrandIconContext.Provider>;
 }
