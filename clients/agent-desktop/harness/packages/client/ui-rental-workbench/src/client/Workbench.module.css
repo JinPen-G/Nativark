@@ -20,3 +20,8 @@
 .catalog li { margin-block: 8px; overflow-wrap: anywhere; }
 .catalog li span { display: block; }
 .material { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.preparation { box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 12px; height: 100%; min-width: 0; overflow: auto; padding: calc(var(--dsh-frame-top-clearance, 0px) + 24px) 24px 24px; color: var(--dsw-alias-label-primary); font-size: 13px; }
+.preparation h1 { margin: 0; font-size: 18px; font-weight: 500; overflow-wrap: anywhere; }
+.preparation > p { margin: 0; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.preparation > button { align-self: flex-start; }
+.context > p { margin: 0; overflow-wrap: anywhere; }

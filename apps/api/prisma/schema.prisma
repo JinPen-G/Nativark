@@ -6135,6 +6135,68 @@ enum AiTaskOriginalRequestStatus {
 }
 
 /// Creation input is immutable; expiry/revocation never deletes the task or business receipt.
+/// Owner-scoped conversation metadata, not a Task, business record or budget.
+model AiConversation {
+  id                String @id @db.VarChar(36)
+  scopeId           String @db.VarChar(36)
+  ownerId           String @db.VarChar(191)
+  capabilityCode    String @db.VarChar(64)
+  revision          Int @db.UnsignedInt
+  status            String @db.VarChar(16)
+  /// Remains occupied until original task/effect evidence permits a new turn.
+  activeTurnId      String? @db.VarChar(36)
+  createdAt         DateTime @db.DateTime(3)
+  updatedAt         DateTime @db.DateTime(3)
+  deletedAt         DateTime? @db.DateTime(3)
+  scope             AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  turns             AiConversationTurn[]
+  operations        AiConversationOperation[]
+
+  @@unique([scopeId, ownerId, id], map: "ai_conversations_owner_key")
+  @@index([scopeId, ownerId, status, id], map: "ai_conversations_owner_page")
+  @@map("ai_conversations")
+}
+
+/// Immutable admission -> original request association. No copied message body,
+/// generated reply, credentials or approval. Original request retention applies.
+model AiConversationTurn {
+  id                String @id @db.VarChar(36)
+  scopeId           String @db.VarChar(36)
+  ownerId           String @db.VarChar(191)
+  conversationId    String @db.VarChar(36)
+  admissionKey      String @db.VarChar(128)
+  admissionRevision Int @db.UnsignedInt
+  inputHash         String @db.Char(64)
+  originalRequestId String @db.VarChar(36)
+  originalRequestKey String @db.VarChar(128)
+  capabilityCode    String @db.VarChar(64)
+  capabilityVersion String @db.VarChar(64)
+  createdAt         DateTime @db.DateTime(3)
+  conversation      AiConversation @relation(fields: [scopeId, ownerId, conversationId], references: [scopeId, ownerId, id], onDelete: Restrict, onUpdate: Restrict)
+  original          AiTaskOriginalRequest @relation(fields: [scopeId, originalRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scopeId, ownerId, conversationId, admissionKey], map: "ai_conversation_turn_admission")
+  @@unique([scopeId, originalRequestId], map: "ai_conversation_turn_original")
+  @@index([scopeId, ownerId, conversationId, id], map: "ai_conversation_turn_page")
+  @@map("ai_conversation_turns")
+}
+
+/// Exact metadata-operation receipts survive hide/delete; no cascade to Core.
+model AiConversationOperation {
+  scopeId           String @db.VarChar(36)
+  ownerId           String @db.VarChar(191)
+  operationKey      String @db.VarChar(128)
+  conversationId    String @db.VarChar(36)
+  operation         String @db.VarChar(16)
+  inputHash         String @db.Char(64)
+  revision          Int @db.UnsignedInt
+  createdAt         DateTime @db.DateTime(3)
+  conversation      AiConversation @relation(fields: [scopeId, ownerId, conversationId], references: [scopeId, ownerId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([scopeId, ownerId, operationKey])
+  @@map("ai_conversation_operations")
+}
+
 model AiTaskOriginalRequest {
   id                       String @id @default(uuid()) @db.VarChar(36)
   scopeId                  String @db.VarChar(36)
@@ -6159,6 +6221,7 @@ model AiTaskOriginalRequest {
   scope                    AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   previous                 AiTaskOriginalRequest? @relation("OriginalRequestVersions", fields: [scopeId, previousRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
   reissues                 AiTaskOriginalRequest[] @relation("OriginalRequestVersions")
+  conversationTurn         AiConversationTurn?
   quoteSelections          AiTaskQuoteSelection[]
 
   @@unique([scopeId, id], map: "ai_original_requests_scope_id")
@@ -6216,6 +6279,7 @@ model AiScope {
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
   originalRequests AiTaskOriginalRequest[]
+  conversations AiConversation[]
   automationManagementGrants AiAutomationManagementGrant[]
   automationPolicyPreparations AiAutomationPolicyPreparation[]
   automationPolicyManagementOperations AiAutomationPolicyManagementOperation[]

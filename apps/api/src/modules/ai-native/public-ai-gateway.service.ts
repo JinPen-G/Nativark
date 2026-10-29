@@ -120,6 +120,7 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
       },
       assertCurrent: async () => current()
     }, transport: {
+      ...(ports.transport.inputBoundHash ? { inputBoundHash: ports.transport.inputBoundHash.bind(ports.transport) } : {}),
       invoke: (...args) => { dispatched = true; return ports.transport.invoke(...args); },
       stream: (...args) => { dispatched = true; return ports.transport.stream(...args); }
     } }, this.timeoutMs, binding);

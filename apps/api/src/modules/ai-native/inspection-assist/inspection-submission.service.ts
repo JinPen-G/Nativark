@@ -12,8 +12,11 @@ import { OriginalInspectionApplication, type InspectionSubmissionReceipt } from 
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 
 const base = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).strict();
-const operation = base.extend({ operationId: inspectionId, expectedRevision: z.number().int().min(1).max(997) }).strict();
-const preparation = operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict();
+// Preparation spends one revision; submit reserves one and its final link spends
+// one more. Preserve the repository ceiling (1000) without stranding revision998.
+const operation = base.extend({ operationId: inspectionId, expectedRevision: z.number().int().min(1).max(998) }).strict();
+const preparation = operation.extend({ expectedRevision: z.number().int().min(1).max(997),
+  actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict();
 const targetOf = (input: AiInspectionTarget): AiInspectionTarget => ({ orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage });
 
 export class InspectionSubmissionService {

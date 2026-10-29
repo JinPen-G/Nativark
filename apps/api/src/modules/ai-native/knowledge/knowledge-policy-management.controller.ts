@@ -1,7 +1,8 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { AI_KNOWLEDGE_POLICY_HTTP_DRAFT as paths, AI_KNOWLEDGE_POLICY_HTTP_ERRORS as errors } from '@rental-os/shared';
+import { AI_KNOWLEDGE_POLICY_HTTP_DRAFT as paths, AI_KNOWLEDGE_POLICY_HTTP_ERRORS as errors, AI_KNOWLEDGE_TARGET_HTTP_CONTRACTS } from '@rental-os/shared';
+import { validateKnowledgeTargetRequest, validateKnowledgeTargetResponse } from './knowledge-target-http.contract';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { KNOWLEDGE_POLICY_MANAGEMENT, type KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
 import { KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
@@ -22,7 +23,13 @@ export class KnowledgePolicyManagementController {
       if (!header.success || typeof this.application?.[method] !== 'function') throw new KnowledgePolicyManagementError('unavailable');
       const credential = { authorization: header.data, audience: 'operator' as const, requestId: randomUUID() };
       const command = structuredClone(value);
-      return await withRequestAbort<unknown>(request, signal => runWithRequestIdentity({}, async () => this.application[method](credential, command, signal)));
+      const targetAction = Object.hasOwn(AI_KNOWLEDGE_TARGET_HTTP_CONTRACTS, method)
+        ? method as keyof typeof AI_KNOWLEDGE_TARGET_HTTP_CONTRACTS : undefined;
+      if (targetAction) validateKnowledgeTargetRequest(targetAction, command);
+      return await withRequestAbort<unknown>(request, signal => runWithRequestIdentity({}, async () => {
+        const result = await this.application[method](credential, structuredClone(command), signal);
+        return targetAction ? validateKnowledgeTargetResponse(targetAction, result, command as { authorityId: string }) : result;
+      }));
     } catch (error) {
       const key = error instanceof KnowledgePolicyManagementError ? error.code
         : error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN'

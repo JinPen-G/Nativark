@@ -37,6 +37,12 @@ import type { AiRequestAbortSource } from '../scenes/request-abort';
 import { InputCountTokensAuthorizationSource, InputCountTokensCallPricing, InputCountTokensEvidence } from './input-count-tokens.admission';
 import { InputCountTokensService, type CountTokensServiceDb } from './input-count-tokens.service';
 import { InputCountingFrozenInputReader, type InputCountingFrozenReaderDb } from './input-counting-frozen.reader';
+import type { SecretBox } from '../../../common/secret-box';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
+import { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } from '../tenant-model-config.composition';
+import { createAuthorizedPlatformModelConfiguration } from '../platform-model-config.composition';
+import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { CountTokensGatewayPricingEvidenceSource } from './input-count-tokens.composition';
 
 export type InputCountingRequestAction = 'count' | 'observeCountKey' | 'readCountReceipt'
@@ -69,6 +75,11 @@ export interface InputCountingRequestDependencies {
    * compositions; never request-supplied. */
   resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
+  /** Standard host: construct the existing encrypted connection resolvers only
+   * inside this request, after the frozen invocation selects its original task.
+   * Mutually exclusive with explicit resolver ports. Never HTTP body data. */
+  connectionConfiguration?: { db: Parameters<typeof createAuthorizedPlatformModelConfiguration>[0]['db']
+    & Parameters<typeof createPersistedTenantModelConfiguration>[0]['db']; secrets: SecretBox; platformProfileId: string };
   /** Optional platform-rate read delegate for bound publication alongside
    * counting evidence. */
   priceDelegate?: Pick<GatewayPricingEvidenceSource, 'readPrice'>;
@@ -84,20 +95,29 @@ const hash = requestFingerprint;
 const denied = () => new BudgetError('FORBIDDEN');
 
 export class InputCountingRequestFactory {
-  constructor(private readonly server: InputCountingRequestDependencies) {
+  private readonly server: InputCountingRequestDependencies;
+  constructor(server: InputCountingRequestDependencies) {
     if (!server || typeof server.auth?.resolveAccessContext !== 'function' || typeof server.guard?.canActivate !== 'function'
       || typeof server.db?.$transaction !== 'function' || typeof server.db.aiScope?.findFirst !== 'function'
       || typeof server.subscriptions?.readCategoryCommercialContext !== 'function'
       || server.resolvers !== undefined && (typeof server.resolvers.platform?.resolve !== 'function'
         || typeof server.resolvers.tenant?.resolve !== 'function')
       || server.transport !== undefined && typeof server.transport.post !== 'function'
+      || server.connectionConfiguration !== undefined && (server.resolvers !== undefined
+        || !Object.is(server.connectionConfiguration.db, server.db)
+        || typeof server.connectionConfiguration.secrets?.encrypt !== 'function' || typeof server.connectionConfiguration.secrets?.decrypt !== 'function'
+        || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u).safeParse(server.connectionConfiguration.platformProfileId).success)
       || server.configuration !== undefined && (!z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u).safeParse(server.configuration.sceneCode).success
         || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u).safeParse(server.configuration.countingPriceVersion).success
         || !server.configuration.toolPolicy || typeof server.configuration.toolPolicy !== 'object'
         || !Number.isSafeInteger(server.configuration.sceneMaxOutputTokens)
         || server.configuration.sceneMaxOutputTokens < 1 || server.configuration.sceneMaxOutputTokens > 32768)
       || server.clock !== undefined && typeof server.clock !== 'function') throw new BudgetError('UNAVAILABLE');
-    if (server.resolvers) Object.freeze(server.resolvers);
+    this.server = Object.freeze({ ...server,
+      ...(server.configuration ? { configuration: Object.freeze({ ...structuredClone(server.configuration),
+        toolPolicy: Object.freeze(structuredClone(server.configuration.toolPolicy)) }) } : {}),
+      ...(server.connectionConfiguration ? { connectionConfiguration: Object.freeze({ ...server.connectionConfiguration }) } : {}),
+      ...(server.resolvers ? { resolvers: Object.freeze({ ...server.resolvers }) } : {}) });
   }
 
   async call(request: InputCountingHttpRequest, action: InputCountingRequestAction, value: unknown, signal?: AbortSignal) {
@@ -150,11 +170,57 @@ export class InputCountingRequestFactory {
           // the single cast keeps that contract visible in one place.
           db: server.db as unknown as Parameters<typeof composePersistedTaskAuthorization>[0]['db'],
           auth, credentials, subscriptions: server.subscriptions, clock });
-        const frozen = configuration ? new InputCountingFrozenInputReader({ db: server.db,
-          execution: { authorize: async (taskId: string) => taskAuthorization.execution.authorize(taskId) },
+        let originalTaskId: string | undefined;
+        const invocation = { resolve: async () => {
+          if (!originalTaskId || !active) throw denied();
+          const current = await taskAuthorization.execution.authorize(originalTaskId);
+          if (!active) throw denied();
+          return current;
+        } };
+        const frozen = configuration && action === 'count' ? new InputCountingFrozenInputReader({ db: server.db,
+          execution: { authorize: async (taskId: string) => {
+            if (originalTaskId !== undefined && originalTaskId !== taskId) throw denied();
+            const context = await taskAuthorization.execution.authorize(taskId);
+            if (!active) throw denied();
+            originalTaskId = taskId;
+            return context;
+          } },
           scenePolicy: { sceneCode: configuration.sceneCode,
             maxOutputTokens: configuration.sceneMaxOutputTokens,
             ...(configuration.toolPolicy.orderExplainTool ? { orderExplainTool: true } : {}) }, clock }) : undefined;
+        let resolvers = server.resolvers;
+        if (action === 'count' && server.connectionConfiguration) {
+          const connection = server.connectionConfiguration;
+          const configAuthority = new TenantModelConfigurationAuthority(guard, credentials, invocation);
+          const tenantConfiguration = createPersistedTenantModelConfiguration({ db: connection.db, secrets: connection.secrets,
+            authorize: configAuthority.authorize.bind(configAuthority) });
+          const scopes = new AiScopeRepository(connection.db, invocation, clock);
+          const tenant = createScopeBoundTenantModelConnection(tenantConfiguration, scopes);
+          const platform = createAuthorizedPlatformModelConfiguration({ db: connection.db, guard, credentials,
+            invocation, profileId: connection.platformProfileId, secrets: connection.secrets }).invocation;
+          const boundResolver = (resolver: GatewayConnectionResolver): GatewayConnectionResolver => {
+            const check = async (context: Parameters<GatewayConnectionResolver['resolve']>[0],
+              profile: Parameters<GatewayConnectionResolver['resolve']>[1]) => {
+              const principal = gatewayBudgetPrincipal(await invocation.resolve());
+              if (!('tenantId' in context && 'workspaceId' in context) || principal.actorId !== context.actorId
+                || principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId) throw denied();
+              const selection = await tenantConfiguration.selectionForInvocation({ actorId: context.actorId,
+                tenantId: context.tenantId, workspaceId: context.workspaceId });
+              if (selection.mode !== profile.serviceMode) throw denied();
+              return hash({ principal, selection });
+            };
+            return { resolve: async (context, profile) => {
+              const before = await check(context, profile), result = await resolver.resolve(structuredClone(context), structuredClone(profile));
+              if (!active || await check(context, profile) !== before) throw denied();
+              return result;
+            }, assertCurrent: async (context, profile) => {
+              const before = await check(context, profile);
+              await resolver.assertCurrent?.(structuredClone(context), structuredClone(profile));
+              if (!active || await check(context, profile) !== before) throw denied();
+            } };
+          };
+          resolvers = { tenant: boundResolver(tenant), platform: boundResolver(platform) };
+        }
         const countingAuthorization = new InputCountTokensAuthorizationSource(
           { db: server.db as unknown as Parameters<typeof composePersistedTaskAuthorization>[0]['db'],
             auth, credentials, subscriptions: server.subscriptions, guard, clock }, server.db);
@@ -166,7 +232,7 @@ export class InputCountingRequestFactory {
           subscriptions: server.subscriptions, authorization: countingAuthorization, quotes, evidence, clock });
         const service = new InputCountTokensService({ db: server.db, scopes: countingAuthorization.scopes,
           authorization: countingAuthorization, budget, frozen,
-          resolvers: server.resolvers, transport: server.transport ?? (server.resolvers ? createNativeModelEgressTransport() : undefined),
+          resolvers, transport: server.transport ?? (resolvers ? createNativeModelEgressTransport() : undefined),
           policyOptions: configuration?.toolPolicy,
           sceneCode: configuration?.sceneCode, countingPriceVersion: configuration?.countingPriceVersion,
           ...(configuration?.timeoutMs !== undefined ? { timeoutMs: configuration.timeoutMs } : {}), clock });

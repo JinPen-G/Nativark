@@ -10,6 +10,629 @@ const Ajv = require('ajv'), addFormats = require('ajv-formats');
 const ajv = new Ajv({ strict: true }); addFormats(ajv);
 const recoveryValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestRecoveryDraft);
 
+test('fixed order chain exposes closed preparation, actual order facts and a snapshot-bound answer without redispatch', { timeout: 60000 }, async () => {
+  const shared = require('../packages/shared/src');
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { composeAiOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/original-scene-model.composition');
+  const { AiOriginalOrderReadController } = require('../apps/api/src/modules/ai-native/scenes/original-order-read.controller');
+  const { composePersistedTaskCenter } = require('../apps/api/src/modules/ai-native/task-center.composition');
+  const { validateAiOrderReadResponse } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  const tool = { code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION };
+  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], undefined, { maxSteps: 3, maxCalls: 2 });
+  const dependencies = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
+  const model = composeAiOriginalSceneModel(dependencies);
+  const chain = model.createModelOrderApplication({ holderId: 'fixed-order-worker', leaseMs: 100000 },
+    { financialEvidence: h.financial }, { answerRoundTrip: true });
+  h.execution.beforeTransport = async () => {
+    h.execution.result = h.execution.sent.length === 1 ? { text: 'Candidate only', usage: { inputTokens: 1, outputTokens: 2 },
+      toolRequests: [{ contractVersion: shared.AI_CONTRACT_DRAFT_VERSION, toolCode: tool.code, toolVersion: tool.version, input: { orderId: 'order-a' } }] }
+      : { text: 'Snapshot explanation, not payment evidence', usage: { inputTokens: 3, outputTokens: 4 } };
+  };
+  const request = { headers: { authorization: (await dependencies.credentials.current()).authorization } };
+  const center = composePersistedTaskCenter(dependencies);
+  const methods = Object.fromEntries(Object.keys(shared.AI_ORDER_READ_HTTP_CONTRACTS).map(action => [action,
+    (_request, command, signal) => action === 'readTaskSnapshot' ? center.events.readSnapshot({ taskId: h.created.task.taskId })
+      : chain[action === 'readTaskScene' ? 'readScene' : action === 'reopenModelSource' ? 'reopenOrderSource' : action](command, signal)]));
+  const controller = new AiOriginalOrderReadController(methods);
+  const before = await controller.readPreparation(request, h.reference);
+  assert.deepEqual(before.preparation.missing, ['model_request', 'order_read', 'model_answer']);
+  assert.equal(before.preparation.planPublished, false); assert.equal(h.execution.sent.length, 0);
+  const started = await controller.start(request, h.reference);
+  assert.equal(started.outcome.outcome.status, 'succeeded', JSON.stringify(started));
+  assert.equal(h.execution.sent.length, 2); assert.equal(h.state.aiStep.length, 3);
+  assert.equal(h.state.aiTaskExecutionBudget.length, 1); assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
+  assert.equal((await controller.readPreparation(request, h.reference)).preparation.planPublished, true);
+  const facts = await controller.readOrderResult(request, h.reference);
+  assert.equal(facts.result.status, 'available'); assert.equal(facts.result.facts.order.amounts.finalPayable, 100);
+  assert.equal(facts.result.facts.paymentEvidence, 'not_loaded');
+  const answer = await controller.readAnswer(request, h.reference);
+  assert.equal(answer.result.status, 'available'); assert.equal(answer.result.textSemantics, 'model_text_not_core_fact');
+  assert.equal(answer.result.originalReadResultId, facts.result.resultId);
+  assert.equal((await controller.readModelResult(request, h.reference)).toolCandidates.execution, 'not_attempted');
+  assert.equal((await controller.reopenModelSource(request, h.reference)).sourceIndex, 0);
+  const scene = await controller.readTaskScene(request, h.reference);
+  assert.equal(scene.answer.result.originalReadResultId, facts.result.resultId); assert.equal(scene.handoff.approval, 'not_granted');
+  assert.equal((await controller.readTaskSnapshot(request, h.reference)).taskId, h.created.task.taskId);
+  const stopped = await controller.recover(request, h.reference);
+  assert.equal(stopped.outcome.reason, 'task_not_runnable'); assert.equal(h.execution.sent.length, 2);
+  for (const [action, value, corrupt] of [
+    ['readOrderResult', facts, value => { value.result.facts.sources[0].resourceId = 'another-order'; }],
+    ['readAnswer', answer, value => { value.result.facts.order.privateNote = 'must-not-leak'; }],
+    ['readAnswer', answer, value => { value.result.text = '界'.repeat(50000); }],
+    ['readTaskScene', scene, value => { value.answer.original.inputRef = 'another-original'; }],
+    ['readPreparation', before, value => { value.preparation.publishedInputs = 2; }]
+  ]) {
+    const invalid = structuredClone(value); corrupt(invalid);
+    assert.throws(() => validateAiOrderReadResponse(action, invalid, h.reference), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  }
+  const independent = structuredClone(scene);
+  independent.orderFacts = { ...facts, result: { status: 'candidate_not_executed', facts: null, automaticRetry: false, businessExecution: 'readonly_not_business_commit' } };
+  assert.doesNotThrow(() => validateAiOrderReadResponse('readTaskScene', independent, h.reference));
+  for (const alter of [value => { value.order.id = 'another-order'; }, value => { value.scope.workspaceId = 'another-workspace'; }]) {
+    const mixed = structuredClone(independent); alter(mixed.answer.result.facts);
+    assert.throws(() => validateAiOrderReadResponse('readTaskScene', mixed, h.reference), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  }
+  const mutated = new AiOriginalOrderReadController({ ...methods, readAnswer: async (_request, command) => {
+    command.inputRef = 'another-original'; return { ...answer, original: { ...answer.original, inputRef: command.inputRef } };
+  } });
+  await assert.rejects(mutated.readAnswer(request, h.reference), error => error.getStatus() === 503);
+  assert.equal(answer.original.inputRef, h.reference.inputRef);
+  const changedOrder = { ...require('./fixtures/ai-native/authorization-baseline.cjs').order({ tenantId: 'tenant_001' }),
+    finalPayableAmount: 101, updatedAt: '2026-01-01T01:00:00Z' };
+  h.b.facts.findOrder = async () => structuredClone(changedOrder);
+  assert.equal((await controller.readOrderResult(request, h.reference)).result.status, 'stale');
+  assert.equal((await controller.readAnswer(request, h.reference)).result.status, 'stale');
+  assert.equal(h.execution.sent.length, 2); assert.equal(h.state.aiGatewayInvocation.length, 2);
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.readOrderResult(request, h.reference), error => error.getStatus() === 403);
+  assert.equal(h.execution.sent.length, 2);
+});
+
+test('fixed order public receipts preserve cancellation and takeover generations and unknown writes', { timeout: 60000 }, async () => {
+  const shared = require('../packages/shared/src'), contracts = require('./fixtures/ai-native/contract-consumer.cjs');
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { composeAiOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/original-scene-model.composition');
+  const { AiOriginalOrderReadController } = require('../apps/api/src/modules/ai-native/scenes/original-order-read.controller');
+  const create = async () => {
+    const h = await originalModelApplicationHarness('order_explanation', undefined, undefined,
+      [{ code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION }], undefined, { maxSteps: 2, maxCalls: 1 });
+    const deps = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
+    const chain = composeAiOriginalSceneModel(deps).createModelOrderApplication({ holderId: 'fixed-recovery-worker', leaseMs: 100000 },
+      { financialEvidence: h.financial });
+    const request = { headers: { authorization: (await deps.credentials.current()).authorization } };
+    const methods = Object.fromEntries(Object.keys(shared.AI_ORDER_READ_HTTP_CONTRACTS).map(action => [action,
+      (_request, command, signal) => chain[action](command, signal)]));
+    return { ...h, chain, methods, request, controller: new AiOriginalOrderReadController(methods) };
+  };
+  const h = await create(), cancel = { original: h.reference, expectedRevision: h.state.aiTask[0].revision };
+  const missing = await h.controller.readCancellationReceipt(h.request, cancel);
+  assert.equal(missing.receipt.status, 'not_observed'); assert.equal(missing.receipt.event, null);
+  const receipt = await h.controller.requestCancel(h.request, cancel);
+  assert.equal(receipt.receipt.event.taskRevision, cancel.expectedRevision + 1);
+  const observed = await h.controller.readCancellationReceipt(h.request, cancel);
+  assert.equal(observed.receipt.status, 'observed'); assert.equal(observed.receipt.remoteCancellation, 'not_attested');
+  const settle = { original: h.reference, expectedRevision: h.state.aiTask[0].revision };
+  assert.equal((await h.controller.readCancellationSettlementReceipt(h.request, settle)).receipt.status, 'not_observed');
+  const settled = await h.controller.settleUnstartedCancellation(h.request, settle);
+  assert.equal(settled.cancellation, 'unstarted_task_cancelled_not_business_rollback');
+  const settlement = await h.controller.readCancellationSettlementReceipt(h.request, settle);
+  assert.equal(settlement.receipt.event.data.to, 'cancelled');
+  const { validateAiOrderReadResponse } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  const contradictory = structuredClone(settlement); contradictory.receipt.snapshot.status = 'running';
+  assert.throws(() => validateAiOrderReadResponse('readCancellationSettlementReceipt', contradictory, settle), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  const later = structuredClone(observed); later.receipt.snapshot = structuredClone(settlement.receipt.snapshot);
+  assert.doesNotThrow(() => validateAiOrderReadResponse('readCancellationReceipt', later, cancel));
+  assert.equal(h.state.aiTask[0].status, 'CANCELLED'); assert.equal(h.execution.sent.length, 0);
+  const signal = new AbortController(); signal.abort();
+  assert.deepEqual(await h.chain.start(h.reference, signal.signal), { outcome: { kind: 'not_started', reason: 'host_aborted' } });
+
+  const partial = await create(), priorWrite = partial.control.beforeWrite;
+  const { AiTaskRunnerError } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+  partial.control.beforeWrite = async (table, args, data) => {
+    await priorWrite?.(table, args, data);
+    if (table === 'aiTaskActionInput' && args.data?.toolCode === 'rental.order.explain') throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+  };
+  await assert.rejects(partial.controller.start(partial.request, partial.reference), error => error.getStatus() === 503
+    && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE');
+  const prefix = await partial.controller.readPreparation(partial.request, partial.reference);
+  assert.equal(prefix.preparation.publishedInputs, 1); assert.deepEqual(prefix.preparation.missing, ['order_read']);
+  const firstInput = partial.state.aiTaskActionInput[0].id;
+  partial.control.beforeWrite = priorWrite;
+  partial.execution.result.toolRequests = [{ contractVersion: shared.AI_CONTRACT_DRAFT_VERSION,
+    toolCode: 'rental.order.explain', toolVersion: shared.AI_TOOL_DRAFT_VERSION, input: { orderId: 'order-a' } }];
+  const resumed = await partial.controller.resumePrepared(partial.request, partial.reference);
+  assert.equal(resumed.outcome.outcome.status, 'succeeded'); assert.equal(resumed.preparation, 'original_inputs_only');
+  assert.equal(partial.state.aiTaskActionInput[0].id, firstInput);
+  assert.equal(partial.execution.sent.length, 1); assert.equal(partial.state.aiTaskActionInput.length, 2);
+  assert.equal(partial.state.aiTaskExecutionBudget.length, 1);
+
+  const lost = await create(), lostCancel = { original: lost.reference, expectedRevision: lost.state.aiTask[0].revision };
+  const originalWrite = lost.control.beforeWrite;
+  lost.control.beforeWrite = async (table, args, data) => {
+    await originalWrite?.(table, args, data);
+    if (table === 'aiTaskEvent' && args.data?.payload?.data?.to === 'cancel_requested') lost.control.loseReply = true;
+  };
+  await assert.rejects(lost.controller.requestCancel(lost.request, lostCancel), error => error.getStatus() === 409
+    && error.getResponse().nextAction === 'read_cancellation_receipt');
+  lost.control.beforeWrite = originalWrite;
+  assert.equal((await lost.controller.readCancellationReceipt(lost.request, lostCancel)).receipt.status, 'observed');
+  assert.equal(lost.execution.sent.length, 0);
+
+  const unknown = await create(); delete unknown.execution.result.usage;
+  const started = await unknown.controller.start(unknown.request, unknown.reference);
+  assert.equal(started.outcome.outcome.status, 'unknown'); assert.equal(unknown.execution.sent.length, 1);
+  assert.equal((await unknown.controller.readOrderResult(unknown.request, unknown.reference)).result.status, 'candidate_not_executed');
+  assert.equal((await unknown.controller.recover(unknown.request, unknown.reference)).outcome.outcome.status, 'unknown');
+  const policy = unknown.state.aiTaskActionPolicy.find(row => row.operation === 'claim_recovery_run');
+  unknown.state.aiTaskActionPolicy.push({ ...structuredClone(policy), operation: 'takeover_run' });
+  unknown.state.operationLog = [];
+  unknown.db.operationLog = { findFirst: async ({ where }) => structuredClone(unknown.state.operationLog
+    .find(row => Object.entries(where).every(([key, value]) => (row[key] ?? null) === value)) ?? null) };
+  const run = unknown.state.aiRun[0]; run.leaseOwnerId = 'interrupted-fixed-worker';
+  run.leaseExpiresAt = new Date(unknown.dependencies.clock().getTime() + 10000);
+  const takeover = { original: unknown.reference, expectedTaskRevision: unknown.state.aiTask[0].revision,
+    expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) };
+  assert.equal((await unknown.controller.readTakeoverReceipt(unknown.request, takeover)).receipt.status, 'not_observed');
+  const taken = await unknown.controller.takeover(unknown.request, takeover);
+  assert.equal(taken.outcome.outcome.status, 'unknown'); assert.equal(taken.takeover, 'same_owner_recovery_only');
+  const takeoverReceipt = await unknown.controller.readTakeoverReceipt(unknown.request, takeover);
+  assert.equal(takeoverReceipt.receipt.status, 'observed'); assert.equal(takeoverReceipt.receipt.admission, 'not_granted');
+  assert.equal(unknown.execution.sent.length, 1); assert.equal(unknown.state.aiGatewayInvocation.length, 1);
+  const invalid = new AiOriginalOrderReadController({ ...h.methods,
+    requestCancel: async () => ({ ...receipt, privatePayload: 'must-not-leak' }),
+    readTakeoverReceipt: async () => ({ ...takeoverReceipt, receipt: { ...takeoverReceipt.receipt, recordedRunRevision: 1 } }) });
+  await assert.rejects(invalid.requestCancel(h.request, cancel), error => error.getStatus() === 409
+    && error.getResponse().code === 'AI_RESULT_UNKNOWN' && error.getResponse().nextAction === 'read_cancellation_receipt');
+  await assert.rejects(invalid.readTakeoverReceipt(h.request, takeover), error => error.getStatus() === 503);
+  assert.throws(() => h.controller.start(h.request, { ...h.reference, actor: 'forged' }), error => error.getStatus() === 400);
+  assert.equal(unknown.execution.sent.length, 1);
+
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  const schemas = shared.AI_ORDER_READ_HTTP_SCHEMAS;
+  contracts.checkClosed(schemas, OPENAPI_DOCUMENT.components.schemas);
+  for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  for (const [action, contract] of Object.entries(shared.AI_ORDER_READ_HTTP_CONTRACTS)) {
+    const route = OPENAPI_DOCUMENT.paths[`/api/${shared.AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${shared.AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`].post;
+    assert.equal(route.requestBody.content['application/json'].schema.$ref, `#/components/schemas/${contract.request}`);
+    assert.equal(route.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+    assert.equal(Reflect.getMetadata('path', AiOriginalOrderReadController.prototype[action]), shared.AI_SCENE_ORDER_READ_HTTP_DRAFT[action]);
+  }
+  assert.deepEqual(contracts.compileConsumer(`import type { AiOrderReadAnswerResponseDraft, AiOrderReadTakeoverReceiptDraft } from '../packages/shared/src';
+    declare const answer: AiOrderReadAnswerResponseDraft;
+    if (answer.result.status === 'available') { const amount: number | null = answer.result.facts.order.amounts.finalPayable; }
+    declare const receipt: AiOrderReadTakeoverReceiptDraft;
+    if (receipt.status === 'observed') { const revision: number = receipt.recordedRunRevision; }
+    if (receipt.status === 'not_observed') {
+      // @ts-expect-error absence cannot supply an acknowledged generation
+      const revision: number = receipt.recordedRunRevision;
+    }`), []);
+});
+
+test('extension HTTP preserves full Core pricing snapshots and read-only authority without redispatch', { timeout: 60000 }, async t => {
+  const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  const shared = require('@rental-os/shared'), { RentalCoreController } = require('../apps/api/src/modules/rental-core/rental-core.controller');
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { validateAiExtensionPreviewResponse } = require('../apps/api/src/modules/ai-native/scenes/extension-preview-http.contract');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const tenantId = 'tenant_001', core = h.b.core, business = h.b.business;
+  const ctx = { profile: core.getProfile(tenantId), category: await core.getWorkspaceCategory(tenantId), settings: core.getBusinessSettings(tenantId),
+    groups: core.listItemGroups(tenantId), pricingGroups: core.listPricingGroups(tenantId), couponTemplates: core.listCouponTemplates(tenantId),
+    locations: core.listLocations(tenantId), operators: core.listOperators(tenantId) };
+  const startAt = new Date(Date.now() + 2 * 86400000).toISOString(), endAt = new Date(Date.now() + 3 * 86400000).toISOString();
+  const newEndAt = new Date(Date.now() + 4 * 86400000).toISOString(), group = h.b.group, location = h.b.location;
+  const quote = await business.createQuote(tenantId, ctx, { customerType: 'personal', customerName: 'Synthetic extension',
+    fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: location.id, startAt, endAt,
+    lines: [{ itemGroupId: group.id, quantity: 1, pricingUnit: h.b.candidate.items[0].pricingUnit }] });
+  quote.ruleSnapshot.extension = { enabled: true, forceImmediateWhenOverdue: true, pricingMode: 'original_total' };
+  const row = require('./fixtures/ai-native/authorization-baseline.cjs').order({ tenantId, status: 'renting', startAt, endAt,
+    quoteId: quote.id, ruleSnapshot: quote.ruleSnapshot, customerType: 'personal', fulfillmentMode: 'store_pickup_return',
+    fulfillmentLocationId: location.id, lines: quote.request.lines.map((line, i) => ({ ...line, id: `line-${i}`, inventoryMode: group.inventoryMode,
+      itemGroupName: group.name, amount: quote.rentalAmount })),
+    reservations: [{ id: 'reservation-a', orderId: 'order-a', itemGroupId: group.id, locationId: location.id,
+      quantity: 1, releasedQuantity: 0, status: 'confirmed', startAt, endAt }], depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount });
+  h.b.facts.findOrder = async () => structuredClone(row);
+  // The fact-store fixtures expose stock only; Core still decides availability
+  // and performs the actual extension pricing. No DB/lock claim is made here.
+  h.b.facts.listAssets = async () => [{ id: 'asset-extension', itemGroupId: group.id, locationId: location.id, status: 'available' }];
+  h.b.facts.listStockBalances = async () => [{ itemGroupId: group.id, locationId: location.id, onHandQuantity: 10, maintenanceQuantity: 0 }];
+  const coreController = new RentalCoreController(core, undefined, business);
+  const requests = composeRequestBoundOriginalScenes({ ...dependencies, extensionPreview: coreController }, { enabled: true, audience: 'operator' });
+  const http = new AiOriginalScenesController(requests), request = { headers: { authorization: (await credentials.current()).authorization } };
+  const create = h.command(); create.input.question = 'next_steps';
+  const original = await http.create(request, create), command = { ...h.ref(original.receipt.inputRef), expectedOrderVersion: row.updatedAt,
+    extension: { newEndAt, memo: 'Synthetic read-only preview' } };
+  const denied = (status, code) => e => e.getStatus() === status && e.getResponse().code === code;
+  const permissions = [...h.b.h.identity.user.permissions];
+  h.b.h.identity.user.permissions = permissions.filter(code => !['rental-os:order:extend', 'rental-os:order:operate'].includes(code));
+  await assert.rejects(http.previewOrderExtension(request, command), denied(403, 'AI_ACCESS_DENIED'));
+  h.b.h.identity.user.permissions = permissions; // Original operator fallback remains valid.
+  const factsBefore = h.b.facts.writes.length, businessBefore = h.b.businessFacts.writes.length;
+  const result = await http.previewOrderExtension(request, command);
+  assert.equal(result.result.status, 'previewed', JSON.stringify(result));
+  assert.equal(result.taskExecution, 'not_started'); assert.equal(result.result.inventory, 'not_reserved');
+  const preview = result.result.preview;
+  assert.equal(preview.pricingSnapshot.method, 'original_version_difference');
+  assert.ok(preview.pricingSnapshot.context.calendars.length > 0);
+  assert.equal(result.result.source.inputFingerprint, requestFingerprint(command.extension));
+  assert.equal(h.b.facts.writes.length, factsBefore); assert.equal(h.b.businessFacts.writes.length, businessBefore);
+  assert.equal(h.state.aiStep.length, 0); assert.equal(h.state.aiRun[0].status, 'QUEUED');
+  const offsetCommand = { ...command, extension: { newEndAt: newEndAt.replace('Z', '+00:00') } };
+  assert.equal((await http.previewOrderExtension(request, offsetCommand)).result.status, 'previewed');
+  const signed = structuredClone(result);
+  signed.result.preview.depositDelta = -0.25; signed.result.preview.preAuthDelta = -1.5;
+  signed.result.preview.pricingSnapshot.differenceAmount = -2.75;
+  signed.result.preview.chargeLines.push({ code: 'synthetic-refund', name: 'Core difference', type: 'early_return_refund', amount: -2.75 });
+  assert.deepEqual(validateAiExtensionPreviewResponse(signed, command), signed);
+  // Explicit wire fixtures exercise optional historical branches not present in
+  // the seeded quote. They assert preservation/closure, not executed business.
+  const historical = structuredClone(result), priced = historical.result.preview;
+  priced.executionBasis.categoryPolicySnapshot = structuredClone(ctx.category);
+  priced.pricingSnapshot.context.dayRates = [{ id: 'rate-a', itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name,
+    unit: 'day_24h', baseAmount: 10.25, weekendMultiplier: 1, holidayMultiplier: 2, depositAmount: 5, minimumUnits: 1,
+    maxAmount: 0, usagePrecision: 2, tierMode: 'progressive', tiers: [{ minUnits: 1, unitAmount: 0.25 }],
+    dayTypePrices: { workday: 1 }, periodicWindows: [{ fromWeekday: 1, fromTime: '09:00', toWeekday: 1, toTime: '18:00', multiplier: 1 }],
+    datetimeOverrides: [{ id: 'price-override', start: startAt, end: endAt, multiplier: 1.5 }] }];
+  priced.serviceSnapshots = [{ serviceId: 'service-a', serviceCode: 'SUPPORT', serviceName: 'Historical support', serviceType: 'support',
+    serviceVersion: '1', workspaceId: 'workspace-a', billingUnit: 'per_order', selectionMode: 'optional', requiredByRule: false,
+    unitPrice: 1.25, quantity: 1, billingUnits: 1, amount: 1.25, formula: '1.25 x 1', termsVersion: '1', terms: 'Original terms',
+    eligibility: [{ rule: 'historical', passed: true }], insuredDisplayable: false, requiresCapacity: false,
+    scheduledStartAt: startAt, scheduledEndAt: newEndAt, serviceLocationId: location.id, capacityQuantity: 1 }];
+  priced.pricingSnapshot.discountEvaluations = [{ planSnapshot: { id: 'plan-a', tenantId, categoryCode: ctx.category.code, code: 'DISCOUNT', name: 'Original plan',
+    status: 'enabled', discountType: 'fixed_amount', discountValue: 1, minimumSpend: 0, appliesTo: 'rental', customerScope: 'all',
+    applicableItemGroupIds: [], applicableDayTypes: [], priority: 1, stackableWithOtherPlans: false, stackableWithCoupon: true,
+    effectiveFrom: startAt, version: '1', createdAt: startAt, updatedAt: startAt }, planId: 'plan-a', planCode: 'DISCOUNT',
+    planName: 'Original plan', planVersion: '1', workspaceId: 'workspace-a', appliesTo: 'rental', discountType: 'fixed_amount', priority: 1,
+    stackableWithOtherPlans: false, stackableWithCoupon: true, applied: true, eligibility: [], grossAmount: 10, base: 10,
+    formula: '10 - 1', candidateAmount: 1, discountAmount: 1, rentalAllocations: { 'line-0': 1 }, capped: false }];
+  priced.pricingSnapshot.couponEvaluation = { couponId: 'coupon-a', templateId: 'template-a', templateCode: 'C', templateName: 'Historical coupon',
+    templateVersion: '1', appliesTo: 'rental', discountType: 'fixed_amount', discountValue: 1, minimumSpend: 0,
+    stackableWithDiscountPlans: true, checkedAt: startAt, rentalStartAt: startAt, baseBeforeDiscount: 10, runningBase: 9,
+    formula: '9 - 1', discountAmount: 1, rentalAllocations: { 'line-0': 1 } };
+  priced.pricingSnapshot.refundReview = { amount: 2.75, status: 'pending' };
+  assert.deepEqual(validateAiExtensionPreviewResponse(historical, command), historical);
+  const minimal = structuredClone(result);
+  delete minimal.result.preview.pricingSnapshot; delete minimal.result.preview.executionBasis; delete minimal.result.preview.serviceSnapshots;
+  assert.deepEqual(validateAiExtensionPreviewResponse(minimal, command), minimal);
+  for (const change of [value => { value.original.inputRef = 'wrong'; }, value => { value.result.source.inputFingerprint = '0'.repeat(64); },
+    value => { value.result.preview.chargeLines[0].credential = 'internal'; }, value => { value.result.preview.depositDelta = NaN; },
+    value => { value.result.preview.pricingSnapshot.context.calendars[0].tenantId = 'other'; },
+    value => { value.result.preview.newEndAt = endAt; }, value => { value.taskExecution = 'started'; }]) {
+    const invalid = structuredClone(result); change(invalid);
+    assert.throws(() => validateAiExtensionPreviewResponse(invalid, command), { code: 'AI_STORAGE_UNAVAILABLE' });
+  }
+  const corrupt = new AiOriginalScenesController({ ...requests, previewOrderExtension: async (_req, input) => {
+    input.extension.newEndAt = endAt;
+    return { ...result, result: { ...result.result, source: { ...result.result.source, inputFingerprint: requestFingerprint(input.extension) } } };
+  } });
+  await assert.rejects(corrupt.previewOrderExtension(request, command), denied(503, 'AI_STORAGE_UNAVAILABLE'));
+  const raw = coreController.previewExtension.bind(coreController);
+  const late = t.mock.method(coreController, 'previewExtension', async (...args) => { const value = await raw(...args); row.updatedAt = new Date().toISOString(); return value; });
+  await assert.rejects(http.previewOrderExtension(request, command), denied(409, 'AI_REVISION_CONFLICT')); late.mock.restore();
+  row.updatedAt = command.expectedOrderVersion;
+  row.status = 'completed';
+  const blocked = await http.previewOrderExtension(request, command);
+  assert.equal(blocked.result.status, 'blocked'); assert.equal(blocked.result.coreStatus, 409); assert.equal(blocked.result.preview, undefined);
+  row.status = 'renting';
+  await assert.rejects(http.previewOrderExtension(request, { ...command, approved: true }), denied(400, 'AI_INVALID_INPUT'));
+  const beforeDamaged = t.mock.method(coreController, 'previewExtension', async (...args) => ({ ...await raw(...args), credential: 'internal' }));
+  await assert.rejects(http.previewOrderExtension(request, command), denied(503, 'AI_STORAGE_UNAVAILABLE')); beforeDamaged.mock.restore();
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const route = OPENAPI_DOCUMENT.paths[`/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension}`].post;
+  assert.equal(route.responses['200'].content['application/json'].schema.properties.data.$ref, '#/components/schemas/AiSceneOrderExtensionPreviewResponseDraft');
+  assert.deepEqual(require('./fixtures/ai-native/contract-consumer.cjs').compileConsumer(`
+    import type { AiSceneOrderExtensionPreviewResponseDraft, RentalOrderExtensionPreview } from '../packages/shared/src';
+    declare const response: AiSceneOrderExtensionPreviewResponseDraft;
+    if (response.result.status === 'previewed') { const core: RentalOrderExtensionPreview = response.result.preview; }
+    if (response.result.status === 'blocked') {
+      // @ts-expect-error Core refusal is not a price or business receipt
+      const price: number = response.result.preview.payableAmount;
+    }`), []);
+  h.b.h.identity.session = false;
+  await assert.rejects(http.previewOrderExtension(request, command), denied(403, 'AI_ACCESS_DENIED'));
+  assert.equal(h.b.facts.writes.length, factsBefore); assert.equal(h.b.businessFacts.writes.length, businessBefore);
+});
+
+test('original policy HTTP contracts preserve current-row CAS and deny damaged responses without execution', { timeout: 60000 }, async () => {
+  const h = await setup({ operationLog: [] }); h.b.h.identity.user.permissions.push('system:params:manage');
+  const shared = require('@rental-os/shared'), { AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const { composeRequestBoundOriginalTaskActionPolicies, composeRequestBoundScenePlanPolicies } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { originalPolicyRequest, originalPolicyResponse } = require('../apps/api/src/modules/ai-native/scenes/original-policy-http.contract');
+  const { credentials, ...deps } = h.dependencies, request = { headers: { authorization: (await credentials.current()).authorization } };
+  const created = await h.app.create(h.command()), original = h.ref(created.receipt.inputRef);
+  const app = composeRequestBoundOriginalTaskActionPolicies(deps, { enabled: true, audience: 'operator', ttlMs: 120000,
+    templates: [{ operation: 'read_metadata', requiredPermissions: ['rental-os:order:view'] }] });
+  const http = new AiOriginalTaskActionPolicyController(app), read = { original, operation: 'read_metadata' };
+  assert.equal((await http.read(request, read)).state, 'not_observed');
+  const configured = await http.configure(request, { ...read, expectedRevision: null });
+  assert.equal(configured.policy.revision, 1); assert.equal(configured.policy.taskId, created.task.taskId);
+  assert.equal((await http.read(request, read)).policy.revision, 1);
+  await assert.rejects(http.configure(request, { ...read, expectedRevision: null }), e => e.getStatus() === 409);
+  await assert.rejects(http.configure(request, { ...read, expectedRevision: 1, permissions: ['forged'] }), e => e.getStatus() === 400);
+  await assert.rejects(http.read(request, { ...read, operation: 'claim_run' }), e => e.getStatus() === 404);
+  const revoked = await http.clear(request, { ...read, expectedRevision: 1 }); assert.equal(revoked.policy.revision, 2);
+  assert.equal(revoked.semantics, 'new_task_actions_denied_not_remote_rollback');
+  const damaged = new AiOriginalTaskActionPolicyController({ ...app, read: async () => ({ ...configured, state: 'observed', credential: 'hidden' }) });
+  await assert.rejects(damaged.read(request, read), e => e.getStatus() === 503);
+  const writeCommand = { ...read, expectedRevision: 2 };
+  const altered = new AiOriginalTaskActionPolicyController({ ...app, configure: async (_request, value) => {
+    value.original.inputRef = '00000000-0000-4000-8000-000000000002';
+    return { ...configured, original: value.original, policy: { ...configured.policy, revision: 3 } };
+  } });
+  await assert.rejects(altered.configure(request, writeCommand), e => e.getStatus() === 409 && e.getResponse().code === 'AI_RESULT_UNKNOWN');
+  assert.equal(writeCommand.original.inputRef, original.inputRef);
+  const tools = ['ai.model.text', 'rental.order.explain'], limits = structuredClone(h.b.h.plan.limits);
+  const planRow = h.state.aiTaskPlanPolicy.find(row => row.sceneCode === 'order_explanation');
+  planRow.limits = limits; planRow.allowedTools = tools.map(code => ({ code, version: shared.AI_TOOL_DRAFT_VERSION }));
+  const plans = composeRequestBoundScenePlanPolicies(deps, { enabled: true, audience: 'operator', scenes: [{ scene: { code: 'order_explanation', version: '1' }, tools }] });
+  const planHttp = new AiScenePlanPolicyController(plans), key = { sceneCode: 'order_explanation' };
+  assert.equal((await planHttp.read(request, key)).state, 'configured');
+  const change = { ...key, change: { expectedRevision: 1, enabled: false, limits, expiresAt: '2027-01-01T00:00:00+00:00' } };
+  const saved = await planHttp.change(request, change); assert.equal(saved.revision, 2); assert.equal(saved.enabled, false);
+  assert.equal((await planHttp.read(request, key)).revision, 2); assert.equal(h.state.operationLog.length, 1);
+  await assert.rejects(planHttp.change(request, change), e => e.getStatus() === 409);
+  await assert.rejects(planHttp.change(request, { ...change, change: { ...change.change, limits: { ...limits, maxStepMs: limits.maxTotalMs + 1 } } }), e => e.getStatus() === 400);
+  for (const patch of [{ tenantId: 'another' }, { tools: ['sql'] }, { sceneCode: 'unknown' }])
+    await assert.rejects(planHttp.read(request, { ...key, ...patch }), e => e.getStatus() === 400);
+  assert.throws(() => originalPolicyResponse('planChange', { ...saved, revision: 3 }, change), { code: 'AI_RESULT_UNKNOWN' });
+  assert.throws(() => originalPolicyRequest('taskRead', { ...read, approved: true }), { code: 'AI_INVALID_INPUT' });
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document'), f = require('./fixtures/ai-native/contract-consumer.cjs');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  f.checkClosed(shared.AI_ORIGINAL_POLICY_HTTP_SCHEMAS, OPENAPI_DOCUMENT.components.schemas);
+  for (const [name, schema] of Object.entries(shared.AI_ORIGINAL_POLICY_HTTP_SCHEMAS)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  assert.deepEqual(f.compileConsumer(`import type { AiOriginalTaskPolicyReadResponseDraft, AiOriginalScenePlanReadResponseDraft } from '../packages/shared/src';
+    declare const policy: AiOriginalTaskPolicyReadResponseDraft;
+    if (policy.state === 'observed') { const id: string = policy.policy.taskId; }
+    else { const absent: null = policy.policy; }
+    declare const plan: AiOriginalScenePlanReadResponseDraft;
+    // @ts-expect-error policy observation cannot authorize model dispatch
+    const dispatch: true = plan.taskActionPolicy;`), []);
+  h.b.h.identity.session = false; await assert.rejects(http.read(request, read), e => e.getStatus() === 403);
+  assert.equal(h.state.aiTask.length, 1); assert.equal(h.state.aiStep.length, 0);
+});
+
+test('conversation metadata and original admission share CAS, owner scope and immutable recovery', { timeout: 60000 }, async () => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiTaskExecutionCharge: [],
+    aiApprovalConsumption: [], aiGatewayInvocation: [], aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [] });
+  const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { AI_CONVERSATION_DRAFT_VERSION: draftVersion } = require('@rental-os/shared');
+  const app = new AiConversationRepository(h.dependencies, h.app.requests);
+  const create = { draftVersion, operationKey: 'conversation-create-a', capabilityCode: 'order_explanation' };
+  const created = await app.create(create), conversationId = created.conversationId;
+  assert.equal((await app.create(create)).conversationId, conversationId); assert.equal(h.state.aiConversation.length, 1);
+  assert.equal((await app.readOperation({ draftVersion, operationKey: create.operationKey })).revision, 1);
+  assert.equal((await app.readOperation({ draftVersion, operationKey: 'absent' })).status, 'not_observed');
+  await assert.rejects(app.create({ ...create, actor: 'forged' }), { code: 'AI_INVALID_INPUT' });
+  await assert.rejects(app.create({ ...create, capabilityCode: 'opening_diagnosis' }), { code: 'AI_REVISION_CONFLICT' });
+  const ref = { draftVersion, conversationId }, body = { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } };
+  const command = { ...ref, expectedRevision: 1, admissionKey: 'message-a', request: body };
+  const accepted = await app.admit(command);
+  assert.equal(accepted.result.status, 'original_bound'); assert.equal(accepted.result.task, null);
+  assert.equal(h.state.aiTaskOriginalRequest.length, 1); assert.equal(h.state.aiTask.length, 0);
+  assert.equal((await app.admit(command)).result.turnId, accepted.result.turnId);
+  await assert.rejects(app.admit({ ...command, expectedRevision: 2 }), { code: 'AI_REVISION_CONFLICT' });
+  assert.equal((await app.read(ref)).currentTurn.turnId, accepted.result.turnId);
+  const waiting = { ...ref, operationKey: 'release-a', expectedRevision: 2 };
+  await assert.rejects(app.releaseTurn(waiting), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  await assert.rejects(app.admit({ ...command, expectedRevision: 2, admissionKey: 'message-b' }), { code: 'AI_REVISION_CONFLICT' });
+  const task = await h.app.requests.createTask(accepted.result.original);
+  await assert.rejects(app.releaseTurn(waiting), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  const taskRow = h.state.aiTask.find(row => row.id === task.taskId);
+  taskRow.status = 'SUCCEEDED';
+  h.state.aiTaskExecutionCharge.push({ scopeId: taskRow.scopeId, taskId: taskRow.id, status: 'UNKNOWN', chargeId: 'unresolved' });
+  await assert.rejects(app.releaseTurn(waiting), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  h.state.aiTaskExecutionCharge[0].status = 'CONSUMED';
+  h.state.aiGatewayInvocation.push({ scopeId: taskRow.scopeId, taskId: taskRow.id, callId: 'original-call' });
+  h.state.aiInvocationAdmission.push({ tenantId: 'tenant_001', workspaceId: 'workspace-a', callId: 'original-call', status: 'unknown' });
+  const priorRead = h.control.beforeRead;
+  h.control.beforeRead = async (table, args, data) => {
+    await priorRead?.(table, args, data);
+    if (['aiInvocationAdmission', 'aiUsageReservation'].includes(table)) {
+      assert.deepEqual(Object.keys(args.where).sort(), ['callId', 'status', 'tenantId', 'workspaceId']);
+    }
+  };
+  await assert.rejects(app.releaseTurn(waiting), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  h.state.aiInvocationAdmission[0].status = 'completed';
+  h.state.aiUsageReservation.push({ tenantId: 'tenant_001', workspaceId: 'workspace-a', callId: 'original-call', status: 'pending_reconciliation' });
+  await assert.rejects(app.releaseTurn(waiting), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  h.state.aiUsageReservation[0].status = 'settled';
+  const releases = await Promise.all([app.releaseTurn(waiting), app.releaseTurn(waiting)]);
+  const release = releases[0]; assert.deepEqual(releases[1], release);
+  h.control.beforeRead = priorRead; assert.equal(release.operation, 'release_turn'); assert.equal(release.revision, 3);
+  assert.equal((await app.releaseTurn(waiting)).revision, 3);
+  const next = { ...command, expectedRevision: 3, admissionKey: 'message-b' };
+  const priorWrite = h.control.beforeWrite;
+  h.control.beforeWrite = async (table, args, data) => { await priorWrite?.(table, args, data);
+    if (table === 'aiConversationTurn') h.control.loseReply = true;
+  };
+  await assert.rejects(app.admit(next), { code: 'AI_RESULT_UNKNOWN' });
+  h.control.beforeWrite = priorWrite;
+  const recovered = await app.readAdmission({ ...ref, admissionKey: 'message-b' });
+  assert.equal(recovered.result.status, 'original_bound'); assert.equal(h.state.aiTaskOriginalRequest.length, 2);
+  assert.equal((await app.admit(next)).result.turnId, recovered.result.turnId);
+  assert.equal(h.state.aiTaskOriginalRequest.length, 2);
+  const page = await app.turns({ ...ref, limit: 1 }); assert.equal(page.items.length, 1); assert.ok(page.nextBeforeId);
+  const summary = await app.list({ draftVersion, status: 'active', limit: 1 }); assert.equal(summary.items[0].conversationId, conversationId);
+  const owner = h.b.h.identity.user.id; h.b.h.identity.user.id = 'another-operator';
+  await assert.rejects(app.read(ref)); assert.equal((await app.list({ draftVersion, status: 'active', limit: 1 })).items.length, 0);
+  h.b.h.identity.user.id = owner;
+  const archived = await app.mutate({ ...ref, operationKey: 'archive-a', expectedRevision: 4 }, 'archive');
+  assert.equal(archived.revision, 5); assert.equal((await app.read(ref)).status, 'archived');
+  const tasksBefore = structuredClone(h.state.aiTask), originalCount = h.state.aiTaskOriginalRequest.length;
+  const deleted = await app.mutate({ ...ref, operationKey: 'delete-a', expectedRevision: 5 }, 'delete');
+  assert.equal(deleted.taskCancellation, 'not_requested'); await assert.rejects(app.read(ref), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  assert.deepEqual(h.state.aiTask, tasksBefore); assert.equal(h.state.aiTaskOriginalRequest.length, originalCount);
+  assert.equal((await app.readOperation({ draftVersion, operationKey: 'delete-a' })).revision, 6);
+  assert.deepEqual(await app.releaseTurn(waiting), release); // Exact receipt survives history deletion.
+  assert.equal((await app.list({ draftVersion, status: 'active', limit: 20 })).items.length, 0);
+  // Competing first messages: the losing original request rolls back together
+  // with its conversation CAS. No orphan request or second automatic turn.
+  const separate = await app.create({ ...create, operationKey: 'conversation-create-b' });
+  const race = { ...command, conversationId: separate.conversationId, expectedRevision: 1 };
+  const before = h.state.aiTaskOriginalRequest.length;
+  const outcomes = await Promise.allSettled([app.admit({ ...race, admissionKey: 'race-a' }), app.admit({ ...race, admissionKey: 'race-b' })]);
+  assert.equal(outcomes.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(h.state.aiTaskOriginalRequest.length, before + 1);
+  // A transport can report a typed storage error AFTER the admission committed.
+  // Keep it unknown too, then recover without creating another original request.
+  const typed = await app.create({ ...create, operationKey: 'conversation-create-typed' });
+  const typedCommand = { ...command, conversationId: typed.conversationId, admissionKey: 'typed-reply' };
+  const originalTransaction = h.db.$transaction;
+  let typedCommit = false;
+  h.control.beforeWrite = async (table, args, data) => {
+    await priorWrite?.(table, args, data);
+    if (table === 'aiConversationTurn') typedCommit = true;
+  };
+  h.db.$transaction = async (...args) => {
+    const result = await originalTransaction(...args);
+    if (typedCommit) { typedCommit = false; throw new (require('../apps/api/src/modules/ai-native/ai-task.repository').AiTaskRepositoryError)('AI_STORAGE_UNAVAILABLE'); }
+    return result;
+  };
+  await assert.rejects(app.admit(typedCommand), { code: 'AI_RESULT_UNKNOWN' });
+  h.db.$transaction = originalTransaction; h.control.beforeWrite = priorWrite;
+  assert.equal((await app.readAdmission({ ...ref, conversationId: typed.conversationId, admissionKey: typedCommand.admissionKey })).result.status, 'original_bound');
+  const originalsAfterTyped = h.state.aiTaskOriginalRequest.length;
+  assert.equal((await app.admit(typedCommand)).result.status, 'original_bound');
+  assert.equal(h.state.aiTaskOriginalRequest.length, originalsAfterTyped);
+  h.b.h.identity.session = false;
+  await assert.rejects(app.list({ draftVersion, status: 'active', limit: 20 }), { code: 'AI_ACCESS_DENIED' });
+});
+
+test('conversation history reopens only attested erased locators under current task authority', { timeout: 60000 }, async () => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiDataErasure: [],
+    aiTaskExecutionCharge: [], aiApprovalConsumption: [], aiGatewayInvocation: [], aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [] });
+  const shared = require('@rental-os/shared'), { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { AiRetentionService } = require('../apps/api/src/modules/ai-native/privacy/retention.service');
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  const app = new AiConversationRepository(h.dependencies, h.app.requests), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  await assert.rejects(app.create({ draftVersion: 'ain-conversation-draft-1', operationKey: 'legacy-create', capabilityCode: 'order_explanation' }), { code: 'AI_INVALID_INPUT' });
+  const created = await app.create({ draftVersion, operationKey: 'retained-create', capabilityCode: 'order_explanation' });
+  const ref = { draftVersion, conversationId: created.conversationId }, command = { ...ref, expectedRevision: 1, admissionKey: 'retained-message',
+    request: { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } } };
+  const accepted = await app.admit(command), original = accepted.result.original;
+  assert.equal(accepted.result.material, 'retained'); assert.equal(accepted.result.task, null);
+  const task = await h.app.requests.createTask(original), taskRow = h.state.aiTask.find(row => row.id === task.taskId);
+  taskRow.status = 'SUCCEEDED';
+  h.state.aiTaskActionPolicy.push({ scopeId: taskRow.scopeId, taskId: taskRow.id, operation: 'read_metadata', revision: 1,
+    requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01T00:00:00Z') });
+  h.b.h.identity.user.permissions.push('system:params:manage');
+  h.b.h.control.now = new Date(h.b.h.control.now.getTime() + 31 * 86400000);
+  const privacy = new AiRetentionService(h.db, h.dependencies.auth, h.dependencies.credentials, undefined, h.dependencies.clock);
+  const erased = await privacy.erase('request', original.inputRef);
+  assert.equal(erased.state, 'erased');
+  const originalRow = h.state.aiTaskOriginalRequest.find(row => row.id === original.inputRef);
+  assert.equal(originalRow.payload.retention, 'erased');
+  await assert.rejects(h.app.requests.readHistorical(original), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  const before = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state), opened = await app.read(ref), page = await app.turns({ ...ref, limit: 20 });
+  assert.equal(opened.currentTurn.material, 'erased'); assert.deepEqual(opened.currentTurn.task, { taskId: task.taskId, runId: task.runId });
+  const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
+  const { credentials, ...readDependencies } = h.dependencies;
+  const readHttp = new AiConversationController(composeAiConversationRequests(readDependencies, true,
+    { readModelResult: async () => { throw Error('erased material must not reach a body reader'); } }));
+  const downgraded = await readHttp.modelResult({ headers: { authorization: (await credentials.current()).authorization } },
+    { ...ref, admissionKey: command.admissionKey, resultId: 'unread-erased-result' });
+  assert.equal(downgraded.status, 'material_erased'); assert.equal(downgraded.result, null);
+  assert.doesNotThrow(() => conversationResponse('modelResult', downgraded, { ...ref, admissionKey: command.admissionKey, resultId: 'unread-erased-result' }));
+  assert.equal(page.items[0].material, 'erased');
+  assert.deepEqual((await app.readAdmission({ ...ref, admissionKey: command.admissionKey })).result, opened.currentTurn);
+  assert.deepEqual((await app.admit(command)).result, opened.currentTurn, 'replay observes only the original erased locator');
+  assert.deepEqual(h.state, before, 'history and replay do not write, recreate input, start a task or remove an erasure');
+  assert.doesNotThrow(() => conversationResponse('read', opened, ref));
+  assert.throws(() => conversationResponse('read', { ...opened, currentTurn: { ...opened.currentTurn, task: null } }, ref), { code: 'AI_STORAGE_UNAVAILABLE' });
+  assert.throws(() => conversationResponse('read', { ...opened, currentTurn: { ...opened.currentTurn, request: command.request } }, ref), { code: 'AI_STORAGE_UNAVAILABLE' });
+  const contracts = require('./fixtures/ai-native/contract-consumer.cjs'), { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  contracts.checkClosed(shared.AI_CONVERSATION_SCHEMAS, OPENAPI_DOCUMENT.components.schemas);
+  for (const [name, schema] of Object.entries(shared.AI_CONVERSATION_SCHEMAS))
+    assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  assert.deepEqual(contracts.compileConsumer(`import type { AiConversationTurnObservationDraft } from '../packages/shared/src';
+    declare const turn: AiConversationTurnObservationDraft;
+    if (turn.material === 'erased') { const taskId: string = turn.task.taskId;
+      // @ts-expect-error erased history exposes no recovered plaintext
+      const request = turn.request;
+    }
+    // @ts-expect-error erased history needs a currently authorized original task locator
+    const absent: AiConversationTurnObservationDraft = { ...turn, material: 'erased', task: null };`), []);
+  const receipt = h.state.aiDataErasure[0];
+  for (const [key, value] of [['state', 'unknown'], ['tenantId', 'another-tenant'], ['targetHash', '0'.repeat(64)]]) {
+    const saved = receipt[key]; receipt[key] = value;
+    await assert.rejects(app.read(ref)); receipt[key] = saved;
+  }
+  h.state.aiDataErasure.pop(); await assert.rejects(app.read(ref)); h.state.aiDataErasure.push(receipt);
+  const policy = h.state.aiTaskActionPolicy[0]; policy.requiredPermissions = ['ungranted:permission'];
+  await assert.rejects(app.read(ref), { code: 'AI_ACCESS_DENIED' }); policy.requiredPermissions = ['rental-os:order:view'];
+  const currentTask = h.state.aiTask.find(row => row.id === task.taskId);
+  currentTask.status = 'RUNNING'; await assert.rejects(app.read(ref)); currentTask.status = 'SUCCEEDED';
+  const release = await app.releaseTurn({ ...ref, operationKey: 'retained-release', expectedRevision: 2 });
+  assert.equal(release.revision, 3); assert.equal((await app.read(ref)).currentTurn, null);
+  assert.equal(h.state.aiTask.length, 1); assert.equal(h.state.aiTaskOriginalRequest.length, 1);
+  assert.equal(originalRow.payload.retention, 'erased');
+  h.b.h.identity.session = false; await assert.rejects(app.turns({ ...ref, limit: 20 }), { code: 'AI_ACCESS_DENIED' });
+});
+
+test('conversation standard provider and Controller preserve explicit admission and original unknown receipts', { timeout: 60000 }, async t => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
+  const { credentials, ...dependencies } = h.dependencies;
+  const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
+  const { AI_NATIVE_CONVERSATION_PROVIDER } = require('../apps/api/src/modules/ai-native/ai-native-application.providers');
+  const shared = require('@rental-os/shared'), { draftVersion } = { draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION };
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const create = { draftVersion, operationKey: 'http-create', capabilityCode: 'order_explanation' };
+  const rejected = status => e => e.getStatus() === status && e.getResponse().retryable === false;
+  const off = new AiConversationController(AI_NATIVE_CONVERSATION_PROVIDER.useFactory(...[]));
+  await assert.rejects(off.create(request, create), rejected(404)); assert.equal(h.state.aiConversation.length, 0);
+  const enabled = AI_NATIVE_CONVERSATION_PROVIDER.useFactory(h.db, dependencies.auth, dependencies.guard, dependencies.subscriptions,
+    dependencies.core, dependencies.business, dependencies.reports, dependencies.memberships, undefined, { enabled: true });
+  const http = new AiConversationController(enabled);
+  const created = await http.create(request, create), ref = { draftVersion, conversationId: created.conversationId };
+  const read = await http.read(request, ref); assert.equal(read.currentTurn, null);
+  assert.equal((await http.list(request, { draftVersion, status: 'active', limit: 20 })).items.length, 1);
+  const body = { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } };
+  const command = { ...ref, expectedRevision: 1, admissionKey: 'http-message', request: body };
+  const original = await http.admit(request, command);
+  assert.equal(original.result.task, null); assert.equal(h.state.aiTask.length, 0);
+  assert.equal((await http.admission(request, { ...ref, admissionKey: command.admissionKey })).result.turnId, original.result.turnId);
+  assert.equal((await http.turns(request, { ...ref, limit: 20 })).items.length, 1);
+  await assert.rejects(http.release(request, { ...ref, operationKey: 'release', expectedRevision: 2 }), rejected(404));
+  const mutation = { ...ref, operationKey: 'archive', expectedRevision: 2 };
+  const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const originalMutate = AiConversationRepository.prototype.mutate;
+  const damaged = t.mock.method(AiConversationRepository.prototype, 'mutate', async function(...args) {
+    return { ...await originalMutate.apply(this, args), credential: 'internal' };
+  });
+  await assert.rejects(http.archive(request, mutation), e => e.getStatus() === 409 && e.getResponse().code === 'AI_RESULT_UNKNOWN'
+    && e.getResponse().nextAction === 'read_original_operation');
+  damaged.mock.restore();
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  const absent = { draftVersion, operationKey: mutation.operationKey, retryable: false, status: 'not_observed',
+    nextAction: 'read_original_operation', absence: 'not_proof_of_no_commit' };
+  assert.throws(() => conversationResponse('archive', absent, mutation), { code: 'AI_RESULT_UNKNOWN' });
+  assert.throws(() => conversationResponse('admit', { ...original, result: null }, command), { code: 'AI_RESULT_UNKNOWN' });
+  assert.doesNotThrow(() => conversationResponse('admission', { ...original, result: null }, { ...ref, admissionKey: command.admissionKey }));
+  assert.equal((await http.operation(request, { draftVersion, operationKey: 'archive' })).revision, 3);
+  assert.equal((await http.read(request, ref)).status, 'archived');
+  const erase = await http.delete(request, { ...ref, operationKey: 'delete', expectedRevision: 3 });
+  assert.equal(erase.taskCancellation, 'not_requested'); assert.equal(h.state.aiTaskOriginalRequest.length, 1);
+  const before = h.state.aiConversation.length;
+  await assert.rejects(http.create(request, { ...create, operationKey: 'new', actor: 'forged' }), rejected(400));
+  await assert.rejects(http.create({ ...request, aborted: true }, { ...create, operationKey: 'aborted' }));
+  assert.equal(h.state.aiConversation.length, before);
+  const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard'), { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  for (const [action, contract] of Object.entries(shared.AI_CONVERSATION_HTTP_DRAFT.operations)) {
+    const path = `/${shared.AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`;
+    assert.deepEqual(requiredPermissions('POST', path), [...shared.AI_TASK_CENTER_ENTRY_PERMISSIONS]);
+    const route = OPENAPI_DOCUMENT.paths[`/api${path}`].post;
+    assert.equal(route.requestBody.content['application/json'].schema.$ref, `#/components/schemas/${contract.request}`);
+    assert.equal(route.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+    assert.equal(Reflect.getMetadata('path', AiConversationController.prototype[action]), action);
+  }
+  const appSource = require('node:fs').readFileSync(path.join(__dirname, '../apps/api/src/app.module.ts'), 'utf8');
+  assert.match(appSource, /\n\s+AiConversationController,/u); assert.match(appSource, /\n\s+AI_NATIVE_CONVERSATION_PROVIDER,/u);
+  await assert.rejects(composeAiConversationRequests({ ...dependencies, credentials }, true).consume(request, 'create', create), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  h.b.h.identity.session = false;
+  await assert.rejects(http.operation(request, { draftVersion, operationKey: 'delete' }), rejected(403));
+});
+
 test('opt-in module is inert; strict controller uses current authority without starting HTTP', async () => {
   const h = await setup(), before = h.trace.length;
   const noHttp = AiOriginalScenesModule.register(h.dependencies);
@@ -256,14 +879,51 @@ test('empty metadata recovery does not create a task or infer a safe replay', as
 });
 
 test('persisted scene model result is bound to its original input and current authorized facts', async () => {
+  const shared = require('@rental-os/shared'), contracts = require('./fixtures/ai-native/contract-consumer.cjs');
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  for (const method of ['reopenModelSource', 'reopenOpeningModelSource']) {
+    const contract = shared.AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS[method];
+    const operation = OPENAPI_DOCUMENT.paths[`/api/${shared.AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${shared.AI_SCENE_MODEL_HTTP_DRAFT[method]}`].post;
+    assert.equal(operation.requestBody.content['application/json'].schema.$ref, `#/components/schemas/${contract.request}`);
+    assert.equal(operation.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+  }
+  const schemas = shared.AI_SCENE_MODEL_OBSERVATION_SCHEMAS;
+  contracts.checkClosed(schemas, OPENAPI_DOCUMENT.components.schemas);
+  for (const [name, schema] of Object.entries(schemas)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  assert.deepEqual(contracts.compileConsumer(`import type { AiSceneModelSourceReadResponseDraft, AiSceneOpeningModelSourceReadResponseDraft, AiConversationModelResultResponseDraft } from '../packages/shared/src';
+    declare const conversation: AiConversationModelResultResponseDraft;
+    if (conversation.status === 'observed') { const id: string = conversation.result.resultId; }
+    else { const absent: null = conversation.result; const next: 'original_task_center' = conversation.nextAction; }
+    // @ts-expect-error observation is never a model or business execution grant
+    const execute: 'start' = conversation.execution;
+    declare const source: AiSceneModelSourceReadResponseDraft;
+    if (source.sourceKind === 'knowledge') { const text: string = source.source.text; }
+    else if (source.source.status === 'available' && source.source.field === 'order') { const order: string = source.source.value.value.orderNo; }
+    // @ts-expect-error source observation is never execution authority
+    const executed: 'committed' = source.execution;
+    declare const opening: AiSceneOpeningModelSourceReadResponseDraft;
+    // @ts-expect-error frozen evidence does not contain a current observation time
+    const current: string = opening.frozenBasis.reference.observedAt;`), []);
   const { AiOriginalSceneResultService } = require('../apps/api/src/modules/ai-native/scenes/original-scene-result.service');
   const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
   const { taskModelIntent, taskModelIdentity, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
   const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
-  const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
-  const created = await h.app.create(h.command(sceneCode)), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
+  const sourceCases = ['status', 'fees', 'payments', 'next_steps'].map(question => ({ sceneCode: 'order_explanation', question }));
+  sourceCases.push({ sceneCode: 'opening_diagnosis' }, { sceneCode: 'quote_clarification' });
+  for (const { sceneCode, question } of sourceCases) {
+  const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [], aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
+  h.b.facts.listInspectionsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  const originalCommand = h.command(sceneCode);
+  if (question) originalCommand.input.question = question;
+  const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const conversations = new AiConversationRepository(h.dependencies, h.app.requests), conversationVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  const conversation = await conversations.create({ draftVersion: conversationVersion, operationKey: 'model-conversation', capabilityCode: sceneCode });
+  const conversationReference = { draftVersion: conversationVersion, conversationId: conversation.conversationId, admissionKey: 'model-message' };
+  const admitted = await conversations.admit({ ...conversationReference, expectedRevision: 1,
+    request: { sceneCode: originalCommand.sceneCode, input: originalCommand.input } });
+  const ref = admitted.result.original, created = { receipt: (await h.app.requests.readHistorical(ref)).receipt, task: await h.app.requests.createTask(ref) }, task = h.state.aiTask[0];
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
   const policy = { sceneCode, maxOutputTokens: 64 };
   const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
@@ -322,6 +982,63 @@ test('persisted scene model result is bound to its original input and current au
   await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');
   const command = { original: ref, resultId: 'model-result' };
   const result = await center.readModelResult(command);
+  const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
+  const { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_CONVERSATION_CONFIGURATION, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER } = require('../apps/api/src/modules/ai-native/ai-native-application.providers');
+  const { credentials, ...readDependencies } = h.dependencies, httpRequest = { headers: { authorization: (await credentials.current()).authorization } };
+  const originalObservations = AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER.useFactory(h.db, readDependencies.auth, readDependencies.guard,
+    readDependencies.subscriptions, readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined);
+  const conversationRequests = AI_NATIVE_CONVERSATION_PROVIDER.useFactory(h.db, readDependencies.auth, readDependencies.guard, readDependencies.subscriptions,
+    readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined, { enabled: true }, originalObservations);
+  const conversationHttp = new AiConversationController(conversationRequests), query = { ...conversationReference, resultId: 'model-result' };
+  const readState = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
+  const modelPacket = await conversationHttp.modelResult(httpRequest, query);
+  assert.equal(modelPacket.status, 'observed');
+  assert.ok(['available', 'stale'].includes(modelPacket.result.status));
+  if (modelPacket.result.status === 'available') {
+    assert.deepEqual(modelPacket.result.text, result.text); assert.equal(modelPacket.result.materialHash, result.materialHash);
+  } else { assert.equal(modelPacket.result.text, null); assert.equal(modelPacket.result.nextAction, 'reread_facts'); }
+  assert.equal(modelPacket.result.original.contentHash, result.original.contentHash); assert.equal(modelPacket.result.original.inputRef, ref.inputRef);
+  assert.equal(modelPacket.result.runId, result.runId); assert.equal(modelPacket.result.sceneCode, result.sceneCode);
+  if (sceneCode === 'order_explanation') assert.equal(modelPacket.result.status, 'available', 'new request IDs and observation times are not changed order facts');
+  // Standard providers use the current clock; original quote availability can
+  // become stale. The same-clock reader proves the available payload separately.
+  const sameClock = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application').composeRequestBoundOriginalTaskRecoveryReaders(
+    readDependencies, { enabled: true, audience: 'operator' }, { policy: { sceneCode, routeScene: 'chat', maxOutputTokens: 64 } });
+  const sameClockHttp = new AiConversationController(composeAiConversationRequests(readDependencies, true, sameClock));
+  const sameClockResult = (await sameClockHttp.modelResult(httpRequest, query)).result;
+  assert.equal(sameClockResult.status, 'available'); assert.deepEqual(sameClockResult.text, result.text);
+  const withoutReadEnvelope = value => {
+    const copy = structuredClone(value);
+    if (copy.facts?.payload?.facts?.history?.value) delete copy.facts.payload.facts.history.value.requestId;
+    if (copy.facts) { delete copy.facts.payloadFingerprint; delete copy.facts.payloadBytes; }
+    return copy;
+  };
+  assert.deepEqual(withoutReadEnvelope(sameClockResult), withoutReadEnvelope(result));
+  assert.deepEqual(h.state, readState, 'conversation result reads never create artifacts, calls, budgets or tasks');
+  if (sceneCode === 'order_explanation' && question === 'fees') {
+    const findOrder = h.b.facts.findOrder;
+    h.b.facts.findOrder = async (...args) => { const order = await findOrder(...args); return { ...order, pricingPlanVersion: 'changed-historical-price' }; };
+    const changedHistory = (await sameClockHttp.modelResult(httpRequest, query)).result;
+    assert.equal(changedHistory.status, 'stale'); assert.equal(changedHistory.text, null);
+    h.b.facts.findOrder = findOrder;
+  }
+  assert.equal(modelPacket.execution, 'read_only_no_start_no_dispatch'); assert.equal(modelPacket.turn.task.taskId, task.id);
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  for (const corrupt of [value => { value.result.taskId = 'another-task'; }, value => { value.result.original.inputRef = '00000000-0000-4000-8000-000000000002'; },
+    value => { value.result.resultId = 'another-result'; }, value => { value.result.credential = 'internal'; }, value => { value.turn.material = 'erased'; }]) {
+    const damaged = structuredClone(modelPacket); corrupt(damaged);
+    assert.throws(() => conversationResponse('modelResult', damaged, query), { code: 'AI_STORAGE_UNAVAILABLE' });
+  }
+  const noReader = new AiConversationController(composeAiConversationRequests(readDependencies, true));
+  await assert.rejects(noReader.modelResult(httpRequest, query), e => e.getStatus() === 404);
+  await assert.rejects(conversationHttp.modelResult(httpRequest, { ...query, reader: 'arbitrary' }), e => e.getStatus() === 400);
+  const { AI_ORIGINAL_SCENE_RECOVERY_REQUESTS } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  assert.ok(AI_NATIVE_CONVERSATION_PROVIDER.inject.some(item => item.token === AI_NATIVE_CONVERSATION_CONFIGURATION));
+  assert.ok(AI_NATIVE_CONVERSATION_PROVIDER.inject.some(item => item.token === AI_ORIGINAL_SCENE_RECOVERY_REQUESTS && item.optional));
+  const revokedRead = new AiConversationController(composeAiConversationRequests(readDependencies, true, { readModelResult: async () => {
+    h.b.h.identity.session = false; return result;
+  } }));
+  await assert.rejects(revokedRead.modelResult(httpRequest, query), e => e.getStatus() === 403); h.b.h.identity.session = true;
   const { validateAiSceneModelObservation, AiOriginalSceneObservationController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
   assert.deepEqual(validateAiSceneModelObservation(result), result);
   const observation = new AiOriginalSceneObservationController({ readModelResult: async () => center.readModelResult(command) });
@@ -337,9 +1054,42 @@ test('persisted scene model result is bound to its original input and current au
   assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
   assert.equal(result.sceneCode, sceneCode);
   if (sceneCode === 'order_explanation') {
-  assert.deepEqual(result.sources.map(source => source.field), ['order']);
-  const reopened = await center.reopenModelSource({ ...command, sourceIndex: 0 });
+  assert.equal(result.sources[0].field, 'order');
+  if (question === 'fees') assert.ok(result.sources.some(source => source.field === 'rental_period'));
+  if (question === 'payments') assert.ok(result.sources.some(source => source.field === 'amounts'));
+  const sourceCommand = { ...command, sourceIndex: 0 };
+  const reopened = await center.reopenModelSource(sourceCommand);
   assert.equal(reopened.reference.resourceId, 'order-a'); assert.equal(reopened.source.status, 'available');
+  assert.equal(typeof reopened.source.value.value.orderNo, 'string', 'source retains the original full order projection');
+  const sourceController = new AiOriginalSceneObservationController({ reopenModelSource: (_request, input) => center.reopenModelSource(input) });
+  const { validateAiSceneSourceObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  assert.deepEqual(validateAiSceneSourceObservation(reopened, sourceCommand), reopened);
+  assert.deepEqual(await sourceController.reopenModelSource({ headers: {} }, sourceCommand), reopened);
+  assert.equal((await sourceController.reopenModelSource({ headers: {} }, { ...sourceCommand, sourceKind: 'order' })).sourceKind, undefined);
+  // The source reader retains these declared states; fabricated fixtures here
+  // prove wire discrimination only, not a real stale/optional-source race.
+  for (const source of [{ status: 'stale', field: 'order', reason: 'order_version_changed_reread_material' },
+    { status: 'missing', field: 'order', scope: reopened.reference.scope, orderId: 'order-a', reason: 'historical_or_optional_source_not_loaded' }]) {
+    const value = { ...reopened, source };
+    assert.deepEqual(validateAiSceneSourceObservation(value, sourceCommand), value);
+  }
+  for (const mutate of [value => { value.resultId = 'another-result'; }, value => { value.sourceIndex = 1; },
+    value => { value.source.value.value.credential = 'must-not-leak'; }, value => { value.sourceKind = 'order'; },
+    value => { value.source.field = 'amounts'; }, value => { value.source.orderId = 'another-order'; },
+    value => { value.source.value.source.version = 'another-version'; }, value => { value.source.value.value.id = 'another-order'; }]) {
+    const invalid = structuredClone(reopened); mutate(invalid);
+    const corrupted = new AiOriginalSceneObservationController({ reopenModelSource: async () => invalid });
+    await assert.rejects(corrupted.reopenModelSource({ headers: {} }, sourceCommand), error => error.getStatus() === 503
+      && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+  }
+  await assert.rejects(sourceController.reopenModelSource({ headers: {} }, { ...sourceCommand, sourceKind: 'url' }), error => error.getStatus() === 400);
+  for (let sourceIndex = 1; sourceIndex < result.sources.length; sourceIndex++) {
+    const query = { ...command, sourceIndex };
+    const evidence = await sourceController.reopenModelSource({ headers: {} }, query);
+    assert.equal(evidence.reference.field, result.sources[sourceIndex].field);
+    assert.equal(evidence.source.field, evidence.reference.field);
+    assert.deepEqual(validateAiSceneSourceObservation(evidence, query), evidence);
+  }
   } else {
     assert.deepEqual(result.sources, []);
     if (sceneCode === 'opening_diagnosis') {
@@ -352,7 +1102,9 @@ test('persisted scene model result is bound to its original input and current au
     }
     await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   }
-  await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 1 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const absentIndex = result.sources.length < 5 ? result.sources.length : 5;
+  await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: absentIndex }),
+    e => e.code === (absentIndex === 5 ? 'AI_INVALID_INPUT' : 'AI_RESOURCE_UNAVAILABLE'));
   await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0, url: 'https://invalid.example' }), e => e.code === 'AI_INVALID_INPUT');
   assert.equal(JSON.stringify(result).includes('credential-test'), false);
   h.state.aiGatewayInvocation[0].actionId = 'another-call';
@@ -361,6 +1113,9 @@ test('persisted scene model result is bound to its original input and current au
   h.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN'; h.state.aiStep[0].status = 'UNKNOWN';
   const unknown = await reader.read(command); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.text, null);
   assert.deepEqual(validateAiSceneModelObservation(unknown), unknown);
+  const conversationUnknown = await sameClockHttp.modelResult(httpRequest, query);
+  assert.equal(conversationUnknown.result.status, 'unknown'); assert.equal(conversationUnknown.result.automaticRetry, false);
+  assert.equal(conversationUnknown.result.text, null);
   h.b.h.identity.session = false;
   await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   }
@@ -1022,8 +1777,60 @@ test('request-bound model runs original scenes and reads knowledge results witho
     const resultCommand = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
     const result = await app.readModelResult(h.request, resultCommand);
     assert.equal(result.status, 'available'); assert.equal(result.knowledge.originalInputRef, h.reference.inputRef);
-    const source = await app.reopenModelSource(h.request, { ...resultCommand, sourceKind: 'knowledge', sourceIndex: 0 });
+    const sourceCommand = { ...resultCommand, sourceKind: 'knowledge', sourceIndex: 0 };
+    const { AiOriginalSceneObservationController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+    const controller = new AiOriginalSceneObservationController(app);
+    const beforeFactories = h.factoryCalls.length;
+    const source = await controller.reopenModelSource(h.request, sourceCommand);
     assert.equal(source.reference.documentId, h.supplemental.document.documentId);
+    const { validateAiSceneSourceObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+    assert.deepEqual(validateAiSceneSourceObservation(source, sourceCommand), source);
+    const { composeRequestBoundTaskCenter } = require('../apps/api/src/modules/ai-native/task-center.application');
+    const centerDependencies = { db: h.db, auth: h.dependencies.auth, clock: h.dependencies.clock, originalDb: h.db, originalResults: app };
+    const center = composeRequestBoundTaskCenter(centerDependencies);
+    const centerQuery = { taskId: h.created.task.taskId, resultId: resultCommand.resultId };
+    const observed = await center.result(h.request, centerQuery);
+    const centerSource = { ...centerQuery, source: observed.sources.find(item => item.kind === 'knowledge') };
+    const openedText = await center.source(h.request, centerSource);
+    assert.equal(openedText.content.value, source.source.text); assert.equal(openedText.content.trust, 'source_data_not_instructions');
+    assert.equal(openedText.execution, 'read_only_no_start_no_reconnect_side_effect');
+    if (sceneCode === 'order_explanation') {
+      const orderSource = await center.source(h.request, { ...centerQuery, source: observed.sources.find(item => item.kind === 'order') });
+      assert.equal(orderSource.content.format, 'json');
+      const order = JSON.parse(orderSource.content.value);
+      assert.equal(order.status, 'available'); assert.equal(order.field, 'order'); assert.equal(order.orderId, 'order-a');
+    }
+    const invalidSource = structuredClone(source); invalidSource.source.credential = 'must-not-leak';
+    const corruptedCenter = composeRequestBoundTaskCenter({ ...centerDependencies,
+      originalResults: { ...app, reopenModelSource: async () => invalidSource } });
+    await assert.rejects(corruptedCenter.source(h.request, centerSource), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+    for (const mutate of [value => { value.source.documentId = 'another-document'; },
+      value => { value.source.locator = { kind: 'page', page: 2, paragraph: 1 }; },
+      value => { value.source.privateCredential = 'must-not-leak'; }, value => { value.source.text = 'a'.repeat(2001); }]) {
+      const invalid = structuredClone(source); mutate(invalid);
+      const corrupted = new AiOriginalSceneObservationController({ reopenModelSource: async () => invalid });
+      await assert.rejects(corrupted.reopenModelSource(h.request, sourceCommand), error => error.getStatus() === 503
+        && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+    }
+    if (sceneCode === 'opening_diagnosis') {
+      const openingCommand = { ...resultCommand, key: 'item_groups' };
+      const opened = await controller.reopenOpeningModelSource(h.request, openingCommand);
+      assert.equal(opened.source.key, 'item_groups'); assert.equal(opened.reference.observedAt !== undefined, true);
+      assert.equal(opened.frozenBasis.reference.observedAt, undefined); assert.equal(opened.historicalConfiguration, 'not_loaded');
+      assert.equal(opened.execution, 'not_attempted'); assert.ok(Array.isArray(opened.source.current.rows));
+      for (const mutate of [value => { value.frozenBasis.reference.observedAt = value.reference.observedAt; },
+        value => { value.frozenBasis.reference.version = 'other'; }, value => { value.reference.resourceId = 'other'; },
+        value => { value.source.current = { fields: [] }; }, value => { value.source.candidate.currentVersion = 'other'; },
+        value => { value.source.current.rows[0].privateCredential = 'must-not-leak'; }]) {
+        const invalid = structuredClone(opened); mutate(invalid);
+        const corrupted = new AiOriginalSceneObservationController({ reopenOpeningModelSource: async () => invalid });
+        await assert.rejects(corrupted.reopenOpeningModelSource(h.request, openingCommand), error => error.getStatus() === 503
+          && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
+      }
+      await assert.rejects(controller.reopenOpeningModelSource(h.request, { ...openingCommand, key: 'unselected' }), error => [403, 404].includes(error.getStatus()));
+    }
+    assert.equal(h.factoryCalls.length, beforeFactories, 'source reads do not compose execution dependencies');
+    assert.equal(h.execution.sent.length, 1, 'source reads do not redispatch');
     assert.equal(await app.readInput(h.request, h.reference), null);
     assert.deepEqual(await app.reconcile(h.request, h.reference), { kind: 'not_started', reason: 'recovery_lease_unavailable' });
     await assert.rejects(app.resume(h.request, { original: h.reference, submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,

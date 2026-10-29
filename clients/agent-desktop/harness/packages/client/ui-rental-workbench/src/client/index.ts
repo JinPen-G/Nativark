@@ -16,7 +16,7 @@ export const inject = ['slots', 'layout', 'locale']
 export function apply(ctx: Context): void {
   const bridge = (globalThis as typeof globalThis & { rentalDesktop?: RentalDesktopBridge }).rentalDesktop
   if (bridge?.protocolVersion !== RENTAL_DESKTOP_PROTOCOL_VERSION) return
-  const state = createSnapshotStore<WorkbenchState>({ snapshot: null, busy: false, failed: false, notice: null, catalog: { status: 'idle', result: null, inspection: null, material: null }, sources: { status: 'idle', result: null } })
+  const state = createSnapshotStore<WorkbenchState>({ purpose: 'personal', expanded: false, snapshot: null, busy: false, failed: false, notice: null, catalog: { status: 'idle', result: null, inspection: null, material: null }, sources: { status: 'idle', result: null } })
   let catalogGeneration = 0
   let catalogExpiry: ReturnType<typeof setTimeout> | undefined
   let catalogRenewal: ReturnType<typeof setTimeout> | undefined
@@ -40,25 +40,45 @@ export function apply(ctx: Context): void {
     clearSources(['loading', 'ready'].includes(before.sources.status) ? status : before.sources.status)
   }
   const previews = new Map<'catalog' | 'sources', { element: HTMLDetailsElement; release: () => void }>()
+  let expandedContexts = 0
   const previewVisible = (kind: 'catalog' | 'sources') => {
     const catalog = previews.get('catalog')?.element, sources = previews.get('sources')?.element
-    return !disposed && !document.hidden && document.hasFocus() && !!catalog?.isConnected && catalog.open
+    return !disposed && expandedContexts > 0 && purpose.getSnapshot() === 'business'
+      && !document.hidden && document.hasFocus() && !!catalog?.isConnected && catalog.open
       && (kind === 'catalog' || (!!sources?.isConnected && sources.open))
   }
   let noticeSequence = 0
+  // Reuse the retained business panel so the personal composer and its draft stay mounted.
   const panel = 'rental-business' as MainPanelId
+  const subscribeView = (getSnapshot: () => string, listener: () => void) => {
+    let previous = getSnapshot()
+    const notify = () => {
+      const next = getSnapshot()
+      if (next !== previous) { previous = next; listener() }
+    }
+    const releaseState = state.subscribe(notify), releasePanel = ctx.layout.panelInfo.subscribe(notify)
+    return () => { releaseState(); releasePanel() }
+  }
+  const purpose = {
+    getSnapshot: (): 'personal' | 'business' => ctx.layout.panelInfo.getSnapshot().activePanelId === panel ? state.getSnapshot().purpose : 'personal',
+    subscribe: (listener: () => void) => subscribeView(purpose.getSnapshot, listener),
+  }
   const workMode = {
-    getSnapshot: (): 'ai' | 'traditional' => ctx.layout.panelInfo.getSnapshot().activePanelId === panel ? 'traditional' : 'ai',
-    subscribe: (listener: () => void) => ctx.layout.panelInfo.subscribe(listener),
+    getSnapshot: (): 'ai' | 'traditional' => ctx.layout.panelInfo.getSnapshot().activePanelId === panel && purpose.getSnapshot() !== 'business' ? 'traditional' : 'ai',
+    subscribe: (listener: () => void) => subscribeView(workMode.getSnapshot, listener),
   }
   let disposed = false
-  let aiPanel: MainPanelId | null = ctx.layout.panelInfo.getSnapshot().activePanelId
+  let aiPanel: MainPanelId | null = ctx.layout.panelInfo.getSnapshot().activePanelId === panel ? null : ctx.layout.panelInfo.getSnapshot().activePanelId
+  const leaveBusinessPurpose = () => {
+    if (purpose.getSnapshot() === 'business') ctx.layout.selectPanel(null)
+    state.update(value => { value.purpose = 'personal' })
+  }
   let bounds: { x: number; y: number; width: number; height: number } | null = null
   const fail = () => { if (!disposed) { withdrawMaterials('failed'); state.update(value => { value.failed = true; value.busy = false }) } }
   const present = () => {
     const overlay = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [role="alert"], [data-shell-overlay] > *')]
       .some(node => node.getClientRects().length > 0)
-    return bridge.present({ mode: workMode.getSnapshot(), bounds: overlay ? null : bounds }).catch(fail)
+    return bridge.present({ mode: workMode.getSnapshot(), bounds: overlay || purpose.getSnapshot() === 'business' ? null : bounds }).catch(fail)
   }
   const accept = (value: RentalDesktopSnapshot) => {
     if (disposed) return
@@ -67,10 +87,10 @@ export function apply(ctx: Context): void {
       const session = parseRentalDesktopSession(value.session)
       const previous = state.getSnapshot().snapshot
       if (previous && value.revision < previous.revision) return
-      if (JSON.stringify(previous?.session) !== JSON.stringify(session)) { withdrawMaterials('changed') }
+      if (JSON.stringify(previous?.session) !== JSON.stringify(session)) { withdrawMaterials('changed'); leaveBusinessPurpose() }
       state.update(draft => { draft.snapshot = { protocolVersion: value.protocolVersion, revision: value.revision, session } })
     } catch (_error) {
-      withdrawMaterials('failed')
+      withdrawMaterials('failed'); leaveBusinessPurpose()
       // Invalid native data cannot leave the previous menu usable.
       state.update(draft => { draft.snapshot = null; draft.failed = true; draft.busy = false })
       void bridge.present({ mode: 'ai', bounds: null }).catch(fail)
@@ -78,7 +98,7 @@ export function apply(ctx: Context): void {
   }
   const request = (command: RentalDesktopCommand) => {
     if (disposed || state.getSnapshot().busy || state.getSnapshot().snapshot?.session.status !== 'ready') return
-    if (command.kind === 'logout' || command.kind === 'switch-workspace') { withdrawMaterials('changed') }
+    if (command.kind === 'logout' || command.kind === 'switch-workspace') { withdrawMaterials('changed'); leaveBusinessPurpose() }
     state.update(value => { value.busy = true; value.failed = false })
     void bridge.request(command).then(() => {
       if (!disposed) state.update(value => { value.busy = false; value.notice = { sequence: ++noticeSequence, ok: true } })
@@ -132,14 +152,43 @@ export function apply(ctx: Context): void {
     })
   }
   const props: WorkbenchInjected = {
-    hooks: { business: state, workMode },
+    hooks: { business: state, workMode, purpose },
     changeMode: mode => {
+      if (disposed || state.getSnapshot().busy || mode === workMode.getSnapshot()) return
       withdrawMaterials('changed')
-      state.update(value => { value.failed = false })
-      if (mode === 'traditional' && workMode.getSnapshot() === 'ai') aiPanel = ctx.layout.panelInfo.getSnapshot().activePanelId
-      try { ctx.layout.selectPanel(mode === 'ai' ? aiPanel : panel) }
-      catch (_error) { ctx.layout.selectPanel(null); aiPanel = null; fail() }
+      const active = ctx.layout.panelInfo.getSnapshot().activePanelId
+      if (active !== panel) aiPanel = active
+      try {
+        if (mode === 'ai') ctx.layout.selectPanel(aiPanel)
+        state.update(value => { value.failed = false; value.purpose = 'personal' })
+        if (mode === 'traditional') ctx.layout.selectPanel(panel)
+      } catch (_error) { ctx.layout.selectPanel(null); aiPanel = null; fail() }
       void present()
+    },
+    changePurpose: next => {
+      const before = state.getSnapshot(), session = before.snapshot?.session
+      if (disposed || before.busy || (next === 'business' && !before.expanded) || workMode.getSnapshot() !== 'ai' || next === purpose.getSnapshot()
+        || session?.status !== 'ready' || (next === 'business' && (session.audience !== 'tenant' || !session.currentWorkspaceId))) return
+      withdrawMaterials('changed')
+      const active = ctx.layout.panelInfo.getSnapshot().activePanelId
+      if (active !== panel) aiPanel = active
+      try {
+        if (next === 'personal') ctx.layout.selectPanel(aiPanel)
+        state.update(value => { value.purpose = next; value.failed = false })
+        if (next === 'business') ctx.layout.selectPanel(panel)
+      } catch (_error) { ctx.layout.selectPanel(null); state.update(value => { value.purpose = 'personal' }); aiPanel = null; fail() }
+      void present()
+    },
+    observeExpandedContext: () => {
+      if (disposed) return () => undefined
+      expandedContexts++
+      state.update(value => { value.expanded = true })
+      let released = false
+      return () => {
+        if (released) return
+        released = true; expandedContexts--
+        if (!expandedContexts) { withdrawMaterials('inactive'); state.update(value => { value.expanded = false }) }
+      }
     },
     navigate: routeId => { request({ kind: 'navigate', routeId, revision: revision() }) },
     switchWorkspace: workspaceId => { request({ kind: 'switch-workspace', workspaceId, revision: revision() }) },
@@ -237,7 +286,7 @@ export function apply(ctx: Context): void {
     disposed = true
     for (const preview of [...previews.values()]) preview.release()
     withdrawMaterials('inactive')
-    if (workMode.getSnapshot() === 'traditional') ctx.layout.selectPanel(null)
+    if (ctx.layout.panelInfo.getSnapshot().activePanelId === panel) ctx.layout.selectPanel(null)
     void bridge.present({ mode: 'ai', bounds: null }).catch(() => undefined)
   }, 'rental: native presentation')
   ctx.effect(() => {
@@ -262,15 +311,16 @@ export function apply(ctx: Context): void {
       document.documentElement.dataset.rentalWorkMode = snapshot.snapshot?.session.status === 'ready' ? workMode.getSnapshot() : ''
     }
     const unsubscribe = state.subscribe(sync)
-    let previousMode = workMode.getSnapshot()
-    const unsubscribeMode = workMode.subscribe(() => {
-      const mode = workMode.getSnapshot()
-      if (mode !== previousMode) { previousMode = mode; withdrawMaterials('changed') }
-      sync(); void present()
+    const unsubscribeMode = workMode.subscribe(() => { withdrawMaterials('changed'); sync(); void present() })
+    const unsubscribePurpose = purpose.subscribe(() => { withdrawMaterials('changed'); sync(); void present() })
+    const unsubscribePanel = ctx.layout.panelInfo.subscribe(() => {
+      if (ctx.layout.panelInfo.getSnapshot().activePanelId !== panel && state.getSnapshot().purpose === 'business') {
+        withdrawMaterials('changed'); state.update(value => { value.purpose = 'personal' })
+      }
     })
     sync()
     return () => {
-      unsubscribe(); unsubscribeMode()
+      unsubscribe(); unsubscribeMode(); unsubscribePurpose(); unsubscribePanel()
       if (previous === null) delete document.documentElement.dataset.rentalWorkMode
       else document.documentElement.setAttribute('data-rental-work-mode', previous)
     }

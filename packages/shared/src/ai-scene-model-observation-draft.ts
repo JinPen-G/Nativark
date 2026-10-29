@@ -1,11 +1,12 @@
 /** Public observation of an existing, source-revalidated model result. Text,
  * citations and tool candidates remain data, not approval or execution proof.
  * Current authorization and original dispatch provenance stay server-owned. */
-import type { AiKnowledgeSourceDraft, AiPreferenceValueDraft } from './ai-knowledge-draft';
-import type { AiOrderExplainRequestDraft } from './ai-native';
+import type { AiKnowledgeSourceDraft, AiKnowledgeChunkDraft, AiPreferenceValueDraft } from './ai-knowledge-draft';
+import type { AiWorkspaceScope, AiOrderExplainRequestDraft } from './ai-native';
+import type { AiOrderReadFactsDraft } from './ai-order-facts-draft';
 import type { AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
-import type { AiOrderEvidenceReferenceDraft, AiOrderExplanationMaterialDraft,
-  AiOpeningBusinessMaterialDraft, AiQuoteBusinessMaterialDraft } from './ai-business-material-draft';
+import type { AiOrderHistoryFactsDraft, AiOrderLocalPaymentsDraft, AiOrderInspectionEvidenceDraft, AiOpeningSectionMaterialDraft,
+  AiOrderEvidenceReferenceDraft, AiOrderExplanationMaterialDraft, AiOpeningBusinessMaterialDraft, AiQuoteBusinessMaterialDraft } from './ai-business-material-draft';
 
 type PreferenceKind = AiPreferenceValueDraft['kind'];
 export interface AiSceneKnowledgeSnapshotDraft {
@@ -47,3 +48,48 @@ type Unavailable<S extends AiSceneRequestReceiptDraft['sceneCode']> = ModelObser
 );
 export type AiSceneModelResultObservationDraft = AvailableOrder | AvailableOpening | AvailableQuote
   | Unavailable<'order_explanation'> | Unavailable<'opening_diagnosis'> | Unavailable<'quote_clarification'>;
+
+/** The index locates an original supplied source; it is not a resource grant.
+ * Omitted sourceKind retains the original order-only request behaviour. */
+export interface AiSceneModelSourceReadDraft {
+  original: Pick<AiSceneRequestReceiptDraft, 'draftVersion' | 'inputRef'>;
+  resultId: string; sourceIndex: number; sourceKind?: 'order' | 'knowledge';
+}
+type Evidence<T> = { coverage: 'partial'; value: T; source: AiOrderEvidenceReferenceDraft };
+type FeeFacts = Extract<AiOrderExplanationMaterialDraft['payload'], { question: 'fees' }>['facts'];
+type OrderSourceValues = {
+  order: Evidence<AiOrderReadFactsDraft['order']>;
+  amounts: FeeFacts['amounts']; rental_period: FeeFacts['fulfillment'];
+  saved_basis: Evidence<AiOrderHistoryFactsDraft>; payment_records: Evidence<AiOrderLocalPaymentsDraft>;
+  inspection_records: Evidence<AiOrderInspectionEvidenceDraft>;
+};
+export type AiOrderSourceObservationDraft = {
+  [F in keyof OrderSourceValues]: { status: 'available'; scope: AiWorkspaceScope; orderId: string; field: F;
+    value: OrderSourceValues[F]; observedAt: string; freshness: 'current_observation_not_historical_payment_snapshot';
+    reauthorization: 'current_order_authority_rechecked' }
+}[keyof OrderSourceValues]
+  | { status: 'stale'; field: keyof OrderSourceValues; reason: 'order_version_changed_reread_material' }
+  | { status: 'missing'; scope: AiWorkspaceScope; orderId: string; field: keyof OrderSourceValues;
+      reason: 'historical_or_optional_source_not_loaded' };
+export type AiSceneModelSourceReadResponseDraft = {
+  original: AiSceneRequestReceiptDraft; resultId: string; sourceIndex: number; execution: 'not_attempted';
+} & (
+  | { original: Omit<AiSceneRequestReceiptDraft, 'sceneCode'> & { sceneCode: 'order_explanation' };
+      sourceKind?: never; reference: AiOrderEvidenceReferenceDraft; source: AiOrderSourceObservationDraft }
+  | { sourceKind: 'knowledge'; reference: Extract<AiKnowledgeSourceDraft, { kind: 'document' }>; source: AiKnowledgeChunkDraft }
+);
+type OpeningConfiguration = AiOpeningBusinessMaterialDraft['configuration'];
+export interface AiOpeningSectionObservationDraft extends Pick<AiOpeningSectionMaterialDraft,
+  'key' | 'issue' | 'required' | 'impact' | 'evidence' | 'manual' | 'candidate' | 'externalVerification'> {
+  status: 'ready_for_human_review' | 'capability_unavailable' | 'missing_configuration' | 'check_failed' | 'awaiting_external_evidence';
+  current: NonNullable<OpeningConfiguration['products'] | OpeningConfiguration['pricing'] | OpeningConfiguration['fulfillment']>
+    | { configVersion: string; fields: string[] } | { fields: string[] };
+  materials: string[]; persistence: 'not_attempted'; publication: 'not_attempted';
+}
+export interface AiSceneOpeningModelSourceReadResponseDraft {
+  original: Omit<AiSceneRequestReceiptDraft, 'sceneCode'> & { sceneCode: 'opening_diagnosis' };
+  resultId: string; key: string; reference: AiOpeningSectionMaterialDraft['evidence']; source: AiOpeningSectionObservationDraft;
+  frozenBasis: { materialHash: string; reference: Omit<AiOpeningSectionMaterialDraft['evidence'], 'observedAt'> };
+  observation: 'current_authorized_reobservation'; historicalConfiguration: 'not_loaded';
+  execution: 'not_attempted'; proposalPersistence: 'not_attempted';
+}

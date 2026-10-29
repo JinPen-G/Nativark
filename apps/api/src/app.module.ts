@@ -109,8 +109,13 @@ import { AiOriginalTaskAccountingController } from "./modules/ai-native/scenes/o
 import { AiBudgetManagementController, AiGatewayPricingHistoryController } from "./modules/ai-native/budget/budget-management.module";
 import { AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER } from "./modules/ai-native/ai-native-application.providers";
 import { TextCapabilityProbeController } from "./modules/ai-native/text-capability-probe.controller";
+import { AiInputCountingController } from './modules/ai-native/input-counting/input-counting-request.module';
+import { AI_NATIVE_INPUT_COUNTING_PROVIDER, AI_NATIVE_PLATFORM_PROBE_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { PlatformCapabilityProbeController } from './modules/ai-native/platform-capability-probe/platform-capability-probe.controller';
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
 import { AiTaskCenterController } from './modules/ai-native/task-center.application';
+import { AiConversationController } from './modules/ai-native/conversation.application';
+import { AI_NATIVE_CONVERSATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
@@ -153,7 +158,10 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     StaffInspectionTaskPolicyController,
     ClientTaskPolicyController,
     AiCategoryDraftController,
+    AiConversationController,
     TextCapabilityProbeController,
+    AiInputCountingController,
+    PlatformCapabilityProbeController,
     AiOriginalScenesController,
     AiOriginalOrderReadController,
     AiOriginalTaskAccountingController,
@@ -225,6 +233,7 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
+    AI_NATIVE_CONVERSATION_PROVIDER,
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
@@ -242,6 +251,8 @@ import { WebsiteClientEntryController, WechatClientEntryController } from "./mod
     ...AI_NATIVE_QUOTE_ORDER_PROVIDERS,
     AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER,
     AI_NATIVE_CAPABILITY_PROBE_PROVIDER,
+    AI_NATIVE_INPUT_COUNTING_PROVIDER,
+    AI_NATIVE_PLATFORM_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
     AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,

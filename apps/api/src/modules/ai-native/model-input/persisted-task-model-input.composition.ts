@@ -31,7 +31,9 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   /** Recorded hosts only: the in-task counting chain (count the registered
    * frozen input, publish its trusted bound) wrapped around the invocation
    * preparation. A calls host omits it and never counts. */
-  inputCounting?: { preparation(inner: import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation):
+  inputCounting?: { preparation(inner: import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation,
+    frozen: import('../input-counting/input-count-tokens.service').CountTokensFrozenInputSource,
+    policy: import('./task-model-input').TaskModelPolicy):
     import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation };
 };
 export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & TaskModelCompositionInput) {
@@ -62,7 +64,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     input.gatewayScene, input.priceVersion, clock, input.kind);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
   const invocations = input.inputCounting
-    ? input.inputCounting.preparation(new PrismaTaskGatewayInvocationPreparation(bindings, inputs))
+    ? input.inputCounting.preparation(new PrismaTaskGatewayInvocationPreparation(bindings, inputs), inputs, modelPolicy)
     : new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
     new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);

@@ -1,7 +1,7 @@
-/** Default-closed HTTP module for the AI input-counting request surface.
- * Registered only through InputCountingModule.registerHttp(dependencies,
- * { enabled: true }) by the mainline; disabled registration contributes no
- * routes, providers, timers or model calls. Every route reuses the original
+/** Shared HTTP controller for explicit counting hosts and the standard app.
+ * The standard app keeps counting/publication disabled until configured while
+ * retaining authorized history reads. registerHttp remains an opt-in module;
+ * disabled registration contributes no routes or providers. Every route reuses the original
  * Auth/Guard/ALS chain inside the request factory. Every request and response
  * uses the shared closed contract, including nested task-cost receipts.
  * Pricing and usage retain their original safe readers and summaries;
@@ -13,8 +13,8 @@ import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from 
 import { InputCountingRequestFactory, type InputCountingRequestAction, type InputCountingHttpRequest } from './input-counting-request.factory';
 import { validateCountingHttp } from '../counting-http.contract';
 
-const AI_COUNTING_REQUESTS = Symbol('AI_COUNTING_REQUESTS');
-type Factory = InputCountingRequestFactory;
+export const AI_COUNTING_REQUESTS = Symbol('AI_COUNTING_REQUESTS');
+type Factory = Pick<InputCountingRequestFactory, 'call'>;
 type CountingRequest = { headers: { authorization?: unknown } } & AiRequestAbortSource;
 
 const unknownRead = (action: InputCountingRequestAction) => action === 'publishInputBound' ? 'readInputBound' as const

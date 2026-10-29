@@ -6,6 +6,8 @@ import { InspectionAssistError, inspectionId, inspectionTargetSchema } from './i
 import { withInspectionRequestSignal, respondInspectionHttp, type InspectionHttpRequest } from './inspection-http';
 import { INSPECTION_RECOGNITION_TASKS } from './inspection-recognition-task.controller';
 import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
+import { isInspectionManualAction, inspectionManualRequest, inspectionManualResponse } from './inspection-manual-http.contract';
+import { isInspectionLifecycleAction, inspectionLifecycleRequest, inspectionLifecycleResponse } from './inspection-lifecycle-http.contract';
 
 export const AI_STAFF_INSPECTION_REQUESTS = Symbol('AI_STAFF_INSPECTION_REQUESTS');
 export const AI_STAFF_INSPECTION_ENABLED = Symbol('AI_STAFF_INSPECTION_ENABLED');
@@ -37,9 +39,13 @@ export class StaffInspectionAssistController {
       }
       // Snapshot before the first await; original service schemas reject caller
       // identity, raw model output and arbitrary configuration/URL properties.
-      const input = structuredClone(body);
+      const manualAction = isInspectionManualAction(operation) ? operation : undefined;
+      const manualCommand = manualAction ? inspectionManualRequest(manualAction, body) : undefined;
+      const lifecycleAction = isInspectionLifecycleAction(operation) ? operation : undefined;
+      const lifecycleCommand = lifecycleAction ? inspectionLifecycleRequest(lifecycleAction, body) : undefined;
+      const input = structuredClone(manualCommand ?? lifecycleCommand ?? body);
       const current = { headers: { authorization: request?.headers?.authorization } };
-      return withInspectionRequestSignal(request, signal => this.requests.withRequest(current, async services => {
+      const result = await withInspectionRequestSignal(request, signal => this.requests.withRequest(current, async services => {
         const absent = () => { throw new InspectionAssistError('STORAGE_UNAVAILABLE'); };
         switch (operation) {
           case 'history-read': return services.readHistory(input);
@@ -89,6 +95,8 @@ export class StaffInspectionAssistController {
           default: throw new InspectionAssistError('INVALID_INPUT');
         }
       }, signal), 15000);
+      if (manualAction && manualCommand) return inspectionManualResponse(manualAction, result, manualCommand);
+      return lifecycleAction && lifecycleCommand ? inspectionLifecycleResponse(lifecycleAction, result, lifecycleCommand) : result;
     }, operation.startsWith('submission-') ? operation === 'submission-submit' || operation === 'submission-read' ? 'submission-read' : 'submission-preparation'
       : operation.startsWith('input-') ? 'input-receipt' : operation.startsWith('result-') ? 'result-save-receipt' : 'draft-operation');
   }

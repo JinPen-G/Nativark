@@ -1,5 +1,5 @@
 import { leafClosed as obj, leafEnum as choice, leafInt as int, leafList as list,
-  leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
+  leafText as text, leafTime as time, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 export const AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION = 'knowledge-policy-management-1' as const;
 export type AiKnowledgePreparationTargetSpecDraft = {
@@ -12,6 +12,27 @@ export type AiKnowledgePreparationTargetSpecDraft = {
 export type AiKnowledgeTargetSelectionDraft = { authorityId: string };
 export type AiKnowledgeTargetReadDraft = { authorityId: string; operationKey: string; specHash?: string };
 export type AiKnowledgeTargetBindDraft = { authorityId: string; operationKey: string; sessionId: string; expectedRevision: 1; confirm: 'bind_knowledge_upload' };
+
+export type AiKnowledgeTargetResponseDraft =
+  | { state: 'not_observed'; operationKey: string; retryable: false }
+  | { state: 'unknown'; operationKey: string; specHash: string; retryable: false; nextAction: 'read_target' }
+  | ({ targetId: string; operationKey: string; specHash: string; specification: AiKnowledgePreparationTargetSpecDraft;
+      expiresAt: string; executionPermission: false } & (
+      { state: 'prepared'; revision: 1; attachmentId: null; uploadSessionId: null }
+      | { state: 'bound'; revision: 2; attachmentId: string; uploadSessionId: string }));
+type KnowledgePolicyMemoryOwner = { actorKind: 'user'; actorId: string };
+export type AiKnowledgePolicyResourceDraft = Record<string, never> | { attachmentId: string }
+  | { documentId: string; documentVersion: string; attachmentId: string; aclRevision: number }
+  | { owner: KnowledgePolicyMemoryOwner }
+  | { owner: KnowledgePolicyMemoryOwner; memoryId: string; revision: number; aclRevision: number }
+  | { upload: { documentId: string; idempotencyKey: string; fileName: string; mimeType: 'text/plain' | 'text/markdown'; sizeBytes: number;
+      revision?: { documentVersion: string; expectedRevision: number; aclRevision: number; targetVersion: string } } };
+export type AiKnowledgePolicyCurrentResponseDraft = {
+  authorityId: string; policyKeyHash: string; executionPermission: false;
+  target: { tenantId: string; workspaceId: string; actorKind: 'user'; actorId: string; audience: 'operator' | 'staff';
+    domain: 'knowledge' | 'memory'; action: string; resourceKey: string };
+  resource: AiKnowledgePolicyResourceDraft;
+} & ({ state: 'configured'; result: AiKnowledgePolicySnapshotDraft } | { state: 'not_configured'; result: null });
 
 export type AiKnowledgePolicyManagementAction = 'create_disabled' | 'update_disabled' | 'enable' | 'disable';
 export type AiKnowledgePolicyChangeDraft = {
@@ -118,7 +139,37 @@ const receipt = obj({ state: choice('observed'), operationKey: id, preparationId
 const unknown = obj({ state: choice('unknown', 'not_observed'), operationKey: id, changeHash: hash, retryable: no,
   nextAction: choice('read_preparation', 'read_operation'), executionPermission: no },
   ['state', 'operationKey', 'retryable', 'nextAction', 'executionPermission']);
+const actor = obj({ actorKind: choice('user'), actorId: id });
+const upload = { documentId: id, idempotencyKey: text(128), fileName: text(180), mimeType: choice('text/plain', 'text/markdown'),
+  sizeBytes: int(1, 262144), revision: obj({ documentVersion: id, expectedRevision: int(1), aclRevision: int(1), targetVersion: id }) };
+const document = obj({ documentId: id, documentVersion: id, attachmentId: id, aclRevision: revision });
+const resource: AiLeafSchemaDraft = { oneOf: [obj({}), obj({ attachmentId: id }), document, obj({ owner: actor }),
+  obj({ owner: actor, memoryId: id, revision, aclRevision: revision }),
+  obj({ upload: obj(upload, ['documentId', 'idempotencyKey', 'fileName', 'mimeType', 'sizeBytes']) })] };
+const targetFields = { targetId: uuid, operationKey: id, specHash: hash,
+  specification: ref('AiKnowledgePreparationTargetSpecDraft'), expiresAt: time, executionPermission: no };
+const targetResponse: AiLeafSchemaDraft = { oneOf: [
+  obj({ state: choice('not_observed'), operationKey: id, retryable: no }),
+  obj({ state: choice('unknown'), operationKey: id, specHash: hash, retryable: no, nextAction: choice('read_target') }),
+  obj({ state: choice('prepared'), ...targetFields, revision: { type: 'integer', const: 1 }, attachmentId: { type: 'null' }, uploadSessionId: { type: 'null' } }),
+  obj({ state: choice('bound'), ...targetFields, revision: { type: 'integer', const: 2 }, attachmentId: id, uploadSessionId: text(128) })
+] };
+const policyTargetBase = { tenantId: { ...text(128), pattern: '^[A-Za-z0-9._:-]+$' }, workspaceId: { ...text(128), pattern: '^[A-Za-z0-9._:-]+$' },
+  actorKind: choice('user'), actorId: { ...text(128), pattern: '^[A-Za-z0-9._:-]+$' }, audience: choice('operator', 'staff'), resourceKey: hash };
+const policyTarget: AiLeafSchemaDraft = { oneOf: [obj({ ...policyTargetBase, domain: choice('knowledge'),
+  action: choice('upload', 'create', 'read_metadata', 'parse', 'publish', 'withdraw', 'delete', 'revise', 'search', 'read_body', 'snippet', 'resolve_source', 'download', 'index', 'change_acl') }),
+  obj({ ...policyTargetBase, domain: choice('memory'), action: choice('read', 'propose', 'modify', 'confirm', 'delete') })] };
+const currentFields = { authorityId: uuid, policyKeyHash: hash, target: policyTarget, resource, executionPermission: no };
+export const AI_KNOWLEDGE_TARGET_HTTP_CONTRACTS = {
+  prepareTarget: { request: 'AiKnowledgeTargetSelectionDraft', response: 'AiKnowledgeTargetResponseDraft', write: true },
+  target: { request: 'AiKnowledgeTargetReadDraft', response: 'AiKnowledgeTargetResponseDraft', write: false },
+  bindTarget: { request: 'AiKnowledgeTargetBindDraft', response: 'AiKnowledgeTargetResponseDraft', write: true },
+  read: { request: 'AiKnowledgeTargetSelectionDraft', response: 'AiKnowledgePolicyCurrentResponseDraft', write: false }
+} as const;
 export const AI_KNOWLEDGE_POLICY_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiKnowledgeTargetResponseDraft: targetResponse,
+  AiKnowledgePolicyCurrentResponseDraft: { oneOf: [obj({ state: choice('configured'), ...currentFields, result: snapshot }),
+    obj({ state: choice('not_configured'), ...currentFields, result: { type: 'null' } })] },
   // Existing request leaves remain owned by AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS.
   AiKnowledgeLifecycleTargetDraft: target,
   AiKnowledgePolicyHttpLifecycleDraft: lifecycle,

@@ -20,6 +20,8 @@
     "@nestjs/platform-express": "^10.4.15",
     "@prisma/client": "^5.22.0",
     "@rental-os/shared": "0.1.0",
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "reflect-metadata": "^0.2.2",

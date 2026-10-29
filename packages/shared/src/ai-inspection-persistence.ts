@@ -72,6 +72,9 @@ export type AiInspectionDraftEditRequest = AiInspectionTarget & {
   edits: Array<{ fieldCode: string; decision: AiInspectionHumanField['decision']; value?: AiInspectionFieldValue; candidateId?: string }>;
 };
 
+export type AiInspectionEvidenceChangeRequest = AiInspectionTarget & {
+  draftId: string; operationId: string; expectedRevision: number; bindingFingerprint: string; evidence: AiInspectionEvidenceRef[];
+};
 export type AiInspectionBindingRequest = AiInspectionTarget & { attachmentId: string };
 export type AiInspectionDraftReadRequest = AiInspectionTarget & { draftId: string };
 export type AiInspectionDraftListRequest = AiInspectionTarget & { after?: string; limit: number };
@@ -150,7 +153,8 @@ export type AiInspectionPrepareSubmissionRequest = AiInspectionSubmitRequest & {
 export type AiInspectionOriginalOperationRequest =
   | { kind: 'create'; request: AiInspectionDraftCreateRequest }
   | { kind: 'edit'; request: AiInspectionDraftEditRequest }
-  | { kind: 'candidates'; request: AiInspectionDraftCandidateRequest };
+  | { kind: 'candidates'; request: AiInspectionDraftCandidateRequest }
+  | { kind: 'evidence'; request: AiInspectionEvidenceChangeRequest };
 
 export type AiInspectionDraftStatus = 'draft_saved' | 'prepared' | 'submission_unknown' | 'submitted';
 export type AiInspectionOperationResult = {

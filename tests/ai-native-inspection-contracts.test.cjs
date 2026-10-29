@@ -4,7 +4,8 @@ require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "
 const { AI_NATIVE_COMPONENT_SCHEMAS: native } = require("../apps/api/src/contracts/ai-native-schemas"), { AI_TASK_INPUT_DRAFT_SCHEMAS: taskInput } = require("../packages/shared/src/ai-task-input-draft-schemas"), { RENTAL_CATEGORY_DEFINITIONS: definitions } = require("../packages/shared/src/core"), { AI_INSPECTION_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-inspection-draft-schemas"), f = require("./fixtures/ai-native/inspection-contracts.cjs");
 // Mirror the production composition (contracts/ai-leaf-components.ts): every
 // referenced leaf family is registered, so cross-family $refs resolve.
-const componentBase = { ...native, ...taskInput };
+const { AI_TASK_RECOVERY_HTTP_SCHEMAS: recovery } = require('../packages/shared/src/ai-task-recovery-draft');
+const componentBase = { ...native, ...taskInput, ...recovery };
 const validators = h.validatorsFor(schemas, componentBase), examples = f.examples(definitions, h.scope);
 const yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors)), no = (n, x) => assert.equal(validators[n](x), false, n);
 test("C09 closed reference closure, no inspection submission handler", () => h.checkClosed(schemas, { ...componentBase, ...schemas }));

@@ -5,6 +5,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { withRequestAbort, type AiRequestAbortSource } from '../scenes/request-abort';
 import { callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { retentionHttpRequest, retentionHttpResponse } from './retention-http.contract';
 
 export const AI_RETENTION_REQUESTS = Symbol('AI_RETENTION_REQUESTS');
 export const AI_RETENTION_HTTP = Object.freeze({ basePath: 'ai-native/privacy', cleanup: 'cleanup', receipt: 'receipt', receipts: 'receipts' });
@@ -18,17 +19,16 @@ export class AiRetentionController {
   private async respond(request: Request, operation: 'cleanup' | 'receipt' | 'receipts', body: unknown) {
     const writing = operation === 'cleanup';
     try {
-      let command: unknown;
-      try {
-        command = structuredClone(body);
-        if (Buffer.byteLength(JSON.stringify(command) ?? '', 'utf8') > 65536) throw Error();
-      } catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
+      const command = retentionHttpRequest(operation, body);
       return await withRequestAbort(request, signal => runWithRequestIdentity({}, async () => {
         const scoped = this.create(request), close = () => scoped.close();
         signal.addEventListener('abort', close, { once: true });
         if (signal.aborted) close();
-        try { return await callAiTaskRunnerDependency<unknown>(() => scoped[operation](command), writing ? 30000 : 5000,
-          'retention_http', signal); }
+        try {
+          const result = await callAiTaskRunnerDependency<unknown>(() => scoped[operation](structuredClone(command)), writing ? 30000 : 5000,
+            'retention_http', signal);
+          return retentionHttpResponse(operation, result, command);
+        }
         finally { close(); signal.removeEventListener('abort', close); }
       }), { maxWaitMs: writing ? 30000 : 15000 });
     }

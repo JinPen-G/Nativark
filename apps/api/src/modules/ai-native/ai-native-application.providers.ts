@@ -42,6 +42,7 @@ import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecov
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
 import { gatewayPricingSelectionSchema } from './budget/gateway-pricing-evidence';
+import { taskInputCountingConfigurationSchema } from './task-model-gateway.composition';
 import { selectOriginalOrderReadHttpRequests } from './scenes/original-order-read-http.module';
 import { AI_ORIGINAL_TASK_ACCOUNTING_REQUESTS } from './scenes/original-task-accounting-http.module';
 import { AI_ORIGINAL_OPENING_MODEL_REQUESTS, type OpeningModelRequests } from './scenes/opening-model-execution.controller';
@@ -49,10 +50,16 @@ import { AI_BUDGET_MANAGEMENT, AI_GATEWAY_PRICING_HISTORY } from './budget/budge
 import { GatewayPricingRequestFactory } from './budget/gateway-pricing-request.composition';
 import { composeRequestBoundBudgetManagement } from './budget/budget-management.application';
 import { BudgetError } from './budget/budget.ports';
+import { AI_COUNTING_REQUESTS } from './input-counting/input-counting-request.module';
+import { composeStandardInputCounting, AI_NATIVE_INPUT_COUNTING_CONFIGURATION } from './input-counting/input-counting-standard.application';
 import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
+import { PLATFORM_CAPABILITY_PROBE_REQUESTS } from './platform-capability-probe/platform-capability-probe.controller';
+import { composeStandardPlatformProbe, AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, AI_NATIVE_PLATFORM_PROBE_AUDIT } from './platform-capability-probe/platform-capability-standard.application';
+import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
 import { AI_NATIVE_MODEL_SETTINGS_REQUESTS, composeRequestBoundModelSettings } from './model-settings.application';
 import { AI_NATIVE_TASK_CENTER_REQUESTS, composeRequestBoundTaskCenter } from './task-center.application';
+import { AI_CONVERSATION_REQUESTS, composeAiConversationRequests } from './conversation.application';
 import { AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, composeRequestBoundPlatformModelSettings } from './platform-model-settings.application';
 import { HumanMemoryManagementRequestFactory } from './knowledge/human-memory-management.composition';
 import { HumanKnowledgeManagementRequestFactory } from './knowledge/human-knowledge-management.composition';
@@ -372,6 +379,21 @@ function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: 
       { sceneCode: 'opening_diagnosis', sceneVersion: '1', revision: 1,
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
 }
+/** Default closed until the conversation migration and host are explicitly
+ * configured. This grants metadata/admission only, never model execution. */
+export const AI_NATIVE_CONVERSATION_CONFIGURATION = Symbol('AI_NATIVE_CONVERSATION_CONFIGURATION');
+export const AI_NATIVE_CONVERSATION_PROVIDER: FactoryProvider = {
+  provide: AI_CONVERSATION_REQUESTS, inject: [...originalSceneInjection, { token: AI_NATIVE_CONVERSATION_CONFIGURATION, optional: true },
+    { token: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, value?: unknown,
+    observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult'>) => {
+    const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return composeAiConversationRequests(originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments), parsed.data.enabled, observations);
+  }
+};
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_SCENE_REQUESTS, inject: [...originalSceneInjection, ModuleRef],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
@@ -449,13 +471,14 @@ const orderExecutionConfiguration = z.discriminatedUnion('enabled', [
   z.object({ enabled: z.literal(false) }).strict(),
   z.object({ enabled: z.literal(true), platformProfileId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     maxOutputTokens: z.number().int().min(1).max(32768), pricing: gatewayPricingSelectionSchema,
+    inputCounting: taskInputCountingConfigurationSchema.optional(),
     host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
       leaseMs: z.number().int().min(1).max(120000) }).strict(), includeKnowledge: z.boolean() }).strict()
 ]);
 function readOrderExecutionConfiguration(value: unknown) {
   try {
     const parsed = orderExecutionConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
-    if (parsed.success) return parsed.data;
+    if (parsed.success && !(parsed.data.enabled && parsed.data.inputCounting && parsed.data.pricing.kind !== 'recorded')) return parsed.data;
   } catch { /* Non-data DI values cannot become configuration. */ }
   throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 }
@@ -492,7 +515,8 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
       scene: { code: 'quote_clarification', version: '1' },
       gatewayScene: { sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
-        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS,
+        ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host });
   }
@@ -521,7 +545,8 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
       scene: { code: 'opening_diagnosis', version: '1' },
       gatewayScene: { sceneCode: 'opening_diagnosis', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
-        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS,
+        ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host });
     return Object.freeze({ start: requests.start, recover: requests.recover, reconcile: requests.reconcile,
@@ -641,6 +666,20 @@ export const AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER: FactoryProvider<Pick<Ga
     const history = GatewayPricingRequestFactory.history({ db, auth, guard, subscriptions });
     return Object.freeze({ call: history.call.bind(history) });
   }
+};
+export const AI_NATIVE_PLATFORM_PROBE_PROVIDER: FactoryProvider<ReturnType<typeof composeStandardPlatformProbe>> = {
+  provide: PLATFORM_CAPABILITY_PROBE_REQUESTS,
+  inject: [PrismaService, ApiAuthGuard, SecretBox, { token: AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_PLATFORM_PROBE_AUDIT, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox, configuration?: unknown, audit?: UnifiedGatewayAudit) =>
+    composeStandardPlatformProbe({ db, guard, secrets, audit }, configuration)
+};
+export const AI_NATIVE_INPUT_COUNTING_PROVIDER: FactoryProvider<ReturnType<typeof composeStandardInputCounting>> = {
+  provide: AI_COUNTING_REQUESTS,
+  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+    { token: AI_NATIVE_INPUT_COUNTING_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    secrets: SecretBox, configuration?: unknown) => composeStandardInputCounting({ db, auth, guard, subscriptions, secrets }, configuration)
 };
 const originalReadOperations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
 const originalOrderExecutionOperations = ['claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run'] as const;
@@ -789,7 +828,8 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
-        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS },
+        pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS,
+        ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host,
       orderReadChain: { enabled: true, answerRoundTrip: true } }));

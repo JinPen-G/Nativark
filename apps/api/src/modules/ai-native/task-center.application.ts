@@ -28,6 +28,7 @@ import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
 import { validateAiTaskObservation } from './task-contract-validation';
+import { validateAiSceneSourceObservation } from './scenes/scene-observation-contracts';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -142,15 +143,15 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           const row = await input.db.aiTask.findFirst({ where: access.where });
           if (!row) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           const original = await readOriginalTaskModelProvenance(input.originalDb, row);
-          const opened = z.object({ resultId: id, sourceIndex: z.number().int(), reference: z.record(z.unknown()),
-            source: z.unknown(), execution: z.literal('not_attempted') }).passthrough().parse(await input.originalResults.reopenModelSource(
-              { headers: { authorization: header.data } }, { original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: original.inputRef },
-                resultId: query.resultId, sourceKind: reference.kind, sourceIndex: reference.index }));
+          const sourceCommand = { original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: original.inputRef },
+            resultId: query.resultId, sourceKind: reference.kind, sourceIndex: reference.index };
+          const opened = validateAiSceneSourceObservation(await input.originalResults.reopenModelSource(
+            { headers: { authorization: header.data } }, structuredClone(sourceCommand)), sourceCommand);
           if (opened.resultId !== query.resultId || opened.sourceIndex !== reference.index
             || requestFingerprint(opened.reference) !== reference.referenceHash) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           // Text/JSON are inert source data, never rich HTML, a route or tool instructions.
-          const content = reference.kind === 'knowledge'
-            ? { format: 'text' as const, value: z.object({ text: z.string().max(65536) }).passthrough().parse(opened.source).text }
+          const content = opened.sourceKind === 'knowledge'
+            ? { format: 'text' as const, value: opened.source.text }
             : { format: 'json' as const, value: JSON.stringify(opened.source) };
           if (typeof content.value !== 'string' || Buffer.byteLength(content.value, 'utf8') > 65536)
             throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

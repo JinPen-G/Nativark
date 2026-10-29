@@ -350,10 +350,16 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     if (!drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
     const command = structuredClone(value), target = reviewTarget(command);
     const mutation = await drafts.edit(command);
-    const before = await drafts.readReview(target), review = await drafts.readReview(target);
-    if (requestFingerprint(before) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
-    return { mutation, review, operationRevisionMatchesCurrent: mutation.revision === review.revision,
-      semantics: 'human_draft_patch_not_inspection_submission' as const, businessActionRequested: false as const };
+    try {
+      const before = await drafts.readReview(target), review = await drafts.readReview(target);
+      if (requestFingerprint(before) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+      return { mutation, review, operationRevisionMatchesCurrent: mutation.revision === review.revision,
+        semantics: 'human_draft_patch_not_inspection_submission' as const, businessActionRequested: false as const };
+    } catch {
+      // The edit already has a durable receipt. A later read/CAS/authorization
+      // failure cannot be reported as a failed write that is safe to replace.
+      throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+    }
   };
   /** Receipt observation is independent of the current draft head and never
    * performs submission, repairs linkage or re-runs recognition. */

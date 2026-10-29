@@ -6,11 +6,14 @@ import type { WorkbenchState } from './contract.ts'
 import { prepareRentalDesktopCatalogInput } from '@rental-os/shared/agent-desktop'
 import css from './Workbench.module.css'
 
-export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, switchWorkspace, logout, retry, readCatalog, discardCatalog, clearMaterials, readSources, observePreview, t }: ContextProps) {
+export function WorkbenchContext({ wide, useBusiness, useWorkMode, usePurpose, changeMode, changePurpose, observeExpandedContext, switchWorkspace, logout, retry, t }: ContextProps) {
   const state = useBusiness(value => value)
   const mode = useWorkMode(value => value)
+  const purpose = usePurpose(value => value)
   const [open, setOpen] = useState(false)
   const session = state.snapshot?.session
+  const ready = session?.status === 'ready'
+  useEffect(() => { if (wide && ready) return observeExpandedContext() }, [wide, ready, observeExpandedContext])
   if (!session || session.status !== 'ready') return <Button onClick={retry}>{t('retry')}</Button>
   const current = session.workspaces.find(row => row.id === session.currentWorkspaceId)
   const label = current?.name ?? (session.audience === 'saas' ? t('platform') : t('noSpace'))
@@ -27,9 +30,10 @@ export function WorkbenchContext({ wide, useBusiness, useWorkMode, changeMode, s
     <div className={css.account}><span className={css.title}>{session.displayName}</span>
       <Button variant="ghost" disabled={state.busy} onClick={logout}>{t('logout')}</Button></div>
     {state.failed && <span className={css.failure} role="status">{t('unavailable')}</span>}
-    {wide && session.audience === 'tenant' && session.currentWorkspaceId && <CatalogPreview key={JSON.stringify([session.actorId, session.tenantId, session.currentWorkspaceId])}
-      catalog={state.catalog} sources={state.sources} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog}
-      clearMaterials={clearMaterials} readSources={readSources} observePreview={observePreview} t={t} />}
+    {mode === 'ai' && <SegmentedControl id="rental-purpose" value={purpose} label={t('purpose')} disabled={state.busy}
+      options={[{ value: 'personal', label: t('personal') }, { value: 'business', label: t('businessPreparation'),
+        disabled: !wide || session.audience !== 'tenant' || !session.currentWorkspaceId, title: t('businessPreparationBoundary') }]} onChange={changePurpose} />}
+    {wide && mode === 'ai' && <p className={css.failure}>{t(purpose === 'personal' ? 'personalBoundary' : 'businessPreparationBoundary')}</p>}
   </div>
 }
 
@@ -130,16 +134,28 @@ export function WorkbenchToast({ useBusiness, dismissNotice, t }: ToastProps) {
     {...notice.ok ? { tone: 'success' as const } : { icon: <IconWarningOutlineRegular /> }} />
 }
 
-export function WorkbenchMain({ useBusiness, measure, retry, t }: MainProps) {
+export function WorkbenchMain({ useBusiness, usePurpose, measure, retry, changePurpose, readCatalog, discardCatalog, clearMaterials, readSources, observePreview, t }: MainProps) {
   const state = useBusiness(value => value)
+  const purpose = usePurpose(value => value)
   const viewport = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const element = viewport.current
-    if (!element) return
+    if (!element || purpose === 'business') return
     return measure(element)
-  }, [measure])
-  return <div ref={viewport} className={css.viewport} id="rental-mode-traditional-panel" role="tabpanel" aria-labelledby="rental-mode-traditional">
-    {state.snapshot?.session.status !== 'ready' && <div className={css.unavailable}>
+  }, [measure, purpose])
+  const session = state.snapshot?.session
+  return <div ref={viewport} className={css.viewport} id={purpose === 'business' ? 'rental-purpose-business-panel' : 'rental-mode-traditional-panel'}
+    role="tabpanel" aria-labelledby={purpose === 'business' ? 'rental-purpose-business' : 'rental-mode-traditional'}>
+    {purpose === 'business' ? <section className={css.preparation}>
+      <h1>{t('businessPreparation')}</h1>
+      <p>{t('businessPreparationBoundary')}</p>
+      <Button variant="outline" onClick={() => changePurpose('personal')}>{t('returnPersonal')}</Button>
+      {state.expanded && session?.status === 'ready' && session.audience === 'tenant' && session.currentWorkspaceId
+        ? <CatalogPreview key={JSON.stringify([session.actorId, session.tenantId, session.currentWorkspaceId])}
+          catalog={state.catalog} sources={state.sources} busy={state.busy} readCatalog={readCatalog} discardCatalog={discardCatalog}
+          clearMaterials={clearMaterials} readSources={readSources} observePreview={observePreview} t={t} />
+        : <p role="status">{t('preparationUnavailable')}</p>}
+    </section> : state.snapshot?.session.status !== 'ready' && <div className={css.unavailable}>
       <span>{t('unavailable')}</span><Button variant="outline" onClick={retry}>{t('retry')}</Button>
     </div>}
   </div>

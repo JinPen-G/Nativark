@@ -14,6 +14,7 @@ AI Native 是在原有业务上的智能入口：理解需求、读取受权事�
 | 查看需求、任务和进度 | [项目文档导航](docs/文档导航.md)，各专项资料集中在同一文件夹 |
 | 让 AI 或开发者接手修改 | 先读 [AGENTS.md](AGENTS.md)，再读本次专项的正式依据与当前接续 |
 | 继续 AI Native | [需求](<docs/AI Native/AI Native-需求.md>)、[开发任务](<docs/AI Native/AI Native-开发任务.md>)、[当前接续](<docs/AI Native/AI Native-协作接续.md>)、[开发记录](<docs/AI Native/AI Native-开发记录.md>) |
+| 继续 MCP / Harness 接入 | [MCP 接续](docs/MCP服务/MCP服务-协作接续.md)、[Harness 插件接续](docs/Harness插件/Harness插件-协作接续.md)；原[Agent 接入改造接续](docs/Agent接入改造/Agent接入改造-协作接续.md)保留独立状态，不继承旧进度 |
 | 继续品类治理与版本发布 | [需求](docs/品类治理/品类治理-需求.md)、[开发任务](docs/品类治理/品类治理-开发任务.md)、[当前接续](docs/品类治理/品类治理-协作接续.md)；暂停状态不代表需求取消 |
 | 了解架构或接口 | [项目开发指南](docs/公共技术资料/开发指南/项目-开发指南.md)、[客户端 API 说明](docs/公共技术资料/接口说明/客户端-API说明.md)、[OpenAPI 源码](apps/api/src/contracts/openapi-document.ts) |
 
@@ -33,11 +34,14 @@ AI 开发规则只在 `AGENTS.md` 维护一份；[CLAUDE.md](CLAUDE.md) 是引�
 | `apps/website/` | Rental OS 平台营销网站，静态网页工程 | [说明](apps/website/README.md) |
 | `packages/shared/` | 前后端公共类型、枚举、校验 schema 与运行时工具 | [公共出口](packages/shared/src/index.ts) |
 | `packages/ui-arc/` | 管理后台 UIArc 源码保留与适配资料 | [说明](packages/ui-arc/README.md) |
+| `packages/mcp-server/` | 标准 MCP 受控接入工程，正式业务仍由原服务端授权与执行 | [说明](packages/mcp-server/README.md) |
+| `clients/harness-plugin/` | Harness 客户端接入增强，消费标准 MCP，不重建业务工具 | [说明](clients/harness-plugin/README.md) |
+| `clients/agent-desktop/` | 原定制客户端、Harness 参考源码与许可保留；不作为新专项的完成证据 | [说明](clients/agent-desktop/README.md) |
 | `scripts/` | 构建、静态检查、数据库与运维辅助脚本 | [根命令清单](package.json) |
 | `tests/` | 业务、契约、离线替身、宿主及数据库等不同层级的验证 | 按本次改动选择已有验证入口 |
 | `docs/` | 按专项分类的需求、任务、接续、开发记录与未来规划 | [文档导航](docs/文档导航.md) |
 
-目录存在不表示对应端、场景或第三方集成已完成验收。其他参考工程、设计与品牌原稿不能当作当前业务实现，是否清理或提交需单独确认。
+根 workspaces 只包含 `apps/*` 和 `packages/*`；`clients/` 按自身说明工作，不由根构建自动覆盖。目录存在不表示对应端、场景或第三方集成已完成验收。其他参考工程、设计与品牌原稿不能当作当前业务实现，是否清理或提交需单独确认。
 
 ### 后端阅读路线
 
@@ -62,7 +66,7 @@ AI 开发规则只在 `AGENTS.md` 维护一份；[CLAUDE.md](CLAUDE.md) 是引�
 - **业务事实由原业务域决定。** 商品是否可租、库存、报价、金额、资格、订单状态及支付结果不能由 AI 或前端推断成正式结果。
 - **保留历史依据。** 报价和订单的规则、价格、履约及检查快照按原关联读取，不能用当前设置补写历史事实。
 - **业务阶段不能混同。** 可用性查询不等于库存预占，报价不等于建单，提案不等于批准，请求已提交不等于业务执行成功；押金、预授权、应收、实收和退款也须按原契约分别表达。
-- **各端复用同一业务底座。** 传统列表、表单和人工流程继续保留；AI Native 服务端模型使用唯一 Gateway、预算单账。[Agent 接入改造](docs/Agent接入改造/Agent接入改造-需求.md) 的本地 Harness 模型由用户自配直连自付，与服务端并行；业务权限、受控工具、审批、Core 和原收据仍复用，实际云端模型委托仍走原 Gateway。缺依赖保持不可用，不把接入规划当已交付。
+- **各端复用同一业务底座。** 传统列表、表单和人工流程继续保留；AI Native 服务端模型使用唯一 Gateway、预算单账。[MCP 服务](docs/MCP服务/MCP服务-需求.md)提供标准受控业务通路，[Harness 插件](docs/Harness插件/Harness插件-需求.md)按需补客户端接入，Harness 本地模型由用户自配直连自付。业务权限、审批、Core 和原收据仍由原服务端决定；实际云端模型委托仍走原 Gateway。原 Agent 接入改造成果独立保留，缺依赖保持不可用，不把新包或接入规划当业务已上线。
 
 具体规则及验收以正式需求和开发指南为准，本文不另立一套业务规范。
 
@@ -104,6 +108,8 @@ API 通过包出口使用 `packages/shared/dist`；管理后台 Vite 将 `@renta
 
 | 入口 | 用途与注意事项 |
 | --- | --- |
+| `npm run docs:check` | 白名单文档本地文件链接、共用规则入口及 AI Native 任务表算术；不加载业务或环境、不联网、不写产物；不检查锚点/外网/全历史，也不判定验收 |
+| `npm run test:docs` | 文档检查器的离线回归；只验证检查规则，不启动应用 |
 | `npm run contract:validate` | 控制器 / OpenAPI、DTO、路由权限及客户写入归属检查 |
 | `npm run test:admin` | 管理后台结构与约定检查，不是浏览器验收 |
 | `npm run lint` | 工作区类型检查链；包含 shared 构建，不是纯只读操作 |
@@ -111,7 +117,7 @@ API 通过包出口使用 `packages/shared/dist`；管理后台 Vite 将 `@renta
 | 根目录 `test:*` 脚本 | 按改动选择业务专项；先检查其是否连库、读取环境或调用外部服务 |
 | `scripts/ops/` 与 `ops:*` | 发布预检、备份、恢复和升级等；先确认目标、授权及脚本实际行为 |
 
-AI Native 离线验证的 preload、固定无效数据库地址及隔离产物规则见 [AGENTS.md](AGENTS.md) 和[当前接续](<docs/AI Native/AI Native-协作接续.md>)。本说明不创建新验证脚本，也不授予真库测试权限。
+AI Native 离线验证的 preload、固定无效数据库地址及隔离产物规则见 [AGENTS.md](AGENTS.md) 和[当前接续](<docs/AI Native/AI Native-协作接续.md>)。文档检查器的白名单与实现见[scripts/validate-docs.cjs](scripts/validate-docs.cjs)；新增检查不授予真库测试、服务启动或业务完成认定权限。
 
 报告须区分：源码 / 静态检查、类型检查、实际实现的离线行为、构建、浏览器 / 微信宿主、真实数据库 / 外部集成、正式验收与发布。未执行的部分写未验，不用局部通过代替整项完成。
 

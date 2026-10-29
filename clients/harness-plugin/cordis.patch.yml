@@ -1,0 +1,5 @@
+- insert:
+    - id: rental-os
+      name: '@rental-os/harness-plugin'
+      config:
+        language: zh-CN

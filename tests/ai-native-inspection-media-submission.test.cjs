@@ -151,6 +151,70 @@ async function prepared(f){
   return {...target,draftId:result.draftId,expectedRevision:result.revision,operationId:'submit-a'};
 }
 
+test('submission HTTP contracts preserve preparation, original business receipts and unknown recovery',async t=>{
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const {StaffInspectionAssistController}=require('../apps/api/src/modules/ai-native/inspection-assist/staff-inspection-assist.controller');
+  const {inspectionLifecycleResponse}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-lifecycle-http.contract');
+  const shared=require('@rental-os/shared'),{OPENAPI_DOCUMENT}=require('../apps/api/src/contracts/openapi-document');
+  const f=submissionFixture('lost'),factory=new StaffInspectionRequestFactory({...f.ports,originalInspection:f.originalInspection});
+  const http=new StaffInspectionAssistController(factory,true),request={headers:{authorization:(await f.ports.credentials.current()).authorization}};
+  const call=(op,body)=>http.consume(request,op,body);
+  const errors=(status,code,next)=>e=>e.getStatus()===status&&e.getResponse().code===code&&(!next||e.getResponse().nextAction===next);
+  const d=await draft(f),selection={...target,draftId:d.result.draftId};
+  assert.equal((await call('submission-read',selection)).status,'not_prepared');
+  // Begin at the last preparable revision: prepare 997->998, claim ->999,
+  // link ->1000. The public submit boundary must not strand the prepared row.
+  f.state.drafts.get(d.result.draftId).revision=997;
+  const command={...selection,operationId:'http-prepare',expectedRevision:997,actionId:'http-original',handoverSignatureFileAssetId:'signature-a'};
+  const prepared=await call('submission-prepare',command);
+  assert.equal(prepared.status,'prepared');assert.equal(prepared.mode,'original_single');assert.equal(f.calls(),0);
+  assert.equal((await call('submission-read',selection)).status,'submission_unknown');
+  const preparation=await call('submission-preparation',{kind:'prepare',request:command});
+  assert.equal(preparation.result.revision,998);assert.equal(preparation.execution,'not_attested');
+  assert.equal((await call('submission-preparation',{kind:'prepare',request:{...command,operationId:'absent'}})).status,'absent');
+  const submit={...selection,operationId:'http-submit',expectedRevision:998};
+  await assert.rejects(call('submission-submit',{...submit,expectedRevision:999}),errors(400,'AI_INVALID_INPUT'));
+  await assert.rejects(call('submission-submit',{...submit,approved:true}),errors(400,'AI_INVALID_INPUT'));
+  assert.equal(f.calls(),0);
+  const original=factory.withRequest.bind(factory);
+  const corrupt=t.mock.method(factory,'withRequest',async(...args)=>({...await original(...args),internalAudit:'private'}));
+  await assert.rejects(call('submission-submit',submit),errors(409,'AI_RESULT_UNKNOWN','submission-read'));
+  corrupt.mock.restore();
+  assert.equal(f.calls(),1);
+  const observation=await call('submission-read',selection);
+  assert.equal(observation.status,'submitted');assert.equal(observation.inspectionId,'inspection-original');assert.equal(observation.draftLinked,true);
+  assert.equal(observation.revision,1000);
+  assert.equal((await call('submission-submit',submit)).status,'submission_unknown','replayed claim is not another submission');
+  assert.equal(f.calls(),1);
+  const before=f.state.operations.size;
+  assert.equal((await call('submission-preparation',{kind:'prepare',request:command})).result.revision,998);
+  assert.equal(f.state.operations.size,before);
+  assert.throws(()=>inspectionLifecycleResponse('submission-prepare',{...prepared,mode:'manual_review_only'},command),{code:'RECONCILIATION_REQUIRED'});
+  assert.throws(()=>inspectionLifecycleResponse('submission-read',{...observation,draftId:'foreign'},selection),{code:'STORAGE_UNAVAILABLE'});
+  assert.throws(()=>inspectionLifecycleResponse('submission-read',{...observation,status:'submission_unknown',draftLinked:true},selection),{code:'STORAGE_UNAVAILABLE'});
+  const badRead=t.mock.method(factory,'withRequest',async(...args)=>({...await original(...args),internalAudit:'private'}));
+  await assert.rejects(call('submission-read',selection),errors(503,'AI_STORAGE_UNAVAILABLE'));badRead.mock.restore();
+  for(const [op,contract]of Object.entries(shared.AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS)){
+    const route=OPENAPI_DOCUMENT.paths[`/api/${shared.AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}/${op}`].post;
+    assert.equal(route.requestBody.content['application/json'].schema.$ref,`#/components/schemas/${contract.request}`);
+    assert.equal(route.responses['200'].content['application/json'].schema.properties.data.$ref,`#/components/schemas/${contract.response}`);
+  }
+  f.state.user.permissions=['rental-os:order:view'];
+  await assert.rejects(call('submission-read',selection),errors(403,'AI_ACCESS_DENIED'));
+  assert.equal(f.calls(),1);
+  const multiple=submissionFixture();multiple.order.allocations.push({...multiple.order.allocations[0],id:'allocation-b',assetId:'asset-b'});
+  const md=await draft(multiple),mhttp=new StaffInspectionAssistController(new StaffInspectionRequestFactory({...multiple.ports,originalInspection:multiple.originalInspection}),true);
+  const mr={headers:{authorization:(await multiple.ports.credentials.current()).authorization}},mselection={...target,draftId:md.result.draftId};
+  const reviewCommand={...mselection,operationId:'review-http',expectedRevision:1,actionId:'review-only'};
+  const reviewed=await mhttp.consume(mr,'submission-review',reviewCommand);
+  assert.equal(reviewed.mode,'manual_review_only');assert.equal(multiple.calls(),0);
+  const unknown=await mhttp.consume(mr,'submission-read',mselection);
+  assert.equal(unknown.status,'submission_unknown');assert.equal(unknown.draftLinked,false);
+  assert.equal((await mhttp.consume(mr,'submission-preparation',{kind:'prepareReview',request:reviewCommand})).mode,'manual_review_only');
+  await assert.rejects(mhttp.consume(mr,'submission-submit',{...mselection,expectedRevision:2,operationId:'no-aggregate'}),errors(503,'AI_RESOURCE_UNAVAILABLE'));
+  assert.equal(multiple.calls(),0);
+});
+
 test('employee review consumes original receipt without submitting or back-writing the draft',async()=>{
   const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
   const f=submissionFixture('lost'),input=await prepared(f);
@@ -237,7 +301,7 @@ test('actual file runtime and evidence adapter produce bounded immutable recogni
   await assert.rejects(bound.media.resolve(context,{kind:'image',...ref},new AbortController().signal));
   assert.equal(f.calls.length,2);
 });
-for(const mediaKind of ['image','audio']) test(`original inspection frozen ${mediaKind} creates a real model runner host without changing inspection fields`,{timeout:30000},async()=>{
+for(const mediaKind of ['image','audio']) test(`original inspection frozen ${mediaKind} creates a real model runner host without changing inspection fields`,{timeout:30000},async t=>{
   const bytes=mediaKind==='audio'?wavFixtureBytes():png;
   const f=mediaFixture(bytes);f.state.user.id='user-a';Object.assign(f.state.assets.get('file-a'),{
     uploadedBy:'user-a',mimeType:mediaKind==='audio'?'audio/wav':'image/png',sizeBytes:bytes.length});
@@ -350,6 +414,12 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   await runWithRequestIdentity({},async()=>{assert.equal(await staffGuard.canActivate(new ExecutionContextHost([outer])),true);
     assert.equal((await http.readCreation(outer,originalReference)).state,'observed');});
   assert.equal((await http.create(staffRequest,originalReference)).task.taskId,taskReceipt.task.taskId);
+  const validCreate=staffTasks.create.bind(staffTasks), taskCountBeforeCorruption=h.state.aiTask.length;
+  const corruptCreate=t.mock.method(staffTasks,'create',async(...args)=>({...await validCreate(...args),internal:'never public'}));
+  await assert.rejects(http.create(staffRequest,originalReference),error=>error.getStatus()===409&&error.getResponse().nextAction==='read_creation');
+  corruptCreate.mock.restore();
+  assert.equal((await http.readCreation(staffRequest,originalReference)).task.taskId,taskReceipt.task.taskId);
+  assert.equal(h.state.aiTask.length,taskCountBeforeCorruption);
   await assert.rejects(http.create({headers:{}},originalReference),error=>error.getStatus()===403&&error.getResponse().retryable===false);
   await assert.rejects(http.requestCancel(staffRequest,{reference:originalReference,expectedRevision:1,actor:'forged'}),error=>error.getStatus()===400);
   assert.equal(InspectionRecognitionTaskModule.registerHttp(taskDependencies).controllers[0],InspectionRecognitionTaskController);
@@ -366,6 +436,102 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   assert.equal(isStaffBusinessRouteAllowed('GET',outer.path),false);
   // No fabricated action policy for the new task: metadata creation grants no execution permission.
   await assert.rejects(staffTasks.start(staffRequest,originalReference));assert.equal(h.modelControl.sent.length,0);
+  if(mediaKind==='image') {
+    const {composeStandardStaffRecognition,STAFF_RECOGNITION_SCENES}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-standard.application');
+    const {AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS,AI_INSPECTION_TASK_HTTP_CONTRACTS,AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT:routes}=require('@rental-os/shared');
+    const contracts={...AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS,...AI_INSPECTION_TASK_HTTP_CONTRACTS};
+    const {OPENAPI_DOCUMENT}=require('../apps/api/src/contracts/openapi-document');
+    for(const [action,contract] of Object.entries(contracts)) {
+      const operation=OPENAPI_DOCUMENT.paths[`/api/${routes.basePath}/${routes[action]}`].post;
+      assert.equal(operation.requestBody.content['application/json'].schema.$ref,`#/components/schemas/${contract.request}`);
+      assert.equal(operation.responses['200'].content['application/json'].schema.properties.data.$ref,`#/components/schemas/${contract.response}`);
+    }
+    // This separate never-started task has no model/step/budget evidence. Its
+    // original association is a declared database fixture for the standard host.
+    const owned=h.state.aiTask.find(row=>row.id===taskReceipt.task.taskId);
+    const {composeStaffInspectionTaskPolicies}=require('../apps/api/src/modules/ai-native/staff-inspection-task-policy.composition');
+    const {StaffInspectionTaskPolicyController}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-task-policy.controller');
+    const policies=composeStaffInspectionTaskPolicies(taskDependencies,{enabled:true,ttlMs:120000,
+      operations:['read_metadata','read_events','transition_task','read_step_terminal']});
+    const policyHttp=new StaffInspectionTaskPolicyController(policies);
+    const policyBeforeBytes=f.calls.length;
+    for(const operation of ['read_metadata','read_events','transition_task']) {
+      const command={reference:originalReference,operation};
+      assert.equal((await policyHttp.read(staffRequest,command)).result.state,'not_observed');
+      const saved=await policyHttp.configure(staffRequest,{...command,expectedRevision:null});
+      assert.equal(saved.result.taskId,owned.id);assert.equal(saved.result.revision,1);
+      assert.deepEqual(saved.result.requiredPermissions,['rental-os:order:view','rental-os:order:return']);
+      assert.equal((await policyHttp.read(staffRequest,command)).result.policy.revision,1);
+      await assert.rejects(policyHttp.configure(staffRequest,{...command,expectedRevision:null}),error=>error.getStatus()===409);
+    }
+    const toClear={reference:originalReference,operation:'read_step_terminal',expectedRevision:null};
+    await assert.rejects(policyHttp.configure(staffRequest,{...toClear,requiredPermissions:['root']}),error=>error.getStatus()===400);
+    await policyHttp.configure(staffRequest,toClear);
+    const clearResponse=await policyHttp.clear(staffRequest,{...toClear,expectedRevision:1});
+    assert.equal(clearResponse.result.revision,2);assert.equal(clearResponse.result.expiresAt,h.config.clock().toISOString());
+    assert.equal(f.calls.length,policyBeforeBytes);assert.equal(h.modelControl.sent.length,0);
+    const {AI_INSPECTION_TASK_POLICY_HTTP_CONTRACTS:policyContracts,AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT:policyRoutes}=require('@rental-os/shared');
+    for(const [action,contract] of Object.entries(policyContracts)) {
+      const operation=OPENAPI_DOCUMENT.paths[`/api/${policyRoutes.basePath}/${policyRoutes[action]}`].post;
+      assert.equal(operation.responses['200'].content['application/json'].schema.properties.data.$ref,`#/components/schemas/${contract.response}`);
+    }
+    const {inspectionPolicyResponse}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-task-http.contract');
+    assert.throws(()=>inspectionPolicyResponse('clear',{...clearResponse,result:{...clearResponse.result,revision:3}},
+      {...toClear,expectedRevision:1}),{code:'RECONCILIATION_REQUIRED'});
+    h.state.aiTask.find(row=>row.id===owned.id).sceneCode=STAFF_RECOGNITION_SCENES.image;
+    const standard=composeStandardStaffRecognition({db:combinedDb,auth:staffAuth,guard:staffGuard,core:f.ports.core,
+      subscriptions:h.config.subscriptions,clock:h.config.clock,files:f.storage,
+      secrets:{decrypt:()=>assert.fail('history must not read model credentials')},
+      moduleRef:{get:()=>assert.fail('cancellation must not construct Core submission')}},{enabled:false});
+    const cancellationHttp=new InspectionRecognitionTaskController(standard.application);
+    const selection={reference:originalReference,expectedRevision:1}, beforeBytes=f.calls.length;
+    assert.equal((await cancellationHttp.readCreation(staffRequest,originalReference)).task.taskId,owned.id);
+    const notCreated=await cancellationHttp.readCreation(staffRequest,{...originalReference,inputId:'never-created-input'});
+    assert.equal(notCreated.state,'not_observed');assert.equal(notCreated.task,null);
+    const absentAnswer={draftVersion:h.contract.draftVersion,taskId:owned.id,requestId:'no-question',expectedRevision:1,
+      submissionKey:'no-answer',answers:[{fieldId:'clarification_text',value:'An original answer only'}]};
+    await assert.rejects(cancellationHttp.readAnswer(staffRequest,{reference:originalReference,submission:absentAnswer}),
+      error=>error.getResponse().code==='AI_RESOURCE_UNAVAILABLE'); // No original question is not an absent answer receipt.
+    const absent=await cancellationHttp.readCancelReceipt(staffRequest,selection);
+    assert.equal(absent.status,'not_observed');assert.equal(absent.event,null);
+    await assert.rejects(cancellationHttp.requestCancel(staffRequest,{...selection,reference:{...originalReference,taskId:owned.id}}),error=>error.getStatus()===400);
+    const originalRequestCancel=standard.application.requestCancel;
+    const lost=t.mock.method(standard.application,'requestCancel',async(...args)=>{
+      const response=await originalRequestCancel(...args);return {...response,internalPayload:'must-not-leak'};
+    });
+    await assert.rejects(cancellationHttp.requestCancel(staffRequest,selection),error=>error.getStatus()===409&&error.getResponse().nextAction==='read_cancel_receipt');
+    lost.mock.restore();
+    const requested=await cancellationHttp.readCancelReceipt(staffRequest,selection);
+    assert.equal(requested.status,'observed');assert.equal(requested.event.taskId,owned.id);assert.equal(requested.event.taskRevision,2);
+    const eventCount=h.state.aiTaskEvent.length;
+    assert.equal((await cancellationHttp.requestCancel(staffRequest,selection)).receipt.event.cursor,requested.event.cursor);
+    assert.equal(h.state.aiTaskEvent.length,eventCount);
+    const settlement={...selection,expectedRevision:2};
+    const settled=await cancellationHttp.settleUnstartedCancellation(staffRequest,settlement);
+    assert.equal(settled.receipt.event.data.to,'cancelled');assert.equal(settled.remoteCancellation,'not_attested');
+    const observed=await cancellationHttp.readCancellationSettlementReceipt(staffRequest,settlement);
+    assert.equal(observed.status,'observed');assert.equal(observed.snapshot.status,'cancelled');
+    assert.equal((await cancellationHttp.settleReleasedInputCancellation(staffRequest,settlement)).receipt.event.cursor,observed.event.cursor);
+    const eventCountAfterSettlement=h.state.aiTaskEvent.length;
+    const {inspectionCancellationResponse}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-task-http.contract');
+    for(const corrupt of [value=>{value.expectedRevision++;},value=>{value.event.taskId='foreign-task';},
+      value=>{value.snapshot.status='running';},value=>{value.event.data.to='cancel_requested';},value=>{value.snapshot.lease='internal';}]) {
+      const invalid=structuredClone(observed);corrupt(invalid);
+      assert.throws(()=>inspectionCancellationResponse('readCancellationSettlementReceipt',invalid,2),{code:'AI_STORAGE_UNAVAILABLE'});
+    }
+    const currentRead=standard.application.readCancelReceipt;
+    const altered=t.mock.method(standard.application,'readCancelReceipt',async(...args)=>{
+      const response=structuredClone(await currentRead(...args));response.event.taskRevision++;
+      return response;
+    });
+    await assert.rejects(cancellationHttp.readCancelReceipt(staffRequest,selection),error=>error.getStatus()===503);
+    altered.mock.restore();
+    assert.equal(h.modelControl.sent.length,0);assert.equal(f.calls.length,beforeBytes);
+    assert.equal(h.state.aiTaskEvent.length,eventCountAfterSettlement);
+    f.state.active=false;
+    await assert.rejects(cancellationHttp.readCancelReceipt(staffRequest,selection),error=>error.getStatus()===403);
+    f.state.active=true;
+  }
   await assert.rejects(staffTasks.create({headers:{}},originalReference));
   await assert.rejects(staffTasks.create(staffRequest,{...originalReference,taskId:'caller-task'}),{code:'AI_INVALID_INPUT'});
   await assert.rejects(new InspectionRecognitionTaskApplication({...taskDependencies,enabled:false}).create(staffRequest,originalReference),{code:'AI_RESOURCE_UNAVAILABLE'});
@@ -377,6 +543,9 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   const clarificationSource=f.services.recognitionResults.inputSource({...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision});
   const root=await composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,inputSource:clarificationSource,task});
   const result=await root.application.start(h.query);
+  const {inspectionTaskResponse}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-task-http.contract');
+  assert.deepEqual(inspectionTaskResponse('start',result,originalReference),result);
+  assert.throws(()=>inspectionTaskResponse('reconcile',{...result,lease:{holderId:'internal'}},originalReference),{code:'RECONCILIATION_REQUIRED'});
   assert.equal(result.outcome.status,'paused');assert.equal(h.modelControl.sent.length,1);
   assert.equal(h.state.aiTaskActionInput[0].payload.media[0].contentHash,detail.state.recognitionInputs[0].media[0].contentHash);
   assert.equal(h.modelControl.sent[0].messages[0].content[1].data,bytes.toString('base64'));
@@ -405,6 +574,11 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   h.state.aiTaskResultArtifact[0].completeMeasurement=false;
   const unknown=await f.services.recognitionResults.read(reference);
   assert.equal(unknown.status,'unknown');assert.deepEqual(unknown.candidates,[]);
+  const {inspectionLifecycleResponse}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-lifecycle-http.contract');
+  assert.deepEqual(inspectionLifecycleResponse('result-read',reviewObservation.recognition,reference),reviewObservation.recognition);
+  assert.deepEqual(inspectionLifecycleResponse('result-read',unknown,reference),unknown);
+  assert.throws(()=>inspectionLifecycleResponse('result-read',{...unknown,candidates:[candidate]},reference),{code:'STORAGE_UNAVAILABLE'});
+  assert.throws(()=>inspectionLifecycleResponse('result-read',{...reviewObservation.recognition,taskId:'foreign'},reference),{code:'STORAGE_UNAVAILABLE'});
   const incomplete=await f.services.readRecognitionReview(reference);
   assert.equal(incomplete.recognition.status,'unknown');assert.deepEqual(incomplete.recognition.candidates,[]);
   assert.equal(incomplete.automaticRetry,false);assert.equal(incomplete.review.fields.find(field=>field.fieldCode==='mileage').human.value,42);
@@ -413,8 +587,10 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   h.state.aiTaskResultArtifact[0].outcome='FAILED';h.state.aiStep.find(s=>s.id===reference.stepId||s.resultRef===reference.resultId).status='FAILED';
   const failed=await f.services.recognitionResults.read(reference);
   assert.equal(failed.status,'failed');assert.deepEqual(failed.candidates,[]);
+  assert.deepEqual(inspectionLifecycleResponse('result-read',failed,reference),failed);
   h.state.aiTaskResultArtifact[0].outcome='SUCCEEDED';h.state.aiStep.find(s=>s.resultRef===reference.resultId).status='SUCCEEDED';
   const pending=await root.application.readInput({taskId:h.query.taskId});
+  assert.deepEqual(inspectionTaskResponse('readInput',pending,originalReference),pending);
   assert.equal(pending.contract.code,'inspection_context');
   h.modelControl.result.text=JSON.stringify([candidate]);
   const submission={draftVersion:h.contract.draftVersion,taskId:h.query.taskId,requestId:pending.requestId,
@@ -423,7 +599,14 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   assert.equal(h.modelControl.sent.length,1);
   const continued=await root.application.resume(submission);
   assert.equal(continued.continuation.outcome.status,'succeeded',JSON.stringify(continued));
+  const answerCommand={reference:originalReference,submission};
+  assert.deepEqual(inspectionTaskResponse('resume',continued,answerCommand),continued);
+  assert.throws(()=>inspectionTaskResponse('resume',{...continued,receipt:{...continued.receipt,taskId:'foreign-task'}},answerCommand),{code:'RECONCILIATION_REQUIRED'});
   const answerReceipt=await root.inputs.readSubmission(submission);
+  assert.deepEqual(inspectionTaskResponse('readAnswer',answerReceipt,answerCommand),answerReceipt);
+  assert.throws(()=>inspectionTaskResponse('readAnswer',{...answerReceipt,requestId:'foreign-question'},answerCommand),{code:'AI_STORAGE_UNAVAILABLE'});
+  assert.deepEqual(inspectionTaskResponse('continueAnswer',{receipt:answerReceipt,result:continued.continuation},answerCommand),{receipt:answerReceipt,result:continued.continuation});
+  assert.throws(()=>inspectionTaskResponse('continueAnswer',{receipt:{state:'not_observed',retryable:false},result:continued.continuation},answerCommand),{code:'RECONCILIATION_REQUIRED'});
   assert.equal(answerReceipt.state,'observed');
   assert.equal(answerReceipt.execution,'not_inferred_from_receipt');
   assert.equal(answerReceipt.runId,h.state.aiRun.find(r=>r.inputReceiptId===answerReceipt.receiptId).id);
@@ -443,6 +626,8 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   const save={...successorReference,operationId:'save-original-vision'};
   const savedReview=await f.services.saveRecognitionReview(save),saved=savedReview.receipt;
   assert.equal(saved.result.revision,3);
+  assert.deepEqual(inspectionLifecycleResponse('result-save',saved,save),saved);
+  assert.throws(()=>inspectionLifecycleResponse('result-save',{...saved,result:{...saved.result,revision:4}},save),{code:'RECONCILIATION_REQUIRED'});
   assert.equal(savedReview.savedRevisionMatchesCurrent,true);assert.equal(savedReview.adoption,'not_attempted');
   assert.equal(savedReview.review.fields.find(field=>field.fieldCode==='mileage').human.value,42);
   assert.deepEqual(await f.services.recognitionResults.save(save),saved);
