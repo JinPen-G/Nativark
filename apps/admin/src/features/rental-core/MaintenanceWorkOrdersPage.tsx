@@ -1,3 +1,4 @@
+import { ListFilterItem } from "@/components/ui";
 import { RecordDisclosure } from "@/components/RecordDisclosure";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PlusOutlined, ReloadOutlined } from "@/components/ui/icons";
@@ -212,7 +213,19 @@ export function MaintenanceWorkOrdersPage() {
           </Space> }
         ]} />
       </ListSection>
-      <ListSection title={t("养护工单")} controls={<><SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("工单号、原因或负责人")} style={{ width: "var(--rental-control-width-search)" }} /><Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} /><Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /><Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: "var(--rental-control-width-select)" }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} /><Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button></>}>
+      <ListSection title={t("养护工单")} controls={<>
+        <SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("工单号、原因或负责人")} />
+        <ListFilterItem label={t("工单状态")} priority active={Boolean(statusFilter)}>
+          <Select aria-label={t("工单状态")} allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} />
+        </ListFilterItem>
+        <ListFilterItem label={t("工单类型")} collapsed active={Boolean(typeFilter)}>
+          <Select aria-label={t("工单类型")} allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} />
+        </ListFilterItem>
+        <ListFilterItem label={t("负责人")} collapsed active={Boolean(assigneeFilter)}>
+          <Select aria-label={t("负责人")} allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} />
+        </ListFilterItem>
+        <Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>
+      </>}>
 
         <Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isLoading} refreshing={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty scene={resourceFilter.trim() || statusFilter || typeFilter || assigneeFilter ? "search" : "empty"} compact description={t("暂无匹配的养护工单")} /> }} columns={[
           { title: t("工单号"), dataIndex: "workNo", width: 190 },

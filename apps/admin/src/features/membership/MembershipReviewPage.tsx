@@ -1,3 +1,4 @@
+import { ListFilterItem } from "@/components/ui";
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import { SearchField, useListFilter } from "@/components/ui";
 import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
@@ -57,7 +58,15 @@ export function MembershipReviewPage() {
     <PageHeader title={t("会员审核")} description={t("审核结果在租户内共享；证件要求按经营空间设置。")}  />
 
     {scopeOptions.error && <Alert type="warning" showIcon title={t("来源空间名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
-    <ListSection controls={<><SearchField label={t("会员姓名")} placeholder={t("会员姓名")} value={reviewSearch.keyword} onValueChange={reviewSearch.setKeyword} /><Select value={filter.status} style={{ width: "var(--rental-control-width-select)" }} options={[{ value: "", label: t("全部状态") }, ...Object.entries(statusMeta).map(([value, item]) => ({ value, label: t(item.text) }))]} onChange={(status) => { setFilter((value) => ({ ...value, status: status || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} /><Select value={filter.type} style={{ width: "var(--rental-control-width-select)" }} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => { setFilter((value) => ({ ...value, type: type || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} /></>}>
+    <ListSection controls={<>
+      <SearchField label={t("会员姓名")} placeholder={t("会员姓名")} value={reviewSearch.keyword} onValueChange={reviewSearch.setKeyword} />
+      <ListFilterItem label={t("审核状态")} priority active={Boolean(filter.status)}>
+        <Select aria-label={t("审核状态")} allowClear placeholder={t("全部状态")} value={filter.status} options={[{ value: "", label: t("全部状态") }, ...Object.entries(statusMeta).map(([value, item]) => ({ value, label: t(item.text) }))]} onChange={(status) => { setFilter((value) => ({ ...value, status: status || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} />
+      </ListFilterItem>
+      <ListFilterItem label={t("审核类型")} collapsed active={Boolean(filter.type)}>
+        <Select aria-label={t("审核类型")} allowClear placeholder={t("全部类型")} value={filter.type} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => { setFilter((value) => ({ ...value, type: type || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} />
+      </ListFilterItem>
+    </>}>
       <Table<CustomerMembershipReview> rowKey="id" onRefresh={() => reviews.refetch()} loading={reviews.isLoading} refreshing={reviews.isFetching} dataSource={reviewSearch.rows} pagination={reviewSearch.pagination} columns={[
         { title: t("会员"), dataIndex: "customerName", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerName ?? "—"} type={row.reviewType === "corporate_registration" ? "corporate" : undefined} /> },
         { title: t("审核类型"), render: (_, row) => t(typeText[row.reviewType] ?? row.reviewType) },

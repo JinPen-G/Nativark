@@ -1,4 +1,4 @@
-import { ActionButton, App, Button, DataTableRowActions, DataTableStatus, Drawer, EmptyScene, Form, InfoPopover, Input, ListFilters, ListSection, SaveButton, Segmented, Select, Table, Upload, downloadCsv, useListFilter } from "@/components/ui";
+import { ActionButton, App, Button, DataTableRowActions, DataTableStatus, Drawer, EmptyScene, Form, InfoPopover, Input, ListFilters, ListSection, SaveButton, Select, Table, Upload, downloadCsv, useListFilter } from "@/components/ui";
 import type { PaymentStatementBatchSummary, PaymentStatementLineSummary } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -95,9 +95,7 @@ export function PaymentReconciliationPage() {
     {!selectedBatchId && <>
     <PageHeader title={t("支付对账")} note={{ title: "对账说明", description: "对账不会自动修改收退款记录；差异须逐条核实。" }}
       extra={<Button type="primary" icon={<UploadCloud size={16} aria-hidden="true" />} onClick={() => { importStatement.reset(); setImportOpen(true); }}>{t("导入对账文件")}</Button>} />
-    <ListSection controls={<><Segmented value={batchFilter.status} onChange={value => batchFilter.setStatus(String(value))}
-      options={[{ value: "", label: t("全部") }, ...Object.entries(batchStatusLabels).map(([value, label]) => ({ value, label: t(label) }))]} />
-      <ListFilters filter={batchFilter} placeholder="文件名或支付平台" /></>}>
+    <ListSection controls={<ListFilters filter={batchFilter} placeholder="文件名或支付平台" statusLabel="对账状态" options={Object.entries(batchStatusLabels).map(([value, label]) => ({ value, label }))} />}>
       <QueryState loading={batches.isLoading} error={batches.error} onRetry={() => batches.refetch({ throwOnError: true })}>
         <Table<PaymentStatementBatchSummary>
           rowKey="id"

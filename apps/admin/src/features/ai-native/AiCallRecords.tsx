@@ -51,10 +51,10 @@ export function AiCallRecords({ identity }: { identity: string }) {
     { title: t('关联任务'), dataIndex: 'taskId', key: 'task', render: (value: string) => <code>{value}</code> }
   ], [t]);
   const filters = <>
-    <ListFilterItem label={t('时间范围')} priority active={days !== 7}>
+    <ListFilterItem label={t('时间范围')} priority collapsed={Boolean(period)} active={!period && days !== 7}>
       <Select id={`${field}-days`} aria-label={t('时间范围')} value={days} disabled={busy} options={[1, 7, 31].map(value => ({ value, label: t(`最近 ${value} 天`) }))}
         onChange={value => { setPeriod(null); setRangeError(false); setDays(Number(value)); }} /></ListFilterItem>
-    <ListFilterItem label={t('自定义日期')} width="dateRange" active={!!period}>
+    <ListFilterItem label={t('自定义日期')} width="dateRange" priority={Boolean(period)} collapsed={!period} active={Boolean(period)}>
       <DatePicker.RangePicker showTime value={period} disabled={busy} allowClear
         placeholder={[t('自定义开始时间'), t('自定义结束时间')]} onChange={value => {
           if (!value?.[0] || !value[1]) { setPeriod(null); setRangeError(false); return; }
