@@ -22,7 +22,7 @@ import styles from "./RentalOrdersPage.module.css";
 
 const statusLabels = orderStatusLabels;
 const EMPTY_ORDERS: RentalOrder[] = [];
-// Order-list trial only; do not enable on other lists before visual approval.
+// Order-specific narrative minimum; shared lists inherit the same natural layout.
 const ORDER_CONTENT_LAYOUT = {
   compactColumns: ["select", "orderNo", "payableAmount", "actions"],
   minimumWidths: { items: ADMIN_TABLE_COLUMN_WIDTH.summary }

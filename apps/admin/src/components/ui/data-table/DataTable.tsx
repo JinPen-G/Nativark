@@ -24,6 +24,8 @@ declare module "@tanstack/react-table" {
   interface ColumnMeta<TData extends RowData, TValue> {
     /** Opt in per column/record; multi-line cells keep the existing top alignment. */
     cellAlign?: "top" | "middle" | ((row: TData) => "top" | "middle");
+    /** Short scalar/action columns shrink; narrative columns share spare space. */
+    contentSizing?: { compact?: boolean; minWidth?: number };
   }
 }
 
@@ -74,18 +76,20 @@ export function DataTableViewOptions<T>({ table, label, disabled }: { table: Tan
   </Popover.Root>;
 }
 
-/** Order-list pilot with one trailing pinned column; defaults remain unchanged. */
+/** Shared natural sizing. Explicit business minima override the default flow. */
 type ContentLayout = {
   compactColumns: readonly string[];
   minimumWidths?: Readonly<Record<string, number>>;
 };
+const DEFAULT_CONTENT_LAYOUT: ContentLayout = { compactColumns: ["select", "expand", "actions"] };
 
-function pinningStyle<T>(column: Column<T>, contentLayout?: ContentLayout): CSSProperties {
+function pinningStyle<T>(column: Column<T>, contentLayout: ContentLayout | false, index: number): CSSProperties {
   const pinned = column.getIsPinned();
+  const sizing = column.columnDef.meta?.contentSizing;
   return {
-    width: contentLayout ? (contentLayout.compactColumns.includes(column.id) ? "1%" : undefined) : column.getSize(),
-    minWidth: contentLayout?.minimumWidths?.[column.id],
-    ...(pinned ? { position: "sticky", left: pinned === "left" ? column.getStart("left") : undefined, right: pinned === "right" ? column.getAfter("right") : undefined, zIndex: 1 } : {})
+    width: contentLayout ? (contentLayout.compactColumns.includes(column.id) || sizing?.compact ? "1%" : undefined) : column.getSize(),
+    minWidth: contentLayout ? contentLayout.minimumWidths?.[column.id] ?? sizing?.minWidth : undefined,
+    ...(pinned ? { position: "sticky", left: pinned === "left" ? (contentLayout ? `var(--table-pin-${index}, 0px)` : column.getStart("left")) : undefined, right: pinned === "right" ? (contentLayout ? `var(--table-pin-${index}, 0px)` : column.getAfter("right")) : undefined, zIndex: 1 } : {})
   };
 }
 
@@ -109,7 +113,7 @@ function CellContent<T>({ cell, animated, paused }: { cell: Cell<T, unknown>; an
     renderNumber={config.renderNumber ? formatted => config.renderNumber!(formatted, row) : undefined} paused={paused}>{content}</DataTableCellMotion>;
 }
 
-export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, emptyScene = 'empty', footer, animated = false, motionScope = "", compactHeader = false, contentLayout, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
+export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, emptyScene = 'empty', footer, animated = false, motionScope = "", compactHeader = false, contentLayout = DEFAULT_CONTENT_LAYOUT, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
   table: TanstackTable<T>; caption: string; busy?: boolean; loading?: boolean;
   /** Background revalidation is not placeholder data or a blocking load. */
   refreshing?: boolean;
@@ -117,7 +121,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   /** Reset motion history on page/filter/scope changes; placeholder data is paused by busy. */
   motionScope?: string;
   compactHeader?: boolean;
-  contentLayout?: ContentLayout;
+  contentLayout?: ContentLayout | false;
   rowProps?: (row: Row<T>) => HTMLAttributes<HTMLTableRowElement>;
   cellProps?: (cell: Cell<T, unknown>) => TdHTMLAttributes<HTMLTableCellElement>;
   renderExpanded?: (row: Row<T>) => ReactNode;
@@ -129,9 +133,42 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   const suppress = !animated || Boolean(reduced);
   const rows = table.getRowModel().rows;
   const columns = table.getVisibleLeafColumns();
+  const allColumns = table.getAllLeafColumns();
+  const columnStyle = (column: Column<T>) => pinningStyle(column, contentLayout, allColumns.indexOf(column));
   const tableMinWidth = minWidth ?? (contentLayout ? "100%" : table.getTotalSize());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   const headerRef = useRef<HTMLTableSectionElement>(null);
   const refreshRef = useRef<HTMLDivElement>(null);
+  const visibleColumnsKey = columns.map(column => column.id).join("|");
+  // TanStack's offsets use configured sizes. Natural columns need real widths,
+  // including multi-column pinning, visibility changes and late font/image loads.
+  const measurePinning = () => {
+    const root = rootRef.current, element = tableRef.current;
+    if (!contentLayout || !root || !element) return;
+    const widths = new Map(Array.from(element.querySelectorAll<HTMLTableCellElement>("thead th[data-column-id]")).map(cell => [cell.dataset.columnId, cell.getBoundingClientRect().width]));
+    if (!widths.size) {
+      element.querySelectorAll<HTMLTableCellElement>("tbody tr:first-child td[data-column-id]").forEach(cell => widths.set(cell.dataset.columnId, cell.getBoundingClientRect().width));
+    }
+    for (const side of ["left", "right"] as const) {
+      const pinned = columns.filter(column => column.getIsPinned() === side);
+      if (side === "right") pinned.reverse();
+      let offset = 0;
+      for (const column of pinned) {
+        root.style.setProperty(`--table-pin-${allColumns.indexOf(column)}`, `${offset}px`);
+        offset += widths.get(column.id) ?? 0;
+      }
+    }
+  };
+  useLayoutEffect(measurePinning);
+  useLayoutEffect(() => {
+    const element = tableRef.current;
+    if (!contentLayout || !element || !columns.some(column => column.getIsPinned()) || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measurePinning);
+    observer.observe(element);
+    element.querySelectorAll(showHeader ? "thead th" : "tbody tr:first-child td").forEach(cell => observer.observe(cell));
+    return () => observer.disconnect();
+  }, [table, contentLayout, visibleColumnsKey, showHeader]);
   // Font loading, zoom or grouped headers can make the real header taller than
   // its minimum token. Never let the data placeholder cover that real header.
   useLayoutEffect(() => {
@@ -158,20 +195,21 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(header);
+    header.querySelectorAll("th").forEach(cell => observer.observe(cell));
     return () => observer.disconnect();
-  }, [busy, loading, contentLayout]);
+  }, [busy, loading, contentLayout, visibleColumnsKey]);
   const skeletonRows = (count: number) => Array.from({ length: count }, (_, index) => <tr key={`skeleton-${index}`} className={styles.skeletonRow} aria-hidden="true">
-    {columns.map(column => <td key={column.id} style={pinningStyle(column, contentLayout)} data-column-id={column.id} data-pinned={column.getIsPinned() || undefined}>
+    {columns.map(column => <td key={column.id} style={columnStyle(column)} data-column-id={column.id} data-pinned={column.getIsPinned() || undefined}>
       <TableSkeletonCell columnId={column.id} />
     </td>)}
   </tr>);
-  return <div className={styles.root} data-compact-header={compactHeader || undefined} data-column-layout={contentLayout ? "content" : undefined} aria-busy={busy || loading || refreshing || undefined}>
+  return <div ref={rootRef} className={styles.root} data-compact-header={compactHeader || undefined} data-column-layout={contentLayout ? "content" : undefined} aria-busy={busy || loading || refreshing || undefined}>
     {animated && <DataTableAnnouncements table={table} scope={JSON.stringify([motionScope, table.getState().sorting])} paused={Boolean(busy)} />}
     <div className={styles.viewport}>
     <div className={styles.scroll} style={{ maxHeight }} data-scroll-y={maxHeight != null || undefined} tabIndex={0} role="region" aria-label={caption}>
-      <table className={styles.table} style={{ minWidth: tableMinWidth }}>
+      <table ref={tableRef} className={styles.table} style={{ minWidth: tableMinWidth }}>
         <caption className={styles.srOnly}>{caption}</caption>
-        {showHeader && <thead ref={headerRef}>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" colSpan={header.colSpan} style={pinningStyle(header.column, contentLayout)} data-column-id={header.column.id} data-pinned={header.column.getIsPinned() || undefined} aria-sort={header.column.getCanSort() ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
+        {showHeader && <thead ref={headerRef}>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" colSpan={header.colSpan} style={columnStyle(header.column)} data-column-id={header.column.id} data-pinned={header.column.getIsPinned() || undefined} aria-sort={header.column.getCanSort() ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
           {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
         </th>)}</tr>)}</thead>}
         <LayoutGroup><tbody key={motionScope} inert={busy || loading || undefined} aria-hidden={busy || loading || undefined} className={busy && !loading ? styles.refreshingBody : undefined}>
@@ -181,7 +219,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
               exit={suppress ? { opacity: 0 } : MOTIQ_TABLE_MOTION.exit}
               transition={suppress ? { duration: 0 } : MOTIQ_TABLE_MOTION.transition}
               data-state={row.getIsSelected() ? "selected" : undefined} data-row-id={row.id} aria-selected={table.options.enableRowSelection ? row.getIsSelected() : undefined}>
-              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...pinningStyle(cell.column, contentLayout), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
+              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...columnStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />
               </td>; })}
             </motion.tr>, row.getIsExpanded() && renderExpanded ? <motion.tr key={`${row.id}-detail`} className={styles.expandedRow}

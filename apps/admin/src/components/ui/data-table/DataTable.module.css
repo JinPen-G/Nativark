@@ -69,6 +69,10 @@
 .root[data-column-layout="content"] .table :is(th, td) { padding-inline: var(--space-2); }
 .root[data-column-layout="content"] .table tr > :first-child { padding-inline-start: var(--space-4); }
 .root[data-column-layout="content"] .table tr > :last-child { padding-inline-end: var(--space-4); }
+.legacyContent { min-width: 0; max-width: 100%; }
+.legacyContent :global(.ant-table-cell) { padding-inline: var(--space-2); overflow-wrap: anywhere; }
+.legacyContent :global(.ant-table-cell:first-child) { padding-inline-start: var(--space-4); }
+.legacyContent :global(.ant-table-cell:last-child) { padding-inline-end: var(--space-4); }
 .table th, .table td { padding: var(--space-3); text-align: start; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 /* Wrapping Space still gives its items an intrinsic minimum; constrain legacy
    tag groups so long names grow the row instead of painting across columns. */

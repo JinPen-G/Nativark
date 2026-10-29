@@ -51,7 +51,7 @@ export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */
 export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, accountLabelWidth: ADMIN_CONTROL_WIDTH.select } as const;
 /** One leading slot for table badges, financial values and row actions; not whole-row centering. */
-export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, expandWidth: 52 } as const;
+export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, contentMinWidth: 112, expandWidth: 52 } as const;
 /** Structural loading geometry; controls/type/colors continue to use their existing roles. */
 export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: 80, textRadius: 4 } as const;
 export const ADMIN_EMPTY_METRICS = { artWidth: 240, artCompactWidth: 144 } as const;

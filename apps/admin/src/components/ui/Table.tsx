@@ -70,6 +70,16 @@ function pinActionColumns<T extends object>(columns: TableProps<T>["columns"], a
       ? { ...column, fixed: "right" as const } : column);
 }
 
+/** Legacy widths are sizing hints, not minimums in a responsive list. Preserve
+ * explicitly declared minima, editable controls and fallback business contracts. */
+function naturalColumns<T extends object>(columns: TableProps<T>["columns"]): TableProps<T>["columns"] {
+  return columns?.map(column => "children" in column
+    ? { ...column, children: naturalColumns<T>(column.children)! }
+    : { ...column, width: undefined, minWidth: column.minWidth ?? ADMIN_TABLE_METRICS.columnMinWidth });
+}
+
+const SHORT_COLUMN_FIELD = /(?:status|state|amount|price|balance|total|count|quantity|capacity|version|currency|enabled|active|phone|date|time|At$)/i;
+
 declare module "@tanstack/react-table" {
   interface ColumnMeta<TData extends RowData, TValue> {
     business?: { label: string; render: (row: TData, index: number) => ReactNode };
@@ -104,7 +114,7 @@ export function Table<T extends object>(props: BusinessTableProps<T>) {
     props.columns?.some(column => "children" in column || column.filters || column.filterDropdown) ||
     props.dataSource?.some(row => Array.isArray((row as Record<string, unknown>).children));
   const { refreshing: _refreshing, ...fallbackProps } = props;
-  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><AntTable<T> {...fallbackProps} columns={columns} /></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
+  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><div className={styles.legacyContent}><AntTable<T> {...fallbackProps} tableLayout={props.tableLayout ?? "auto"} columns={props.tableLayout === "fixed" ? columns : naturalColumns(columns)} scroll={props.scroll ? { ...props.scroll, x: props.tableLayout === "fixed" ? props.scroll.x : "100%" } : undefined} /></div></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
 }
 Table.listToolbarHost = true;
 
@@ -150,6 +160,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   const expansion = controlledExpanded ? Object.fromEntries(controlledExpanded.map(key => [String(key), true])) : expanded;
   const labels: Record<string, string> = {};
   const columnSources = new Map<string, ColumnType<T>>();
+  const compactLabels = new Set(["状态", "账号状态", "会员状态", "数量", "金额", "价格", "版本", "类型", "日期", "时间", "手机", "加入时间", "更新时间", "创建时间"].map(label => t(label)));
   const ids = new Set<string>();
   const columns: ColumnDef<T, unknown>[] = sourceColumns.map((column, index) => {
     const title = typeof column.title === "function" ? column.title({}) : column.title;
@@ -160,13 +171,22 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
     ids.add(id); labels[id] = label; columnSources.set(id, column);
     const canSort = props.sorting !== false && !action && (remote ? Boolean(props.onChange && column.sorter) : column.sorter !== false && (column.dataIndex != null || Boolean(props.sortValue) || Boolean(column.sorter)));
     const compare = typeof column.sorter === "function" ? column.sorter : typeof column.sorter === "object" ? column.sorter.compare : undefined;
+    let sample: unknown;
+    if (column.dataIndex != null) {
+      for (const row of source) {
+        sample = readTableValue(row, column.dataIndex);
+        if (sample != null) break;
+      }
+    }
+    const compact = action || compactLabels.has(label) || SHORT_COLUMN_FIELD.test(id) || column.align === "right" ||
+      (typeof column.width === "number" && column.width <= ADMIN_TABLE_METRICS.columnMinWidth * 2) || typeof sample === "number" || typeof sample === "boolean";
     return {
       id, accessorFn: row => props.sortValue ? props.sortValue(row, index) : readTableValue(row, column.dataIndex),
       size: typeof column.width === "number" ? column.width : column.width ? parseFloat(String(column.width)) || ADMIN_TABLE_METRICS.columnWidth : action ? ADMIN_TABLE_METRICS.actionsWidth : ADMIN_TABLE_METRICS.columnWidth,
       minSize: column.minWidth ?? ADMIN_TABLE_METRICS.columnMinWidth, enableSorting: canSort, enableHiding: index !== 0 && !action,
       sortUndefined: "last", sortingFn: compare ? (a, b) => compare(a.original, b.original, "ascend") : "auto",
       header: BusinessHeader, cell: BusinessCell,
-      meta: { cellAlign: "middle", motion: !action && column.dataIndex != null ? { value: row => {
+      meta: { cellAlign: "middle", contentSizing: { compact, minWidth: column.minWidth ?? (compact ? ADMIN_TABLE_METRICS.columnMinWidth : ADMIN_TABLE_METRICS.contentMinWidth) }, motion: !action && column.dataIndex != null ? { value: row => {
         // Track explicit scalar facts, never rendered nodes, clocks or whole row objects.
         const value = readTableValue(row, column.dataIndex);
         return value == null || typeof value === "string" || typeof value === "number" ? value : undefined;
@@ -245,8 +265,8 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
       </>} trailingExtra={props.cardView && <ListViewSwitch value={view} onChange={setView} />} />
     <ContentTransition value={view}>{props.cardView && view === "cards" && source.length > 0 ? <><ListCards key={identity} rows={pageRows} config={props.cardView} busy={loading} canSelect={row => !selectionConfig?.getCheckboxProps?.(row)?.disabled} getKey={row => String(getKey(row, source.indexOf(row)))} selected={new Set(Object.keys(selectedState).filter(key => selectedState[key]))}
       onSelect={selectable ? (row, checked) => { const id = String(getKey(row, source.indexOf(row))); if (!selectionConfig?.getCheckboxProps?.(row)?.disabled) updateSelection({ ...selectedState, [id]: checked }); } : undefined} />{pager}</> :
-    <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0} refreshing={props.refreshing}
-      emptyScene={props.emptyScene} empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.scroll?.x === true ? undefined : props.scroll?.x}
+    <ListHeadingContext.Provider value={null}><ListControlsContext.Provider value={null}><DataTable table={table} compactHeader contentLayout={props.tableLayout === "fixed" ? false : undefined} caption={props.caption ?? t("数据表格")} busy={loading && source.length > 0} loading={loading && source.length === 0} refreshing={props.refreshing}
+      emptyScene={props.emptyScene} empty={(typeof props.locale?.emptyText === "function" ? props.locale.emptyText() : props.locale?.emptyText) ?? t("暂无数据")} maxHeight={props.scroll?.y} minWidth={props.tableLayout === "fixed" && props.scroll?.x !== true ? props.scroll?.x : undefined}
       showHeader={props.showHeader} animated motionScope=""
       rowProps={row => {
         const attributes = props.onRow?.(row.original, row.index) ?? {};
