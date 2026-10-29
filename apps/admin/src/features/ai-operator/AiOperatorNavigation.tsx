@@ -8,8 +8,8 @@ import { useLocale } from "@/app/locale";
 export function OperatorModeSwitch({ ai, onChange }: { ai: boolean; onChange: (ai: boolean) => void }) {
   const { t } = useLocale();
   return <div className="operator-mode-switch">
-    <div className="operator-mode-expanded"><Segmented block aria-label={t("工作模式")} value={ai ? "ai" : "admin"} options={[{ label: t("AI 工作中心"), value: "ai" }, { label: t("业务管理"), value: "admin" }]} onChange={value => onChange(value === "ai")} /></div>
-    <div className="operator-mode-collapsed"><Button type="text" aria-label={t(ai ? "切换到业务管理" : "切换到 AI 工作中心")} title={t(ai ? "业务管理" : "AI 工作中心")} icon={<AnimatedIcon name={ai ? "dashboard" : "ai"} />} onClick={() => onChange(!ai)} /></div>
+    <div className="operator-mode-expanded"><Segmented block aria-label={t("工作模式")} value={ai ? "ai" : "admin"} options={[{ label: t("Agent工作台"), value: "ai" }, { label: t("管理控制台"), value: "admin" }]} onChange={value => onChange(value === "ai")} /></div>
+    <div className="operator-mode-collapsed"><Button type="text" aria-label={t(ai ? "切换到管理控制台" : "切换到Agent工作台")} title={t(ai ? "管理控制台" : "Agent工作台")} icon={<AnimatedIcon name={ai ? "dashboard" : "ai"} />} onClick={() => onChange(!ai)} /></div>
   </div>;
 }
 export function AiOperatorNavigation({ query }: { query: string }) {
