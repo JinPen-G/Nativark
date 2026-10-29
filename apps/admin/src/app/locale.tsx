@@ -606,6 +606,7 @@ const ENGLISH: Record<string, string> = {
   "一套系统，统一管理": "One system, all categories",
   "多工作空间": "Workspaces",
   "一次登录，自如切换": "Sign in once. Switch freely.",
+  "不同业务，轻松切换": "Switch easily between businesses",
   "rentalOS · 租赁操作系统": "rentalOS · The rental operating system",
   "选择日期": "Choose date",
   "秒": "Seconds",
