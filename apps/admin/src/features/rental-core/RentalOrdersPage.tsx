@@ -5,12 +5,13 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Tag } from "antd";
 import { getCoreRowModel, useReactTable, type SortingState, type VisibilityState } from "@tanstack/react-table";
 import { Checkbox, EmptyScene } from "@/components/ui";
-import { Alert, DataTable, ListTransferTools, ListSelectionBar, type ListExport, dataTableSelectionColumn, useDataTableSelection, DataTableToolbar, ListFilterItem, Button, DatePicker, Pagination, SearchField, Segmented, Select, Tooltip } from "@/components/ui";
+import { Alert, DataTable, ListTransferTools, ListSelectionBar, type ListExport, dataTableSelectionColumn, useDataTableSelection, DataTableToolbar, ListFilterItem, Button, DatePicker, Pagination, SearchField, Select, Tooltip } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
+import { currentSessionEpoch } from "@/app/queryClient";
 import { PageHeader } from "@/components/PageHeader";
 import { LoadingState } from "@/components/LoadingState";
 import { PageEnter } from "@/components/workspace/PageEnter";
@@ -80,12 +81,20 @@ export function RentalOrdersPage() {
   // Only a first load or another page's placeholder blocks existing controls.
   const waitingForRows = orders.isLoading || orders.isPlaceholderData;
   const total = orders.data?.total ?? 0;
-  const exportConfig: ListExport<RentalOrder> = { filename: t("租赁订单"), scope: "page", fields: [
+  const exportConfig: ListExport<RentalOrder> = { filename: t("租赁订单"), scope: "filtered", fields: [
     { label: t("订单号"), value: row => row.orderNo }, { label: t("使用人"), value: row => row.membershipSnapshot?.personalCustomerName ?? row.customerName },
     { label: t("企业"), value: row => row.membershipSnapshot?.corporateCustomerName }, { label: t("计划取机"), value: row => row.startAt },
     { label: t("计划还机"), value: row => row.effectiveEndAt ?? row.endAt }, { label: t("应付"), value: row => Number.isFinite(row.payableAmount) ? row.payableAmount : undefined },
     { label: t("币种"), value: row => row.currency }, { label: t("状态"), value: row => t(statusLabels[row.status] ?? row.status) },
   ] };
+  const loadExportRows = async () => {
+    const epoch = currentSessionEpoch();
+    const { page: _page, pageSize: _pageSize, ...filters } = query;
+    const result = await rentalCoreApi.orderExportRows(filters);
+    // Session aborts cancel the request; also prevent a completed old response from reaching a download.
+    if (epoch !== currentSessionEpoch()) throw new Error("Export session changed");
+    return result;
+  };
   useEffect(() => { setRowSelection({}); }, [page, pageSize, assignment, keyword, status, query.from, query.to, pendingFeeOnly, JSON.stringify(sorting)]);
   const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
   const pickupLabel = profile.data?.terminology.pickupLabel ?? "领取";
@@ -127,8 +136,7 @@ export function RentalOrdersPage() {
   return <PageEnter className={styles.page}>
     <PageHeader title="租赁订单" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>{t("新建订单")}</Button>} />
       <div className={styles.filters} role="region" aria-label={t("订单筛选")}>
-        <DataTableToolbar extra={<ListTransferTools config={exportConfig} rows={rows} busy={waitingForRows || orders.isError} />} table={table} label={id => columnLabels[id] ?? id} onRefresh={() => orders.refetch()} busy={waitingForRows} keyboardShortcut controls={<>
-            <Segmented aria-label={t("分配进度")} value={assignment} onChange={applyFilter(setAssignment)} options={localizedAssignmentFilterOptions} />
+        <DataTableToolbar extra={<ListTransferTools config={exportConfig} rows={rows} loadExportRows={loadExportRows} busy={waitingForRows || orders.isError} />} table={table} label={id => columnLabels[id] ?? id} onRefresh={() => orders.refetch()} busy={waitingForRows} keyboardShortcut controls={<>
             <SearchField label={t("搜索订单")} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onValueChange={(value) => { setKeywordInput(value); if (!value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} />
           <ListFilterItem label={t("租期范围")} active={Boolean(period?.some(Boolean))} width="dateRange" priority>
             <DatePicker.RangePicker value={period} onChange={applyFilter(setPeriod)} presets={[
@@ -139,8 +147,14 @@ export function RentalOrdersPage() {
           { label: t("近 90 天"), value: (): [Dayjs, Dayjs] => [dayjs().subtract(89, "day").startOf("day"), dayjs().endOf("day")] }
             ]} />
           </ListFilterItem>
-          <Select allowClear placeholder={t("全部状态")} aria-label={t("订单状态")} options={statusOptions} value={status} onChange={value => applyFilter(setStatus)(value as RentalCoreOrderStatus | undefined)} />
-          <ListFilterItem label={t("待裁定费用")} active={pendingFeeOnly} width="wide">
+          <ListFilterItem label={t("分配进度")} active={assignment !== "all"} collapsed>
+            <Select allowClear aria-label={t("分配进度")} placeholder={t("全部分配")} value={assignment === "all" ? undefined : assignment}
+              onChange={value => applyFilter(setAssignment)((value ?? "all") as RentalOrderAssignmentFilter | "all")} options={localizedAssignmentFilterOptions.filter(option => option.value !== "all")} />
+          </ListFilterItem>
+          <ListFilterItem label={t("订单状态")} active={Boolean(status)} collapsed>
+            <Select allowClear placeholder={t("全部状态")} aria-label={t("订单状态")} options={statusOptions} value={status} onChange={value => applyFilter(setStatus)(value as RentalCoreOrderStatus | undefined)} />
+          </ListFilterItem>
+          <ListFilterItem label={t("待裁定费用")} active={pendingFeeOnly} width="wide" collapsed>
           <div className={styles.feeCondition}>
             <div className={styles.feeToggle}>
             <Checkbox checked={pendingFeeOnly} onChange={(event) => applyFilter(setPendingFeeOnly)(event.target.checked)}>{t("只看有待审费用的订单")}</Checkbox>

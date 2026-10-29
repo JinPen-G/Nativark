@@ -3,7 +3,7 @@
 export function planListFilters(input: {
   available: number; category: number; categoryMin: number; search: number; searchMin: number;
   fieldWidths: number[]; preferFirst: boolean; actions: number[]; resets: number[];
-  gap: number; moreWidth: number; collapsedCategory: boolean;
+  gap: number; moreWidth: number; collapsedCategory: boolean; forcedMore?: boolean;
 }) {
   let category = input.category, search = input.search;
   const primaryCount = Number(category > 0) + Number(search > 0) + input.actions.length;
@@ -12,14 +12,14 @@ export function planListFilters(input: {
     input.fieldWidths.slice(0, count).reduce((sum, width) => sum + width, 0) +
     (more ? input.moreWidth : 0) + (resets ? input.resets.reduce((sum, width) => sum + width, 0) : 0) +
     Math.max(0, primaryCount + count + Number(more) + (resets ? input.resets.length : 0) - 1) * input.gap;
-  if (!input.collapsedCategory && total(input.fieldWidths.length, false, true) <= input.available)
+  if (!input.collapsedCategory && !input.forcedMore && total(input.fieldWidths.length, false, true) <= input.available)
     return { count: input.fieldWidths.length, category, search, more: false };
   const compress = (deficit: number, allowCategory = true) => {
     const fromSearch = Math.min(deficit, Math.max(0, search - input.searchMin));
     search -= fromSearch; deficit -= fromSearch;
     if (allowCategory) category -= Math.min(deficit, Math.max(0, category - input.categoryMin));
   };
-  if (!input.collapsedCategory) {
+  if (!input.collapsedCategory && !input.forcedMore) {
     const preferred = { category, search };
     compress(Math.max(0, total(input.fieldWidths.length, false, true) - input.available), false);
     if (total(input.fieldWidths.length, false, true) <= input.available)

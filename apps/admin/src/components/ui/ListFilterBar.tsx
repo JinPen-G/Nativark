@@ -14,7 +14,7 @@ import { planListFilters } from "./listFilterLayout";
 import styles from "./data-table/DataTable.module.css";
 
 type Kind = "category" | "search" | "filter" | "reset" | "action";
-type ItemProps = { children: ReactNode; kind?: Kind; label?: string; active?: boolean; width?: keyof typeof LIST_WIDTH; priority?: boolean };
+type ItemProps = { children: ReactNode; kind?: Kind; label?: string; active?: boolean; width?: keyof typeof LIST_WIDTH; priority?: boolean; collapsed?: boolean };
 type Entry = ItemProps & { key: string; kind: Kind };
 
 /** Explicitly describe a wrapped/custom business filter; ordinary shared fields are inferred. */
@@ -73,7 +73,8 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
   const entries = entriesFrom(children, t);
   const categories = entries.filter(item => item.kind === "category");
   const searches = entries.filter(item => item.kind === "search");
-  const fields = entries.filter(item => item.kind === "filter");
+  const fields = entries.filter(item => item.kind === "filter" && !item.collapsed);
+  const secondaryFields = entries.filter(item => item.kind === "filter" && item.collapsed);
   const resets = entries.filter(item => item.kind === "reset");
   const actions = entries.filter(item => item.kind === "action");
   const compact = available > 0 && available < ADMIN_LIST_METRICS.categoryInlineMinWidth;
@@ -98,12 +99,12 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
       searchMin: searches.length ? (width >= categoryMin + LIST_WIDTH.searchMin + moreWidth + gap * 2 ? LIST_WIDTH.searchMin : LIST_WIDTH.compact) : 0,
       fieldWidths: fields.map(sizeOf), preferFirst: Boolean(fields[0]?.priority), actions: actions.map(sizeOf), resets: resets.map(sizeOf),
       gap, moreWidth,
-      collapsedCategory: compact && categories.length > 0 });
+      collapsedCategory: compact && categories.length > 0, forcedMore: secondaryFields.length > 0 });
     setLayout(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
     if (!next.more && open) setOpen(false);
   });
   const inlineFields = fields.slice(0, layout?.count ?? fields.length);
-  const collapsed = [...(compact ? categories : []), ...fields.slice(inlineFields.length)];
+  const collapsed = [...(compact ? categories : []), ...fields.slice(inlineFields.length), ...secondaryFields];
   const activeCount = collapsed.filter(item => item.active).length;
   // A child Select/Combobox may portal outside this panel. Only its actual
   // aria-controls target belongs to this popover; unrelated page overlays do not.

@@ -310,6 +310,9 @@ export const rentalCoreApi = {
   reviewWorkOrder: (id: string, data: ReviewRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/review`, { method: "post", data }),
   cancelWorkOrder: (id: string, data: CancelRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/cancel`, { method: "post", data }),
   orders: () => request<RentalOrder[]>("/rental/v1/orders"),
+  /** Same server filters/sort and session scope, without pagination; never reuse the visible page as an export. */
+  orderExportRows: ({ status, keyword, from, to, assignment, pendingFeeOnly, sort }: Omit<RentalOrderListQuery, "page" | "pageSize">) =>
+    request<RentalOrder[]>("/rental/v1/orders", { params: { status, keyword, from, to, assignment, pendingFeeOnly, sort } }),
   /**
    * ORDER-LIST-01：服务端筛选 + 分页。始终带 `page`，服务端据此返回分页信封
    * 而不是兼容用的纯数组；空间不传，取会话。
