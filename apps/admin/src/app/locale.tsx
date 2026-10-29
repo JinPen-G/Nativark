@@ -12,6 +12,11 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "AI 工作中心": "AI Workspace",
+  "AI 工作中心对话": "AI Workspace conversation",
+  "工作模式": "Work mode",
+  "切换到业务管理": "Switch to business management",
+  "切换到 AI 工作中心": "Switch to AI Workspace",
   "导入": "Import",
   "结果": "Result",
   "全部匹配": "Matched",
@@ -141,7 +146,7 @@ const ENGLISH: Record<string, string> = {
   "上次保存结果尚未确认，请先核对保存结果，不要重复提交。": "The previous save is unconfirmed. Check its result before submitting again.",
   "当前没有管理 AI 设置的权限。": "You do not have permission to manage AI settings.",
   "AI 设置暂不可用，请稍后刷新；保存过的设置不会因此被删除。": "AI settings are unavailable. Refresh later; saved settings have not been deleted.",
-  "搜索菜单": "Search menus", "业务管理": "Workspace", "没有匹配的菜单": "No matching menus",
+  "搜索菜单": "Search menus", "业务管理": "Business", "没有匹配的菜单": "No matching menus",
   "界面动效": "Interface motion", "动效偏好": "Motion preference",
   "完整动效": "Full", "减少动效": "Reduced",
   "仅保存在当前浏览器，立即生效。": "Applies instantly. Saved in this browser.",

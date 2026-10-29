@@ -3,11 +3,13 @@ import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/animate-sidebar/runtime/sidebar";
 import { useOperator } from "./OperatorContext";
 import { Highlight, HighlightItem } from "@animate-ui/react/primitives/effects/highlight";
+import { useLocale } from "@/app/locale";
 
 export function OperatorModeSwitch({ ai, onChange }: { ai: boolean; onChange: (ai: boolean) => void }) {
+  const { t } = useLocale();
   return <div className="operator-mode-switch">
-    <div className="operator-mode-expanded"><Segmented block aria-label="工作模式" value={ai ? "ai" : "admin"} options={[{ label: "AI运营官", value: "ai" }, { label: "管理后台", value: "admin" }]} onChange={value => onChange(value === "ai")} /></div>
-    <div className="operator-mode-collapsed"><Button type="text" aria-label={ai ? "切换到管理后台" : "切换到AI运营官"} title={ai ? "管理后台" : "AI运营官"} icon={<AnimatedIcon name={ai ? "dashboard" : "ai"} />} onClick={() => onChange(!ai)} /></div>
+    <div className="operator-mode-expanded"><Segmented block aria-label={t("工作模式")} value={ai ? "ai" : "admin"} options={[{ label: t("AI 工作中心"), value: "ai" }, { label: t("业务管理"), value: "admin" }]} onChange={value => onChange(value === "ai")} /></div>
+    <div className="operator-mode-collapsed"><Button type="text" aria-label={t(ai ? "切换到业务管理" : "切换到 AI 工作中心")} title={t(ai ? "业务管理" : "AI 工作中心")} icon={<AnimatedIcon name={ai ? "dashboard" : "ai"} />} onClick={() => onChange(!ai)} /></div>
   </div>;
 }
 export function AiOperatorNavigation({ query }: { query: string }) {

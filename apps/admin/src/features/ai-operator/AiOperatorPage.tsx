@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { aiModelSettingsApi } from '@/api/aiModelSettings';
 import { settingsSummary } from '@/features/ai-native/model-settings-session';
 import { currentSessionEpoch } from '@/app/queryClient';
+import { useLocale } from '@/app/locale';
 import type { ChatModel } from './archive/ai-chat/chat-state';
 import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, ShieldCheck, X } from "lucide-react";
 import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
@@ -52,15 +53,17 @@ function useNarrow() {
   return narrow;
 }
 export function AiOperatorPage() {
+  const { t } = useLocale();
   const operator = useOperator();
   const tenant = useAuthStore(state => state.tenant), user = useAuthStore(state => state.user);
   const title = operator.view === "chat" ? operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
-  useEffect(() => { document.title = `${title} · AI运营官 · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user]);
+  useEffect(() => { document.title = `${t(title)} · ${t("AI 工作中心")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
   return <ArcLocale><ContentTransition value={operator.view} className="operator-page">
     {operator.view === "chat" ? <OperatorChat /> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
   </ContentTransition></ArcLocale>;
 }
 function OperatorChat() {
+  const { t } = useLocale();
   const operator = useOperator(), narrow = useNarrow();
   const configured = useConfiguredChatModels();
   const [workOpen, setWorkOpen] = useState(!narrow), [mobileOpen, setMobileOpen] = useState(false);
@@ -76,7 +79,7 @@ function OperatorChat() {
     if (separator && narrow && !collapsed) separator.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     if (!narrow) setMobileOpen(false);
   }, [narrow]);
-  return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label="AI运营官对话">
+  return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label={t("AI 工作中心对话")}>
     <div className="operator-split" ref={split}>
       <ResizablePanels label="对话与Agent工作区" onLayoutChange={sizes => setWorkOpen(sizes[1] > 1)}>
         <ResizablePanel id="operator-conversation" label="聊天区" defaultSize={60} minSize={340}>
