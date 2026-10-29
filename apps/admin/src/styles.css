@@ -1173,6 +1173,8 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .login-brand img { width: 148px; height: auto; max-height: 48px; object-fit: contain; }
 /* 左栏可见时，右栏顶部的紧凑品牌行让位给左栏，避免同一屏两次出现 Logo。 */
 .login-brand--compact { display: flex; }
+.login-brand--compact.login-brand--platform img { filter: brightness(0); }
+:root[data-theme="dark"] .login-brand--compact.login-brand--platform img { filter: brightness(0) invert(1); }
 @media (min-width: 880px) {
   .login-brand--compact { display: none; }
 }

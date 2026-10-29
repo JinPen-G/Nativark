@@ -166,7 +166,7 @@ export function LoginPage() {
             </aside>
             <div className="login-card-form">
               {/* 窄屏才显示：左栏隐藏后，品牌标识挪到表单顶部。 */}
-              <div className="login-brand login-brand--compact"><img src={loginBrandLogo} alt={loginBrandName} /></div>
+              <div className={`login-brand login-brand--compact${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}><img src={loginBrandLogo} alt={loginBrandName} /></div>
               <div className="login-panel-heading">
                 <Typography.Title level={2}>{locale === "en-US" ? loginBrandName === ADMIN_BRAND_NAME ? "Admin Console" : `${loginBrandName} Admin Console` : loginBrandName === ADMIN_BRAND_NAME ? "登录运营台" : `登录${loginBrandName}运营台`}</Typography.Title>
                 <Typography.Paragraph type="secondary">{t(loginMode === "reset" ? "通过手机号或邮箱验证找回密码（前端预览）。" : "使用租户账号进入对应品类的租赁工作区。")}</Typography.Paragraph>

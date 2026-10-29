@@ -1,7 +1,9 @@
 import type { AuthUser, TenantContext } from "@rental-os/shared";
 
 export const ADMIN_BRAND_NAME = "Rental OS";
-export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-color.svg";
+// Login wordmark is the original monochrome brand asset. Sidebar mark/favicon
+// remain independent; tenant-uploaded artwork is not filtered as platform art.
+export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-mono.svg";
 export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon.svg";
 export const ADMIN_DEFAULT_FAVICON = ADMIN_DEFAULT_MARK;
 export const ADMIN_LOGIN_DEFAULTS = {
