@@ -9,7 +9,7 @@ import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, Drawer, Segmented } from "@/components/ui";
+import { Button, Drawer, ListFilterItem } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
@@ -191,16 +191,16 @@ export function TenantManagementPage() {
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t("新增 SaaS 租户")}</Button>}
       />
       <QueryState loading={tenants.isLoading || categories.isLoading} error={tenants.error ?? categories.error}>
-        <ListSection controls={<><ListFilters filter={tenantFilter} placeholder="租户名称或编码" /><Segmented
+        <ListSection controls={<><ListFilters filter={tenantFilter} placeholder="租户名称或编码" /><ListFilterItem label={t("租户状态")} priority active={filter !== "all"}><Select aria-label={t("租户状态")}
             value={filter}
             onChange={(value) => { setFilter(String(value)); tenantFilter.pagination.onChange(1, tenantFilter.pagination.pageSize); }}
             options={[
-              { label: t("全部"), value: "all" },
+              { label: t("全部状态"), value: "all" },
               { label: t("正常"), value: TenantStatus.Active },
               { label: t("冻结"), value: TenantStatus.Frozen },
               { label: t("停用"), value: TenantStatus.Disabled }
             ]}
-          /></>}>
+          /></ListFilterItem></>}>
           <Table<TenantSummary>
             rowKey="tenantId"
             onRefresh={() => tenants.refetch()} loading={tenants.isLoading} refreshing={tenants.isFetching} dataSource={tenantFilter.rows} pagination={tenantFilter.pagination}

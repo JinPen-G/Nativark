@@ -115,14 +115,19 @@ export function PlatformPage() {
 
   return (
     <>
-      <PageHeader title={t("平台配置")} />
+      <PageHeader title={t("平台配置")} extra={
+        activeKey === "users" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openUser()}>{t("新增账号")}</Button>
+          : activeKey === "organizations" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openOrganization()}>{t("新增组织")}</Button>
+            : activeKey === "roles" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button>
+              : undefined
+      } />
       <QueryState loading={loading} error={error}>
         <ListSection>
           <Tabs className="standalone-tabs" activeKey={activeKey} onChange={setActiveKey} items={[
             {
               key: "users",
               label: `${t("账号")} (${users.data?.length ?? 0})`,
-              children: <><Table<SystemUserRow> toolbar={<><ListFilters filter={userFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /><Button type="primary" icon={<PlusOutlined />} onClick={() => openUser()}>{t("新增账号")}</Button></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isLoading} refreshing={users.isFetching} dataSource={userFilter.rows} pagination={userFilter.pagination} scroll={{ x: 1080 }} columns={[
+              children: <><Table<SystemUserRow> toolbar={<><ListFilters filter={userFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isLoading} refreshing={users.isFetching} dataSource={userFilter.rows} pagination={userFilter.pagination} scroll={{ x: 1080 }} columns={[
                 { title: t("账号"), render: (_, record) => <><b>{record.account}</b><br /><span className="muted">{record.displayName}</span></> },
                 { title: t("组织"), dataIndex: "organizationName", render: (value) => value ?? t("未分配") },
                 { title: t("角色"), dataIndex: "roleNames", render: (values: string[]) => values.join("、") || t("未分配") },
@@ -135,7 +140,7 @@ export function PlatformPage() {
             {
               key: "organizations",
               label: `${t("组织")} (${organizations.data?.length ?? 0})`,
-              children: <><Table<OrganizationSummary> toolbar={<><ListFilters filter={organizationFilter} placeholder="组织名称或编码" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openOrganization()}>{t("新增组织")}</Button></>} rowKey="id" onRefresh={() => organizations.refetch()} loading={organizations.isLoading} refreshing={organizations.isFetching} dataSource={organizationFilter.rows} pagination={organizationFilter.pagination} columns={[
+              children: <><Table<OrganizationSummary> toolbar={<><ListFilters filter={organizationFilter} placeholder="组织名称或编码" /></>} rowKey="id" onRefresh={() => organizations.refetch()} loading={organizations.isLoading} refreshing={organizations.isFetching} dataSource={organizationFilter.rows} pagination={organizationFilter.pagination} columns={[
                 { title: t("组织"), render: (_, record) => <><b>{record.name}</b><br /><span className="muted">{record.code}</span></> },
                 { title: t("类型"), dataIndex: "type", render: (value) => <Tag>{t(String(value))}</Tag> },
                 { title: t("上级组织"), dataIndex: "parentId", render: (value) => organizations.data?.find((item) => item.id === value)?.name ?? t("根组织") },
@@ -146,7 +151,7 @@ export function PlatformPage() {
             {
               key: "roles",
               label: `${t("角色权限")} (${roles.data?.length ?? 0})`,
-              children: <><Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openRole()}>{t("新增角色")}</Button></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isLoading} refreshing={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 1080 }} columns={[
+              children: <><Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" /></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isLoading} refreshing={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 1080 }} columns={[
                 { title: t("角色"), render: (_, record) => <><b>{record.name}</b><br /><span className="muted">{record.code}</span></> },
                 { title: t("作用域"), dataIndex: "scope", render: (value) => <Tag>{t(String(value))}</Tag> },
                 { title: t("数据范围"), dataIndex: "dataScope", render: (value) => <Tag color="blue">{t(String(value))}</Tag> },

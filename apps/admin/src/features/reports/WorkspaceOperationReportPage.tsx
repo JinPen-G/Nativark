@@ -125,6 +125,7 @@ export function WorkspaceOperationReportPage() {
               ]}
             />
             </ListFilterItem>
+            <ListFilterItem label={t("履约地点")} active={Boolean(locationId)}>
             <Select
               allowClear
               placeholder={t("履约地点")}
@@ -133,6 +134,8 @@ export function WorkspaceOperationReportPage() {
               onChange={(value) => setLocationId(value)}
               options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))}
             />
+            </ListFilterItem>
+            <ListFilterItem label={t("客户类型")} collapsed active={Boolean(customerType)}>
             <Select
               allowClear
               placeholder={t("客户类型")}
@@ -141,7 +144,8 @@ export function WorkspaceOperationReportPage() {
               onChange={(value) => setCustomerType(value)}
               options={[{ value: "personal", label: t("个人客户") }, { value: "corporate", label: t("企业客户") }]}
             />
-            <ListFilterItem label={t("客户 id")} active={Boolean(customerId)}>
+            </ListFilterItem>
+            <ListFilterItem label={t("客户 id")} collapsed active={Boolean(customerId)}>
             <Input
               allowClear
               placeholder={t("客户 id")}
