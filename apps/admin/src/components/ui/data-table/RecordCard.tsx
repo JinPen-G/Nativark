@@ -78,7 +78,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     <Card title={title} meta={subtitle ? <span className={styles.secondary}>{subtitle}</span> : undefined} className={styles.card} media={media}
       details={narrow ? undefined : details} open={!narrow && open} onOpenChange={changeOpen}
       action={!open ? <Button ref={trigger} size="sm" variant="secondary" onClick={() => changeOpen(true)} aria-label={`${t("查看详情")} ${title}`}>{t("查看详情")}</Button> : undefined}>
-      {narrow && <button type="button" className={styles.mobileHit} aria-label={`${t("查看详情")} ${title}`} onClick={() => changeOpen(true)} />}
+      {narrow && <button type="button" className={styles.mobileHit} data-copilot-reference="" aria-label={`${t("查看详情")} ${title}`} onClick={() => changeOpen(true)} />}
       {summary}
     </Card>
     {narrow && <BottomSheet open={open} onOpenChange={next => { changeOpen(next); if (!next && !pending.current) requestAnimationFrame(() => trigger.current?.focus()); }} title={title} description={subtitle} closeLabel={t("关闭详情")} detents={[.6, .92]} initialDetent={1}>

@@ -16,6 +16,10 @@
 
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`UserMenu`、`Modal`、`App`、`Empty`、`Skeleton`、`Radio`、`Collapse`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`InfoPopover`、`Input`、`SearchField`、`DataTableLeading`、`DataTableMoney`、`dataTableSelectionColumn`、`DataTableSelectionSummary`、`useDataTableSelection`、`DataTableStatus`、`DataTableNote`、`DataTableStatusTone`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`ListSection`、`ListFilters`、`useListFilter`、`ListFilterBar`、`ListFilterItem`、`AnimatedTable`、`DataTable`、`DataTableColumnHeader`、`DataTableViewOptions`、`DataTableSortList`、`DataTableToolbar`、`TableRefreshProvider`、`DataTableRowActions`、`DataTableRowAction`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
 
+## 2026-10-29 业务 Copilot 预览
+
+业务侧栏复用本地归档 `ai-side-panel` 原 CSS 的停靠/底部面板；用户限定仅取按钮与侧栏效果，业务内容在独立适配层装配。原组件目录、shared、许可与导入哈希保留，来源和实际接入范围见 [Copilot 说明](../../apps/admin/src/features/copilot/README.md)。右键菜单沿已安装的 Animate UI Base UI ContextMenu；共享列表、卡片和已接入详情按完整记录提供上下文，不提供字段级右键。仅本地演示，未连接模型或执行真实业务；未改 vendor。
+
 ## 2026-10-24 实页复核与保留项
 
 已读查租户端 28 个主菜单入口、平台端 5 个主菜单入口（含错误态）、业务设置与客户端渠道 8 个页签；对工作台、订单和定价分组追加 1600/1280/1024/390px 检查，查看新增订单及定价分组抽屉、深色英文页面说明。只读请求及常规认证刷新放行，业务写请求拦截，未保存/发布/删除或执行资金操作。平台非菜单入口部分跳转或权限拒绝，不能算已验收；SaaS 租户页的品类读取返回 409，未在本轮修改业务接口。

@@ -58,9 +58,10 @@ export function readRecord(node: HTMLElement, path: string): CopilotRecord | nul
 export function readTarget(target: EventTarget | null, path: string): CopilotRecord[] {
   if (!(target instanceof Element) || target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),a,[data-copilot-ignore]')) return [];
   const button = target.closest('button,[role="button"]');
-  // Explicit identity references and Card's article retain their normal left-click.
-  if (button && !button.matches('[data-copilot-reference],article') && !target.closest('[data-record-card]')) return [];
-  if (button?.tagName === 'BUTTON' && !button.matches('[data-copilot-reference]')) return [];
+  // Card titles are quick-look triggers, but their right-click still belongs to
+  // the whole card. Editing, selection and other operation buttons remain native.
+  const cardTitle = target.closest('[data-record-card]') && button?.matches('[aria-haspopup="dialog"]') && button.closest('h2,h3');
+  if (button && !button.matches('[data-copilot-reference],article') && !cardTitle) return [];
   if (window.getSelection()?.toString().trim()) return [];
   const node = target.closest<HTMLElement>('[data-copilot-record]');
   if (!node) return [];
