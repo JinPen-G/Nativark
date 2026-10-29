@@ -1,5 +1,5 @@
 import { AppleOutlined, GoogleOutlined, WechatOutlined } from "@ant-design/icons";
-import { Typography } from "antd";
+import { ConfigProvider, Typography } from "antd";
 import { Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
@@ -8,13 +8,15 @@ import { Button, PasswordField, SaveButton, Segmented, useFeedback } from "@/com
 import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
 import { AuthCodePreview } from "./AuthCodePreview";
 import { isAxiosError } from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { clientChannelApi } from "@/api/clientChannel";
 import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_LOGIN_DEFAULTS, applyAdminFavicon } from "@/app/branding";
 import { apiAssetOrigin } from "@/api/http";
 import { useLocale } from "@/app/locale";
+import { createThemeConfig, useAppearance } from "@/app/theme";
+import { applyArcThemeTokens } from "@/app/arcTokens";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { api } from "@/api/platform";
@@ -33,7 +35,7 @@ const TENANT_CODE_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/u;
 
 function LoginBackground({ src }: { src: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return null;
+  if (failed) return <div className="login-brand-background login-brand-background--generated" aria-hidden="true" />;
   return <div className="login-brand-background" aria-hidden="true"><img src={src} alt="" onError={() => setFailed(true)} /></div>;
 }
 
@@ -42,6 +44,8 @@ export function LoginPage() {
   const [demoPasswordForm] = Form.useForm<DemoPasswordValues>();
   const { toast } = useFeedback();
   const { locale, t } = useLocale();
+  const { mode } = useAppearance();
+  const stageRef = useRef<HTMLDivElement>(null);
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
   // 租户专属登录链接 /login/:tenantCode：租户编码来自 URL、不再要求手输，也不在页面上展示可编辑的租户编码框。
@@ -75,6 +79,13 @@ export function LoginPage() {
   const showBrandFooter = loginBranding?.showFooter !== false;
   const backgroundPath = loginBranding?.backgroundImageUrl;
   const backgroundSrc = backgroundPath?.startsWith("/") ? `${apiAssetOrigin}${backgroundPath}` : backgroundPath;
+  // Only the current public tenant response can color the login surface.
+  // Clearing/changing its query key immediately drops the previous preview.
+  const loginThemeColor = publicBootstrap.data?.themeColor;
+  const loginTheme = createThemeConfig(mode, loginThemeColor);
+  useLayoutEffect(() => {
+    if (stageRef.current) applyArcThemeTokens(stageRef.current, mode === "dark", loginThemeColor);
+  }, [mode, loginThemeColor]);
 
   useEffect(() => {
     document.title = locale === "en-US"
@@ -136,7 +147,8 @@ export function LoginPage() {
   };
 
   return (
-    <div className="login-stage">
+    <ConfigProvider theme={{ ...loginTheme, cssVar: { key: "rental-login", prefix: "rental" } }}>
+    <div className="login-stage" ref={stageRef}>
       {/* 外层：原有的带留白/圆角/描边的视口容器，保持不变。 */}
       <div className="login-frame">
         <div className="login-appearance"><LanguageSwitcher /><AppearanceSwitcher iconOnly /></div>
@@ -144,7 +156,7 @@ export function LoginPage() {
           {/* 内层：更大圆角的登录卡片，左品牌、右表单；窄屏左栏隐藏，卡片退化为单栏。 */}
           <div className="login-card">
             <aside className="login-card-brand" aria-labelledby={showBrandTitle ? "login-brand-heading" : undefined} aria-label={showBrandTitle ? undefined : loginBrandName}>
-              {backgroundSrc ? <LoginBackground key={`${effectiveTenantCode}:${backgroundSrc}`} src={backgroundSrc} /> : null}
+              {backgroundSrc ? <LoginBackground key={`${effectiveTenantCode}:${backgroundSrc}`} src={backgroundSrc} /> : <div className="login-brand-background login-brand-background--generated" aria-hidden="true" />}
               <div className={`login-brand login-brand--hero${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}>
                 <img src={loginBrandLogo} alt={loginBrandName} />
               </div>
@@ -292,5 +304,6 @@ export function LoginPage() {
         </Form>
       </Modal>
     </div>
+    </ConfigProvider>
   );
 }

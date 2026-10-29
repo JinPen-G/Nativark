@@ -1104,6 +1104,8 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .login-brand-background { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
 .login-brand-background img { width: 100%; height: 100%; object-fit: cover; }
 .login-brand-background::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, .7); }
+.login-brand-background--generated { background: #1b1c1e url("/brand/login-graphite.webp") center / cover no-repeat; }
+.login-brand-background--generated::after { background: linear-gradient(90deg, rgb(0 0 0 / .16), rgb(0 0 0 / .1) 60%, rgb(0 0 0 / .26)); }
 .login-card-brand .login-brand { align-self: start; margin-bottom: 0; }
 .login-card-brand .login-brand img { width: 156px; height: 44px; max-height: none; object-position: left center; }
 .login-brand--platform img { filter: brightness(0) invert(1); }

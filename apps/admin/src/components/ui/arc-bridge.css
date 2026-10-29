@@ -23,7 +23,7 @@
 .arc-copy-action button { border-radius: var(--rental-ui-radius-button, 18px); }
 [data-rental-arc-button][data-button-kind="link"] { padding-inline: var(--rental-control-padding-small); min-height: var(--rental-control-height-small); }
 [data-rental-arc-button][data-button-kind="link"]:not([data-button-danger]) { color: var(--accent); }
-:root[data-tenant-accent] [data-rental-arc-button][data-button-kind="primary"] {
+:is(:root, .login-stage)[data-tenant-accent] [data-rental-arc-button][data-button-kind="primary"] {
   background: var(--accent); border-color: var(--accent); color: var(--accent-foreground);
 }
 .arc-segmented-block > div { width: 100%; }
