@@ -74,9 +74,19 @@ export function DataTableViewOptions<T>({ table, label, disabled }: { table: Tan
   </Popover.Root>;
 }
 
-function pinningStyle<T>(column: Column<T>): CSSProperties {
+/** Order-list pilot with one trailing pinned column; defaults remain unchanged. */
+type ContentLayout = {
+  compactColumns: readonly string[];
+  minimumWidths?: Readonly<Record<string, number>>;
+};
+
+function pinningStyle<T>(column: Column<T>, contentLayout?: ContentLayout): CSSProperties {
   const pinned = column.getIsPinned();
-  return { width: column.getSize(), ...(pinned ? { position: "sticky", left: pinned === "left" ? column.getStart("left") : undefined, right: pinned === "right" ? column.getAfter("right") : undefined, zIndex: 1 } : {}) };
+  return {
+    width: contentLayout ? (contentLayout.compactColumns.includes(column.id) ? "1%" : undefined) : column.getSize(),
+    minWidth: contentLayout?.minimumWidths?.[column.id],
+    ...(pinned ? { position: "sticky", left: pinned === "left" ? column.getStart("left") : undefined, right: pinned === "right" ? column.getAfter("right") : undefined, zIndex: 1 } : {})
+  };
 }
 
 /** Internal leading slot; whole-cell alignment is separately controlled by column metadata. */
@@ -99,7 +109,7 @@ function CellContent<T>({ cell, animated, paused }: { cell: Cell<T, unknown>; an
     renderNumber={config.renderNumber ? formatted => config.renderNumber!(formatted, row) : undefined} paused={paused}>{content}</DataTableCellMotion>;
 }
 
-export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, emptyScene = 'empty', footer, animated = false, motionScope = "", compactHeader = false, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
+export function DataTable<T>({ table, caption, busy, loading, refreshing, empty, emptyScene = 'empty', footer, animated = false, motionScope = "", compactHeader = false, contentLayout, rowProps, cellProps, renderExpanded, maxHeight, minWidth, showHeader = true }: {
   table: TanstackTable<T>; caption: string; busy?: boolean; loading?: boolean;
   /** Background revalidation is not placeholder data or a blocking load. */
   refreshing?: boolean;
@@ -107,6 +117,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   /** Reset motion history on page/filter/scope changes; placeholder data is paused by busy. */
   motionScope?: string;
   compactHeader?: boolean;
+  contentLayout?: ContentLayout;
   rowProps?: (row: Row<T>) => HTMLAttributes<HTMLTableRowElement>;
   cellProps?: (cell: Cell<T, unknown>) => TdHTMLAttributes<HTMLTableCellElement>;
   renderExpanded?: (row: Row<T>) => ReactNode;
@@ -118,6 +129,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   const suppress = !animated || Boolean(reduced);
   const rows = table.getRowModel().rows;
   const columns = table.getVisibleLeafColumns();
+  const tableMinWidth = minWidth ?? (contentLayout ? "100%" : table.getTotalSize());
   const headerRef = useRef<HTMLTableSectionElement>(null);
   const refreshRef = useRef<HTMLDivElement>(null);
   // Font loading, zoom or grouped headers can make the real header taller than
@@ -125,25 +137,41 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
   useLayoutEffect(() => {
     const header = headerRef.current, overlay = refreshRef.current;
     if (!busy || loading || !header || !overlay) return;
-    const measure = () => { overlay.style.top = `${header.getBoundingClientRect().height}px`; };
+    const measure = () => {
+      overlay.style.top = `${header.getBoundingClientRect().height}px`;
+      if (!contentLayout) return;
+      // A separate skeleton table cannot infer the real data's intrinsic widths.
+      // Copy the current geometry only while the existing refresh overlay is shown.
+      const sourceTable = header.closest("table"), placeholder = overlay.querySelector("table");
+      if (!sourceTable || !placeholder) return;
+      const width = `${sourceTable.getBoundingClientRect().width}px`;
+      overlay.style.width = width;
+      placeholder.style.width = width;
+      placeholder.style.tableLayout = "fixed";
+      const widths = new Map(Array.from(header.querySelectorAll<HTMLTableCellElement>("th[data-column-id]")).map(cell => [cell.dataset.columnId, cell.getBoundingClientRect().width]));
+      overlay.querySelectorAll<HTMLTableCellElement>("td[data-column-id]").forEach(cell => {
+        const size = widths.get(cell.dataset.columnId);
+        if (size != null) cell.style.width = `${size}px`;
+      });
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(header);
     return () => observer.disconnect();
-  }, [busy, loading]);
+  }, [busy, loading, contentLayout]);
   const skeletonRows = (count: number) => Array.from({ length: count }, (_, index) => <tr key={`skeleton-${index}`} className={styles.skeletonRow} aria-hidden="true">
-    {columns.map(column => <td key={column.id} style={pinningStyle(column)} data-pinned={column.getIsPinned() || undefined}>
+    {columns.map(column => <td key={column.id} style={pinningStyle(column, contentLayout)} data-column-id={column.id} data-pinned={column.getIsPinned() || undefined}>
       <TableSkeletonCell columnId={column.id} />
     </td>)}
   </tr>);
-  return <div className={styles.root} data-compact-header={compactHeader || undefined} aria-busy={busy || loading || refreshing || undefined}>
+  return <div className={styles.root} data-compact-header={compactHeader || undefined} data-column-layout={contentLayout ? "content" : undefined} aria-busy={busy || loading || refreshing || undefined}>
     {animated && <DataTableAnnouncements table={table} scope={JSON.stringify([motionScope, table.getState().sorting])} paused={Boolean(busy)} />}
     <div className={styles.viewport}>
     <div className={styles.scroll} style={{ maxHeight }} data-scroll-y={maxHeight != null || undefined} tabIndex={0} role="region" aria-label={caption}>
-      <table className={styles.table} style={{ minWidth: minWidth ?? table.getTotalSize() }}>
+      <table className={styles.table} style={{ minWidth: tableMinWidth }}>
         <caption className={styles.srOnly}>{caption}</caption>
-        {showHeader && <thead ref={headerRef}>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" colSpan={header.colSpan} style={pinningStyle(header.column)} data-column-id={header.column.id} data-pinned={header.column.getIsPinned() || undefined} aria-sort={header.column.getCanSort() ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
+        {showHeader && <thead ref={headerRef}>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" colSpan={header.colSpan} style={pinningStyle(header.column, contentLayout)} data-column-id={header.column.id} data-pinned={header.column.getIsPinned() || undefined} aria-sort={header.column.getCanSort() ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
           {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
         </th>)}</tr>)}</thead>}
         <LayoutGroup><tbody key={motionScope} inert={busy || loading || undefined} aria-hidden={busy || loading || undefined} className={busy && !loading ? styles.refreshingBody : undefined}>
@@ -153,7 +181,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
               exit={suppress ? { opacity: 0 } : MOTIQ_TABLE_MOTION.exit}
               transition={suppress ? { duration: 0 } : MOTIQ_TABLE_MOTION.transition}
               data-state={row.getIsSelected() ? "selected" : undefined} data-row-id={row.id} aria-selected={table.options.enableRowSelection ? row.getIsSelected() : undefined}>
-              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...pinningStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
+              {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...pinningStyle(cell.column, contentLayout), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />
               </td>; })}
             </motion.tr>, row.getIsExpanded() && renderExpanded ? <motion.tr key={`${row.id}-detail`} className={styles.expandedRow}
@@ -162,7 +190,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
           </AnimatePresence>}
         </tbody></LayoutGroup>
       </table>
-    {busy && !loading && <div ref={refreshRef} className={styles.refreshOverlay} role="status" aria-label={t("加载中")} style={{ minWidth: minWidth ?? table.getTotalSize(), top: showHeader ? `calc(var(--table-header-height) * ${table.getHeaderGroups().length})` : 0 }}>
+    {busy && !loading && <div ref={refreshRef} className={styles.refreshOverlay} role="status" aria-label={t("加载中")} style={{ minWidth: tableMinWidth, top: showHeader ? `calc(var(--table-header-height) * ${table.getHeaderGroups().length})` : 0 }}>
       <table className={styles.table} aria-hidden="true"><tbody>{skeletonRows(rows.length || ADMIN_LOADING_METRICS.rows)}</tbody></table>
     </div>}
     {loading && <span className={styles.srOnly} role="status">{t("加载中")}</span>}

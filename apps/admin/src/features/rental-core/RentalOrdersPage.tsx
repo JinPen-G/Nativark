@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { currentSessionEpoch } from "@/app/queryClient";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { PageHeader } from "@/components/PageHeader";
 import { LoadingState } from "@/components/LoadingState";
 import { PageEnter } from "@/components/workspace/PageEnter";
@@ -21,6 +22,11 @@ import styles from "./RentalOrdersPage.module.css";
 
 const statusLabels = orderStatusLabels;
 const EMPTY_ORDERS: RentalOrder[] = [];
+// Order-list trial only; do not enable on other lists before visual approval.
+const ORDER_CONTENT_LAYOUT = {
+  compactColumns: ["select", "orderNo", "payableAmount", "actions"],
+  minimumWidths: { items: ADMIN_TABLE_COLUMN_WIDTH.summary }
+};
 /** 分配进度分段的显示文案 → 服务端筛选值。判据在服务端 SQL 里，与 `rentalAllocationProgress` 对应。 */
 const assignmentFilterOptions: Array<{ label: string; value: RentalOrderAssignmentFilter | "all" }> = [
   { label: "全部分配", value: "all" },
@@ -176,7 +182,7 @@ export function RentalOrdersPage() {
       {orders.isError && <Alert className={styles.error} type="error" showIcon title={t("订单读取失败")} description={t("筛选条件已保留，请重试读取。")}
         action={<Button onClick={() => void orders.refetch()}>{t("重试")}</Button>} />}
       {(!orders.isError || rows.length > 0) &&
-        <DataTable compactHeader table={table} caption={t("租赁订单")} busy={orders.isPlaceholderData} refreshing={orders.isFetching} loading={orders.isLoading} animated
+        <DataTable compactHeader contentLayout={ORDER_CONTENT_LAYOUT} table={table} caption={t("租赁订单")} busy={orders.isPlaceholderData} refreshing={orders.isFetching} loading={orders.isLoading} animated
           motionScope={JSON.stringify([selectionScope, page, pageSize, assignment, keyword, status, query.from, query.to, pendingFeeOnly])}
           empty={<EmptyScene compact scene={hasFilters ? 'search' : 'empty'} title={t(hasFilters ? "没有符合筛选条件的订单" : "暂无订单")}
             action={hasFilters ? <Button onClick={clearFilters}>{t('清除筛选')}</Button> : undefined} />}

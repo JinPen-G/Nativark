@@ -64,6 +64,11 @@
 .viewport { position: relative; min-width: 0; }
 .scroll { position: relative; overflow: auto; max-width: 100%; isolation: isolate; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); container: table-viewport / inline-size; }
 .table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); }
+.root[data-column-layout="content"] .table { table-layout: auto; }
+.root[data-column-layout="content"] .headerTrigger { min-width: max-content; }
+.root[data-column-layout="content"] .table :is(th, td) { padding-inline: var(--space-2); }
+.root[data-column-layout="content"] .table tr > :first-child { padding-inline-start: var(--space-4); }
+.root[data-column-layout="content"] .table tr > :last-child { padding-inline-end: var(--space-4); }
 .table th, .table td { padding: var(--space-3); text-align: start; vertical-align: top; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 /* Wrapping Space still gives its items an intrinsic minimum; constrain legacy
    tag groups so long names grow the row instead of painting across columns. */

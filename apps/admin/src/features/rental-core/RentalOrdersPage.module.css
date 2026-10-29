@@ -1,4 +1,6 @@
 .page { min-width: 0; }
+.page [data-column-layout="content"] .orderLink { white-space: nowrap; overflow-wrap: normal; }
+.page [data-column-layout="content"] .statusStack { min-width: max-content; }
 .page:has([data-list-selection-bar]) { padding-block-end: calc(var(--rental-list-bulk-bar-height, var(--rental-control-height-large)) + var(--space-8)); }
 
 .filters { position: relative; z-index: 3; margin-bottom: var(--rental-layout-list-toolbar-gap); }
