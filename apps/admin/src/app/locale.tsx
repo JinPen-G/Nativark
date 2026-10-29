@@ -577,6 +577,8 @@ const ENGLISH: Record<string, string> = {
   "登录方式预览": "Sign-in method preview",
   "暂未接入第三方授权，不会打开授权页面或建立登录会话。": "Third-party authorization is not connected. No authorization page or login session will open.",
   "租赁生意，\n有序运转。": "Your rentals,\nin good order.",
+  "你的租赁业务，\n有了 Rental Agent。": "Your rental business,\nmeet Rental Agent.",
+  "资源调配、任务分派、跨店协作，交给 Rental Agent 统筹安排。日常管理，也有 Copilot 随时协助。": "Let Rental Agent coordinate resources, assign tasks and bring locations together. Copilot is there to help with day-to-day management.",
   "管理后台登录页": "Admin login page",
   "文案留空使用默认内容；关闭对应开关可隐藏，已填写的内容会保留。仅影响后台登录页。": "Leave text blank to use defaults. Turn a section off to hide it without losing your text. Applies only to admin sign-in.",
   "仅影响管理后台登录页左侧，不影响客户官网。留空使用平台默认文案，上传或移除图片后请保存配置。": "Customize the left side of the admin login page without changing your customer website. Blank fields use platform defaults. Save after uploading or removing an image.",

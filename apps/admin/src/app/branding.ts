@@ -7,8 +7,8 @@ export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-mono.svg";
 export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon.svg";
 export const ADMIN_DEFAULT_FAVICON = ADMIN_DEFAULT_MARK;
 export const ADMIN_LOGIN_DEFAULTS = {
-  title: "租赁生意，\n有序运转。",
-  description: "从预订、交付到归还与结算，把资产、订单和客户放在同一个工作台。",
+  title: "你的租赁业务，\n有了 Rental Agent。",
+  description: "资源调配、任务分派、跨店协作，交给 Rental Agent 统筹安排。日常管理，也有 Copilot 随时协助。",
   highlights: [
     { title: "管好资产", description: "在库、在租与维护" },
     { title: "跟进订单", description: "预订、交付与归还" },
