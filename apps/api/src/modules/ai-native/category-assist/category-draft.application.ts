@@ -13,6 +13,7 @@ import { CategoryGovernancePreviewGuard } from '../../rental-core/category-gover
 import { CreateCategoryDraftDto, PatchCategoryDraftDto } from '../../rental-core/category-governance-request.dto';
 import { withRequestAbort } from '../scenes/request-abort';
 import type { IncomingMessage } from 'node:http';
+import { categoryDraftRequest, categoryDraftResponse } from './category-draft-http.contract';
 
 export class CategoryAssistError extends Error {
   constructor(readonly code: 'INVALID_INPUT' | 'ACCESS_DENIED' | 'UNAVAILABLE', readonly writeMayHaveCommitted = false) { super(code); }
@@ -146,10 +147,9 @@ export function composeCategoryDraftRequests(dependencies: Omit<Dependencies, 'c
       const action = operation as CategoryOperation;
       const write = action === 'create' || action === 'patch';
       if (!enabled && (write || action === 'validate')) throw new HttpException({ code: 'AI_RESOURCE_UNAVAILABLE', retryable: false }, 503);
-      let command: unknown;
+      let command: ReturnType<typeof categoryDraftRequest>;
       try {
-        if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 256 * 1024) throw Error();
-        command = structuredClone(value);
+        command = categoryDraftRequest(action, value);
       } catch { throw new HttpException({ code: 'AI_INVALID_INPUT', retryable: false }, 400); }
       let authorization = request?.headers?.authorization;
       if (typeof authorization !== 'string' || !authorization || authorization.length > 8192) {
@@ -173,7 +173,8 @@ export function composeCategoryDraftRequests(dependencies: Omit<Dependencies, 'c
           timer = setTimeout(abort, 5000);
         });
         const app = new CategoryDraftApplication({ ...dependencies, credentials });
-        return await Promise.race([Promise.resolve().then<unknown>(() => app[action](command)), stopped]);
+        const result = await Promise.race([Promise.resolve().then<unknown>(() => app[action](structuredClone(command))), stopped]);
+        return categoryDraftResponse(action, result, command);
       } catch (error) {
         const response = error instanceof HttpException ? error.getResponse() : undefined;
         if (response && typeof response === 'object' && 'code' in response) throw error;

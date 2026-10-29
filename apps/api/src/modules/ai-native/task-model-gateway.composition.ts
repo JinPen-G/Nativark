@@ -33,6 +33,11 @@ import { BudgetError } from './budget/budget.ports';
 import { createNativeModelAdapters } from './native-model-adapters';
 import { isNativeModelProtocol, type NativeModelProtocol } from './native-model-protocols';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { z } from 'zod';
+import { composeTaskInputCountingChain } from './input-counting/input-count-tokens.composition';
+import { createNativeModelEgressTransport } from './model-egress.transport';
+import { capabilityProfileFingerprint } from './capability-verification';
+import type { GatewayConnectionResolver } from './routed-model-transport';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -59,7 +64,14 @@ export type PersistedTaskGatewayDependencies = Omit<PersistedTaskCallGatewayDepe
   /** Server policy only. Recorded mode reads the invocation's persisted price
    * and certified input bound; it never falls back to calls or guesses a rate. */
   pricing: PersistedTaskGatewayPricing;
+  /** Explicit recorded-host decision; never enabled for calls pricing or media. */
+  inputCounting?: TaskInputCountingConfiguration;
 };
+export const taskInputCountingConfigurationSchema = z.object({
+  countingPriceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
+  timeoutMs: z.number().int().min(1000).max(30000)
+}).strict();
+export type TaskInputCountingConfiguration = z.infer<typeof taskInputCountingConfigurationSchema>;
 
 function checkedPricing(value: unknown) {
   const parsed = gatewayPricingSelectionSchema.safeParse(structuredClone(value));
@@ -154,6 +166,10 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     || input.nativeProtocol === undefined && (!Array.isArray(input.adapters) || !input.adapters.length)
     || input.audit !== undefined && typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const selection = checkedPricing(input.pricing);
+  const counted = input.inputCounting === undefined ? undefined : taskInputCountingConfigurationSchema.safeParse(structuredClone(input.inputCounting));
+  if (counted && (!counted.success || selection.kind !== 'recorded' || input.routeScene !== 'chat' || input.media
+    || input.nativeProtocol === undefined)) throw new ModelGatewayError('CONFIG_INVALID');
+  const counting = counted?.success ? counted.data : undefined;
   // Recorded evidence currently attests plain-text input/output tokens only.
   // Never price image/audio traffic with an unrelated text/calls upper bound.
   if (selection.kind === 'recorded' && (input.media || input.routeScene === 'vision')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -235,7 +251,41 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   // still re-read by the services, not frozen into a permanent grant.
   Object.freeze(runtime.ports);
   Object.freeze(runtime);
+  const inputCounting: TaskModelHostDependencies['inputCounting'] = counting ? Object.freeze({ preparation: (inner, frozen, policy) => {
+    if (policy.kind || policy.structuredOutput || policy.structuredSchemaHash) throw new ModelGatewayError('CONFIG_INVALID');
+    const taskExecution = { authorize: (selectedTaskId: string) => {
+      if (selectedTaskId !== taskId) throw new ModelGatewayError('FORBIDDEN');
+      return authorization.execution.authorize(taskId);
+    } };
+    // Count under the same currently verified route as generation, without
+    // borrowing its dispatch/lease. A mode/profile/capability change refuses.
+    const bind = (resolver: GatewayConnectionResolver): GatewayConnectionResolver => {
+      const check = async (context: Parameters<GatewayConnectionResolver['resolve']>[0],
+        profile: Parameters<GatewayConnectionResolver['resolve']>[1]) => {
+        if (!('tenantId' in context && 'workspaceId' in context)) throw new ModelGatewayError('FORBIDDEN');
+        const resolution = await routing.resolve(context, policy.orderExplainTool ? ['text', 'tools'] : ['text']);
+        if (capabilityProfileFingerprint(resolution.route.profile) !== capabilityProfileFingerprint(profile))
+          throw new ModelGatewayError('FORBIDDEN');
+        await routing.assertCurrent(context, resolution);
+        return () => routing.assertCurrent(context, resolution);
+      };
+      return { resolve: async (context, profile) => {
+        const recheck = await check(context, profile), connection = await resolver.resolve(context, profile);
+        await recheck();
+        return connection;
+      }, assertCurrent: async (context, profile) => {
+        const recheck = await check(context, profile);
+        await resolver.assertCurrent?.(context, profile);
+        await recheck();
+      } };
+    };
+    return composeTaskInputCountingChain({ ...dependencies, guard, frozen, taskExecution,
+      resolvers: { platform: bind(platform), tenant: bind(tenant) }, transport: createNativeModelEgressTransport(),
+      policyOptions: { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } },
+      countingPriceVersion: counting.countingPriceVersion, timeoutMs: counting.timeoutMs }).preparation(inner);
+  } }) : undefined;
   return Object.freeze({ runtime, priceVersion: selection.priceVersion, accountingRecovery: accounting.recovery,
+    ...(inputCounting ? { inputCounting } : {}),
     financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
 }
 
@@ -245,7 +295,7 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
  * leases, input/plan and accounting semantics, never re-dispatches unknown work.
  */
 export function composePersistedCallTaskModelHost(input:
-  Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence'> & {
+  Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence' | 'inputCounting'> & {
     gateway: Omit<PersistedTaskCallGatewayDependencies,
       keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId'>;
   }) {
@@ -256,14 +306,14 @@ export function composePersistedCallTaskModelHost(input:
 }
 
 export function composePersistedTaskModelHost(input:
-  Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence'> & {
+  Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence' | 'inputCounting'> & {
     gateway: Omit<PersistedTaskGatewayDependencies,
       keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId'>;
   }) {
   const { gateway, ...host } = input;
   // Protocol support alone is insufficient: media requires the explicit
   // original ACL/ObjectReader dependency and the server-selected vision route.
-  if (!gateway || gateway.routeScene !== host.gatewayScene.routeScene
+  if (!gateway || 'inputCounting' in host || gateway.routeScene !== host.gatewayScene.routeScene
     || (host.kind && (!gateway.media || gateway.routeScene !== 'vision'))) {
     throw new ModelGatewayError('CONFIG_INVALID');
   }

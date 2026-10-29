@@ -7,6 +7,8 @@
     "packages/*"
   ],
   "scripts": {
+    "docs:check": "node scripts/validate-docs.cjs",
+    "test:docs": "node --test tests/docs-check.test.cjs",
     "test:demo-requests": "npm run build -w @rental-os/shared && node --test tests/demo-requests.test.cjs",
     "test:demo-requests-db": "npm run build -w @rental-os/shared && node tests/demo-requests-db.test.cjs",
     "test:workspace-scope": "node tests/rental-workspace-scope.test.cjs",

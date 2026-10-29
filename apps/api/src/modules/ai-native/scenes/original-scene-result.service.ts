@@ -68,6 +68,14 @@ function orderFactsFingerprint(material: unknown) {
       delete (value as Record<string, unknown>).observedAt;
     }
   }
+  // History's request/observation metadata belongs to the reading request too.
+  // Preserve its sourceOrderUpdatedAt and all historical rule/price evidence.
+  const history = (payload.facts as Record<string, unknown>).history;
+  if (history && typeof history === 'object' && !Array.isArray(history) && 'value' in history
+    && history.value && typeof history.value === 'object' && !Array.isArray(history.value)) {
+    delete (history.value as Record<string, unknown>).requestId;
+    delete (history.value as Record<string, unknown>).observedAt;
+  }
   const inspections = (payload.facts as Record<string, unknown>).inspections;
   if (inspections && typeof inspections === 'object' && !Array.isArray(inspections) && 'value' in inspections
     && inspections.value && typeof inspections.value === 'object' && !Array.isArray(inspections.value)) {

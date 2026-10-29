@@ -15,12 +15,16 @@ import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_
   type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
   type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
   type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft,
-  type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft, type AiSceneTaskMaterialResponseDraft } from '@rental-os/shared';
+  type AiOriginalQuoteReceiptResponseDraft, type AiOriginalQuotesCompareResponseDraft, type AiSceneTaskMaterialResponseDraft,
+  type AiSceneOrderExtensionPreviewDraft } from '@rental-os/shared';
+import { validateAiExtensionPreviewResponse } from './extension-preview-http.contract';
+import { originalPolicyRequest, originalPolicyResponse } from './original-policy-http.contract';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { validateAiTaskObservation } from '../task-contract-validation';
-import { validateAiSceneModelObservation, validateAiTaskSceneObservation } from './scene-observation-contracts';
+import { validateAiSceneModelObservation, validateAiTaskSceneObservation, parseAiSceneSourceRequest,
+  parseAiOpeningSourceRequest, validateAiSceneSourceObservation, validateAiOpeningSourceObservation } from './scene-observation-contracts';
 export { validateAiSceneModelObservation, validateAiTaskSceneObservation } from './scene-observation-contracts';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
@@ -60,7 +64,7 @@ const openingSourceDefinitions = JSON.parse(JSON.stringify(Object.fromEntries(
 const validOpeningSource = openingSourceAjv.compile<AiOriginalOpeningReadSourceDraft>({
   $ref: '#/$defs/AiOriginalOpeningReadSourceDraft', $defs: openingSourceDefinitions
 });
-const validOrderExtensionPreview = openingSourceAjv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneOrderExtensionPreviewDraft);
+const validOrderExtensionPreview = openingSourceAjv.compile<AiSceneOrderExtensionPreviewDraft>(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneOrderExtensionPreviewDraft);
 const recoveryDefinitions = JSON.parse(JSON.stringify({ ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_INPUT_DRAFT_SCHEMAS,
   AiSceneRequestReadDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft,
   AiSceneRequestReceiptDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReceiptDraft
@@ -197,11 +201,19 @@ export class AiScenePlanPolicyController {
   constructor(@Inject(AI_SCENE_PLAN_POLICIES) private readonly application: ReturnType<typeof composeRequestBoundScenePlanPolicies>) {}
   @Post(AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.application.read(request, body), 'read_original_scene_plan_policy');
+    return respondAiScene(async () => {
+      const command = originalPolicyRequest('planRead', body), current = { headers: { authorization: request?.headers?.authorization } };
+      const result = await this.application.read(current, structuredClone(command));
+      return originalPolicyResponse('planRead', result, command);
+    }, 'read_original_scene_plan_policy');
   }
   @Post(AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change) @HttpCode(200) @Header('Cache-Control', 'no-store')
   change(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.application.change(request, body), 'read_original_scene_plan_policy');
+    return respondAiScene(async () => {
+      const command = originalPolicyRequest('planChange', body), current = { headers: { authorization: request?.headers?.authorization } };
+      const result = await this.application.change(current, structuredClone(command));
+      return originalPolicyResponse('planChange', result, command);
+    }, 'read_original_scene_plan_policy');
   }
 }
 @Controller(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath)
@@ -210,15 +222,27 @@ export class AiOriginalTaskActionPolicyController {
     private readonly application: ReturnType<typeof composeRequestBoundOriginalTaskActionPolicies>) {}
   @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.configure) @HttpCode(200) @Header('Cache-Control', 'no-store')
   configure(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.application.configure(request, body), 'read_original_task_action_policy');
+    return respondAiScene(async () => {
+      const command = originalPolicyRequest('taskConfigure', body), current = { headers: { authorization: request?.headers?.authorization } };
+      const result = await this.application.configure(current, structuredClone(command));
+      return originalPolicyResponse('taskConfigure', result, command);
+    }, 'read_original_task_action_policy');
   }
   @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.clear) @HttpCode(200) @Header('Cache-Control', 'no-store')
   clear(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.application.clear(request, body), 'read_original_task_action_policy');
+    return respondAiScene(async () => {
+      const command = originalPolicyRequest('taskClear', body), current = { headers: { authorization: request?.headers?.authorization } };
+      const result = await this.application.clear(current, structuredClone(command));
+      return originalPolicyResponse('taskClear', result, command);
+    }, 'read_original_task_action_policy');
   }
   @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
   read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.application.read(request, body), 'read_original_task_action_policy');
+    return respondAiScene(async () => {
+      const command = originalPolicyRequest('taskRead', body), current = { headers: { authorization: request?.headers?.authorization } };
+      const result = await this.application.read(current, structuredClone(command));
+      return originalPolicyResponse('taskRead', result, command);
+    }, 'read_original_task_action_policy');
   }
 }
 @Controller(AI_SCENE_REQUEST_HTTP_DRAFT.basePath)
@@ -240,10 +264,11 @@ export class AiOriginalScenesController {
   }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.previewOrderExtension) @HttpCode(200) @Header('Cache-Control', 'no-store')
   previewOrderExtension(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return this.respond(() => {
-      const command = structuredClone(body);
+    return this.respond(async () => {
+      const command = structuredClone(body), current = { headers: { authorization: request?.headers?.authorization } };
       if (!validOrderExtensionPreview(command)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      return withRequestAbort(request, signal => this.scenes.previewOrderExtension(request, command, signal));
+      const result = await withRequestAbort(request, signal => this.scenes.previewOrderExtension(current, structuredClone(command), signal));
+      return validateAiExtensionPreviewResponse(result, command);
     });
   }
   @Post() @Header('Cache-Control', 'no-store')
@@ -366,11 +391,17 @@ export class AiOriginalSceneObservationController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.reopenModelSource(request, body));
+    return respondAiScene(async () => {
+      const command = parseAiSceneSourceRequest(body);
+      return validateAiSceneSourceObservation(await this.observations.reopenModelSource(request, structuredClone(command)), command);
+    });
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenOpeningModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.reopenOpeningModelSource(request, body));
+    return respondAiScene(async () => {
+      const command = parseAiOpeningSourceRequest(body);
+      return validateAiOpeningSourceObservation(await this.observations.reopenOpeningModelSource(request, structuredClone(command)), command);
+    });
   }
 }
 

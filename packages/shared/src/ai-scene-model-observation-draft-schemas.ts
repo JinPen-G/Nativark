@@ -2,6 +2,8 @@
  * context. Missing/stale/unknown results never carry invented successful text. */
 import { AI_SCENE_REQUEST_DRAFT_SCHEMAS } from './ai-scene-request-draft-schemas';
 import { AI_KNOWLEDGE_DRAFT_SCHEMAS } from './ai-knowledge-draft-schemas';
+import { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS } from './ai-business-material-draft-schemas';
+import { AI_ORDER_FACTS_DRAFT_SCHEMAS } from './ai-order-facts-draft-schemas';
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id,
   leafText as text, leafTime as time, leafInt as integer, leafList as list, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 const hash: AiLeafSchemaDraft = { type: 'string', pattern: '^[a-f0-9]{64}$' };
@@ -35,10 +37,49 @@ const available = (scene: string, material: string, order = false) => obj({ ...b
 }, [...Object.keys(base(scene)), 'status', 'text', 'materialHash', 'callId', 'facts', 'sources', 'citationValidation', 'nextAction']);
 const unavailable = (scene: string, status: string, nextAction: string) => obj({ ...base(scene), status: choice(status),
   text: { type: 'null' }, nextAction: choice(nextAction), automaticRetry: no });
+const business = AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS;
+const feeFacts = business.AiOrderExplanationMaterialDraft.properties!.payload.oneOf!
+  .find(branch => (branch.properties!.question.enum as readonly string[]).includes('fees'))!.properties!.facts.properties!;
+const evidence = (value: AiLeafSchemaDraft) => obj({ coverage: choice('partial'), value, source: ref('AiOrderEvidenceReferenceDraft') });
+const orderValues = {
+  order: evidence(AI_ORDER_FACTS_DRAFT_SCHEMAS.AiOrderReadFactsDraft.properties!.order),
+  amounts: feeFacts.amounts, rental_period: feeFacts.fulfillment,
+  saved_basis: evidence(ref('AiOrderHistoryFactsDraft')), payment_records: evidence(ref('AiOrderLocalPaymentsDraft')),
+  inspection_records: evidence(ref('AiOrderInspectionEvidenceDraft'))
+};
+const fields = choice(...Object.keys(orderValues));
+const sourceBase = { original: ref('AiSceneRequestReceiptDraft'), resultId: id(), sourceIndex: integer(0, 4), execution: choice('not_attempted') };
+const section = business.AiOpeningSectionMaterialDraft.properties!;
+const configuration = business.AiOpeningBusinessMaterialDraft.properties!.configuration.properties!;
+const frozenReference = { ...section.evidence,
+  properties: Object.fromEntries(Object.entries(section.evidence.properties!).filter(([key]) => key !== 'observedAt')),
+  required: section.evidence.required!.filter(key => key !== 'observedAt') };
 export const AI_SCENE_MODEL_OBSERVATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiSceneKnowledgeSnapshotDraft: knowledge,
   AiSceneModelResultObservationDraft: { oneOf: [available('order_explanation', 'AiOrderExplanationMaterialDraft', true),
     available('opening_diagnosis', 'AiOpeningBusinessMaterialDraft'), available('quote_clarification', 'AiQuoteBusinessMaterialDraft'),
     ...['order_explanation', 'opening_diagnosis', 'quote_clarification'].flatMap(scene => [unavailable(scene, 'unknown', 'reconcile'),
-      unavailable(scene, 'failed', 'manual_review'), unavailable(scene, 'stale', 'reread_facts')])] }
+      unavailable(scene, 'failed', 'manual_review'), unavailable(scene, 'stale', 'reread_facts')])] },
+  AiOrderSourceObservationDraft: { oneOf: [
+    ...Object.entries(orderValues).map(([field, value]) => obj({ status: choice('available'), scope: ref('AiWorkspaceScope'), orderId: id(),
+      field: choice(field), value, observedAt: time, freshness: choice('current_observation_not_historical_payment_snapshot'),
+      reauthorization: choice('current_order_authority_rechecked') })),
+    obj({ status: choice('stale'), field: fields, reason: choice('order_version_changed_reread_material') }),
+    obj({ status: choice('missing'), scope: ref('AiWorkspaceScope'), orderId: id(), field: fields, reason: choice('historical_or_optional_source_not_loaded') })
+  ] },
+  AiSceneModelSourceReadResponseDraft: { oneOf: [
+    obj({ ...sourceBase, original: base('order_explanation').original, reference: ref('AiOrderEvidenceReferenceDraft'), source: ref('AiOrderSourceObservationDraft') }),
+    obj({ ...sourceBase, sourceKind: choice('knowledge'), reference: documentSource, source: ref('AiKnowledgeSourceReadResponseDraft') })
+  ] },
+  AiOpeningSectionObservationDraft: obj({ status: choice('ready_for_human_review', 'capability_unavailable', 'missing_configuration', 'check_failed', 'awaiting_external_evidence'),
+    key: section.key, current: { oneOf: [configuration.products, configuration.pricing, configuration.fulfillment,
+      obj({ configVersion: text(191), fields: section.candidate.properties!.fieldsToReview }), obj({ fields: section.candidate.properties!.fieldsToReview })] },
+    issue: section.issue, required: section.required, impact: section.impact, evidence: section.evidence,
+    materials: section.candidate.properties!.fieldsToReview, manual: section.manual, candidate: section.candidate,
+    externalVerification: section.externalVerification, persistence: choice('not_attempted'), publication: choice('not_attempted')
+  }, ['status', 'key', 'current', 'required', 'impact', 'evidence', 'materials', 'manual', 'candidate', 'externalVerification', 'persistence', 'publication']),
+  AiSceneOpeningModelSourceReadResponseDraft: obj({ original: base('opening_diagnosis').original, resultId: id(), key: section.key,
+    reference: section.evidence, source: ref('AiOpeningSectionObservationDraft'), frozenBasis: obj({ materialHash: hash, reference: frozenReference }),
+    observation: choice('current_authorized_reobservation'), historicalConfiguration: choice('not_loaded'),
+    execution: choice('not_attempted'), proposalPersistence: choice('not_attempted') })
 };

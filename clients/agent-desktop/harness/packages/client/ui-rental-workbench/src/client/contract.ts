@@ -7,6 +7,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 /** Local display state only; withdrawal never asserts remote cancellation or audit deletion. */
 export type PreviewStatus = 'idle' | 'loading' | 'ready' | 'cleared' | 'inactive' | 'changed' | 'expired' | 'failed'
 export interface WorkbenchState {
+  /** Local view intent only. Business model dispatch remains unavailable. */
+  purpose: 'personal' | 'business'
+  expanded: boolean
   snapshot: RentalDesktopSnapshot | null
   busy: boolean
   failed: boolean
@@ -15,8 +18,12 @@ export interface WorkbenchState {
   sources: { status: PreviewStatus; result: RentalDesktopCatalogSourcesResult | null }
 }
 export interface WorkbenchInjected {
-  hooks: { business: HostObservable<WorkbenchState>; workMode: HostObservable<'ai' | 'traditional'> }
+  hooks: { business: HostObservable<WorkbenchState>; workMode: HostObservable<'ai' | 'traditional'>; purpose: HostObservable<'personal' | 'business'> }
   changeMode(mode: 'ai' | 'traditional'): void
+  /** Choose a human preparation view, not a model/tool permission. */
+  changePurpose(purpose: 'personal' | 'business'): void
+  /** Withdraw material when the expanded workspace controls leave the screen. */
+  observeExpandedContext(): () => void
   navigate(routeId: string): void
   switchWorkspace(workspaceId: string): void
   logout(): void

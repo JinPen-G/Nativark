@@ -1,14 +1,67 @@
-import { AI_INSPECTION_DRAFT_VERSION } from "./ai-inspection-draft";
+import { AI_INSPECTION_DRAFT_VERSION, AI_INSPECTION_TASK_POLICY_OPERATIONS } from "./ai-inspection-draft";
+import { AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from './ai-task-recovery-draft';
+import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id, leafInt as int, leafList as list, leafText as text, leafTime, type AiLeafSchemaDraft } from "./ai-gateway-draft-schemas";
 const coordinate = { type: "number", minimum: 0, maximum: 1 };
 const dimension = { type: "number", exclusiveMinimum: 0, maximum: 1 };
 const source = { attachmentId: id(), attachmentRevision: int(1) };
 const candidate = { candidateId: id(), fieldCode: id() };
 const taskId = { ...id(), maxLength: 128 };
+const no: AiLeafSchemaDraft = { type: 'boolean', const: false };
+const taskSummary = obj({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, status: choice(...AI_TASK_STATUSES_DRAFT),
+  revision: int(1, 4294967295), replayed: { type: 'boolean' } });
+const taskObservation = { creationKey: { type: 'string', pattern: '^inspection:[a-f0-9]{64}$' }, execution: choice('not_attested'), retryable: no };
+const taskSemantics = choice('original_metadata_not_dispatch_or_candidate_evidence');
+const policyRequest = { reference: ref('AiInspectionRecognitionTaskReference'), operation: choice(...AI_INSPECTION_TASK_POLICY_OPERATIONS) };
+const policySemantics = { purpose: choice('original_inspection_candidate_runtime_only'), approval: choice('not_granted'), inspectionSubmission: choice('not_attempted') };
+const policy = obj({ taskId: id(), operation: policyRequest.operation, revision: int(1, 4294967294),
+  requiredPermissions: { ...list(id(), 64, 1), uniqueItems: true }, expiresAt: leafTime });
+const taskExecution: AiLeafSchemaDraft = { oneOf: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelExecutionDraft.oneOf!.slice(0, 2) };
+const continuation = AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelResumeResponseDraft.properties!.continuation.oneOf!;
+const receipt = AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelCancelResponseDraft.properties!.receipt;
+const transition = (settled: boolean) => ({ ...receipt, required: ['event'], properties: { ...receipt.properties!,
+  event: { ...receipt.properties!.event, properties: { ...receipt.properties!.event.properties!,
+    cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
+    data: obj({ from: choice(...AI_TASK_STATUSES_DRAFT), to: choice(settled ? 'cancelled' : 'cancel_requested'),
+      reason: choice(settled ? 'cancel_settled' : 'cancel_requested') }) } } } });
+const cancellationObservation = (settled: boolean): AiLeafSchemaDraft => ({ oneOf: ['observed', 'not_observed'].map(status => obj({
+  taskId: id(), expectedRevision: int(1, 4294967294), status: choice(status),
+  event: status === 'observed' ? transition(settled).properties.event : { type: 'null' },
+  snapshot: obj({ revision: int(1, 4294967295), cursor: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, status: choice(...AI_TASK_STATUSES_DRAFT) }),
+  cancellation: choice(settled ? 'task_cancelled_not_business_rollback' : 'request_not_rollback'),
+  remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted'),
+  absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
+})) });
 export const AI_INSPECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiInspectionTaskPolicyRequest: obj(policyRequest),
+  AiInspectionTaskPolicyConfigureRequest: obj({ ...policyRequest, expectedRevision: { oneOf: [int(1, 4294967293), { type: 'null' }] } }),
+  AiInspectionTaskPolicyClearRequest: obj({ ...policyRequest, expectedRevision: int(1, 4294967293) }),
+  AiInspectionTaskPolicyReadResponse: obj({ ...policySemantics, result: { oneOf: [
+    obj({ state: choice('observed'), policy, retryable: no, nextAction: choice('read_original_policy') }),
+    obj({ state: choice('not_observed'), retryable: no, nextAction: choice('reconcile') })] } }),
+  AiInspectionTaskPolicyChangeResponse: obj({ ...policySemantics, result: policy }),
+  AiInspectionTaskCreationResponse: obj({ task: taskSummary, execution: choice('not_attested'), purpose: choice('inspection_candidates_only') }),
+  AiInspectionTaskCreationObservation: { oneOf: [
+    obj({ ...taskObservation, state: choice('not_observed'), task: { type: 'null' }, nextAction: choice('read_original_task') }),
+    obj({ ...taskObservation, state: choice('not_observed', 'unknown'), task: { type: 'null' }, nextAction: choice('reconcile'), semantics: taskSemantics }),
+    obj({ ...taskObservation, state: choice('observed'), task: taskSummary, nextAction: choice('read_original_task'), semantics: taskSemantics })] },
+  AiInspectionTaskExecutionResponse: taskExecution,
+  AiInspectionTaskPendingInputResponse: ref('AiSceneModelPendingInputDraft'),
+  AiInspectionTaskResumeResponse: obj({ receipt: ref('AiTaskInputSavedReceiptDraft'),
+    continuation: { oneOf: [taskExecution, continuation[1], continuation[2]] } }),
+  AiInspectionTaskAnswerObservation: ref('AiTaskInputReceiptObservationDraft'),
+  AiInspectionTaskContinueResponse: { oneOf: [
+    obj({ receipt: obj({ state: choice('not_observed'), retryable: no }), continuation: choice('unavailable') }),
+    obj({ receipt: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputReceiptObservationDraft.oneOf![1], result: taskExecution })] },
   AiInspectionRecognitionTaskReference: obj({ orderId: taskId, allocationId: taskId, stage: choice("pickup", "return"),
     templateId: taskId, draftId: taskId, inputId: taskId, expectedRevision: int(1, 999) }),
   AiInspectionRecognitionTaskCancelRequest: obj({ reference: ref("AiInspectionRecognitionTaskReference"), expectedRevision: int(1, 4294967294) }),
+  AiInspectionTaskCancelResponse: obj({ receipt: transition(false), cancellation: choice('requested_not_rollback') }),
+  AiInspectionTaskSettlementResponse: obj({ receipt: transition(true), cancellation: choice('task_cancelled_not_business_rollback'),
+    remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted') }),
+  AiInspectionTaskCancelObservation: cancellationObservation(false),
+  AiInspectionTaskSettlementObservation: cancellationObservation(true),
   AiInspectionRecognitionTaskResumeRequest: obj({ reference: ref("AiInspectionRecognitionTaskReference"), submission: ref("AiTaskInputSubmissionDraft") }),
   AiInspectionSourceDraft: { oneOf: [obj({ ...source, kind: choice("image"), region: obj({ x: coordinate, y: coordinate, width: dimension, height: dimension }) }), obj({ ...source, kind: choice("audio"), span: obj({ startMs: int(0, 86400000), endMs: int(0, 86400000) }) })] },
   AiInspectionValueDraft: { oneOf: [obj({ kind: choice("number"), value: { type: "number", minimum: -1e12, maximum: 1e12 } }), obj({ kind: choice("boolean"), value: { type: "boolean" } }), obj({ kind: choice("text", "select"), value: text(2000, 0) }), obj({ kind: choice("photo"), ...source })] },

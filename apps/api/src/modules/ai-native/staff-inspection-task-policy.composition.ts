@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Module, type DynamicModule } from '@nestjs/common';
 import { z } from 'zod';
+import { AI_INSPECTION_TASK_POLICY_OPERATIONS } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from './ai-task.repository';
 import { AiScopeRepository } from './ai-scope.repository';
@@ -15,9 +16,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 
 // These policies only enable the existing candidate runtime, never inspection
 // submission, approval or an arbitrary business/model tool.
-const operations = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
-  'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run',
-  'request_input', 'submit_input', 'resume_input'] as const;
+const operations = AI_INSPECTION_TASK_POLICY_OPERATIONS;
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
   inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();
 const base = z.object({ reference: referenceSchema, operation: z.enum(operations) }).strict();

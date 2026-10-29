@@ -135,13 +135,50 @@ test('HTTP policy consumer uses current auth, exact targets and safe root refusa
   const spec = { version: 'knowledge-prepared-target-1', operationKey: 'http-target',
     upload: { documentId: 'http-doc', fileName: 'http.txt', mimeType: 'text/plain', sizeBytes: 12 },
     document: { documentVersion: 'http-v1', operationId: 'http-create', title: 'Synthetic HTTP document', validFrom: new Date(f.flags.now).toISOString() },
-    expiresAt: new Date(f.flags.now + 3600000).toISOString() };
+    expiresAt: new Date(f.flags.now + 3600000).toISOString().replace('Z', '+00:00') };
   const root = f.authority('upload', h.load('knowledge-policy-management.validation').preparedUploadResource(spec), 'knowledge',
     { preparationTarget: spec, allowedOperations: ['prepare_target','bind_target'] });
+  const absent = await controller.target(request, { authorityId: root.id, operationKey: spec.operationKey });
+  assert.equal(absent.state, 'not_observed');
   const prepared = await controller.prepareTarget(request, { authorityId: root.id });
   assert.equal(prepared.state, 'prepared');
+  const { validateKnowledgeTargetResponse } = h.load('knowledge-target-http.contract');
+  const current = await controller.read(request, { authorityId: root.id });
+  for (const [action, result, command, corrupt, code] of [
+    ['target', prepared, { authorityId: root.id, operationKey: spec.operationKey }, value => { value.specification.operationKey = 'other'; }, 'unavailable'],
+    ['prepareTarget', prepared, { authorityId: root.id }, value => { value.attachmentId = 'not-yet-bound'; }, 'result_unknown'],
+    ['target', prepared, { authorityId: root.id, operationKey: spec.operationKey }, value => { value.expiresAt = new Date(Date.parse(value.expiresAt) + 1).toISOString(); }, 'unavailable'],
+    ['target', prepared, { authorityId: root.id, operationKey: spec.operationKey }, value => { value.revision = 2; }, 'unavailable'],
+    ['read', current, { authorityId: root.id }, value => { value.resource.upload.storageKey = 'must-not-leak'; }, 'unavailable'],
+    ['read', current, { authorityId: root.id }, value => { value.target.resourceKey = 'f'.repeat(64); }, 'unavailable']
+  ]) {
+    const invalid = structuredClone(result); corrupt(invalid);
+    assert.throws(() => validateKnowledgeTargetResponse(action, invalid, command), error => error.code === code);
+  }
+  const bad = new KnowledgePolicyManagementController({ ...f.manage, bindTarget: async () => ({ ...prepared, unexpected: true }) });
+  await assert.rejects(bad.bindTarget(request, { authorityId: root.id, operationKey: spec.operationKey, sessionId: 'session', expectedRevision: 1, confirm: 'bind_knowledge_upload' }),
+    error => error.getStatus() === 409 && error.getResponse().nextAction === 'read_original_policy_target');
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const contracts = require('../packages/shared/src').AI_KNOWLEDGE_TARGET_HTTP_CONTRACTS;
+  for (const [action, contract] of Object.entries(contracts)) {
+    const operation = OPENAPI_DOCUMENT.paths[`/api/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT.basePath}/${AI_KNOWLEDGE_POLICY_HTTP_DRAFT[action]}`].post;
+    assert.equal(operation.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+  }
   assert.equal((await controller.read(request, { authorityId: root.id })).state, 'not_configured');
   assert.equal((await controller.target(request, { authorityId: root.id, operationKey: spec.operationKey })).targetId, prepared.targetId);
+  const owner = { actorKind: 'user', actorId: f.actor.id };
+  for (const [action, resource, domain] of [
+    ['search', {}, 'knowledge'], ['read', { owner }, 'memory'],
+    ['read', { memoryId: 'reserved-memory', revision: 1, aclRevision: 1, owner }, 'memory']
+  ]) {
+    const authority = f.authority(action, resource, domain);
+    await f.enable(authority);
+    const configured = await controller.read(request, { authorityId: authority.id });
+    assert.equal(configured.state, 'configured'); assert.equal(configured.result.enabled, true);
+    assert.deepEqual(configured.resource, resource);
+    const invalid = structuredClone(configured); invalid.result = null;
+    assert.throws(() => validateKnowledgeTargetResponse('read', invalid, { authorityId: authority.id }), { code: 'unavailable' });
+  }
   await assert.rejects(controller.prepareTarget(request, { authorityId: randomUUID() }), error => {
     assert.deepEqual(error.getResponse(), { code: 'AI_RESOURCE_UNAVAILABLE', retryable: false }); return error.getStatus() === 503;
   });
@@ -186,11 +223,9 @@ test('prepared first document produces exact policies and request-bound manageme
   const transport = f.deps.objectIO.transport;
   f.deps.objectIO.transport = (...args) => { reads++; return transport(...args); };
   const { FileStorageRuntimeService } = require('../apps/api/src/modules/integrations/file-storage.runtime.service');
-  const old = FileStorageRuntimeService.prototype.objectExists;
-  FileStorageRuntimeService.prototype.objectExists = async function (_config, key, mime, size) {
-    assert.ok([...f.state.assets.values()].some(row => row.storageKey === key)); assert.equal(mime, 'text/plain'); assert.equal(size, f.text.length); return true;
-  };
-  t.after(() => { FileStorageRuntimeService.prototype.objectExists = old; });
+  t.mock.method(FileStorageRuntimeService.prototype, 'objectExists', async () => {
+    assert.fail('knowledge completion must use its bounded content read, not an ambient HEAD');
+  });
   const spec = { version: 'knowledge-prepared-target-1', operationKey: 'first-target',
     upload: { documentId: 'first-doc', fileName: 'first.txt', mimeType: 'text/plain', sizeBytes: f.text.length },
     document: { documentVersion: 'first-v1', operationId: 'first-create', title: 'First real document', validFrom: new Date(f.flags.now).toISOString() },
@@ -218,16 +253,19 @@ test('prepared first document produces exact policies and request-bound manageme
   const docResource = { documentId: spec.upload.documentId, documentVersion: spec.document.documentVersion, attachmentId: started.fileAssetId, aclRevision: 1 };
   const createRoot = f.authority('create', docResource, 'knowledge', { preparationTarget: spec });
   await assert.rejects(f.manage.prepare(f.request, f.command(createRoot)));
+  const policyHttp = new (h.load('knowledge-policy-management.controller').KnowledgePolicyManagementController)(f.manage);
   const binding = { authorityId: root.id, operationKey: spec.operationKey, sessionId: started.sessionId, expectedRevision: 1, confirm: 'bind_knowledge_upload' };
   await assert.rejects(f.manage.bindTarget(f.request, binding)); assert.equal([...f.state.policyTargets.values()][0].revision, 1);
   const completed = valid('AiKnowledgeManagementCompleteUploadResponseDraft', await http.completeUpload(request,
     { documentId: spec.upload.documentId, sessionId: started.sessionId }));
   assert.equal(completed.attachmentId, started.fileAssetId);
+  assert.equal(reads, 1);
   const asset = f.state.assets.get(completed.attachmentId), originalWorkspace = asset.metadata.workspaceId;
+  assert.equal(asset.metadata.knowledgeContentHash, require('node:crypto').createHash('sha256').update(f.text).digest('hex'));
   asset.metadata.workspaceId = 'foreign-space'; await assert.rejects(f.manage.bindTarget(f.request, binding)); asset.metadata.workspaceId = originalWorkspace;
   f.flags.loseTargetReply = true;
-  assert.equal((await f.manage.bindTarget(f.request, binding)).state, 'unknown');
-  const writes = f.flags.writes, bound = await f.manage.target(f.request, { authorityId: root.id, operationKey: spec.operationKey });
+  assert.equal((await policyHttp.bindTarget(request, binding)).state, 'unknown');
+  const writes = f.flags.writes, bound = await policyHttp.target(request, { authorityId: root.id, operationKey: spec.operationKey });
   assert.equal(bound.state, 'bound'); assert.equal(bound.attachmentId, completed.attachmentId);
   assert.equal((await f.manage.bindTarget(f.request, binding)).state, 'bound'); assert.equal(f.flags.writes, writes);
   await assert.rejects(f.manage.bindTarget(f.request, { ...binding, operationKey: 'other-target' }), { code: 'conflict' });
@@ -255,6 +293,7 @@ test('prepared first document produces exact policies and request-bound manageme
     const next = f.authority(action, resource); roots.push(next); await f.enable(next);
   }
   const parseInput = { documentId: spec.upload.documentId, expectedRevision: 1, operationId: 'first-parse' };
+  assert.equal(reads, 1);
   const transaction = f.db.$transaction;
   let loseParseReply = true;
   const lostReply = t.mock.method(f.db, '$transaction', async (...args) => {
@@ -266,9 +305,10 @@ test('prepared first document produces exact policies and request-bound manageme
   });
   await assert.rejects(command('parse', parseInput), errorCode('AI_RESULT_UNKNOWN'));
   lostReply.mock.restore();
-  const operationCount = f.state.operations.size;
+  assert.equal(reads, 2);
+  const operationCount = f.state.operations.size, readsBeforeReconcile = reads;
   const parsed = valid('AiKnowledgeManagementCommandResponseDraft', await http.reconcileParse(request, parseInput)).document;
-  assert.equal(parsed.parsing, 'parsed'); assert.equal(reads, 1); assert.equal(f.state.operations.size, operationCount);
+  assert.equal(parsed.parsing, 'parsed'); assert.equal(reads, readsBeforeReconcile); assert.equal(f.state.operations.size, operationCount);
   assert.equal((await receipt('first-parse')).receipt, 'recorded');
   await assert.rejects(http.reconcileParse(request, { ...parseInput, expectedRevision: 2 }), errorCode('AI_REVISION_CONFLICT'));
   const indexing = f.service(h.load('human-knowledge-index.service').HumanKnowledgeIndexService);
@@ -289,7 +329,8 @@ test('prepared first document produces exact policies and request-bound manageme
   await f.apply(f.command(roots.find(row => row.action === 'search' && row.resource.documentId), 'disable', 2));
   await assert.rejects(inputs.revalidate(material));
   for (const resource of [{}, docResource]) await f.enable(f.authority('withdraw', resource));
-  const oldSource = h.source([...f.state.chunks.values()][0].state);
+  const oldSource = structuredClone(material.sources[0].source);
+  assert.equal((await inputs.openSource(oldSource)).text, f.text.toString('utf8'));
   const withdrawn = await command('withdraw', { documentId: 'first-doc', expectedRevision: published.revision, operationId: 'first-withdraw' });
   assert.equal(withdrawn.indexJob.kind, 'remove'); assert.equal(withdrawn.indexJob.status, 'pending');
   await assert.rejects(inputs.openSource(oldSource));
@@ -318,10 +359,11 @@ test('prepared first document produces exact policies and request-bound manageme
   f.db.responseError = Error('synthetic committed deletion reply lost');
   await assert.rejects(command('delete', { documentId: 'first-doc', expectedRevision: revised.revision, operationId: 'first-delete' }), errorCode('AI_RESULT_UNKNOWN'));
   f.db.responseError = null;
-  const operationsBeforeRead = f.state.operations.size, deleted = await receipt('first-delete');
+  const operationsBeforeRead = f.state.operations.size, readsBeforeDeletionReceipt = reads;
+  const deleted = await receipt('first-delete');
   assert.equal(deleted.receipt, 'recorded'); assert.equal(deleted.document.publication, 'deleted');
   assert.equal(deleted.document.indexJob.status, 'pending'); assert.equal(deleted.document.physicalIndexDeletion, 'not_verified');
-  assert.equal(f.state.operations.size, operationsBeforeRead); assert.equal(reads, 1);
+  assert.equal(f.state.operations.size, operationsBeforeRead); assert.equal(reads, readsBeforeDeletionReceipt);
   assert.deepEqual({ assets: f.state.assets.size, chunks: f.state.chunks.size }, preserved);
   const findOperation = f.db.aiKnowledgeOperation.findFirst;
   const revoked = t.mock.method(f.db.aiKnowledgeOperation, 'findFirst', async (...args) => {

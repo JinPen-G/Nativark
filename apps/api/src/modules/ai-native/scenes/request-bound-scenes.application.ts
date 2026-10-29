@@ -1079,12 +1079,12 @@ export function composeRequestBoundOriginalTaskAccounting(
 }
 
 export type RequestBoundPersistedOriginalSceneModelDependencies =
-  Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind'> & {
+  Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind' | 'inputCounting'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
     gateway: Pick<PersistedTaskCallGatewayDependencies,
       'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit'>
       | Pick<PersistedTaskGatewayDependencies,
-        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit'>;
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting'>;
   };
 
 /** Formal original-reference model actions. Resolve the current original task
@@ -1100,7 +1100,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     /** Server configuration only. Absence preserves the original single model. */
     orderReadChain?: { enabled: true; inputSource?: AiTaskInputSource; answerRoundTrip?: true } }) {
   if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
-    || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies
+    || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies || 'inputCounting' in dependencies
     || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const { host, clock, monotonic, orderReadChain, ...requestOptions } = options;
   if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
@@ -1121,7 +1121,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   if ('pricing' in gateway && 'callPriceVersion' in gateway) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const serverGateway = Object.freeze({ ...gateway,
     ...(gateway.adapters === undefined ? {} : { adapters: Object.freeze([...gateway.adapters]) }),
-    ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)) } : {}) });
+    ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)),
+      ...(gateway.inputCounting ? { inputCounting: freezeOriginalInput(structuredClone(gateway.inputCounting)) } : {}) } : {}) });
   const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
     const parsed = originalRequestReferenceSchema.safeParse(raw);
@@ -1142,7 +1143,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     const persisted = 'pricing' in serverGateway
       ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
       : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
-    const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion });
+    const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion,
+      ...(persisted.inputCounting ? { inputCounting: persisted.inputCounting } : {}) });
     const orderApplication = orderReadChain ? model.createModelOrderApplication(serverHost, {
       inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
       answerRoundTrip ? { answerRoundTrip: true } : undefined) : undefined;
@@ -1195,7 +1197,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     readOrderReadChainTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTakeoverReceipt(command)),
     readOrderReadChainCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationReceipt(command)),
-    settleOrderReadChainUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settleUnstartedCancellation(command)),
+    settleOrderReadChainUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true }),
     readOrderReadChainCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationSettlementReceipt(command)),
     ...(orderReadChain ? {
       readOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOrderResult(command)),

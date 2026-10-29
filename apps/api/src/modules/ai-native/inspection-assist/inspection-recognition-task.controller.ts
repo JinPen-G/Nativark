@@ -1,18 +1,17 @@
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { AI_STAFF_INSPECTION_ACCOUNTING, type composeStaffInspectionAccounting } from '../staff-inspection-accounting.composition';
-import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from '@rental-os/shared';
-import { z } from 'zod';
+import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS } from '@rental-os/shared';
+import { inspectionCancellationRequest, inspectionCancellationResponse, inspectionTaskRequest, inspectionTaskResponse } from './inspection-task-http.contract';
 import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { respondInspectionHttp, withInspectionRequestSignal, type InspectionHttpRequest } from './inspection-http';
 
 export const INSPECTION_RECOGNITION_TASKS = Symbol('INSPECTION_RECOGNITION_TASKS');
 type Request = InspectionHttpRequest;
-const cancellation = z.object({ reference: z.unknown(), expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
-const resume = z.object({ reference: z.unknown(), submission: z.unknown() }).strict();
 
-/** Opt-in only. All operations delegate to the same request-bound current staff
- * authority and persisted original task. No inspection submission or new lease. */
+/** Original staff task transport. The application rechecks current owner,
+ * resource and action authority; explicit execution delegates lease handling to
+ * the original runner. Receipt reads do not execute or submit an inspection. */
 @Controller(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath)
 export class InspectionRecognitionTaskController {
   constructor(@Inject(INSPECTION_RECOGNITION_TASKS) private readonly tasks: Omit<InspectionRecognitionTaskApplication, 'requestCancel'> & {
@@ -32,91 +31,74 @@ export class InspectionRecognitionTaskController {
   }
 
   private snapshot(request: Request) { return { headers: { authorization: request?.headers?.authorization } }; }
+  private task(request: Request, value: unknown, action: keyof typeof AI_INSPECTION_TASK_HTTP_CONTRACTS) {
+    const current = this.snapshot(request), contract = AI_INSPECTION_TASK_HTTP_CONTRACTS[action];
+    return this.respond(async () => {
+      const command = inspectionTaskRequest(action, value);
+      return this.run(request, async signal => {
+        let result: unknown;
+        if ('submission' in command) {
+          const operation: (request: Request, reference: unknown, submission: unknown, signal?: AbortSignal) => Promise<unknown>
+            = this.tasks[action as 'resume' | 'readAnswer' | 'continueAnswer'];
+          result = await operation.call(this.tasks, current, structuredClone(command.reference), structuredClone(command.submission), signal);
+        } else {
+          const operation: (request: Request, reference: unknown, signal?: AbortSignal) => Promise<unknown>
+            = this.tasks[action as 'create' | 'readCreation' | 'start' | 'reconcile' | 'readInput'];
+          result = await operation.call(this.tasks, current, structuredClone(command), signal);
+        }
+        return inspectionTaskResponse(action, result, command);
+      });
+    }, contract.nextAction);
+  }
 
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.create)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  create(@Req() request: Request, @Body() reference: unknown) {
-    const current = this.snapshot(request), input = structuredClone(reference);
-    return this.respond(() => this.run(request, signal => this.tasks.create(current, input, signal)));
-  }
+  create(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'create'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCreation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readCreation(@Req() request: Request, @Body() reference: unknown) {
-    const current = this.snapshot(request), input = structuredClone(reference);
-    return this.respond(() => this.run(request, signal => this.tasks.readCreation(current, input, signal)));
-  }
+  readCreation(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'readCreation'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.start)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  start(@Req() request: Request, @Body() reference: unknown) {
-    const current = this.snapshot(request), input = structuredClone(reference);
-    return this.respond(() => this.run(request, signal => this.tasks.start(current, input, signal)), 'reconcile');
-  }
+  start(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'start'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.reconcile)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  reconcile(@Req() request: Request, @Body() reference: unknown) {
-    const current = this.snapshot(request), input = structuredClone(reference);
-    return this.respond(() => this.run(request, signal => this.tasks.reconcile(current, input, signal)), 'reconcile');
-  }
+  reconcile(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'reconcile'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.requestCancel)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  requestCancel(@Req() request: Request, @Body() body: unknown) {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = cancellation.parse(input);
-      return this.run(request, signal => this.tasks.requestCancel(current, parsed.reference, parsed.expectedRevision, signal)); }, 'read_cancel_receipt');
-  }
+  requestCancel(@Req() request: Request, @Body() body: unknown) { return this.cancellation(request, body, 'requestCancel'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancelReceipt)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readCancelReceipt(@Req() request: Request, @Body() body: unknown) {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = cancellation.parse(input);
-      if (!this.tasks.readCancelReceipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      return this.run(request, signal => this.tasks.readCancelReceipt!(current, parsed.reference, parsed.expectedRevision, signal)); }, 'read_cancel_receipt');
-  }
-  private cancellationSettlement(request: Request, body: unknown, mode: 'read' | 'unstarted' | 'released_input') {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = cancellation.parse(input);
-      const operation = mode === 'read' ? this.tasks.readCancellationSettlementReceipt
-        : mode === 'unstarted' ? this.tasks.settleUnstartedCancellation : this.tasks.settleReleasedInputCancellation;
+  readCancelReceipt(@Req() request: Request, @Body() body: unknown) { return this.cancellation(request, body, 'readCancelReceipt'); }
+  private cancellation(request: Request, body: unknown, action: keyof typeof AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS) {
+    const current = this.snapshot(request), contract = AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS[action];
+    return this.respond(async () => {
+      const input = inspectionCancellationRequest(body), operation = this.tasks[action];
       if (!operation) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      return this.run(request, signal => operation.call(this.tasks, current, parsed.reference, parsed.expectedRevision, signal));
-    }, 'read_cancel_settlement_receipt');
+      return this.run(request, async signal => inspectionCancellationResponse(action,
+        await operation.call(this.tasks, current, structuredClone(input.reference), input.expectedRevision, signal), input.expectedRevision));
+    }, contract.nextAction);
   }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.settleUnstartedCancellation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleUnstartedCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'unstarted'); }
+  settleUnstartedCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellation(request, body, 'settleUnstartedCancellation'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.settleReleasedInputCancellation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleReleasedInputCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'released_input'); }
+  settleReleasedInputCancellation(@Req() request: Request, @Body() body: unknown) { return this.cancellation(request, body, 'settleReleasedInputCancellation'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCancellationSettlementReceipt)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readCancellationSettlementReceipt(@Req() request: Request, @Body() body: unknown) { return this.cancellationSettlement(request, body, 'read'); }
+  readCancellationSettlementReceipt(@Req() request: Request, @Body() body: unknown) { return this.cancellation(request, body, 'readCancellationSettlementReceipt'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readInput)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readInput(@Req() request: Request, @Body() reference: unknown) {
-    const current = this.snapshot(request), input = structuredClone(reference);
-    return this.respond(() => this.run(request, signal => this.tasks.readInput(current, input, signal)));
-  }
+  readInput(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'readInput'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.resume)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  resume(@Req() request: Request, @Body() body: unknown) {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = resume.parse(input);
-      return this.run(request, signal => this.tasks.resume(current, parsed.reference, parsed.submission, signal)); }, 'read_answer');
-  }
+  resume(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'resume'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readAnswer)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readAnswer(@Req() request: Request, @Body() body: unknown) {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = resume.parse(input);
-      return this.run(request, signal => this.tasks.readAnswer(current, parsed.reference, parsed.submission, signal)); }, 'read_answer');
-  }
+  readAnswer(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'readAnswer'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.continueAnswer)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
-  continueAnswer(@Req() request: Request, @Body() body: unknown) {
-    const current = this.snapshot(request), input = structuredClone(body);
-    return this.respond(async () => { const parsed = resume.parse(input);
-      return this.run(request, signal => this.tasks.continueAnswer(current, parsed.reference, parsed.submission, signal)); }, 'read_answer');
-  }
+  continueAnswer(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'continueAnswer'); }
 }
 
 /** Original financial receipts stay available when NEW recognition is disabled.

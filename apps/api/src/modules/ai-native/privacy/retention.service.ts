@@ -8,6 +8,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { fingerprint } from '../knowledge/knowledge-validation';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AI_RETENTION_POLICY } from './retention-policy';
+import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { aiRetentionObjectHash } from './retention-binding';
 import { z } from 'zod';
 import { retentionKinds, requireRestorePermit, signRetentionManifest, retentionPublicKeyHash, type AiRestorePermit } from './retention-restore';
@@ -57,28 +58,7 @@ export class AiRetentionService {
   async check(before: Session) { if ((await this.current()).hash !== before.hash) throw refused(); }
   private now() { const value = this.clock(); if (!Number.isFinite(value.getTime())) throw unavailable(); return value; }
   private cutoff(days: number) { return new Date(this.now().getTime() - days * 86400000); }
-  private async unresolvedTask(tx: Prisma.TransactionClient, scopeId: string, taskId: string,
-    owner: { tenantId: string; workspaceId: string }): Promise<boolean> {
-    if (await tx.aiTask.findFirst({ where: { id: taskId, scopeId, status: { notIn: [...terminal] } }, select: { id: true } })
-      || await tx.aiStep.findFirst({ where: { taskId, scopeId, status: { in: ['RUNNING', 'UNKNOWN'] } }, select: { id: true } })
-      || await tx.aiTaskExecutionCharge.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { chargeId: true } })
-      || await tx.aiApprovalConsumption.findFirst({ where: { taskId, scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { actionId: true } })
-      || await tx.aiStep.findFirst({ where: { taskId, scopeId, effect: 'POSSIBLE' }, select: { id: true } })) return true;
-    // Resolve persisted associations, not guessed call prefixes. Include
-    // reservations created before their accounting link was acknowledged.
-    const runs = await tx.aiRun.findMany({ where: { taskId, scopeId }, select: { id: true }, orderBy: { id: 'asc' }, take: 101 });
-    const invocations = await tx.aiGatewayInvocation.findMany({ where: { taskId, scopeId }, select: { callId: true }, orderBy: { id: 'asc' }, take: 201 });
-    if (runs.length > 100 || invocations.length > 200) return true;
-    const calls = invocations.map(row => row.callId);
-    return Boolean(await tx.aiBudgetReservation.findFirst({ where: { scopeId, scopeKind: 'WORKSPACE',
-      status: { in: ['reserved', 'pending_reconciliation'] }, OR: [
-        { runId: { in: runs.map(row => row.id) } }, { accountingReceipts: { some: { taskId, scopeId } } }
-      ] }, select: { id: true } })
-      || calls.length && (await tx.aiInvocationAdmission.findFirst({ where: { ...owner, callId: { in: calls },
-        status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
-      || await tx.aiUsageReservation.findFirst({ where: { ...owner, callId: { in: calls },
-        status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })));
-  }
+  private readonly unresolvedTask = aiTaskHasUnresolvedEffects;
   async receipt(value: unknown) {
     const command = aiRetentionReceiptSchema.parse(value), current = await this.current();
     const row = await this.db.aiDataErasure.findFirst({ where: { id: command.id,

@@ -53,7 +53,7 @@ test('configuration-management permission does not replace invocation resource a
   await assert.rejects(h.authority.authorize(h.context, 'invoke'), forbidden);
 });
 
-test('customer task policy management uses original Guard, scoped CAS and atomic original audit recovery', async () => {
+test('customer task policy management uses original Guard, scoped CAS and atomic original audit recovery', async t => {
   const h = setup(), rows = [], logs = [], modelPlans = []; let loseReply = false, failAudit = false;
   const same = (row, where) => Object.entries(where).every(([key, value]) => row[key] === value);
   const db = {
@@ -150,9 +150,106 @@ test('customer task policy management uses original Guard, scoped CAS and atomic
   // Legacy payloads retain their original audit hash, not a hash augmented by
   // newly defaulted flags, and never inherit the newly enabled input actions.
   assert.equal((await service.change(input)).result.allowSubmitInput, false);
+  const { ClientTaskPolicyController } = require('../apps/api/src/modules/ai-native/scenes/client-task-policy.controller');
+  const { clientPolicyRequest, clientPolicyResponse } = require('../apps/api/src/modules/ai-native/scenes/client-policy-http.contract');
+  const shared = require('@rental-os/shared');
+  const contractHelpers = require('./fixtures/ai-native/contract-consumer.cjs');
+  contractHelpers.checkClosed(shared.AI_CLIENT_POLICY_HTTP_SCHEMAS, shared.AI_CLIENT_POLICY_HTTP_SCHEMAS);
+  const validators = contractHelpers.validatorsFor(shared.AI_CLIENT_POLICY_HTTP_SCHEMAS, {});
+  const httpApplication = { ...planApplication };
+  const http = new ClientTaskPolicyController(httpApplication);
+  const request = { headers: { authorization: (await h.credentials.current()).authorization } };
+  const { AI_NATIVE_CLIENT_POLICY_PROVIDER } = require('../apps/api/src/modules/ai-native/ai-native-application.providers');
+  const standard = new ClientTaskPolicyController(AI_NATIVE_CLIENT_POLICY_PROVIDER.useFactory(db, h.guard, h.auth, { enabled: true }));
+  assert.equal((await standard.readModelPlan(request, {})).state, 'not_configured');
+  const standardRead = await standard.read(request, key);
+  assert.equal(standardRead.state, 'not_configured', 'server-selected quote_clarification cannot read the other scene policy');
+  const fails = (status, code, nextAction) => e => e.getStatus() === status && e.getResponse().code === code
+    && e.getResponse().retryable === false && (!nextAction || e.getResponse().nextAction === nextAction);
+  const callCounts = () => ({ policies: rows.length, plans: modelPlans.length, logs: logs.length });
+  await assert.rejects(new ClientTaskPolicyController(AI_NATIVE_CLIENT_POLICY_PROVIDER.useFactory(db, h.guard, h.auth))
+    .read(request, key), fails(503, 'AI_RESOURCE_UNAVAILABLE'));
+  const beforeReads = callCounts();
+  const currentPolicy = await http.read(request, key);
+  assert.equal(currentPolicy.policy.revision, 3);
+  assert.equal(validators.AiClientPolicyReadResponseDraft(currentPolicy), true);
+  assert.equal((await http.read(request, { channel: 'app', customerType: 'corporate' })).state, 'not_configured');
+  const originalPolicy = await http.operation(request, { ...key, operationKey: input.operationKey });
+  assert.equal(originalPolicy.result.revision, 1, 'operation reads its exact original result, not the current row');
+  assert.equal(originalPolicy.result.allowExecute, true);
+  assert.equal((await http.operation(request, { ...key, operationKey: 'never-recorded' })).state, 'not_observed');
+  const replay = await http.change(request, input);
+  assert.equal(replay.result.revision, 1);
+  assert.equal(Object.hasOwn(clientPolicyRequest('change', input), 'allowCancel'), false, 'wire validation must not default legacy command flags');
+  assert.deepEqual(callCounts(), beforeReads);
+  assert.equal((await http.readModelPlan(request, {})).revision, 2);
+  for (const [method, value] of [['read', { ...key, tenantId: 'forged' }], ['change', { ...input, allowExecute: 'true' }],
+    ['readModelPlan', { sceneCode: 'forged' }], ['changeModelPlan', { ...modelPlan, expectedRevision: 2, limits: { ...modelPlan.limits, maxStepMs: 2001 } }]]) {
+    await assert.rejects(http[method](request, value), fails(400, 'AI_INVALID_INPUT'));
+  }
+  const originalRead = planApplication.read;
+  const corruptRead = t.mock.method(httpApplication, 'read', async (...args) => ({ ...await originalRead(...args), internalCredential: 'not-for-wire' }));
+  await assert.rejects(http.read(request, key), fails(503, 'AI_STORAGE_UNAVAILABLE'));
+  corruptRead.mock.restore();
+  assert.throws(() => clientPolicyResponse('read', { ...currentPolicy, policy: { ...currentPolicy.policy, channel: 'app' } }, key),
+    e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  assert.throws(() => clientPolicyResponse('operation', { ...originalPolicy, operationKey: 'another-key' }, { ...key, operationKey: input.operationKey }),
+    e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  for (const altered of [{ ...replay, result: { ...replay.result, revision: 3 } },
+    { ...replay, result: { ...replay.result, allowCancel: true } }, { ...replay, retryable: true }]) {
+    assert.throws(() => clientPolicyResponse('change', altered, input), e => e.code === 'RECONCILIATION_REQUIRED');
+  }
+  // Use the actual producer then damage its response: the write remains recorded
+  // once and is recovered with the same operation key, never a fabricated retry.
+  const nextPolicy = { ...input, operationKey: 'http-disable', expectedRevision: 3, enabled: false,
+    expiresAt: input.expiresAt.replace('Z', '+00:00') };
+  const originalChange = planApplication.change;
+  const corruptChange = t.mock.method(httpApplication, 'change', async (...args) => {
+    const saved = await originalChange(...args);
+    args[1].expectedRevision = 100;
+    return { ...saved, result: { ...saved.result, revision: 101 } };
+  });
+  await assert.rejects(http.change(request, nextPolicy), fails(409, 'AI_RESULT_UNKNOWN', 'read_original_policy_operation'));
+  corruptChange.mock.restore();
+  assert.equal(rows[0].revision, 4); assert.equal(logs.length, 4);
+  assert.equal((await http.operation(request, { ...key, operationKey: nextPolicy.operationKey })).result.revision, 4);
+  assert.equal((await http.change(request, nextPolicy)).result.revision, 4, 'equivalent offset date survives original idempotent replay');
+  assert.equal(logs.length, 4);
+  loseReply = true;
+  const uncertain = { ...nextPolicy, operationKey: 'http-commit-lost', expectedRevision: 4, enabled: true };
+  assert.equal((await http.change(request, uncertain)).state, 'unknown');
+  assert.equal((await http.operation(request, { ...key, operationKey: uncertain.operationKey })).result.revision, 5);
+  const originalPlan = planApplication.changeModelPlan;
+  const corruptPlan = t.mock.method(httpApplication, 'changeModelPlan', async (...args) => ({ ...await originalPlan(...args), allowedTools: ['forged'] }));
+  await assert.rejects(http.changeModelPlan(request, { ...modelPlan, expectedRevision: 2 }), fails(409, 'AI_RESULT_UNKNOWN', 'read_original_model_plan'));
+  corruptPlan.mock.restore();
+  const planRead = await http.readModelPlan(request, {});
+  assert.equal(planRead.revision, 3);
+  assert.equal(planRead.state, 'configured');
+  assert.equal((await http.changeModelPlan(request, { ...modelPlan, expectedRevision: 3, enabled: false,
+    expiresAt: modelPlan.expiresAt.replace('Z', '+00:00') })).revision, 4);
+  assert.throws(() => clientPolicyResponse('readModelPlan', { ...planRead, limits: { ...planRead.limits, maxConcurrent: 2 } }, {}),
+    e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  const { OPENAPI_DOCUMENT: doc } = require('../apps/api/src/contracts/openapi-document');
+  for (const [method, contract] of Object.entries(shared.AI_CLIENT_POLICY_HTTP_CONTRACTS)) {
+    const operation = doc.paths[`/api/${shared.AI_CLIENT_TASK_POLICY_HTTP_DRAFT.basePath}/${shared.AI_CLIENT_TASK_POLICY_HTTP_DRAFT[method]}`].post;
+    assert.equal(operation.requestBody.content['application/json'].schema.$ref, `#/components/schemas/${contract.request}`);
+    assert.ok(doc.components.schemas[contract.response]);
+    assert.equal(operation.responses['200'].content['application/json'].schema.properties.data.$ref, `#/components/schemas/${contract.response}`);
+  }
+  assert.deepEqual(contractHelpers.compileConsumer(`import type { AiClientPolicyChangeResponseDraft, AiClientModelPlanReadResponseDraft } from '../packages/shared/src/index';
+const policy: AiClientPolicyChangeResponseDraft = ${JSON.stringify(replay)};
+const plan: AiClientModelPlanReadResponseDraft = ${JSON.stringify(planRead)};
+// @ts-expect-error configuration never attests execution
+const forged: AiClientPolicyChangeResponseDraft = { ...policy, execution: 'granted' };
+// @ts-expect-error an absent plan carries no configuration
+const absent: AiClientModelPlanReadResponseDraft = { state: 'not_configured', execution: 'not_attested', revision: 1 };
+`), []);
   h.state.user.permissions = [];
+  await assert.rejects(http.read(request, key), fails(403, 'AI_ACCESS_DENIED'));
+  await assert.rejects(http.operation(request, { ...key, operationKey: nextPolicy.operationKey }), fails(403, 'AI_ACCESS_DENIED'));
   await assert.rejects(planApplication.readModelPlan(await h.credentials.current()), e => e.code === 'AI_ACCESS_DENIED');
   await assert.rejects(service.read(key), e => e.code === 'AI_ACCESS_DENIED');
   await assert.rejects(service.operation({ ...key, operationKey: input.operationKey }), e => e.code === 'AI_ACCESS_DENIED');
-  assert.equal(logs.length, 3);
+  assert.equal(logs.length, 5);
 });

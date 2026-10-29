@@ -5,11 +5,13 @@ import { HttpException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { z } from 'zod';
-import type { AiExecutionContext, RentalOrderExtensionPreview } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/shared';
+import { validateAiCoreExtensionPreview } from '../scenes/extension-preview-http.contract';
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { RentalOrderExtensionDto } from '../../rental-core/rental-order-request.dto';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { rentalOrderDueAt } from '../../rental-core/rental-carrier-shipment';
 import type { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -26,16 +28,6 @@ export const aiOrderExtensionPreviewInputSchema = z.object({
     }).strict()).max(50).optional(), memo: z.string().max(2000).optional()
   }).strict()
 }).strict();
-const previewSchema = z.object({ orderId: z.string(), originalEndAt: absoluteTime, newEndAt: absoluteTime,
-  billableUnits: z.number().finite().nonnegative(), rentalAmount: z.number().finite(), serviceAmount: z.number().finite(),
-  depositDelta: z.number().finite(), preAuthDelta: z.number().finite(), payableAmount: z.number().finite(),
-  currency: z.string().regex(/^[A-Z]{3}$/u), settlementMode: z.enum(['immediate', 'monthly']), paymentRequired: z.boolean(),
-  chargeLines: z.array(z.unknown()).max(1000), calendarSnapshot: z.array(z.unknown()).max(1000),
-  ruleVersion: z.string().min(1).max(191)
-}).passthrough();
-const previewKeys = ['orderId', 'originalEndAt', 'newEndAt', 'billableUnits', 'rentalAmount', 'serviceAmount',
-  'depositDelta', 'preAuthDelta', 'payableAmount', 'currency', 'settlementMode', 'paymentRequired', 'chargeLines',
-  'calendarSnapshot', 'ruleVersion', 'serviceSnapshots', 'priceVersionId', 'priceVersion', 'executionBasis', 'pricingSnapshot'] as const;
 
 export class AiOrderExtensionPreviewService {
   constructor(private readonly orderId: string, private readonly core: Pick<RentalCoreService, 'getOrder'>,
@@ -90,10 +82,8 @@ export class AiOrderExtensionPreviewService {
         approval: 'not_granted' as const, execution: 'not_attempted' as const,
         validity: 'observation_only_recheck_in_original_business_flow' as const };
       if (blocked !== undefined) return { ...common, status: 'blocked' as const, reason: 'core_validation_failed' as const, coreStatus: blocked };
-      const checked = previewSchema.safeParse(result);
-      if (!checked.success || result?.orderId !== this.orderId || result.newEndAt !== command.extension.newEndAt
-        || Buffer.byteLength(JSON.stringify(result), 'utf8') > 131072) throw new ModelGatewayError('INVALID_RESPONSE');
-      const projection = Object.fromEntries(previewKeys.filter(key => result[key] !== undefined).map(key => [key, result[key]])) as unknown as RentalOrderExtensionPreview;
+      const projection = validateAiCoreExtensionPreview(result, this.orderId, command.extension.newEndAt);
+      if (Date.parse(projection.originalEndAt) !== Date.parse(rentalOrderDueAt(before))) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       return { ...common, status: 'previewed' as const, preview: projection };
     });
   }

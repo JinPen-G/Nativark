@@ -178,7 +178,11 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     return freezeOriginalInput({ receipt: this.receipt(row), context: current.context, material: 'erased' as const,
       task: { state: 'observed' as const, ...before, execution: 'not_inferred_from_metadata' as const } });
   }
-  async save(value: unknown, isReissue = false) {
+  /** A trusted association participant may atomically attach metadata to the
+   * original request. It cannot create a task or dispatch inside this transaction.
+   * Association conflicts roll back the request as well; normal callers omit it. */
+  async save(value: unknown, isReissue = false,
+    associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
     const command = parseOriginalRequest(value, isReissue), body = originalBody(command);
     const previousRef = command.previousInputRef ?? null;
     const initial = await this.authority.create(body);
@@ -199,7 +203,12 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     try {
       const result = await this.db.$transaction(async tx => {
         const existing = await tx.aiTaskOriginalRequest.findFirst({ where });
-        if (existing) return { ...(await verify(existing)).receipt, replayed: true };
+        if (existing) {
+          const receipt = (await verify(existing)).receipt;
+          await associate?.(tx, receipt);
+          completed = Boolean(associate);
+          return { ...receipt, replayed: true };
+        }
         const current = await this.authority.create(body);
         this.sameIdentity(initial, current);
         if (initial.policyHash !== current.policyHash || initial.policyRevision !== current.policyRevision) throw conflict();
@@ -210,13 +219,20 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
           contentHash, authorizationBindingHash: originalIdentityHash(initial.context), policyRevision: initial.policyRevision,
           policyHash: initial.policyHash, expiresAt, createdAt: now, status: 'STORED' } });
         const checked = await verify(row);
+        await associate?.(tx, checked.receipt);
         completed = true;
         return { ...checked.receipt, replayed: false };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       return freezeOriginalInput(result);
     } catch (error) {
+      // Once the participant completed, a lost COMMIT reply is an unknown
+      // association even when a transport maps it to a typed repository error.
+      if (associate && completed) throw new AiOriginalRequestResultUnknownError();
       if (error instanceof AiTaskRepositoryError) throw error;
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        // A uniqueness race does not prove the separate association committed.
+        // Its caller must observe the original operation, not replay a callback.
+        if (associate) throw new AiOriginalRequestResultUnknownError();
         const row = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where }));
         if (!row) throw conflict();
         return freezeOriginalInput({ ...(await verify(row)).receipt, replayed: true });

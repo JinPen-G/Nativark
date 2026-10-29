@@ -303,7 +303,9 @@ export const AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS = Object.freeze({
   readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft', successStatus: 200 },
   readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft', successStatus: 200 },
   readModelResult: { request: 'AiSceneModelResultReadDraft', response: 'AiSceneModelResultObservationDraft', successStatus: 200 },
-  readTaskScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft', successStatus: 200 }
+  readTaskScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft', successStatus: 200 },
+  reopenModelSource: { request: 'AiSceneModelSourceReadDraft', response: 'AiSceneModelSourceReadResponseDraft', successStatus: 200 },
+  reopenOpeningModelSource: { request: 'AiSceneOpeningModelSourceReadDraft', response: 'AiSceneOpeningModelSourceReadResponseDraft', successStatus: 200 }
 } as const);
 
 /** Separate opt-in accounting host. No model/runner routes are registered,

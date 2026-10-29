@@ -35,7 +35,7 @@ const gatewayCodes: Record<string, keyof typeof statuses> = { FORBIDDEN: 'AI_ACC
  * composition re-verify the current SaaS principal on every operation. */
 @Controller(routes.basePath)
 export class PlatformCapabilityProbeController {
-  constructor(@Inject(PLATFORM_CAPABILITY_PROBE_REQUESTS) private readonly requests: PlatformCapabilityProbeRequestFactory) {}
+  constructor(@Inject(PLATFORM_CAPABILITY_PROBE_REQUESTS) private readonly requests: Pick<PlatformCapabilityProbeRequestFactory, 'open'>) {}
 
   private call(method: Method, request: Request, body: unknown, response?: Response): Promise<unknown> {
     return (async () => {

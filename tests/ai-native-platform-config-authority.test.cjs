@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', lib: ['es2022'], experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { AuthService } = require('../apps/api/src/modules/auth/auth.service');
 const { ApiAuthGuard, requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
 const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
@@ -32,6 +32,44 @@ function setup() {
   });
   return { state, auth, guard, credentials, activate, invocation, authority };
 }
+test('standard platform probe is inert and keeps current-authorized history when new execution is disabled', async () => {
+  const { composeStandardPlatformProbe } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-standard.application');
+  const { PlatformCapabilityProbeController } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-capability-probe.controller');
+  const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
+  const h = setup(); h.state.user.permissions = ['system:ai-provider:view'];
+  const scope = { id: 'platform-scope', ...aiPersistenceScopeColumns({ kind: 'platform' }) };
+  const store = createTaskInputStore({ aiScope: [scope], aiTask: [], aiRun: [], aiStep: [], aiTaskActionInput: [],
+    aiTaskOriginalRequest: [], aiTaskActionPolicy: [], aiTaskPlanPolicy: [], aiProviderProfile: [], aiPlatformModelConnection: [],
+    aiBudgetPolicy: [], aiBudgetReservation: [], aiBudgetLedgerEntry: [], aiBudgetAllocation: [], aiGatewayInvocation: [],
+    aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], aiProviderCapability: [], aiProviderCapabilityEvidence: [], operationLog: [] });
+  store.db.aiPlatformModelConnection.update = async () => { throw Error('history cannot update platform connection'); };
+  const input = { db: store.db, guard: h.guard,
+    secrets: { encrypt() { throw Error('history cannot encrypt'); }, decrypt() { throw Error('history cannot decrypt'); } } };
+  const request = { headers: { authorization: (await h.credentials.current()).authorization } }, key = { requestKey: 'probe-not-created' };
+  const settings = { enabled: false, platformProfileId: 'synthetic-profile', sceneVersion: '1', priceVersion: 'count-price',
+    host: { holderId: 'probe-worker', leaseMs: 30000 } };
+  const disabled = composeStandardPlatformProbe(input), before = store.trace.length;
+  assert.throws(() => disabled.open(request), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const factory = composeStandardPlatformProbe(input, settings);
+  assert.equal(store.trace.length, before);
+  const controller = new PlatformCapabilityProbeController(factory);
+  assert.deepEqual(await controller.readOriginal(request, key), { ...key, retryable: false, state: 'not_observed' });
+  const opened = factory.open(request);
+  for (const method of ['prepareOriginal', 'readExecutableOriginal', 'createTask', 'start', 'readCapabilityReceipt'])
+    assert.throws(() => opened[method](key), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  opened.close();
+  await assert.rejects(opened.readOriginal(key), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(controller.readOriginal(request, { ...key, actorId: 'forged' }), e => e.getStatus() === 400);
+  h.state.active = false;
+  await assert.rejects(controller.readOriginal(request, key), e => e.getStatus() === 403);
+  assert.ok(store.trace.every(line => !/\.(create|update|upsert|createMany)$/u.test(line)));
+  assert.throws(() => composeStandardPlatformProbe(input, { ...settings, enabled: true }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.throws(() => composeStandardPlatformProbe(input, { ...settings, tenantId: 'forged' }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const fs = require('node:fs'), source = fs.readFileSync(require('node:path').join(__dirname, '../apps/api/src/app.module.ts'), 'utf8');
+  assert.match(source, /controllers:\s*\[[\s\S]*?\bPlatformCapabilityProbeController\b/u);
+  assert.match(source, /providers:\s*\[[\s\S]*?\bAI_NATIVE_PLATFORM_PROBE_PROVIDER\b/u);
+});
+
 test('explicit SaaS provider-management permission is recognized by the actual existing Guard', async () => {
   const h = setup(); assert.equal(await h.activate(), true);
   assert.deepEqual(requiredPermissions('PUT', '/platform/ai/providers/synthetic-profile'), ['system:ai-provider:manage']);

@@ -290,16 +290,17 @@ function workbenchFixture() {
   plugin.apply(ctx);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const mount = () => {
+    const releaseContext = props.observeExpandedContext(); props.changePurpose("business");
     const catalog = document.createElement("details"), sources = document.createElement("details");
     catalog.open = sources.open = true; catalog.append(sources); document.body.append(catalog);
     const releaseCatalog = props.observePreview(catalog, "catalog"), releaseSources = props.observePreview(sources, "sources");
     return { catalog, sources, close: element => { element.open = false; element.dispatchEvent(new window.Event("toggle")); },
-      dispose: () => { releaseSources(); releaseCatalog(); catalog.remove(); } };
+      dispose: () => { releaseSources(); releaseCatalog(); releaseContext(); catalog.remove(); } };
   };
   return { dom, window, document, props, locale, calls, selection, result, check, sourceResult, mount, flush,
     state: () => props.hooks.business.getSnapshot(), timers,
     setCatalog: fn => { catalogHandler = fn; }, setCheck: fn => { checkHandler = fn; }, setSources: fn => { sourcesHandler = fn; },
-    accept: session => accept({ protocolVersion: 1, revision: 2, session }), mode: ctx.layout.selectPanel,
+    accept: session => accept({ protocolVersion: 1, revision: 2, session }), mode: ctx.layout.selectPanel, panel: () => currentPanel,
     blur: () => { focused = false; window.dispatchEvent(new window.Event("blur")); },
     hide: () => { hidden = true; document.dispatchEvent(new window.Event("visibilitychange")); },
     advance: async ms => {
@@ -316,7 +317,7 @@ function workbenchFixture() {
 }
 
 test("workbench withdraws closed, collapsed, inactive and changed previews without reviving late reads", async () => {
-  for (const action of ["close", "rapid-reopen", "collapse", "sources", "clear", "blur", "hidden", "mode", "scope", "dispose"]) {
+  for (const action of ["close", "rapid-reopen", "collapse", "sources", "clear", "blur", "hidden", "mode", "purpose", "panel", "scope", "logout", "dispose"]) {
     const f = workbenchFixture();
     try {
       await f.flush(); const view = f.mount();
@@ -331,8 +332,11 @@ test("workbench withdraws closed, collapsed, inactive and changed previews witho
       else if (action === "clear") f.props.clearMaterials();
       else if (action === "blur") f.blur();
       else if (action === "hidden") f.hide();
-      else if (action === "mode") f.mode("rental-business");
+      else if (action === "mode") f.props.changeMode("traditional");
+      else if (action === "purpose") f.props.changePurpose("personal");
+      else if (action === "panel") f.mode("models");
       else if (action === "scope") f.accept({ ...sample(), currentWorkspaceId: "w2" });
+      else if (action === "logout") f.props.logout();
       else f.dispose();
       const status = f.state().catalog.status;
       assert.ok(["inactive", "cleared", "changed"].includes(status), action);
@@ -383,7 +387,7 @@ test("workbench expiry and failed checks keep explicit states and never extend o
   }
 });
 
-test("workbench presentation clears on real component unmount and offers localized manual clearing", async () => {
+test("workbench purpose controls keep the personal composer and withdraw preparation on exit or collapse", async () => {
   const f = workbenchFixture(), React = harnessRequire("react"), { createRoot } = harnessRequire("react-dom/client");
   const { act } = React;
   const previous = new Map(["window", "document", "IS_REACT_ACT_ENVIRONMENT"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -394,35 +398,68 @@ test("workbench presentation clears on real component unmount and offers localiz
     for (const key of omit) delete props[key];
     return React.createElement(tag, props, children);
   };
-  const { WorkbenchContext } = load(`${workbench}Workbench.tsx`, { React, ...React, ...shared,
-    Button: primitive("button", ["variant"]), Input: primitive("input"), Menu: () => null, SegmentedControl: () => null,
+  const { SegmentedControl } = load("clients/agent-desktop/harness/packages/client/ui-primitives/src/SegmentedControl.tsx", {
+    React, ...React, document: f.document, clsx: (...values) => values.filter(Boolean).join(" "), css: {}
+  }, [[/^import \{[^}]*\} from '[^']+'$/gm, ""], [/^import (css|clsx) from '[^']+'$/gm, ""]]);
+  const { WorkbenchContext, WorkbenchMain } = load(`${workbench}Workbench.tsx`, { React, ...React, ...shared,
+    Button: primitive("button", ["variant"]), Input: primitive("input"), Menu: () => null, SegmentedControl,
     Tooltip: ({ children }) => children, Toast: () => null, IconWarningOutlineRegular: () => null, IconChevronDownOutlineRegular: () => null,
     css: {} }, [[/^import \{[^}]*\} from '[^']+'$/gm, ""], [/^import css from '[^']+'$/gm, ""]]);
+  // Exercise the actual retention owner, not a second test implementation of panel switching.
+  const { MainPanel } = load("clients/agent-desktop/harness/packages/client/ui-layout/src/client/AppFrame.tsx", {
+    React, ...React, css: {}
+  }, [[/^import \{[^}]*\} from '[^']+'$/gm, ""], [/^import css from '[^']+'$/gm, ""], ["function MainPanel(", "export function MainPanel("]]);
+  function PersonalComposer() { return React.createElement("textarea", { "aria-label": "personal draft", defaultValue: "personal draft" }); }
+  const bind = source => select => select(React.useSyncExternalStore(source.subscribe, source.getSnapshot));
+  const hooks = { useBusiness: bind(f.props.hooks.business), useWorkMode: bind(f.props.hooks.workMode),
+    usePurpose: bind(f.props.hooks.purpose), t: key => f.locale.zh[key] };
   const render = async wide => { await act(async () => {
-    renderer.render(React.createElement(WorkbenchContext, { ...f.props, wide,
-      useBusiness: select => select(f.state()), useWorkMode: select => select("ai"), t: key => f.locale.zh[key] })); await f.flush();
+    const props = { ...f.props, ...hooks, measure: () => () => {} };
+    renderer.render(React.createElement(React.Fragment, null,
+      React.createElement(WorkbenchContext, { ...props, wide }),
+      React.createElement(MainPanel, { usePanelInfo: select => select({ activePanelId: f.panel() }),
+        renderSlot: (_name, _owner, { entryKey }) => entryKey === "rental-business"
+          ? React.createElement(WorkbenchMain, props) : React.createElement(PersonalComposer) })));
+    await f.flush();
   }); };
+  const button = key => [...container.querySelectorAll("button")].find(row => row.textContent === f.locale.zh[key]);
+  const chooseBusiness = async () => { await act(async () => { button("businessPreparation").click(); await f.flush(); }); await render(true); };
+  const open = () => { for (const element of container.querySelectorAll("details")) {
+    element.open = true; element.dispatchEvent(new f.window.Event("toggle"));
+  } };
   try {
     await f.flush(); await render(true);
-    const open = () => { for (const element of container.querySelectorAll("details")) {
-      element.open = true; element.dispatchEvent(new f.window.Event("toggle"));
-    } };
-    open(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush(); await render(true);
+    const draft = container.querySelector("textarea"); draft.value = "unsaved personal draft";
+    assert.equal(f.props.hooks.purpose.getSnapshot(), "personal"); assert.equal(container.querySelector("form"), null);
+    f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush(); assert.equal(f.calls.catalog, 0);
+    await chooseBusiness(); assert.equal(container.querySelector("textarea"), draft); assert.equal(draft.value, "unsaved personal draft");
+    assert.equal(draft.closest("[hidden]") !== null, true); assert.equal(f.props.hooks.workMode.getSnapshot(), "ai");
+    assert.match(container.textContent, /业务模型接入尚未开放/); assert.equal(f.calls.catalog, 0);
+    assert.equal(container.querySelector("[role=tabpanel]").id, "rental-purpose-business-panel");
+    await act(async () => { open(); f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush(); }); await render(true);
     assert.match(container.textContent, /catalog-ref-1/);
     await render(false); assert.equal(f.state().catalog.status, "inactive"); assert.equal(f.timers.size, 0);
     await render(true); assert.doesNotMatch(container.textContent, /catalog-ref-1/); assert.match(container.textContent, /预览已撤回/);
     assert.ok([...container.querySelectorAll("input")].every(input => input.value === "")); assert.equal(f.calls.catalog, 1);
-    open(); f.props.readSources(); await f.flush(); await render(true);
-    const reopen = [...container.querySelectorAll("button")].find(button => button.textContent === f.locale.zh.catalogReopenSource);
-    assert.ok(reopen); await act(async () => { reopen.click(); await f.flush(); }); await render(true);
+    await act(async () => { open(); f.props.readSources(); await f.flush(); }); await render(true);
+    const reopen = button("catalogReopenSource"); assert.ok(reopen);
+    await act(async () => { reopen.click(); await f.flush(); }); await render(true);
     assert.equal(f.state().catalog.result.reopenedFrom.auditId, "audit-1");
     assert.equal(container.querySelector("input").value, "show first 10 products");
-    const clear = [...container.querySelectorAll("button")].find(button => button.textContent === f.locale.zh.catalogClear);
-    assert.ok(clear); await act(async () => clear.click()); await render(true);
+    const clear = button("catalogClear"); assert.ok(clear); await act(async () => clear.click()); await render(true);
     assert.equal(f.state().catalog.material, null); assert.equal(f.state().sources.result, null); assert.equal(f.timers.size, 0);
     assert.match(container.textContent, /当前预览已清除/); assert.match(container.textContent, /不删除正式业务记录/);
-    assert.equal(f.state().catalog.status, "cleared");
-    assert.ok([...container.querySelectorAll("input")].every(input => input.value === ""));
+    assert.equal(f.state().catalog.status, "cleared"); assert.ok([...container.querySelectorAll("input")].every(input => input.value === ""));
+    await act(async () => { open(); f.props.readSources(); await f.flush(); }); await render(true);
+    await act(async () => button("returnPersonal").click()); await render(true);
+    assert.equal(container.querySelector("form"), null); assert.equal(draft.closest("[hidden]"), null);
+    assert.equal(container.querySelector("textarea"), draft); assert.equal(draft.value, "unsaved personal draft");
+    assert.equal(f.state().sources.result, null); assert.equal(f.timers.size, 0);
+    const count = f.calls.catalog; f.props.readCatalog({ selection: f.selection, limit: 10 }); await f.flush(); assert.equal(f.calls.catalog, count);
+    await chooseBusiness(); assert.equal(f.calls.catalog, count); assert.equal(container.querySelector("input").value, "");
+    await act(async () => { f.accept({ ...sample(), currentWorkspaceId: "w2" }); await f.flush(); }); await render(true);
+    assert.equal(f.props.hooks.purpose.getSnapshot(), "personal"); assert.equal(container.querySelector("form"), null);
+    assert.equal(draft.value, "unsaved personal draft");
   } finally {
     await act(async () => renderer.unmount()); f.dispose();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
