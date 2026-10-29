@@ -522,40 +522,29 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
 .breadcrumb-link:hover { color: var(--foreground); }
 .breadcrumb-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .workspace-context-actions { display: flex; flex: none; align-items: center; gap: var(--space-4); }
-/* Copilot entry placement preview. Keep it outside route motion and scrolling;
-   leave the bottom pagination lane free. No assistant action is connected. */
+/* AI side panel preview's .asp-reopen button geometry; hosted in the shared header.
+   Source: uiarc-pro-archive/preview/src/components/ai-side-panel/side-panel.css.
+   Only the entry is previewed here; no panel or assistant action is connected. */
 .workspace-copilot-entry {
-  position: absolute;
-  z-index: 20;
-  inset-inline-end: var(--space-6);
-  inset-block-end: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
   display: inline-flex;
   flex: none;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  height: var(--space-10);
-  padding: 0 var(--space-4);
+  gap: 7px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: var(--rental-ui-radius-pill);
-  background: var(--foreground);
-  color: var(--surface);
-  box-shadow: var(--shadow-floating);
+  border-radius: var(--rental-ui-radius-button);
+  background: var(--surface);
+  color: var(--foreground);
   font: inherit;
-  font-size: var(--text-sm);
-  font-weight: 500;
+  font-size: 13px;
   line-height: 1.6;
   white-space: nowrap;
   cursor: pointer;
 }
-.workspace-copilot-entry .rental-animated-icon { font-size: 18px; }
-.workspace-copilot-entry:hover { background: color-mix(in srgb, var(--foreground) 90%, var(--surface)); }
+.workspace-copilot-entry .rental-animated-icon { font-size: 15px; }
+.workspace-copilot-entry:hover { background: var(--surface-muted); }
 .workspace-copilot-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-body:has(.rental-selection-toolbar [data-shown="true"]) .workspace-copilot-entry {
-  inset-block-end: calc(var(--space-24) + env(safe-area-inset-bottom, 0px));
-}
 @media (max-width: 767px) {
-  .workspace-copilot-entry { inset-inline-end: var(--space-4); width: var(--space-10); padding: 0; }
   .workspace-copilot-label { display: none; }
 }
 .workspace-clock { color: var(--text-muted); font-size: var(--rental-typography-meta-size); font-variant-numeric: tabular-nums; white-space: nowrap; }
