@@ -17,7 +17,7 @@ export function RecordDetailLayout({ title, status, facts, actions, onBack, chil
   title: string; status?: ReactNode; facts?: RecordFact[]; actions?: ReactNode; onBack: () => void; children: ReactNode;
 }) {
   const { t } = useLocale();
-  return <div className={styles.record} data-copilot-record="detail" data-copilot-label={title}>
+  return <div className={styles.record} data-copilot-detail="" data-copilot-record="detail" data-copilot-label={title}>
     <PageHeader title={title} extra={<div className={styles.actions}>{actions}<Button icon={<ArrowLeftOutlined aria-hidden />} onClick={onBack}>{t("返回列表")}</Button></div>} />
     {(status || facts?.length) && <section className={styles.summary} aria-label={t("资料概览")}>
       {status && <div className={styles.status}>{status}</div>}

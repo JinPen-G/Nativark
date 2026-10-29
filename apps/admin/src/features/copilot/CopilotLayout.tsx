@@ -7,15 +7,18 @@ import { useLocale } from '@/app/locale';
 import { AnimatedIcon } from '@/components/ui/AnimatedIcon';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
 import { useCopilot, type CopilotTurn } from './CopilotProvider';
-import { readTarget, type CopilotRecord } from './context';
+import { readTarget, readRecord, type CopilotRecord } from './context';
+import { CopilotNavigation } from './CopilotNavigation';
+import { navigationTarget } from './destinations';
 import './archive/ai-side-panel/side-panel.css';
 import './copilot.css';
 
 /** Original ai-side-panel dock geometry and curve; only the document/demo is replaced.
  * The single business-area trigger delegates to whole records, not individual fields. */
 export function CopilotLayout({ children, suspended = false }: { children: ReactNode; suspended?: boolean }) {
-  const copilot = useCopilot(), { t } = useLocale(), { pathname } = useLocation();
+  const copilot = useCopilot(), { t } = useLocale(), location = useLocation(), { pathname } = location;
   const [menuOpen, setMenuOpen] = useState(false), [target, setTarget] = useState<CopilotRecord[]>([]), [narrow, setNarrow] = useState(false);
   const root = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const shown = Boolean(copilot?.open && !suspended && copilot.available);
@@ -27,6 +30,7 @@ export function CopilotLayout({ children, suspended = false }: { children: React
     return () => observer.disconnect();
   }, []);
   useEffect(() => { setMenuOpen(false); }, [pathname, suspended]);
+  useEffect(() => { if (narrow && navigationTarget(location.state, pathname)) copilot?.close(); }, [location.key, narrow]);
   const capture = (event: SyntheticEvent) => {
     const items = !suspended && copilot?.available ? readTarget(event.target, pathname) : [];
     if (!items.length) {
@@ -36,6 +40,7 @@ export function CopilotLayout({ children, suspended = false }: { children: React
     setTarget(items);
   };
   return <div ref={root} className={`ai-side-panel copilot-host${shown ? ' is-open' : ''}${narrow ? ' is-sheet' : ''}`}>
+    <CopilotNavigation />
     <ContextMenu.Root open={menuOpen} onOpenChange={next => setMenuOpen(next)}>
       <ContextMenu.Trigger render={<div className="asp-page-column" ref={content} inert={shown && narrow || undefined} />}
         onContextMenuCapture={capture} onTouchStartCapture={capture}>
@@ -58,8 +63,19 @@ export function CopilotLayout({ children, suspended = false }: { children: React
 
 function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boolean; background: HTMLElement | null }) {
   const copilot = useCopilot()!, { t, locale } = useLocale(), navigate = useNavigate();
+  const { pathname } = useLocation();
   const input = useRef<HTMLTextAreaElement>(null), panel = useRef<HTMLElement>(null), thread = useRef<HTMLDivElement>(null);
   const [review, setReview] = useState<CopilotTurn | null>(null), [reviewOpen, setReviewOpen] = useState(false);
+  const [availableContext, setAvailableContext] = useState({ detail: false, configuration: false });
+  useEffect(() => {
+    if (!open || !background) return;
+    const read = () => {
+      const next = { detail: Boolean(background.querySelector('[data-copilot-detail]')), configuration: Boolean(background.querySelector('[data-copilot-config]')) };
+      setAvailableContext(previous => previous.detail === next.detail && previous.configuration === next.configuration ? previous : next);
+    };
+    read(); const observer = new MutationObserver(read); observer.observe(background, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [open, background, pathname]);
   useEffect(() => { if (open) input.current?.focus({ preventScroll: true }); }, [open, copilot.focusVersion]);
   useEffect(() => {
     const node = thread.current;
@@ -82,6 +98,13 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
     return () => { document.removeEventListener('keydown', handle); document.removeEventListener('focusin', contain); };
   }, [open, narrow, background, copilot.close]);
   const send = (text = copilot.draft) => copilot.send(text, locale === 'en-US');
+  const prepareCurrent = (label: string) => {
+    const candidates = document.querySelectorAll<HTMLElement>('.copilot-host .asp-page-column [data-copilot-config], .copilot-host .asp-page-column [data-copilot-detail]');
+    const records = Array.from(candidates).map(node => readRecord(node, window.location.pathname)).filter((record): record is CopilotRecord => Boolean(record));
+    if (!records.length) return;
+    copilot.add(records); copilot.send(label, locale === 'en-US', records);
+  };
+  const changed = (turn: CopilotTurn) => turn.changes?.filter(change => change.after !== change.before) ?? [];
   const contextLabel = (record: CopilotRecord) => record.label;
   return <aside id="business-copilot" ref={panel} className="asp-panel" role={narrow ? 'dialog' : 'complementary'} aria-modal={narrow && open || undefined} aria-label="Copilot">
     <header className="asp-panel-header"><div className="asp-identity"><AnimatedIcon name="ai" /><strong>Copilot</strong><span>{t('本地演示')}</span>
@@ -90,7 +113,10 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
     </div><div className="asp-context"><span><FileText size={12} />{t(copilot.page?.label ?? '当前页面')}</span></div></header>
     <div className="asp-thread" ref={thread} aria-busy={copilot.busy}><div className={`asp-thread-content${copilot.turns.length ? '' : ' is-empty'}`}>
       {!copilot.turns.length && <div className="asp-empty"><h2>{t('从当前工作继续')}</h2><p>{t('右击业务记录，加入上下文后提问。')}</p>
-        <div className="asp-suggestions">{[t('整理所选内容'), t('查看可用页面')].map(label => <button type="button" key={label} data-sound="press" onClick={() => send(label)}>{label}</button>)}</div>
+        <div className="asp-suggestions">
+          {!copilot.contexts.length && availableContext.detail && <button type="button" data-sound="press" onClick={() => prepareCurrent(t('分析当前资料'))}>{t('分析当前资料')}</button>}
+          {!copilot.contexts.length && availableContext.configuration && <button type="button" data-sound="press" onClick={() => prepareCurrent(t('解释当前配置'))}>{t('解释当前配置')}</button>}
+          {[t('整理所选内容'), t('查看可用页面')].map(label => <button type="button" key={label} data-sound="press" onClick={() => send(label)}>{label}</button>)}</div>
       </div>}
       {copilot.turns.map(turn => <article key={turn.id} className="asp-turn"><div className="asp-user"><p>{turn.prompt}</p><span>{t(turn.page)} · {turn.contexts.length} {t('条上下文')}</span></div>
         {turn.status === 'reading' ? <p className="asp-reading" role="status">{t('正在整理所选内容（演示）')}</p> : <>
@@ -98,10 +124,13 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
           {turn.status === 'stopped' && <p className="asp-state">{t('已停止')}<button type="button" onClick={() => send(turn.prompt)}>{t('重试')}</button></p>}
           {!!turn.contexts.length && <details className="copilot-sources"><summary>{t('上下文来源')} · {turn.contexts.length}</summary>{turn.contexts.map(record => <div key={record.key}><strong>{contextLabel(record)}</strong><span>{t(record.source)} · {new Date(record.capturedAt).toLocaleTimeString(locale)}</span>
             <button type="button" onClick={() => { if (copilot.routes.some(route => record.path === route.path || record.path.startsWith(`${route.path}/`))) { navigate(record.path); if (narrow) copilot.close(); } }}>{t('返回来源')}</button></div>)}</details>}
-          {turn.proposal && <section className="asp-change"><header><strong>{t('操作预览')}</strong><span>{t('尚未执行')}</span></header><div className="asp-change-body"><p>{turn.prompt}</p><span className="asp-state">{turn.contexts.length} {t('条记录')}</span></div>
-            <footer>{turn.proposal === 'pending' ? <><span /><div><button type="button" data-sound="press" onClick={() => copilot.decide(turn.id, 'discarded')}>{t('放弃')}</button><button type="button" className="asp-primary" data-sound="press" onClick={() => { setReview(turn); setReviewOpen(true); }}>{t('核对方案')}</button></div></> : <span className="asp-state">{t(turn.proposal === 'confirmed' ? '演示方案已确认，未执行业务' : '已放弃')}</span>}</footer>
+          {turn.proposal && <section className="asp-change"><header><strong>{t(turn.changes?.length ? '配置建议' : '操作预览')}</strong><span>{t(turn.filled ? '未保存' : '尚未执行')}</span></header><div className="asp-change-body"><p>{turn.prompt}</p>
+            {turn.changes?.map(change => <label key={`${change.configId}:${change.key}`} className="copilot-proposed-field"><span>{change.label}<small>{t('当前值')}：{change.options?.find(option => option.value === change.before)?.label ?? change.before}</small></span>
+              <Select aria-label={`${t('建议值')} ${change.label}`} value={change.after} disabled={turn.proposal !== 'pending'} options={change.options} onChange={value => copilot.updateChange(turn.id, `${change.configId}:${change.key}`, String(value))} /></label>)}
+            {turn.changes?.length ? <small>{t('核对后仅填入表单，仍需手动保存。')}</small> : <span className="asp-state">{turn.contexts.length} {t('条记录')}</span>}</div>
+            <footer>{turn.proposal === 'pending' ? <><span /><div><button type="button" data-sound="press" onClick={() => copilot.decide(turn.id, 'discarded')}>{t('放弃')}</button><button type="button" className="asp-primary" data-sound="press" disabled={Boolean(turn.changes?.length && !changed(turn).length)} onClick={() => { setReview(turn); setReviewOpen(true); }}>{t('核对方案')}</button></div></> : <span className="asp-state">{t(turn.filled ? '已填入表单，尚未保存。' : turn.proposal === 'confirmed' ? '演示方案已确认，未执行业务' : '已放弃')}</span>}</footer>
           </section>}
-          {!turn.contexts.length && <div className="copilot-routes">{copilot.routes.filter(route => turn.prompt.includes(route.label) || /可用页面|available pages/i.test(turn.prompt)).slice(0, 8).map(route => <button type="button" key={route.path} data-sound="page" onClick={() => { navigate(route.path); if (narrow) copilot.close(); }}>{t(route.label)}</button>)}</div>}
+          {!!turn.destinations?.length && <div className="copilot-routes">{turn.destinations.map(target => <button type="button" key={target.id} data-sound="page" onClick={() => { copilot.navigateTo(target.id); if (narrow) copilot.close(); }}>{target.anchor ? `${t('定位')} · ` : ''}{t(target.label)}</button>)}</div>}
         </>}
       </article>)}
     </div></div>
@@ -112,7 +141,8 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
     <div className="copilot-footnote">{t('本地演示，未连接模型或执行业务。')}</div>
     <span className="asp-sr" role="status">{copilot.notice && t('已添加 {count} 条上下文', { count: copilot.notice })}</span>
     <Modal title={<><ShieldCheck size={18} /> {t('确认处理方案')}</>} open={reviewOpen} afterClose={() => setReview(null)} onCancel={() => setReviewOpen(false)} footer={<>
-      <Button onClick={() => setReviewOpen(false)}>{t('返回核对')}</Button><Button type="primary" disabled={!copilot.available} onClick={() => { if (review) copilot.decide(review.id, 'confirmed'); setReviewOpen(false); }}>{t('确认演示方案')}</Button>
-    </>}><div className="copilot-review"><p>{review?.prompt}</p><dl>{review?.contexts.map(record => <div key={record.key}><dt>{contextLabel(record)}</dt><dd>{record.fields.map(field => `${field.label}：${field.value}`).join(' · ')}</dd></div>)}</dl><small>{t('仅记录本次演示确认，不修改真实数据。')}</small></div></Modal>
+      <Button onClick={() => setReviewOpen(false)}>{t('返回核对')}</Button><Button type="primary" disabled={!copilot.available} onClick={() => { if (review?.changes?.length) { if (!copilot.fillConfiguration(review)) return; } else if (review) copilot.decide(review.id, 'confirmed'); setReviewOpen(false); }}>{t(review?.changes?.length ? '填入表单' : '确认演示方案')}</Button>
+    </>}><div className="copilot-review"><p>{review?.prompt}</p><dl>{review?.changes?.length ? changed(review).map(change => <div key={`${change.configId}:${change.key}`}><dt>{change.label}</dt><dd><del>{change.options?.find(option => option.value === change.before)?.label ?? change.before}</del><span aria-hidden> → </span><strong>{change.options?.find(option => option.value === change.after)?.label ?? change.after}</strong></dd></div>) : review?.contexts.map(record => <div key={record.key}><dt>{contextLabel(record)}</dt><dd>{record.fields.map(field => `${field.label}：${field.value}`).join(' · ')}</dd></div>)}</dl>
+      {copilot.configurationNotice && <p role="alert">{t(copilot.configurationNotice)}</p>}<small>{t(review?.changes?.length ? '核对后仅填入表单，仍需手动保存。' : '仅记录本次演示确认，不修改真实数据。')}</small></div></Modal>
   </aside>;
 }

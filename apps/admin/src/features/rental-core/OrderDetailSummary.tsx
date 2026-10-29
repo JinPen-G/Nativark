@@ -26,7 +26,7 @@ export function OrderDetailSummary({ order, funding, fundingState, deliveryAddre
   const pickup = order.fulfillmentLocationSnapshot, returned = order.returnLocationSnapshot;
   const sameLocation = Boolean(pickup.id && pickup.id === returned.id && pickup.name === returned.name
     && pickup.operator.id === returned.operator.id && pickup.operator.name === returned.operator.name);
-  return <section className={styles.overview} data-copilot-record={order.id} data-copilot-id={order.id} data-copilot-label={order.orderNo} aria-label={t("订单概览")}>
+  return <section className={styles.overview} data-copilot-detail="" data-copilot-record={order.id} data-copilot-id={order.id} data-copilot-label={order.orderNo} aria-label={t("订单概览")}>
     <div>
       <div className={styles.identity}>
         <span data-copilot-field="status" data-copilot-label={t("状态")}><DataTableStatus variant="soft" tone={tone}>{t(detailStatusLabels[order.status])}</DataTableStatus></span>

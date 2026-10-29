@@ -19,6 +19,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { SoundSettingCard } from "@/features/sound/SoundSettingCard";
 import { MotionSettingCard } from "./MotionSettingCard";
+import { CopilotSection } from "@/features/copilot/CopilotSection";
 
 /** 仅按钮组允许 999 离散档，容器与输入组沿用已配置的连续范围。 */
 function AdminRadiusSlider({ name, label, tooltip, allowFull = true }: { name: string; label: string; tooltip: string; allowFull?: boolean }) {
@@ -72,7 +73,7 @@ function AccountThemeColorCard() {
     onError: (error: any) => message.error(error?.response?.data?.message ?? error?.message ?? t("保存失败"))
   });
   return (
-    <Card size="small" title={t("管理后台主题色")}>
+    <Card size="small" title={t("管理后台主题色")} data-copilot-anchor="theme-color">
       <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
         {t("仅影响你自己的管理后台主色，跟随登录账户；留空使用平台默认色。与租户品牌色相互独立。")}
       </Typography.Paragraph>
@@ -135,7 +136,18 @@ export function AppearancePage() {
           <Alert showIcon type="error" title={t("无法读取圆角设置")} description={<Button onClick={() => profile.refetch()}>{t("重试")}</Button>} />
         ) : (
           <Form<AppearanceForm> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
-            <Card size="small" title={t("管理后台圆角（分组）")}>
+            <CopilotSection id="admin-radii" title={t("管理后台圆角（分组）")} fields={[
+              { key: 'adminContainerRadius', label: t('容器圆角'), value: watchContainer == null ? 'inherit' : String(watchContainer) },
+              { key: 'adminButtonRadius', label: t('按钮圆角'), value: watchButton == null ? 'inherit' : String(watchButton) },
+              { key: 'adminInputRadius', label: t('输入框圆角'), value: watchInput == null ? 'inherit' : String(watchInput) },
+            ].map(field => ({ ...field, options: [
+              { value: 'inherit', label: t('沿用默认') },
+              ...Array.from({ length: ADMIN_UI_CORNER_RADIUS_MAX - ADMIN_UI_CORNER_RADIUS_MIN + 1 }, (_, index) => ({ value: String(index + ADMIN_UI_CORNER_RADIUS_MIN), label: `${index + ADMIN_UI_CORNER_RADIUS_MIN}px` })),
+              ...(field.key === 'adminButtonRadius' ? [{ value: String(ADMIN_UI_CORNER_RADIUS_FULL), label: t('胶囊') }] : []),
+            ] }))} onFill={save.isPending || profile.isFetching ? undefined : values => {
+              const allowed = ['adminContainerRadius', 'adminButtonRadius', 'adminInputRadius'];
+              form.setFieldsValue(Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)).map(([key, value]) => [key, value === 'inherit' ? null : Number(value)])));
+            }}><Card size="small" title={t("管理后台圆角（分组）")}>
               <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
                 {t("三组圆角独立调整；留空沿用统一圆角，圆形与胶囊控件保留原形态。")}
               </Typography.Paragraph>
@@ -145,11 +157,11 @@ export function AppearancePage() {
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} allowFull={false} /><RadiusPreview kind="input" radius={previewRadii.input} /></Col>
               </Row>
               <SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 16 }} />
-            </Card>
+            </Card></CopilotSection>
           </Form>
         )}
-        <MotionSettingCard />
-        <SoundSettingCard />
+        <div data-copilot-anchor="motion"><MotionSettingCard /></div>
+        <div data-copilot-anchor="sound"><SoundSettingCard /></div>
       </Space>
     </>
   );

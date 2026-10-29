@@ -1,9 +1,11 @@
 /** Display-only context projection. Never serialize API records, hidden DOM or credentials.
  * Local locators are not server IDs or authorization; a backend must resolve references again. */
 export type CopilotField = { key: string; label: string; value: string };
+export type CopilotConfigField = { key: string; label: string; value: string; options?: { value: string; label: string }[] };
 export type CopilotRecord = {
   key: string; recordId?: string; source: string; path: string; label: string;
   capturedAt: string; fields: CopilotField[];
+  configId?: string; configuration?: CopilotConfigField[];
 };
 
 const PRIVATE = /password|secret|token|credential|api.?key|authorization|身份证|证件号|密钥|密码|地址|address|phone|email|手机|电话|邮箱/i;
@@ -53,7 +55,7 @@ export function readRecord(node: HTMLElement, path: string): CopilotRecord | nul
   const locator = node.dataset.copilotRecord;
   if (!locator || !label) return null;
   return { key: JSON.stringify([path, source, locator]), recordId: node.dataset.copilotId, source,
-    path, label: label.slice(0, 100), fields, capturedAt: new Date().toISOString() };
+    path, label: label.slice(0, 100), fields, configId: node.dataset.copilotConfig, capturedAt: new Date().toISOString() };
 }
 export function readTarget(target: EventTarget | null, path: string): CopilotRecord[] {
   if (!(target instanceof Element) || target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),a,[data-copilot-ignore]')) return [];

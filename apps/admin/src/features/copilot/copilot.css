@@ -34,3 +34,9 @@
 .copilot-menu-item .rental-animated-icon { font-size:16px; }
 .copilot-entry-count { min-width:16px; padding:0 4px; font-size:11px; line-height:16px; border-radius:var(--rental-ui-radius-button); background:var(--surface-muted); }
 html[data-reduced-motion="true"] .copilot-host *, html[data-reduced-motion="true"] .copilot-host *::before { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+.copilot-located { outline:2px solid var(--accent); outline-offset:4px; border-radius:var(--rental-ui-radius-container); scroll-margin:var(--space-6); animation:copilot-locate 2.4s ease-out both; }
+@keyframes copilot-locate { 0%,35% { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 13%, transparent); } 100% { box-shadow:0 0 0 0 transparent; } }
+.copilot-location-status { position:absolute; z-index:8; bottom:var(--space-4); left:var(--space-4); padding:var(--space-2) var(--space-3); background:var(--surface); color:var(--foreground); border:1px solid var(--border); box-shadow:var(--shadow-floating); border-radius:var(--rental-ui-radius-container); font-size:var(--rental-typography-meta-size); pointer-events:none; max-width:calc(100% - 32px); }
+.copilot-proposed-field { display:grid; grid-template-columns:minmax(0,1fr) 112px; align-items:center; gap:var(--space-2); margin-block:var(--space-3); }
+.copilot-proposed-field small { display:block; color:var(--text-secondary); font-size:var(--rental-typography-meta-size); margin-top:var(--space-1); }
+.copilot-proposed-field [role="combobox"] { border:1px solid var(--border); background:var(--surface); }

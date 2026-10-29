@@ -13,6 +13,8 @@ import { CategoryTab } from "./governance/CategoryTab";
 import { MembershipRewardRulesTab } from "./governance/MembershipRewardRulesTab";
 import { NotificationsTab } from "./governance/NotificationsTab";
 import { RulesTab } from "./governance/RulesTab";
+import { useLocation } from "react-router-dom";
+import { navigationTarget } from "@/features/copilot/destinations";
 import {
   useGovernancePermissions,
   type GovernancePermissions,
@@ -98,6 +100,11 @@ export function RentalGovernancePage() {
   const permissions = useGovernancePermissions();
   const permittedTabs = useMemo(() => TABS.filter((definition) => definition.permitted(permissions)), [permissions]);
   const [tab, setTab] = useState<TabKey>(permittedTabs[0]?.key ?? "calendar");
+  const location = useLocation();
+  useEffect(() => {
+    const target = navigationTarget(location.state, location.pathname);
+    if (target?.tab && permittedTabs.some(item => item.key === target.tab)) setTab(target.tab as TabKey);
+  }, [location.key, location.state, location.pathname, permittedTabs]);
   useEffect(() => {
     if (permittedTabs.length && !permittedTabs.some((definition) => definition.key === tab)) setTab(permittedTabs[0].key);
   }, [permittedTabs, tab]);
@@ -177,7 +184,7 @@ export function RentalGovernancePage() {
         onChange={(key) => setTab(key as TabKey)}
         items={localizedTabs.map(({ key, label, icon }) => ({ key, label, icon }))}
       />
-      <QueryState
+      <div data-copilot-anchor="governance-view"><QueryState
         transitionKey={tab}
         loading={settings.isLoading || profile.isLoading}
         error={settings.error || profile.error}
@@ -191,7 +198,7 @@ export function RentalGovernancePage() {
             saving: saveSettings.isPending,
           })
         )}
-      </QueryState>
+      </QueryState></div>
     </>
   );
 }

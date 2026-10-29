@@ -101,7 +101,7 @@ export function CategoryTab({
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Card title={t("计价方式")}>
+            <Card title={t("计价方式")} data-copilot-anchor="pricing-method">
               {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
                   允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
               <Form.Item
@@ -178,7 +178,7 @@ export function CategoryTab({
           </Space>
         </Col>
         <Col xs={24} xl={12}>
-          <Card title={t("租赁与履约方式")}>
+          <Card title={t("租赁与履约方式")} data-copilot-anchor="fulfillment-method">
             <Form.Item name={["allocation", "autoPreassign"]} label={t("自动预分配资源")} valuePropName="checked"><Switch /></Form.Item>
             <Form.Item name={["allocation", "preassignDays"]} label={t("提前预分配（天）")}><InputNumber min={0} max={365} precision={0} /></Form.Item>
             <Form.Item name={["allocation", "autoLock"]} label={t("到时自动锁定分配")} valuePropName="checked"><Switch /></Form.Item>

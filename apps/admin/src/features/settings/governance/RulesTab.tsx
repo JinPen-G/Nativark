@@ -12,6 +12,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { RuleSetupWizard } from "./RuleSetupWizard";
+import { CopilotSection } from "@/features/copilot/CopilotSection";
 import { overdueFeeModeLabels, paymentTimingLabels } from "./ruleOptionLabels";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import {
@@ -236,7 +237,13 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           />
         )}
         {currentRule && (
-          <Card>
+          <CopilotSection id="business-rules" title={t("业务规则")} fields={[
+            { key: "version", label: t("已生效版本"), value: currentRule.version },
+            { key: "graceMinutes", label: t("逾期宽限时间"), value: `${currentRule.config.overdue.graceMinutes} ${t("分钟")}` },
+            { key: "feeMode", label: t("逾期计费方式"), value: t(overdueFeeModeLabels[currentRule.config.overdue.feeMode] ?? currentRule.config.overdue.feeMode) },
+            { key: "freeBeforeHours", label: t("免费取消截止"), value: `${currentRule.config.cancellation.freeBeforeHours} ${t("小时前")}` },
+            { key: "paymentTiming", label: t("支付时点"), value: t(paymentTimingLabels[currentRule.config.payment.timing] ?? currentRule.config.payment.timing) },
+          ]}><Card>
             <Descriptions
               column={{ xs: 1, md: 2, xl: 3 }}
               items={[
@@ -261,12 +268,12 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                 {
                   key: "overdue",
                   label: t("逾期"),
-                  children: `${currentRule.config.overdue.graceMinutes} ${t("分钟")} · ${t(overdueFeeModeLabels[currentRule.config.overdue.feeMode] ?? currentRule.config.overdue.feeMode)}`,
+                  children: <span data-copilot-anchor="overdue-fees">{currentRule.config.overdue.graceMinutes} {t("分钟")} · {t(overdueFeeModeLabels[currentRule.config.overdue.feeMode] ?? currentRule.config.overdue.feeMode)}</span>,
                 },
                 {
                   key: "cancel",
                   label: t("取消"),
-                  children: `${currentRule.config.cancellation.freeBeforeHours} ${t("小时前免费")}`,
+                  children: <span data-copilot-anchor="cancellation-rules">{currentRule.config.cancellation.freeBeforeHours} {t("小时前免费")}</span>,
                 },
                 {
                   key: "qualification",
@@ -279,7 +286,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                 },
               ]}
             />
-          </Card>
+          </Card></CopilotSection>
         )}
         <ListSection title={t("版本历史")}>
           <Table<RentalRuleVersion>
