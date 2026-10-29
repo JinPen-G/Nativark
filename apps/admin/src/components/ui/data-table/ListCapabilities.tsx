@@ -5,7 +5,6 @@ import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { Button } from "../Button";
-import { ActionButton } from "../ActionButton";
 import { App } from "../App";
 import { Modal } from "../Modal";
 import { Input } from "../Input";
@@ -43,13 +42,28 @@ export function ListTransferTools<T>({ config, rows, busy, importConfig, loadExp
   const { message } = App.useApp();
   const [open, setOpen] = useState(false);
   const [importMounted, setImportMounted] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const exportLocked = useRef(false);
+  async function handleExport() {
+    if (!config || busy || !rows.length || exportLocked.current) return;
+    exportLocked.current = true;
+    setExporting(true);
+    const identity = listIdentity();
+    try {
+      const result = loadExportRows ? await loadExportRows() : rows;
+      if (identity === listIdentity()) exportRows(config, result);
+    } catch {
+      message.error(t("导出失败，请重试"));
+    } finally {
+      exportLocked.current = false;
+      setExporting(false);
+    }
+  }
   if (!config && !importConfig) return null;
+  const exportLabel = !loadExportRows && config?.scope === "page" ? "导出本页" : "导出";
   return <div className={styles.tools}>
     {importConfig && <Button size="small" disabled={busy || !importConfig.allowed()} aria-label={t("导入")} title={t("导入")} icon={<AnimatedIcon name="upload" />} onClick={() => { setImportMounted(true); setOpen(true); }}><span className={styles.transferLabel}>{t("导入")}</span></Button>}
-    {config && (loadExportRows ? <ActionButton variant="secondary" label={t("导出")} disabled={busy || !rows.length} title={t("导出筛选结果")}
-      pendingLabel={t("导出中")} successLabel={t("已导出")} onAction={async () => exportRows(config, await loadExportRows())}
-      onActionError={() => message.error(t("导出失败，请重试"))} />
-      : <Button size="small" disabled={busy || !rows.length} aria-label={t(config.scope === "page" ? "导出本页" : "导出")} title={t(config.scope === "page" ? "导出当前页" : "导出筛选结果")} icon={<AnimatedIcon name="download" />} onClick={() => exportRows(config, rows)}><span className={styles.transferLabel}>{t(config.scope === "page" ? "导出本页" : "导出")}</span></Button>)}
+    {config && <Button size="small" loading={exporting} disabled={busy || exporting || !rows.length} aria-label={t(exportLabel)} title={t(exportLabel === "导出本页" ? "导出当前页" : "导出筛选结果")} icon={<AnimatedIcon name="download" />} onClick={() => void handleExport()}><span className={styles.transferLabel}>{t(exportLabel)}</span></Button>}
     {importConfig && importMounted && <ListImportDialog key={listIdentity()} open={open} config={importConfig} onClose={() => setOpen(false)} onClosed={() => setImportMounted(false)} />}
   </div>;
 }
