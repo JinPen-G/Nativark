@@ -522,6 +522,31 @@ html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transfor
 .breadcrumb-link:hover { color: var(--foreground); }
 .breadcrumb-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .workspace-context-actions { display: flex; flex: none; align-items: center; gap: var(--space-4); }
+/* AI side panel preview's .asp-reopen button geometry; hosted in the shared header.
+   Source: uiarc-pro-archive/preview/src/components/ai-side-panel/side-panel.css.
+   Only the entry is previewed here; no panel or assistant action is connected. */
+.workspace-copilot-entry {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--rental-ui-radius-button);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-copilot-entry .rental-animated-icon { font-size: 15px; }
+.workspace-copilot-entry:hover { background: var(--surface-muted); }
+.workspace-copilot-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .workspace-copilot-label { display: none; }
+}
 .workspace-clock { color: var(--text-muted); font-size: var(--rental-typography-meta-size); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .workspace-notifications { width: var(--rental-control-height-toolbar); min-height: var(--rental-control-height-toolbar); height: var(--rental-control-height-toolbar); padding: 0; }
 .workspace-context .ant-breadcrumb-overlay-link {

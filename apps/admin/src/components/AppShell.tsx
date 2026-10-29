@@ -12,6 +12,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { NotificationProvider } from "@/features/notifications/NotificationProvider";
 import { HeaderNotifications } from "@/features/notifications/HeaderNotifications";
 import { WorkspaceClock } from "./WorkspaceClock";
+import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
@@ -123,6 +124,9 @@ function ShellContents({ children }: { children: ReactNode }) {
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
+          {!aiMode && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" data-sound="press">
+            <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
+          </button></Tooltip>}
           <HeaderNotifications />
         </div>
       </header>
