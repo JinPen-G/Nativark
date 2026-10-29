@@ -124,13 +124,13 @@ function ShellContents({ children }: { children: ReactNode }) {
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
-          {!aiMode && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" data-sound="press">
-            <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
-          </button></Tooltip>}
           <HeaderNotifications />
         </div>
       </header>
       <div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>
+      {!aiMode && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" data-sound="press">
+        <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
+      </button></Tooltip>}
     </SidebarInset>
     <SubscriptionExpiryFloatingCard />
   </>;
