@@ -33,6 +33,13 @@ const LOCAL_DEMO_ACCOUNTS = [
 
 const TENANT_CODE_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/u;
 
+// Product names are indivisible text, not HTML supplied by a tenant.
+function LoginBrandText({ text }: { text: string }) {
+  return <>{text.split(/(Rental Agent|Copilot)/g).map((part, index) =>
+    /^(Rental Agent|Copilot)$/.test(part) ? <span className="login-brand-product" key={index}>{part}</span> : part
+  )}</>;
+}
+
 function LoginBackground({ src }: { src: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <div className="login-brand-background login-brand-background--generated" aria-hidden="true" />;
@@ -77,6 +84,7 @@ export function LoginPage() {
   const showBrandDescription = loginBranding?.showDescription !== false;
   const showBrandHighlights = loginBranding?.showHighlights !== false;
   const showBrandFooter = loginBranding?.showFooter !== false;
+  const brandDescription = loginBranding?.description?.trim() || t(ADMIN_LOGIN_DEFAULTS.description);
   const backgroundPath = loginBranding?.backgroundImageUrl;
   const backgroundSrc = backgroundPath?.startsWith("/") ? `${apiAssetOrigin}${backgroundPath}` : backgroundPath;
   // Only the current public tenant response can color the login surface.
@@ -161,14 +169,14 @@ export function LoginPage() {
                 <img src={loginBrandLogo} alt={loginBrandName} />
               </div>
               {(showBrandTitle || showBrandDescription) && <div className="login-card-brand-copy">
-                {showBrandTitle && <h1 id="login-brand-heading" className="login-card-brand-title">{loginBranding?.title?.trim() || t(ADMIN_LOGIN_DEFAULTS.title)}</h1>}
-                {showBrandDescription && <p className="login-card-brand-tagline">{loginBranding?.description?.trim() || t(ADMIN_LOGIN_DEFAULTS.description)}</p>}
+                {showBrandTitle && <h1 id="login-brand-heading" className="login-card-brand-title"><LoginBrandText text={loginBranding?.title?.trim() || t(ADMIN_LOGIN_DEFAULTS.title)} /></h1>}
+                {showBrandDescription && <div className="login-brand-description">{brandDescription.split(/\r?\n\s*\r?\n/).map((paragraph, index) => <p className="login-card-brand-tagline" key={index}><LoginBrandText text={paragraph} /></p>)}</div>}
               </div>}
               {(showBrandHighlights || showBrandFooter) && <div className="login-card-brand-footer">
                 {showBrandHighlights && <dl className="login-brand-capabilities">
                   {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
                     <div key={item.title}>
-                      <dt>{loginBranding?.highlights?.[index]?.title?.trim() || t(item.title)}</dt>
+                      <dt><LoginBrandText text={loginBranding?.highlights?.[index]?.title?.trim() || t(item.title)} /></dt>
                       <dd>{loginBranding?.highlights?.[index]?.description?.trim() || t(item.description)}</dd>
                     </div>
                   ))}

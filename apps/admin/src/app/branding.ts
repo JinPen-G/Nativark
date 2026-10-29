@@ -8,13 +8,13 @@ export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon.svg";
 export const ADMIN_DEFAULT_FAVICON = ADMIN_DEFAULT_MARK;
 export const ADMIN_LOGIN_DEFAULTS = {
   title: "你的租赁业务，\n有了 Rental Agent。",
-  description: "资源调配、任务分派、跨店协作，交给 Rental Agent 统筹安排。日常管理，也有 Copilot 随时协助。",
+  description: "资源调配、任务分派、跨店协作，\n交给 Rental Agent 统筹安排。\n\n日常管理，也有 Copilot 随时协助。",
   highlights: [
-    { title: "管好资产", description: "在库、在租与维护" },
-    { title: "跟进订单", description: "预订、交付与归还" },
-    { title: "连接客户", description: "会员、权益与往来" }
+    { title: "Rental Agent", description: "统筹资源与任务" },
+    { title: "Copilot", description: "辅助日常管理" },
+    { title: "多品类经营", description: "一套系统，统一管理" }
   ],
-  footerText: "多品类经营，一个工作台。"
+  footerText: "rentalOS · 租赁操作系统"
 } as const;
 
 function isTenantUser(user?: Pick<AuthUser, "isSaasAdmin">) {
