@@ -24,13 +24,15 @@ import { NativeWorkspaceSwitcher } from "./animate-sidebar/NativeWorkspaceSwitch
 import { NativeNavigation } from "./animate-sidebar/NativeNavigation";
 import { OperatorProvider } from "@/features/ai-operator/OperatorContext";
 import { AiOperatorNavigation, OperatorModeSwitch } from "@/features/ai-operator/AiOperatorNavigation";
+import { CopilotProvider, useCopilot } from "@/features/copilot/CopilotProvider";
+import { CopilotLayout } from "@/features/copilot/CopilotLayout";
 import "@/features/ai-operator/ai-operator.css";
 import "./animate-sidebar/animate-sidebar.css";
 import "./animate-sidebar/sidebar-adapter.css";
 
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
-  return <OperatorProvider><NotificationProvider><AppShellLayout>{children}</AppShellLayout></NotificationProvider></OperatorProvider>;
+  return <CopilotProvider><OperatorProvider><NotificationProvider><AppShellLayout>{children}</AppShellLayout></NotificationProvider></OperatorProvider></CopilotProvider>;
 }
 function AppShellLayout({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
@@ -47,6 +49,7 @@ function AppShellLayout({ children }: { children: ReactNode }) {
 }
 
 function ShellContents({ children }: { children: ReactNode }) {
+  const copilot = useCopilot();
   const { state, openMobile, setOpenMobile } = useSidebar();
   const [query, setQuery] = useState("");
   const navRef = useRef<HTMLDivElement>(null), contentRef = useRef<HTMLDivElement>(null);
@@ -124,13 +127,14 @@ function ShellContents({ children }: { children: ReactNode }) {
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
-          {!aiMode && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" data-sound="press">
+          {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
             <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
+            {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}
           </button></Tooltip>}
           <HeaderNotifications />
         </div>
       </header>
-      <div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div>
+      <CopilotLayout suspended={aiMode}><div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div></CopilotLayout>
     </SidebarInset>
     <SubscriptionExpiryFloatingCard />
   </>;

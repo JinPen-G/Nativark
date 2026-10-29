@@ -1,0 +1,34 @@
+[
+  {
+    "path": "ai-side-panel/AiSidePanel.tsx",
+    "sha256": "48419700828c06f5e6598ebb16cfc9f4951393ba93239f3d9c80c2bf6c454a07"
+  },
+  {
+    "path": "ai-side-panel/panel-demo.ts",
+    "sha256": "4e85c315b564fcb48f7d3ccbbff13012fbd60372bd4420c78ab2202506e94d40"
+  },
+  {
+    "path": "ai-side-panel/panel-state.ts",
+    "sha256": "0cee4da528e0891b75c5ccc8f6467f62c6fa8afdbfeadb5229be18eb024c3332"
+  },
+  {
+    "path": "ai-side-panel/README.md",
+    "sha256": "56b234387e8d18fccd19e91ca23a6781c56a66254698293db4f2316fb11d02d7"
+  },
+  {
+    "path": "ai-side-panel/side-panel.css",
+    "sha256": "f59fd25a4150e886a760257d1c7d18ee9fe49575b764c9742560587b5e9c1143"
+  },
+  {
+    "path": "shared/BrandMark.tsx",
+    "sha256": "0aa01b23ae8a47a55b81448af8a3333edc51bc27399470a8293346c683eb2954"
+  },
+  {
+    "path": "shared/README.md",
+    "sha256": "930acc1d09673e361c901265385f76479fc355dbe4deb1b0dc13c77719940118"
+  },
+  {
+    "path": "shared/reference-marks.json",
+    "sha256": "d3311114f960ac89c02bc644ead7ce04405b8b222b5e1b62d87c3c99190409f9"
+  }
+]

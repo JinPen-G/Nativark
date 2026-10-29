@@ -69,11 +69,11 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     {config.details?.(row)}
     {config.actions && <div className={styles.previewActions}>{config.actions(row, afterClose)}</div>}
   </PreviewContent>;
-  const summary = <div className={styles.summary} data-kind={config.kind}>
+  const summary = <div className={styles.summary} data-kind={config.kind} data-copilot-field="summary" data-copilot-label={t("摘要")}>
     {config.status && <div className={styles.context}>{config.status(row)}</div>}
     {config.body(row)}
   </div>;
-  return <div ref={wrapper} className={styles.item} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
+  return <div ref={wrapper} className={styles.item} data-copilot-record={rowKey} data-copilot-label={title} data-copilot-disabled={disabled ? "true" : undefined} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
     {onSelect && selectionHost && createPortal(<div className={styles.selection}><Checkbox aria-label={`${t("选择")} ${title}`} checked={Boolean(selected)} disabled={disabled} onCheckedChange={value => onSelect(value === true)} /></div>, selectionHost)}
     <Card title={title} meta={subtitle ? <span className={styles.secondary}>{subtitle}</span> : undefined} className={styles.card} media={media}
       details={narrow ? undefined : details} open={!narrow && open} onOpenChange={changeOpen}

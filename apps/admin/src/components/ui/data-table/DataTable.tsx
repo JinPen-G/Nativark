@@ -206,7 +206,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
       <TableSkeletonCell columnId={column.id} />
     </td>)}
   </tr>);
-  return <div ref={rootRef} className={styles.root} data-compact-header={compactHeader || undefined} data-column-layout={contentLayout ? "content" : undefined} aria-busy={busy || loading || refreshing || undefined}>
+  return <div ref={rootRef} className={styles.root} data-copilot-list="" data-copilot-source={caption} data-copilot-disabled={busy || loading ? "true" : undefined} data-compact-header={compactHeader || undefined} data-column-layout={contentLayout ? "content" : undefined} aria-busy={busy || loading || refreshing || undefined}>
     {animated && <DataTableAnnouncements table={table} scope={JSON.stringify([motionScope, table.getState().sorting])} paused={Boolean(busy)} />}
     <div className={styles.viewport}>
     <div className={styles.scroll} style={{ maxHeight }} data-scroll-y={maxHeight != null || undefined} tabIndex={0} role="region" aria-label={caption}>
@@ -221,6 +221,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
               initial={suppress ? false : MOTIQ_TABLE_MOTION.initial} animate={MOTIQ_TABLE_MOTION.animate}
               exit={suppress ? { opacity: 0 } : MOTIQ_TABLE_MOTION.exit}
               transition={suppress ? { duration: 0 } : MOTIQ_TABLE_MOTION.transition}
+              data-copilot-record={row.id} data-copilot-id={typeof (row.original as { id?: unknown })?.id === "string" ? (row.original as { id: string }).id : undefined}
               data-state={row.getIsSelected() ? "selected" : undefined} data-row-id={row.id} aria-selected={table.options.enableRowSelection ? row.getIsSelected() : undefined}>
               {row.getVisibleCells().map(cell => { const attributes = cellProps?.(cell); return attributes?.colSpan === 0 || attributes?.rowSpan === 0 ? null : <td {...attributes} key={cell.id} style={{ ...columnStyle(cell.column), ...attributes?.style }} data-pinned={cell.column.getIsPinned() || undefined} data-column-id={cell.column.id} data-content-compact={compactColumn(cell.column) || undefined} data-cell-align={cellAlignment(cell)}>
                 <CellContent cell={cell} animated={animated} paused={busy} />

@@ -255,7 +255,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   const exportConfig = props.exportConfig ? { ...props.exportConfig, scope: remote ? "page" as const : "filtered" as const } : undefined;
   const pager = paged && total > 0 ? <Pagination {...config} showSizeChanger={config.showSizeChanger ?? true} hideOnSinglePage={config.hideOnSinglePage ?? false}
     disabled={loading || config.disabled} current={current} pageSize={pageSize} total={total} onShowSizeChange={undefined} onChange={changePage} /> : undefined;
-  return <div className={`${styles.root} ${selectedRows.length ? capabilityStyles.reserved : ""} ${props.className ?? ""}`} style={props.style}>
+  return <div data-copilot-list="" data-copilot-source={props.caption} className={`${styles.root} ${selectedRows.length ? capabilityStyles.reserved : ""} ${props.className ?? ""}`} style={props.style}>
     {props.title?.(pageRows)}
     <DataTableToolbar table={table} label={id => labels[id] ?? id} onRefresh={props.onRefresh ?? undefined} busy={loading} controls={props.toolbar} heading={props.toolbarHeading}
       sortDisabled={!table.getAllLeafColumns().some(column => column.getCanSort())}

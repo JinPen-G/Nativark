@@ -202,8 +202,10 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
     <>
       <div className="report-metrics">
         {cards.map((card) => (
-            <Card className="data-panel" key={card.label}>
+            <Card className="data-panel" key={card.label} data-copilot-record={`metric:${card.label}`} data-copilot-label={card.label}>
+              <div data-copilot-field="amount" data-copilot-label={card.label}>
               <Statistic title={card.label} value={card.value} prefix={card.prefix} precision={card.precision} />
+              </div>
             </Card>
         ))}
       </div>

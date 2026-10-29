@@ -26,10 +26,10 @@ export function OrderDetailSummary({ order, funding, fundingState, deliveryAddre
   const pickup = order.fulfillmentLocationSnapshot, returned = order.returnLocationSnapshot;
   const sameLocation = Boolean(pickup.id && pickup.id === returned.id && pickup.name === returned.name
     && pickup.operator.id === returned.operator.id && pickup.operator.name === returned.operator.name);
-  return <section className={styles.overview} aria-label={t("订单概览")}>
+  return <section className={styles.overview} data-copilot-record={order.id} data-copilot-id={order.id} data-copilot-label={order.orderNo} aria-label={t("订单概览")}>
     <div>
       <div className={styles.identity}>
-        <DataTableStatus variant="soft" tone={tone}>{t(detailStatusLabels[order.status])}</DataTableStatus>
+        <span data-copilot-field="status" data-copilot-label={t("状态")}><DataTableStatus variant="soft" tone={tone}>{t(detailStatusLabels[order.status])}</DataTableStatus></span>
         <span className={styles.customer}><CustomerPreview customerId={order.customerId} name={order.customerName} type={order.customerType} snapshot /></span>
         <span className={styles.secondary}>{t(order.customerType === "corporate" ? "企业客户" : "个人客户")} · {t(detailFulfillmentLabels[order.fulfillmentMode] ?? order.fulfillmentMode)}</span>
       </div>
@@ -37,11 +37,11 @@ export function OrderDetailSummary({ order, funding, fundingState, deliveryAddre
         {order.subjectSnapshot.map(subject => <div key={subject.role}><dt>{t({ contract: "签约主体", payer: "付款主体", user: "使用主体", agent: "经办人" }[subject.role])}</dt><dd><CustomerPreview customerId={subject.customerId} name={subject.name} type={subject.customerType} phoneMasked={subject.phoneMasked} companyName={subject.corporateName} snapshot /></dd></div>)}
       </dl>}
       <div className={styles.plan}>
-        <div className={styles.planItem}><span className={styles.label}>{t("计划{action}", { action: t(pickupLabel ?? "领取") })}</span><strong className={styles.date}>{date(order.startAt)}</strong>
+        <div className={styles.planItem}><span className={styles.label}>{t("计划{action}", { action: t(pickupLabel ?? "领取") })}</span><strong className={styles.date} data-copilot-field="startAt" data-copilot-label={t("计划{action}", { action: t(pickupLabel ?? "领取") })}>{date(order.startAt)}</strong>
           {!sameLocation && <><span className={styles.location}>{order.fulfillmentLocationSnapshot.name}</span><span className={styles.secondary}>{order.fulfillmentLocationSnapshot.operator.name}</span></>}
           {order.actualRentalStartAt && <span className={styles.secondary}>{t("实际签收")} · {date(order.actualRentalStartAt)}</span>}
         </div>
-        <div className={styles.planItem}><span className={styles.label}>{t("当前应还时间")}</span><strong className={styles.date}>{date(end)}</strong>
+        <div className={styles.planItem}><span className={styles.label}>{t("当前应还时间")}</span><strong className={styles.date} data-copilot-field="endAt" data-copilot-label={t("当前应还时间")}>{date(end)}</strong>
           {!sameLocation && <><span className={styles.location}>{order.returnLocationSnapshot.name}</span><span className={styles.secondary}>{order.returnLocationSnapshot.operator.name}</span></>}
           {end !== order.endAt && <span className={styles.secondary}>{t("原约定归还")} · {date(order.endAt)}</span>}
         </div>
@@ -51,7 +51,7 @@ export function OrderDetailSummary({ order, funding, fundingState, deliveryAddre
     </div>
     <aside className={styles.balance} aria-label={t("租金与费用摘要")}>
       <div className={styles.balanceTop}><span className={styles.label}>{t("当前待收")}</span>{fundingState === "ready" && <span className={styles.secondary}>{t("模拟资金")}</span>}</div>
-      <OrderMoney value={fundingState === "ready" ? funding?.rental.due : undefined} currency={order.currency} prominent />
+      <span data-copilot-field="due" data-copilot-label={t("当前待收")}><OrderMoney value={fundingState === "ready" ? funding?.rental.due : undefined} currency={order.currency} prominent /></span>
       {fundingState === "ready" && knownMoney(funding?.rental.pendingExtensionAmount) && funding!.rental.pendingExtensionAmount > 0 && <span className={styles.secondary}>{t("含续租待补")} · <OrderMoney value={funding!.rental.pendingExtensionAmount} currency={order.currency} /></span>}
       {fundingState === "ready" ? <dl className={styles.balanceFacts}>
         <div><dt>{t("当前应收")}</dt><dd><OrderMoney value={funding?.rental.payable} currency={order.currency} /></dd></div>

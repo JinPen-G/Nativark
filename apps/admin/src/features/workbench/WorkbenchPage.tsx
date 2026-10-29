@@ -125,12 +125,12 @@ export function WorkbenchPage() {
     <QueryState loading={loading} error={error}>
       {showMetrics ? <div className="metric-grid">
         {canViewOrders && <>
-          <Card className="metric-card"><Statistic title={t("期间订单")} value={orderCount} /><div className="metric-foot"><span>{t(period)}{t("起租")}</span><span>{t("非草稿")}</span></div></Card>
-          <Card className="metric-card"><Statistic title={t("履约中")} value={activeCount} /><div className="metric-foot"><span>{t("已预订至待结算")}</span><span className="metric-trend">{t("实时")}</span></div></Card>
-          <Card className="metric-card"><Statistic title={t("应收金额")} value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} {t("单已关闭")}</span><span>{t("调账后应收")}</span></div></Card>
-          <Card className="metric-card"><Statistic title={t("租赁收入")} value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{t("只含租金")}</span><span>{t("不含服务与押金")}</span></div></Card>
+          <Card className="metric-card" data-copilot-record="metric:期间订单" data-copilot-label={t("期间订单")}><Statistic data-copilot-field="amount" data-copilot-label={t("期间订单")} title={t("期间订单")} value={orderCount} /><div className="metric-foot"><span>{t(period)}{t("起租")}</span><span>{t("非草稿")}</span></div></Card>
+          <Card className="metric-card" data-copilot-record="metric:履约中" data-copilot-label={t("履约中")}><Statistic data-copilot-field="amount" data-copilot-label={t("履约中")} title={t("履约中")} value={activeCount} /><div className="metric-foot"><span>{t("已预订至待结算")}</span><span className="metric-trend">{t("实时")}</span></div></Card>
+          <Card className="metric-card" data-copilot-record="metric:应收金额" data-copilot-label={t("应收金额")}><Statistic data-copilot-field="amount" data-copilot-label={t("应收金额")} title={t("应收金额")} value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} {t("单已关闭")}</span><span>{t("调账后应收")}</span></div></Card>
+          <Card className="metric-card" data-copilot-record="metric:租赁收入" data-copilot-label={t("租赁收入")}><Statistic data-copilot-field="amount" data-copilot-label={t("租赁收入")} title={t("租赁收入")} value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{t("只含租金")}</span><span>{t("不含服务与押金")}</span></div></Card>
         </>}
-        {canViewAssets && <Card className="metric-card"><Statistic title={t("可租库存")} value={availableUnits} /><div className="metric-foot"><span>{t("独立资产 + 数量库存")}</span><span className="metric-trend">{t("当前快照")}</span></div></Card>}
+        {canViewAssets && <Card className="metric-card" data-copilot-record="metric:可租库存" data-copilot-label={t("可租库存")}><Statistic data-copilot-field="amount" data-copilot-label={t("可租库存")} title={t("可租库存")} value={availableUnits} /><div className="metric-foot"><span>{t("独立资产 + 数量库存")}</span><span className="metric-trend">{t("当前快照")}</span></div></Card>}
       </div> : <Alert type="info" showIcon title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} style={{ marginBottom: 16 }} />}
       <ListSection title={<span className="panel-title">{t("运营待办")} <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>} style={{ marginBottom: "var(--space-4)" }}>
         <Table<RentalWorkbenchTodo>

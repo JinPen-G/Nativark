@@ -16,6 +16,9 @@ import { RecordCard, type RecordCardConfig } from "./RecordCard";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { SelectionToolbar } from "@/components/selection-toolbar/archive/SelectionToolbar";
 import "@/components/selection-toolbar/adapter.css";
+import { useCopilot } from "@/features/copilot/CopilotProvider";
+import { readSelection } from "@/features/copilot/context";
+import { useLocation } from "react-router-dom";
 
 export function listIdentity() {
   const state = useAuthStore.getState();
@@ -153,6 +156,8 @@ function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImp
 
 export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, onSelectPage }: { rows: T[]; clear: () => void; config?: ListExport<T>; actions?: ListBatchAction<T>[]; busy?: boolean; onSelectPage?: () => void }) {
   const { t } = useLocale();
+  const copilot = useCopilot(), { pathname } = useLocation();
+  const { message } = App.useApp();
   const reduced = usePrefersReducedMotion();
   const [action, setAction] = useState<ListBatchAction<T>>(), [reason, setReason] = useState("");
   const [actionOpen, setActionOpen] = useState(false);
@@ -205,6 +210,13 @@ export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, o
           if (returnFocus) requestAnimationFrame(() => host?.querySelector<HTMLElement>('button[role="checkbox"]:not(:disabled), input[type="checkbox"]:not(:disabled)')?.focus({ preventScroll: true }));
         }} actions={[
           ...(onSelectPage ? [{ label: t("选择当前页"), disabled: busy || running, onClick: onSelectPage }] : []),
+          ...(copilot?.available ? [{ label: t("添加到 Copilot"), icon: <AnimatedIcon name="ai" />, disabled: busy || running, onClick: () => {
+            const host = barRef.current?.parentElement;
+            if (!host) return;
+            const records = readSelection(host, pathname);
+            if (records.length !== rows.length) { message.warning(t("部分所选记录不在当前视图，请重新选择后添加。")); return; }
+            copilot.add(records, true);
+          } }] : []),
           ...(config ? [{ label: t("导出所选"), icon: <AnimatedIcon name="download" />, disabled: busy || running, onClick: () => exportRows(config, rows) }] : []),
           ...actions.filter(item => item.allowed()).map(item => ({ label: t(item.label), destructive: item.danger,
             disabled: busy || running || !rows.some(item.eligible),

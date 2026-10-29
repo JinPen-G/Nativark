@@ -1,0 +1,36 @@
+/* Geometry/motion from archive/ai-side-panel/side-panel.css; platform tokens only. */
+.copilot-host.ai-side-panel { height:auto; min-height:0; flex:1 1 0; font:inherit; --asp-ink:var(--foreground); --asp-muted:var(--text-secondary); --asp-faint:var(--text-meta); --asp-ground:var(--surface); --asp-soft:var(--surface-muted); --asp-line:var(--border); }
+.copilot-host > .asp-page-column { display:flex; min-height:0; flex-direction:column; }
+.copilot-host .asp-panel { font-size:14px; }
+.copilot-host .asp-identity > button { margin-left:0; }
+.copilot-host .asp-identity > button:first-of-type { margin-left:auto; }
+.copilot-host .asp-context > span { border-radius:var(--rental-ui-radius-button); }
+.copilot-host .asp-composer { border-radius:var(--rental-ui-radius-input); }
+.copilot-host .asp-primary,.copilot-host .asp-send { background:var(--accent) !important; color:var(--accent-foreground) !important; }
+.copilot-host .asp-suggestions button,.copilot-host .asp-change,.copilot-host .asp-user p { border-radius:var(--rental-ui-radius-container); }
+.copilot-host.is-sheet .asp-dock { border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.copilot-host .asp-thread { scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.copilot-host .asp-reading { font-size:13px; }
+.copilot-host .copilot-contexts { flex:none; max-height:126px; overflow:auto; margin:8px 12px 0; }
+.copilot-host .copilot-footnote { padding:0 12px 10px; color:var(--text-secondary); font-size:11px; text-align:center; }
+.copilot-host .copilot-sources { font-size:12px; color:var(--text-secondary); margin:8px 0 12px; }
+.copilot-sources summary { cursor:pointer; }
+.copilot-sources > div { padding:8px 0; display:grid; gap:3px; border-bottom:1px solid var(--border); }
+.copilot-sources strong { color:var(--foreground); font-weight:500; }
+.copilot-sources button { width:fit-content; color:var(--accent) !important; }
+.copilot-routes { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.copilot-routes button { padding:5px 10px; border:1px solid var(--border) !important; border-radius:var(--rental-ui-radius-button); }
+.copilot-review { display:grid; gap:16px; }
+.copilot-review p { margin:0; }
+.copilot-review dl { margin:0; max-height:40dvh; overflow:auto; }
+.copilot-review dl > div { padding:8px 0; border-bottom:1px solid var(--border); }
+.copilot-review dd { margin:4px 0 0; color:var(--text-secondary); overflow-wrap:anywhere; }
+.copilot-review small { color:var(--text-secondary); }
+.copilot-menu-positioner { z-index:1150; outline:none; }
+.copilot-menu { background:var(--surface); color:var(--foreground); border:1px solid var(--border); border-radius:var(--rental-ui-radius-container); box-shadow:var(--shadow-floating); padding:4px; min-width:192px; max-width:calc(100vw - 16px); outline:none; transform-origin:var(--transform-origin); }
+.copilot-menu-label { padding:6px 8px; color:var(--text-secondary); font-size:12px; max-width:248px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.copilot-menu-item { position:relative; display:flex; align-items:center; gap:8px; min-height:32px; padding:6px 8px; border-radius:var(--rental-ui-radius-button); cursor:default; outline:none; font-size:13px; }
+.copilot-menu-item[data-highlighted] { background:var(--surface-muted); }
+.copilot-menu-item .rental-animated-icon { font-size:16px; }
+.copilot-entry-count { min-width:16px; padding:0 4px; font-size:11px; line-height:16px; border-radius:var(--rental-ui-radius-button); background:var(--surface-muted); }
+html[data-reduced-motion="true"] .copilot-host *, html[data-reduced-motion="true"] .copilot-host *::before { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
