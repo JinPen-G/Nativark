@@ -27,7 +27,7 @@ export interface AppNavigationSection {
 }
 
 export const APP_ROUTES = {
-  aiOperator: { path: "/ai-operator", label: "AI 工作中心", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view", "rental-core:maintenance:view", "rental-os:member:view", "system:integration:manage"], audience: "tenant", icon: <FundOutlined /> },
+  aiOperator: { path: "/ai-operator", label: "Agent工作台", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view", "rental-core:maintenance:view", "rental-os:member:view", "system:integration:manage"], audience: "tenant", icon: <FundOutlined /> },
   // 工作台既承载经营指标，也承载订单/维护待办。维护人员没有报表或订单数据权限时，
   // 仍应能进入页面查看自己的工单待办；页面内部会继续按数据权限隐藏订单和金额指标。
   workbench: { path: "/workbench", label: "运营概览", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },

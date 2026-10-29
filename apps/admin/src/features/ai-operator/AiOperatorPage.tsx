@@ -57,7 +57,7 @@ export function AiOperatorPage() {
   const operator = useOperator();
   const tenant = useAuthStore(state => state.tenant), user = useAuthStore(state => state.user);
   const title = operator.view === "chat" ? operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
-  useEffect(() => { document.title = `${t(title)} · ${t("AI 工作中心")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
+  useEffect(() => { document.title = `${t(title)} · ${t("Agent工作台")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
   return <ArcLocale><ContentTransition value={operator.view} className="operator-page">
     {operator.view === "chat" ? <OperatorChat /> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
   </ContentTransition></ArcLocale>;
@@ -79,7 +79,7 @@ function OperatorChat() {
     if (separator && narrow && !collapsed) separator.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     if (!narrow) setMobileOpen(false);
   }, [narrow]);
-  return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label={t("AI 工作中心对话")}>
+  return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label={t("Agent工作台对话")}>
     <div className="operator-split" ref={split}>
       <ResizablePanels label="对话与Agent工作区" onLayoutChange={sizes => setWorkOpen(sizes[1] > 1)}>
         <ResizablePanel id="operator-conversation" label="聊天区" defaultSize={60} minSize={340}>

@@ -1,6 +1,6 @@
-# AI 工作中心前端演示
+# Agent工作台前端演示
 
-入口：租户侧栏的「AI 工作中心 / 业务管理」，英文为「AI Workspace / Business」，路由 `/ai-operator`。业务管理原菜单与业务页保持独立，切回时返回上次管理页面。
+入口：侧栏「Agent工作台 / 管理控制台」，英文短标签为「Agent / Admin」。页面标题使用完整名称「Agent工作台 / Rental Agent」，路由 `/ai-operator`。管理控制台原菜单与业务页保持独立，切回时返回上次管理页面。
 
 ## 组件来源
 
