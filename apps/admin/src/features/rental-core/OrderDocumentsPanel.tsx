@@ -1,4 +1,4 @@
-import { DownloadOutlined, PrinterOutlined } from "@/components/ui/icons";
+import { DownloadOutlined, FileTextOutlined, PrinterOutlined } from "@/components/ui/icons";
 import type {
   RentalCategoryTerminology,
   RentalFundingBalance,
@@ -237,7 +237,7 @@ export function OrderDocumentsPanel({ order, inspections, templates, funding, te
   return <>
     <ListSection title={t("客户业务凭证")}>
       <Space wrap>
-        {DOCUMENT_TYPES.map((item) => <Button key={item.value} icon={<PrinterOutlined />} onClick={() => { setType(item.value); setOpen(true); }}>{t(item.label)}</Button>)}
+        {DOCUMENT_TYPES.map((item) => <Button key={item.value} icon={<FileTextOutlined />} onClick={() => { setType(item.value); setOpen(true); }}>{t(item.label)}</Button>)}
       </Space>
       <Typography.Text type="secondary">{t("基于订单快照查看、下载或浏览器打印；不构成法定票据")}</Typography.Text>
     </ListSection>

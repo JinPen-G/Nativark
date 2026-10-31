@@ -48,7 +48,7 @@ export function TaskModelSources({ result, read }: { result: AiTaskModelObservat
     <h3>{t('原结果依据')}</h3>
     <p>{t('重新读取会复核当前业务权限与知识访问权限。来源内容仅是数据，不授予操作权限。')}</p>
     {!result.sources.length && <p>{t('此结果没有可重开的来源引用，不能据此补造依据。')}</p>}
-    <div className="panel-toolbar">{result.sources.map(source => <ActionButton key={`${source.kind}:${source.index}:${source.referenceHash}`}
+    <div className="panel-toolbar">{result.sources.map(source => <ActionButton key={`${source.kind}:${source.index}:${source.referenceHash}`} intent="review"
       label={`${t(source.kind === 'order' ? '订单依据' : '知识依据')} ${source.index + 1}`}
       pendingLabel={t('读取中…')} successLabel={t('来源读取已结束')} disabled={pending} onAction={() => open(source)} />)}</div>
     {failed && <Alert type="warning" title={t('来源当前不可读取，旧内容已清除。请重新核对权限、版本或当前业务事实。')} />}

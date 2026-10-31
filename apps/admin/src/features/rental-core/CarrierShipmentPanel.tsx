@@ -1,4 +1,4 @@
-import { DownloadOutlined, PlusOutlined } from "@/components/ui/icons";
+import { FileSearchOutlined, UploadOutlined } from "@/components/ui/icons";
 import type { CreateRentalCarrierShipmentEventRequest, RentalCarrierShipmentEvent, RentalOrder } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Timeline } from "antd";
@@ -94,7 +94,7 @@ export function CarrierShipmentPanel({ order }: { order: RentalOrder }) {
     children: <Space orientation="vertical" size={4}>
       <b>{t(eventLabels[event.type])}</b>
       <span>{dayjs(event.occurredAt).format("YYYY-MM-DD HH:mm:ss")} · {event.carrierName} · {event.trackingNumber}</span>
-      <Space wrap>{event.evidenceFileAssetIds.map((fileId) => <Button key={fileId} type="link" size="small" icon={<DownloadOutlined />} onClick={() => openEvidence(fileId)}>{t("查看凭证")}</Button>)}</Space>
+      <Space wrap>{event.evidenceFileAssetIds.map((fileId) => <Button key={fileId} type="link" size="small" icon={<FileSearchOutlined />} onClick={() => openEvidence(fileId)}>{t("查看凭证")}</Button>)}</Space>
     </Space>
   }));
 
@@ -114,7 +114,7 @@ export function CarrierShipmentPanel({ order }: { order: RentalOrder }) {
         <Form.Item name="occurredAt" label={t(nextType === "outbound_dispatched" ? "实际发出时间" : "承运商揽收时间")} rules={[{ required: true }]}><DatePicker showTime style={{ width: "100%" }} disabledDate={(date) => date.isAfter(dayjs(), "day")} /></Form.Item>
         <Form.Item label={t("运单或揽收凭证")} required>
           <Upload accept="image/jpeg,image/png,image/webp,application/pdf" multiple maxCount={5} fileList={files} customRequest={uploadEvidence} onChange={({ fileList }) => setFiles(fileList as EvidenceFile[])}>
-            <Button icon={<PlusOutlined />}>{t("上传凭证（图片或 PDF）")}</Button>
+            <Button icon={<UploadOutlined />}>{t("上传凭证（图片或 PDF）")}</Button>
           </Upload>
         </Form.Item>
         <SaveButton form={form} pending={createEvent.isPending} label={t("登记里程碑")} onSave={onSubmit} />

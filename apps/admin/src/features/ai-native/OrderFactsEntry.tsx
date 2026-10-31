@@ -72,7 +72,7 @@ export function OrderFactsEntry({ orderId }: { orderId: string }) {
     <p>按需读取正式业务事实。默认不读取、不轮询、不调用模型；场景未配置时保留人工办理。</p>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       {([['status', '查看订单状态'], ['fees', '核对费用依据'], ['next_steps', '查看人工办理提示']] as const).map(([question, label]) =>
-        <ActionButton key={question} label={label} pendingLabel="读取中…" successLabel="已读取" disabled={current?.pending}
+        <ActionButton key={question} label={label} intent="review" pendingLabel="读取中…" successLabel="已读取" disabled={current?.pending}
           onAction={() => load(question)} />)}
     </div>
     {current?.error && <Alert type="warning" message={current.error} />}
