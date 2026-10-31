@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { PaymentRuntimeService, PaymentProviderUnknownError } = require("../apps/api/dist/modules/integrations/payment.runtime.service.js");
+const { PaymentRuntimeService, PaymentProviderUnknownError, PaymentProviderDefinitiveError } = require("../apps/api/dist/modules/integrations/payment.runtime.service.js");
 
 function makeHarness(providerError, existingMethod = null) {
   const updates = [];
@@ -64,7 +64,7 @@ async function main() {
   assert.equal(unknown.updates.at(-1).status, "pending", "未知结果不能被记成失败");
   assert.match(unknown.updates.at(-1).failureReason, /结果未知/u);
 
-  const rejected = makeHarness(new Error("HTTP 400: invalid parameter"));
+  const rejected = makeHarness(new PaymentProviderDefinitiveError("PARAM_ERROR", "invalid parameter"));
   await assert.rejects(
     () => rejected.service.createPaymentIntent("tenant-1", "workspace-1", "order-1", {
       instrument: "rental",

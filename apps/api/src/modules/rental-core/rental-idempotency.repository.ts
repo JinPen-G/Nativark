@@ -27,13 +27,7 @@ export interface RentalIdempotencyStore {
     },
     tx: RentalIdempotencyTx
   ): Promise<void>;
-  /**
-   * 删除保留窗口之外的幂等记录，返回删除行数。
-   *
-   * 必须有清理：这张表每个受保护动作写一行、只增不减，长期运行会无界增长，
-   * 而记录价值随时间迅速衰减——客户端网络重试发生在秒级到分钟级，
-   * 不会在两周后拿同一个键重发。
-   */
+  /** 兼容旧维护端口；没有永久操作墓碑及获批保留依据时拒绝按时间批量删除。 */
   deleteOlderThan(cutoff: Date): Promise<number>;
 }
 
@@ -105,11 +99,8 @@ export class RentalIdempotencyRepository implements RentalIdempotencyStore {
     });
   }
 
-  async deleteOlderThan(cutoff: Date): Promise<number> {
-    const result = await this.prisma.rentalOrderIdempotencyRecord.deleteMany({
-      where: { createdAt: { lt: cutoff } }
-    });
-    return result.count;
+  async deleteOlderThan(_cutoff: Date): Promise<number> {
+    throw new ConflictException("原操作身份尚无安全清理依据，禁止仅按年龄删除幂等记录");
   }
 }
 

@@ -72,11 +72,11 @@ test('human review returns original snapshots, not a later quote or generated te
   assert.equal(view.proposal.status, 'pending_confirmation');
   assert.equal(view.facts.preview.payload.payableAmount, 123);
   assert.equal(view.generatedText, null);
-  assert.deepEqual(await h.root.approvals.readReceipt('task-a', { ...h.review, decision: 'approve' }), { kind: 'absent', retryable: false });
+  assert.deepEqual(await h.root.approvals.readReceipt('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' }), { kind: 'absent', retryable: false });
 });
 
 test('formal human policy is required and order read permission never authorizes approval', async () => {
-  const h = await controlledApprovedOrderHarness(), command = { ...h.review, decision: 'approve' };
+  const h = await controlledApprovedOrderHarness(), command = { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' };
   const policy = h.state.records.aiTaskActionPolicy.find(row => row.operation === 'decide_approval');
   h.state.records.aiTaskActionPolicy = h.state.records.aiTaskActionPolicy.filter(row => row !== policy);
   await assert.rejects(h.root.approvals.decide('task-a', command), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
@@ -89,8 +89,8 @@ test('formal human policy is required and order read permission never authorizes
 
 test('strict human commands reject caller identity and ordinary confirmation text', async () => {
   const h = await controlledApprovedOrderHarness();
-  for (const command of [{ ...h.review, decision: 'approve', context: h.context },
-    { ...h.review, decision: 'yes' }, { ...h.review, decision: 'approve', actorId: 'operator-a' }]) {
+  for (const command of [{ ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2', context: h.context },
+    { ...h.review, decision: 'yes' }, { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2', actorId: 'operator-a' }]) {
     await assert.rejects(h.root.approvals.decide('task-a', command), e => e.code === 'AI_INVALID_INPUT');
   }
   assert.equal(h.state.records.aiApproval.length, 0);
@@ -99,7 +99,7 @@ test('strict human commands reject caller identity and ordinary confirmation tex
 test('waiting human approval retries the original durable decision and rejects the opposite decision', async () => {
   const h = await controlledApprovedOrderHarness();
   h.state.records.aiTask[0].status = 'WAITING_CONFIRMATION';
-  const command = { ...h.review, decision: 'approve' };
+  const command = { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' };
   const first = await h.root.approvals.decide('task-a', command);
   assert.deepEqual(await h.compose().approvals.decide('task-a', command), first);
   assert.equal(h.state.records.aiApproval.length, 1);
@@ -110,7 +110,7 @@ test('waiting human approval retries the original durable decision and rejects t
 });
 
 test('lost decision acknowledgement reconciles the receipt without another approval or Core execution', async () => {
-  const h = await controlledApprovedOrderHarness(), command = { ...h.review, decision: 'approve' };
+  const h = await controlledApprovedOrderHarness(), command = { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' };
   h.state.decisionAckLost = true;
   await assert.rejects(h.root.approvals.decide('task-a', command), e => e.code === 'AI_RESULT_UNKNOWN'
     && e.retryable === false && e.nextAction === 'read_decision_receipt');
@@ -133,9 +133,9 @@ test('confirmed proposal with a missing decision receipt stays unknown, not abse
   const h = await controlledApprovedOrderHarness();
   await h.approve();
   h.state.records.aiApproval = [];
-  const receipt = await h.root.approvals.readReceipt('task-a', { ...h.review, decision: 'approve' });
+  const receipt = await h.root.approvals.readReceipt('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' });
   assert.deepEqual(receipt, { kind: 'unknown', retryable: false, nextAction: 'read_decision_receipt' });
-  await assert.rejects(h.root.approvals.decide('task-a', { ...h.review, decision: 'approve' }), e => e.code === 'AI_REVISION_CONFLICT');
+  await assert.rejects(h.root.approvals.decide('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' }), e => e.code === 'AI_REVISION_CONFLICT');
   assert.equal(h.state.records.aiApproval.length, 0);
 });
 
@@ -165,7 +165,7 @@ test('decision transaction rechecks human policy before accepting the CAS', asyn
       records.aiTaskActionPolicy.find(p => p.operation === 'decide_approval').revision++;
     }
   };
-  await assert.rejects(h.root.approvals.decide('task-a', { ...h.review, decision: 'approve' }),
+  await assert.rejects(h.root.approvals.decide('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' }),
     e => ['AI_ACCESS_DENIED', 'AI_RESULT_UNKNOWN'].includes(e.code));
   assert.equal(changed, true);
   assert.equal(h.state.records.aiApproval.length, 0);

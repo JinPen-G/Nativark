@@ -4,6 +4,11 @@ import { ForbiddenException } from "@nestjs/common";
 export interface RequestIdentity {
   tenantId: string;
   userId: string;
+  /** 原认证分面，区分运营账号与客户；不由请求体/模型推断。 */
+  audience?: 'operator' | 'staff' | 'client';
+  /** 当前有效操作权限，仅由 Auth / Guard 解析；调用方的 owner 不是授权。 */
+  permissions?: readonly string[];
+  isPlatformAdmin?: boolean;
   /** 办理凭证只用于与订单服务端保存的随机令牌比较，不授予权限。 */
   operationToken?: string;
   isSaasAdmin: boolean;

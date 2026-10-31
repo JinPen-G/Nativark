@@ -24,7 +24,8 @@ const labels: Record<SettingsFeedback, string> = {
   conflict: "设置已被其他管理员修改，请重新读取后确认。",
   denied: "当前没有管理 AI 设置的权限。",
   unavailable: "AI 设置暂不可用，请稍后刷新；保存过的设置不会因此被删除。",
-  invalid: "输入未通过服务端校验，请检查配置。"
+  invalid: "输入未通过服务端校验，请检查配置。",
+  reference_unavailable: "原操作引用无法可靠保存或读取，已停止发送。请恢复浏览器存储并核对原保存结果。"
 };
 function contextKey() {
   const state = useAuthStore.getState();
@@ -59,7 +60,7 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
   const session = useMemo(() => {
     const epoch = currentSessionEpoch();
     let storage: Storage | undefined;
-    try { storage = window.sessionStorage; } catch { /* The pending key remains in memory and visible below. */ }
+    try { storage = window.sessionStorage; } catch { /* The session blocks saves without durable recovery references. */ }
     // Reference partition only, never authorization or an enable switch.
     const owner = useAuthStore.getState();
     const storageKey = `rental_ai_config_operation:${JSON.stringify([tenantId, owner.currentWorkspaceId, owner.user?.id])}`;
@@ -91,7 +92,7 @@ function TenantSettingsEditor({ tenantId, identity, onModeChange }: { tenantId: 
           : !reviewLegacy && <ActionButton label={t("审阅并准备停用替换")} successLabel={t("待填写并保存")} disabled={state.busy || !!state.pending} onAction={async () => { setReviewLegacy(true); }} />}
       </>}
       {showEditor && <AiServiceSettingsCard headerActions={refreshActions} summary={state.summary} configId={tenantId} expectedRevision={state.summary?.configRevision ?? 0}
-        contextIdentity={identity} pending={state.busy} readOnly={!!state.pending}
+        contextIdentity={identity} pending={state.busy} readOnly={!!state.pending || state.feedback === 'reference_unavailable'}
         legacySource={!state.summary && legacy && reviewLegacy ? legacy.source : undefined}
         onModeChange={onModeChange}
         onDiscover={aiModelSettingsApi.discover}

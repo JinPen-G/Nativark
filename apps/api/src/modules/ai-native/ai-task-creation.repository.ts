@@ -14,6 +14,10 @@ const grantSchema = z.object({
 
 /** Must authorize the real principal, scene and immutable input reference. No allow-all implementation is supplied. */
 export interface AiTaskCreationAuthority {
+  /** Original request hosts may fence creation under the same row lock as
+   * explicit unstarted closure. This is not a caller-supplied authorization. */
+  assertCreationOpen?(tx: Prisma.TransactionClient, command: { creationKey: string; sceneCode: string; inputRef: string },
+    grant: { context: AiExecutionContext; scopeId: string; sceneVersion: string; inputRevision: number; inputHash: string }): Promise<void>;
   resolve(sceneCode: string, inputRef: string): Promise<{
     context: AiExecutionContext; creationAllowed: true; sceneCode: string; sceneVersion: string;
     inputRef: string; inputRevision: number; inputHash: string;
@@ -172,6 +176,8 @@ export class AiTaskCreationRepository {
         // MySQL text collation must not turn a differently-cased scope key into authority.
         const exact = initial.access.scope;
         if (scope.kind !== exact.kind || scope.scopeKey !== exact.scopeKey || scope.tenantId !== exact.tenantId || scope.workspaceId !== exact.workspaceId) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+        await this.authority!.assertCreationOpen?.(tx, input, { context: initial.grant.context as AiExecutionContext,
+          scopeId: scope.id, sceneVersion: initial.grant.sceneVersion, inputRevision: initial.grant.inputRevision, inputHash: initial.grant.inputHash });
         const existing = await tx.aiTask.findFirst({ where: { ...where, scopeId: scope.id }, select: selectedTask });
         if (existing) {
           const result = this.result(existing, input.creationKey, initial.fingerprint, true);

@@ -20,7 +20,7 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
     const observe = async () => {
       const current = await policy.authorizeRead(taskId), { context, scopeId } = current;
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw deniedOrder();
-      const view = await human.readProposal(taskId, original), action = view.proposal.payload.actions[0];
+      const view = await human.readOriginal(taskId, original), action = view.proposal.payload.actions[0];
       const key = { scopeId, taskId, actionId: action.actionId };
       const step = await d.db.aiStep.findFirst({ where: key, select: { scopeId: true, taskId: true, actionId: true,
         toolCode: true, toolVersion: true, requestFingerprint: true, status: true, effect: true, resultRef: true, revision: true } });

@@ -5,7 +5,8 @@ import addFormats from 'ajv-formats';
 import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   type AiConversationCreateDraft, type AiConversationReferenceDraft, type AiConversationMutationDraft,
   type AiConversationListDraft, type AiConversationTurnAdmissionDraft, type AiConversationTurnReferenceDraft,
-  type AiConversationOperationRequestDraft, type AiConversationTurnListDraft, type AiConversationModelResultReadDraft } from '@rental-os/shared';
+  type AiConversationOperationRequestDraft, type AiConversationTurnListDraft, type AiConversationModelResultReadDraft,
+  type AiConversationUnstartedCloseDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { parseOriginalRequest, originalBody } from './task-request/original-request.validation';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT,
@@ -27,6 +28,7 @@ interface Requests {
   AiConversationTurnAdmissionDraft: AiConversationTurnAdmissionDraft; AiConversationTurnReferenceDraft: AiConversationTurnReferenceDraft;
   AiConversationOperationRequestDraft: AiConversationOperationRequestDraft; AiConversationTurnListDraft: AiConversationTurnListDraft;
   AiConversationModelResultReadDraft: AiConversationModelResultReadDraft;
+  AiConversationUnstartedCloseDraft: AiConversationUnstartedCloseDraft;
 }
 export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations, value: T, command: Requests[keyof Requests]): T {
   const contract = AI_CONVERSATION_HTTP_DRAFT.operations[action];
@@ -44,11 +46,11 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
         || result.result.sceneCode !== result.turn.capabilityCode || result.result.original.sceneVersion !== result.turn.capabilityVersion
         || result.result.taskId !== result.turn.task.taskId) throw Error();
     } else if (!ajv.getSchema(`#/components/schemas/${contract.response}`)!(copy)) throw Error();
-    if (['create', 'archive', 'delete', 'operation', 'release'].includes(action)) {
+    if (['create', 'archive', 'delete', 'operation', 'release', 'closeUnstarted'].includes(action)) {
       const result = copy as AiConversationOperationObservationDraft;
       if (!('operationKey' in command) || result.operationKey !== command.operationKey || contract.write && result.status !== 'observed') throw Error();
       if (result.status === 'observed' && action !== 'operation') {
-        if (result.operation !== (action === 'release' ? 'release_turn' : action)) throw Error();
+        if (result.operation !== (action === 'release' ? 'release_turn' : action === 'closeUnstarted' ? 'close_unstarted' : action)) throw Error();
         if ('conversationId' in command && result.conversationId !== command.conversationId) throw Error();
         if (result.revision !== ('expectedRevision' in command ? command.expectedRevision + 1 : 1)) throw Error();
       }

@@ -40,6 +40,7 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
           : action === 'operation' ? await app.readOperation(supplied)
           : action === 'admission' ? await app.readAdmission(supplied)
           : action === 'release' ? await app.releaseTurn(supplied)
+          : action === 'closeUnstarted' ? await app.closeUnstarted(supplied)
           : action === 'modelResult' ? await app.modelResult(supplied, { readModelResult: command => {
             if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             if (!observations) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -78,6 +79,8 @@ export class AiConversationController {
   turns(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'turns', value); }
   @Post('release') @HttpCode(200) @Header('Cache-Control', 'no-store')
   release(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'release', value); }
+  @Post('closeUnstarted') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  closeUnstarted(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'closeUnstarted', value); }
   @Post('modelResult') @HttpCode(200) @Header('Cache-Control', 'no-store')
   modelResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'modelResult', value); }
 }

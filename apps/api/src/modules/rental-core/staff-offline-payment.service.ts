@@ -75,6 +75,14 @@ export class StaffOfflinePaymentService {
       if (!registration) throw new NotFoundException("待确认收款登记不存在");
       await this.lockOrder(tx, tenantId, workspaceId, registration.orderId);
       const order = await this.assertOrder(tenantId, workspaceId, registration.orderId, scope, tx);
+      if (registration.status === "confirmed") {
+        const balance = await this.funding.listEvents(tenantId, workspaceId, registration.orderId, tx, { realOnly: true });
+        const event = balance.events.find(row => row.id === registration.fundingEventId
+          && row.idempotencyKey === `staff-offline:${registration.id}` && row.instrument === registration.instrument
+          && row.amount === Number(registration.amount) && row.provider === "offline");
+        if (!event) throw new ConflictException("原收款登记缺少一致的资金收据，请核对，不能重新收款");
+        return { registration: this.toResponse(registration), fundingEvent: event };
+      }
       if (["completed", "cancelled"].includes(String(order.status).toLowerCase())) throw new ConflictException("已完成或已取消订单不能确认新增收款");
       if (registration.status !== "pending") throw new ConflictException("该收款登记已处理");
       const balance = await this.funding.listEvents(tenantId, workspaceId, registration.orderId, tx, { realOnly: true });

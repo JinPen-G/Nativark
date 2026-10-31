@@ -71,7 +71,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
           draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, original: command.original, intent: 'inspect'
         });
         if (original.state !== 'superseded') throw new AiApprovalReprepareResultUnknownError();
-        const view = await app.approvals.readProposal(row.replacementTaskId, { contractVersion: AI_PROPOSAL_DRAFT_VERSION,
+        const view = await app.approvals.readOriginal(row.replacementTaskId, { contractVersion: AI_PROPOSAL_DRAFT_VERSION,
           proposalId: row.replacementProposalId, proposalRevision: row.replacementRevision, reviewedPayloadHash: row.replacementPayloadHash });
         if (view.proposal.payload.actions[0].actionId !== row.replacementActionId
           || view.proposal.payload.actions[0].input.contentHash !== row.replacementFingerprint) throw conflict();
@@ -147,7 +147,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
           assertActive();
         };
         await recheck();
-        const original = await app.approvals.readProposal(command.originalTaskId, command.original), action = original.proposal.payload.actions[0];
+        const original = await app.approvals.readOriginal(command.originalTaskId, command.original), action = original.proposal.payload.actions[0];
         const head = await tx.aiProposal.findFirst({ where: { scopeId: current.scopeId, taskId: command.originalTaskId, id: command.original.proposalId } });
         if (!head) throw conflict();
         const first = await materials(command, services, deps, tx), r = command.replacement;

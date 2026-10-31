@@ -99,13 +99,13 @@ ok("退款上限封顶生效");
 /* ---------- 未发生的服务费 ---------- */
 
 const services = [
-  { serviceName: "送车上门", amount: 80, scheduledStartAt: "2026-09-07T09:00:00.000Z" },
-  { serviceName: "取车清洗", amount: 50, scheduledStartAt: "2026-09-03T09:00:00.000Z" }
+  { occurrenceId: "delivery", serviceName: "送车上门", amount: 80, quantity: 1, executionStatus: "not_started", scheduledStartAt: "2026-09-07T09:00:00.000Z" },
+  { occurrenceId: "cleaning", serviceName: "取车清洗", amount: 50, quantity: 1, executionStatus: "completed", executedQuantity: 1, scheduledStartAt: "2026-09-03T09:00:00.000Z" }
 ];
 const withServices = computeEarlyReturnRefund(rule({ refundUndeliveredServices: true }), ctx({ services }));
 assert.equal(withServices.serviceRefund, 80);
 assert.equal(withServices.amount, 248);
-ok("只退计划时段在归还之后的服务（80），已执行的 50 不退");
+ok("按原实际服务状态只退未执行净额（80），已执行的 50 不退");
 
 assert.equal(computeEarlyReturnRefund(rule(), ctx({ services })).serviceRefund, 0);
 ok("未打开「退未发生的服务费」时服务费一律不退");
@@ -116,9 +116,11 @@ const undated = computeEarlyReturnRefund(
   rule({ refundUndeliveredServices: true }),
   ctx({ services: [{ serviceName: "历史快照服务", amount: 80 }] })
 );
-assert.equal(undated.serviceRefund, 0);
-assert.equal(undated.amount, 168);
-ok("服务计划时间读不出来（历史快照缺字段）时不退，不把「不知道」当成「未发生」");
+assert.equal(undated.serviceRefund, null);
+assert.equal(undated.amount, null);
+assert.equal(undated.requiresReview, true);
+assert.equal(undated.maximumAmount, 248);
+ok("历史服务缺少实际履约依据进入未知审核，不把计划时间或缺失当成未发生");
 
 /* ---------- 人工审批 ---------- */
 
@@ -126,5 +128,18 @@ const review = computeEarlyReturnRefund(rule({ mode: "manual_review" }), ctx());
 assert.equal(review.amount, 168);
 assert.equal(review.requiresReview, true);
 ok("manual_review 仍算出金额但标记待审批，落账由服务层拦住");
+
+for (const status of ["completed", "cancelled", "failed", "no_show"]) {
+  const row = { ...services[0], executionStatus: status, executedQuantity: status === "completed" ? 1 : 0,
+    refundStatus: status === "completed" ? "none" : "included_in_order_change" };
+  assert.equal(computeEarlyReturnRefund(rule({ refundUndeliveredServices: true }), ctx({ services: [row] })).serviceRefund, 0);
+}
+const actuallyDoneEarly = computeEarlyReturnRefund(rule({ refundUndeliveredServices: true }), ctx({ services: [{ ...services[0],
+  executionStatus: "completed", executedQuantity: 1 }] }));
+assert.equal(actuallyDoneEarly.serviceRefund, 0, "future plan does not override actual completion");
+const unstartedPastPlan = computeEarlyReturnRefund(rule({ refundUndeliveredServices: true }), ctx({ services: [{ ...services[0],
+  scheduledStartAt: "2026-09-01T00:00:00Z" }] }));
+assert.equal(unstartedPastPlan.serviceRefund, 80, "past plan does not prove actual service performed");
+ok("已执行或已有原核减的服务不重复退款，计划时点不能代替实际履约");
 
 console.log(`\n提前归还退款专项：${passed} 项全部通过`);

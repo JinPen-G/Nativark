@@ -52,6 +52,7 @@ import type {
   RentalOrderChangePreview,
   PreviewRentalOrderChangeRequest,
   RentalOrderServiceOccurrence,
+  RentalServiceExecutionReceipt,
   RentalOrderExtension,
   RentalOrderExtensionPreview,
   RentalOrderExtensionRequest,
@@ -384,8 +385,12 @@ export const rentalCoreApi = {
    */
   reviewOrderFeeReview: (id: string, reviewId: string, data: ReviewRentalOrderFeeReviewRequest) =>
     request<RentalOrder>(`/rental/v1/orders/${id}/fee-reviews/${reviewId}/review`, { method: "post", data }),
-  updateServiceOccurrence: (id: string, occurrenceId: string, data: UpdateRentalServiceOccurrenceRequest) =>
-    request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/execution`, { method: "post", data }),
+  updateServiceOccurrence: (id: string, occurrenceId: string, data: UpdateRentalServiceOccurrenceRequest, idempotencyKey?: string) =>
+    request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/execution`, { method: "post", data,
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined }),
+  serviceExecutionReceipt: (id: string, occurrenceId: string, idempotencyKey: string) =>
+    request<RentalServiceExecutionReceipt>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/execution-receipt`,
+      { headers: { "Idempotency-Key": idempotencyKey } }),
   refundServiceOccurrence: (id: string, occurrenceId: string, data: RefundRentalServiceRequest) =>
     request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/refund`, { method: "post", data }),
   inspectionTemplates: (stage?: "pickup" | "return", orderId?: string) => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage, orderId } }),

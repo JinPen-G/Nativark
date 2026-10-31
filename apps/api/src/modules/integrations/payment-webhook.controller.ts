@@ -1,4 +1,5 @@
-import { Controller, HttpCode, HttpException, HttpStatus, Post, Req } from "@nestjs/common";
+import { Controller, Header, HttpCode, HttpException, HttpStatus, Post, Req, SetMetadata } from "@nestjs/common";
+import { RAW_HTTP_RESPONSE } from "../../common/request-id.interceptor";
 import { PaymentRuntimeService } from "./payment.runtime.service";
 import { PaymentWebhookRateLimiter } from "./payment-webhook-rate-limit";
 
@@ -30,6 +31,8 @@ export class PaymentWebhookController {
 
   @Post("alipay")
   @HttpCode(200)
+  @SetMetadata(RAW_HTTP_RESPONSE, true)
+  @Header("Content-Type", "text/plain; charset=utf-8")
   alipay(@Req() req: WebhookRequest) {
     this.assertRate(req);
     return this.payments.handleAlipayCallback(req.body);
@@ -37,6 +40,7 @@ export class PaymentWebhookController {
 
   @Post("wechat_pay")
   @HttpCode(200)
+  @SetMetadata(RAW_HTTP_RESPONSE, true)
   wechatPay(@Req() req: WebhookRequest) {
     this.assertRate(req);
     return this.payments.handleWechatCallback({ body: req.body, rawBody: req.rawBody, headers: req.headers });
@@ -44,6 +48,7 @@ export class PaymentWebhookController {
 
   @Post("stripe")
   @HttpCode(200)
+  @SetMetadata(RAW_HTTP_RESPONSE, true)
   stripe(@Req() req: WebhookRequest) {
     this.assertRate(req);
     return this.payments.handleStripeCallback({ body: req.body, rawBody: req.rawBody, headers: req.headers });
@@ -51,6 +56,8 @@ export class PaymentWebhookController {
 
   @Post("alipay/refund")
   @HttpCode(200)
+  @SetMetadata(RAW_HTTP_RESPONSE, true)
+  @Header("Content-Type", "text/plain; charset=utf-8")
   alipayRefund(@Req() req: WebhookRequest) {
     this.assertRate(req);
     return this.payments.handleAlipayRefundCallback(req.body);
@@ -58,6 +65,7 @@ export class PaymentWebhookController {
 
   @Post("wechat_pay/refund")
   @HttpCode(200)
+  @SetMetadata(RAW_HTTP_RESPONSE, true)
   wechatRefund(@Req() req: WebhookRequest) {
     this.assertRate(req);
     return this.payments.handleWechatRefundCallback({ body: req.body, rawBody: req.rawBody, headers: req.headers });

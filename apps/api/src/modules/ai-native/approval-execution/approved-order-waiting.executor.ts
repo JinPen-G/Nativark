@@ -63,7 +63,7 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
   const readWaiting = async (raw: ApprovedOrderExecutorInput) => {
     const input = parse(raw), first = await locate(input);
     if (!first.reference) return { kind: 'missing' as const, binding: first.binding, lease: input.lease };
-    const view = await app.approvals.readProposal(input.taskId, first.reference);
+    const view = await app.approvals.readOriginal(input.taskId, first.reference);
     if (view.proposal.payload.actions[0].actionId !== input.actionId || view.proposal.payload.actions[0].input.contentHash !== input.fingerprint) throw deniedOrder();
     const decision: AiProposalDecisionRequestDraft['decision'] = view.proposal.status === 'cancelled' ? 'reject' : 'approve';
     const receipt = await app.approvals.readReceipt(input.taskId, { ...first.reference, decision });
@@ -170,9 +170,21 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
       // A persisted proposal can still be observed and paused after new work
       // closes. Do not discard its measurement or grant a fresh preparation;
       // approval and submission retain their separate current execution gates.
-      await policy.authorizeRead(input.taskId);
+      const assertHeld = async () => {
+        const current = await policy.authorizeRead(input.taskId), now = (d.clock ?? (() => new Date()))();
+        if (current.context.actor.kind !== 'user') throw deniedOrder();
+        const task = await d.db.aiTask.findFirst({ where: { scopeId: current.scopeId, id: input.taskId,
+          status: { in: ['RUNNING', 'WAITING_CONFIRMATION'] }, cancelRequestedAt: null } });
+        const run = await d.db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: input.taskId, id: input.runId,
+          actorKind: 'USER', actorId: current.context.actor.userId, status: 'RUNNING', leaseOwnerId: input.lease.holderId,
+          revision: input.lease.revision, fencingToken: new Prisma.Decimal(input.lease.fencingToken), leaseExpiresAt: { gt: now } } });
+        // Historical readWaiting stays lease-independent. execute may pause a
+        // live held step, not renew a cancelled task or a stale worker's phase.
+        if (!task || !run || Date.parse(input.lease.expiresAt) <= now.getTime()) throw deniedOrder();
+      };
+      await assertHeld();
       const latest = await readWaiting(input);
-      await policy.authorizeRead(input.taskId);
+      await assertHeld();
       if (signal.aborted || requestFingerprint(latest) !== requestFingerprint(waiting)) return unknown(material(waiting, 'unresolved'));
       return { kind: 'paused', pause: 'confirmation', payload: material(waiting, 'awaiting_decision') };
     }

@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
 const { PaymentRuntimeService } = require("../apps/api/dist/modules/integrations/payment.runtime.service.js");
+const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+const identity = { tenantId: 'tenant-1', workspaceId: 'workspace-1', userId: 'finance-operator', isSaasAdmin: false,
+  audience: 'operator', permissions: ['rental-os:finance:reconcile'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
 
 const intentRows = [
   { id: "intent-paid", orderId: "order-1", status: "pending", updatedAt: new Date("2026-09-14T00:00:00Z") },
@@ -51,12 +54,20 @@ async function main() {
     assert.equal(call.args.take, 10);
   }
 
+  for (const changes of [{ dataScope: 'own' }, { dataScope: 'store' }, { permissions: ['system:integration:manage'] },
+    { locationScope: { mode: 'selected', locationIds: ['own-place'] } }, { locationScope: undefined },
+    { tenantId: 'different' }, { workspaceId: 'different' }, { audience: 'client' }, { isSaasAdmin: true }]) {
+    const before = calls.length;
+    await assert.rejects(() => runWithRequestIdentity({ ...identity, ...changes }, () => service.reconcileCurrentWorkspace('tenant-1', 'workspace-1')),
+      error => error.status === 403);
+    assert.equal(calls.length, before, 'rejected bulk scope cannot read payment candidates or issue provider requests');
+  }
   const limited = await service.reconcileCurrentWorkspace("tenant-1", "workspace-1", 1);
   assert.equal(limited.scanned, 1, "批量对账必须受 limit 约束");
   console.log("payment reconciliation tests passed");
 }
 
-main().catch((error) => {
+runWithRequestIdentity(identity, main).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

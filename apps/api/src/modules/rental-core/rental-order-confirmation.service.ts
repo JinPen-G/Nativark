@@ -17,6 +17,7 @@ import {
   type RentalBusinessFactStore
 } from "./rental-business-fact.repository";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
+import { assertQuoteReadAccess } from './rental-quote-access';
 import {
   RentalCoreFactRepository,
   type RentalCoreFactStore
@@ -45,12 +46,14 @@ function canonicalize(value: unknown): unknown {
 function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
+    sourceSnapshot: quote.sourceSnapshot,
     request: quote.request,
     deliveryAddressSnapshot: quote.deliveryAddressSnapshot,
     membershipSnapshot: quote.membershipSnapshot,
     membershipBenefitEvaluations: quote.membershipBenefitEvaluations,
     chargeLines: quote.chargeLines,
     rentalAmount: quote.rentalAmount,
+    rentalLineAmounts: quote.rentalLineAmounts,
     discountAmount: quote.discountAmount,
     couponAmount: quote.couponAmount,
     serviceAmount: quote.serviceAmount,
@@ -227,19 +230,19 @@ export class RentalOrderConfirmationService {
       if (!customerGate.allowed) throw new ConflictException(customerGate.message);
     }
 
-    // An original quote COMMIT can succeed without publishing the cache when
-    // its acknowledgement is lost. Approved execution reads the persisted quote,
-    // never recreates it or relies on that process-local cache being populated.
-    const quote = approval ? await this.businessFacts.findQuote(tenantId, input.quoteId)
-      : this.business.consumeQuote(tenantId, context, input.quoteId);
+    // Both manual and approved creation read the original durable quote. A
+    // successful COMMIT with a lost response/cache publication is not a missing
+    // quote, and another instance's consumption cannot be hidden by stale cache.
+    const quote = await this.businessFacts.findQuote(tenantId, input.quoteId);
     if (!quote) throw new ConflictException("报价事实不存在，请核对原报价");
+    assertQuoteReadAccess(quote);
     if (new Date(quote.expiresAt).getTime() < Date.now() || quote.consumedAt || quote.consumedOrderId) {
       throw new ConflictException("报价已过期或被使用，请核对原报价");
     }
     this.assertOrderMatchesQuote(input, quote);
     // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
     // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。
-    const membershipAtCommit = quote.membershipSnapshot
+    let membershipAtCommit = quote.membershipSnapshot
       ? await this.resolveMembershipAtCommit(tenantId, workspaceId, quote)
       : undefined;
     const orderInput: CreateRentalOrderRequest = membershipAtCommit
@@ -304,6 +307,12 @@ export class RentalOrderConfirmationService {
           await approval.authorize(structuredClone(approvalBinding));
           await approval.prepare(tx, structuredClone(approvalBinding));
         }
+        // Acquire personal/corporate customer gates in the relation writer's
+        // canonical order, before the individual customer business check below.
+        if (quote.membershipSnapshot) {
+          membershipAtCommit = await this.resolveMembershipAtCommit(tenantId, workspaceId, quote, tx);
+          order.membershipSnapshot = membershipAtCommit;
+        }
         // 快速预检只改善反馈；这里才是权威判定。它与客户暂停、注销、合并共用
         // customer_profiles 行锁，消除“检查通过后状态才变化”的竞态窗口。
         if (this.customerOperations && input.customerId) {
@@ -330,6 +339,9 @@ export class RentalOrderConfirmationService {
           }
           if (hasOpenRisk) throw new ConflictException("会员风控状态已变化，请重新报价后再试");
         }
+        // Current location/operator admission shares the configuration writer's
+        // workspace lock; a prepared order or frozen quote is not authorization.
+        await this.core.bindOrderCreationFulfillment(tenantId, order, tx);
         // 先锁定序列化资产或数量余额，再在同一事务内按最新预占重新计算。
         // 并发请求会在这里串行，后到者不能继续使用事务外看到的陈旧可用量。
         await this.core.assertAvailabilityWithLocks(tenantId, {
@@ -395,6 +407,7 @@ export class RentalOrderConfirmationService {
 
         const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);
         if (!storedQuote) throw new ConflictException("报价事实不存在，请重新报价");
+        assertQuoteReadAccess(storedQuote);
         if (storedQuote.consumedAt) throw new ConflictException("报价已被使用，请重新报价");
         if (new Date(storedQuote.expiresAt).getTime() < new Date(committedAt).getTime()) {
           throw new ConflictException("报价已过期，请重新报价");
@@ -517,14 +530,15 @@ export class RentalOrderConfirmationService {
     }
   }
 
-  private async resolveMembershipAtCommit(tenantId: string, workspaceId: string, quote: RentalQuoteSnapshotV1) {
+  private async resolveMembershipAtCommit(tenantId: string, workspaceId: string, quote: RentalQuoteSnapshotV1, tx?: Prisma.TransactionClient) {
     if (!this.memberships) throw new ConflictException("会员预约服务未就绪");
     const snapshot = quote.membershipSnapshot!;
     const current = await this.memberships.resolveBookingIdentity(
       tenantId,
       workspaceId,
       snapshot.personalCustomerId,
-      quote.request.bookingIdentity
+      quote.request.bookingIdentity,
+      tx
     );
     if (
       current.bookingIdentity !== snapshot.bookingIdentity ||
@@ -533,6 +547,11 @@ export class RentalOrderConfirmationService {
       current.enterpriseContractAndPayer !== snapshot.enterpriseContractAndPayer
     ) {
       throw new ConflictException("会员预约身份或企业员工关系已变化，请重新报价");
+    }
+    if (tx) {
+      if (!this.memberships.assertBookingQualificationForAction) throw new ConflictException("提交事务资格读取未就绪");
+      await this.memberships.assertBookingQualificationForAction(tenantId, workspaceId, current, quote.ruleSnapshot.qualification, "submit",
+        { validThroughAt: quote.request.endAt, minimumValidityFromAt: quote.request.startAt }, tx);
     }
     // 价格权益保持报价快照，资格读取当前事实，不能使用已被撤销的旧审核结果。
     return { ...snapshot, qualifications: current.qualifications };

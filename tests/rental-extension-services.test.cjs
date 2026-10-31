@@ -83,6 +83,7 @@ async function pricingFixture(spy) {
     locations: core.listLocations(tenantId),
     operators: core.listOperators(tenantId)
   };
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', ctx);
   const group = ctx.groups.find((row) => row.status === "enabled") ?? ctx.groups[0];
   const location = ctx.locations.find((row) => row.status === "enabled") ?? ctx.locations[0];
   // listServices 返回的是状态里的那个数组本体，直接补一条需要容量的服务即可。
@@ -95,6 +96,9 @@ async function pricingFixture(spy) {
     lines: [{ itemGroupId: group.id, quantity: 1 }]
   });
   quote.ruleSnapshot.extension = { enabled: true, forceImmediateWhenOverdue: true, pricingMode: "original_total" };
+  // The async quote consumer reads a durable port; this fixture supplies its
+  // own frozen quote, not production cache fallback or a database-lock claim.
+  business.factStore.findQuote = async (_tenant, id) => id === quote.id ? structuredClone(quote) : undefined;
   // createQuote 自己也过同一道容量闸门（本单没选服务，传的是空数组）。清掉这次记录，
   // 后面断言的才是续租那一次。
   spy.calls.asserted.length = 0;
@@ -173,7 +177,10 @@ const orderWithServices = (snapshots) => ({
 });
 
 const extensionWith = (id, sequence, snapshots) => ({
-  id, sequence, originalEndAt: endAt, newEndAt: extendedTo, payableAmount: 200,
+  id, sequence, originalEndAt: endAt, newEndAt: extendedTo,
+  rentalAmount: snapshots?.length ? 0 : 200,
+  serviceAmount: snapshots?.reduce((sum, row) => sum + row.amount, 0) ?? 0,
+  payableAmount: snapshots?.length ? snapshots.reduce((sum, row) => sum + row.amount, 0) : 200,
   settlementMode: "immediate", ruleVersion: "1.0", serviceSnapshots: snapshots
 });
 

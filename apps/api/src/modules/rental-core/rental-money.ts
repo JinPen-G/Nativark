@@ -10,6 +10,14 @@
  * `Math.round(1.005 * 100)` 得 100 而不是 101。加一个最小步长把这类"差一点"推过边界。
  * 它只治舍入边界，**不治浮点本身**——金额链路仍是 `number`，换 Decimal 是另一件事。
  */
+import { RENTAL_CURRENCY_CODES } from "@rental-os/shared";
+
+/** New order amounts must retain a supported original currency. Missing history
+ * cannot be repaired from today's workspace settings or by relabelling a price. */
+export function hasOriginalRentalCurrency(original: unknown, currency: unknown): boolean {
+  return RENTAL_CURRENCY_CODES.some(code => code === original) && currency === original;
+}
+
 export const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 /**

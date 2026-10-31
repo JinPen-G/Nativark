@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger, type OnApplicationBootstrap } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, type OnApplicationBootstrap } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import {
@@ -15,9 +15,6 @@ class IdempotentReplay extends Error {
     super("idempotent replay");
   }
 }
-
-/** 幂等记录保留天数。理由见 onApplicationBootstrap。 */
-const IDEMPOTENCY_RETENTION_DAYS = 14;
 
 /**
  * 写冲突的有界重试。次数刻意小：它只为覆盖「先到者即将提交」的窄窗口，
@@ -44,9 +41,9 @@ export interface IdempotentActionInput<T> {
   /** 在事务内执行业务变更，返回要登记并回放的结果。 */
   run: (tx: RentalIdempotencyTx) => Promise<T>;
   /**
-   * 从登记的响应快照还原结果，用于重放。
-   * 返回 undefined 表示"不可重放"——调用方据此让业务逻辑重新执行，
-   * 由状态机给出正确的拒绝，而不是回放一个陈旧的成功结果。
+   * 在当前授权下从原收据及持久事实还原结果；后继合法状态不应单独使原收据失效。
+   * 返回 undefined 表示缺少安全回放依据，不能仅凭存在旧键就声称成功。
+   * 已有原记录而缺少安全回放依据时直接拒绝，不再次调用业务动作。
    */
   replay: (response: unknown) => Promise<T | undefined>;
 }
@@ -58,10 +55,9 @@ export interface IdempotentActionInput<T> {
  * 分散到每个动作各写一遍时，很容易漏掉事务内那次重查——只有事务外检查的话，
  * 并发同键会双双通过，两边都推进状态。
  *
- * 关于回放与状态机的先后：幂等只覆盖「同一次意图的重试」，不得把非法状态转移
- * 伪装成重放。这件事由 `replay` 负责——只有订单确实处于本动作的**目标状态**才回放，
- * 否则返回 undefined 交回状态机拒绝：已完成订单再次确认因状态不是 reserved 而落到
- * `run`，由状态机给出 409。
+ * 幂等只覆盖「同一次意图的重试」，回放仍检查当前授权和原收据。
+ * 原成功动作之后订单可继续推进，不能仅因已到后继状态就丢失原收据；
+ * 已有原记录而缺少安全回放依据时直接拒绝，不能重新创造一次业务事实。
  *
  * 反过来，`fallbackKey` **不得**纳入订单当前状态。状态会被本动作自己改掉，纳入后
  * 无键网络重试算出的键与首次登记的键不同，查不到记录同样落到状态机报 409，
@@ -69,33 +65,15 @@ export interface IdempotentActionInput<T> {
  */
 @Injectable()
 export class RentalIdempotentActionService implements OnApplicationBootstrap {
-  private readonly logger = new Logger(RentalIdempotentActionService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
   ) {}
 
-  /**
-   * 启动时清理保留窗口之外的幂等记录。
-   *
-   * 为什么是 14 天：幂等记录只服务「同一次意图的重试」，客户端重试发生在秒级到
-   * 分钟级；14 天远超任何真实重试窗口，又足以覆盖排查期间的人工追溯。
-   *
-   * 为什么放在启动钩子：本任务分支只负责 rental-core，不跨到 jobs 模块加定时任务。
-   * 代价是长期不重启的进程不会再清理——**这是已知限制**，正式的周期调度应由
-   * 拥有 jobs 模块的任务承接（已在台账记录为依赖，不在此自行实现）。
+  /** 操作键也是长租/分批履约的唯一身份，不能仅按年龄删除后允许同键再执行。
+   * 尚无永久操作墓碑及获批保留策略，启动时保留全部原记录；清理另走受控维护。
    */
-  async onApplicationBootstrap() {
-    const cutoff = new Date(Date.now() - IDEMPOTENCY_RETENTION_DAYS * 86_400_000);
-    try {
-      const removed = await this.idempotency.deleteOlderThan(cutoff);
-      if (removed > 0) this.logger.log(`清理过期幂等记录 ${removed} 条（保留 ${IDEMPOTENCY_RETENTION_DAYS} 天）`);
-    } catch (error) {
-      // 清理失败不得阻断启动：它是维护动作，不是业务正确性的前提。
-      this.logger.warn(`幂等记录清理失败，将在下次启动重试：${(error as Error).message}`);
-    }
-  }
+  async onApplicationBootstrap() {}
 
   /**
    * 返回值带 `replayed` 标记：调用方据此跳过通知等**外部副作用**。
@@ -120,6 +98,19 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
     return { result, replayed };
   }
 
+  /** Read an original receipt only. Absence is unknown, never permission to run. */
+  async readReceipt<T>(input: {
+    tenantId: string; action: string; key: string; orderId: string;
+    replay: (response: unknown) => Promise<T | undefined>;
+  }): Promise<T | undefined> {
+    const original = await this.idempotency.find(input.tenantId, input.action, input.key);
+    if (!original) return undefined;
+    if (original.orderId !== input.orderId) throw new ConflictException("原操作收据与当前订单不一致");
+    const result = await input.replay(original.response);
+    if (result === undefined) throw new ConflictException("原操作收据缺少安全恢复依据，禁止重新执行");
+    return result;
+  }
+
   async execute<T>(input: IdempotentActionInput<T>, attempt = 0): Promise<T> {
     const key = input.key?.trim() || input.fallbackKey;
     const fingerprint = requestFingerprint(input.request);
@@ -130,6 +121,7 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
       assertSameRequest(early, fingerprint);
       const replayed = await input.replay(early.response);
       if (replayed !== undefined) return replayed;
+      throw new ConflictException("原操作收据缺少安全恢复依据，禁止重新执行");
     }
 
     try {

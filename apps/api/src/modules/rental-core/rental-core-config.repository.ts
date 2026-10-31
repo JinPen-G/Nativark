@@ -23,6 +23,7 @@ import { getRequestWorkspaceId } from "../../common/request-identity";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import type { RentalUniqueAttributeClaim } from "./rental-core-fact.repository";
 import type { VersionedBusinessSettings } from './approved-settings-change.ports';
+import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } from './rental-fulfillment-admission';
 
 /**
  * 单个**经营空间**的全部配置，用于启动预热写穿缓存。
@@ -92,6 +93,10 @@ export interface RentalConfigStore {
   listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery): Promise<RentalItemGroupPage>;
   listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
   listCouponTemplates?(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]>;
+  /** Missing authority is unavailable, never permission to use a cached enabled flag. */
+  readFulfillmentAdmission?(tenantId: string, workspaceId: string, requirements: readonly RentalFulfillmentRequirement[], tx?: RentalConfigTx): Promise<{
+    locations: RentalFulfillmentLocation[]; operators: RentalFulfillmentOperator[];
+  }>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
@@ -148,6 +153,16 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return { rows: page.map(row => this.toItemGroup(row)), nextCursor: truncated ? page[page.length - 1].id : null,
       truncated, source: 'persisted_workspace_configuration',
       configurationVersion: createHash('sha256').update(JSON.stringify(page)).digest('hex') };
+  }
+
+  async readFulfillmentAdmission(tenantId: string, workspaceId: string, requirements: readonly RentalFulfillmentRequirement[], tx?: RentalConfigTx) {
+    const input = structuredClone(requirements);
+    const read = async (client: RentalConfigTx) => {
+      if (await resolveScopeWorkspaceId(client, tenantId) !== workspaceId) throw new ConflictException("履约准入经营空间变化");
+      const current = await readRentalFulfillmentAdmission(client, tenantId, workspaceId, input);
+      return { locations: current.locations.map(row => this.toLocation(row)), operators: current.operators.map(row => this.toOperator(row)) };
+    };
+    return tx ? read(tx) : this.prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async listInspectionTemplates(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]> {

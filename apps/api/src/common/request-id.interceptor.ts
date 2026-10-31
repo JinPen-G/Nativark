@@ -7,6 +7,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { Observable, map } from "rxjs";
 
+/** 仅处理器声明的原协议响应跳过 API 信封；请求字段不能启用。 */
+export const RAW_HTTP_RESPONSE = 'rental.raw-http-response';
+
 interface HttpRequestLike {
   headers: Record<string, string | string[] | undefined>;
   url: string;
@@ -32,7 +35,8 @@ export class RequestIdInterceptor implements NestInterceptor {
     request.requestId = requestId;
     response.setHeader("x-request-id", requestId);
 
-    if (request.url.split("?")[0] === "/api/openapi.json") {
+    if (request.url.split("?")[0] === "/api/openapi.json"
+      || Reflect.getMetadata(RAW_HTTP_RESPONSE, context.getHandler()) === true) {
       return next.handle();
     }
 

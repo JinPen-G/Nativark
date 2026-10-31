@@ -4,6 +4,9 @@ const {
   PaymentReconciliationFileService,
   parsePaymentStatementCsv
 } = require("../apps/api/dist/modules/integrations/payment-reconciliation-file.service");
+const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+const identity = { tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'operator-a', isSaasAdmin: false,
+  audience: 'operator', permissions: ['rental-os:finance:reconcile'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
 
 function csv() {
   return Buffer.from([
@@ -133,7 +136,8 @@ async function main() {
   assert.deepEqual(unknownStatusLine.differenceCodes.sort(), ["amount_mismatch", "duplicate_statement_key", "unsupported_status"]);
   assert.deepEqual(missingLocalLine.differenceCodes, ["local_record_missing"]);
 
-  await assert.rejects(() => service.getBatch("tenant-b", "workspace-a", first.id), (error) => error instanceof NotFoundException);
+  await assert.rejects(() => runWithRequestIdentity({ ...identity, tenantId: 'tenant-b' }, () => service.getBatch("tenant-b", "workspace-a", first.id)),
+    (error) => error instanceof NotFoundException);
   await service.reviewLine("tenant-a", "workspace-a", first.id, unknownStatusLine.id, { decision: "query_provider", reason: "请平台确认状态" }, "operator-a");
   let reviewed = await service.getBatch("tenant-a", "workspace-a", first.id);
   assert.equal(reviewed.lines.find((line) => line.id === unknownStatusLine.id).reviewStatus, "query_pending");
@@ -144,10 +148,22 @@ async function main() {
   assert.equal(reviewed.acknowledgedRows, 2);
   assert.equal(reviewed.status, "reviewed");
   assert.equal(reviewed.lines.filter((line) => line.reviewStatus === "acknowledged").length, 2);
-  console.log("payment reconciliation file tests passed: parser, idempotency, immutable facts, scope isolation and review state");
+  for (const changes of [{ dataScope: 'own' }, { dataScope: 'organization' }, { permissions: [] },
+    { locationScope: { mode: 'selected', locationIds: ['own-place'] } }, { workspaceId: 'different' }, { isSaasAdmin: true }]) {
+    const before = JSON.stringify({ batches: prisma.batches, lines: prisma.lines });
+    await runWithRequestIdentity({ ...identity, ...changes }, async () => {
+      for (const operation of [() => service.listBatches('tenant-a', 'workspace-a'), () => service.getBatch('tenant-a', 'workspace-a', first.id),
+        () => service.importStatement('tenant-a', 'workspace-a', 'alipay', { originalname: 'new.csv', size: csv().length, buffer: csv() }),
+        () => service.reviewLine('tenant-a', 'workspace-a', first.id, unknownStatusLine.id, { decision: 'acknowledge', reason: 'bypass' })]) {
+        await assert.rejects(operation, error => error.status === 403);
+      }
+    });
+    assert.equal(JSON.stringify({ batches: prisma.batches, lines: prisma.lines }), before, 'scope rejection cannot partially write a batch');
+  }
+  console.log("payment reconciliation file tests passed: parser, idempotency, immutable facts, scope isolation, restricted-scope rejection and review state");
 }
 
-main().catch((error) => {
+runWithRequestIdentity(identity, main).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -6,6 +6,7 @@ import type {
   SystemUserRow
 } from "@rental-os/shared";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
+import { assertQuoteReadAccess } from './rental-quote-access';
 import {
   GrantRentalRewardDto,
   RentalQuoteDto,
@@ -442,6 +443,8 @@ export class RentalBusinessController {
     return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, (await this.context(req.user.tenantId)), resolved));
   }
   @Get("quotes/:id") async quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    return redactDeliveryAddressPhone(this.business.getQuote(req.user.tenantId, (await this.context(req.user.tenantId)), id));
+    const quote = await this.business.loadQuote(req.user.tenantId, await this.context(req.user.tenantId), id);
+    assertQuoteReadAccess(quote);
+    return redactDeliveryAddressPhone(quote);
   }
 }

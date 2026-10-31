@@ -101,6 +101,7 @@ function createTaskInputStore(initial, constraints = {}) {
         }
         if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
         if (name === 'aiTask') { row.archivedAt ??= null; row.cancelRequestedAt ??= null; row.updatedAt ??= row.createdAt; }
+        if (name === 'aiTaskOriginalRequest') { row.creationClosedAt ??= null; row.creationCloseKey ??= null; row.erasedAt ??= null; }
         if (name === 'aiGatewayInvocation') row.id ??= require('node:crypto').randomUUID();
         if (name === 'aiInvocationAdmission') {
           row.scopeKind ??= 'WORKSPACE'; // Real schema default for existing workspace admissions.

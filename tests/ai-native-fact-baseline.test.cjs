@@ -43,6 +43,11 @@ async function harness(categoryCode, memberships) {
     settings: core.getBusinessSettings(input.TENANT_ID), groups: core.listItemGroups(input.TENANT_ID),
     pricingGroups: core.listPricingGroups(input.TENANT_ID), locations: core.listLocations(input.TENANT_ID),
     operators: core.listOperators(input.TENANT_ID), couponTemplates: core.listCouponTemplates(input.TENANT_ID) };
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], input.TENANT_ID,
+    (await config.listWorkspaces()).find(row => row.tenantId === input.TENANT_ID).id, context);
+  // Explicit fixture snapshot read; production never falls back to this cache.
+  businessFacts.findQuote = async (tenant, id) => tenant === input.TENANT_ID
+    ? structuredClone(business.state(tenant, context).quotes.find(row => row.id === id)) : undefined;
   return { core, business, context, config, facts, businessConfig, businessFacts };
 }
 
@@ -117,6 +122,8 @@ for (const categoryCode of ["camera", "camping", "vehicle", "construction"]) {
   test(`${categoryCode}: confirmation only creates confirmed reservation, not paid or handed-over status`, async () => {
     const h = await harness(categoryCode);
     const order = { id: "order_ain", tenantId: input.TENANT_ID, categoryCode, status: "draft",
+      fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: h.context.locations[0].id,
+      returnLocationId: h.context.locations[0].id,
       reservations: [{ id: "reservation_ain", status: "soft", expiresAt: new Date(Date.now() + 60_000).toISOString() }],
       allocations: [] };
     h.facts.findOrder = async () => order;

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui";
 import { ActionButton, Button, Select } from "@/components/ui";
 import type { UploadFile, UploadProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -25,12 +25,28 @@ import { OrderQuickActionNotice } from "./OrderQuickActionNotice";
 import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
 import { TableRefreshProvider } from "@/components/ui";
 import { CarrierShipmentPanel } from "./CarrierShipmentPanel";
-import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
+import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, feeReviewAmountCeiling, feeReviewAmountError, hasPendingFeeReview } from "./orderFeeReview";
 import { OrderDetailSummary, OrderMoney } from "./OrderDetailSummary";
 import { detailResourceLabels, detailChargeLabels } from "./orderDetailPresentation";
 import { OrderFundingPanel } from "./OrderFundingPanel";
 import detailStyles from "./OrderDetail.module.css";
 import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./orderServiceOccurrence";
+import { currentSessionEpoch } from "@/app/queryClient";
+import { clearServiceExecutionReference, readServiceExecutionReference, retainServiceExecutionReference, type ServiceExecutionReference } from "./service-execution-reference";
+
+function currentServiceExecutionScope() {
+  const auth = useAuthStore.getState();
+  return auth.sessionVerified && auth.tenant?.tenantId && auth.currentWorkspaceId && auth.user?.id
+    ? JSON.stringify([auth.tenant.tenantId, auth.currentWorkspaceId, auth.user.id]) : "";
+}
+
+function serviceReferenceStorage() {
+  try { return window.sessionStorage; } catch { return undefined; }
+}
+
+type ServiceExecutionValues = { executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean;
+  refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string };
+type ServiceExecutionCommand = { reference: ServiceExecutionReference; epoch: number; data: UpdateRentalServiceOccurrenceRequest; uncertain?: boolean };
 
 type FundingOperation = {
   instrument: RentalFundingInstrument;
@@ -178,7 +194,30 @@ export function RentalOrderDetailPage() {
   const [postPickupExchangeOpen, setPostPickupExchangeOpen] = useState(false);
   const [postPickupExchangePreview, setPostPickupExchangePreview] = useState<RentalOrderChangePreview>();
   const [exchangeTarget, setExchangeTarget] = useState<{ exchangeOrderLineId: string; replacementItemGroupId: string }>();
-  const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
+  const serviceAuthUser = useAuthStore(state => state.user);
+  const serviceAuthWorkspace = useAuthStore(state => state.currentWorkspaceId);
+  const serviceAuthVerified = useAuthStore(state => state.sessionVerified);
+  const serviceScope = serviceAuthVerified && serviceAuthWorkspace && serviceAuthUser?.id ? currentServiceExecutionScope() : "";
+  const serviceEpoch = currentSessionEpoch();
+  const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction;
+    orderId: string; operationKey: string; scope: string; epoch: number }>();
+  const serviceExecutionCommand = useRef<ServiceExecutionCommand | undefined>(undefined);
+  const [serviceReference, setServiceReference] = useState<{ scope: string; orderId: string; pending: ServiceExecutionReference | null; blocked: boolean }>();
+  const serviceReferenceReady = serviceReference?.scope === serviceScope && serviceReference.orderId === id;
+  const servicePendingReference = serviceReferenceReady ? serviceReference.pending : null;
+  const serviceReferenceBlocked = !serviceReferenceReady || serviceReference.blocked;
+  const serviceOwner = useRef({ id, scope: serviceScope, epoch: serviceEpoch });
+  serviceOwner.current = { id, scope: serviceScope, epoch: serviceEpoch };
+  const serviceCommandIsCurrent = (reference: ServiceExecutionReference, epoch: number) => serviceOwner.current.id === reference.orderId
+    && serviceOwner.current.scope === reference.scope && serviceOwner.current.epoch === epoch
+    && currentSessionEpoch() === epoch && currentServiceExecutionScope() === reference.scope;
+  useEffect(() => {
+    serviceExecutionCommand.current = undefined;
+    setServiceExecution(undefined);
+    serviceOwner.current = { id, scope: serviceScope, epoch: serviceEpoch };
+    setServiceReference({ scope: serviceScope, orderId: id, ...readServiceExecutionReference(serviceReferenceStorage(), serviceScope, id) });
+    return () => { serviceOwner.current = { id: "", scope: "", epoch: -1 }; };
+  }, [id, serviceScope, serviceEpoch, serviceAuthUser, serviceAuthWorkspace, serviceAuthVerified]);
   const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
   const [revealedDeliveryAddress, setRevealedDeliveryAddress] = useState<{ orderId: string; snapshot: RentalDeliveryAddressSnapshot }>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
@@ -187,7 +226,7 @@ export function RentalOrderDetailPage() {
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
-  const [serviceExecutionForm] = Form.useForm<{ executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
+  const [serviceExecutionForm] = Form.useForm<ServiceExecutionValues>();
   const [serviceRefundForm] = Form.useForm<{ reason: string; paymentMethod?: RentalOfflinePaymentMethod }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
@@ -357,7 +396,7 @@ export function RentalOrderDetailPage() {
   const refreshChanges = async () => { await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "changes"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]); };
   /**
    * 费用裁定。落账口径由服务端决定，这里只提交结论：
-   * 认定额不得超过建议额（超出属于另立一笔异常费用，走检查异常流程），原因必填。
+   * 已知建议额不能超额；待核定必须显式输入并受原快照上限约束，原因必填。
    * 成功后同时刷新订单与资金余额——裁定会改应收，但**不会**产生实际收退款。
    */
   const decideFeeReview = useMutation({
@@ -541,30 +580,89 @@ export function RentalOrderDetailPage() {
     },
     onError: (error: Error) => message.error(error.message || t("使用量修正失败，请刷新后重试"))
   });
+  const finishServiceCommand = async (reference: ServiceExecutionReference, epoch: number) => {
+    clearServiceExecutionReference(serviceReferenceStorage(), reference);
+    if (!serviceCommandIsCurrent(reference, epoch)) return;
+    serviceExecutionCommand.current = undefined;
+    setServiceReference({ scope: reference.scope, orderId: reference.orderId, pending: null, blocked: false });
+    setServiceExecution(undefined);
+    serviceExecutionForm.resetFields();
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", reference.orderId] }),
+      queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]);
+    if (serviceCommandIsCurrent(reference, epoch)) message.success(t("服务履约记录已保存；如产生退款，已进入费用审核"));
+  };
   const executeService = useMutation({
-    mutationFn: (values: { executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }) => {
-      const selected = serviceExecution!;
-      const data: UpdateRentalServiceOccurrenceRequest = {
-        action: selected.action,
-        actualAt: new Date().toISOString(),
-        executedQuantity: values.executedQuantity === undefined ? undefined : Number(values.executedQuantity),
-        result: values.result,
-        reason: values.reason,
-        customerConfirmed: values.customerConfirmed,
-        refundAmount: values.refundAmount === undefined ? undefined : Number(values.refundAmount),
-        compensationAmount: values.compensationAmount === undefined ? undefined : Number(values.compensationAmount),
-        evidenceAttachments: values.evidenceAttachments?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean)
-      };
-      return rentalCoreApi.updateServiceOccurrence(id, selected.occurrence.occurrenceId!, data);
+    mutationFn: (command: ServiceExecutionCommand) => {
+      if (!serviceCommandIsCurrent(command.reference, command.epoch) || !useAuthStore.getState().hasPermission("rental-os:order:operate")) {
+        throw new Error(t("资料已变更，请刷新后重新选择"));
+      }
+      retainServiceExecutionReference(serviceReferenceStorage(), command.reference);
+      return rentalCoreApi.updateServiceOccurrence(command.reference.orderId, command.reference.occurrenceId, command.data, command.reference.key);
     },
-    onSuccess: async () => {
-      setServiceExecution(undefined);
-      serviceExecutionForm.resetFields();
-      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
-      message.success(t("服务履约记录已保存；如产生退款，已进入费用审核"))
+    onSuccess: async (result, command) => {
+      if (result.order.id !== command.reference.orderId || result.occurrence.occurrenceId !== command.reference.occurrenceId) {
+        throw new Error(t("资料已变更，请刷新后重新选择"));
+      }
+      await finishServiceCommand(command.reference, command.epoch);
     },
-    onError: (error: Error) => message.error(error.message || t("服务履约记录失败，请刷新后重试"))
+    onError: (error: Error, command) => {
+      if (!serviceCommandIsCurrent(command.reference, command.epoch)) return;
+      const failure = error as Error & { response?: { status?: number; data?: { serviceExecutionNotCommitted?: boolean } } };
+      // Only an original validation refusal before any uncertain attempt can
+      // reopen input. Later rejection does not prove the earlier attempt rolled back.
+      if (!command.uncertain && failure.response?.status === 400 && failure.response.data?.serviceExecutionNotCommitted === true) {
+        try {
+          clearServiceExecutionReference(serviceReferenceStorage(), command.reference);
+          serviceExecutionCommand.current = undefined;
+          setServiceReference({ scope: command.reference.scope, orderId: command.reference.orderId, pending: null, blocked: false });
+          setServiceExecution(previous => previous?.operationKey === command.reference.key ? { ...previous, operationKey: crypto.randomUUID() } : previous);
+        } catch { setServiceReference({ scope: command.reference.scope, orderId: command.reference.orderId, pending: command.reference, blocked: true }); }
+      } else command.uncertain = true;
+      message.error(error.message || t("服务履约记录失败，请刷新后重试"));
+    }
   });
+  const recoverService = useMutation({
+    mutationFn: ({ reference, epoch }: { reference: ServiceExecutionReference; epoch: number }) => {
+      if (!serviceCommandIsCurrent(reference, epoch)) throw new Error(t("资料已变更，请刷新后重新选择"));
+      return rentalCoreApi.serviceExecutionReceipt(reference.orderId, reference.occurrenceId, reference.key);
+    },
+    onSuccess: async (receipt, command) => {
+      if (receipt.status === "unknown") {
+        if (serviceCommandIsCurrent(command.reference, command.epoch)) message.warning(t("原操作结果仍未明确，请稍后再次读取收据；不要另行记录同一段服务。"));
+        return;
+      }
+      if (receipt.order.id !== command.reference.orderId || receipt.occurrence.occurrenceId !== command.reference.occurrenceId) {
+        throw new Error(t("资料已变更，请刷新后重新选择"));
+      }
+      await finishServiceCommand(command.reference, command.epoch);
+    },
+    onError: (error: Error, command) => {
+      if (serviceCommandIsCurrent(command.reference, command.epoch)) message.error(error.message);
+    }
+  });
+  const saveServiceExecution = async (values: ServiceExecutionValues) => {
+    const selected = serviceExecution;
+    if (!selected?.occurrence.occurrenceId || selected.orderId !== id || selected.scope !== serviceScope || selected.epoch !== serviceEpoch
+      || serviceReferenceBlocked) throw new Error(t("资料已变更，请刷新后重新选择"));
+    let command = serviceExecutionCommand.current;
+    if (!command) {
+      if (servicePendingReference) throw new Error(t("资料已变更，请刷新后重新选择"));
+      command = { reference: { version: 1, scope: selected.scope, orderId: selected.orderId,
+        occurrenceId: selected.occurrence.occurrenceId, key: selected.operationKey, action: selected.action }, epoch: selected.epoch,
+        data: { action: selected.action, actualAt: new Date().toISOString(),
+          executedQuantity: values.executedQuantity === undefined ? undefined : Number(values.executedQuantity),
+          result: values.result, reason: values.reason, customerConfirmed: values.customerConfirmed,
+          refundAmount: values.refundAmount === undefined ? undefined : Number(values.refundAmount),
+          compensationAmount: values.compensationAmount === undefined ? undefined : Number(values.compensationAmount),
+          evidenceAttachments: values.evidenceAttachments?.split(/[\n,]/u).map(item => item.trim()).filter(Boolean) } };
+      // Persist the locator before dispatch; do not store results, notes or evidence locally.
+      retainServiceExecutionReference(serviceReferenceStorage(), command.reference);
+      serviceExecutionCommand.current = command;
+      setServiceReference({ scope: serviceScope, orderId: id, pending: command.reference, blocked: false });
+    }
+    if (command.reference.key !== selected.operationKey) throw new Error(t("资料已变更，请刷新后重新选择"));
+    return executeService.mutateAsync(command);
+  };
   const refundService = useMutation({
     mutationFn: (values: { reason: string; paymentMethod?: RentalOfflinePaymentMethod }) => {
       const occurrence = serviceRefund;
@@ -694,6 +792,11 @@ export function RentalOrderDetailPage() {
               {canRevealSensitive && fullPhoneVisible && <Button type="link" size="small" onClick={() => setRevealedDeliveryAddress(undefined)}>{t("隐藏完整收件电话")}</Button>}
             </Space>;
           })()) : undefined} />
+  {serviceReferenceReady && (serviceReferenceBlocked || servicePendingReference) && <Alert type="warning" showIcon
+    title={t("存在待核对的服务操作；原收据明确前不要另行记录同一段服务。")}
+    description={serviceReferenceBlocked ? t("本地操作引用不可用，已停止新服务操作，请先核对原操作。") : undefined}
+    action={servicePendingReference && <ActionButton label={t("读取原服务收据")} pending={recoverService.isPending} disabled={executeService.isPending}
+      onAction={() => recoverService.mutateAsync({ reference: servicePendingReference, epoch: serviceEpoch })} />} />}
   <OrderQuickActionNotice orderId={id} ready={!order.isFetching && !order.isError} />
   <div className={detailStyles.actions} id="rental-order-operations" tabIndex={-1}>
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}
@@ -788,7 +891,7 @@ export function RentalOrderDetailPage() {
                         ? t("已记录未到场")
                         : t("暂无可用操作");
               return <Space wrap>
-                {canOperate && actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}
+                {canOperate && actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" disabled={serviceReferenceBlocked || Boolean(servicePendingReference) || executeService.isPending || recoverService.isPending} onClick={() => { if (serviceReferenceBlocked || servicePendingReference || serviceExecutionCommand.current) return; serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action, orderId: id, operationKey: crypto.randomUUID(), scope: serviceScope, epoch: serviceEpoch }); }}>{item.label}</Button>)}
                 {canSettleFunding && row.refundStatus === "approved_pending_refund" && <Button key="refund" type="primary" size="small" onClick={() => { serviceRefundForm.resetFields(); setServiceRefund(row); }}>{t("办理退款")}</Button>}
                 {canOperate && !actions.length && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "var(--text-secondary)" }}>{terminalHint}</span>}
                 {!canOperate && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "var(--text-secondary)" }}>{t("无操作权限")}</span>}
@@ -839,7 +942,7 @@ export function RentalOrderDetailPage() {
         {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} onRefresh={() => order.refetch()} loading={order.isLoading} refreshing={order.isFetching} dataSource={feeReviews} columns={[
           { title: t("类型"), dataIndex: "type", render: (value) => t(FEE_REVIEW_TYPE_LABELS[value as RentalOrderFeeReview["type"]] ?? String(value)) },
           { title: t("来源"), render: () => t("订单费用审核") },
-          { title: t("建议金额"), dataIndex: "suggestedAmount", render: (value) => money(Number(value)) },
+          { title: t("建议金额"), dataIndex: "suggestedAmount", render: (value) => value === null ? t("金额待核定") : money(Number(value)) },
           { title: t("依据"), dataIndex: "basis", render: (value) => <Space orientation="vertical" size={0}>{((value as string[]) ?? []).map((row) => <span key={row}>{t(row)}</span>)}</Space> },
           { title: t("状态"), render: (_, row) => <Tag color={FEE_REVIEW_STATUS_COLORS[row.status]}>{t(feeReviewStatusText(row))}</Tag> },
           { title: t("裁定额"), dataIndex: "decidedAmount", render: (value, row) => row.status === "pending" ? "-" : money(Number(value ?? 0)) },
@@ -851,7 +954,7 @@ export function RentalOrderDetailPage() {
             render: (_, row) => row.status !== "pending"
               ? "-"
               : canReviewFees
-                ? <Button type="link" onClick={() => { setFeeReview(row); feeReviewForm.setFieldsValue({ decision: "approved", amount: row.suggestedAmount, reason: undefined }); }}>{t("裁定")}</Button>
+                ? <Button type="link" onClick={() => { setFeeReview(row); feeReviewForm.setFieldsValue({ decision: "approved", amount: row.suggestedAmount ?? undefined, reason: undefined }); }}>{t("裁定")}</Button>
                 : <span style={{ color: "var(--text-secondary)" }}>{t("无费用裁定权限")}</span>
           }
         ]} /> : <span style={{ color: "var(--text-secondary)" }}>{t("当前订单没有需要人工裁定的费用事项。")}</span>}
@@ -1347,9 +1450,10 @@ export function RentalOrderDetailPage() {
     </Modal>
     <Modal
       title={serviceExecution ? `${t(serviceExecution.action === "start" ? "开始" : serviceExecution.action === "complete" ? "完成" : serviceExecution.action === "cancel" ? "取消" : serviceExecution.action === "no_show" ? "登记未到场" : "记录失败")}${t("服务")}：${serviceExecution.occurrence.serviceName}` : t("服务履约")}
-      open={Boolean(serviceExecution)}
-      onCancel={() => { setServiceExecution(undefined); serviceExecutionForm.resetFields(); }}
-      onConfirm={() => serviceExecutionForm.validateFields().then((values) => executeService.mutateAsync(values))}
+      open={Boolean(serviceExecution && serviceExecution.orderId === id && serviceExecution.scope === serviceScope && serviceExecution.epoch === serviceEpoch)}
+      onCancel={() => { if (executeService.isPending || recoverService.isPending) return; setServiceExecution(undefined); serviceExecutionForm.resetFields(); }}
+      onConfirm={() => serviceExecutionForm.validateFields().then(saveServiceExecution)}
+      okButtonProps={{ disabled: recoverService.isPending || serviceReferenceBlocked }}
       confirmLoading={executeService.isPending}
       destroyOnHidden
     >
@@ -1360,7 +1464,9 @@ export function RentalOrderDetailPage() {
           description={serviceExecution?.action === "complete" ? t("完成服务必须填写执行结果，并明确记录客户是否确认；数量服务可以分次记录，未执行部分仍会保持待处理。") : t("取消、失败或未到场会按未执行部分的净额生成待审核退款；批准后仍需到资金区办理实际退款。")}
         style={{ marginBottom: 16 }}
       />
-      <Form form={serviceExecutionForm} layout="vertical" onFinish={(values) => executeService.mutate(values)}>
+      {servicePendingReference && <ActionButton label={t("读取原服务收据")} pending={recoverService.isPending} disabled={executeService.isPending}
+        onAction={() => recoverService.mutateAsync({ reference: servicePendingReference, epoch: serviceEpoch })} />}
+      <Form form={serviceExecutionForm} layout="vertical" disabled={executeService.isPending || Boolean(servicePendingReference)} onFinish={saveServiceExecution}>
         {serviceExecution?.action === "start" && <span style={{ color: "var(--text-secondary)" }}>{t("点击确认后记录当前时间为实际开始时间。")}</span>}
         {serviceExecution?.action === "complete" && <>
           {serviceOccurrenceTotalQuantity(serviceExecution.occurrence) > 1 && <Form.Item name="executedQuantity" label={t("本次实际执行数量")} initialValue={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} rules={[{ required: true, message: t("请输入本次实际执行数量") }]} extra={`${t("剩余可执行")} ${serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)}${t("份；全部执行后才会结束该服务。")}`}><InputNumber min={1} max={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} precision={0} style={{ width: "100%" }} /></Form.Item>}
@@ -1412,9 +1518,10 @@ export function RentalOrderDetailPage() {
       <Alert
         type="info"
         showIcon
-        title={`${t("规则建议金额")} ${money(feeReview?.suggestedAmount)}`}
+        title={feeReview?.suggestedAmount === null ? t("金额待核定") : `${t("规则建议金额")} ${money(feeReview?.suggestedAmount)}`}
         description={<Space orientation="vertical" size={0}>
           {(feeReview?.basis ?? []).map((row) => <span key={row}>{row}</span>)}
+          {feeReview?.suggestedAmount === null && <span>{t("原快照最大核减额")} {feeReviewAmountCeiling(feeReview) === undefined ? t("不可用") : money(feeReviewAmountCeiling(feeReview))}</span>}
           <span>
             {feeReview?.type === "refund_due"
                ? t("批准只表示退款/释放已获认可，本单不动账；押金、预授权与多收租金的实际退款/释放要到资金区由具备资金权限的人员办理。")
@@ -1437,14 +1544,16 @@ export function RentalOrderDetailPage() {
             ? <Form.Item
                 name="amount"
                 label={t("认定金额")}
-                extra={t("不填按建议金额。认定额不得超过建议额——超出部分属于另立一笔异常费用，须走检查异常流程并留下自己的依据。")}
+                extra={t(feeReview?.suggestedAmount === null
+                  ? "金额尚待核定，必须按原计价、优惠及已核减记录填写认定额；不得超过原快照最大核减额，确认零也须显式填写。"
+                  : "不填按建议金额。认定额不得超过建议额——超出部分属于另立一笔异常费用，须走检查异常流程并留下自己的依据。")}
                 rules={[
                   { required: true, message: t("请填写认定金额") },
                   {
-                    validator: (_rule, value) =>
-                      value === undefined || Number(value) <= Number(feeReview?.suggestedAmount ?? 0)
-                        ? Promise.resolve()
-                        : Promise.reject(new Error(`${t("认定额不能超过建议额")} ${money(feeReview?.suggestedAmount)}`))
+                    validator: (_rule, value) => {
+                      const error = feeReviewAmountError(feeReview, value);
+                      return error ? Promise.reject(new Error(t(error))) : Promise.resolve();
+                    }
                   }
                 ]}
               ><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>

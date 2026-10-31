@@ -110,6 +110,7 @@ for (const categoryCode of ['camera', 'camping', 'vehicle', 'construction']) tes
   const tools = composeAiGuardedQuoteTools({ core, business, routes: h.bridge, readers, clock: () => new Date() });
   const source = new AiGuardedQuoteCoreContextSource(core, h.bridge);
   const scope = { kind: 'workspace', tenantId: 'tenant_001', workspaceId: 'workspace-a' }, ctx = await source.current(scope);
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], 'tenant_001', 'workspace-a', ctx);
   const rates = await h.bridge.withRead('quote_context', {}, () => business.listSpaceRatesAt('tenant_001', ctx, '2026-11-10T09:00:00+08:00'));
   const prepared = await tools.candidates.prepare({ customerType: 'personal', customerId: 'customer-a', items: [{ productName: ctx.groups[0].name, quantity: 1, pricingUnit: rates.find(rate => rate.itemGroupId === ctx.groups[0].id).unit }],
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: ctx.settings.fulfillment.enabledModes[0], locationName: ctx.locations[0].name });

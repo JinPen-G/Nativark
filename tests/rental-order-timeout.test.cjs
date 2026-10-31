@@ -40,6 +40,11 @@ function serviceWith(order) {
   service.lockedOrder = async () => order;
   service.orderHookInstances = () => undefined;
   service.runHook = async () => undefined;
+  service.resolveWorkspaceId = () => "ws_1";
+  service.funding = {
+    listEvents: async () => ({ rental: { collected: 0 }, deposit: { collected: 0 }, preauthorization: { frozen: 0 } }),
+    computeHeldFunds: async () => ({ depositBalance: 0, preauthBalance: 0, rentalOverpaid: 0 })
+  };
   service.factStore = {
     listExpiredDraftOrderIds: async () => ["order_timeout_1"],
     listExtensions: async () => [],
@@ -55,7 +60,8 @@ void (async () => {
   assert.deepEqual(ids, ["order_timeout_1"]);
   ok("候选查询只按当前空间的过期待确认订单入口返回 id");
 
-  const expired = await service.expirePendingOrder("tenant_1", order.id, undefined, "系统任务", cutoff);
+  const tx = { $queryRaw: async () => [] };
+  const expired = await service.expirePendingOrder("tenant_1", order.id, tx, "系统任务", cutoff);
   assert.equal(expired.status, "cancelled");
   assert.equal(expired.cancellationReason, RENTAL_PENDING_PAYMENT_TIMEOUT_REASON);
   assert.equal(expired.chargeLines.find((row) => row.code === `cancellation_reversal:${order.id}`).amount, -100);

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { isDeepStrictEqual } from "node:util";
 import {
   findTenantIntegrationProvider,
   paymentProviderSupportsCurrency,
@@ -28,6 +29,8 @@ export interface TenantIntegrationRuntimeConfig {
   provider: TenantIntegrationProvider;
   settings: Record<string, unknown>;
   credentials: Record<string, string>;
+  /** Private original config CAS for transaction-bound creation; never public. */
+  revision?: TenantIntegrationTestRevision;
 }
 
 export interface TenantIntegrationRuntimeOptions {
@@ -38,10 +41,18 @@ export interface TenantIntegrationRuntimeOptions {
   requireLiveTest?: boolean;
   /** 新建外部业务事实时要求该平台仍是租户当前明确选择的默认出口。 */
   requireDefault?: boolean;
+  /** The exact config read before entering the business transaction. */
+  configRevision?: TenantIntegrationTestRevision;
 }
+
+/** Private storage CAS token, never a controller response or a log field. Test
+ * bookkeeping does not advance this config version; a config save invalidates it. */
+export type TenantIntegrationTestRevision = Pick<IntegrationRow,
+  'updatedAt' | 'settings' | 'credentialsEncrypted' | 'secretFields' | 'enabled' | 'isDefault'>;
 
 export interface TenantIntegrationTestConfig extends TenantIntegrationRuntimeConfig {
   tenantId: string;
+  revision: TenantIntegrationTestRevision;
   missingFields: string[];
   configurationError?: string;
   lastTestAt?: Date;
@@ -196,7 +207,8 @@ export class TenantIntegrationService {
       capability,
       provider: row.provider as TenantIntegrationProvider,
       settings,
-      credentials
+      credentials,
+      revision: this.configRevision(row)
     };
   }
 
@@ -215,8 +227,8 @@ export class TenantIntegrationService {
     provider: TenantIntegrationProvider,
     options: TenantIntegrationRuntimeOptions = {}
   ): Promise<void> {
-    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string; isDefault: boolean | number | string; lastTestStatus: string; lastTestMode: string }>>(Prisma.sql`
-      SELECT id, enabled, isDefault, lastTestStatus, lastTestMode
+    const rows = await tx.$queryRaw<Array<IntegrationRow>>(Prisma.sql`
+      SELECT id, tenantId, capability, provider, enabled, isDefault, updatedAt, settings, credentialsEncrypted, secretFields, lastTestStatus, lastTestMode
         FROM tenant_integration_configs
        WHERE tenantId = ${tenantId}
          AND capability = ${capability}
@@ -225,15 +237,19 @@ export class TenantIntegrationService {
        FOR UPDATE
     `);
     const row = rows[0];
-    const enabled = row?.enabled === true || row?.enabled === 1 || row?.enabled === "1";
+    const truth = (value: unknown) => value === true || value === 1 || value === "1";
+    const enabled = truth(row?.enabled);
     if (!row || !enabled) {
       throw new ServiceUnavailableException("该第三方平台已停用或配置不存在，请稍后重试");
     }
-    if (options.requireDefault && !(row.isDefault === true || row.isDefault === 1 || row.isDefault === "1")) {
+    if (options.requireDefault && !truth(row.isDefault)) {
       throw new ServiceUnavailableException("该第三方平台已不再是当前默认平台，请刷新后重试");
     }
     if (options.requireLiveTest !== false && (row.lastTestStatus !== "passed" || row.lastTestMode !== "live")) {
       throw new ServiceUnavailableException("该第三方平台尚未通过真实连接测试，请先完成连接测试");
+    }
+    if (options.configRevision && !isDeepStrictEqual(this.configRevision(row), options.configRevision)) {
+      throw new ConflictException("第三方配置已变化，不能用旧配置创建业务操作");
     }
   }
 
@@ -336,26 +352,33 @@ export class TenantIntegrationService {
     const row = await this.prisma.$transaction(async (tx) => {
       if (existing) {
         // 与运行时创建事务使用同一行锁，避免检查完进行中事实后又被并发创建。
-        await tx.$queryRaw(Prisma.sql`
-          SELECT id
+        const locked = await tx.$queryRaw<Array<IntegrationRow>>(Prisma.sql`
+          SELECT id, tenantId, capability, provider, enabled, isDefault, updatedAt, settings, credentialsEncrypted, secretFields
             FROM tenant_integration_configs
            WHERE tenantId = ${tenantId}
              AND capability = ${capability}
              AND provider = ${provider}
            FOR UPDATE
         `);
-        if (existing.enabled && !input.enabled) {
+        const current = locked[0];
+        if (!current || current.id !== existing.id || !isDeepStrictEqual(this.configRevision(current), this.configRevision(existing))) {
+          throw new ConflictException("平台配置已被其他操作修改，请重新载入后保存");
+        }
+        await this.assertOriginalProviderIdentity(tx, current, capability, provider, mergedSettings, mergedSecrets);
+        if (this.configRevision(current).enabled && !input.enabled) {
           await this.assertCanDisableProvider(tx, tenantId, capability, provider);
         }
       }
-      const saved = await tx.tenantIntegrationConfig.upsert({
-        where: { tenantId_capability_provider: { tenantId, capability, provider } },
+      // Millisecond timestamp collisions must still invalidate an older claim.
+      const updatedAt = new Date(Math.max(Date.now(), (existing?.updatedAt.getTime() ?? 0) + 1));
+      const write = {
         create: {
           tenantId,
           capability,
           provider,
           enabled: input.enabled,
           isDefault: input.isDefault,
+          updatedAt,
           settings: mergedSettings as Prisma.InputJsonValue,
           credentialsEncrypted: secretFieldNames.length ? this.secretBox.encrypt(mergedSecrets) : null,
           secretFields: secretFieldNames as Prisma.InputJsonValue,
@@ -366,6 +389,7 @@ export class TenantIntegrationService {
         update: {
           enabled: input.enabled,
           isDefault: input.isDefault,
+          updatedAt,
           settings: mergedSettings as Prisma.InputJsonValue,
           credentialsEncrypted: secretFieldNames.length ? this.secretBox.encrypt(mergedSecrets) : null,
           secretFields: secretFieldNames as Prisma.InputJsonValue,
@@ -375,10 +399,15 @@ export class TenantIntegrationService {
           lastTestError: null,
           updatedBy: user?.displayName ?? user?.account
         }
-      });
+      };
+      // A concurrent first save must not turn an originally absent row into an
+      // unchecked upsert update after someone has started using its identity.
+      const saved = existing
+        ? await tx.tenantIntegrationConfig.update({ where: { id: existing.id, tenantId }, data: write.update })
+        : await tx.tenantIntegrationConfig.create({ data: write.create });
       if (input.isDefault) {
         await tx.tenantIntegrationConfig.updateMany({
-          where: { tenantId, capability, id: { not: saved.id } },
+          where: { tenantId, capability, id: { not: saved.id }, isDefault: true },
           data: { isDefault: false }
         });
       } else if (existing?.isDefault) {
@@ -409,7 +438,7 @@ export class TenantIntegrationService {
         if (!defaultConfig) throw new BadRequestException("首个启用的平台必须设为该能力默认平台");
       }
       return saved;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     await this.operationLog.record({
       tenantId,
       user,
@@ -522,12 +551,54 @@ export class TenantIntegrationService {
       credentials: secrets,
       missingFields,
       configurationError,
+      revision: this.configRevision(row),
       lastTestAt: row.lastTestAt ?? undefined
     };
   }
 
+  private configRevision(row: IntegrationRow): TenantIntegrationTestRevision {
+    const truth = (value: unknown) => value === true || value === 1 || value === '1';
+    return structuredClone({ updatedAt: row.updatedAt, settings: row.settings, credentialsEncrypted: row.credentialsEncrypted,
+      secretFields: row.secretFields, enabled: truth(row.enabled), isDefault: truth(row.isDefault) });
+  }
+
+  private async assertOriginalProviderIdentity(tx: Prisma.TransactionClient, row: IntegrationRow,
+    capability: TenantIntegrationCapability, provider: TenantIntegrationProvider,
+    settings: Record<string, unknown>, secrets: Record<string, string>) {
+    if (capability === 'sms') return;
+    const previousSettings = (row.settings ?? {}) as Record<string, unknown>, previousSecrets = this.configuredSecrets(row);
+    const keys = capability === 'file' ? ['endpoint', 'bucket', 'region', 'objectPrefix', 'forcePathStyle']
+      : provider === 'alipay' ? ['appId', 'gatewayUrl'] : provider === 'wechat_pay' ? ['mchid', 'appId', 'gatewayUrl'] : [];
+    const changed = keys.some(key => !isDeepStrictEqual(previousSettings[key], settings[key]))
+      // Stripe's secret identifies an account as well as authorizing it. There is
+      // no trusted account-id port here, so a changed key cannot be called a same-account rotation.
+      || (provider === 'stripe' && previousSecrets.secretKey !== secrets.secretKey);
+    if (!changed) return;
+    const dependent = capability === 'file'
+      ? await tx.fileAsset.findFirst({ where: { tenantId: row.tenantId, storageProvider: provider, status: { not: 'deleted' } }, select: { id: true } })
+        || await tx.fileUploadSession.findFirst({ where: { tenantId: row.tenantId, provider, OR: [
+          { status: { in: ['pending_upload', 'cleanup_in_progress'] } }, { cleanupError: { not: null } }
+        ] }, select: { id: true } })
+      : await tx.rentalPaymentIntent.findFirst({ where: { tenantId: row.tenantId, provider }, select: { id: true } })
+        || await tx.rentalPaymentRefund.findFirst({ where: { tenantId: row.tenantId, provider }, select: { id: true } });
+    if (dependent) throw new ConflictException(capability === 'file'
+      ? '原文件或上传仍依赖当前存储位置，不能原位更换；请先完成受控迁移/清理'
+      : '历史支付或退款仍依赖原商户配置，不能原位更换；需保留原商户恢复通路');
+  }
+
+  private testRevisionWhere(revision: TenantIntegrationTestRevision): Prisma.TenantIntegrationConfigWhereInput {
+    if (!revision || !(revision.updatedAt instanceof Date) || !Number.isFinite(revision.updatedAt.getTime())
+      || typeof revision.enabled !== 'boolean' || typeof revision.isDefault !== 'boolean') {
+      throw new ConflictException("连接测试缺少原配置版本");
+    }
+    return { updatedAt: revision.updatedAt, enabled: revision.enabled, isDefault: revision.isDefault,
+      settings: { equals: revision.settings ?? Prisma.JsonNull }, credentialsEncrypted: revision.credentialsEncrypted,
+      secretFields: { equals: revision.secretFields ?? Prisma.JsonNull } };
+  }
+
   async recordTestResult(input: {
     tenantId: string;
+    revision: TenantIntegrationTestRevision;
     configId: string;
     status: TenantIntegrationTestStatus;
     mode: "configuration" | "live";
@@ -539,9 +610,11 @@ export class TenantIntegrationService {
       where: {
         id: input.configId,
         tenantId: input.tenantId,
-        ...(input.startedAt ? { lastTestAt: input.startedAt } : {})
+        ...this.testRevisionWhere(input.revision),
+        ...(input.startedAt ? { lastTestAt: input.startedAt, lastTestStatus: "not_tested", lastTestMode: "live" } : {})
       },
       data: {
+        updatedAt: input.revision.updatedAt,
         lastTestStatus: input.status,
         lastTestMode: input.mode,
         lastTestAt: input.checkedAt,
@@ -555,15 +628,18 @@ export class TenantIntegrationService {
    * 原子占用一次外部测试窗口，避免两个并发点击同时打到第三方平台。
    * lastTestAt 在发起调用前写入；调用完成后再由 recordTestResult 写最终状态。
    */
-  async claimLiveTest(input: { tenantId: string; configId: string; startedAt: Date; cooldownMs: number }) {
+  async claimLiveTest(input: { tenantId: string; configId: string; startedAt: Date; cooldownMs: number;
+    revision: TenantIntegrationTestRevision }) {
     const cutoff = new Date(input.startedAt.getTime() - input.cooldownMs);
     const result = await this.prisma.tenantIntegrationConfig.updateMany({
       where: {
         id: input.configId,
         tenantId: input.tenantId,
+        ...this.testRevisionWhere(input.revision),
         OR: [{ lastTestAt: null }, { lastTestAt: { lt: cutoff } }]
       },
       data: {
+        updatedAt: input.revision.updatedAt,
         lastTestStatus: "not_tested",
         lastTestMode: "live",
         lastTestAt: input.startedAt,

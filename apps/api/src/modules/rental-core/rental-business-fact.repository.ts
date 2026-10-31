@@ -18,6 +18,7 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { requestFingerprint } from './rental-idempotency.repository';
+import { readRentalFulfillmentAdmission } from './rental-fulfillment-admission';
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 /** Server-derived opaque hashes, never authorization or a client DTO. The key
@@ -492,6 +493,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const data = {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
+      sourceSnapshot: quote.sourceSnapshot === undefined ? Prisma.DbNull : quote.sourceSnapshot as unknown as Prisma.InputJsonValue,
+      deliveryAddressSnapshot: quote.deliveryAddressSnapshot === undefined ? Prisma.DbNull : quote.deliveryAddressSnapshot as unknown as Prisma.InputJsonValue,
+      rentalLineAmounts: quote.rentalLineAmounts === undefined ? Prisma.DbNull : quote.rentalLineAmounts as unknown as Prisma.InputJsonValue,
       categoryCode: upper<$Enums.RentalCategoryCode>(quote.categoryCode),
       categoryVersionId: quote.categoryVersionId ?? null,
       inspectionTemplateSnapshots: quote.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : quote.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
@@ -551,6 +555,13 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
         throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
       }
+      if (existing && ['sourceSnapshot', 'deliveryAddressSnapshot', 'rentalLineAmounts'].some(field =>
+        !isDeepStrictEqual(existing[field as keyof typeof existing] ?? null, quote[field as keyof typeof quote] ?? null))) {
+        throw new ConflictException('已有报价的创建来源、地址及租金分摊不可改写或补造');
+      }
+      if (quote.sourceSnapshot && (quote.sourceSnapshot.tenantId !== quote.tenantId || quote.sourceSnapshot.workspaceId !== workspaceId)) {
+        throw new ConflictException('报价创建来源与持久空间不一致');
+      }
       if (existing && (existing.categoryVersionId ?? null) !== (quote.categoryVersionId ?? null)) {
         throw new ConflictException("已有报价的品类版本依据不可改写");
       }
@@ -573,6 +584,25 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
             consumedAt: data.consumedAt, consumedOrderId: data.consumedOrderId } });
         } else await client.rentalQuote.update({ where: { id: quote.id }, data });
       } else {
+        // New quotes share the configuration writers' space lock. Replaying or
+        // consuming an existing quote above never re-authorizes new business.
+        await readRentalFulfillmentAdmission(client, quote.tenantId, workspaceId, [
+          { locationId: quote.request.fulfillmentLocationId,
+            capability: ["delivery", "onsite_delivery"].includes(quote.request.fulfillmentMode) ? "delivery" : "pickup",
+            partner: quote.request.fulfillmentMode === "partner_pickup_return" },
+          { locationId: quote.request.returnLocationId ?? quote.request.fulfillmentLocationId, capability: "return" }
+        ]);
+        if (expectedBinding) {
+          const rows = await client.$queryRaw<Array<{ categoryVersionId: string | null; categoryAdoptionRevision: number }>>(Prisma.sql`
+            SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces
+            WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} FOR UPDATE
+          `);
+          const binding = rows[0];
+          if (!binding || binding.categoryVersionId !== expectedBinding.categoryVersionId ||
+              binding.categoryAdoptionRevision !== expectedBinding.adoptionRevision || quote.categoryVersionId !== expectedBinding.categoryVersionId) {
+            throw new ConflictException("品类版本在报价期间已变化，请重新报价");
+          }
+        }
         await client.rentalQuote.create({
           data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt),
             ...(original ? { originalOperationKey: original.key, originalInputHash: original.inputHash } : {}) }
@@ -580,21 +610,13 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       return quote;
     };
-    if (!expectedBinding && !original) return persist(this.prisma);
     return this.prisma.$transaction(async (tx) => {
-      // 与空间版本采用写入竞争同一行锁，防止最后一次校验与报价写入之间穿插升级。
-      const rows = await tx.$queryRaw<Array<{ categoryVersionId: string | null; categoryAdoptionRevision: number }>>`
-        SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces
-        WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} AND status = 'ACTIVE' FOR UPDATE
-      `;
-      const binding = rows[0];
-      if (!binding || (expectedBinding && (binding.categoryVersionId !== expectedBinding.categoryVersionId ||
-          binding.categoryAdoptionRevision !== expectedBinding.adoptionRevision ||
-          quote.categoryVersionId !== expectedBinding.categoryVersionId))) {
-        throw new ConflictException("品类版本在报价期间已变化，请重新报价");
-      }
+      // Serialize original-operation creation without applying today's enabled
+      // flags to an already saved receipt; only the create branch admits work.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM business_workspaces
+        WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} FOR UPDATE`);
       return persist(tx);
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void> {
@@ -1004,6 +1026,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       quoteNo: row.quoteNo,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       categoryVersionId: row.categoryVersionId ?? undefined,
+      sourceSnapshot: row.sourceSnapshot === null ? undefined : row.sourceSnapshot as unknown as RentalQuoteSnapshotV1['sourceSnapshot'],
+      deliveryAddressSnapshot: row.deliveryAddressSnapshot === null ? undefined : row.deliveryAddressSnapshot as unknown as RentalQuoteSnapshotV1['deliveryAddressSnapshot'],
+      rentalLineAmounts: row.rentalLineAmounts === null ? undefined : row.rentalLineAmounts as unknown as RentalQuoteSnapshotV1['rentalLineAmounts'],
       inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalQuoteSnapshotV1["inspectionTemplateSnapshots"],
       request: row.request as unknown as RentalQuoteRequest,
       membershipSnapshot: (row.membershipSnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipSnapshot"],

@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { Prisma } = require('../../../apps/api/node_modules/@prisma/client');
-const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } = require('../../../packages/shared/src/index.ts');
+const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION } = require('../../../packages/shared/src/index.ts');
 const { persistedApprovedOrderHarness } = require('./approved-order-persisted.cjs');
 const { clone, matches } = require('./task-input-store.cjs');
 const { composeControlledApprovedOrder } = require('../../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition');
@@ -160,7 +160,8 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
   const review = { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: 'proposal-a', proposalRevision: 1,
     reviewedPayloadHash: pending.reviewedPayloadHash };
   const approve = async () => {
-    const approval = await root.approvals.decide(taskId, { ...review, decision: 'approve' });
+    await root.approvals.readProposal(taskId, review);
+    const approval = await root.approvals.decide(taskId, { ...review, decision: 'approve', reviewVersion: AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION });
     const { expiresAt: _, ...command } = prepareCommand;
     return { ...command, reviewedPayloadHash: review.reviewedPayloadHash, approvalId: approval.approvalId };
   };

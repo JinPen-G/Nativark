@@ -61,6 +61,7 @@ export function renderRentalDocument(input: RentalDocumentRenderInput): RentalDo
           rental: {
             collected: funding.rental.collected,
             refunded: funding.rental.refunded,
+            ...(funding.rental.corporatePaid !== undefined ? { corporatePaid: funding.rental.corporatePaid } : {}),
             balance: funding.rental.balance
           },
           deposit: {
@@ -210,8 +211,11 @@ function documentSummaryHtml(type: RentalDocumentType, summary: Record<string, u
   if (type !== "settlement") return "";
   const fundingNotice = financial?.balanceBasis === "simulated" ? "模拟资金演练，不代表真实收款、冻结或退款。"
     : financial?.balanceBasis === "real" ? "实际资金口径，不含模拟事件。" : "资金来源待核对，不作为实款凭证。";
+  const rental = financial?.rental as Record<string, unknown> | undefined;
+  const corporateHtml = rental?.corporatePaid !== undefined
+    ? `　企业回款已核销：${escapeHtml(formatRentalMoney(Number(rental.corporatePaid), currency))}` : "";
   const financialHtml = financial?.visible
-    ? `<p>${escapeHtml(fundingNotice)}</p><p>已收租金及费用：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.collected ?? 0), currency))}　已退：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.refunded ?? 0), currency))}　待收/待退：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.balance ?? 0), currency))}</p><p>押金已收：${escapeHtml(formatRentalMoney(Number((financial.deposit as Record<string, unknown>)?.collected ?? 0), currency))}　预授权已冻结：${escapeHtml(formatRentalMoney(Number((financial.preauthorization as Record<string, unknown>)?.frozen ?? 0), currency))}</p>`
+    ? `<p>${escapeHtml(fundingNotice)}</p><p>已收租金及费用：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.collected ?? 0), currency))}　已退：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.refunded ?? 0), currency))}${corporateHtml}　待收/待退：${escapeHtml(formatRentalMoney(Number((financial.rental as Record<string, unknown>)?.balance ?? 0), currency))}</p><p>押金已收：${escapeHtml(formatRentalMoney(Number((financial.deposit as Record<string, unknown>)?.collected ?? 0), currency))}　预授权已冻结：${escapeHtml(formatRentalMoney(Number((financial.preauthorization as Record<string, unknown>)?.frozen ?? 0), currency))}</p>`
     : `<p class="muted">${escapeHtml(String(financial?.message ?? "当前账号无资金明细查看权限"))}</p>`;
   return `<p>最终应收：<strong>${escapeHtml(formatRentalMoney(Number(summary.receivableAmount ?? 0), currency))}</strong>　调账：${escapeHtml(formatRentalMoney(Number(summary.adjustmentAmount ?? 0), currency))}</p>${financialHtml}`;
 }

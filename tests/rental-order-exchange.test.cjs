@@ -31,6 +31,7 @@ const stores = require("./helpers/absorbing-config-store.cjs");
     couponTemplates: core.listCouponTemplates(tenantId),
     operators: core.listOperators(tenantId)
   };
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', context);
   const groups = context.groups.filter((item) => item.status === "enabled" && item.inventoryMode === RentalInventoryMode.Quantity);
   const location = context.locations.find((item) => item.status === "enabled");
   assert.ok(groups.length >= 2 && location, "需要两个数量库存商品和一个启用地点");
@@ -46,6 +47,7 @@ const stores = require("./helpers/absorbing-config-store.cjs");
     lines: [{ itemGroupId: groups[0].id, quantity: 1 }]
   });
   business.getQuote = () => originalQuote;
+  business.factStore.findQuote = async (tenant, id) => tenant === tenantId && id === originalQuote.id ? structuredClone(originalQuote) : undefined;
   const requestLine = originalQuote.request.lines[0];
   const originalRate = originalQuote.rateSnapshot.find((row) => row.itemGroupId === groups[0].id || row.pricingGroupId === requestLine.pricingGroupId);
   assert.ok(originalRate, "原订单必须有价格快照");
@@ -76,7 +78,7 @@ const stores = require("./helpers/absorbing-config-store.cjs");
     orderLineId: "exchange-line-1",
     replacementItemGroupId: groups[1].id,
     priceBasis: "original_order_price",
-    appliedAt: new Date().toISOString(),
+    appliedAt: new Date(Date.parse(startAt) + 86400000).toISOString(),
     fulfillmentMode: order.fulfillmentMode ?? "store_pickup_return",
     locationIds: [location.id],
     customerType: "personal"

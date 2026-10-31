@@ -16,7 +16,9 @@ import type {
 import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
+import { FileBusinessAccessService } from "../files/file-business-access.service";
 import { OperationLogService } from "../../common/operation-log.service";
+import { getRequestIdentity } from "../../common/request-identity";
 import { createAliyunOssV4Url } from "./aliyun-oss-v4";
 import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
@@ -91,7 +93,10 @@ function isoBasic(date: Date) {
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  init.signal?.addEventListener("abort", abort, { once: true });
+  if (init.signal?.aborted) controller.abort();
+  const timer = setTimeout(abort, timeoutMs);
   try {
     // 供应商地址来自租户配置；禁止跟随跳转，避免一个看似安全的公网地址
     // 把服务端请求转发到内网或云元数据地址。
@@ -99,6 +104,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_00
     return await fetch(safeUrl, { ...init, redirect: "error", signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    init.signal?.removeEventListener("abort", abort);
   }
 }
 
@@ -111,7 +117,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     private readonly integrations: TenantIntegrationService,
     @Optional() private readonly operationLog?: OperationLogService,
     @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader,
-    @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess
+    @Optional() @Inject(KNOWLEDGE_FILE_ACCESS) private readonly knowledgeFiles?: KnowledgeFileAccess,
+    @Optional() private readonly fileAccess?: FileBusinessAccessService
   ) {}
 
   onApplicationBootstrap() {
@@ -161,7 +168,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     input: CreateFileUploadSessionRequest,
     owner?: FileBusinessOwner
   ): Promise<FileUploadSessionSummary> {
-    if (input.businessType === 'ai_knowledge_document') { input = structuredClone(input); owner = structuredClone(owner); }
+    input = structuredClone(input); owner = structuredClone(owner);
     const mimeType = this.validateInput(input);
     const idempotencyKey = input.idempotencyKey.trim();
     if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
@@ -185,8 +192,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       if (existing.provider === "local_mock" && process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
       }
-      const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
-      return this.sessionSummary(existing, existingAsset, existingMode);
+      return this.originalUploadSummary(tenantId, existing, existingAsset, owner);
     }
     if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
     else await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
@@ -197,7 +203,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const configured = await this.integrations.runtimeConfig("file", tenantId);
     if (input.businessType === 'ai_knowledge_document' && configured?.provider !== 's3_compatible') throw new ServiceUnavailableException('知识首建需要可读取的受控存储');
     const provider = configured?.provider ?? "local_mock";
-    const storageKey = this.storageKey(configured, tenantId, assetId, input.fileName);
+    const storageKey = this.storageKey(configured, tenantId, assetId, configured && input.businessType !== "ai_knowledge_document" ? "blob" : input.fileName);
+    if (storageKey.length > 380) throw new ConflictException("文件对象定位过长，不能创建安全上传会话");
     const mode = configured ? "provider" : "simulation";
     if (!configured && process.env.NODE_ENV === "production") {
       throw new ServiceUnavailableException("文件存储尚未配置，请先启用一个文件平台");
@@ -213,7 +220,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         if (configured) {
           // runtimeConfig 在事务外读取；锁住配置行后再创建 pending 上传会话，
           // 与停用配置的检查形成互斥，避免产生无法继续上传或清理的孤儿会话。
-          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", configured.provider);
+          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", configured.provider, { configRevision: configured.revision });
         }
         if (input.businessType === 'ai_knowledge_document') await this.authorizeKnowledgeUpload(tenantId, input, owner);
         if (input.businessType === 'ai_knowledge_document') knowledgeWriteAttempted = true;
@@ -235,13 +242,19 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
             status: "pending_upload",
             uploadedBy: owner?.actorUserId ?? null,
             metadata: {
-              ...(input.metadata ?? {}),
+              ...Object.fromEntries(Object.entries(input.metadata ?? {}).filter(([key]) => ![
+                "fileUploadVersion", "fileContentVersion", "contentHash", "stagingStorageKey", "storageLocationHash", "uploadConfigHash",
+                "knowledgeUploadVersion", "knowledgeContentHash", "knowledgeRevision", "uploadMode", "workspaceId", "uploadedByUserId"
+              ].includes(key))),
               ...(owner?.actorUserId ? {
                 uploadedByUserId: owner.actorUserId,
                 uploadedByName: owner.actorName ?? "",
                 uploadedAt: new Date().toISOString()
               } : {}),
               ...(owner?.workspaceId ? { workspaceId: owner.workspaceId } : {}),
+              ...(configured && input.businessType !== "ai_knowledge_document" ? { fileUploadVersion: 2,
+                storageLocationHash: this.retentionLocationHash(configured),
+                uploadConfigHash: requestFingerprint({ id: configured.id, provider: configured.provider, settings: configured.settings, credentials: configured.credentials }) } : {}),
               ...(input.businessType === 'ai_knowledge_document' ? { knowledgeUploadVersion: 1,
                 ...(configured ? { storageLocationHash: this.retentionLocationHash(configured) } : {}),
                 ...(owner?.knowledgeRevision ? { knowledgeRevision: { ...owner.knowledgeRevision } } : {}) } : {}),
@@ -278,8 +291,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           }
           if (input.businessType === 'ai_knowledge_document') return this.knowledgeUploadSummary(tenantId, input, concurrent, concurrentAsset, owner);
           await this.assertBusinessReference(tenantId, concurrentAsset.businessType, concurrentAsset.businessId ?? "", owner?.workspaceId);
-          const concurrentMode = (concurrentAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
-          return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
+          return this.originalUploadSummary(tenantId, concurrent, concurrentAsset, owner);
         }
       }
       if (knowledgeWriteAttempted) throw new KnowledgeCommitUnknownError();
@@ -290,13 +302,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       try { return await this.knowledgeUploadSummary(tenantId, input, created.session, created.asset, owner); }
       catch { throw new KnowledgeCommitUnknownError(); }
     }
-    if (!configured) return this.sessionSummary(created.session, created.asset, mode);
-    const signed = this.presign(configured, "PUT", storageKey, mimeType, expiresAt);
-    return {
-      ...this.sessionSummary(created.session, created.asset, mode),
-      uploadUrl: signed.url,
-      uploadHeaders: signed.headers
-    };
+    return this.originalUploadSummary(tenantId, created.session, created.asset, owner);
   }
 
   /**
@@ -314,8 +320,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!Buffer.isBuffer(content) || content.length !== input.sizeBytes) {
       throw new ConflictException("上传文件内容与声明大小不一致");
     }
+    const checksum = createHash("sha256").update(content).digest("hex");
     const session = await this.createUploadSession(tenantId, input, owner);
-    if (session.status === "completed") return this.completeUpload(tenantId, session.sessionId, {}, owner);
+    if (session.status === "completed" || session.status === "freeze_pending") return this.completeUpload(tenantId, session.sessionId, { checksum }, owner);
     if (session.mode !== "provider" || !session.uploadUrl) {
       await this.failSession(tenantId, session.sessionId, "文件平台未返回可用上传地址");
       throw new ServiceUnavailableException("文件平台未返回可用上传地址");
@@ -336,7 +343,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       await this.failSession(tenantId, session.sessionId, `对象存储返回 HTTP ${response.status}`);
       throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
     }
-    return this.completeUpload(tenantId, session.sessionId, {}, owner);
+    return this.completeUpload(tenantId, session.sessionId, { checksum }, owner);
   }
 
   /**
@@ -490,7 +497,11 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         if (!deleted) {
           const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never, { requireLiveTest: false });
           if (!config) throw new ServiceUnavailableException("文件平台已停用，无法清理过期对象");
-          deleted = await this.deleteObject(config, row.storageKey, now);
+          const asset = await this.prisma.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
+          const metadata = asset?.metadata as JsonRecord | null;
+          const staged = metadata?.fileUploadVersion === 2;
+          if (staged && metadata.storageLocationHash !== this.retentionLocationHash(config)) throw new ConflictException("原上传存储位置已变化，不能清理其他位置的对象");
+          deleted = await this.deleteObject(config, staged ? this.pendingObjectKey(row.storageKey) : row.storageKey, now);
           if (!deleted) throw new ServiceUnavailableException("对象存储未确认删除过期对象");
         }
       } catch (error) {
@@ -695,9 +706,10 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     input: CompleteFileUploadRequest,
     owner?: FileBusinessOwner
   ) {
-    const session = await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+    input = structuredClone(input); owner = structuredClone(owner);
+    let session = structuredClone(await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } }));
     if (!session) throw new NotFoundException("上传会话不存在");
-    const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
+    let asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
     if (!asset || (owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId)))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
     const knowledgeInput: CreateFileUploadSessionRequest | undefined = asset.businessType === 'ai_knowledge_document' ? {
       businessModule: asset.businessModule, businessType: asset.businessType, businessId: asset.businessId ?? '', uploadScene: asset.uploadScene,
@@ -709,26 +721,84 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
     } else if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (session.status === "completed") {
-      if (knowledgeInput && asset.status !== 'active') throw new ConflictException('知识上传结果不可用');
+      if (asset.status !== 'active') throw new ConflictException('上传结果不可用');
+      if (session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey) throw new ConflictException("原已完成文件绑定不一致");
+      if ((asset.metadata as JsonRecord | null)?.fileUploadVersion === 2 && input.checksum?.trim() && input.checksum.trim() !== asset.checksum) {
+        throw new ConflictException("原完成收据与文件摘要不一致，不能重写内容");
+      }
       if (knowledgeInput) await this.assertKnowledgeBinding(tenantId, asset.id, owner!, owner?.knowledgeRevision ? {
         documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
       return this.assetSummary(asset);
     }
-    if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
-    if (session.expiresAt.getTime() <= Date.now()) {
+    const resumingFreeze = session.status === "freeze_pending" && asset.status === "pending_upload"
+      && (asset.metadata as JsonRecord | null)?.fileUploadVersion === 2;
+    if (session.status !== "pending_upload" && !resumingFreeze) throw new ConflictException("上传会话已失效");
+    if (!resumingFreeze && session.expiresAt.getTime() <= Date.now()) {
       await this.failSession(tenantId, session.id, "上传会话已过期");
       throw new ConflictException("上传会话已过期，请重新上传");
     }
     if (session.provider === "local_mock" && process.env.NODE_ENV === "production") {
       throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
     }
-    // Knowledge completion proves existence/type/length through its bounded,
-    // DNS-pinned bytes read below, not a separate ambient HEAD connection.
+    // The client receives only a staging PUT. Read those actual bounded bytes,
+    // then write a fresh server-only destination; no original PUT can alter it.
+    let frozen: { storageKey: string; checksum: string; config: TenantIntegrationRuntimeConfig } | undefined;
     if (session.provider !== "local_mock" && !knowledgeInput) {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
-      if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
-      const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
-      if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
+      const originalMetadata = asset.metadata as JsonRecord | null;
+      if (!config || originalMetadata?.fileUploadVersion !== 2
+        || originalMetadata.storageLocationHash !== this.retentionLocationHash(config)
+        || originalMetadata.uploadConfigHash !== requestFingerprint({ id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials })) {
+        throw new ConflictException("原上传缺少有效临时对象或文件配置依据，不能确认完成");
+      }
+      let checksum: string, destination: string;
+      if (resumingFreeze) {
+        checksum = String(originalMetadata.contentHash ?? ""); destination = asset.storageKey;
+        if (!/^[a-f0-9]{64}$/u.test(checksum) || session.storageKey !== destination || originalMetadata.fileContentVersion !== 1
+          || asset.checksum !== checksum || typeof originalMetadata.stagingStorageKey !== "string"
+          || !destination.startsWith(`${originalMetadata.stagingStorageKey}.committed/`)
+          || !destination.endsWith(`/${checksum}`)) {
+          throw new ConflictException("原内容冻结依据无效，禁止另写或替换文件");
+        }
+        if (input.checksum?.trim() && input.checksum.trim() !== checksum) throw new ConflictException("原冻结收据与文件摘要不一致");
+      } else {
+        const bytes = await this.readObjectContent(config, this.pendingObjectKey(session.storageKey), asset.mimeType, asset.sizeBytes);
+        checksum = createHash("sha256").update(bytes).digest("hex");
+        if (input.checksum?.trim() && input.checksum.trim() !== checksum) throw new ConflictException("文件内容摘要与实际上传字节不一致");
+        destination = `${session.storageKey}.committed/${randomUUID()}/${checksum}`;
+        // Persist the exact one-time write intent first. A lost commit or PUT
+        // response is only observed at this destination; staging is never reread.
+        const claimed = await this.prisma.$transaction(async tx => {
+          if (knowledgeInput) await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
+          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider, { configRevision: config.revision });
+          const [currentAsset, currentSession] = await Promise.all([
+            tx.fileAsset.findFirst({ where: { id: asset!.id, tenantId } }),
+            tx.fileUploadSession.findFirst({ where: { id: session!.id, tenantId } })
+          ]);
+          if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)
+            || session!.expiresAt.getTime() <= Date.now()) throw new ConflictException("原上传会话在内容读取期间已变化");
+          const sessionClaim = await tx.fileUploadSession.updateMany({ where: { id: session!.id, tenantId, status: "pending_upload",
+            updatedAt: session!.updatedAt, storageKey: session!.storageKey, fileAssetId: asset!.id },
+            data: { status: "freeze_pending", storageKey: destination } });
+          if (sessionClaim.count !== 1) throw new ConflictException("原上传已被另一完成操作占用，请读取原结果");
+          const assetClaim = await tx.fileAsset.updateMany({ where: { id: asset!.id, tenantId, status: "pending_upload",
+            updatedAt: asset!.updatedAt, storageKey: asset!.storageKey }, data: { storageKey: destination, checksum,
+            metadata: { ...originalMetadata, fileContentVersion: 1, contentHash: checksum, stagingStorageKey: session!.storageKey } as Prisma.InputJsonValue } });
+          if (assetClaim.count !== 1) throw new ConflictException("原上传文件已变化，不能冻结内容");
+          return { asset: await tx.fileAsset.findUniqueOrThrow({ where: { id: asset!.id } }),
+            session: await tx.fileUploadSession.findFirst({ where: { id: session!.id, tenantId } }) };
+        });
+        if (!claimed.session) throw new ConflictException("原内容冻结会话缺失");
+        asset = structuredClone(claimed.asset); session = structuredClone(claimed.session);
+        const signed = this.presign(config, "PUT", destination, asset.mimeType, new Date(Date.now() + 60_000));
+        const response = await this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
+        if (!response.ok) throw new ServiceUnavailableException("正式文件存储未确认写入，只能核对原内容冻结结果");
+      }
+      const written = await this.readObjectContent(config, destination, asset.mimeType, asset.sizeBytes);
+      if (createHash("sha256").update(written).digest("hex") !== checksum) {
+        throw new ConflictException("正式文件内容校验失败，禁止激活证据");
+      }
+      frozen = { storageKey: destination, checksum, config };
     }
     let knowledgeContentHash: string | undefined;
     if (knowledgeInput) {
@@ -740,9 +810,21 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       ...((asset.metadata ?? {}) as JsonRecord),
       completedAt: new Date().toISOString(),
       ...(knowledgeContentHash ? { knowledgeContentHash } : {}),
+      ...(frozen ? { fileContentVersion: 1, contentHash: frozen.checksum } : {}),
       ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
     };
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (frozen) {
+        await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", frozen.config.provider, { configRevision: frozen.config.revision });
+        const [currentAsset, currentSession] = await Promise.all([
+          tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } }),
+          tx.fileUploadSession.findFirst({ where: { id: session.id, tenantId } })
+        ]);
+        if (requestFingerprint(currentAsset) !== requestFingerprint(asset) || requestFingerprint(currentSession) !== requestFingerprint(session)) {
+          throw new ConflictException("文件或原上传会话在内容冻结期间已变化");
+        }
+        if (!knowledgeInput) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId);
+      }
       if (knowledgeInput) {
         await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
         const [currentAsset, currentSession] = await Promise.all([
@@ -754,17 +836,19 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           throw new ConflictException('知识上传绑定在读取正文后已变化');
       }
       const sessionClaim = await tx.fileUploadSession.updateMany({
-        where: { id: session.id, tenantId, status: "pending_upload",
-          ...(knowledgeInput ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
+        where: { id: session.id, tenantId, status: frozen ? "freeze_pending" : "pending_upload",
+          ...(knowledgeInput || frozen ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
             provider: asset.storageProvider, storageKey: asset.storageKey } : {}) },
-        data: { status: "completed", completedAt: new Date(), failureReason: null }
+        data: { status: "completed", completedAt: new Date(), failureReason: null,
+          ...(frozen ? { storageKey: frozen.storageKey } : {}) }
       });
       if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
       const assetClaim = await tx.fileAsset.updateMany({
         where: { id: asset.id, tenantId, status: "pending_upload",
-          ...(knowledgeInput ? { updatedAt: asset.updatedAt, storageProvider: asset.storageProvider,
+          ...(knowledgeInput || frozen ? { updatedAt: asset.updatedAt, storageProvider: asset.storageProvider,
             storageKey: asset.storageKey, uploadedBy: asset.uploadedBy } : {}) },
-        data: { status: "active", metadata: metadata as Prisma.InputJsonValue }
+        data: { status: "active", metadata: metadata as Prisma.InputJsonValue,
+          ...(frozen ? { storageKey: frozen.storageKey, checksum: frozen.checksum } : {}) }
       });
       if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");
       return tx.fileAsset.findUniqueOrThrow({ where: { id: asset.id } });
@@ -787,20 +871,55 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       throw new NotFoundException("文件不存在或不属于当前授权的客户实名核验资料");
     }
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (!this.fileAccess || !this.operationLog) throw new ServiceUnavailableException("文件业务读取权威或访问审计未配置");
+    const actor = getRequestIdentity();
+    const auditActor = { requireSuccess: true, ...(actor?.audience !== 'client' ? { userId: actor?.userId } : {}) };
+    const authorityKey = this.fileAccess.authorityKey(tenantId);
+    const binding = (row: typeof asset) => requestFingerprint({ id: row.id, tenantId: row.tenantId, status: row.status,
+      businessType: row.businessType, businessId: row.businessId, uploadScene: row.uploadScene,
+      storageKey: row.storageKey, storageProvider: row.storageProvider, mimeType: row.mimeType,
+      updatedAt: row.updatedAt.toISOString(), metadata: row.metadata });
+    const originalBinding = binding(asset);
+    await this.fileAccess.assertRead(tenantId, asset);
+    // Config lookup and audit can yield; no URL leaves the service until the
+    // original file binding and current request authority have been read again.
+    const recheck = async () => {
+      const current = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+      if (!current || binding(current) !== originalBinding
+        || this.fileAccess!.authorityKey(tenantId) !== authorityKey) throw new ConflictException("文件或读取授权已变化");
+      await this.fileAccess!.assertRead(tenantId, current);
+      const afterAccess = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+      if (!afterAccess || binding(afterAccess) !== originalBinding || this.fileAccess!.authorityKey(tenantId) !== authorityKey) {
+        throw new ConflictException("文件或读取授权已变化");
+      }
+    };
     if (asset.storageProvider === "local_mock") {
       if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境禁止访问未归档的模拟文件，请先配置文件存储平台");
       }
       const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
-      await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", metadata: { mode: result.mode } });
+      await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", ...auditActor,
+        metadata: { mode: result.mode, audience: actor?.audience ?? 'public', actorId: actor?.userId,
+          businessType: asset.businessType, businessId: asset.businessId } });
+      await recheck();
       return result;
     }
     const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
     if (!config) throw new ServiceUnavailableException("文件平台已停用，无法生成下载地址");
+    const contentMetadata = asset.metadata as JsonRecord | null;
+    if (contentMetadata?.fileUploadVersion === 2 && (contentMetadata.fileContentVersion !== 1
+      || contentMetadata.contentHash !== asset.checksum || !/^[a-f0-9]{64}$/u.test(asset.checksum ?? "")
+      || contentMetadata.storageLocationHash !== this.retentionLocationHash(config))) {
+      throw new ConflictException("正式文件内容版本或原存储位置无法核实");
+    }
+    await recheck();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, expiresAt);
     const result = { fileAssetId, provider: asset.storageProvider, mode: "provider" as const, downloadUrl: signed.url, expiresAt: expiresAt.toISOString() };
-    await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成短时文件访问签名", metadata: { mode: result.mode, expiresAt: result.expiresAt } });
+    await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成短时文件访问签名", ...auditActor,
+      metadata: { mode: result.mode, expiresAt: result.expiresAt, audience: actor?.audience ?? 'public', actorId: actor?.userId,
+        businessType: asset.businessType, businessId: asset.businessId } });
+    await recheck();
     return result;
   }
 
@@ -881,6 +1000,42 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const signed = this.presign(config, 'PUT', asset.storageKey, asset.mimeType, session.expiresAt);
     return { ...this.sessionSummary(session, asset, 'provider'), uploadUrl: signed.url, uploadHeaders: signed.headers };
   }
+
+  private async originalUploadSummary(tenantId: string, session: Prisma.FileUploadSessionGetPayload<object>,
+    asset: Prisma.FileAssetGetPayload<object>, owner?: FileBusinessOwner) {
+    session = structuredClone(session); asset = structuredClone(asset);
+    const metadata = asset.metadata as JsonRecord | null;
+    const mode = metadata?.uploadMode === "provider" ? "provider" : "simulation";
+    const summary = this.sessionSummary(session, asset, mode);
+    if (session.tenantId !== tenantId || asset.tenantId !== tenantId || session.fileAssetId !== asset.id
+      || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey
+      || owner?.workspaceId && metadata?.workspaceId && metadata.workspaceId !== owner.workspaceId && !["customer", "customer_profile", "membership_review"].includes(asset.businessType)) {
+      throw new ConflictException("原上传会话与文件绑定不一致");
+    }
+    if (session.status !== "pending_upload" || asset.status !== "pending_upload" || session.expiresAt.getTime() <= Date.now() || mode === "simulation") {
+      return summary;
+    }
+    if (metadata?.fileUploadVersion !== 2) throw new ConflictException("旧上传会话缺少临时对象和原配置依据，须核对原会话");
+    const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
+    if (!config || metadata.storageLocationHash !== this.retentionLocationHash(config)
+      || metadata.uploadConfigHash !== requestFingerprint({ id: config.id, provider: config.provider, settings: config.settings, credentials: config.credentials })) {
+      throw new ConflictException("文件平台配置已变化，不能续签原上传会话");
+    }
+    const signed = this.presign(config, "PUT", this.pendingObjectKey(asset.storageKey), asset.mimeType, session.expiresAt);
+    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner?.workspaceId);
+    const currentSession = await this.prisma.fileUploadSession.findFirst({ where: { id: session.id, tenantId } });
+    const currentAsset = await this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId } });
+    const currentConfig = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
+    if (!currentSession || !currentAsset || requestFingerprint(currentSession) !== requestFingerprint(session)
+      || requestFingerprint(currentAsset) !== requestFingerprint(asset) || session.expiresAt.getTime() <= Date.now()
+      || !currentConfig || metadata.uploadConfigHash !== requestFingerprint({ id: currentConfig.id, provider: currentConfig.provider,
+        settings: currentConfig.settings, credentials: currentConfig.credentials })) {
+      throw new ConflictException("原上传会话在续签期间已变化");
+    }
+    return { ...summary, uploadUrl: signed.url, uploadHeaders: signed.headers };
+  }
+
+  private pendingObjectKey(storageKey: string) { return `${storageKey}.pending-upload`; }
 
   private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
     return (!owner.businessType || asset.businessType === owner.businessType)
@@ -1125,6 +1280,48 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     query.set("X-Amz-Signature", hmac(signingKey, `${"AWS4-HMAC-SHA256"}\n${amzDate}\n${scope}\n${sha256(canonicalRequest)}`));
     const headers: Record<string, string> = method === "PUT" ? { "Content-Type": contentType } : {};
     return { url: `${endpoint.protocol}//${host}${path}?${query.toString()}`, headers };
+  }
+
+  private objectRequest(url: string, init: RequestInit) { return fetchWithTimeout(url, init); }
+
+  /** Exact byte evidence, not a client digest or HEAD-only size claim. The
+   * timeout covers stream consumption; abort/cancel never proves rollback. */
+  private async readObjectContent(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number) {
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_FILE_BYTES) throw new ConflictException("文件大小无效");
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const wait = async <T>(work: Promise<T>): Promise<T> => {
+      let rejectAbort: () => void = () => undefined;
+      const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = () => reject(new ServiceUnavailableException("文件内容读取结果未明确")); });
+      controller.signal.addEventListener("abort", rejectAbort, { once: true });
+      if (controller.signal.aborted) rejectAbort();
+      try { return await Promise.race([work, aborted]); }
+      finally { controller.signal.removeEventListener("abort", rejectAbort); }
+    };
+    try {
+      const signed = this.presign(config, "GET", storageKey, mimeType, new Date(Date.now() + 60_000));
+      const task = this.objectRequest(signed.url, { method: "GET", headers: signed.headers, signal: controller.signal });
+      void task.then(response => { if (controller.signal.aborted && response.body) void response.body.cancel().catch(() => undefined); }, () => undefined);
+      const response = await wait(task);
+      const actualType = (response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+      if (!response.ok || !response.body || response.headers.get("content-length") !== String(sizeBytes) || actualType !== mimeType) {
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        throw new ConflictException("实际上传文件的类型或大小与原声明不一致");
+      }
+      reader = response.body.getReader();
+      const chunks: Buffer[] = []; let total = 0;
+      for (;;) {
+        const next = await wait(reader.read());
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (total += next.value.byteLength) > sizeBytes) throw new ConflictException("实际上传内容超过原文件大小");
+        chunks.push(Buffer.from(next.value));
+      }
+      if (total !== sizeBytes) throw new ConflictException("实际上传内容大小不完整");
+      return Buffer.concat(chunks, total);
+    } finally {
+      controller.abort(); clearTimeout(timer);
+      if (reader) { void reader.cancel().catch(() => undefined); reader.releaseLock(); }
+    }
   }
 
   private async objectExists(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number, expiresAt: Date) {

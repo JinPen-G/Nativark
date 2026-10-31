@@ -19,7 +19,8 @@ const identityKey = () => JSON.stringify([useAuthStore.getState().user, currentS
 const feedback = { idle: "配置、能力验证、费率及预算分别管理，不会因保存而开放调用。", saved: "平台配置已保存，请重新读取当前配置。",
   recorded: "原保存收据已确认，请重新读取当前配置。", unknown: "保存结果未知，只能核对原操作收据，不能换编号重试。",
   conflict: "修订或原操作冲突，请重新读取，不覆盖其他配置。", denied: "当前权限已不足，已清除旧配置显示。",
-  invalid: "配置未通过服务端校验，请检查输入。", unavailable: "配置或收据不可用，不代表不存在或未保存。" };
+  invalid: "配置未通过服务端校验，请检查输入。", unavailable: "配置或收据不可用，不代表不存在或未保存。",
+  reference_unavailable: "原操作引用无法可靠保存或读取，已停止发送。请恢复浏览器存储并核对原保存结果。" };
 export function PlatformModelSettingsPage() {
   const { t } = useLocale(), auth = useAuthStore();
   const [target, setTarget] = useState("");
@@ -98,7 +99,7 @@ function ProfileHost({ profileId, identity }: { profileId: string; identity: str
   const canManage = useAuthStore(s => s.hasPermission("system:ai-provider:manage"));
   const session = useMemo(() => {
     let storage: Storage | undefined;
-    try { storage = window.sessionStorage; } catch { /* Reference remains visible in memory. */ }
+    try { storage = window.sessionStorage; } catch { /* The session blocks saves without durable recovery references. */ }
     return new PlatformModelSettingsSession(profileId, platformAiSettingsApi,
       () => identityKey() === identity && !!useAuthStore.getState().token && !!useAuthStore.getState().user?.isSaasAdmin
         && useAuthStore.getState().hasPermission("system:ai-provider:view"),
@@ -119,7 +120,7 @@ function ProfileHost({ profileId, identity }: { profileId: string; identity: str
     </div>
     {state.pending && <p role="status">{t("原操作编号")}: <code>{state.pending.operationKey}</code></p>}
     {(state.summary || state.creating) && <ProfileEditor key={JSON.stringify([state.summary, state.creating])} session={session}
-      disabled={state.busy || !!state.pending || !canManage} />}
+      disabled={state.busy || !!state.pending || state.feedback === 'reference_unavailable' || !canManage} />}
     {!canManage && <p role="status">{t("仅可读取，当前没有平台 AI 配置管理权限。")}</p>}
     <PlatformPriceReview profileId={profileId} identity={identity} profile={state.summary} blocked={state.busy || !!state.pending} />
     <PlatformCapabilityObservation key={JSON.stringify([identity, profileId, state.summary, state.pending])} profileId={profileId} identity={identity} />

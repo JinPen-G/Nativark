@@ -28,7 +28,7 @@ test('formal original/selection repositories and claimed lease reach reprepare, 
   assert.equal(pending.value.state, 'prepared');
   assert.equal(h.state.records.aiApproval.length, 1);
   assert.equal(h.state.records.rentalOrder.length, 0);
-  const approved = await api.decide(request, h.second.reference.taskId, { ...pending.value.proposal, decision: 'approve' });
+  const approved = await api.decide(request, h.second.reference.taskId, { ...pending.value.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' });
   assert.equal(approved.ok, true);
   const result = await h.compose().waiting.execute(h.second.executor(), new AbortController().signal);
   assert.equal(result.kind, 'succeeded');

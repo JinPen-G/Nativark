@@ -89,7 +89,10 @@ export interface FileUploadSessionSummary {
   fileAssetId: string;
   provider: string;
   mode: "provider" | "simulation";
-  status: "pending_upload" | "completed" | "failed" | string;
+  /** freeze_pending binds a one-time content write; only original completion
+   * observation may resume it, never a new upload or PUT retry. */
+  status: "pending_upload" | "freeze_pending" | "completed" | "failed" | string;
+  /** Only the original still-pending staging object receives a PUT grant. */
   uploadUrl?: string;
   uploadHeaders?: Record<string, string>;
   expiresAt: string;
@@ -104,6 +107,8 @@ export interface FileUploadCleanupSummary {
 }
 
 export interface CompleteFileUploadRequest {
+  /** Optional SHA-256 assertion for staged uploads; the server computes the
+   * actual digest. It never treats this client field as content evidence. */
   checksum?: string;
 }
 

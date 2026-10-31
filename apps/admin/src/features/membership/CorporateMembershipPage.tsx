@@ -14,7 +14,10 @@ import { BadgeCheck, Landmark, Users } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";
 import recordStyles from "@/components/RecordDetailLayout.module.css";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { currentSessionEpoch } from "@/app/queryClient";
+import { bindCorporateCreditDraft, corporateCreditDraftChanged, prepareCorporateCreditDraft,
+  type CorporateCreditDraftBaseline, type CorporateCreditDraftCommand } from "./corporate-credit-draft";
 import { corporateImport } from "@/features/listCapabilities";
 import { membershipApi } from "@/api/membership";
 import { customerApi } from "@/api/customer";
@@ -23,6 +26,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
+
+function currentCreditScope() {
+  const auth = useAuthStore.getState();
+  return JSON.stringify([currentSessionEpoch(), auth.sessionVerified, auth.tenant?.tenantId, auth.currentWorkspaceId,
+    auth.user?.id, auth.user?.permissions, auth.user?.dataScope, auth.user?.locationScope, auth.user?.tenantMembership]);
+}
 
 const relationMeta: Record<string, { text: string; color: string }> = { active: { text: "有效", color: "success" }, suspended: { text: "暂停", color: "warning" }, exited: { text: "已退出", color: "default" } };
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
@@ -66,6 +75,11 @@ export function CorporateMembershipPage() {
   const canView = hasTenantMembershipPermission("rental-os:corporate:view") || canManage || canEmployeeManage;
   const canViewCredit = hasTenantMembershipPermission("rental-os:corporate:view") || canManage;
   const canGrant = hasTenantMembershipPermission("rental-os:member:plan:manage");
+  useAuthStore((state) => state.user);
+  useAuthStore((state) => state.currentWorkspaceId);
+  useAuthStore((state) => state.sessionVerified);
+  const creditScope = currentCreditScope();
+  const [creditBaseline, setCreditBaseline] = useState<CorporateCreditDraftBaseline>();
   const [selectedTarget, setSelected] = useState<CorporateMembershipMember>();
   const [drawer, setDrawer] = useState<CorporateDrawer>();
   const [editTarget, setEditTarget] = useState<CorporateMembershipMember>();
@@ -86,6 +100,8 @@ export function CorporateMembershipPage() {
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
   const corporates = useQuery({ queryKey: ["membership-corporate"], queryFn: membershipApi.corporate, enabled: canView });
   const selected = customerId ? corporates.data?.find(row => row.customerId === customerId) : selectedTarget;
+  const creditOwner = useRef(selected?.customerId);
+  creditOwner.current = selected?.customerId;
   const panel = customerId ? (["invoice", "contracts"].includes(corporateTab) ? "corporate" : corporateTab) : drawer;
   const corporateFilter = useListFilter(corporates.data, { fields: row => [row.name, row.corporateName, row.email, row.phoneMasked], status: row => row.membershipStatus });
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans, enabled: canGrant && drawer === "grant" });
@@ -158,17 +174,25 @@ export function CorporateMembershipPage() {
     }
   });
   const saveCredit = useMutation({
-    mutationFn: (values: SaveCustomerCreditRequest) => customerApi.saveCredit(selected!.customerId, {
-      ...values,
-      expectedRevision: creditConfig.data?.revision
-    }),
-    onSuccess: async (saved) => {
+    mutationFn: (command: CorporateCreditDraftCommand) => {
+      if (command.scope !== currentCreditScope() || command.customerId !== creditOwner.current
+        || !useAuthStore.getState().hasTenantMembershipPermission("rental-os:corporate:manage")) {
+        throw new Error(t("资料已变更，请刷新后重新选择"));
+      }
+      return customerApi.saveCredit(command.customerId, command.input);
+    },
+    onSuccess: async (saved, command) => {
+      if (command.scope !== currentCreditScope() || command.customerId !== creditOwner.current
+        || saved.customerId !== command.customerId) return;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["customer-credit", selected?.customerId] }),
         queryClient.invalidateQueries({ queryKey: ["customer-credit-account", selected?.customerId] }),
         queryClient.invalidateQueries({ queryKey: ["customer-credit-ledger", selected?.customerId] })
       ]);
+      if (command.scope !== currentCreditScope() || command.customerId !== creditOwner.current) return;
+      creditForm.resetFields();
       creditForm.setFieldsValue({ ...saved, reason: "" });
+      setCreditBaseline(bindCorporateCreditDraft(command.scope, command.customerId, saved));
       message.success(t("企业授信与账期已保存"));
     }
   });
@@ -215,11 +239,12 @@ export function CorporateMembershipPage() {
     setDrawer(undefined); setEditTarget(undefined); setInvoiceTarget(undefined); setContractTarget(undefined); setRevokeTarget(undefined);
     setInvoiceEditorOpen(false); setContractEditorOpen(false); setEmployeeEditorOpen(false);
     corporateForm.resetFields(); invoiceForm.resetFields(); contractForm.resetFields(); employeeForm.resetFields(); creditForm.resetFields();
-  }, [customerId, corporateForm, invoiceForm, contractForm, employeeForm, creditForm]);
+    setCreditBaseline(undefined);
+  }, [customerId, creditScope, corporateForm, invoiceForm, contractForm, employeeForm, creditForm]);
 
-  useEffect(() => {
-    if (panel !== "credit" || creditConfig.isLoading || creditForm.isFieldsTouched()) return;
-    const row = creditConfig.data;
+  const loadCreditDraft = (row: CustomerCorporateCredit | null) => {
+    if (!selected?.customerId || creditScope !== currentCreditScope()) return;
+    creditForm.resetFields();
     creditForm.setFieldsValue(row ? {
       creditLimit: row.creditLimit,
       settlementTermDays: row.settlementTermDays,
@@ -233,7 +258,18 @@ export function CorporateMembershipPage() {
       status: "active",
       reason: ""
     });
-  }, [creditConfig.data, creditConfig.isLoading, creditForm, panel]);
+    setCreditBaseline(bindCorporateCreditDraft(creditScope, selected.customerId, row));
+  };
+  useEffect(() => {
+    if (panel !== "credit" || !creditConfig.isSuccess || creditConfig.data === undefined || !selected?.customerId) return;
+    if (creditBaseline?.scope === creditScope && creditBaseline.customerId === selected.customerId) return;
+    loadCreditDraft(creditConfig.data);
+  }, [creditConfig.data, creditConfig.isSuccess, creditForm, panel, creditScope, selected?.customerId, creditBaseline]);
+  const creditDraftChanged = corporateCreditDraftChanged(creditBaseline, creditConfig.data);
+  const saveCreditDraft = (values: SaveCustomerCreditRequest) => {
+    if (!canManage) throw new Error("Operation unavailable");
+    return saveCredit.mutateAsync(prepareCorporateCreditDraft(creditBaseline, currentCreditScope(), creditOwner.current, values));
+  };
 
   const corporatePanels = [
         { key: "profile", label: t("企业资料"), children: <>
@@ -386,7 +422,11 @@ export function CorporateMembershipPage() {
           </>}
         </QueryState>}
       <details className={recordStyles.disclosure}><summary>{t("授信与账期配置")}</summary>        <Card title={t("授信与账期配置")}>
-          <Form form={creditForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && saveCredit.mutate(values)}>
+          {creditDraftChanged && <Alert type="warning" showIcon title={t("资料已变更，请刷新后重新选择")} />}
+          <Button disabled={!creditConfig.isSuccess || saveCredit.isPending} onClick={() => {
+            if (creditConfig.data !== undefined) loadCreditDraft(creditConfig.data);
+          }}>{t("重新载入并放弃当前输入")}</Button>
+          <Form form={creditForm} layout="vertical" disabled={!canManage || saveCredit.isPending} onFinish={saveCreditDraft}>
             <Space wrap align="start" style={{ width: "100%" }}>
               <Form.Item name="creditLimit" label={t("授信额度（元）")} rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "var(--rental-control-width-number)" }} /></Form.Item>
               <Form.Item name="settlementTermDays" label={t("账期天数")} rules={[{ required: true }]}><InputNumber min={0} precision={0} style={{ width: "var(--rental-control-width-number)" }} /></Form.Item>
@@ -394,7 +434,7 @@ export function CorporateMembershipPage() {
               <Form.Item name="status" label={t("授信状态")} rules={[{ required: true }]}><Select style={{ width: "var(--rental-control-width-select)" }} options={Object.entries(creditStatusLabel).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
             </Space>
             <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-            <SaveButton disabled={!canManage} label={t("保存授信配置")} form={creditForm} pending={saveCredit.isPending} onSave={async values => { const operation = canManage && saveCredit.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
+            <SaveButton disabled={!canManage || !creditBaseline || creditBaseline.scope !== creditScope || creditBaseline.customerId !== selected?.customerId} label={t("保存授信配置")} form={creditForm} pending={saveCredit.isPending} onSave={saveCreditDraft} />
           </Form>
         </Card>
    </details></QueryState>;

@@ -19,7 +19,7 @@ for(const categoryCode of ['camera','camping','vehicle','construction'])test(`${
  const tenant='tenant_001',workspace=`quote-${categoryCode}`,config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:workspace,tenantId:tenant,categoryCode,isDefault:true}];
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore()),business=new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(),stores.createAbsorbingBusinessFactStore(),config);
  await core.onApplicationBootstrap();await business.onApplicationBootstrap();
- await runWithRequestIdentity({tenantId:tenant,userId:'synthetic-user',workspaceId:workspace,dataScope:'all',locationScope:{mode:'all',locationIds:[]}},async()=>{
+ await runWithRequestIdentity({tenantId:tenant,userId:'synthetic-user',audience:'operator',workspaceId:workspace,dataScope:'all',locationScope:{mode:'all',locationIds:[]}},async()=>{
   const ctx={profile:core.getProfile(tenant),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code===categoryCode),settings:core.getBusinessSettings(tenant),groups:core.listItemGroups(tenant),pricingGroups:core.listPricingGroups(tenant),locations:core.listLocations(tenant),operators:core.listOperators(tenant),couponTemplates:core.listCouponTemplates(tenant)};
   const unit=business.listPricingPlans(tenant,ctx)[0].rates[0].unit;
   const req={customerType:'personal',customerId:'synthetic-customer',fulfillmentMode:ctx.settings.fulfillment.enabledModes[0],fulfillmentLocationId:ctx.locations[0].id,startAt:'2026-11-10T09:00:00+08:00',endAt:'2026-11-11T09:00:00+08:00',lines:[{itemGroupId:ctx.groups[0].id,quantity:1,pricingUnit:unit}]};

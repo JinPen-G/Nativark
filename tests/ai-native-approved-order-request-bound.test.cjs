@@ -12,7 +12,7 @@ async function harness() {
 }
 
 test('request-bound application uses real human services and hands the decision to the original Core action', async () => {
-  const h = await harness(), command = { ...h.review, decision: 'approve' };
+  const h = await harness(), command = { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' };
   const view = await h.app.readProposal(h.request, 'task-a', h.review);
   assert.equal(view.ok, true);
   assert.equal(view.value.deterministic.quoteAmounts.payableAmount, 123);
@@ -55,7 +55,7 @@ test('session revocation remains effective on every new call and prevents decisi
   const h = await harness();
   assert.equal((await h.app.readProposal(h.request, 'task-a', h.review)).ok, true);
   h.state.session = false;
-  const result = await h.app.decide(h.request, 'task-a', { ...h.review, decision: 'approve' });
+  const result = await h.app.decide(h.request, 'task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' });
   assert.equal(result.ok, false);
   assert.equal(result.error.code, 'access_denied');
   assert.equal(h.state.records.aiApproval.length, 0);
@@ -76,7 +76,7 @@ test('unknown decision is redacted and recovered with the same request-bound rec
 test('body-supplied credentials or amounts are rejected rather than becoming request authority', async () => {
   const h = await harness();
   for (const extra of [{ authorization: h.request.headers.authorization }, { audience: 'staff' }, { scope: h.context.scope }, { quoteAmounts: { payableAmount: 1 } }]) {
-    const result = await h.app.decide(h.request, 'task-a', { ...h.review, decision: 'approve', ...extra });
+    const result = await h.app.decide(h.request, 'task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2', ...extra });
     assert.deepEqual(result, { ok: false, error: { code: 'invalid_request', retryable: false, nextAction: 'correct_request' } });
   }
   assert.equal(h.state.records.aiApproval.length, 0);

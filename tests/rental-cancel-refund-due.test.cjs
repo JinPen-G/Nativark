@@ -135,5 +135,70 @@ void (async () => {
     ok("取消/爽约遗留资金聚合为高优先级 cancelled_refund_due 待办，不与 fee_review 重复");
   }
 
+  {
+    const serviceRow = (overrides = {}) => ({ occurrenceId: "original-service", serviceId: "service", serviceName: "已履约服务",
+      quantity: 3, amount: 120, discountAllocatedAmount: 20, couponAllocatedAmount: 10,
+      capacityQuantity: 3, requiresCapacity: false, executionStatus: "completed", executedQuantity: 3,
+      executionSegments: [{ quantity: 3, actualEndAt: "2026-09-10T08:00:00Z", result: "completed" }], ...overrides });
+    for (const [executedQuantity, expected] of [[3, 90], [1, 30], [0, 0]]) {
+      const status = executedQuantity === 3 ? "completed" : executedQuantity ? "in_progress" : "not_started";
+      const occurrence = serviceRow({ executionStatus: status, executedQuantity,
+        executionSegments: executedQuantity ? [{ quantity: executedQuantity, actualEndAt: "2026-09-10T08:00:00Z", result: "completed" }] : [] });
+      const order = orderWith({ payableAmount: 190, finalPayableAmount: 190, totalAmount: 190, status: "ready_for_pickup", serviceSnapshots: [occurrence] });
+      const service = serviceWith(order, { depositBalance: 0, preauthBalance: 0, rentalOverpaid: 0 });
+      const returned = await service.cancelOrder("tenant_1", order.id, "客户取消", 10, {}, "Operator");
+      assert.equal(returned.finalPayableAmount, expected + 10);
+      assert.equal(returned.chargeLines.find(row => row.code.startsWith("cancellation_reversal:")).amount, -(190 - expected));
+      assert.equal(returned.serviceSnapshots[0].executionSegments.length, executedQuantity ? 1 : 0);
+      assert.equal(returned.serviceSnapshots[0].executionStatus, executedQuantity === 3 ? "completed" : "cancelled");
+      await assert.rejects(service.cancelOrder("tenant_1", order.id, "重复取消", 10, {}, "Operator"), /当前订单状态不能取消/);
+    }
+    const occurrence = serviceRow({ requiresCapacity: true, reservationKey: "original-capacity", executionStatus: "in_progress", executedQuantity: 1,
+      executionSegments: [{ quantity: 1, actualEndAt: "2026-09-10T08:00:00Z", result: "one completed" }] });
+    const order = orderWith({ payableAmount: 190, finalPayableAmount: 190, totalAmount: 190, serviceSnapshots: [occurrence] });
+    const service = serviceWith(order, { depositBalance: 0, preauthBalance: 0, rentalOverpaid: 0 });
+    const capacityCalls = [];
+    service.serviceCapacities = { markPartiallyUsedForOccurrence: async (...args) => capacityCalls.push(args),
+      releaseForOccurrence: async () => { throw Error("must preserve used capacity"); } };
+    await service.cancelOrder("tenant_1", order.id, "取消未执行部分", 0, {}, "Operator");
+    assert.equal(order.finalPayableAmount, 30); assert.equal(capacityCalls.length, 1);
+    assert.equal(capacityCalls[0][2], "original-capacity"); assert.equal(capacityCalls[0][3], 1);
+    const { RentalServiceCapacityService } = require("../apps/api/src/modules/rental-core/rental-service-capacity.service");
+    const capacity = new RentalServiceCapacityService({});
+    const reservations = [{ id: "capacity-used", idempotencyKey: "used-key", status: "confirmed", quantity: 1,
+      capacityId: "cap", serviceId: "service", tenantId: "tenant_1", workspaceId: "ws-1" }];
+    capacity.lockOrderReservations = async () => reservations;
+    let released = 0;
+    const tx = { businessWorkspace: { findFirst: async () => ({ id: "ws-1" }) },
+      rentalServiceCapacity: { updateMany: async () => { released++; return { count: 1 }; } },
+      rentalServiceReservation: { updateMany: async ({ where, data }) => {
+        const row = reservations.find(row => row.id === where.id && row.status === where.status);
+        if (!row) return { count: 0 }; Object.assign(row, data); return { count: 1 };
+      } } };
+    const completedOrder = orderWith({ payableAmount: 190, finalPayableAmount: 190, serviceSnapshots: [serviceRow({ quantity: 1,
+      executedQuantity: 1, executionSegments: [{ quantity: 1 }], requiresCapacity: true, capacityQuantity: 1, reservationKey: "used-key" })] });
+    const completedService = serviceWith(completedOrder, {}); completedService.serviceCapacities = capacity;
+    await completedService.cancelOrder("tenant_1", completedOrder.id, "取消不释放已用容量", 0, tx, "Operator");
+    await capacity.releaseForOrder("tenant_1", completedOrder.id, "order_cancelled", new Date().toISOString(), tx);
+    assert.equal(reservations[0].status, "used"); assert.equal(released, 0);
+    assert.equal(completedOrder.finalPayableAmount, 90);
+    ok("订单取消保留已履约服务净额、原执行段与已用容量，只冲销未履行部分并保留原取消费");
+
+    for (const row of [serviceRow({ executionStatus: undefined }), serviceRow({ executionStatus: "in_progress", executedQuantity: 0 }),
+      serviceRow({ executedQuantity: 2 }), serviceRow({ executionSegments: [{ quantity: 2 }] }), serviceRow({ amount: NaN })]) {
+      const order = orderWith({ serviceSnapshots: [row] });
+      const service = serviceWith(order, {});
+      await assert.rejects(service.cancelOrder("tenant_1", order.id, "未知不自动全冲", 0, {}, "Operator"));
+      assert.equal(service.saved, undefined); assert.equal(order.status, "reserved");
+      assert.equal(order.chargeLines.length, 0); assert.equal(order.reservations[0].status, "confirmed");
+    }
+    const reducedOrder = orderWith({ payableAmount: 190, finalPayableAmount: 70, adjustmentAmount: -120, totalAmount: 70,
+      serviceSnapshots: [serviceRow()], feeReviews: [{ id: "original-refund", type: "service_refund", sourceId: "original-service", status: "approved", decidedAmount: 90 }] });
+    const reduced = serviceWith(reducedOrder, {});
+    await reduced.cancelOrder("tenant_1", reducedOrder.id, "原服务已另行全额核减", 0, {}, "Operator");
+    assert.equal(reducedOrder.finalPayableAmount, 0, "approved service deduction is not re-added as earned income");
+    ok("履约状态/数量/金额不明时取消不写；已经批准的服务核减不被重新加回收入");
+  }
+
   console.log(`\n取消遗留资金 refund_due 专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

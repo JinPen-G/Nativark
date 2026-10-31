@@ -4,7 +4,8 @@
  * An occupied turn cannot be replaced without a separate trusted completion. */
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_CONVERSATION_DRAFT_VERSION as version, AI_SCENE_REQUEST_DRAFT_VERSION,
+import { AI_CONVERSATION_DRAFT_VERSION as version, AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION,
+  type AiConversationUnstartedReceiptDraft,
   AI_TASK_CENTER_ENTRY_PERMISSIONS, type AiSceneCode, type AiConversationObservationDraft,
   type AiConversationOperationObservationDraft, type AiConversationTurnObservationDraft,
   type AiConversationListResponseDraft, type AiConversationTurnPageDraft, type AiConversationAdmissionResponseDraft,
@@ -67,6 +68,9 @@ export class AiConversationRepository {
       status: row.status as 'active' | 'archived', createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }
   private operation(row: Operation): AiConversationOperationObservationDraft {
+    if (row.operation === 'close_unstarted') return { draftVersion: AI_CONVERSATION_UNSTARTED_DRAFT_VERSION,
+      operationKey: row.operationKey, retryable: false, status: 'observed', conversationId: row.conversationId, revision: row.revision,
+      operation: 'close_unstarted', creation: 'permanently_closed', task: 'not_created', taskCancellation: 'not_requested', businessRecords: 'not_modified' };
     if (!['create', 'archive', 'delete', 'release_turn'].includes(row.operation)) throw unavailable();
     return { draftVersion: version, operationKey: row.operationKey, retryable: false, status: 'observed', conversationId: row.conversationId,
       revision: row.revision, operation: row.operation as 'create' | 'archive' | 'delete' | 'release_turn', taskCancellation: 'not_requested', businessRecords: 'not_modified' };
@@ -165,6 +169,48 @@ export class AiConversationRepository {
       await this.check(session); return result;
     } catch (error) { if (attempted) throw new AiOriginalRequestResultUnknownError(); throw error; }
   }
+  /** Explicit closure of an admitted request that never created a Task. Does
+   * not infer rollback from TTL; closure and the creation fence commit together. */
+  async closeUnstarted(value: unknown): Promise<AiConversationUnstartedReceiptDraft> {
+    const command = conversationCommand('AiConversationUnstartedCloseDraft', value), session = await this.current();
+    const inputHash = requestFingerprint({ operation: 'close_unstarted', command });
+    const key = { ...this.owner(session), operationKey: command.operationKey };
+    const original = (row: Operation) => {
+      if (row.operation !== 'close_unstarted' || row.inputHash !== inputHash || row.conversationId !== command.conversationId) throw conflict();
+      return this.operation(row) as AiConversationUnstartedReceiptDraft;
+    };
+    let attempted = false;
+    try {
+      const result = await this.db.$transaction(async tx => {
+        // Task creation/upsert and retention take the scope first. Keep that
+        // order before conversation/original locks to avoid a lock inversion.
+        const scopes = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM ai_scopes WHERE id = ${session.scopeId}
+          AND kind = 'workspace' AND tenantId = ${session.tenantId} AND workspaceId = ${session.workspaceId} FOR UPDATE`);
+        if (scopes.length !== 1 || scopes[0].id !== session.scopeId) throw unavailable();
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_conversations WHERE scopeId = ${session.scopeId} AND ownerId = ${session.ownerId} AND id = ${command.conversationId} FOR UPDATE`);
+        const replay = await tx.aiConversationOperation.findFirst({ where: key });
+        if (replay) { await this.check(session); return original(replay); }
+        const row = await this.row(tx, session, command.conversationId);
+        if (row.revision !== command.expectedRevision || row.activeTurnId !== command.turnId || row.revision >= 4294967294) throw conflict();
+        const turn = await tx.aiConversationTurn.findFirst({ where: { ...this.owner(session), conversationId: row.id, id: command.turnId,
+          originalRequestId: command.originalInputRef } });
+        if (!turn || turn.id !== command.turnId || turn.originalRequestId !== command.originalInputRef
+          || turn.scopeId !== session.scopeId || turn.ownerId !== session.ownerId || turn.conversationId !== row.id
+          || turn.capabilityCode !== row.capabilityCode) throw unavailable();
+        await this.check(session);
+        const closed = await this.originals.closeUnstartedCreation(tx, turn.originalRequestId, command.operationKey, () => { attempted = true; });
+        if (closed.requestKey !== turn.originalRequestKey || closed.sceneCode !== turn.capabilityCode || closed.sceneVersion !== turn.capabilityVersion
+          || closed.admissionHash !== null && closed.admissionHash !== turn.inputHash) throw conflict();
+        const changed = await tx.aiConversation.updateMany({ where: { ...this.owner(session), id: row.id, revision: row.revision,
+          activeTurnId: turn.id, deletedAt: null }, data: { activeTurnId: null, revision: { increment: 1 }, updatedAt: closed.closedAt } });
+        if (changed.count !== 1) throw conflict();
+        const receipt = await tx.aiConversationOperation.create({ data: { ...key, conversationId: row.id, operation: 'close_unstarted',
+          inputHash, revision: row.revision + 1, createdAt: closed.closedAt } });
+        await this.check(session); return original(receipt);
+      }, transaction);
+      await this.check(session); return result;
+    } catch (error) { if (attempted) throw new AiOriginalRequestResultUnknownError(); throw error; }
+  }
   async list(value: unknown): Promise<AiConversationListResponseDraft> {
     const command = conversationCommand('AiConversationListDraft', value), session = await this.current();
     const rows = await this.db.aiConversation.findMany({ where: { ...this.owner(session), status: command.status, deletedAt: null,
@@ -175,6 +221,32 @@ export class AiConversationRepository {
   }
   private async turn(row: Turn): Promise<AiConversationTurnObservationDraft> {
     const reference = { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: row.originalRequestId };
+    const closed = await this.originals.readCreationClosure(reference);
+    if (closed) {
+      if (closed.receipt.inputRef !== row.originalRequestId || closed.receipt.requestKey !== row.originalRequestKey
+        || closed.receipt.sceneCode !== row.capabilityCode || closed.receipt.sceneVersion !== row.capabilityVersion
+        || closed.material === 'retained' && requestFingerprint(closed.request) !== row.inputHash) throw unavailable();
+      const where = { scopeId: row.scopeId, ownerId: row.ownerId, operationKey: closed.operationKey,
+        conversationId: row.conversationId, operation: 'close_unstarted' };
+      const receipt = await this.db.aiConversationOperation.findFirst({ where });
+      if (!receipt || Object.entries(where).some(([key, value]) => receipt[key as keyof Operation] !== value)
+        || !Number.isSafeInteger(receipt.revision) || receipt.revision > 4294967294
+        || receipt.createdAt.getTime() !== closed.closedAt.getTime() || receipt.revision <= row.admissionRevision
+        || receipt.inputHash !== requestFingerprint({ operation: 'close_unstarted', command: {
+          draftVersion: AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, conversationId: row.conversationId, operationKey: closed.operationKey,
+          expectedRevision: receipt.revision - 1, turnId: row.id, originalInputRef: row.originalRequestId } })) throw unavailable();
+      const after = await this.originals.readCreationClosure(reference);
+      const latest = await this.db.aiConversationOperation.findFirst({ where });
+      if (!after || after.operationKey !== closed.operationKey || after.closedAt.getTime() !== closed.closedAt.getTime()
+        || after.material !== closed.material || requestFingerprint(after.receipt) !== requestFingerprint(closed.receipt)
+        || !latest || Object.entries(where).some(([key, value]) => latest[key as keyof Operation] !== value)
+        || latest.inputHash !== receipt.inputHash || latest.revision !== receipt.revision
+        || latest.createdAt.getTime() !== receipt.createdAt.getTime()) throw conflict();
+      return { admissionKey: row.admissionKey, turnId: row.id, originalRequestKey: row.originalRequestKey, requestHash: row.inputHash,
+        capabilityCode: row.capabilityCode as AiSceneCode, capabilityVersion: row.capabilityVersion, createdAt: row.createdAt.toISOString(),
+        automaticRetry: false, status: 'original_bound', original: reference, execution: 'not_inferred_from_association',
+        material: closed.material, task: null, creation: 'permanently_closed', closeOperationKey: closed.operationKey };
+    }
     const locator = await this.originals.readTaskLocator(reference);
     if (locator.receipt.state === 'revoked') throw denied();
     if (locator.receipt.inputRef !== row.originalRequestId || locator.receipt.requestKey !== row.originalRequestKey

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiApprovalRecordDraft, type AiProposalDecisionRequestDraft,
+import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION,
+  type AiApprovalApplicationDecisionDraft, type AiApprovalRecordDraft, type AiProposalDecisionRequestDraft,
   type AiProposalPayloadDraft, type AiProposalRecordDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiApprovalService, AiApprovalRepositoryError, PrismaAiApprovalRepository, type AiApprovalRecord } from '../ai-approval-repository';
@@ -12,11 +13,15 @@ import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority'
 import { PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
 import { AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { approvedOrderReviewMaterial } from './approved-order-review-material';
+import { assertQuoteReadAccess } from '../../rental-core/rental-quote-access';
+import type { RentalQuoteSnapshotV1 } from '@rental-os/shared';
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const referenceSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: id,
   proposalRevision: z.number().int().min(1).max(4294967294), reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
-const decisionSchema = referenceSchema.extend({ decision: z.enum(['approve', 'reject']) }).strict() satisfies z.ZodType<AiProposalDecisionRequestDraft>;
+const decisionSchema = referenceSchema.extend({ decision: z.enum(['approve', 'reject']),
+  reviewVersion: z.literal(AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION).optional() }).strict() satisfies z.ZodType<AiApprovalApplicationDecisionDraft>;
 type Reference = Omit<AiProposalDecisionRequestDraft, 'decision'>;
 const money = z.number().finite().nonnegative();
 const quoteReviewSchema = z.object({ currency: z.string().min(1).max(16), expiresAt: z.string().datetime({ offset: true }),
@@ -76,11 +81,12 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
   const same = (first: Awaited<ReturnType<typeof load>>, next: Awaited<ReturnType<typeof load>>, includeHead = true) => {
     if (first.stable !== next.stable || (includeHead && requestFingerprint(first.head) !== requestFingerprint(next.head))) throw conflict();
   };
-  const readProposal = async (taskId: string, value: Reference) => {
+  const readOriginal = async (taskId: string, value: Reference, verifyMaterial = false) => {
     taskId = parse(id, taskId);
     const reference = parse(referenceSchema, value), first = await load(taskId, reference);
     return route.withOrderReview(first.context, first.facts.input.payload, async () => {
       same(first, await load(taskId, reference));
+      if (verifyMaterial) assertQuoteReadAccess(first.facts.preview.payload as unknown as RentalQuoteSnapshotV1);
       const proposal: AiProposalRecordDraft = { payload: first.payload, payloadHash: reference.reviewedPayloadHash,
         status: first.head.status.toLowerCase() as AiProposalRecordDraft['status'] };
       const { currency, expiresAt: quoteExpiresAt, ...quoteAmounts } = quoteReviewSchema.parse(first.facts.preview.payload);
@@ -88,9 +94,14 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
         quoteAmounts, currency, quoteExpiresAt, decisionExpiresAt: first.payload.expiresAt }, generatedText: null };
     });
   };
-  const readReceipt = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
+  const readProposal = async (taskId: string, value: Reference) => {
+    const view = await readOriginal(taskId, value, true);
+    return { ...view, deterministic: { ...view.deterministic,
+      order: approvedOrderReviewMaterial(view.facts.input.payload, view.facts.preview.payload) } };
+  };
+  const readReceipt = async (taskId: string, value: AiApprovalApplicationDecisionDraft) => {
     taskId = parse(id, taskId);
-    const command = parse(decisionSchema, value), { decision, ...reference } = command;
+    const command = parse(decisionSchema, value), { decision, reviewVersion, ...reference } = command;
     const first = await load(taskId, reference);
     const read = async () => {
       if (first.context.actor.kind !== 'user') throw deniedOrder();
@@ -123,18 +134,25 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       return after;
     });
   };
-  const decide = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
+  const decide = async (taskId: string, value: AiApprovalApplicationDecisionDraft) => {
     let started = false, committed = false;
     const attempt = async (signal: AbortSignal) => {
       const assertActive = () => { if (signal.aborted) throw new AiApprovalDecisionResultUnknownError(); };
       taskId = parse(id, taskId);
-      const command = parse(decisionSchema, value), { decision, ...reference } = command;
+      const command = parse(decisionSchema, value), { decision, reviewVersion, ...reference } = command;
       const first = await load(taskId, reference), grant = await human.resolve(taskId);
+      if (decision === 'approve' && first.head.status === 'PENDING_CONFIRMATION'
+        && reviewVersion !== AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       assertActive();
       if (orderContextHash(first.context) !== orderContextHash(grant.context)) throw deniedOrder();
       const recheck = async (tx?: Prisma.TransactionClient) => {
         assertActive();
-        same(first, await load(taskId, reference, tx), false);
+        const original = await load(taskId, reference, tx);
+        same(first, original, false);
+        // Legacy receipts need no new material; a new approval cannot omit the
+        // customer, rental and fulfillment facts this human host must show.
+        if (decision === 'approve' && first.head.status === 'PENDING_CONFIRMATION')
+          approvedOrderReviewMaterial(original.facts.input.payload, original.facts.preview.payload);
         const current = await human.resolve(taskId, tx);
         assertActive();
         if (current.bindingHash !== grant.bindingHash || Date.parse(first.payload.expiresAt) <= clock().getTime()) throw deniedOrder();
@@ -168,6 +186,8 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       } });
       const outcome = await route.withOrderPreparation(grant.context, first.facts.input.payload, async () => {
         try {
+          if (decision === 'approve' && first.head.status === 'PENDING_CONFIRMATION')
+            assertQuoteReadAccess(first.facts.preview.payload as unknown as RentalQuoteSnapshotV1);
           const record = await service.decide({ context: grant.context, scopeId: grant.principal.scopeId, taskId,
             proposalId: reference.proposalId, proposalRevision: reference.proposalRevision, payload: first.payload,
             reviewedPayloadHash: reference.reviewedPayloadHash, decision: decision === 'approve' ? 'approved' : 'rejected' });
@@ -202,8 +222,11 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
     }
   };
   return Object.freeze({
+    // Internal historical observation preserves legacy evidence; public hosts
+    // use readProposal and cannot promote an incomplete snapshot to approval.
+    readOriginal: (taskId: string, value: Reference) => observe(() => readOriginal(taskId, structuredClone(value))),
     readProposal: (taskId: string, value: Reference) => observe(() => readProposal(taskId, structuredClone(value))),
     decide,
-    readReceipt: (taskId: string, value: AiProposalDecisionRequestDraft) => observe(() => readReceipt(taskId, structuredClone(value)))
+    readReceipt: (taskId: string, value: AiApprovalApplicationDecisionDraft) => observe(() => readReceipt(taskId, structuredClone(value)))
   });
 }

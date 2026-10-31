@@ -63,6 +63,7 @@ test('actual saved quote source uses original Core business store within guarded
       fulfillmentLocationId: context.locations[0].id, lines: [{ itemGroupId: context.groups[0].id, quantity: 1 }] });
     } catch (error) { callbackError = error; throw error; }
   }).catch(error => { throw callbackError ?? error; });
+  business.factStore.findQuote = async (_tenant, id) => id === old.id ? structuredClone(old) : undefined;
   Object.assign(h.state.order, { quoteId: old.id, ruleVersion: old.ruleVersion, pricingPlanVersion: old.pricingPlanVersion });
   const source = new AiOrderSavedQuoteSource(business, contexts);
   const reader = new AiOrderReadFactsService(h.core, h.authority, undefined, source);

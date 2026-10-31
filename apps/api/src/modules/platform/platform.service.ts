@@ -765,8 +765,13 @@ export class PlatformService {
 
   async saveSecurityBaseline(
     input: SystemSecurityBaselineConfig,
-    operator = "平台管理员"
+    currentUser?: SystemUserRow
   ) {
+    this.assertSaasAdmin(currentUser);
+    if (!currentUser!.permissions.includes("system:params:manage") && !currentUser!.permissions.includes("*")) {
+      throw new ForbiddenException("修改全平台安全基线需要系统参数管理权限");
+    }
+    const operator = currentUser!.displayName;
     const security = this.normalizeSecurityBaseline(input);
     // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
     const config = this.useMysqlDataSource()
@@ -1611,16 +1616,14 @@ export class PlatformService {
     );
   }
 
-  getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) {
+  async getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().getProfileOverview(
-      tenantId,
-      getRequestWorkspaceId(),
-      customerId,
-      currentUser,
-      query
-    );
+    const workspaceId = requireRequestWorkspaceId();
+    if (!currentUser || currentUser.isSaasAdmin) throw new ForbiddenException("会员经营资料需要当前空间账号授权");
+    const scoped = await this.findWorkspaceScopedUser(currentUser.id, workspaceId);
+    if (!scoped?.isActive || scoped.tenantId !== tenantId) throw new ForbiddenException("当前经营空间访问权已失效");
+    return this.requireCustomerOperations().getProfileOverview(tenantId, workspaceId, customerId, scoped, query);
   }
 
   saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) {
@@ -2198,9 +2201,10 @@ export class PlatformService {
   }
 
   saveRole(input: SaveSystemRoleRequest, currentUser?: SystemUserRow) {
+    this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色");
     const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRole(input, tenantId);
+      return this.platformRepository.saveRole(input, tenantId, currentUser?.id);
     }
     const existing = input.id
       ? this.roleRows.find((role) => role.id === input.id)
@@ -2225,8 +2229,11 @@ export class PlatformService {
       throw new BadRequestException("角色编码已存在");
     }
 
-    const fixedAllPermissions =
-      existing?.fixedAllPermissions ?? code === "TENANT_ADMIN";
+    if (existing?.fixedAllPermissions || code === "TENANT_ADMIN") {
+      throw new BadRequestException("固定全权角色由系统初始化维护，不能通过普通角色编辑修改");
+    }
+    this.assertMemoryRolePermissions(input.permissions ?? [], input.buttonPermissions ?? []);
+    const fixedAllPermissions = false;
     const requestedPermissions = [...new Set(input.permissions ?? [])];
     const requestedButtonPermissions = [
       ...new Set([
@@ -2269,6 +2276,7 @@ export class PlatformService {
   }
 
   async saveRolePermissions(id: string, permissions: string[], tenantId: string | undefined, currentUser?: SystemUserRow) {
+    this.assertCustomerActionPermission(currentUser, "system:role:manage", "维护角色权限");
     const targetTenantId = this.resolveTargetTenantId(
       tenantId ?? (this.useMysqlDataSource()
         ? await this.platformRepository.getRoleTenantId(id)
@@ -2276,7 +2284,7 @@ export class PlatformService {
       currentUser
     );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRolePermissions(id, permissions, targetTenantId);
+      return this.platformRepository.saveRolePermissions(id, permissions, targetTenantId, currentUser?.id);
     }
     const role = this.roleRows.find((item) => item.id === id);
 
@@ -2287,6 +2295,7 @@ export class PlatformService {
       return role;
     }
 
+    this.assertMemoryRolePermissions(permissions, []);
     const nextPermissions = [...new Set(permissions)];
     role.permissions = nextPermissions.filter(
       (permission) => !this.isButtonPermission(permission)
@@ -2298,6 +2307,7 @@ export class PlatformService {
   }
 
   async deleteRole(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    this.assertCustomerActionPermission(currentUser, "system:role:manage", "删除角色");
     const targetTenantId = this.resolveTargetTenantId(
       tenantId ?? (this.useMysqlDataSource()
         ? await this.platformRepository.getRoleTenantId(id)
@@ -2305,7 +2315,7 @@ export class PlatformService {
       currentUser
     );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteRole(id, targetTenantId);
+      return this.platformRepository.deleteRole(id, targetTenantId, currentUser?.id);
     }
     const index = this.roleRows.findIndex((role) => role.id === id);
     if (index < 0) {
@@ -2335,13 +2345,16 @@ export class PlatformService {
       currentUser
     );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.setUserStatus(id, isActive, targetTenantId);
+      return this.platformRepository.setUserStatus(id, isActive, targetTenantId, currentUser?.id);
     }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
     }
+    this.assertCustomerActionPermission(currentUser, "system:user:manage", "维护账号状态");
+    await this.assertTenantAdminPrivilegeWrite({ id }, targetTenantId, currentUser);
     user.isActive = isActive;
+    if (!isActive) await this.revokeUserSessions(id);
     return this.toUserRow(user);
   }
 
@@ -2353,11 +2366,15 @@ export class PlatformService {
       currentUser
     );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetUserPassword(id, targetTenantId);
+      return this.platformRepository.resetUserPassword(id, targetTenantId, currentUser?.id);
     }
     const user = this.users.find((item) => item.id === id);
     if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
+    }
+    if (!currentUser?.isSaasAdmin) {
+      this.assertCustomerActionPermission(currentUser, "system:user:manage", "重置账号密码");
+      await this.assertTenantAdminPrivilegeWrite({ id }, targetTenantId, currentUser);
     }
     const temporaryPassword = `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
     user.password = temporaryPassword;
@@ -2374,7 +2391,7 @@ export class PlatformService {
   async resetTenantAdminPassword(tenantId: string, currentUser?: SystemUserRow) {
     this.assertSaasAdmin(currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetTenantAdminPassword(tenantId);
+      return this.platformRepository.resetTenantAdminPassword(tenantId, currentUser?.id);
     }
 
     const tenant = this.tenants.find((item) => item.tenantId === tenantId && item.tenantCode !== "platform");
@@ -2541,7 +2558,7 @@ export class PlatformService {
   getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerCorporateSettlement().account(tenantId, customerId);
+    return this.requireCustomerCorporateSettlement().financialAccount(tenantId, customerId);
   }
 
   listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) {
@@ -2552,7 +2569,8 @@ export class PlatformService {
 
   recordCustomerCreditMaturity(customerId: string, input: RecordCustomerCorporateCreditMaturityRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
-    if (!currentUser?.id || !(currentUser.permissions.includes("rental-os:corporate:manage") || currentUser.permissions.includes("*"))) {
+    if (!currentUser?.id || currentUser.isSaasAdmin || !(currentUser.isPlatformAdmin
+      || currentUser.permissions.includes("rental-os:corporate:manage") || currentUser.permissions.includes("*"))) {
       throw new ForbiddenException("核定债权到期日需要当前企业管理权限");
     }
     if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("核定债权须当前完整空间财务范围");
@@ -3036,7 +3054,7 @@ export class PlatformService {
 
   /** 管理员标志和固定全权角色属于租户边界，不能仅依赖路由权限或客户端提交值。 */
   private async assertTenantAdminPrivilegeWrite(
-    input: SaveSystemUserRequest,
+    input: Partial<Pick<SaveSystemUserRequest, "id" | "isPlatformAdmin" | "roleIds">>,
     tenantId: string,
     currentUser?: SystemUserRow
   ) {
@@ -3089,6 +3107,14 @@ export class PlatformService {
     const cloned = JSON.parse(JSON.stringify(config)) as SystemRulesConfig;
     cloned.security = this.normalizeSecurityBaseline(cloned.security);
     return cloned;
+  }
+
+  private assertMemoryRolePermissions(permissions: string[], buttons: string[]) {
+    const registered = new Set(this.permissionTree.flatMap(module => module.children.map(row => row.code)));
+    if ([...permissions, ...buttons].some(code => code === "*" || !registered.has(code))
+      || buttons.some(code => !this.isButtonPermission(code))) {
+      throw new BadRequestException("角色只能配置已登记的对应类型权限，不能配置通配权限");
+    }
   }
 
   private isButtonPermission(permission: string) {

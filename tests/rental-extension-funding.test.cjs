@@ -57,8 +57,8 @@ assert.equal(
 );
 assert.equal(
   paymentRequired({ settlementMode: "monthly", payableAmount: 500, depositDelta: 100, preAuthDelta: 0 }),
-  false,
-  "企业月结不走补款，金额进月结账单"
+  true,
+  "企业月结只豁免租金，新增押金仍须先补齐"
 );
 ok("(a) 押金/预授权差额纳入补款判据，免费续租的判定不再只看租金");
 

@@ -1,7 +1,8 @@
 /** Explicit human review/decision and original approved-host continuation.
  * No arbitrary action/Core callback; persist references only, never contents. */
 import { useEffect, useId, useRef, useState } from "react";
-import { AI_PROPOSAL_DRAFT_VERSION, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
+import { AI_PROPOSAL_DRAFT_VERSION, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES,
+  type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
   type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft,
   type AiTaskHumanContinueDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
@@ -36,12 +37,71 @@ function pendingContinuation(key: string, taskId: string): AiTaskHumanContinueDr
       && /^[a-f0-9]{64}$/u.test(value.proposal.reviewedPayloadHash) ? value : "invalid";
   } catch { return "invalid"; }
 }
+const materialId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+const materialText = (value: unknown, max = 191) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+const validPeriod = (value: { startAt: string; endAt: string }) => formatTimestamp(value.startAt).available
+  && formatTimestamp(value.endAt).available && Date.parse(value.startAt) < Date.parse(value.endAt);
+/** Old/missing materials may not enable approval or continuation on this host. */
+export function hasOrderReviewMaterial(value: AiTaskHumanReviewDraft): boolean {
+  if (value.kind !== 'order') return true;
+  try {
+    const review = value.review, order = review.deterministic.order;
+    const optionalName = (name: unknown) => name === undefined || materialText(name);
+    if (review.draftVersion !== AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION || !order || !materialId(order.customer.id)
+      || !['personal', 'corporate'].includes(order.customer.type) || !optionalName(order.customer.name)
+      || !['personal', 'enterprise_employee'].includes(order.booking.identity) || typeof order.booking.enterpriseContractAndPayer !== 'boolean'
+      || order.booking.corporateCustomerId !== undefined && !materialId(order.booking.corporateCustomerId)
+      || !optionalName(order.booking.corporateCustomerName)
+      || order.booking.identity === 'enterprise_employee' && !order.booking.corporateCustomerId
+      || !validPeriod(order.period) || order.period.timeZone !== undefined && !materialText(order.period.timeZone, 128)
+      || !RENTAL_FULFILLMENT_MODES.includes(order.fulfillment.mode) || !materialId(order.fulfillment.pickupLocationId)
+      || !materialId(order.fulfillment.returnLocationId) || !Array.isArray(order.lines) || !order.lines.length || order.lines.length > 100
+      || order.lines.some(line => !materialId(line.itemGroupId) || line.pricingGroupId !== undefined && !materialId(line.pricingGroupId)
+        || !optionalName(line.name) || !formatAmount(line.quantity).available || line.quantity < 1
+        || line.pricingUnit !== undefined && !RENTAL_PRICING_UNIT_CODES.includes(line.pricingUnit))
+      || !Array.isArray(order.services) || order.services.length > 100 || order.services.some(row => !materialId(row.serviceId)
+        || !materialText(row.name) || !formatAmount(row.quantity).available || row.quantity < 1 || !validPeriod(row)
+        || !materialId(row.locationId) || typeof row.requiredByRule !== 'boolean')) return false;
+    const address = order.fulfillment.deliveryAddress;
+    return !address || materialText(address.recipient, 128) && materialText(address.countryCode, 16)
+      && materialText(address.province, 128) && materialText(address.city, 128) && materialText(address.detail, 500)
+      && (address.district === undefined || materialText(address.district, 128))
+      && (address.postalCode === undefined || materialText(address.postalCode, 32));
+  } catch { return false; }
+}
+const fulfillmentLabels = { store_pickup_return: '门店自取还', partner_pickup_return: '合作点取还',
+  warehouse_pickup_return: '仓库取还', locker_pickup_return: '自助柜取还', delivery: '配送',
+  onsite_delivery: '上门交付', carrier_shipping: '承运寄送' } as const;
 /** Deterministic domain values, deliberately separate from generated model text. */
 export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraft }) {
   const { t } = useLocale(), payload = value.review.proposal.payload;
+  if (!hasOrderReviewMaterial(value)) return <Alert type="warning" title={t('原审批材料缺失或版本不兼容，不能批准或继续，请回原业务页核对。')} />;
+  const order = value.kind === 'order' ? value.review.deterministic.order : null;
   return <div style={{ overflowWrap: "anywhere" }}>
     <p>{t("提案版本")}: {payload.revision} · {t("有效期")}: {formatTimestamp(payload.expiresAt).value}</p>
     <p>{t("提案引用")}: {safeDisplayText(payload.proposalId, 36)} · {t("原任务修订")}: {value.taskRevision}</p>
+    {order && <>
+      <dl><dt>{t('客户')}</dt><dd>{order.customer.name && <>{safeDisplayText(order.customer.name, 191)} · </>}{safeDisplayText(order.customer.id, 191)} ({t(order.customer.type === 'personal' ? '个人' : '企业')})</dd>
+        <dt>{t('预约身份')}</dt><dd>{t(order.booking.identity === 'personal' ? '个人' : '企业员工')}
+          {order.booking.corporateCustomerId && <> · {safeDisplayText(order.booking.corporateCustomerName ?? order.booking.corporateCustomerId, 191)}</>}
+          {order.booking.enterpriseContractAndPayer && <> · {t('企业签约与付款')}</>}</dd>
+        <dt>{t('租期开始')}</dt><dd>{formatTimestamp(order.period.startAt).value}</dd>
+        <dt>{t('租期结束')}</dt><dd>{formatTimestamp(order.period.endAt).value}</dd>
+        {order.period.timeZone && <><dt>{t('营业时区')}</dt><dd>{safeDisplayText(order.period.timeZone, 128)}</dd></>}
+        <dt>{t('履约方式')}</dt><dd>{t(fulfillmentLabels[order.fulfillment.mode])}</dd>
+        <dt>{t('领取地点')}</dt><dd>{safeDisplayText(order.fulfillment.pickupLocationId, 191)}</dd>
+        <dt>{t('归还地点')}</dt><dd>{safeDisplayText(order.fulfillment.returnLocationId, 191)}</dd>
+        {order.fulfillment.deliveryAddress && <><dt>{t('配送目的地')}</dt><dd>{safeDisplayText(order.fulfillment.deliveryAddress.recipient, 128)} · {[order.fulfillment.deliveryAddress.countryCode,
+          order.fulfillment.deliveryAddress.province, order.fulfillment.deliveryAddress.city, order.fulfillment.deliveryAddress.district,
+          order.fulfillment.deliveryAddress.detail, order.fulfillment.deliveryAddress.postalCode].filter(Boolean).map(part => safeDisplayText(part, 500)).join(' ')}</dd></>}
+      </dl>
+      <h4>{t('租赁对象与数量')}</h4><ol>{order.lines.map((line, index) => <li key={index}>{line.name && <>{safeDisplayText(line.name, 191)} · </>}
+        {safeDisplayText(line.itemGroupId, 191)}{line.pricingGroupId && <> · {t('定价分组')}: {safeDisplayText(line.pricingGroupId, 191)}</>}
+        {' · '}{t('数量')}: {formatAmount(line.quantity).value}{line.pricingUnit && <> · {t('计价单位')}: {safeDisplayText(line.pricingUnit, 32)}</>}</li>)}</ol>
+      {!!order.services.length && <><h4>{t('增值服务')}</h4><ul>{order.services.map((row, index) => <li key={index}>{safeDisplayText(row.name, 191)} · {safeDisplayText(row.serviceId, 191)}
+        {' · '}{t('数量')}: {formatAmount(row.quantity).value} · {formatTimestamp(row.startAt).value} — {formatTimestamp(row.endAt).value}
+        {' · '}{t('服务地点')}: {safeDisplayText(row.locationId, 191)}{row.requiredByRule && <> · {t('业务规则要求')}</>}</li>)}</ul></>}
+    </>}
     {value.kind === "order" ? <dl>{Object.entries(amountLabels).map(([key, label]) => <div key={key}>
       <dt>{t(label)}</dt><dd>{formatAmount(value.review.deterministic.quoteAmounts[key as keyof typeof amountLabels]).value}
         {" "}{safeDisplayText(value.review.deterministic.currency, 16)}</dd>
@@ -110,7 +170,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
       || value.review.proposal.payload.actions[0].toolCode !== (value.kind === "order" ? "rental.order.commit" : "tenant.notifications.commit")
       || !formatTimestamp(value.review.proposal.payload.expiresAt).available) throw Error("AI_RESOURCE_UNAVAILABLE");
     if (value.kind === "order") {
-      if (typeof value.review.deterministic.currency !== "string" || value.review.deterministic.currency.length > 16
+      if (!hasOrderReviewMaterial(value) || typeof value.review.deterministic.currency !== "string" || value.review.deterministic.currency.length > 16
         || !formatTimestamp(value.review.deterministic.quoteExpiresAt).available
         || Object.keys(amountLabels).some(key => !formatAmount(value.review.deterministic.quoteAmounts[key as keyof typeof amountLabels]).available))
         throw Error("AI_RESOURCE_UNAVAILABLE");
@@ -138,11 +198,12 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     setReceipt(result);
   };
   const decide = (decision: "approve" | "reject") => run(async signal => {
-    if (!review || original || continuation) throw Error("AI_RESOURCE_UNAVAILABLE");
+    if (!review || !hasOrderReviewMaterial(review) || original || continuation) throw Error("AI_RESOURCE_UNAVAILABLE");
     const payload = review.review.proposal.payload;
     const query: AiTaskDecisionQueryDraft = { taskId, runId: review.runId, stepId: review.stepId, proposal: {
       contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: payload.proposalId, proposalRevision: payload.revision,
-      reviewedPayloadHash: review.review.proposal.payloadHash, decision
+      reviewedPayloadHash: review.review.proposal.payloadHash, decision,
+      ...(review.kind === 'order' ? { reviewVersion: AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION } : {})
     } };
     // Failure to retain the original reference stops before any network write.
     sessionStorage.setItem(storageKey, JSON.stringify(query)); setOriginal(query);
@@ -152,8 +213,8 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
   }, true);
   const expires = review ? Math.min(Date.parse(review.review.proposal.payload.expiresAt),
     review.kind === "order" ? Date.parse(review.review.deterministic.quoteExpiresAt) : Infinity) : NaN;
-  const canDecide = !!review && review.review.proposal.status === "pending_confirmation" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
-  const canContinue = !!review && review.review.proposal.status === "confirmed" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
+  const canDecide = !!review && hasOrderReviewMaterial(review) && review.review.proposal.status === "pending_confirmation" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
+  const canContinue = !!review && hasOrderReviewMaterial(review) && review.review.proposal.status === "confirmed" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
   const continueOriginal = () => run(async signal => {
     if (!review || !canContinue) throw Error("AI_RESOURCE_UNAVAILABLE");
     const p = review.review.proposal;

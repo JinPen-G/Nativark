@@ -43,6 +43,7 @@ const tenant = 'tenant_002';
     couponTemplates: core.listCouponTemplates(tenant),
     operators: core.listOperators(tenant)
   };
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenant, 'ws_tenant_002', ctx);
   const groups = ctx.groups.filter(item => item.status === 'enabled' && item.inventoryMode === RentalInventoryMode.Quantity);
   const location = ctx.locations.find(item => item.status === 'enabled');
   assert.ok(groups.length >= 2 && location, '需要至少两个可租商品和一个启用地点');
@@ -59,6 +60,7 @@ const tenant = 'tenant_002';
     lines: groups.slice(0, 2).map((group, index) => ({ itemGroupId: group.id, quantity: index === 0 ? 2 : 1 }))
   });
   business.getQuote = () => quote;
+  business.factStore.findQuote = async (tenantId, id) => tenantId === tenant && id === quote.id ? clone(quote) : undefined;
 
   const requests = quote.request.lines;
   const orderLines = requests.map((request, index) => ({

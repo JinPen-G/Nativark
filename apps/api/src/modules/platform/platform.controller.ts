@@ -483,12 +483,10 @@ export class PlatformController {
 
   @Put("security-baseline")
   saveSecurityBaseline(
-    @Body() body: SaveSecurityBaselineInputDto
+    @Body() body: SaveSecurityBaselineInputDto,
+    @Req() req: RequestWithUser
   ) {
-    return this.platformService.saveSecurityBaseline(
-      body.config,
-      body.operator ?? "平台管理员"
-    );
+    return this.platformService.saveSecurityBaseline(body.config, req.user);
   }
 
   @Post("security-baseline/second-confirmation/check")
@@ -590,7 +588,7 @@ export class PlatformController {
 
   @Post("roles")
   createRole(@Body() body: SaveSystemRoleDto, @Req() req: RequestWithUser) {
-    return this.platformService.saveRole(body, req.user);
+    return this.platformService.saveRole({ ...body, id: undefined }, req.user);
   }
 
   @Put("roles/:id")

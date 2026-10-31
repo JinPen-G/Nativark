@@ -130,7 +130,9 @@ void (async () => {
       /待支付占用尚未全部到期/u
     );
     // 到 08:15 之后可过期，回落到 cancelOrder。
-    await service.expirePendingOrder("tenant_1", order.id, {}, "system", "2026-09-10T08:16:00.000Z");
+    service.funding = { listEvents: async () => ({ rental: { collected: 0 }, deposit: { collected: 0 }, preauthorization: { frozen: 0 } }) };
+    const tx = { $queryRaw: async () => [] };
+    await service.expirePendingOrder("tenant_1", order.id, tx, "system", "2026-09-10T08:16:00.000Z");
     assert.ok(cancelledWith, "无预占草稿单到期后应走取消路径终结");
     ok("无库存预占草稿单按 createdAt + 待支付保留时长判到期，不再因缺软预占永远卡住");
   }

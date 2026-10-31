@@ -148,7 +148,7 @@ async function approvedOrderHarness() {
   // (same flake class task-authorized-runner.cjs documents).
   const tokenExpiresAt = Math.floor(Date.now() / 1000) + 600;
   const credentials = { current: async () => ({ requestId: 'composition-request', audience: 'operator',
-    authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: 'operator', exp: tokenExpiresAt })}` }) };
+    authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', wid: state.workspace, aud: 'operator', exp: tokenExpiresAt })}` }) };
   const policy = { resolve: async (request, operation) => {
     state.trace.push(`policy.${operation}`);
     if (!state.policy || (operation === 'execute' && !state.entitled)) throw Error('synthetic policy denied');
@@ -171,6 +171,20 @@ async function approvedOrderHarness() {
       assert.equal(storedQuote.payableAmount, 123); state.prepares++;
       return { id: `order-${state.prepares}`, tenantId: 'tenant-a', workspaceId: 'workspace-a', status: 'draft', payableAmount: 123, quoteId: quote.id, lines: body.lines };
     },
+    // Explicit fulfillment facts through the actual gate; not a constant grant
+    // or proof of MySQL row-lock timing. Preserve this harness's partial order.
+    bindOrderCreationFulfillment: async (_tenant, order, tx) => {
+      const source = { locations: ['location-a', 'location-b'].map(id => ({ id, tenantId: 'tenant-a', workspaceId: 'workspace-a',
+        code: id, name: id, type: 'store', status: 'enabled', operatorId: 'operator-location', capabilities: ['pickup', 'return', 'delivery'] })),
+        operators: [{ id: 'operator-location', tenantId: 'tenant-a', workspaceId: 'workspace-a', code: 'OP', name: 'Synthetic operator', type: 'self_operated', status: 'enabled' }] };
+      const gate = require('../../helpers/fulfillment-admission-fixture.cjs').fulfillmentAdmissionFixture('tenant-a', 'workspace-a', source);
+      // Each harness provides only its order's named locations, bounded to the original request.
+      source.locations = source.locations.filter(row => row.id === body.fulfillmentLocationId || row.id === (body.returnLocationId ?? body.fulfillmentLocationId));
+      const current = await gate.read('tenant-a', 'workspace-a', [{ locationId: body.fulfillmentLocationId,
+        capability: body.fulfillmentMode === 'delivery' ? 'delivery' : 'pickup' },
+        { locationId: body.returnLocationId ?? body.fulfillmentLocationId, capability: 'return' }], { ...tx, ...gate.tx });
+      assert.ok(tx.records); assert.equal(current.locations.length > 0, true);
+    },
     assertAvailabilityWithLocks: async (_tenant, _input, tx) => { assert.ok(tx.records); if (state.failAt === 'core.inventory') { state.failures.push(state.failAt); throw Error('synthetic inventory rejection'); } },
     getOrder: async (tenantId, id) => {
       assert.equal(getRequestIdentity().workspaceId, 'workspace-a');
@@ -183,11 +197,10 @@ async function approvedOrderHarness() {
     // Declared historical-quote read port for scene assemblies that reach
     // business tools through this harness. Reads the harness's own seeded
     // quote snapshot only — never a re-quote, price rebuild or mutation.
-    // Divergence from RentalBusinessService.getQuote: a missing id returns
-    // null instead of NotFoundException; no current consumer in this harness
-    // distinguishes the two, and AiOrderSavedQuoteSource treats null as
-    // INVALID_RESPONSE (fail-closed) rather than 'missing'.
-    getQuote: async (tenantId, _context, quoteId) =>
+    // Divergence from RentalBusinessService.loadQuote: a missing id returns
+    // null instead of NotFoundException; AiOrderSavedQuoteSource rejects it as
+    // INVALID_RESPONSE (fail-closed), never recreates historical prices.
+    loadQuote: async (tenantId, _context, quoteId) =>
       structuredClone(state.records.quote.find(row => row.id === quoteId && row.tenantId === tenantId)) ?? null,
     // Declared-existence stub: satisfies the scene assembly's composition
     // requireMethod check only. The returned body does NOT match the

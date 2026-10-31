@@ -11,6 +11,7 @@ import type {
 import { createHash } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
 import { roundMoney } from "./payment-money";
+import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
 
 const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
 const MAX_STATEMENT_ROWS = 10_000;
@@ -176,6 +177,7 @@ export class PaymentReconciliationFileService {
   constructor(private readonly prisma: PrismaService) {}
 
   async importStatement(tenantId: string, workspaceId: string, provider: string, file: UploadedPaymentStatement, operator?: string) {
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     const normalizedProvider = provider.trim().toLowerCase();
     const rows = parsePaymentStatementCsv(file.buffer, normalizedProvider);
     const fileSha256 = sha256(file.buffer);
@@ -239,6 +241,7 @@ export class PaymentReconciliationFileService {
     const differenceRows = lineData.filter((row) => (row.differenceCodes as string[]).length > 0).length;
     try {
       const batch = await this.prisma.$transaction(async (tx) => {
+        assertPaymentReconciliationAccess(tenantId, workspaceId);
         const created = await tx.paymentReconciliationBatch.create({
           data: {
             tenantId,
@@ -267,20 +270,24 @@ export class PaymentReconciliationFileService {
   }
 
   async listBatches(tenantId: string, workspaceId: string, limit = 50): Promise<PaymentStatementBatchSummary[]> {
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     const rows = await this.prisma.paymentReconciliationBatch.findMany({
       where: { tenantId, workspaceId },
       orderBy: { importedAt: "desc" },
       take: Math.max(1, Math.min(Math.floor(limit) || 50, 100))
     });
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     return rows.map((row) => this.toBatchSummary(row));
   }
 
   async getBatch(tenantId: string, workspaceId: string, batchId: string): Promise<PaymentStatementBatchDetail> {
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     const row = await this.prisma.paymentReconciliationBatch.findFirst({
       where: { id: batchId, tenantId, workspaceId },
       include: { lines: { orderBy: { rowNumber: "asc" } } }
     });
     if (!row) throw new NotFoundException("对账文件批次不存在或不属于当前经营空间");
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     return {
       ...this.toBatchSummary(row),
       lines: row.lines.map((line) => this.toLineSummary(line))
@@ -288,6 +295,7 @@ export class PaymentReconciliationFileService {
   }
 
   async reviewLine(tenantId: string, workspaceId: string, batchId: string, lineId: string, input: ReviewPaymentStatementLineRequest, operator?: string) {
+    assertPaymentReconciliationAccess(tenantId, workspaceId);
     const reason = input.reason?.trim();
     if (!reason || reason.length > 500) throw new BadRequestException("对账差异处理原因不能为空且不能超过 500 个字符");
     if (!(["acknowledge", "query_provider"] as string[]).includes(input.decision)) throw new BadRequestException("不支持的对账差异处理动作");
@@ -296,6 +304,7 @@ export class PaymentReconciliationFileService {
     if (line.reviewStatus === "acknowledged" && input.decision === "acknowledge") return this.getBatch(tenantId, workspaceId, batchId);
     const nextStatus: PaymentStatementReviewStatus = input.decision === "acknowledge" ? "acknowledged" : "query_pending";
     await this.prisma.$transaction(async (tx) => {
+      assertPaymentReconciliationAccess(tenantId, workspaceId);
       const updated = await tx.paymentReconciliationLine.updateMany({
         where: { id: lineId, batchId, reviewStatus: { in: ["open", "query_pending"] } },
         data: { reviewStatus: nextStatus, reviewReason: reason, reviewedBy: operator ?? null, reviewedAt: new Date() }

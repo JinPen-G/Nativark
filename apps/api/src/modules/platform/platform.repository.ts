@@ -531,6 +531,8 @@ export class PlatformRepository {
     const tenantId = this.workspaceTenantId(currentUser);
     if (!input.userId) throw new BadRequestException("账号不能为空");
     const saved = await this.prisma.$transaction(async (tx) => {
+      await this.assertAccountActionInTransaction(tx, tenantId, input.userId, currentUser?.id);
+      await this.assertFixedAllWorkspaceAccessesAllowed(tx, tenantId, [{ ...input, workspaceId, isActive: input.isActive ?? true }], currentUser?.id);
       const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId } });
       if (!workspace) throw new NotFoundException("经营空间不存在");
       if (workspace.status !== PrismaWorkspaceStatus.ACTIVE) {
@@ -558,7 +560,7 @@ export class PlatformRepository {
         create: { tenantId, workspaceId, userId: input.userId, ...data },
         update: data
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return this.toWorkspaceMember(saved);
   }
 
@@ -951,9 +953,22 @@ export class PlatformRepository {
     return roles.map((role) => this.toRoleRow(role));
   }
 
-  async saveRole(input: SaveSystemRoleRequest, tenantId: string): Promise<SystemRoleRow> {
+  async saveRole(input: SaveSystemRoleRequest, tenantId: string, actorUserId?: string): Promise<SystemRoleRow> {
+    return this.prisma.$transaction(async tx => {
+      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
+      if (input.id) await this.lockRole(tx, input.id, tenantId);
+      return this.saveRoleInTransaction(tx, input, tenantId);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private async lockRole(tx: Prisma.TransactionClient, id: string, tenantId: string) {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM \`Role\` WHERE id = ${id} AND tenantId = ${tenantId} FOR UPDATE`);
+    if (!rows.length) throw new NotFoundException("角色不存在");
+  }
+
+  private async saveRoleInTransaction(tx: Prisma.TransactionClient, input: SaveSystemRoleRequest, tenantId: string): Promise<SystemRoleRow> {
     const existing = input.id
-      ? await this.findRoleWithPermissions(input.id)
+      ? await this.findRoleWithPermissions(input.id, tx)
       : undefined;
     const code = input.code.trim().toUpperCase();
     const name = input.name.trim();
@@ -962,7 +977,7 @@ export class PlatformRepository {
       throw new BadRequestException("角色编码和角色名称不能为空");
     }
 
-    const duplicated = await this.prisma.role.findFirst({
+    const duplicated = await tx.role.findFirst({
       where: {
         id: { not: existing?.id },
         tenantId,
@@ -976,8 +991,10 @@ export class PlatformRepository {
     if (existing && existing.tenantId !== tenantId) {
       throw new NotFoundException("角色不存在");
     }
-    const fixedAllPermissions =
-      existing?.fixedAllPermissions ?? code === "TENANT_ADMIN";
+    if (existing?.fixedAllPermissions || code === "TENANT_ADMIN") {
+      throw new BadRequestException("固定全权角色由系统初始化维护，不能通过普通角色编辑修改");
+    }
+    const fixedAllPermissions = false;
     const requestedPermissions = this.normalizePermissionCodes(input.permissions ?? []);
     const requestedButtonPermissions = [
       ...new Set([
@@ -987,18 +1004,10 @@ export class PlatformRepository {
         )
       ])
     ];
-    const permissionCodes = fixedAllPermissions
-      ? (await this.prisma.permission.findMany()).map((item) => item.code)
-      : [
-          ...new Set([
-            ...requestedPermissions.filter(
-              (permission) => !this.isButtonPermission(permission)
-            ),
-            ...requestedButtonPermissions
-          ])
-        ];
+    const permissionCodes = [...new Set([...requestedPermissions, ...requestedButtonPermissions])];
+    await this.assertRegisteredPermissions(tx, permissionCodes, requestedButtonPermissions);
 
-    const role = await this.prisma.role.upsert({
+    const role = await tx.role.upsert({
       where: { id: existing?.id ?? input.id ?? `role_${randomUUID()}` },
       update: {
         code,
@@ -1032,58 +1041,48 @@ export class PlatformRepository {
       }
     });
 
-    await this.replaceRolePermissions(role.id, permissionCodes);
-    const saved = await this.findRoleWithPermissions(role.id);
+    await this.replaceRolePermissions(role.id, permissionCodes, tx);
+    const saved = await this.findRoleWithPermissions(role.id, tx);
     if (!saved) {
       throw new NotFoundException(`Role ${role.id} was not found`);
     }
     return this.toRoleRow(saved);
   }
 
-  async saveRolePermissions(id: string, permissions: string[], tenantId: string) {
-    const role = await this.findRoleWithPermissions(id);
-    if (!role || role.tenantId !== tenantId) {
-      throw new NotFoundException(`Role ${id} was not found`);
-    }
-    if (role.fixedAllPermissions) {
-      return this.toRoleRow(role);
-    }
-
-    const nextPermissions = this.normalizePermissionCodes(permissions);
-    await this.replaceRolePermissions(id, nextPermissions);
-    await this.prisma.role.update({
-      where: { id },
-      data: {
-        buttonPermissions: nextPermissions.filter((permission) =>
-          this.isButtonPermission(permission)
-        )
-      }
-    });
-    const saved = await this.findRoleWithPermissions(id);
-    if (!saved) {
-      throw new NotFoundException(`Role ${id} was not found`);
-    }
-    return this.toRoleRow(saved);
+  async saveRolePermissions(id: string, permissions: string[], tenantId: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
+      await this.lockRole(tx, id, tenantId);
+      const role = await this.findRoleWithPermissions(id, tx);
+      if (!role || role.tenantId !== tenantId) throw new NotFoundException("角色不存在");
+      if (role.fixedAllPermissions) return this.toRoleRow(role);
+      const nextPermissions = this.normalizePermissionCodes(permissions);
+      const buttons = nextPermissions.filter(permission => this.isButtonPermission(permission));
+      await this.assertRegisteredPermissions(tx, nextPermissions, buttons);
+      await this.replaceRolePermissions(id, nextPermissions, tx);
+      await tx.role.update({ where: { id }, data: { buttonPermissions: buttons } });
+      const saved = await this.findRoleWithPermissions(id, tx);
+      if (!saved) throw new NotFoundException("角色不存在");
+      return this.toRoleRow(saved);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async deleteRole(id: string, tenantId: string) {
-    const role = await this.prisma.role.findUnique({
-      where: { id },
-      include: { userAssignments: true, users: true, workspaceMembers: true }
-    });
-    if (!role || role.tenantId !== tenantId) {
-      throw new NotFoundException(`Role ${id} was not found`);
-    }
-    if (role.fixedAllPermissions) {
-      throw new BadRequestException("预设角色不能删除");
-    }
-    if (role.userAssignments.length > 0 || role.users.length > 0 || role.workspaceMembers.length > 0) {
-      throw new BadRequestException("该角色已分配给账号，不能删除");
-    }
-
-    await this.prisma.rolePermission.deleteMany({ where: { roleId: id } });
-    await this.prisma.role.delete({ where: { id } });
-    return { id, deleted: true };
+  async deleteRole(id: string, tenantId: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:role:manage");
+      await this.lockRole(tx, id, tenantId);
+      const role = await tx.role.findUnique({
+        where: { id }, include: { userAssignments: true, users: true, workspaceMembers: true }
+      });
+      if (!role || role.tenantId !== tenantId) throw new NotFoundException("角色不存在");
+      if (role.fixedAllPermissions) throw new BadRequestException("预设角色不能删除");
+      if (role.userAssignments.length || role.users.length || role.workspaceMembers.length) {
+        throw new BadRequestException("该角色已分配给账号，不能删除");
+      }
+      await tx.rolePermission.deleteMany({ where: { roleId: id } });
+      await tx.role.delete({ where: { id } });
+      return { id, deleted: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async listUsers(
@@ -1114,7 +1113,10 @@ export class PlatformRepository {
   /** 含停用账号；服务层需防止普通账号通过编辑停用管理员来撤销其固定权限。 */
   async isTenantAdminUser(id: string, tenantId: string): Promise<boolean> {
     const user = await this.prisma.user.findFirst({ where: { id, tenantId }, include: this.userInclude() });
-    return Boolean(user && !user.isSaasAdmin && this.toUserRow(user).isPlatformAdmin);
+    if (!user || user.isSaasAdmin) return false;
+    return this.toUserRow(user).isPlatformAdmin || Boolean(await this.prisma.workspaceMember.findFirst({ where: {
+      tenantId, userId: id, isActive: true, role: { is: { fixedAllPermissions: true, isActive: true } }
+    }, select: { userId: true } }));
   }
 
   async hasFixedAllPermissionRole(roleIds: readonly string[], tenantId: string): Promise<boolean> {
@@ -1212,7 +1214,11 @@ export class PlatformRepository {
       ? await tx.user.findFirst({ where: { id: actorUserId, tenantId, isActive: true }, include: this.userInclude() })
       : undefined;
     const actorIsTenantAdmin = Boolean(actor && !actor.isSaasAdmin && this.toUserRow(actor).isPlatformAdmin);
-    const targetIsTenantAdmin = Boolean(existingUser && !existingUser.isSaasAdmin && this.toUserRow(existingUser).isPlatformAdmin);
+    const targetWorkspaceAdmin = existingUser && await tx.workspaceMember.findFirst({ where: {
+      tenantId, userId: existingUser.id, isActive: true, role: { is: { fixedAllPermissions: true, isActive: true } }
+    }, select: { userId: true } });
+    const targetIsTenantAdmin = Boolean(existingUser && !existingUser.isSaasAdmin
+      && (this.toUserRow(existingUser).isPlatformAdmin || targetWorkspaceAdmin));
     const assignsFixedAllPermissions = validRoles.some((role) => role.fixedAllPermissions);
     if (!actorIsTenantAdmin && (input.isPlatformAdmin === true || targetIsTenantAdmin || assignsFixedAllPermissions)) {
       throw new ForbiddenException("只有当前租户管理员可以新增、修改或撤销租户管理员权限");
@@ -1341,19 +1347,48 @@ export class PlatformRepository {
     }
   }
 
-  async setUserStatus(id: string, isActive: boolean, tenantId: string) {
-    const current = await this.prisma.user.findFirst({ where: { id, tenantId } });
-    if (!current) throw new NotFoundException("账号不存在");
-    await this.prisma.user.update({ where: { id }, data: { isActive } });
-    if (!isActive) await this.revokeUserSessions(id);
-    return this.toUserRow(await this.findUserWithRoles(id));
+  private async assertTenantPermissionInTransaction(
+    tx: Prisma.TransactionClient, tenantId: string, actorUserId: string | undefined, permission: string
+  ) {
+    const actor = actorUserId
+      ? await tx.user.findFirst({ where: { id: actorUserId, tenantId, isActive: true }, include: this.userInclude() })
+      : null;
+    if (!actor || actor.isSaasAdmin) throw new ForbiddenException("缺少当前租户管理身份");
+    const user = this.toUserRow(actor);
+    // 这里管理租户共享授权，不能借当前空间角色或历史 JSON 中的通配符提权。
+    if (!user.isPlatformAdmin && (user.dataScope !== "all" || !user.permissions.includes(permission))) {
+      throw new ForbiddenException(`租户管理操作需要完整租户范围及权限：${permission}`);
+    }
+    return user;
   }
 
-  async resetUserPassword(id: string, tenantId: string) {
-    const existing = await this.prisma.user.findFirst({ where: { id, tenantId } });
-    if (!existing) throw new NotFoundException("账号不存在");
+  private async assertAccountActionInTransaction(
+    tx: Prisma.TransactionClient, tenantId: string, id: string, actorUserId?: string
+  ) {
+    const actor = await this.assertTenantPermissionInTransaction(tx, tenantId, actorUserId, "system:user:manage");
+    const target = await tx.user.findFirst({ where: { id, tenantId }, include: this.userInclude() });
+    if (!target || target.isSaasAdmin) throw new NotFoundException("账号不存在");
+    const privilegedWorkspace = await tx.workspaceMember.findFirst({ where: {
+      tenantId, userId: id, isActive: true, role: { is: { fixedAllPermissions: true, isActive: true } }
+    }, select: { userId: true } });
+    if (!actor.isPlatformAdmin && (this.toUserRow(target).isPlatformAdmin || privilegedWorkspace)) {
+      throw new ForbiddenException("只有当前租户管理员可以管理管理员账号及其空间授权");
+    }
+    return target;
+  }
+
+  async setUserStatus(id: string, isActive: boolean, tenantId: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      await this.assertAccountActionInTransaction(tx, tenantId, id, actorUserId);
+      const user = await tx.user.update({ where: { id }, data: { isActive }, include: this.userInclude() });
+      if (!isActive) await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      return this.toUserRow(user);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private async resetPasswordInTransaction(tx: Prisma.TransactionClient, id: string) {
     const temporaryPassword = generateTemporaryPassword();
-    const user = await this.prisma.user.update({
+    const user = await tx.user.update({
       where: { id },
       data: {
         passwordHash: hashPassword(temporaryPassword),
@@ -1362,7 +1397,7 @@ export class PlatformRepository {
         tokenVersion: { increment: 1 }
       }
     });
-    await this.revokeUserSessions(id);
+    await tx.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
     return {
       userId: user.id,
       account: user.account,
@@ -1371,14 +1406,24 @@ export class PlatformRepository {
     };
   }
 
-  async resetTenantAdminPassword(tenantId: string) {
-    const admin = await this.prisma.user.findFirst({
-      where: { tenantId, isPlatformAdmin: true },
-      orderBy: { createdAt: "asc" },
-      select: { id: true }
-    });
-    if (!admin) throw new NotFoundException("租户管理员账号不存在");
-    return this.resetUserPassword(admin.id, tenantId);
+  async resetUserPassword(id: string, tenantId: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      await this.assertAccountActionInTransaction(tx, tenantId, id, actorUserId);
+      return this.resetPasswordInTransaction(tx, id);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async resetTenantAdminPassword(tenantId: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      const actor = actorUserId && await tx.user.findFirst({ where: { id: actorUserId, isSaasAdmin: true, isActive: true } });
+      if (!actor) throw new ForbiddenException("仅 SaaS 平台管理员可以重置租户管理员密码");
+      const admin = await tx.user.findFirst({
+        where: { tenantId, isPlatformAdmin: true, isSaasAdmin: false },
+        orderBy: { createdAt: "asc" }, select: { id: true }
+      });
+      if (!admin) throw new NotFoundException("租户管理员账号不存在");
+      return this.resetPasswordInTransaction(tx, admin.id);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async getSystemRules(tenantId = requireRequestTenantId()) {
@@ -2133,8 +2178,8 @@ export class PlatformRepository {
     return `${yy}${mm}${dd}`;
   }
 
-  private async findRoleWithPermissions(id: string) {
-    return this.prisma.role.findUnique({
+  private async findRoleWithPermissions(id: string, tx?: Prisma.TransactionClient) {
+    return (tx ?? this.prisma).role.findUnique({
       where: { id },
       include: {
         permissions: {
@@ -2177,14 +2222,24 @@ export class PlatformRepository {
     } as const;
   }
 
-  private async replaceRolePermissions(roleId: string, permissionCodes: string[]) {
-    const permissions = await this.prisma.permission.findMany({
-      where: { code: { in: permissionCodes.filter((code) => code !== "*") } }
+  private async assertRegisteredPermissions(tx: Prisma.TransactionClient, codes: string[], buttons: string[]) {
+    if (codes.some(code => !code || code === "*")) throw new BadRequestException("普通角色不能配置通配权限");
+    const rows = await tx.permission.findMany({ where: { code: { in: codes } }, select: { code: true, kind: true } });
+    const registered = new Map(rows.map(row => [row.code, row]));
+    if (codes.some(code => !registered.has(code)) || buttons.some(code =>
+      registered.get(code)?.kind !== PermissionKind.BUTTON && !this.isButtonPermission(code))) {
+      throw new BadRequestException("角色只能配置已登记的对应类型权限");
+    }
+  }
+
+  private async replaceRolePermissions(roleId: string, permissionCodes: string[], tx: Prisma.TransactionClient) {
+    const permissions = await tx.permission.findMany({
+      where: { code: { in: permissionCodes } }
     });
 
-    await this.prisma.rolePermission.deleteMany({ where: { roleId } });
+    await tx.rolePermission.deleteMany({ where: { roleId } });
     if (permissions.length > 0) {
-      await this.prisma.rolePermission.createMany({
+      await tx.rolePermission.createMany({
         data: permissions.map((permission) => ({
           roleId,
           permissionId: permission.id

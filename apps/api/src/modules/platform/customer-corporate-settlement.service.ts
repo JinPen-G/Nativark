@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import type {
@@ -11,6 +11,9 @@ import type {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
+import { confirmedCorporateSettlement } from "../rental-core/rental-corporate-settlement-basis";
+import { getRequestIdentity } from "../../common/request-identity";
+import { PlatformRepository } from "./platform.repository";
 
 type CreditDb = Prisma.TransactionClient | PrismaService;
 
@@ -45,7 +48,8 @@ const CENT = new Prisma.Decimal("0.005");
 export class CustomerCorporateSettlementService {
   constructor(
     private readonly prisma: PrismaService,
-    @Optional() private readonly funding?: RentalFundingService
+    @Optional() private readonly funding?: RentalFundingService,
+    @Optional() private readonly principals?: PlatformRepository
   ) {}
 
   private readonly maturityAction = "corporate.credit.maturity";
@@ -92,23 +96,7 @@ export class CustomerCorporateSettlementService {
   }
 
   private confirmedSettlement(order: CreditOrder): RentalMembershipSnapshot["settlement"] {
-    const membership = order.membershipSnapshot as Record<string, unknown> | null;
-    const value = membership?.settlement;
-    if (value === undefined) return undefined;
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new ConflictException("订单结算依据无效，须核对原确认记录");
-    const settlement = value as NonNullable<RentalMembershipSnapshot["settlement"]>;
-    const customerId = this.corporatePayer(order);
-    if (!customerId || settlement.payerCustomerId !== customerId || settlement.currency !== order.currency
-      || (order.payerSubjectCustomerId && order.payerSubjectCustomerId !== customerId)
-      || (order.contractSubjectCustomerId && order.contractSubjectCustomerId !== customerId)
-      || !["per_order", "credit"].includes(settlement.mode)
-      || !["per_order", "monthly", "semi_monthly"].includes(settlement.billingCycle)
-      || (settlement.mode === "per_order") !== (settlement.billingCycle === "per_order")
-      || !Number.isFinite(Date.parse(settlement.confirmedAt))
-      || (settlement.mode === "credit" && (!settlement.creditId || !Number.isInteger(settlement.creditRevision) || settlement.creditRevision! < 1))) {
-      throw new ConflictException("订单结算方式、付款主体或币种与原确认依据不匹配");
-    }
-    return settlement;
+    return confirmedCorporateSettlement(order);
   }
 
   /** 由持有订单行锁的确认事务调用；不能在领取或结算时用当前主档补造旧单。 */
@@ -151,8 +139,7 @@ export class CustomerCorporateSettlementService {
 
   private async cashPaid(order: CreditOrder, tx?: Prisma.TransactionClient) {
     if (!this.funding) throw new ConflictException("无法核对订单原实收，不能判断企业付款责任");
-    const balance = await this.funding.listEvents(order.tenantId, order.workspaceId, order.id, tx, { realOnly: true });
-    return this.decimal(balance.rental.collected - balance.rental.refunded + balance.rental.securityCaptured);
+    return this.decimal(await this.funding.netCashPaid(order.tenantId, order.workspaceId, order.id, tx));
   }
 
   private async usesOrderCredit(order: CreditOrder, tx?: Prisma.TransactionClient): Promise<boolean> {
@@ -454,6 +441,70 @@ export class CustomerCorporateSettlementService {
     return this.account(tenantId, customerId, tx);
   }
 
+  /** Original Core reduction receipt, never a caller-proposed delta. Release
+   * only redundant reservation; existing debt, repayments and cash stay intact.
+   * Called after saving the reduced order in its original transaction/row lock. */
+  async releaseReducedOrderCredit(tenantId: string, workspaceId: string, orderId: string,
+    source: { kind: 'change' | 'fee_review' | 'extension_refund'; id: string }, tx: Prisma.TransactionClient, operator?: string) {
+    // Enforce the established order→credit lock order even for an internal
+    // caller outside Core; a shared customer lock alone cannot protect this order.
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_orders WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND id = ${orderId} FOR UPDATE`);
+    const order = await this.order(tenantId, orderId, tx), customerId = this.corporatePayer(order);
+    if (order.workspaceId !== workspaceId) throw new ConflictException("订单减额与经营空间不一致");
+    if (!customerId || !await this.usesOrderCredit(order, tx)) return undefined;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(source.id)) throw new BadRequestException("授信释放缺少原核减身份");
+    this.assertCreditCurrency(order.currency);
+    let decrease: Prisma.Decimal;
+    if (source.kind === 'change') {
+      const change = await tx.rentalOrderChange.findFirst({ where: { tenantId, workspaceId, orderId, id: source.id } });
+      if (!change || change.id !== source.id || change.tenantId !== tenantId || change.workspaceId !== workspaceId || change.orderId !== orderId
+        || change.status !== 'applied' || !['partial_line_cancel', 'service_cancel'].includes(change.type)
+        || !change.refundAmount.gt(ZERO) || !change.additionalAmount.eq(ZERO)) throw new ConflictException("原订单变更尚未形成确定核减");
+      decrease = this.decimal(change.refundAmount);
+    } else if (source.kind === 'extension_refund') {
+      const extension = await tx.rentalOrderExtension.findFirst({ where: { tenantId, workspaceId, orderId, id: source.id } });
+      const snapshot = extension?.pricingSnapshot as { refundReview?: { status?: string; amount?: number } } | null;
+      const review = snapshot?.refundReview;
+      if (!extension || extension.id !== source.id || extension.tenantId !== tenantId || extension.workspaceId !== workspaceId || extension.orderId !== orderId
+        || extension.status !== 'effective' || review?.status !== 'approved'
+        || typeof review.amount !== 'number' || !Number.isFinite(review.amount) || review.amount < 0) throw new ConflictException("原续租核减尚未批准");
+      decrease = this.decimal(review.amount);
+    } else if (source.kind === 'fee_review') {
+      const row = await tx.rentalOrder.findFirst({ where: { tenantId, workspaceId, id: orderId }, select: { feeReviews: true } });
+      const review = Array.isArray(row?.feeReviews) ? row.feeReviews.find(value => value && typeof value === 'object'
+        && !Array.isArray(value) && value.id === source.id) as { status?: string; type?: string; decidedAmount?: number } | undefined : undefined;
+      if (!review || review.status !== 'approved' || !['early_return_refund', 'service_refund', 'carrier_rental_refund'].includes(review.type ?? '')
+        || typeof review.decidedAmount !== 'number' || !Number.isFinite(review.decidedAmount) || review.decidedAmount < 0) throw new ConflictException("原费用核减尚未批准");
+      decrease = this.decimal(review.decidedAmount);
+    } else throw new BadRequestException("授信释放来源无效");
+    if (decrease.eq(ZERO)) return undefined;
+    const reason = `原${source.kind}:${source.id}确定核减，释放不再需要的授信占用`;
+    const key = `order.credit.reduction:${source.kind}:${source.id}`;
+    await this.lockCredit(tx, tenantId, customerId);
+    const existing = await tx.customerCorporateCreditLedger.findUnique({ where: {
+      tenantId_customerId_idempotencyKey: { tenantId, customerId, idempotencyKey: key } } });
+    if (existing) {
+      if (existing.orderId !== orderId || existing.workspaceId !== workspaceId || existing.currency !== order.currency
+        || existing.entryType !== 'release' || existing.reason !== reason || !existing.receivableDelta.eq(ZERO)
+        || existing.amount.lt(ZERO) || existing.amount.gt(decrease) || !existing.reservedDelta.eq(existing.amount.neg())) throw new ConflictException("原授信释放收据不一致");
+      return this.account(tenantId, customerId, tx);
+    }
+    const rows = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId, workspaceId, orderId } });
+    if (rows.some(row => row.currency !== order.currency)) throw new ConflictException("原订单授信币种不一致");
+    const reserved = this.decimal(rows.reduce((sum, row) => sum.plus(row.reservedDelta), ZERO));
+    const receivable = this.decimal(rows.reduce((sum, row) => sum.plus(row.receivableDelta), ZERO));
+    const payments = this.decimal(rows.filter(row => ['payment', 'payment_allocation'].includes(row.entryType))
+      .reduce((sum, row) => sum.minus(row.receivableDelta), ZERO));
+    if (reserved.lt(ZERO) || receivable.lt(ZERO) || payments.lt(ZERO)) throw new ConflictException("原订单授信账目无效");
+    const required = Prisma.Decimal.max(ZERO, order.finalPayableAmount.minus(await this.cashPaid(order, tx)).minus(payments).minus(receivable));
+    const amount = Prisma.Decimal.min(decrease, Prisma.Decimal.max(ZERO, reserved.minus(required))).toDecimalPlaces(2);
+    // Zero is a durable original observation too: a later cash payment must not
+    // turn the same reduction receipt into another release.
+    await this.append(tx, { tenantId, customerId, workspaceId, orderId, currency: order.currency,
+      entryType: 'release', amount, reservedDelta: amount.neg(), receivableDelta: ZERO, idempotencyKey: key, reason, operator });
+    return this.account(tenantId, customerId, tx);
+  }
+
   async assertReadyForPickup(tenantId: string, orderId: string, tx: Prisma.TransactionClient) {
     const order = await this.order(tenantId, orderId, tx);
     const customerId = this.corporatePayer(order);
@@ -642,8 +693,13 @@ export class CustomerCorporateSettlementService {
       || !input.idempotencyKey?.trim() || input.idempotencyKey.length > 191 || !input.reason?.trim() || input.reason.length > 500) {
       throw new BadRequestException("债权到期登记须提供原流水、带时区的到期日、合同/账单引用、原因与原操作键");
     }
+    if (actorId !== getRequestIdentity()?.userId || workspaceId !== getRequestIdentity()?.workspaceId) {
+      throw new ForbiddenException("核定债权须当前企业与空间的原财务主体");
+    }
+    await this.assertFinancialAccess(tenantId, customerId, "write");
     return this.prisma.$transaction(async tx => {
       await this.lockCredit(tx, tenantId, customerId);
+      await this.assertFinancialAccess(tenantId, customerId, "write", tx);
       const ledger = await tx.customerCorporateCreditLedger.findFirst({ where: { id: input.ledgerId, tenantId, customerId, workspaceId } });
       if (!ledger || !ledger.orderId || !["settle", "adjust"].includes(ledger.entryType) || !ledger.receivableDelta.gt(ZERO)) {
         throw new ConflictException("只能登记当前企业与空间的原正金额债权到期日");
@@ -667,15 +723,47 @@ export class CustomerCorporateSettlementService {
         idempotencyKey: input.idempotencyKey.trim(), recordedBy: actorId, recordedAt: new Date().toISOString() };
       await tx.operationLog.create({ data: { id, tenantId, workspaceId, rentalOrderId: ledger.orderId, userId: actorId,
         action: this.maturityAction, detail: { ...receipt, customerId, amount: ledger.receivableDelta.toFixed(2) } } });
+      await this.assertFinancialAccess(tenantId, customerId, "write", tx);
       return receipt;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async readMaturity(tenantId: string, customerId: string, ledgerId: string, workspaceId: string) {
+    if (workspaceId !== getRequestIdentity()?.workspaceId) throw new ForbiddenException("读取债权须当前企业与空间的财务权限");
+    await this.assertFinancialAccess(tenantId, customerId, "read");
     const ledger = await this.prisma.customerCorporateCreditLedger.findFirst({ where: { id: ledgerId, tenantId, customerId, workspaceId } });
     if (!ledger) throw new NotFoundException("原债权不存在或不属于当前企业与空间");
     const log = await this.prisma.operationLog.findUnique({ where: { id: this.maturityId(tenantId, customerId, ledgerId) } });
+    await this.assertFinancialAccess(tenantId, customerId, "read");
     return log ? this.maturityReceipt(log, ledger) : null;
+  }
+
+  /** Original reductions extinguish oldest debt of the same order first. A
+   * reservation has no debt timestamp; return only still-unpaid positive entries. */
+  private outstandingDebts<T extends { id: string; orderId: string | null; workspaceId: string | null;
+    currency: string; receivableDelta: Prisma.Decimal; occurredAt: Date }>(rows: T[]) {
+    const ordered = [...rows].sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime()
+      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    const buckets = new Map<string | null, { entries: Array<{ row: T; remaining: Prisma.Decimal }>; paid: Prisma.Decimal }>();
+    for (const row of ordered) {
+      this.assertCreditCurrency(row.currency);
+      if (!Number.isFinite(row.occurredAt.getTime())) throw new ConflictException("原债权形成时间缺失，须财务核对");
+      const bucket = buckets.get(row.orderId) ?? { entries: [], paid: ZERO };
+      if (row.receivableDelta.gt(ZERO)) bucket.entries.push({ row, remaining: row.receivableDelta });
+      else if (row.receivableDelta.lt(ZERO)) bucket.paid = bucket.paid.minus(row.receivableDelta);
+      buckets.set(row.orderId, bucket);
+    }
+    const debts: Array<{ row: T; remaining: Prisma.Decimal }> = [];
+    for (const bucket of buckets.values()) {
+      for (const debt of bucket.entries) {
+        const applied = Prisma.Decimal.min(debt.remaining, bucket.paid);
+        debt.remaining = debt.remaining.minus(applied); bucket.paid = bucket.paid.minus(applied);
+        if (debt.remaining.gt(CENT)) debts.push(debt);
+      }
+      if (bucket.paid.gt(CENT)) throw new ConflictException("企业原核销与债权不匹配，须财务核对");
+    }
+    return debts.sort((left, right) => left.row.occurredAt.getTime() - right.row.occurredAt.getTime()
+      || (left.row.id < right.row.id ? -1 : left.row.id > right.row.id ? 1 : 0));
   }
 
   /** New credit only. Debt settlement/payment never uses this gate. */
@@ -683,26 +771,9 @@ export class CustomerCorporateSettlementService {
     const rows = await db.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }], take: 501 });
     if (rows.length > 500) throw new ConflictException("企业债权核对超过本次安全窗口，须财务核对后再新增挂账");
-    const debts = new Map<string | null, { entries: Array<{ row: typeof rows[number]; remaining: Prisma.Decimal }>; paid: Prisma.Decimal }>();
-    for (const row of rows) {
-      this.assertCreditCurrency(row.currency);
-      const bucket = debts.get(row.orderId) ?? { entries: [], paid: ZERO };
-      if (row.receivableDelta.gt(ZERO)) bucket.entries.push({ row, remaining: row.receivableDelta });
-      else if (row.receivableDelta.lt(ZERO)) bucket.paid = bucket.paid.minus(row.receivableDelta);
-      debts.set(row.orderId, bucket);
-    }
-    // Original per-order allocations extinguish oldest debt first. Aggregate
-    // reductions before applying them so equal timestamps cannot invert a payment and debt.
-    for (const bucket of debts.values()) {
-      for (const debt of bucket.entries) {
-        const applied = Prisma.Decimal.min(debt.remaining, bucket.paid);
-        debt.remaining = debt.remaining.minus(applied); bucket.paid = bucket.paid.minus(applied);
-      }
-      if (bucket.paid.gt(CENT)) throw new ConflictException("企业原核销与债权不匹配，须财务核对");
-    }
+    const debts = this.outstandingDebts(rows);
     const now = Date.now();
-    for (const bucket of debts.values()) for (const debt of bucket.entries) {
-      if (debt.remaining.lte(CENT)) continue;
+    for (const debt of debts) {
       const log = await db.operationLog.findUnique({ where: { id: this.maturityId(tenantId, customerId, debt.row.id) } });
       if (!log) throw new ConflictException("企业尚有未核定到期日的债权，不能新增挂账");
       const receipt = this.maturityReceipt(log, debt.row);
@@ -710,11 +781,73 @@ export class CustomerCorporateSettlementService {
     }
   }
 
+  /** Shared credit configuration grants no operational ledger access. Refuse
+   * the complete view/payment when any original workspace lacks full authority. */
+  async assertFinancialAccess(tenantId: string, customerId: string, mode: "read" | "write", tx?: Prisma.TransactionClient) {
+    const identity = getRequestIdentity();
+    if (!this.principals || !identity?.userId || identity.tenantId !== tenantId || !identity.workspaceId
+      || identity.isSaasAdmin || !["operator", "staff"].includes(identity.audience ?? "")
+      || identity.dataScope !== "all" || identity.locationScope?.mode !== "all") {
+      throw new ForbiddenException("企业账务需要当前有效经营空间及财务授权");
+    }
+    const actor = identity.userId, workspaceId = identity.workspaceId;
+    const base = await this.principals.findUserById(actor);
+    const has = (user: NonNullable<typeof base>, code: string) => !user.isSaasAdmin
+      && (user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes(code));
+    if (!base?.isActive || base.tenantId !== tenantId || !(mode === "write" ? has(base, "rental-os:corporate:manage")
+      : has(base, "rental-os:corporate:view") || has(base, "rental-os:corporate:manage"))) {
+      throw new ForbiddenException("企业账务需要当前租户企业权限");
+    }
+    const rows = await this.db(tx).customerCorporateCreditLedger.findMany({ where: { tenantId, customerId } });
+    const workspaces = new Set([workspaceId]);
+    const allocationsByKey = new Map(rows.filter(row => row.entryType === "payment_allocation" && row.orderId && row.workspaceId)
+      .map(row => [row.idempotencyKey, row]));
+    const orderIds = [...new Set(rows.map(row => row.orderId).filter((id): id is string => Boolean(id)))];
+    for (const row of rows) {
+      if (row.workspaceId) { workspaces.add(row.workspaceId); continue; }
+      // The original aggregate payment is linked by the existing deterministic
+      // allocation keys; without that evidence it is an unscoped legacy fact.
+      const linked = row.entryType === "payment" && !row.orderId ? orderIds.map(orderId => allocationsByKey.get(
+        `payment.allocation:${createHash("sha256").update(`${row.idempotencyKey}:${orderId}`).digest("hex")}`))
+        .filter((allocation): allocation is typeof rows[number] => Boolean(allocation)) : [];
+      const exactPayment = linked.length > 0 && linked.every(allocation => allocation.currency === row.currency)
+        && linked.reduce((sum, allocation) => sum.plus(allocation.amount), ZERO).eq(row.amount);
+      if (!exactPayment) {
+        throw new ForbiddenException("历史企业总账缺少可授权空间，须财务核对原绑定");
+      }
+    }
+    for (const originalWorkspace of workspaces) {
+      const workspace = await this.db(tx).businessWorkspace.findFirst({ where: { id: originalWorkspace, tenantId, status: "ACTIVE" }, select: { id: true } });
+      if (!workspace) throw new ForbiddenException("原账经营空间已失效或不属于当前租户");
+      const user = await this.principals.findWorkspaceScopedUser(actor, originalWorkspace, base);
+      if (!user?.isActive || user.tenantId !== tenantId || user.dataScope !== "all" || user.locationScope?.mode !== "all"
+        || originalWorkspace === workspaceId && !(mode === "write" ? has(user, "rental-os:corporate:manage")
+          : has(user, "rental-os:corporate:view") || has(user, "rental-os:corporate:manage"))
+        || !(mode === "write" ? has(user, "rental-os:finance:manage")
+          : has(user, "rental-os:finance:view") || has(user, "rental-os:finance:reconcile"))) {
+        throw new ForbiddenException("企业原账包含无完整财务权限的经营空间，拒绝跨范围读取或核销");
+      }
+    }
+    if (getRequestIdentity()?.userId !== actor || getRequestIdentity()?.tenantId !== tenantId
+      || getRequestIdentity()?.workspaceId !== workspaceId || getRequestIdentity()?.isSaasAdmin) {
+      throw new ForbiddenException("企业账务核对期间会话已变化");
+    }
+  }
+
+  async financialAccount(tenantId: string, customerId: string) {
+    await this.assertFinancialAccess(tenantId, customerId, "read");
+    const account = await this.account(tenantId, customerId);
+    await this.assertFinancialAccess(tenantId, customerId, "read");
+    return account;
+  }
+
   async listLedger(tenantId: string, customerId: string) {
+    await this.assertFinancialAccess(tenantId, customerId, "read");
     const rows = await this.prisma.customerCorporateCreditLedger.findMany({
       where: { tenantId, customerId },
       orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }]
     });
+    await this.assertFinancialAccess(tenantId, customerId, "read");
     return rows.map((row) => this.toLedger(row));
   }
 
@@ -724,10 +857,47 @@ export class CustomerCorporateSettlementService {
     input: RecordCustomerCorporateCreditPaymentRequest,
     operator?: string
   ) {
+    input = structuredClone(input);
     if (!Number.isFinite(input.amount) || input.amount <= 0) throw new BadRequestException("回款金额必须大于 0");
     if (input.currency && input.currency !== "CNY") throw new BadRequestException("企业授信首期只支持 CNY 回款");
+    if (!input.idempotencyKey?.trim() || input.idempotencyKey.length > 191) throw new BadRequestException("授信回款须携带原操作键");
+    input.idempotencyKey = input.idempotencyKey.trim();
+    await this.assertFinancialAccess(tenantId, customerId, "write");
     const result = await this.prisma.$transaction(async (tx) => {
+      const originalPayment = await tx.customerCorporateCreditLedger.findUnique({ where: {
+        tenantId_customerId_idempotencyKey: { tenantId, customerId, idempotencyKey: input.idempotencyKey } } });
+      if (originalPayment) {
+        if (originalPayment.entryType !== "payment" || !this.decimal(originalPayment.amount).eq(this.decimal(input.amount))
+          || originalPayment.reason !== input.reason.trim() || originalPayment.currency !== (input.currency ?? "CNY")) {
+          throw new ConflictException("相同授信回款幂等键已用于不同的业务事实");
+        }
+        // Observing the original receipt creates no allocation. Later new debt
+        // must not make this old operation wait on, or relock, unrelated orders.
+        await this.lockCredit(tx, tenantId, customerId);
+        await this.assertFinancialAccess(tenantId, customerId, "write", tx);
+        return this.account(tenantId, customerId, tx);
+      }
+      // Cash writers own order→credit. Lock the original debt orders first in
+      // stable order; never hold credit while waiting for a cash/order writer.
+      const before = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId }, select: { orderId: true, workspaceId: true } });
+      const orderScopes = new Map<string, string>();
+      for (const row of before) if (row.orderId) {
+        if (!row.workspaceId || orderScopes.has(row.orderId) && orderScopes.get(row.orderId) !== row.workspaceId) {
+          throw new ConflictException("原企业债权订单空间不一致，须财务核对");
+        }
+        orderScopes.set(row.orderId, row.workspaceId);
+      }
+      for (const id of [...orderScopes.keys()].sort()) {
+        const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM rental_orders
+          WHERE tenantId = ${tenantId} AND workspaceId = ${orderScopes.get(id)!} AND id = ${id} FOR UPDATE`);
+        if (!locked[0]) throw new ConflictException("原企业债权订单不存在，不能核销");
+      }
       const credit = await this.lockCredit(tx, tenantId, customerId);
+      const currentOrders = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId }, select: { orderId: true, workspaceId: true } });
+      if (currentOrders.some(row => row.orderId && orderScopes.get(row.orderId) !== row.workspaceId)) {
+        throw new ConflictException("核销期间有新的企业债权，请重新核对原账");
+      }
+      await this.assertFinancialAccess(tenantId, customerId, "write", tx);
       const existing = await tx.customerCorporateCreditLedger.findUnique({
         where: {
           tenantId_customerId_idempotencyKey: {
@@ -742,22 +912,29 @@ export class CustomerCorporateSettlementService {
           || existing.reason !== input.reason.trim() || existing.currency !== (input.currency ?? "CNY")) {
           throw new ConflictException("相同授信回款幂等键已用于不同的业务事实");
         }
-        return this.account(tenantId, customerId, tx);
+        const account = await this.account(tenantId, customerId, tx);
+        await this.assertFinancialAccess(tenantId, customerId, "write", tx);
+        return account;
       }
       const current = await this.state(tx, tenantId, customerId);
       const amount = this.decimal(input.amount);
       if (current.receivableAmount.lt(amount.minus(CENT))) throw new ConflictException("回款不能超过企业当前应收");
       // 一条总回款事实 + 多条逐单核销事实；总回款本身不再扣余额，防止重复记账。
-      // 对已形成应收的订单按首次入账顺序核销，旧的无订单应收明确留为 legacy，
-      // 不凭空归给当前经营空间或某一订单。
-      const rows = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId }, orderBy: { occurredAt: "asc" } });
-      const debts = new Map<string, { workspaceId: string | undefined; amount: Prisma.Decimal }>();
-      for (const row of rows) {
-        if (!row.orderId) continue;
-        const debt = debts.get(row.orderId) ?? { workspaceId: row.workspaceId ?? undefined, amount: ZERO };
-        debt.amount = debt.amount.plus(row.receivableDelta);
-        debts.set(row.orderId, debt);
+      // 按尚未清偿正债权的形成时点核销，不用预约占用或已经结清的旧债权排序。
+      // 无订单历史应收仍独立标识，不凭空归给当前空间或某一订单。
+      const rows = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId },
+        orderBy: [{ occurredAt: "asc" }, { id: "asc" }] });
+      const debts = this.outstandingDebts(rows), allocations = new Map<string | null, { workspaceId: string | undefined; amount: Prisma.Decimal }>();
+      let remaining = amount;
+      for (const debt of debts) {
+        if (remaining.lte(CENT)) break;
+        const applied = Prisma.Decimal.min(remaining, debt.remaining).toDecimalPlaces(2);
+        const allocation = allocations.get(debt.row.orderId) ?? { workspaceId: debt.row.workspaceId ?? undefined, amount: ZERO };
+        if (allocation.workspaceId !== (debt.row.workspaceId ?? undefined)) throw new ConflictException("同一原订单债权的经营空间不一致，须财务核对");
+        allocation.amount = allocation.amount.plus(applied); allocations.set(debt.row.orderId, allocation);
+        remaining = remaining.minus(applied);
       }
+      if (remaining.gt(CENT)) throw new ConflictException("企业总应收与原债权明细不匹配，须财务核对");
       await this.append(tx, {
         tenantId,
         customerId,
@@ -770,31 +947,22 @@ export class CustomerCorporateSettlementService {
         reason: input.reason,
         operator
       });
-      let remaining = amount;
-      for (const [orderId, debt] of debts) {
-        if (remaining.lte(CENT)) break;
-        const applied = Prisma.Decimal.min(remaining, Prisma.Decimal.max(ZERO, debt.amount)).toDecimalPlaces(2);
-        if (applied.lte(CENT)) continue;
+      for (const [orderId, allocation] of allocations) {
+        if (allocation.amount.lte(CENT)) continue;
         await this.append(tx, {
-          tenantId, customerId, orderId, workspaceId: debt.workspaceId,
-          entryType: "payment_allocation", amount: applied, reservedDelta: ZERO, receivableDelta: applied.neg(),
+          tenantId, customerId, orderId: orderId ?? undefined, workspaceId: allocation.workspaceId,
+          entryType: "payment_allocation", amount: allocation.amount, reservedDelta: ZERO, receivableDelta: allocation.amount.neg(),
           currency: input.currency ?? "CNY",
-          idempotencyKey: `payment.allocation:${createHash("sha256").update(`${input.idempotencyKey}:${orderId}`).digest("hex")}`,
-          reason: `${input.reason.trim()}（逐单核销）`, operator
-        });
-        remaining = remaining.minus(applied);
-      }
-      if (remaining.gt(CENT)) {
-        await this.append(tx, {
-          tenantId, customerId, entryType: "payment_allocation", amount: remaining,
-          reservedDelta: ZERO, receivableDelta: remaining.neg(), currency: input.currency ?? "CNY",
-          idempotencyKey: `payment.legacy:${createHash("sha256").update(input.idempotencyKey).digest("hex")}`,
-          reason: `${input.reason.trim()}（核销未关联订单的历史应收）`, operator
+          idempotencyKey: orderId
+            ? `payment.allocation:${createHash("sha256").update(`${input.idempotencyKey}:${orderId}`).digest("hex")}`
+            : `payment.legacy:${createHash("sha256").update(input.idempotencyKey).digest("hex")}`,
+          reason: `${input.reason.trim()}（${orderId ? "逐单核销" : "核销未关联订单的历史应收"}）`, operator
         });
       }
       void credit;
+      await this.assertFinancialAccess(tenantId, customerId, "write", tx);
       return this.account(tenantId, customerId, tx);
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return result;
   }
 }

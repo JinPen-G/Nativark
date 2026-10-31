@@ -25,7 +25,7 @@ test('real human rejection -> new formal input/plan -> atomic prepare -> new hum
   assert.equal(h.state.records.rentalOrder.length, 0);
   const recorded = await api.readReprepareReceipt(request, 'task-a', h.command);
   assert.deepEqual(recorded, result);
-  const approved = await api.decide(request, 'task-b', { ...result.value.proposal, decision: 'approve' });
+  const approved = await api.decide(request, 'task-b', { ...result.value.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' });
   assert.equal(approved.ok, true);
   assert.equal(h.state.records.rentalOrder.length, 0);
   h.prepareCore();

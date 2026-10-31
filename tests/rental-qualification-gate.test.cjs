@@ -225,6 +225,12 @@ void (async () => {
     console.log("  ✓ 会员方案授予强制记录原因与有效期，停用不影响历史快照，恢复生成新草稿");
     console.log("  ✓ 会员方案授予记录可回看，撤销必须记录原因且保留审计状态");
 
+    await prisma.fileAsset.create({ data: {
+      id: "evidence-first", tenantId, businessModule: "membership", businessType: "customer", businessId: personalId,
+      fileName: "admin-license.jpg", mimeType: "image/jpeg", sizeBytes: 2048, storageProvider: "local_mock",
+      storageKey: `tenant-files/${tenantId}/evidence-first/admin-license.jpg`, uploadScene: "client-qualification", status: "active",
+      metadata: { qualificationType: "driver_license" }
+    } });
     const firstQualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
       qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z", evidenceRef: "evidence-first"
     }, "admin", "资格测试管理员");

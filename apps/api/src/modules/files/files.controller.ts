@@ -43,9 +43,8 @@ export class FilesController {
 
   @Get()
   async files(@Query() query: FileAssetQuery) {
-    const assets = await this.integrationsService.listFiles(query);
-    // 实名凭证只能经客户资料权限、数据范围和专用短时链接读取；不进入通用文件台账。
-    return assets.filter((asset) => !(asset.businessType === "customer" && asset.uploadScene === "identity-verification"));
+    // 通用列表和集成仪表盘共用服务端原业务 ACL，不在控制器维护另一套场景过滤。
+    return this.integrationsService.listFiles(query);
   }
 
   @Post()

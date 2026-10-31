@@ -2,14 +2,16 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'ES2022', lib: ['ES2022'], esModuleInterop: true, experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { controlledApprovedOrderHarness } = require('./fixtures/ai-native/approved-order-controlled.cjs');
-const { AI_APPROVAL_APPLICATION_DRAFT_VERSION: draftVersion } = require('../packages/shared/src/ai-approval-application-draft.ts');
+const { AI_APPROVAL_APPLICATION_DRAFT_VERSION: draftVersion, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION: reviewVersion } = require('../packages/shared/src/ai-approval-application-draft.ts');
 const { approvalApplicationContract, approvalApplicationError } = require('../apps/api/src/modules/ai-native/approval-execution/approval-application-contracts.ts');
 const eligibility = (h, intent = 'inspect') => h.root.application.readReprepareEligibility('task-a', { draftVersion, original: h.review, intent });
 
 test('public contract consumes real review/decision/receipt and preserves the committed action', async () => {
   const h = await controlledApprovedOrderHarness(), api = h.root.application;
   const review = await api.readProposal('task-a', h.review);
-  assert.equal(review.draftVersion, draftVersion);
+  assert.equal(review.draftVersion, reviewVersion);
+  assert.equal(review.deterministic.order.customer.id, h.body.customerId);
+  assert.equal(review.deterministic.order.lines[0].quantity, h.body.lines[0].quantity);
   assert.equal(review.deterministic.quoteAmounts.payableAmount, 123);
   assert.equal(Object.hasOwn(review, 'facts'), false);
   assert.equal(review.generatedText, null);
@@ -17,7 +19,7 @@ test('public contract consumes real review/decision/receipt and preserves the co
   const changed = await eligibility(h, 'change_plan');
   assert.equal(changed.state, 'change_requested');
   assert.equal(changed.canRequestReprepare, true);
-  const command = { ...h.review, decision: 'approve' };
+  const command = { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' };
   const decision = await api.decide('task-a', command);
   assert.equal(decision.kind, 'recorded');
   assert.deepEqual(await h.compose().application.readReceipt('task-a', command), decision);
@@ -54,7 +56,7 @@ test('superseded and explicitly expired heads are readable but cannot obtain a n
     const h = await controlledApprovedOrderHarness();
     h.state.records.aiProposal[0].status = status;
     assert.equal((await eligibility(h)).state, state);
-    await assert.rejects(h.root.application.decide('task-a', { ...h.review, decision: 'approve' }));
+    await assert.rejects(h.root.application.decide('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' }));
     assert.equal(h.state.records.aiApproval.length, 0);
   }
 });
@@ -97,7 +99,7 @@ test('read authority is current and independent from new execution policy', asyn
 test('schema rejects spoofed authority, stale hash, illegal state combinations and leaks no raw errors', async () => {
   const h = await controlledApprovedOrderHarness();
   for (const extra of [{ context: h.context }, { approved: true }, { quoteAmounts: { payableAmount: 1 } }]) {
-    await assert.rejects(h.root.application.decide('task-a', { ...h.review, decision: 'approve', ...extra }), e => e.code === 'AI_INVALID_INPUT');
+    await assert.rejects(h.root.application.decide('task-a', { ...h.review, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2', ...extra }), e => e.code === 'AI_INVALID_INPUT');
   }
   await assert.rejects(h.root.application.readReprepareEligibility('task-a', { draftVersion, original: { ...h.review, reviewedPayloadHash: 'f'.repeat(64) }, intent: 'inspect' }), e => e.code === 'AI_REVISION_CONFLICT');
   assert.throws(() => approvalApplicationContract('AiApprovalReprepareEligibilityDraft', {

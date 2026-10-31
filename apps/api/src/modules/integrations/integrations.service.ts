@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import type {
@@ -26,6 +26,7 @@ import type {
 } from "@rental-os/shared";
 import { requireRequestTenantId } from "../../common/request-identity";
 import { IntegrationsRepository } from "./integrations.repository";
+import { FileBusinessAccessService } from "../files/file-business-access.service";
 
 function safeFileAssetSummary(file: FileAssetSummary): FileAssetSummary {
   const safe = { ...file };
@@ -42,7 +43,8 @@ export class IntegrationsService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly integrationsRepository: IntegrationsRepository
+    private readonly integrationsRepository: IntegrationsRepository,
+    @Optional() private readonly fileAccess?: FileBusinessAccessService
   ) {}
 
   private readonly files: FileAssetSummary[] = [
@@ -240,11 +242,16 @@ export class IntegrationsService {
   }
 
   async listFiles(query: FileAssetQuery = {}) {
+    if (!this.fileAccess) throw new ServiceUnavailableException("文件业务读取权威未配置");
+    const tenantId = this.defaultTenantId;
     if (this.useMysqlDataSource()) {
-      return this.integrationsRepository.listFiles(this.defaultTenantId, query);
+      const key = this.fileAccess.authorityKey(tenantId);
+      const candidates = await this.integrationsRepository.listFiles(tenantId, query);
+      if (this.fileAccess.authorityKey(tenantId) !== key) throw new ServiceUnavailableException("文件读取期间授权范围已变化");
+      return this.fileAccess.filterReadable(tenantId, candidates);
     }
     const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
-    return this.memoryFilesForTenant(this.defaultTenantId)
+    const candidates = this.memoryFilesForTenant(tenantId)
       .filter((file) => {
         if (query.businessModule && file.businessModule !== query.businessModule) {
           return false;
@@ -265,6 +272,7 @@ export class IntegrationsService {
       })
       .slice(0, limit)
       .map(safeFileAssetSummary);
+    return this.fileAccess.filterReadable(tenantId, candidates);
   }
 
   async createFile(input: CreateFileAssetRequest) {

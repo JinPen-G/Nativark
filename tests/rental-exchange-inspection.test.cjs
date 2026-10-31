@@ -79,7 +79,12 @@ void (async () => {
   core.runHook = async (_tenant, _point, _ref, payload) => { hookedOrder = payload.order; };
   core.workspaceOf = () => "workspace";
   core.applyPartialReturnItems = async (_tenant, _state, value, items) => {
-    for (const item of items) value.allocations.find((row) => row.id === item.allocationId).status = "returned";
+    const returnedIds = new Map();
+    for (const item of items) {
+      value.allocations.find((row) => row.id === item.allocationId).status = "returned";
+      returnedIds.set(item.allocationId, item.allocationId);
+    }
+    return returnedIds;
   };
   core.hasReturnHold = () => false;
   core.recordReturnDispositions = async () => {};

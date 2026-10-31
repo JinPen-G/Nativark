@@ -96,8 +96,14 @@ export class MembershipService {
     }
   }
 
-  private async requireWorkspace(tenantId: string, workspaceId: string) {
-    const workspace = await this.prisma.businessWorkspace.findFirst({
+  /** Same canonical customer lock order for relation writers and business readers. */
+  private async lockBookingCustomers(tenantId: string, personalCustomerId: string, corporateCustomerId: string | undefined, tx: Prisma.TransactionClient) {
+    const ids = [...new Set([personalCustomerId, corporateCustomerId].filter((id): id is string => Boolean(id)))].sort();
+    for (const id of ids) await this.lockCustomer(tenantId, id, tx);
+  }
+
+  private async requireWorkspace(tenantId: string, workspaceId: string, tx?: Prisma.TransactionClient) {
+    const workspace = await (tx ?? this.prisma).businessWorkspace.findFirst({
       where: { tenantId, id: workspaceId },
       select: { id: true, categoryCode: true }
     });
@@ -296,6 +302,14 @@ export class MembershipService {
           tenantId, customerId: review.customerId, reviewId: review.id,
           ...(review.sourceWorkspaceId ? { workspaceId: review.sourceWorkspaceId } : {})
         } });
+        if (input.status === "approved") {
+          const original = revision ?? await tx.customerQualificationRef.findFirst({ where: {
+            tenantId, customerId: review.customerId, qualificationType: review.qualificationType, currentRevisionId: null
+          } });
+          // 历史原附件无效只能拒绝本次新批准，不自动撤销或补造已批准历史。
+          if (!original || original.qualificationType !== review.qualificationType) throw new ConflictException("审核任务缺少原资质依据");
+          await this.assertQualificationEvidence(tx, tenantId, review.customerId, review.qualificationType, original.evidenceRef);
+        }
         if (revision) {
           await tx.customerQualificationRevision.update({
             where: { id: revision.id },
@@ -375,6 +389,27 @@ export class MembershipService {
     return (await this.listQualificationTypes(tenantId, workspaceId)).find((item) => item.id === row.id)!;
   }
 
+  /** 渠道只记录提交来源，不能跳过原文件/客户/证件类型校验。行锁使校验和
+   * 审核/版本写入同事务；本门不把附件存在等同于资质已通过。 */
+  private async assertQualificationEvidence(tx: Prisma.TransactionClient, tenantId: string, customerId: string,
+    qualificationType: string, evidenceRef?: string | null) {
+    if (!evidenceRef) return;
+    const id = evidenceRefOrUndefined(evidenceRef);
+    if (!id || id !== evidenceRef) throw new BadRequestException("资质附件引用无效");
+    // MySQL RR：前面的客户读取已建立快照，不能锁后再用普通SELECT读旧文件状态。
+    const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; businessModule: string; businessType: string;
+      businessId: string | null; uploadScene: string; status: string; metadata: Prisma.JsonValue }>>(Prisma.sql`
+      SELECT \`id\`, \`tenantId\`, \`businessModule\`, \`businessType\`, \`businessId\`, \`uploadScene\`, \`status\`, \`metadata\`
+      FROM \`FileAsset\` WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${id} FOR UPDATE`);
+    const evidence = rows[0];
+    if (!evidence || evidence.id !== id || evidence.tenantId !== tenantId || evidence.businessModule !== "membership"
+      || evidence.businessType !== "customer" || evidence.businessId !== customerId || evidence.uploadScene !== "client-qualification"
+      || evidence.status !== "active") throw new BadRequestException("资质附件不存在、尚未完成上传或不属于当前会员");
+    const metadata = evidence.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata)
+      ? evidence.metadata as Record<string, unknown> : {};
+    if (metadata.qualificationType !== qualificationType) throw new BadRequestException("资质附件与证件类型不匹配");
+  }
+
   async submitQualification(tenantId: string, workspaceId: string, customerId: string, input: SubmitCustomerQualificationRequest, channel: "admin" | "app", operator?: string) {
     await this.requireWorkspace(tenantId, workspaceId);
     await this.requireCustomer(tenantId, customerId, "personal");
@@ -392,29 +427,12 @@ export class MembershipService {
       throw new BadRequestException("证件有效期不能早于签发日期");
     }
     const evidenceRef = evidenceRefOrUndefined(input.evidenceRef);
-    if (channel === "app" && evidenceRef) {
-      const evidence = await this.prisma.fileAsset.findFirst({
-        where: {
-          id: evidenceRef,
-          tenantId,
-          businessType: "customer",
-          businessId: customerId,
-          uploadScene: "client-qualification",
-          status: "active"
-        },
-        select: { id: true, metadata: true }
-      });
-      if (!evidence) throw new BadRequestException("资质附件不存在、尚未完成上传或不属于当前会员");
-      const metadata = evidence.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata)
-        ? evidence.metadata as Record<string, unknown>
-        : {};
-      if (metadata.qualificationType !== input.qualificationType) throw new BadRequestException("资质附件与证件类型不匹配");
-    }
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       await this.lockCustomer(tenantId, customerId, tx);
       await this.requireCustomer(tenantId, customerId, "personal", tx);
       await this.requireMembership(tenantId, customerId, tx);
+      await this.assertQualificationEvidence(tx, tenantId, customerId, input.qualificationType, evidenceRef);
       const review = await this.customers.createReview({
         tenantId, sourceWorkspaceId: workspaceId, customerId, reviewType: "qualification", qualificationType: input.qualificationType,
         status: "pending", channel, payload: { evidenceRef, submittedBy: operator } as Prisma.InputJsonValue
@@ -658,11 +676,13 @@ export class MembershipService {
       await this.lockCustomer(tenantId, customerId, tx);
       await this.requireMembership(tenantId, customerId, tx);
       const customer = await this.requireCustomer(tenantId, customerId, "personal", tx);
-      return this.customers.upsertAccountCredentials({
+      const updated = await this.customers.upsertAccountCredentials({
         tenantId, customerId, loginPhone: customer.phone, loginPhoneMasked: customer.phoneMasked,
         passwordHash: hashPassword(temporaryPassword), mustChangePassword: true, rebindLogin: false,
         lastReason: { create: "管理员设置临时密码", update: "管理员重置临时密码" }, lastOperator: operator
       }, tx);
+      await tx.clientAuthSession.updateMany({ where: { tenantId, customerId, revokedAt: null }, data: { revokedAt: new Date() } });
+      return updated;
     });
     return { provisioned: true, status: account.status, loginPhoneMasked: account.loginPhoneMasked, mustChangePassword: account.mustChangePassword };
   }
@@ -827,6 +847,7 @@ export class MembershipService {
   }
 
   async saveCorporateEmployee(tenantId: string, corporateCustomerId: string, input: SaveCustomerCorporateMembershipRequest, operator?: string) {
+    input = structuredClone(input);
     await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
     const corporateLink = await this.requireMembership(tenantId, corporateCustomerId);
     if (corporateLink.status !== "active") throw new ConflictException("企业会员尚未审核通过，不能维护企业员工关系");
@@ -840,21 +861,30 @@ export class MembershipService {
       throw new BadRequestException("员工关系有效期格式无效");
     }
     if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("员工关系失效时间不能早于生效时间");
-    const row = await this.prisma.customerCorporateMembership.upsert({
-      where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId } },
-      create: {
-        tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId,
-        role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-        status: input.status ?? "active", effectiveFrom,
-        effectiveTo, reason: input.reason?.trim() || null, createdBy: operator
-      },
-      update: {
-        role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-        status: input.status ?? "active", effectiveFrom,
-        effectiveTo, reason: input.reason?.trim() || null
-      },
-      include: { personalCustomer: { select: { name: true } } }
-    });
+    const row = await this.prisma.$transaction(async tx => {
+      await this.lockBookingCustomers(tenantId, input.personalCustomerId, corporateCustomerId, tx);
+      await this.requireCustomer(tenantId, corporateCustomerId, "corporate", tx);
+      await this.requireCustomer(tenantId, input.personalCustomerId, "personal", tx);
+      const [corporate, personal] = await Promise.all([
+        this.requireMembership(tenantId, corporateCustomerId, tx), this.requireMembership(tenantId, input.personalCustomerId, tx)
+      ]);
+      if (corporate.status !== "active" || personal.status !== "active") throw new ConflictException("会员状态已变化，不能维护企业员工关系");
+      return tx.customerCorporateMembership.upsert({
+        where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId } },
+        create: {
+          tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId,
+          role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
+          status: input.status ?? "active", effectiveFrom,
+          effectiveTo, reason: input.reason?.trim() || null, createdBy: operator
+        },
+        update: {
+          role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
+          status: input.status ?? "active", effectiveFrom,
+          effectiveTo, reason: input.reason?.trim() || null
+        },
+        include: { personalCustomer: { select: { name: true } } }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.toCorporateMembership(row, row.personalCustomer.name);
   }
 
@@ -1025,26 +1055,27 @@ export class MembershipService {
   }
 
   /** 企业优惠资格判定的单一读模型，供后续报价/订单安全接入，不从旧企业表取权益。 */
-  async resolveBenefits(tenantId: string, workspaceId: string, personalCustomerId: string, corporateCustomerId?: string) {
-    await this.requireWorkspace(tenantId, workspaceId);
-    await this.requireCustomer(tenantId, personalCustomerId, "personal");
-    const membership = await this.requireMembership(tenantId, personalCustomerId);
+  async resolveBenefits(tenantId: string, workspaceId: string, personalCustomerId: string, corporateCustomerId?: string, tx?: Prisma.TransactionClient) {
+    const db = tx ?? this.prisma;
+    await this.requireWorkspace(tenantId, workspaceId, tx);
+    await this.requireCustomer(tenantId, personalCustomerId, "personal", tx);
+    const membership = await this.requireMembership(tenantId, personalCustomerId, tx);
     if (membership.status !== "active") throw new ConflictException("个人会员当前状态不允许使用权益");
     const now = new Date();
-    const personal = await this.prisma.customerMembershipPlanAssignment.findFirst({
+    const personal = await db.customerMembershipPlanAssignment.findFirst({
       where: { tenantId, customerId: personalCustomerId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }]
     });
     let corporate: CustomerMembershipPlanAssignment | undefined;
     if (corporateCustomerId) {
-      await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
-      const membership = await this.requireMembership(tenantId, corporateCustomerId);
+      await this.requireCustomer(tenantId, corporateCustomerId, "corporate", tx);
+      const membership = await this.requireMembership(tenantId, corporateCustomerId, tx);
       if (membership.status !== "active") throw new ConflictException("企业会员当前状态不允许使用权益");
-      const relation = await this.prisma.customerCorporateMembership.findFirst({
+      const relation = await db.customerCorporateMembership.findFirst({
         where: { tenantId, corporateCustomerId, personalCustomerId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
       });
       if (!relation) throw new ConflictException("该个人会员不是当前企业的有效员工，不能使用企业权益");
-      const assignment = await this.prisma.customerMembershipPlanAssignment.findFirst({
+      const assignment = await db.customerMembershipPlanAssignment.findFirst({
         where: { tenantId, customerId: corporateCustomerId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }]
       });
@@ -1061,16 +1092,19 @@ export class MembershipService {
     tenantId: string,
     workspaceId: string,
     personalCustomerId: string,
-    input?: RentalBookingIdentityInput
+    input?: RentalBookingIdentityInput,
+    tx?: Prisma.TransactionClient
   ): Promise<RentalMembershipSnapshot> {
-    await this.requireWorkspace(tenantId, workspaceId);
-    const personal = await this.requireCustomer(tenantId, personalCustomerId, "personal");
-    const personalLink = await this.requireMembership(tenantId, personalCustomerId);
+    const db = tx ?? this.prisma;
+    if (tx) await this.lockBookingCustomers(tenantId, personalCustomerId, input?.corporateCustomerId, tx);
+    await this.requireWorkspace(tenantId, workspaceId, tx);
+    const personal = await this.requireCustomer(tenantId, personalCustomerId, "personal", tx);
+    const personalLink = await this.requireMembership(tenantId, personalCustomerId, tx);
     const [qualificationRows, targetTypes] = await Promise.all([
-      this.prisma.customerQualificationRef.findMany({
+      db.customerQualificationRef.findMany({
         where: { tenantId, customerId: personalCustomerId }, include: { currentRevision: true }, orderBy: { qualificationType: "asc" }
       }),
-      this.prisma.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
+      db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
     ]);
     const qualifications = qualificationRows.filter((row) => {
       const revision = row.currentRevision;
@@ -1090,7 +1124,7 @@ export class MembershipService {
       if (input?.corporateCustomerId || input?.enterpriseContractAndPayer) {
         throw new BadRequestException("个人预约不能携带企业主体或企业付款选择");
       }
-      const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId);
+      const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId, undefined, tx);
       return {
         bookingIdentity,
         personalCustomerId,
@@ -1104,18 +1138,18 @@ export class MembershipService {
     }
     const corporateCustomerId = input?.corporateCustomerId;
     if (!corporateCustomerId) throw new BadRequestException("企业员工预约必须选择企业会员");
-    const corporate = await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
-    const corporateLink = await this.requireMembership(tenantId, corporateCustomerId);
+    const corporate = await this.requireCustomer(tenantId, corporateCustomerId, "corporate", tx);
+    const corporateLink = await this.requireMembership(tenantId, corporateCustomerId, tx);
     if (corporateLink.status !== "active") throw new ConflictException("企业会员当前状态不允许作为订单主体");
     const now = new Date();
-    const relationship = await this.prisma.customerCorporateMembership.findFirst({
+    const relationship = await db.customerCorporateMembership.findFirst({
       where: {
         tenantId, corporateCustomerId, personalCustomerId, status: "active",
         effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }]
       }
     });
     if (!relationship) throw new ConflictException("该个人会员不是当前企业的有效员工，不能使用企业身份或权益");
-    const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId, corporateCustomerId);
+    const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId, corporateCustomerId, tx);
     return {
       bookingIdentity,
       personalCustomerId,
@@ -1144,10 +1178,11 @@ export class MembershipService {
     snapshot: RentalMembershipSnapshot | undefined,
     rule: RentalRuleConfig["qualification"],
     action: RentalQualificationAction,
-    window: RentalQualificationCheckWindow
+    window: RentalQualificationCheckWindow,
+    tx?: Prisma.TransactionClient
   ) {
-    await this.requireWorkspace(tenantId, workspaceId);
-    if (!rule.required) return { ok: true as const };
+    await this.requireWorkspace(tenantId, workspaceId, tx);
+    if (!snapshot && !rule.required) return { ok: true as const };
     if (!snapshot) {
       throw new ConflictException(`${this.qualificationActionLabel(action)}不能继续：订单缺少会员资格快照，请先人工核验`);
     }
@@ -1156,7 +1191,12 @@ export class MembershipService {
       bookingIdentity: snapshot.bookingIdentity,
       corporateCustomerId: snapshot.corporateCustomerId,
       enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer
-    });
+    }, tx);
+    if (current.corporateMembershipId !== snapshot.corporateMembershipId || current.bookingIdentity !== snapshot.bookingIdentity
+      || current.corporateCustomerId !== snapshot.corporateCustomerId || current.enterpriseContractAndPayer !== snapshot.enterpriseContractAndPayer) {
+      throw new ConflictException("原企业预约关系已变化，不能将后继新关系当作原订单授权");
+    }
+    if (!rule.required) return { ok: true as const };
     const result = evaluateRentalQualification(current.qualifications, rule, window);
     if (!result.ok) throw new ConflictException(`${this.qualificationActionLabel(action)}资格校验未通过：${result.message}`);
     return { ok: true as const, qualificationType: result.qualificationType };

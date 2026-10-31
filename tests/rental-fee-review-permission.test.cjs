@@ -29,12 +29,19 @@ function loadAdminModule(relativePath) {
   return exported;
 }
 
-const { feeReviewStatusText, hasPendingFeeReview, FEE_REVIEW_TYPE_LABELS } =
+const { feeReviewStatusText, hasPendingFeeReview, FEE_REVIEW_TYPE_LABELS, feeReviewAmountCeiling, feeReviewAmountError } =
   loadAdminModule("../apps/admin/src/features/rental-core/orderFeeReview.ts");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
+const unknownReview = { suggestedAmount: null, maximumAmount: 80 };
+assert.equal(feeReviewAmountCeiling(unknownReview), 80);
+for (const value of [undefined, null, NaN, Infinity, -1, 81]) assert.ok(feeReviewAmountError(unknownReview, value));
+assert.equal(feeReviewAmountError(unknownReview, 0), undefined);
+assert.equal(feeReviewAmountError(unknownReview, 60), undefined);
+assert.ok(feeReviewAmountError({ suggestedAmount: null }, 0));
+assert.ok(feeReviewAmountError({ suggestedAmount: 50 }, 51));
 const FEE_REVIEW = "rental-os:order:fee-review";
 const SETTLE = "rental-os:order:settle";
 const VIEW = "rental-os:order:view";

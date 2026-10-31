@@ -39,6 +39,7 @@ const ok2 = (message) => console.log(`  PASS  ${message}`);
 // SPACE-03：状态按经营空间取，先跑启动预热建立查找表（夹具提供演示空间）。
 await core.onApplicationBootstrap();
 await business.onApplicationBootstrap();
+require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', context());
 
 const pricing = business.listPricingPlans(tenantId, context());
 assert.equal(pricing[0].categoryCode, "camping");
@@ -307,9 +308,14 @@ assert.equal(
 // 而吸收式 stub 没有库存事实，必然判定库存不足。券操作只需要一个订单标识，
 // 因此这里用合成 id 驱动，订单生命周期本身由 E2E 第 9/11/12 节对真实 MySQL 验证。
 const orderId = "order_coupon_flow_test";
+let storedQuote = structuredClone(quote);
+business.factStore.findQuote = async (tenant, id) => tenant === tenantId && id === storedQuote.id ? structuredClone(storedQuote) : undefined;
+const originalQuoteWrite = business.factStore.upsertQuote;
+business.factStore.upsertQuote = async value => { await originalQuoteWrite(value); storedQuote = structuredClone(value); };
 const consumed = business.consumeQuote(tenantId, context(), quote.id);
 assert.equal(consumed.id, quote.id);
 await business.markQuoteConsumed(tenantId, context(), quote.id, orderId);
+await business.loadQuote(tenantId, context(), quote.id);
 assert.throws(() => business.consumeQuote(tenantId, context(), quote.id), /已用于订单/, "quote snapshots must be single-use");
 await business.lockCoupon(tenantId, context(), quote.customerCouponId, orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "locked");

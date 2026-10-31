@@ -167,6 +167,8 @@ export function isTenantMembershipRoute(path: string) {
   if (path === "/membership" || path.startsWith("/membership/")) {
     return !path.startsWith("/membership/qualification-types");
   }
+  // 资料聚合含订单/资金等经营投影，必须走当前空间身份；共享主档详情仍沿租户会员权限。
+  if (/^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?))$/u.test(path)) return false;
   return path === "/platform/customers" || path.startsWith("/platform/customers/");
 }
 
@@ -430,7 +432,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["system:integration:manage"];
   }
   if (path === "/platform/roles") {
-    return ["system:user:manage", "system:role:manage"];
+    return method === "GET" ? ["system:user:manage", "system:role:manage"] : ["system:role:manage"];
   }
   if (path.startsWith("/platform/roles/")) {
     return ["system:role:manage"];
@@ -761,6 +763,8 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution$/)) {
     return ["rental-os:order:operate"];
   }
+  // Receipt observation is read-only and still requires current order visibility.
+  if (method === "GET" && path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution-receipt$/u)) return ["rental-os:order:view"];
   // 服务退款是已批准退款的实际资金动作，只认结算权限，不让普通履约操作员动资金。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/refund$/)) {
     return ["rental-os:order:settle"];
@@ -841,6 +845,9 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
     if (permissions.some((permission) => permission.startsWith("system:rental-category:"))) {
       return permissions.some((permission) => user.permissions.includes(permission) || user.permissions.includes("*"));
     }
+    if (permissions.includes("system:params:manage")) {
+      return user.permissions.includes("system:params:manage") || user.permissions.includes("*");
+    }
     // SaaS 平台管理员只拿到跨租户的平台能力：租户管理，以及公共官方日历来源注册表
     // （需求 4.5.8：「导入和维护公共官方日历来源」）。后者是跨租户的公共基础数据、
     // 不含任何空间业务数据，因此不违反同款「不得借此查看空间业务数据」。
@@ -892,6 +899,8 @@ export class ApiAuthGuard implements CanActivate {
       path === "/auth/login" ||
       path === "/auth/development/reset-demo-password" ||
       path === "/auth/refresh" ||
+      // 退出只消费原刷新令牌撤销其会话，不要求已被本地清空的access token，不授予业务访问。
+      (request.method.toUpperCase() === "POST" && path === "/auth/logout") ||
       // 支付/退款回调无运营登录态,必须匿名放行到控制器;安全边界是各平台的签名/商户/金额/事件幂等校验。
       // PUBLIC_ROUTES 只把它们标为"无需权限",并不等于"免鉴权",因此这里显式匿名放行(POST)。
       (request.method === "POST" && path.startsWith("/payments/webhooks/")) ||
@@ -910,7 +919,7 @@ export class ApiAuthGuard implements CanActivate {
       const token = typeof raw === "string" && raw.startsWith("Bearer ") ? raw.slice(7).trim() : undefined;
       if (!token) throw new UnauthorizedException("请先登录客户端账号");
       if (!this.clientAuth) throw new UnauthorizedException("客户端认证服务未就绪");
-      const client = await this.clientAuth.authenticate(token);
+      const client = await this.clientAuth.authenticate(token, { method: request.method.toUpperCase(), path });
       await this.clientRateLimit.assertAllowed({
         method: request.method,
         path,
@@ -923,6 +932,7 @@ export class ApiAuthGuard implements CanActivate {
       enterRequestIdentity({
         tenantId: client.tenantId,
         userId: client.customerId,
+        audience: 'client',
         isSaasAdmin: false,
         workspaceId: client.workspaceId
       });
@@ -1009,6 +1019,7 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/tenants") &&
       !path.startsWith("/platform/tenant-bootstrap") &&
       !path.startsWith("/platform/official-calendars") &&
+      path !== "/platform/security-baseline" &&
       !path.startsWith("/platform/subscriptions") &&
       !path.startsWith("/platform/account-appearance") &&
       !path.startsWith("/platform/rental-categories") &&
@@ -1034,6 +1045,9 @@ export class ApiAuthGuard implements CanActivate {
     // 公共官方日历来源是跨租户的公共基础数据（需求 4.5.8）。必须显式 fail-closed：
     // 租户内的 isPlatformAdmin 在 hasAnyPermission 里对任何权限都放行，
     // 不加这一道的话任一租户管理员都能改所有租户共用的官方节假日数据。
+    if (path === "/platform/security-baseline" && request.method.toUpperCase() !== "GET" && !user.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以修改全平台安全基线");
+    }
     if (path.startsWith("/platform/official-calendars") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以维护公共官方日历来源");
     }
@@ -1164,7 +1178,8 @@ export class ApiAuthGuard implements CanActivate {
     const needsLocationScope =
       (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
       (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
-      path.startsWith("/reports") ||
+      path.startsWith("/reports") || path.startsWith("/files") || path.startsWith("/integrations") ||
+      /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?))$/u.test(path) ||
       path === "/platform/workspace-customers" ||
       path.startsWith("/platform/workspace-customers/");
     const locationScope = canManageOrganizationMapping
@@ -1194,6 +1209,9 @@ export class ApiAuthGuard implements CanActivate {
     enterRequestIdentity({
       tenantId: user.tenantId,
       userId: user.id,
+      audience: staffApiRequest ? 'staff' : 'operator',
+      permissions: [...user.permissions],
+      isPlatformAdmin: user.isPlatformAdmin,
       operationToken: typeof request.headers["x-operation-token"] === "string" ? request.headers["x-operation-token"] : undefined,
       isSaasAdmin: Boolean(user.isSaasAdmin),
       // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
@@ -1314,8 +1332,8 @@ export class ApiAuthGuard implements CanActivate {
       if (locationRestricted && typeof body.fulfillmentLocationId !== "string") throw new ForbiddenException("当前账号创建订单必须指定已授权的履约地点");
       ensureLocations([body.fulfillmentLocationId, ...(body.returnLocationId ? [body.returnLocationId] : [])]);
     } else if (path === "/rental/v1/quotes" && request.method.toUpperCase() === "POST") {
-      if (locationRestricted && typeof body.locationId !== "string") throw new ForbiddenException("当前账号报价必须指定已授权的履约地点");
-      ensureLocations([body.locationId]);
+      if (locationRestricted && typeof body.fulfillmentLocationId !== "string") throw new ForbiddenException("当前账号报价必须指定已授权的履约地点");
+      ensureLocations([body.fulfillmentLocationId, ...(body.returnLocationId ? [body.returnLocationId] : [])]);
     } else if (orderMatch && orderMatch[1] !== "expire-pending" && orderMatch[1] !== "reconcile-pickup-overdue") {
       const clauses: Prisma.RentalOrderWhereInput[] = [];
       if (locationRestricted) clauses.push({ OR: [

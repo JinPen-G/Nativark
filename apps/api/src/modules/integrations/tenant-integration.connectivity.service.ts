@@ -44,6 +44,7 @@ export class TenantIntegrationConnectivityService {
       await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,
+        revision: config.revision,
         status: "failed",
         mode: "configuration",
         checkedAt,
@@ -63,6 +64,7 @@ export class TenantIntegrationConnectivityService {
       await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,
+        revision: config.revision,
         status: "failed",
         mode: "configuration",
         checkedAt,
@@ -81,11 +83,12 @@ export class TenantIntegrationConnectivityService {
     const claimed = await this.integrations.claimLiveTest({
       tenantId: config.tenantId,
       configId: config.id,
+      revision: config.revision,
       startedAt: checkedAt,
       cooldownMs: LIVE_TEST_COOLDOWN_MS
     });
     if (!claimed) {
-      throw new ConflictException("连接测试刚刚执行过，请 30 秒后再试");
+      throw new ConflictException("配置已变化或连接测试刚刚执行过，请刷新配置并在 30 秒后再试");
     }
 
     try {
@@ -97,6 +100,7 @@ export class TenantIntegrationConnectivityService {
       const recorded = await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,
+        revision: config.revision,
         status: "passed",
         mode: "live",
         checkedAt,
@@ -120,6 +124,7 @@ export class TenantIntegrationConnectivityService {
       await this.integrations.recordTestResult({
         tenantId: config.tenantId,
         configId: config.id,
+        revision: config.revision,
         status: "failed",
         mode: "live",
         checkedAt,

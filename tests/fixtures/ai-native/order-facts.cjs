@@ -13,7 +13,7 @@ async function setup(audience = 'operator', tenantId = 'tenant-a') {
     getAuthSession: async () => state.session ? { id: 'session-a', userId: state.user.id, audience, currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.member ? state.user : undefined, listUserWorkspaces: async () => []
   }, { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-order-facts-test-secret' : undefined });
-  const credentials = { current: async () => ({ requestId: 'facts-request', audience, authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: audience, exp: Math.floor(Date.now()/1000)+600 })}` }) };
+  const credentials = { current: async () => ({ requestId: 'facts-request', audience, authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', wid: state.workspace, aud: audience, exp: Math.floor(Date.now()/1000)+600 })}` }) };
   const guard = new ApiAuthGuard(auth, undefined, undefined, undefined, { rentalOrder: { findFirst: async () => state.order ? { id: state.order.id } : null } });
   const authority = new AiOrderRouteContextAuthority(guard, credentials, 'order-a');
   const config = stores.createAbsorbingConfigStore(); config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId, categoryCode: 'camera', isDefault: true }];

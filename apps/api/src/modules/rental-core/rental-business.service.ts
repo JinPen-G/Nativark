@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, HttpException, HttpStatus, Inje
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { requestFingerprint } from './rental-idempotency.repository';
+import { currentQuoteSource } from './rental-quote-access';
 import type { RentalQuoteOriginalOperation } from './rental-business-fact.repository';
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
@@ -34,9 +35,13 @@ import {
   type RentalDepositRule,
   type RentalFulfillmentMode,
   type RentalOrder,
+  type RentalOrderServiceOccurrence,
+  type RentalOrderChange,
   type RentalOrderExchangeExecutionBasis,
+  type RentalOrderExchangePricingSegment,
   type RentalOrderExchangePriceBasis,
   type RentalOrderExtension,
+  type RentalIncrementalPricingSnapshot,
   type RentalRepricingContext,
   type RentalOrderExtensionPreview,
   type RentalOrderExtensionRequest,
@@ -140,10 +145,13 @@ import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { applyPricingGroupSecurityRateOverrides, computeSecurityAmounts, type SecurityLineInput, type RentalPricingSecurityRateOverride, validateSecurityRateCoverage, validateSecurityRules } from "./rental-security-deposit";
-import { roundMoney } from "./rental-money";
+import { hasOriginalRentalCurrency, roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
+import { exchangeBasis } from "./rental-exchange-inspection";
+import { assertExchangePricingSegments, assertIncrementalPricingSnapshot, currentExchangePricingIds } from "./rental-exchange-pricing-source";
+import { assertOriginalTotalExtensionReceipts, restoreRentalRepricingContext } from "./rental-repricing-context";
 import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
 import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveQuoteValidityMinutes, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
@@ -4562,6 +4570,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     applyMinimumUnits?: boolean;
     /** 历史报价未保存完整计价上下文时，已有计费块仍按原日期快照还原。 */
     frozenCalendarRows?: RentalQuoteCalendarDay[];
+    /** Splitting an already billed period must retain its selected tier instead
+     * of repricing performed time against the shorter duration. */
+    selectedUnitAmount?: number;
   }): PricedRentalLine {
     const { rate, group, pricingGroup, quantity } = args;
     if (rate.unit === "hour" && args.hourToDay?.hourToDayEnabled) {
@@ -4578,7 +4589,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const hours = Math.min(24, billedHours - offset);
         const startAt = new Date(Date.parse(args.startAt) + offset * 3_600_000).toISOString();
         const endAt = new Date(Date.parse(startAt) + hours * 3_600_000).toISOString();
-        const base = { ...args, startAt, endAt, hourToDay: undefined, applyMinimumUnits: false };
+        // Hour/day conversion has two independent frozen rates. A selected
+        // daily tier cannot be reused as the hourly unit price when splitting.
+        const base = { ...args, startAt, endAt, hourToDay: undefined, applyMinimumUnits: false, selectedUnitAmount: undefined };
         const day = this.priceRentalLine({ ...base, rate: args.dayRate });
         const hour = this.priceRentalLine({ ...base, rate: { ...rate, maxAmount: undefined } });
         // 阈值看实际占用时长，不以小时向上取整提前触发；金额先到日价也封顶。
@@ -4598,6 +4611,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       };
     }
     const strategy = rentalPricingStrategy(rate.unit);
+    const selectedRate = args.selectedUnitAmount === undefined ? rate : { ...rate, baseAmount: args.selectedUnitAmount, tiers: [] };
     // 计价上下文：小时粒度来自**费率**（需求"按价格配置的小时粒度"），班次时长与边界
     // 来自**已发布规则**（需求"由经营空间规则定义"）——两者取数来源不同，不能混。
     const pricingContext = {
@@ -4624,7 +4638,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const unitMultipliers = unitFactors.map((item) => item.value);
     // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
     // 金额、说明与日历快照消费**同一份** breakdown，避免快照里的单位价与金额对不上。
-    const breakdown = strategy.priceBreakdown(rate, units, unitMultipliers);
+    const breakdown = strategy.priceBreakdown(selectedRate, units, unitMultipliers);
     const amount = roundMoney(breakdown.amount * quantity);
     // 押金与预授权按各自规则独立取数（需求 4.4.7）：这里只产出逐行事实，
     // 求和、订单级固定/风险项与封顶交给纯函数 computeSecurityAmounts。
@@ -4682,7 +4696,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       .join("、");
     const detail = [
       `原始 ${naturalUnits} ${rate.unit} → 计费 ${units} ${rate.unit} × ${quantity} 件`,
-      strategy.explain(rate, units, unitMultipliers),
+      strategy.explain(selectedRate, units, unitMultipliers),
       units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效` : undefined,
       dateBreakdown ? `逐单位取价 ${dateBreakdown}` : undefined
     ]
@@ -4724,15 +4738,89 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(base, benefit.maximum === undefined ? raw : Math.min(raw, benefit.maximum)));
   }
 
-  /** Internal server port. The originating authority derives the opaque key;
-   * current original route/Guard checks remain mandatory at the caller. */
-  /** Exposes the SAME server-owned defaults used by the manual quote path.
-   * Normalization does not establish membership or enterprise eligibility;
-   * createQuote still resolves those facts from MembershipService. */
-  normalizeQuoteInput(value: RentalQuoteRequest): RentalQuoteRequest {
+  /** Reprice an adopted security benefit from its frozen risk/policy evidence.
+   * Current product risk may veto a new action, but never supplies historical bases. */
+  private repriceMembershipSecurity(
+    quote: RentalQuoteSnapshotV1, context: BusinessContext, lines: SecurityLineInput[],
+    instrument: "deposit" | "preauthorization", gross: number, workspaceId: string, checkCurrentRisk: boolean
+  ): { amount: number; evaluation?: RentalMembershipBenefitEvaluation } {
+    const benefits = (quote.membershipBenefitEvaluations ?? []).filter(row => row.appliesTo === instrument && row.appliedAmount > 0);
+    if (!benefits.length) return { amount: gross };
+    if (benefits.length !== 1) throw new ConflictException("原保证金权益存在重复减免依据，不能自动重算");
+    const benefit = benefits[0], policy = benefit.securityPolicySnapshot, assessments = benefit.securityRiskAssessments;
+    if (benefit.scopeMatched === false || !membershipBenefitScopeMatches(benefit.scope, workspaceId, context.category.code)) {
+      throw new ConflictException("原保证金权益不适用于当前经营空间或品类，不能静默取消历史减免");
+    }
+    if (benefit.type !== (instrument === "deposit" ? "deposit_reduction" : "preauth_reduction")
+      || benefit.securityRiskCheck !== "clear" || !policy?.enabled || !assessments?.length
+      || !policy.allowedRiskLevels?.length || policy.allowedRiskLevels.some(level => !RENTAL_SECURITY_RISK_LEVELS.includes(level))
+      || !Number.isFinite(policy.maxReductionPercent) || policy.maxReductionPercent! < 0 || policy.maxReductionPercent! > 100
+      || !Number.isFinite(policy.maxReductionAmount) || policy.maxReductionAmount! < 0
+      || !Number.isFinite(benefit.securityOriginalAmount) || benefit.securityOriginalAmount! < 0
+      || !Number.isFinite(benefit.securityEligibleBase) || benefit.securityEligibleBase! < 0
+      || benefit.securityEligibleBase! > benefit.securityOriginalAmount!
+      || !Number.isFinite(benefit.configuredValue) || benefit.configuredValue <= 0 || benefit.calculation === "priority"
+      || benefit.configuredMaximum !== undefined && (!Number.isFinite(benefit.configuredMaximum) || benefit.configuredMaximum < 0)) {
+      throw new ConflictException("原保证金会员减免缺少有效风控或规则快照，不能自动重算");
+    }
+    const reductionAt = (base: number) => roundMoney(Math.min(
+      this.membershipBenefitAmount({ calculation: benefit.calculation, value: benefit.configuredValue, maximum: benefit.configuredMaximum }, base),
+      base * policy.maxReductionPercent! / 100, policy.maxReductionAmount!
+    ));
+    const originalNet = instrument === "deposit" ? quote.depositAmount : quote.preAuthAmount;
+    if (reductionAt(benefit.securityEligibleBase!) !== benefit.appliedAmount
+      || roundMoney(benefit.securityOriginalAmount! - benefit.appliedAmount) !== originalNet) {
+      throw new ConflictException("原保证金净额与会员减免依据不一致，不能自动重算");
+    }
+    const risks = new Map<string, (typeof assessments)[number]>();
+    for (const assessment of assessments) {
+      const target = assessment.pricingGroupId ?? assessment.itemGroupId;
+      if (!target || risks.has(target) || !Number.isInteger(assessment.quantity) || assessment.quantity < 1
+        || assessment.riskLevel !== "unclassified" && !RENTAL_SECURITY_RISK_LEVELS.includes(assessment.riskLevel)
+        || assessment.allowed !== (assessment.riskLevel !== "unclassified" && policy.allowedRiskLevels.includes(assessment.riskLevel))) {
+        throw new ConflictException("原商品风险分摊依据无效，不能自动重算保证金");
+      }
+      risks.set(target, assessment);
+    }
+    const frozenLines = lines.map(line => {
+      const assessment = risks.get(line.pricingGroupId ?? line.itemGroupId ?? "");
+      if (!assessment || assessment.itemGroupId !== line.itemGroupId || assessment.pricingGroupId !== line.pricingGroupId
+        || !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > assessment.quantity) {
+        throw new ConflictException("新增或替换商品缺少原风险依据，保证金须重新核定");
+      }
+      const currentRisk = context.groups.find(group => group.id === line.itemGroupId)?.attributes.securityRiskLevel;
+      if (checkCurrentRisk && (currentRisk ?? "unclassified") !== assessment.riskLevel) {
+        throw new ConflictException("商品风险等级已变化，不能以历史减免自动批准新业务");
+      }
+      return { ...line, securityRiskLevel: assessment.riskLevel === "unclassified" ? undefined : assessment.riskLevel };
+    });
+    const computed = computeSecurityAmounts(frozenLines, effectiveDepositRule(quote.ruleSnapshot), effectivePreauthorizationRule(quote.ruleSnapshot), {
+      [instrument]: policy.allowedRiskLevels
+    })[instrument];
+    if (computed.amount !== gross) throw new ConflictException("原保证金重算基数不一致");
+    const reduction = reductionAt(computed.membershipReductionEligibleAmount);
+    return { amount: roundMoney(gross - reduction), evaluation: {
+      ...structuredClone(benefit), appliedAmount: reduction, base: computed.membershipReductionEligibleAmount,
+      allocations: allocateDiscount(reduction, { [instrument]: computed.membershipReductionEligibleAmount }),
+      securityOriginalAmount: gross, securityEligibleBase: computed.membershipReductionEligibleAmount,
+      detail: `原 ${benefit.planName} 保证金权益：允许基数 ${computed.membershipReductionEligibleAmount}，减免 ${reduction}`
+    } };
+  }
+
+  /** Exposes the same server-owned defaults used by new manual quotes. Pass the
+   * current business context before binding an original-operation input hash;
+   * historical reads never normalize against today's defaults. This establishes
+   * neither membership nor enterprise eligibility. */
+  normalizeQuoteInput(value: RentalQuoteRequest, context?: Pick<BusinessContext, 'settings' | 'pricingGroups'>): RentalQuoteRequest {
     const input = structuredClone(value);
-    return this.memberships && !input.bookingIdentity
-      ? { ...input, bookingIdentity: { bookingIdentity: 'personal' } } : input;
+    if (this.memberships && !input.bookingIdentity) input.bookingIdentity = { bookingIdentity: 'personal' };
+    if (context) input.lines = input.lines.map(line => {
+      const pricingGroup = line.pricingGroupId ? context.pricingGroups?.find(row => row.id === line.pricingGroupId) : undefined;
+      const pricingUnit = line.pricingUnit ?? (line.pricingGroupId ? pricingGroup?.defaultPricingUnit : context.settings.pricing.defaultUnit);
+      if (!pricingUnit) throw new ConflictException("报价行缺少默认计价单位，请先核对定价配置");
+      return { ...line, pricingUnit };
+    });
+    return input;
   }
 
   async createQuoteForOriginalOperation(tenantId: string, context: BusinessContext, value: RentalQuoteRequest,
@@ -4765,6 +4853,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
     original?: RentalQuoteOriginalOperation) {
+    const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
       input = structuredClone(input);
       original = Object.freeze({ key: original.key, inputHash: original.inputHash });
@@ -4785,7 +4874,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       categoryVersionId = resolved.categoryVersionId;
       categoryAdoptionRevision = resolved.adoptionRevision;
     }
-    input = this.normalizeQuoteInput(input);
+    input = this.normalizeQuoteInput(input, context);
+    // Bind the final persisted request, not an input which later acquires new
+    // defaults. Never silently change an already supplied original-operation hash.
+    if (original && original.inputHash !== requestFingerprint(input)) throw new ConflictException('报价原操作输入尚未规范化');
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
     // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，
@@ -4810,6 +4902,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       : undefined;
     if (new Set(input.lines.map((line) => line.pricingGroupId ?? line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
+    if (!this.coreConfigStore.readFulfillmentAdmission) throw new ServiceUnavailableException("履约地点权威读取不可用，不能创建新报价");
+    const fulfillment = await this.coreConfigStore.readFulfillmentAdmission(tenantId, this.workspaceOf(tenantId), [
+      { locationId: input.fulfillmentLocationId,
+        capability: ["delivery", "onsite_delivery"].includes(input.fulfillmentMode) ? "delivery" : "pickup",
+        partner: input.fulfillmentMode === "partner_pickup_return" },
+      { locationId: input.returnLocationId ?? input.fulfillmentLocationId, capability: "return" }
+    ]);
+    // Refresh only the selected admission facts; other authorized locations may
+    // still be needed by separately selected service occurrences.
+    context = { ...context,
+      locations: [...context.locations.filter(row => !fulfillment.locations.some(current => current.id === row.id)), ...fulfillment.locations],
+      operators: [...context.operators.filter(row => !fulfillment.operators.some(current => current.id === row.id)), ...fulfillment.operators]
+    };
     this.validateFulfillmentLocations(context, input);
     // 收货地址（配送/上门类履约）：按品类目的地策略解析并固化进报价快照，见 resolveDeliveryAddressSnapshot。
     const deliveryAddressSnapshot = await this.resolveDeliveryAddressSnapshot(tenantId, context, input, preResolvedDeliveryAddress);
@@ -4876,9 +4981,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 调用方显式指定计价单位时**不得**回退到别的单位。
       // 早前用 `?? plan.rates.find(同商品组)` 兜底：请求快照写着"按小时"、
       // 金额却按自然日算出，报价既解释不通又可能直接算错钱。
-      const rate = line.pricingUnit
-        ? planRates.find((item) => pricingTargetId(item) === targetId && item.unit === line.pricingUnit)
-        : planRates.find((item) => pricingTargetId(item) === targetId);
+      const rate = planRates.find((item) => pricingTargetId(item) === targetId && item.unit === line.pricingUnit);
       if (!rate) {
         throw new ConflictException(
           line.pricingUnit
@@ -5301,6 +5404,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const allocations = selected ? allocateDiscount(candidate.amount, candidate.bases) : undefined;
         membershipBenefitEvaluations.push({
           source: candidate.entry.source,
+          ...(type === "service_benefit" ? { applicableServiceIds: [...(candidate.entry.benefit.applicableServiceIds ?? [])] } : {}),
           scope: structuredClone(candidate.entry.benefit.scope ?? { type: "tenant" }),
           scopeMatched: candidate.scopeMatched,
           planId: candidate.entry.assignment.planId,
@@ -5458,7 +5562,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const quote: RentalQuoteSnapshotV1 = {
       inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template)),
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
-      categoryCode: context.profile.categoryCode, categoryVersionId, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
+      categoryCode: context.profile.categoryCode, categoryVersionId, sourceSnapshot,
+      request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,
@@ -5511,6 +5616,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     quote.capabilityDecisions = await this.runQuoteHook(tenantId, context, quote);
     const expectedBinding = categoryVersionId && categoryAdoptionRevision !== undefined
       ? { categoryVersionId, adoptionRevision: categoryAdoptionRevision } : undefined;
+    if (!isDeepStrictEqual(sourceSnapshot, currentQuoteSource(tenantId))) throw new ConflictException('报价期间创建身份或空间已变化');
     let persisted = quote;
     if (original) {
       if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
@@ -5595,6 +5701,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       throw error;
     }
   }
+  /** Durable original-ID read for API boundaries and historical calculations.
+   * Always observe current consumption markers; a warm cache cannot override a
+   * missing/changed database row. Callers retain their quote/order authorization. */
+  async loadQuote(tenantId: string, context: BusinessContext, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1> {
+    if (!this.factStore.findQuote) throw new ServiceUnavailableException('报价持久读取不可用');
+    const quote = await this.factStore.findQuote(tenantId, quoteId, tx);
+    if (!quote) throw new NotFoundException('报价不存在');
+    if (quote.id !== quoteId || quote.tenantId !== tenantId) throw new ConflictException('报价事实绑定不一致');
+    if (!tx) {
+      const state = this.state(tenantId, context);
+      state.quotes = [structuredClone(quote), ...state.quotes.filter(row => row.id !== quoteId)];
+    }
+    return structuredClone(quote);
+  }
+
+  /** Synchronous cache access only for legacy pure calculations/fixtures, never
+   * an HTTP or new-order fact source. New async consumers use loadQuote. */
   getQuote(tenantId: string, context: BusinessContext, quoteId: string) {
     const quote = this.state(tenantId, context).quotes.find((item) => item.id === quoteId);
     if (!quote) throw new NotFoundException("报价不存在");
@@ -5722,7 +5845,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async markQuoteConsumed(tenantId: string, context: BusinessContext, quoteId: string, orderId: string) {
-    const quote = this.consumeQuote(tenantId, context, quoteId);
+    const quote = await this.loadQuote(tenantId, context, quoteId);
+    if (Date.parse(quote.expiresAt) < Date.now() || quote.consumedAt || quote.consumedOrderId) throw new ConflictException('报价已失效或被使用');
     quote.consumedAt = stamp();
     quote.consumedOrderId = orderId;
     await this.factStore.upsertQuote(quote);
@@ -6043,7 +6167,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     returnedAt: string,
     scheduledEndAt?: string,
     quantityScope?: Record<string, number>,
-    orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[] }
+    orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[];
+      billedLinePricing?: RentalOrderExchangePricingSegment }
   ) {
     quote = this.withOrderChargeSnapshot(quote, orderSnapshot);
     const rule = quote.ruleSnapshot;
@@ -6138,9 +6263,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           shiftHours: rule.pricing?.shiftHours, shiftStartHours: rule.pricing?.shiftStartHours
         };
         const strategy = rentalPricingStrategy(rate.unit);
-        const units = Math.max(rate.minimumUnits, strategy.billableUnits(quote.request.startAt, quote.request.endAt, pricingContext));
-        let hours = billedRentalHours(rate, units, quote.request.startAt, quote.request.endAt, pricingContext);
-        if (rate.unit === "hour" && rule.pricing?.hourToDayEnabled) {
+        const billed = orderSnapshot?.billedLinePricing;
+        const units = billed?.billableUnits ?? Math.max(rate.minimumUnits, strategy.billableUnits(quote.request.startAt, quote.request.endAt, pricingContext));
+        let hours = billed?.billedHours ?? billedRentalHours(rate, units, quote.request.startAt, quote.request.endAt, pricingContext);
+        if (!billed && rate.unit === "hour" && rule.pricing?.hourToDayEnabled) {
           hours = this.convertedHourCoverage(context, quote, rate, quote.request.endAt);
         }
         if (units <= 0 || hours <= 0) throw new ConflictException("原订单没有有效的已计费时间单位，无法计算逾期费");
@@ -6158,9 +6284,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   /**
    * 提前归还退款（需求 4.6.8）。与逾期费同一形态：这里只读快照算钱，落账在 rental-core。
    *
-   * 单位口径取 `rateSnapshot` 里第一个**按时间**计费的费率。`usage`（里程/工时）与
-   * `package` 不参与时间折算——少开几公里不等于少租一天，包段更是整包定价；
-   * 整单只有这两类费率时不退租金。
+   * 租金按原费率逐行折算，部分取消优先恢复已应用变更的剩余租金及优惠分摊；
+   * 服务按锁内实际发生项与原退款状态独立处理。`usage`（里程/工时）与
+   * `package` 不参与时间租金折算——少开几公里不等于少租一天。
    *
    * 分子分母必须描述**同一段租期**，因此单位数按计费时的口径分两段拼：
    *
@@ -6173,6 +6299,113 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 少传它会让"未使用占比"落在一个更小的基数上，续过租的单只退到一半。
    */
   calculateEarlyReturnRefund(
+    tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, scheduledEndAt: string, returnedAt: string,
+    extensionRentalAmount = 0, extensionPricing?: RentalOrderExtension["pricingSnapshot"],
+    orderSnapshot?: Pick<RentalOrder, "ruleSnapshot"> & Partial<Pick<RentalOrder, "id" | "lines" | "serviceSnapshots" | "chargeLines" | "feeReviews" | "finalPayableAmount">>
+      & { rateSnapshot?: RentalPricingRate[]; changes?: RentalOrderChange[] }
+  ): EarlyReturnRefund {
+    quote = this.withOrderChargeSnapshot(quote, orderSnapshot);
+    const rule = effectiveEarlyReturnRule(quote.ruleSnapshot);
+    const services: RentalOrderServiceOccurrence[] = orderSnapshot?.serviceSnapshots ?? quote.serviceSnapshots ?? [];
+    const serviceRefund = computeEarlyReturnRefund(rule, { scheduledEndAt, returnedAt, totalUnits: 1, unusedUnits: 0,
+      rentalAmount: 0, rentalDiscountAmount: 0, rentalCouponAmount: 0,
+      services: services.map(service => {
+        if (![service.amount, service.discountAllocatedAmount ?? 0, service.couponAllocatedAmount ?? 0].every(value => Number.isFinite(value) && value >= 0)) {
+          throw new ConflictException("原服务金额及优惠分摊无效，不能自动退款");
+        }
+        const reviewed = orderSnapshot?.feeReviews?.some(review => review.type === "service_refund" && review.sourceId === service.occurrenceId);
+        return { ...service, refundStatus: reviewed && (!service.refundStatus || service.refundStatus === "none") ? "pending_review" : service.refundStatus,
+          amount: roundMoney(Math.max(0, service.amount - (service.discountAllocatedAmount ?? 0) - (service.couponAllocatedAmount ?? 0))) };
+      }) });
+    const exchangeHistory = orderSnapshot?.changes?.filter(change => change.type === "post_pickup_exchange" && change.status === "applied") ?? [];
+    if (exchangeHistory.length && rule.mode !== "none" && Date.parse(returnedAt) < Date.parse(scheduledEndAt)) {
+      const maximum = orderSnapshot?.finalPayableAmount;
+      if (maximum === undefined || !Number.isFinite(maximum) || maximum < 0) throw new ConflictException("换货后提前归还缺少原应收核减上限");
+      return { amount: null, rentalRefund: null, serviceRefund: null,
+        maximumAmount: roundMoney(Math.min(maximum, rule.maxRefundAmount ?? maximum)), requiresReview: true,
+        basis: ["换货后提前归还须按保留/替换计价段及原优惠核定，不按最初商品金额自动退款"] };
+    }
+    const cancellations = orderSnapshot?.lines?.filter(line => (line.cancelledQuantity ?? 0) > 0) ?? [];
+    const applied = orderSnapshot?.changes?.filter(change => change.status === "applied" && change.type === "partial_line_cancel")
+      .sort((left, right) => left.sequence - right.sequence) ?? [];
+    if (cancellations.length) {
+      const change = applied.at(-1);
+      if (change && orderSnapshot?.id && change.orderId !== orderSnapshot.id) throw new ConflictException("原部分取消计价不属于当前订单");
+      const snapshot = change?.diff.pricingSnapshot as RentalOrderExtension["pricingSnapshot"] | undefined;
+      // A partial cancellation re-evaluates original discounts; scaling the old
+      // quote by quantity loses thresholds and incorrectly refunds cancelled units.
+      if (!snapshot || extensionRentalAmount || extensionPricing || services.length
+        || !Number.isFinite(snapshot.recalculatedRentalAmount) || !Number.isFinite(snapshot.recalculatedDiscountAmount)
+        || !Number.isFinite(snapshot.recalculatedCouponAmount)) {
+        const advance = (Date.parse(scheduledEndAt) - Date.parse(returnedAt)) / 3600000;
+        if (rule.mode === "none" || !Number.isFinite(advance) || advance <= 0 || advance < rule.minAdvanceHours) {
+          return { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: false, basis: [] };
+        }
+        const maximum = orderSnapshot?.finalPayableAmount;
+        if (maximum === undefined || !Number.isFinite(maximum) || maximum < 0) throw new ConflictException("有效数量缺少原核减计价依据，须人工核对");
+        return { amount: null, rentalRefund: null, serviceRefund: null, maximumAmount: roundMoney(Math.min(maximum, rule.maxRefundAmount ?? maximum)),
+          requiresReview: true, basis: ["已部分取消订单缺少完整剩余租金/优惠快照，不能按原数量自动退款，须原变更人工核定"] };
+      }
+      const rentalPlans = snapshot.discountEvaluations.filter(row => row.applied && row.appliesTo === "rental");
+      const allPlans = snapshot.discountEvaluations.filter(row => row.applied).reduce((sum, row) => sum + row.discountAmount, 0);
+      const membershipAmount = roundMoney(snapshot.recalculatedDiscountAmount - allPlans);
+      const membership = quote.membershipBenefitEvaluations?.filter(row => row.appliesTo === "rental" && row.appliedAmount > 0) ?? [];
+      if (membershipAmount < 0 || membershipAmount > 0 && membership.length !== 1
+        || quote.membershipBenefitEvaluations?.some(row => row.appliedAmount > 0 && row.appliesTo !== "rental")) {
+        throw new ConflictException("原部分取消优惠分项不完整，不能自动退款");
+      }
+      const fullLines = snapshot.fullChargeLines.filter(row => row.type === "rental");
+      const amounts: Record<string, number> = {};
+      for (const line of orderSnapshot!.lines!) {
+        if (line.quantity - (line.cancelledQuantity ?? 0) <= 0) continue;
+        const target = line.pricingGroupId ?? line.itemGroupId;
+        const original = quote.rateSnapshot.find(rate => pricingTargetId(rate) === target);
+        const matching = original && fullLines.find(row => row.code === `rental:${original.pricingGroupCode ?? original.itemGroupCode}`);
+        if (!matching || !Number.isFinite(matching.amount)) throw new ConflictException("原部分取消缺少有效行租金分摊，须核对");
+        amounts[target] = matching.amount;
+      }
+      if (roundMoney(Object.values(amounts).reduce((sum, amount) => sum + amount, 0)) !== snapshot.recalculatedRentalAmount) {
+        throw new ConflictException("原部分取消逐行租金与总额不一致，须核对");
+      }
+      const planTotal = roundMoney(rentalPlans.reduce((sum, row) => sum + row.discountAmount, 0));
+      const planAllocations = Object.fromEntries(Object.keys(amounts).map(target => [target,
+        roundMoney(rentalPlans.reduce((sum, row) => sum + (row.rentalAllocations?.[target] ?? 0), 0))]));
+      if (planTotal > 0 && roundMoney(Object.values(planAllocations).reduce((sum, amount) => sum + amount, 0)) !== planTotal) {
+        throw new ConflictException("原部分取消缺少逐行优惠分摊，须核对");
+      }
+      const oldCoupon = snapshot.couponEvaluation;
+      const couponBases = Object.fromEntries(Object.entries(amounts).filter(([target]) => !oldCoupon?.rentalAllocations
+        || Object.hasOwn(oldCoupon.rentalAllocations, target)).map(([target, amount]) => [target, Math.max(0, amount - planAllocations[target])]));
+      const couponEvaluation = oldCoupon?.appliesTo === "rental" ? { ...oldCoupon,
+        rentalAllocations: allocateDiscount(oldCoupon.discountAmount, couponBases) } : oldCoupon;
+      const membershipBases = Object.fromEntries(Object.entries(amounts).filter(([target]) => !membership[0]?.allocations
+        || Object.hasOwn(membership[0].allocations, target)).map(([target, amount]) => [target,
+          Math.max(0, amount - planAllocations[target] - (couponEvaluation?.rentalAllocations?.[target] ?? 0))]));
+      quote = { ...quote, rentalAmount: snapshot.recalculatedRentalAmount, rentalLineAmounts: amounts,
+        rateSnapshot: quote.rateSnapshot.filter(rate => Object.hasOwn(amounts, pricingTargetId(rate))),
+        discountEvaluations: rentalPlans, couponEvaluation,
+        membershipBenefitEvaluations: membershipAmount > 0 ? [{ ...membership[0], appliedAmount: membershipAmount,
+          allocations: allocateDiscount(membershipAmount, membershipBases) }] : [], serviceSnapshots: [] };
+    }
+    const rental = this.calculateEarlyReturnRentalRefund(tenantId, context, { ...quote, serviceSnapshots: [] }, scheduledEndAt,
+      returnedAt, extensionRentalAmount, extensionPricing, orderSnapshot);
+    const priorRental = (orderSnapshot?.chargeLines ?? []).filter(line => line.type === "early_return_refund"
+      && line.code.startsWith("early_return_refund:")).reduce((sum, line) => sum + Math.max(0, -line.amount), 0);
+    if (priorRental > 0 || orderSnapshot?.feeReviews?.some(review => review.type === "early_return_refund" && review.status === "approved")) {
+      return { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: false,
+        basis: ["原提前归还来源已经核减，本次仅观察历史，不另立同来源退款"] };
+    }
+    const knownRental = rental.rentalRefund;
+    const knownServices = serviceRefund.serviceRefund;
+    const maximumAmount = roundMoney(Math.min((rental.maximumAmount ?? knownRental ?? 0) + (serviceRefund.maximumAmount ?? knownServices ?? 0),
+      rule.maxRefundAmount ?? Infinity, orderSnapshot?.finalPayableAmount ?? Infinity));
+    return { amount: knownRental === null || knownServices === null ? null : roundMoney(Math.min(knownRental + knownServices, maximumAmount)),
+      rentalRefund: knownRental, serviceRefund: knownServices, maximumAmount,
+      requiresReview: rental.requiresReview || serviceRefund.requiresReview,
+      basis: [...rental.basis, ...serviceRefund.basis] };
+  }
+
+  private calculateEarlyReturnRentalRefund(
     tenantId: string,
     context: BusinessContext,
     quote: RentalQuoteSnapshotV1,
@@ -6188,7 +6421,29 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 不同计费单位（如日租和周租）不能由“第一条费率”代表整单。正常订单逐行退款；
     // 原价全租期续租的混合计价行缺少逐行重算快照时，保留待审核而不是错误自动退款。
     if (timeRates.length > 1) {
-      if (extensionPricing) return { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: true, basis: ["混合计费订单的原价全租期续租缺少逐行重算快照，须人工审核退款"] };
+      if (extensionPricing) {
+        const advanceHours = (Date.parse(scheduledEndAt) - Date.parse(returnedAt)) / 3600000;
+        if (rule.mode === "none" || advanceHours <= 0 || advanceHours < rule.minAdvanceHours) {
+          return { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: false, basis: [] };
+        }
+        const rentalDiscount = (extensionPricing.discountEvaluations ?? quote.discountEvaluations)
+          .filter(row => row.applied && row.appliesTo === "rental").reduce((sum, row) => sum + row.discountAmount, 0);
+        const membershipDiscount = (extensionPricing.membershipBenefitEvaluations ?? quote.membershipBenefitEvaluations ?? [])
+          .filter(row => row.appliesTo === "rental").reduce((sum, row) => sum + row.appliedAmount, 0);
+        const coupon = extensionPricing.couponEvaluation ?? quote.couponEvaluation;
+        const rentalCoupon = coupon?.appliesTo === "rental" ? coupon.discountAmount : 0;
+        if (![advanceHours, extensionPricing.recalculatedRentalAmount, rentalDiscount, membershipDiscount, rentalCoupon].every(Number.isFinite)) {
+          throw new ConflictException("原续租租金与优惠依据无效，不能自动裁定退款");
+        }
+        if (!Number.isFinite(rule.refundPercent) || rule.refundPercent < 0 || rule.refundPercent > 100
+          || rule.maxRefundAmount !== undefined && (!Number.isFinite(rule.maxRefundAmount) || rule.maxRefundAmount < 0)) {
+          throw new ConflictException("原提前归还规则的退款上限无效，不能自动裁定退款");
+        }
+        const netRental = Math.max(0, roundMoney(extensionPricing.recalculatedRentalAmount - rentalDiscount - membershipDiscount - rentalCoupon));
+        const maximumAmount = roundMoney(Math.min(netRental * rule.refundPercent / 100, rule.maxRefundAmount ?? netRental));
+        return { amount: null, rentalRefund: null, serviceRefund: null, maximumAmount, requiresReview: true,
+          basis: ["混合计费订单的原价全租期续租缺少逐行重算快照，建议退款金额待核定，须依据原计价与优惠记录人工裁定"] };
+      }
       const totalRental = quote.rentalAmount || 1;
       const parts = timeRates.map((rate) => {
         const target = pricingTargetId(rate);
@@ -6198,9 +6453,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const membershipBenefitEvaluations = quote.membershipBenefitEvaluations?.map((row) => row.appliesTo === "rental"
           ? { ...row, appliedAmount: row.allocations?.[target] ?? roundMoney(row.appliedAmount * amount / totalRental) }
           : row);
-        return this.calculateEarlyReturnRefund(tenantId, context, { ...quote, rateSnapshot: [rate], rentalAmount: amount, discountEvaluations, couponEvaluation, membershipBenefitEvaluations, serviceSnapshots: [] }, scheduledEndAt, returnedAt);
+        return this.calculateEarlyReturnRentalRefund(tenantId, context, { ...quote, rateSnapshot: [rate], rentalAmount: amount, discountEvaluations, couponEvaluation, membershipBenefitEvaluations, serviceSnapshots: [] }, scheduledEndAt, returnedAt);
       });
-      const rentalRefund = roundMoney(parts.reduce((sum, part) => sum + part.rentalRefund, 0));
+      if (parts.some(part => part.rentalRefund === null)) throw new ConflictException("逐行退款金额待核定，不能将未知金额当作零汇总");
+      const rentalRefund = roundMoney(parts.reduce((sum, part) => sum + part.rentalRefund!, 0));
       const serviceBlocked = (quote.serviceSnapshots ?? []).length > 0;
       return { amount: rentalRefund, rentalRefund, serviceRefund: 0, requiresReview: parts.some(part => part.requiresReview) || serviceBlocked, basis: [...parts.flatMap(part => part.basis), ...(serviceBlocked ? ["增值服务退款须按服务实际履约及已分摊优惠审核"] : [])] };
     }
@@ -6243,7 +6499,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         .reduce((sum, row) => sum + row.discountAmount, 0)
     );
     const membershipRentalDiscountAmount = roundMoney(
-      (quote.membershipBenefitEvaluations ?? [])
+      (extensionPricing?.membershipBenefitEvaluations ?? quote.membershipBenefitEvaluations ?? [])
         .filter((row) => row.appliesTo === "rental")
         .reduce((sum, row) => sum + row.appliedAmount, 0)
     );
@@ -6257,12 +6513,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       rentalAmount: extensionPricing?.recalculatedRentalAmount ?? roundMoney(quote.rentalAmount + Math.max(0, extensionRentalAmount)),
       rentalDiscountAmount: roundMoney(rentalDiscountAmount + membershipRentalDiscountAmount),
       rentalCouponAmount,
-      services: quote.serviceSnapshots.map((service) => ({
-        ...service,
-        // 服务退款以客户实付净额为上限；营销优惠和券已在报价快照中按服务分摊，
-        // 不再用服务原价“先退后补”，避免多退。
-        amount: roundMoney(Math.max(0, service.amount - (service.discountAllocatedAmount ?? 0) - (service.couponAllocatedAmount ?? 0)))
-      }))
+      services: [] // Service reductions are independently derived from current original occurrences.
     });
   }
 
@@ -6341,9 +6592,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "lines">
+        & Partial<Pick<RentalOrder, "tenantId" | "allocations" | "feeReviews" | "chargeLines">>;
       previousExtensions?: RentalOrderExtension[];
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
+      previousChanges?: RentalOrderChange[];
+      tx?: RentalBusinessFactTx;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "id" | "inventoryMode" | "amount">>>;
       newEndAt: string;
       services?: RentalOrderExtensionRequest["services"];
       /** 申请时点：决定命中哪一版价格、日历与规则。 */
@@ -6360,13 +6614,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       throw new BadRequestException("新的归还时间必须晚于当前归还时间");
     }
     const rule = this.currentRule(tenantId, context, args.appliedAt);
-    const extensionRule = effectiveExtensionRule(this.getQuote(tenantId, context, args.order.quoteId).ruleSnapshot);
+    const originalQuote = await this.loadQuote(tenantId, context, args.order.quoteId, args.tx);
+    const extensionRule = effectiveExtensionRule(originalQuote.ruleSnapshot);
     if (!extensionRule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
+    if (!hasOriginalRentalCurrency(originalQuote.currency, context.settings.pricing.currency)) {
+      throw new ConflictException("独立续租当前价格币种与原订单币种不一致或缺失，不能换汇或改标金额");
+    }
     // 原报价的费率快照只用来确定**计价单位**，价格一律重新命中（需求 4.6.9）。
-    const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
     const unitOf = new Map(
       (originalQuote.rateSnapshot ?? []).map((rate) => [pricingTargetId(rate), rate.unit] as const)
     );
+    const exchangedSources = new Map<string, RentalOrderExchangePricingSegment[]>();
+    const exchangeIds = args.order.allocations ? currentExchangePricingIds({ allocations: args.order.allocations }) : new Map<string, string>();
+    for (const line of args.order.lines ?? []) {
+      if (!args.order.allocations?.some(row => row.orderLineId === line.id
+        && ["picked_up", "locked"].includes(row.status) && row.metadata?.exchangeId)) continue;
+      const source = this.exchangeLinePricingSources(tenantId, context, originalQuote, args.order, line,
+        args.previousExtensions ?? [], args.previousChanges ?? [], "extension");
+      exchangedSources.set(line.id, source);
+    }
     const targets = args.lines
       .filter((line) => line.inventoryMode !== RentalInventoryMode.Consumable)
       .map((line) => line.pricingGroupId ?? line.itemGroupId);
@@ -6376,13 +6642,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 订单只有一次性耗材时，不应因为当前空间没有新的价格版本而阻断续租；
     // 耗材已经按原订单一次性计价，只有仍在租用的商品才需要命中现行版本。
     const spaceVersion = targets.length
-      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt)
+      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt, args.tx)
       : { rates: [] as RentalPricingRate[] };
+    if (exchangedSources.size && (!("versionId" in spaceVersion) || !("version" in spaceVersion)
+      || !spaceVersion.versionId || !spaceVersion.version)) {
+      throw new ConflictException("换货后续租缺少已发布价格版本");
+    }
     const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
     const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
     const legacyDayTypeMultipliers = context.settings.pricing.holidayPricingEnabled;
     const incrementalCalendars = this.calendarsForDateRange(tenantId, context, from, args.newEndAt);
+    const incrementalPricing: RentalIncrementalPricingSnapshot = { version: 1, startAt: from, endAt: args.newEndAt,
+      context: { timeZone, legacyDayTypeMultipliers, calendars: structuredClone(incrementalCalendars),
+        dayRates: spaceVersion.rates.filter(row => row.unit === "day_24h").map(row => structuredClone(row)) }, lines: [] };
     // 押金基数要按**整个新租期**重算，因此日历要覆盖 startAt → newEndAt 全段。
     const fullCalendars = this.calendarsForDateRange(tenantId, context, args.order.startAt, args.newEndAt);
 
@@ -6398,14 +6671,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!group) throw new ConflictException("订单行的产品型号已不存在，无法续租");
       const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
       const target = line.pricingGroupId ?? line.itemGroupId;
-      const unit = unitOf.get(target);
+      const source = line.id ? exchangedSources.get(line.id) : undefined;
+      const unit = source?.at(-1)!.rate.unit ?? unitOf.get(target);
       // 一次性耗材在领取时已经完成一次性消费，续租只延长其它可归还商品的占用，
       // 不应再为耗材按新增时段重复计费或重新查当前价格。
       if (line.inventoryMode === RentalInventoryMode.Consumable) continue;
       if (!unit) throw new ConflictException(`${pricingGroup?.name ?? group.name} 缺少原订单计价单位依据，不能自动续租`);
-      const rate = spaceVersion.rates.find(
+      const matches = spaceVersion.rates.filter(
         (item) => pricingTargetId(item) === target && item.unit === unit
       );
+      if (matches.length > 1) throw new ConflictException("当前续租价格版本存在重复的计价目标与单位");
+      const rate = matches[0];
       if (!rate) {
         throw new ConflictException(
           `${pricingGroup?.name ?? group.name} 在当前价格版本里缺少${unit ? ` ${unit} ` : ""}计价单位的价格，无法为续租定价`
@@ -6439,17 +6715,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       billableUnits += incremental.units;
       chargeLines.push(incremental.chargeLine);
       calendarSnapshot.push(...incremental.calendarRows);
-      rateSnapshot.push(structuredClone(rate));
+      if (!rateSnapshot.some(row => pricingTargetId(row) === target && row.unit === unit)) rateSnapshot.push(structuredClone(rate));
+      incrementalPricing.lines.push({ orderLineId: line.id, itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId,
+        quantity: line.quantity, exchangeId: line.id ? exchangeIds.get(line.id) : undefined,
+        pricingUnit: rate.unit, amount: incremental.amount, billableUnits: incremental.units,
+        selectedUnitAmount: incremental.breakdown.unitAmount,
+        billedHours: rate.unit === "usage" || rate.unit === "package" ? 0
+          : incremental.billedHours ?? billedRentalHours(rate, incremental.units, from, args.newEndAt, {
+            timeZone, hourGranularityMinutes: rate.hourGranularityMinutes, shiftHours: rule.config.pricing?.shiftHours,
+            shiftStartHours: rule.config.pricing?.shiftStartHours }) });
       // 整个新租期：只用来当押金/预授权的倍数基数，**不进** rentalAmount。
-      const full = this.priceRentalLine({
-        ...shared,
-        startAt: args.order.startAt,
-        endAt: args.newEndAt,
-        calendars: fullCalendars,
-        codePrefix: "rental",
-        chargeType: "rental"
-      });
-      fullSecurityLines.push(full.securityLine);
+      if (source) {
+        const performed = roundMoney(source.reduce((sum, row) => sum + row.amount, 0));
+        fullSecurityLines.push({ ...incremental.securityLine, lineRental: roundMoney(performed + incremental.amount) });
+      } else {
+        const full = this.priceRentalLine({
+          ...shared,
+          startAt: args.order.startAt,
+          endAt: args.newEndAt,
+          calendars: fullCalendars,
+          codePrefix: "rental",
+          chargeType: "rental"
+        });
+        fullSecurityLines.push(full.securityLine);
+      }
     }
 
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
@@ -6527,7 +6816,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersionId: versionedSpaceVersion.versionId,
       priceVersion: versionedSpaceVersion.version,
       ruleVersion: rule.version,
-      executionBasis: await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config),
+      executionBasis: { ...await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config),
+        incrementalPricing },
       rateSnapshot,
       ruleSnapshot: structuredClone({ ...rule.config, extension: extensionRule })
     };
@@ -6538,8 +6828,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "actualRentalStartAt" | "carrierRentalDueAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "actualRentalStartAt" | "carrierRentalDueAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">
+        & Partial<Pick<RentalOrder, "tenantId" | "allocations" | "feeReviews" | "chargeLines">>;
       previousExtensions?: RentalOrderExtension[];
+      previousChanges?: RentalOrderChange[];
+      tx?: RentalBusinessFactTx;
       lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "id" | "inventoryMode" | "amount">>>;
       newEndAt: string;
       services?: RentalOrderExtensionRequest["services"];
@@ -6553,20 +6846,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       mode?: "line_cancellation" | "post_pickup_exchange" | "carrier_repricing" | "carrier_return_repricing";
       /** SHIP-01：以已核验的客户签收时点替代预约起点，仍使用原报价版本与优惠快照。 */
       actualStartAt?: string;
-      /** ORDER-CHANGE-01E：换货只替换一条订单行的价格事实，优惠仍按原规则重算。 */
-      exchangeReplacement?: {
-        lineId: string;
-        targetId: string;
-        rate: RentalPricingRate;
-        dayRate?: RentalPricingRate;
-        planId: string;
-        planVersion: string;
-        calendars?: RentalCalendarYear[];
-      };
-      /** 换货时明确取消的、尚未开始的可选服务。 */
-      exchangeCancelledServiceOccurrenceIds?: string[];
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
+    if (args.mode === "post_pickup_exchange") throw new ConflictException("换货须通过稳定行剩余计价入口，不能全租期套用替换价格");
+    const hasExchange = args.order.allocations?.some(row => ["picked_up", "locked"].includes(row.status) && row.metadata?.exchangeId);
+    if (hasExchange && args.mode) {
+      throw new ConflictException("换货后全租期或承运重算缺少稳定行来源接线，须人工核价，不能重算已履行段");
+    }
     const state = this.state(tenantId, context);
     const carrierRepricing = args.mode === "carrier_repricing" || args.mode === "carrier_return_repricing";
     const carrierReturnRepricing = args.mode === "carrier_return_repricing";
@@ -6576,39 +6862,46 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       actualRentalStartAt: args.order.actualRentalStartAt
     }) : (args.order.effectiveEndAt ?? args.order.endAt);
     const pricingStartAt = carrierRepricing ? (args.actualStartAt ?? args.order.startAt) : args.order.startAt;
-    const postPickupExchange = args.mode === "post_pickup_exchange";
-    const lineCancellation = args.mode === "line_cancellation" || postPickupExchange;
+    const lineCancellation = args.mode === "line_cancellation";
     if (!lineCancellation && (carrierReturnRepricing
       ? new Date(args.newEndAt).getTime() <= new Date(pricingStartAt).getTime()
       : new Date(args.newEndAt).getTime() <= new Date(from).getTime())) {
       throw new BadRequestException(carrierReturnRepricing ? "承运实际计租结束时间必须晚于客户签收时间" : "新的归还时间必须晚于当前归还时间");
     }
-    const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
+    const originalQuote = await this.loadQuote(tenantId, context, args.order.quoteId, args.tx);
     const rule = { config: originalQuote.ruleSnapshot, version: originalQuote.ruleVersion };
     if (!lineCancellation && !carrierRepricing && !effectiveExtensionRule(rule.config).enabled) throw new ConflictException("原订单规则不允许续租");
     if (!lineCancellation && !carrierRepricing && (effectiveExtensionRule(rule.config).pricingMode ?? "incremental") === "incremental") {
       return this.quoteIncrementalExtension(tenantId, context, args);
     }
+    if (hasExchange) throw new ConflictException("换货后全租期重算缺少稳定行来源接线，须人工核价，不能重算已履行段");
     if (!lineCancellation && !carrierRepricing && Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
     const previous = (args.previousExtensions ?? []).filter((row) => row.status === "effective").sort((a, b) => a.sequence - b.sequence);
     if (!lineCancellation && !carrierRepricing && from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
-    if (lineCancellation && !postPickupExchange && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
+    if (lineCancellation && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
       throw new ConflictException("本轮部分取消暂不支持已包含增值服务的订单，请先人工处理服务释放与退款");
     }
-    const savedContext = previous.at(-1)?.pricingSnapshot?.context ?? originalQuote.pricingContext;
-    const timeZone = savedContext?.timeZone ?? context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    if (!lineCancellation && !carrierRepricing) {
+      assertOriginalTotalExtensionReceipts(tenantId, this.workspaceOf(tenantId), args.order, from, originalQuote.currency, previous, originalQuote);
+    }
+    const latestExtension = previous.at(-1);
+    const latestPricing = latestExtension?.pricingSnapshot;
+    const pricingContext = restoreRentalRepricingContext(tenantId, {
+      context: latestExtension ? latestPricing?.context : originalQuote.pricingContext,
+      startAt: pricingStartAt, endAt: args.newEndAt,
+      references: previous.at(-1)?.calendarSnapshot ?? originalQuote.calendarSnapshot,
+      historicalCalendars: state.calendars, rates: originalQuote.rateSnapshot,
+      billedEndAt: previous.at(-1)?.newEndAt ?? args.order.endAt,
+      newYearCalendar: (year) => {
+        const published = state.calendars.filter(row => row.year === year && row.status === "published");
+        if (published.length > 1) throw new ConflictException("新增续租年度存在多个已发布日历，不能猜测采用版本");
+        return published[0] ?? this.buildCalendar(tenantId, context.settings, year);
+      }
+    });
+    if (!originalQuote.currency) throw new ConflictException("原报价缺少币种，不能用当前空间币种自动重算");
+    const { timeZone, legacyDayTypeMultipliers, calendars: fullCalendars } = pricingContext;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
     const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
-    const legacyDayTypeMultipliers = savedContext?.legacyDayTypeMultipliers ?? context.settings.pricing.holidayPricingEnabled;
-    const fullCalendars = this.calendarsForDateRange(tenantId, {
-      ...context, settings: { ...context.settings, calendar: { ...context.settings.calendar, timeZone } }
-    }, pricingStartAt, args.newEndAt).map((current) => {
-      const saved = savedContext?.calendars?.find((calendar) => calendar.year === current.year);
-      const version = originalQuote.calendarSnapshot.find((row) => row.year === current.year)?.calendarVersion;
-      const historical = version && version !== "draft" ? state.calendars.find((calendar) => calendar.year === current.year && calendar.version === version) : undefined;
-      return structuredClone(saved ?? (historical ? { ...historical, status: "published" as const } : current));
-    });
-    const pricingContext: RentalRepricingContext = { timeZone, legacyDayTypeMultipliers, calendars: fullCalendars, dayRates: savedContext?.dayRates };
 
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     const calendarSnapshot: RentalQuoteCalendarDay[] = [];
@@ -6624,13 +6917,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const line of args.lines) {
       const group = groups.get(line.itemGroupId);
       if (!group) throw new ConflictException("订单行的产品型号已不存在，无法续租");
-      const exchangeReplacement = postPickupExchange && args.exchangeReplacement?.lineId === line.id ? args.exchangeReplacement : undefined;
       const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
-      const target = exchangeReplacement?.targetId ?? line.pricingGroupId ?? line.itemGroupId;
-      const originalLine = exchangeReplacement
-        ? originalQuote.request.lines.find((row) => row.itemGroupId === (args.order.lines.find((item) => item.id === line.id)?.itemGroupId ?? row.itemGroupId))
-        : originalQuote.request.lines.find((row) => (row.pricingGroupId ?? row.itemGroupId) === target);
-      const rate = exchangeReplacement?.rate ?? originalQuote.rateSnapshot.find((item) => pricingTargetId(item) === target && (!originalLine?.pricingUnit || item.unit === originalLine.pricingUnit));
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const originalLine = originalQuote.request.lines.find((row) => (row.pricingGroupId ?? row.itemGroupId) === target);
+      const rate = originalQuote.rateSnapshot.find((item) => pricingTargetId(item) === target && (!originalLine?.pricingUnit || item.unit === originalLine.pricingUnit));
       if (!rate) {
         throw new ConflictException(
           `${pricingGroup?.name ?? group.name} 缺少原订单费率快照，不能改用现价续租`
@@ -6662,7 +6952,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           detail: `一次性耗材仅在领取时消耗，续租不重复计费；原订单金额 ${preservedAmount}`
         });
         rateSnapshot.push(structuredClone(rate));
-        fullSecurityLines.push(securityLine);
+        fullSecurityLines.push({ ...securityLine, itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId });
         continue;
       }
       const shared = {
@@ -6676,19 +6966,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         legacyDayTypeMultipliers,
         usageQuantity: originalLine?.usageQuantity,
         hourToDay: rule.config.pricing,
-        dayRate: exchangeReplacement?.rate.unit === "day_24h"
-          ? exchangeReplacement.rate
-          : exchangeReplacement?.dayRate ?? savedContext?.dayRates?.find(row => pricingTargetId(row) === target && row.unit === "day_24h"),
-        planId: exchangeReplacement?.planId ?? originalQuote.priceVersionId ?? originalQuote.id,
-        planVersion: exchangeReplacement?.planVersion ?? originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
-        frozenCalendarRows: savedContext ? undefined : originalQuote.calendarSnapshot
+        dayRate: pricingContext.dayRates?.find(row => pricingTargetId(row) === target && row.unit === "day_24h"),
+        planId: originalQuote.priceVersionId ?? originalQuote.id,
+        planVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion
       };
       // 全租期统一进位、选阶梯、封顶，再与已计金额求差；不再把每次续租单独起算。
       const full = this.priceRentalLine({
         ...shared,
         startAt: pricingStartAt,
         endAt: args.newEndAt,
-        calendars: exchangeReplacement?.calendars ?? fullCalendars,
+        calendars: fullCalendars,
         codePrefix: "rental",
         chargeType: "rental"
       });
@@ -6707,7 +6994,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines.push(full.chargeLine);
       calendarSnapshot.push(...full.calendarRows);
       rateSnapshot.push(structuredClone(rate));
-      fullSecurityLines.push(full.securityLine);
+      fullSecurityLines.push({ ...full.securityLine, itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId });
     }
 
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
@@ -6743,27 +7030,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
     }
 
-    // 押金与预授权：按新租期的应收总额减去订单已收，负差额一律归零——
-    // 续租只可能让押金变多或不变，把多收的退回去是退款流程的事，不在续租里做。
-    const security = computeSecurityAmounts(
-      fullSecurityLines,
-      effectiveDepositRule(rule.config),
-      effectivePreauthorizationRule(rule.config)
-    );
-    const depositDeltaRaw = roundMoney(security.deposit.amount - args.order.depositAmount - previous.reduce((sum, row) => sum + row.depositDelta, 0));
-    const preAuthDeltaRaw = roundMoney(security.preauthorization.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0));
+    // Net security requirements retain the original adopted risk benefit. Only
+    // the additional requirement is charged; a reduction is not a cash refund.
+    const security = computeSecurityAmounts(fullSecurityLines, effectiveDepositRule(rule.config), effectivePreauthorizationRule(rule.config));
+    const checkCurrentSecurityRisk = !lineCancellation && !carrierReturnRepricing;
+    const depositMembership = this.repriceMembershipSecurity(originalQuote, context, fullSecurityLines, "deposit", security.deposit.amount, this.workspaceOf(tenantId), checkCurrentSecurityRisk);
+    const preAuthMembership = this.repriceMembershipSecurity(originalQuote, context, fullSecurityLines, "preauthorization", security.preauthorization.amount, this.workspaceOf(tenantId), checkCurrentSecurityRisk);
+    if (checkCurrentSecurityRisk && (depositMembership.evaluation || preAuthMembership.evaluation)) {
+      if (!originalQuote.membershipSnapshot || !this.memberships?.hasOpenRiskForBooking) {
+        throw new ConflictException("当前会员风险读取不可用，不能以原保证金权益批准新业务");
+      }
+      try {
+        if (await this.memberships.hasOpenRiskForBooking(tenantId, this.workspaceOf(tenantId), originalQuote.membershipSnapshot)) {
+          throw new ConflictException("会员存在未关闭风险，不能自动办理保留保证金减免的新业务");
+        }
+      } catch (error) {
+        if (error instanceof ConflictException) throw error;
+        throw new ConflictException("当前会员风险无法核实，保证金减免须人工核定");
+      }
+    }
+    const depositDeltaRaw = roundMoney(depositMembership.amount - args.order.depositAmount - previous.reduce((sum, row) => sum + row.depositDelta, 0));
+    const preAuthDeltaRaw = roundMoney(preAuthMembership.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0));
     const depositDelta = lineCancellation ? depositDeltaRaw : Math.max(0, depositDeltaRaw);
     const preAuthDelta = lineCancellation ? preAuthDeltaRaw : Math.max(0, preAuthDeltaRaw);
-    const cancelledServiceAmount = postPickupExchange
-      ? roundMoney((args.exchangeCancelledServiceOccurrenceIds ?? []).reduce((sum, occurrenceId) => {
-          const row = (args.order.serviceSnapshots ?? []).find((item) => item.occurrenceId === occurrenceId);
-          if (!row) throw new ConflictException("换货要取消的服务发生项不属于当前订单");
-          if ((row.executionStatus ?? "not_started") !== "not_started") throw new ConflictException(`服务「${row.serviceName}」已经开始，不能随换货取消`);
-          if (row.requiredByRule) throw new ConflictException(`服务「${row.serviceName}」属于业务规则要求，必须重新选择适用服务`);
-          return sum + serviceCancellationAmounts(row, row.quantity).refundAmount;
-        }, 0))
-      : 0;
-    const fullServiceAmount = roundMoney(originalQuote.serviceAmount + previous.reduce((sum, row) => sum + row.serviceAmount, 0) + serviceAmount - cancelledServiceAmount);
+    const fullServiceAmount = roundMoney(originalQuote.serviceAmount + previous.reduce((sum, row) => sum + row.serviceAmount, 0) + serviceAmount);
     // 只复算原订单已采用的优惠，不引入后续新活动，不再次锁券/核销。
     const originalPlans = (originalQuote.discountEvaluations ?? []).filter((row) => row.applied).map((row) => {
       const snapshot = row.planSnapshot ?? state.discountPlans.find((plan) => plan.id === row.planId && plan.version === row.planVersion);
@@ -6811,58 +7101,99 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         fullCouponAmount = this.discountAmount(base, oldCoupon.discountType, oldCoupon.discountValue, oldCoupon.maximumDiscount);
       }
       couponEvaluation = { ...oldCoupon, baseBeforeDiscount: gross, runningBase: base, discountAmount: fullCouponAmount,
+        ...(oldCoupon.appliesTo === "rental" ? { rentalAllocations: allocateDiscount(fullCouponAmount,
+          Object.fromEntries(Object.entries(fullRentalLineAmounts).filter(([id]) => !scopedIds || scopedIds.includes(id))
+            .map(([id, amount]) => [id, Math.max(0, roundMoney(amount - (discounts.rentalLineDiscounts[id] ?? 0)))]))) } : {}),
         formula: `原券 ${oldCoupon.templateVersion}：基数 ${base}${scopedIds ? `（限 ${scopedIds.length} 个适用商品）` : ""}，减免 ${fullCouponAmount}（不重复核销）` };
     }
-    // MKT-02C §4.3-2：发生项必须带「原价 / 减免 / 净额」，退款只能退客户实际支付的净额。
-    //
-    // 原价全租期重算算出的 `discountByTarget.service` 与 `fullCouponAmount` 是**整单**服务维度
-    // 的减免；本次续租该分摊到的只是增量：全额减去已经归属给原报价与前几次续租的部分，
-    // 再按本次新增服务的金额比例分配。口径与 `differenceAmount`「全额减已计」完全一致。
-    //
-    // 不回填的后果是发生项的净额恒等于原价：原订单有服务八折时，界面与退款依据都会按
-    // 原价算，多退的正是那笔折扣。
-    if (serviceSnapshots?.length) {
-      const alreadyAllocated = [...(originalQuote.serviceSnapshots ?? []), ...previous.flatMap((row) => row.serviceSnapshots ?? [])];
-      const discountBefore = roundMoney(alreadyAllocated.reduce((sum, row) => sum + Number(row.discountAllocatedAmount ?? 0), 0));
-      const couponBefore = roundMoney(alreadyAllocated.reduce((sum, row) => sum + Number(row.couponAllocatedAmount ?? 0), 0));
-      const discountDelta = Math.max(0, roundMoney((discounts.discountByTarget.service ?? 0) - discountBefore));
-      const couponDelta = couponEvaluation?.appliesTo === "service" ? Math.max(0, roundMoney(fullCouponAmount - couponBefore)) : 0;
-      const bases = Object.fromEntries(serviceSnapshots.map((row) => [row.serviceId, row.amount]));
-      const discountAllocations = discountDelta > 0 ? allocateDiscount(discountDelta, bases) : {};
-      const couponAllocations = couponDelta > 0 ? allocateDiscount(couponDelta, bases) : {};
-      for (const snapshot of serviceSnapshots) {
-        snapshot.discountAllocatedAmount = discountAllocations[snapshot.serviceId] ?? 0;
-        snapshot.couponAllocatedAmount = couponAllocations[snapshot.serviceId] ?? 0;
+    const originalServices = [...(originalQuote.serviceSnapshots ?? []), ...previous.flatMap(row => row.serviceSnapshots ?? [])];
+    const fullServiceBases: Record<string, number> = {};
+    for (const service of [...originalServices, ...(serviceSnapshots ?? [])]) {
+      if (!service.serviceId || !Number.isFinite(service.amount) || service.amount < 0
+        || !Number.isFinite(service.discountAllocatedAmount ?? 0) || (service.discountAllocatedAmount ?? 0) < 0
+        || !Number.isFinite(service.couponAllocatedAmount ?? 0) || (service.couponAllocatedAmount ?? 0) < 0
+        || (service.discountAllocatedAmount ?? 0) + (service.couponAllocatedAmount ?? 0) > service.amount) {
+        throw new ConflictException("原服务金额或优惠分摊无效，不能自动重算");
       }
+      fullServiceBases[service.serviceId] = roundMoney((fullServiceBases[service.serviceId] ?? 0) + service.amount);
     }
-    // 会员权益：只复算原报价里**已生效**的那几条，不引入后续新权益——与优惠方案同一口径。
-    //
-    // 漏掉这一步是 Codex review #2 的第一个反例：日租 240、会员九折、原应付 216，
-    // 延长后仍在同一天内，全租期租金还是 240，而重算不减会员的 24 → 差额 24，
-    // 等于把整个会员折扣向客户虚收一遍。
-    //
-    // 基数口径与原报价一致：方案优惠与券之后的净额。原快照存了 `base` 就精确重算，
-    // 历史快照没有则冻结原减免额——保守方向，宁可少减也不虚收。
+    if ((discounts.discountByTarget.service > 0 || couponEvaluation?.appliesTo === "service"
+      || originalQuote.membershipBenefitEvaluations?.some(row => row.appliesTo === "service" && row.appliedAmount > 0))
+      && roundMoney(Object.values(fullServiceBases).reduce((sum, amount) => sum + amount, 0)) !== fullServiceAmount) {
+      throw new ConflictException("服务重算总额与原发生项不一致，须人工核定优惠及取消净额");
+    }
+    const servicePlanAllocations = allocateDiscount(discounts.discountByTarget.service ?? 0, fullServiceBases);
+    const serviceCouponBases = Object.fromEntries(Object.entries(fullServiceBases).map(([id, amount]) =>
+      [id, Math.max(0, amount - (servicePlanAllocations[id] ?? 0))]));
+    const serviceCouponAllocations = couponEvaluation?.appliesTo === "service" ? allocateDiscount(fullCouponAmount, serviceCouponBases) : {};
+    const serviceMembershipAllocations: Record<string, number> = {};
+    const membershipBenefitEvaluations: RentalMembershipBenefitEvaluation[] = [];
+    // Only adopted benefits survive. Frozen applicability is not a fresh entitlement;
+    // legacy service benefits need original allocation keys instead of today's plan.
     const appliedMembership = (originalQuote.membershipBenefitEvaluations ?? []).filter(
-      (row) => row.appliedAmount > 0 && (row.appliesTo === "rental" || row.appliesTo === "service")
+      row => row.appliedAmount > 0 && (row.appliesTo === "rental" || row.appliesTo === "service")
     );
     let fullMembershipAmount = 0;
+    const seenMembershipTargets = new Set<string>();
     for (const benefit of appliedMembership) {
-      // 显式窄化：`appliesTo` 的联合比优惠基数的键更宽（还含押金/预授权等），
-      // 上面的 filter 不是类型守卫，直接索引会被判 any。
-      const target: "rental" | "service" = benefit.appliesTo === "rental" ? "rental" : "service";
-      const grossTarget = target === "rental" ? fullRentalAmount : fullServiceAmount;
-      const couponOnTarget = couponEvaluation?.appliesTo === target ? fullCouponAmount : 0;
-      const newBase = Math.max(0, roundMoney(grossTarget - (discounts.discountByTarget[target] ?? 0) - couponOnTarget));
-      fullMembershipAmount = roundMoney(fullMembershipAmount + (
-        benefit.base === undefined
-          ? benefit.appliedAmount
-          : this.membershipBenefitAmount(
-              { calculation: benefit.calculation, value: benefit.configuredValue, maximum: benefit.configuredMaximum },
-              newBase
-            )
-      ));
+      const target = benefit.appliesTo === "rental" ? "rental" : "service";
+      if (seenMembershipTargets.has(target) || !Number.isFinite(benefit.appliedAmount)
+        || benefit.scopeMatched === false || !membershipBenefitScopeMatches(benefit.scope, this.workspaceOf(tenantId), context.category.code)
+        || !Number.isFinite(benefit.configuredValue) || benefit.configuredValue <= 0 || benefit.calculation === "priority"
+        || benefit.base !== undefined && (!Number.isFinite(benefit.base) || benefit.base < 0)
+        || benefit.configuredMaximum !== undefined && (!Number.isFinite(benefit.configuredMaximum) || benefit.configuredMaximum < 0)) {
+        throw new ConflictException("原会员金额权益或适用范围无效，不能自动重算");
+      }
+      seenMembershipTargets.add(target);
+      let scopedIds = benefit.allocations ? Object.keys(benefit.allocations) : undefined;
+      if (target === "service") {
+        scopedIds = benefit.applicableServiceIds === undefined ? scopedIds
+          : benefit.applicableServiceIds.length ? benefit.applicableServiceIds : Object.keys(fullServiceBases);
+        if (!scopedIds?.length || scopedIds.some(id => typeof id !== "string" || !id.trim())
+          || benefit.allocations && Object.keys(benefit.allocations).some(id => !scopedIds!.includes(id))) {
+          throw new ConflictException("原会员服务权益缺少适用服务快照，不能扩大到全部服务");
+        }
+      }
+      const bases = Object.fromEntries(Object.entries(target === "rental" ? fullRentalLineAmounts : fullServiceBases)
+        .filter(([id]) => !scopedIds || scopedIds.includes(id)).map(([id, amount]) => [id, Math.max(0, roundMoney(amount
+          - (target === "rental" ? discounts.rentalLineDiscounts[id] ?? 0 : servicePlanAllocations[id] ?? 0)
+          - (target === "rental" ? couponEvaluation?.rentalAllocations?.[id] ?? 0 : serviceCouponAllocations[id] ?? 0)))]));
+      const newBase = roundMoney(Object.values(bases).reduce((sum, amount) => sum + amount, 0));
+      const amount = benefit.base === undefined ? Math.min(benefit.appliedAmount, newBase)
+        : this.membershipBenefitAmount({ calculation: benefit.calculation, value: benefit.configuredValue, maximum: benefit.configuredMaximum }, newBase);
+      const allocations = allocateDiscount(amount, bases);
+      if (target === "service") for (const [id, value] of Object.entries(allocations)) {
+        serviceMembershipAllocations[id] = roundMoney((serviceMembershipAllocations[id] ?? 0) + value);
+      }
+      membershipBenefitEvaluations.push({ ...structuredClone(benefit), base: newBase, appliedAmount: amount, allocations,
+        detail: `原 ${benefit.planName}：适用净基数 ${newBase}，减免 ${amount}` });
+      fullMembershipAmount = roundMoney(fullMembershipAmount + amount);
     }
+    if (couponEvaluation?.appliesTo === "service") couponEvaluation.serviceAllocations = serviceCouponAllocations;
+    // Existing occurrences stay immutable. New occurrences receive only the
+    // additional discount belonging to their own service, after plan/coupon/member.
+    for (const id of Object.keys(fullServiceBases)) {
+      const added = (serviceSnapshots ?? []).filter(row => row.serviceId === id);
+      const before = originalServices.filter(row => row.serviceId === id);
+      const discountBefore = roundMoney(before.reduce((sum, row) => sum + (row.discountAllocatedAmount ?? 0), 0));
+      const couponBefore = roundMoney(before.reduce((sum, row) => sum + (row.couponAllocatedAmount ?? 0), 0));
+      const discountDelta = roundMoney((servicePlanAllocations[id] ?? 0) + (serviceMembershipAllocations[id] ?? 0) - discountBefore);
+      const couponDelta = roundMoney((serviceCouponAllocations[id] ?? 0) - couponBefore);
+      const addedAmount = roundMoney(added.reduce((sum, row) => sum + row.amount, 0));
+      if (!lineCancellation && (discountDelta < 0 || couponDelta < 0 || discountDelta + couponDelta > addedAmount)) {
+        throw new ConflictException("服务优惠重算不能归属新增发生项，须先人工核定原服务净额");
+      }
+      const bases = Object.fromEntries(added.map((row, index) => [String(index), row.amount]));
+      const discountAllocations = allocateDiscount(Math.max(0, discountDelta), bases);
+      const couponBases = Object.fromEntries(added.map((row, index) => [String(index), Math.max(0, row.amount - (discountAllocations[String(index)] ?? 0))]));
+      const couponAllocations = allocateDiscount(Math.max(0, couponDelta), couponBases);
+      added.forEach((row, index) => {
+        row.discountAllocatedAmount = discountAllocations[String(index)] ?? 0;
+        row.couponAllocatedAmount = couponAllocations[String(index)] ?? 0;
+      });
+    }
+    if (depositMembership.evaluation) membershipBenefitEvaluations.push(depositMembership.evaluation);
+    if (preAuthMembership.evaluation) membershipBenefitEvaluations.push(preAuthMembership.evaluation);
     // 与原报价的 `discountAmount` 组成保持一致（方案 + 会员），否则
     // previousPayableAmount 与 recalculatedPayableAmount 不是同一口径，差额必然错。
     const fullDiscountAmount = roundMoney(planDiscountAmount + fullMembershipAmount);
@@ -6896,7 +7227,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       depositDelta,
       preAuthDelta,
       payableAmount,
-      currency: originalQuote.currency ?? context.settings.pricing.currency,
+      currency: originalQuote.currency,
       settlementMode: args.settlementMode,
       // 押金/预授权差额也必须先收：只看租金差额会让「租金不变、押金要补 100」的续租
       // 直接生效，押金从此收不回来。三者任一为正就要走补款确认这一步。
@@ -6909,7 +7240,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       pricingSnapshot: {
         method: "original_version_difference", context: pricingContext, previousPayableAmount, recalculatedPayableAmount,
         recalculatedRentalAmount: fullRentalAmount, recalculatedServiceAmount: fullServiceAmount,
-        recalculatedDiscountAmount: fullDiscountAmount, recalculatedCouponAmount: fullCouponAmount,
+        recalculatedDiscountAmount: fullDiscountAmount, recalculatedCouponAmount: fullCouponAmount, membershipBenefitEvaluations,
         totalBillableUnits, differenceAmount, discountEvaluations: discounts.evaluations, couponEvaluation,
         chargeLines: deltaLines, fullChargeLines: chargeLines,
         refundReview: differenceAmount < 0 ? { amount: -differenceAmount, status: "pending" } : undefined
@@ -6924,7 +7255,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   /** Freeze the replacement action's execution evidence separately from the original order. */
   async captureExchangeExecutionBasis(
     tenantId: string, context: BusinessContext, priceBasis: RentalOrderExchangePriceBasis, effectiveFrom: string,
-    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig;
+      linePricing?: RentalOrderExchangeExecutionBasis["linePricing"] }
   ): Promise<RentalOrderExchangeExecutionBasis> {
     const current = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
     if (current && !isDeepStrictEqual(current.definition, context.category)) throw new ConflictException("品类版本在换货准备期间已变化，请重新试算");
@@ -6938,23 +7270,211 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       categoryPolicySnapshot: current?.definition, effectiveFrom, priceBasis,
       pricingStrategies: [...units].map(rentalPricingStrategyReference),
       rateSnapshot: priced.rateSnapshot, ruleSnapshot: priced.ruleSnapshot, calendarSnapshot: priced.calendarSnapshot,
-      pricingSnapshot: priced.pricingSnapshot,
+      pricingSnapshot: priced.pricingSnapshot, linePricing: priced.linePricing,
       inspectionTemplateSnapshots: templates.filter((row) => row.enabled).map((row) => snapshotInspectionTemplate(context.category, row)),
       capabilitySnapshot: this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined
     });
   }
 
+  private newExchangePricingSegment(context: BusinessContext, orderLineId: string,
+    group: { id: string; code: string; name: string }, pricingGroup: { id: string; code: string; name: string } | undefined,
+    quantity: number, startAt: string, endAt: string, rate: RentalPricingRate, rule: RentalRuleConfig,
+    pricingContext: RentalRepricingContext, applyMinimumUnits: boolean, source: RentalOrderExchangePricingSegment["source"]): RentalOrderExchangePricingSegment {
+    const priced = this.priceRentalLine({ group, pricingGroup, quantity, startAt, endAt, rate,
+      dayRate: rate.unit === "day_24h" ? rate : pricingContext.dayRates?.find(row => pricingTargetId(row) === pricingTargetId(rate)),
+      hourToDay: rule.pricing, timeZone: pricingContext.timeZone, calendars: pricingContext.calendars,
+      legacyDayTypeMultipliers: pricingContext.legacyDayTypeMultipliers, shiftHours: rule.pricing?.shiftHours,
+      shiftStartHours: rule.pricing?.shiftStartHours, applyMinimumUnits, planId: source.priceVersionId ?? source.id,
+      planVersion: source.priceVersion, codePrefix: "rental", chargeType: "rental" });
+    const billedHours = priced.billedHours ?? billedRentalHours(rate, priced.units, startAt, endAt, {
+      timeZone: pricingContext.timeZone, hourGranularityMinutes: rate.hourGranularityMinutes,
+      shiftHours: rule.pricing?.shiftHours, shiftStartHours: rule.pricing?.shiftStartHours });
+    return { orderLineId, itemGroupId: group.id, pricingGroupId: pricingGroup?.id, quantity, startAt, endAt,
+      rate: structuredClone(rate), source: structuredClone(source), context: structuredClone(pricingContext), ruleSnapshot: structuredClone(rule),
+      calendarSnapshot: priced.calendarRows, applyMinimumUnits, selectedUnitAmount: priced.breakdown.unitAmount,
+      amount: priced.amount, billableUnits: priced.units, billedHours };
+  }
+
+  private splitExchangePricingSegment(context: BusinessContext, segment: RentalOrderExchangePricingSegment, endAt: string): RentalOrderExchangePricingSegment {
+    const group = context.groups.find(row => row.id === segment.itemGroupId);
+    if (!group) throw new ConflictException("原换货计价商品来源无法匹配");
+    const pricingGroup = segment.pricingGroupId ? context.pricingGroups?.find(row => row.id === segment.pricingGroupId) : undefined;
+    const origin = segment.splitBasis ?? { startAt: segment.startAt, endAt: segment.endAt, amount: segment.amount,
+      billableUnits: segment.billableUnits, billedHours: segment.billedHours, applyMinimumUnits: segment.applyMinimumUnits,
+      consumedAmount: 0, consumedUnits: 0, consumedHours: 0 };
+    const priced = this.priceRentalLine({ group, pricingGroup, quantity: segment.quantity, startAt: origin.startAt, endAt,
+      rate: segment.rate, dayRate: segment.context.dayRates?.find(row => pricingTargetId(row) === pricingTargetId(segment.rate)),
+      hourToDay: segment.ruleSnapshot.pricing, timeZone: segment.context.timeZone, calendars: segment.context.calendars,
+      legacyDayTypeMultipliers: segment.context.legacyDayTypeMultipliers,
+      shiftHours: segment.ruleSnapshot.pricing?.shiftHours, shiftStartHours: segment.ruleSnapshot.pricing?.shiftStartHours,
+      applyMinimumUnits: origin.applyMinimumUnits, selectedUnitAmount: segment.selectedUnitAmount,
+      planId: segment.source.priceVersionId ?? segment.source.id, planVersion: segment.source.priceVersion,
+      codePrefix: "rental", chargeType: "rental" });
+    const amount = Math.min(segment.amount, Math.max(0, roundMoney(Math.min(origin.amount, priced.amount) - origin.consumedAmount)));
+    const units = Math.min(segment.billableUnits, Math.max(0, Math.min(origin.billableUnits, priced.units) - origin.consumedUnits));
+    const cumulativeHours = priced.billedHours ?? billedRentalHours(segment.rate, priced.units, origin.startAt, endAt, {
+      timeZone: segment.context.timeZone, hourGranularityMinutes: segment.rate.hourGranularityMinutes,
+      shiftHours: segment.ruleSnapshot.pricing?.shiftHours, shiftStartHours: segment.ruleSnapshot.pricing?.shiftStartHours });
+    const hours = Math.min(segment.billedHours, Math.max(0, Math.min(origin.billedHours, cumulativeHours) - origin.consumedHours));
+    return { ...structuredClone(segment), endAt, amount: roundMoney(amount), billableUnits: units,
+      billedHours: hours, calendarSnapshot: priced.calendarRows };
+  }
+
+  private exchangeLinePricingSources(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1,
+    order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "lines">
+      & Partial<Pick<RentalOrder, "tenantId" | "allocations" | "feeReviews" | "chargeLines">>, line: RentalOrderLine,
+    extensions: RentalOrderExtension[], changes: RentalOrderChange[], purpose: "exchange" | "extension" | "return" = "exchange"): RentalOrderExchangePricingSegment[] {
+    const workspaceId = this.workspaceOf(tenantId);
+    const exchanges = changes.filter(row => exchangeBasis(row) && (row.diff.exchange as { orderLineId?: string }).orderLineId === line.id)
+      .sort((a, b) => a.sequence - b.sequence);
+    if (order.tenantId && order.tenantId !== tenantId || changes.some(row => row.tenantId !== tenantId
+      || row.workspaceId !== workspaceId || row.orderId !== order.id)) throw new ConflictException("换货历史来源不属于原订单空间");
+    for (const change of exchanges.filter(row => purpose !== "return" && row.refundAmount > 0)) {
+      const reviews = order.feeReviews?.filter(row => row.sourceId === change.id && row.type === "early_return_refund") ?? [];
+      const review = reviews[0];
+      const reductions = order.chargeLines?.filter(row => row.type === "early_return_refund"
+        && row.code === `early_return_refund:${order.id}:${change.id}`) ?? [];
+      if (reviews.length !== 1 || review.status !== "approved" || !Number.isFinite(review.decidedAmount)
+        || roundMoney(review.decidedAmount!) !== roundMoney(change.refundAmount)
+        || reductions.length !== 1 || roundMoney(reductions[0].amount) !== roundMoney(-change.refundAmount)) {
+        throw new ConflictException("此前换货负差额尚未完整核减，须先处理原审核，不能重复抵扣或另收差额");
+      }
+    }
+    const latest = exchanges.at(-1);
+    const effective = extensions.filter(row => row.status === "effective").sort((a, b) => a.sequence - b.sequence);
+    if (effective.some(row => row.tenantId !== tenantId || row.orderId !== order.id || row.workspaceId !== workspaceId)) {
+      throw new ConflictException("换货续租来源不属于原订单空间");
+    }
+    if (effective.some(row => row.pricingSnapshot?.refundReview && row.pricingSnapshot.refundReview.status !== "approved")) {
+      throw new ConflictException("原续租负差额尚未完整核减，不能把理论租金当作账面已计金额换货");
+    }
+    let segments: RentalOrderExchangePricingSegment[];
+    let sourceEnd: string;
+    if (latest) {
+      const exchange = latest.diff.exchange as { replacementItemGroupId?: string; replacementPricingGroupId?: string };
+      const source = exchangeBasis(latest)?.linePricing;
+      const active = order.allocations?.filter(row => row.orderLineId === line.id && ["picked_up", "locked"].includes(row.status));
+      if (!source || source.version !== 1 || !Array.isArray(source.segments) || source.orderLineId !== line.id || exchange.replacementItemGroupId !== line.itemGroupId
+        || exchange.replacementPricingGroupId !== line.pricingGroupId || active?.some(row => row.metadata?.exchangeId !== latest.id)
+        || !latest.appliedAt || Date.parse(latest.appliedAt) > Date.parse(source.segments.at(-1)?.endAt ?? "")) {
+        throw new ConflictException("再次换货缺少当前分配的稳定行计价收据，不能套用最初报价");
+      }
+      segments = structuredClone(source.segments);
+      sourceEnd = segments.at(-1)?.endAt ?? "";
+      assertExchangePricingSegments(segments, line.id, line.quantity, order.startAt, sourceEnd, source.replacementAmount);
+      if (!Number.isFinite(line.amount) || roundMoney(line.amount) !== source.replacementAmount) throw new ConflictException("当前行租金与原换货收据不一致");
+    } else {
+      if (order.allocations?.some(row => row.orderLineId === line.id && ["picked_up", "locked"].includes(row.status) && row.metadata?.exchangeId)) {
+        throw new ConflictException("当前分配缺少原换货收据");
+      }
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const requests = quote.request.lines.filter(row => row.itemGroupId === line.itemGroupId && (row.pricingGroupId ?? row.itemGroupId) === target);
+      if (requests.length !== 1 || order.lines.filter(row => (row.pricingGroupId ?? row.itemGroupId) === target).length !== 1
+        || requests[0].quantity !== line.quantity || order.startAt !== quote.request.startAt || order.endAt !== quote.request.endAt) {
+        throw new ConflictException("原报价缺少唯一稳定行分摊，不能按相同定价组总额猜测换货价格");
+      }
+      const total = effective.filter(row => row.executionBasis?.pricingMode === "original_total").at(-1);
+      const rates = total?.rateSnapshot ?? quote.rateSnapshot;
+      const matches = rates.filter(row => pricingTargetId(row) === target && (!requests[0].pricingUnit || row.unit === requests[0].pricingUnit));
+      const pricingContext = total?.pricingSnapshot?.context ?? quote.pricingContext;
+      if (matches.length !== 1 || !pricingContext || !pricingContext.timeZone || !Array.isArray(pricingContext.calendars)
+        || typeof pricingContext.legacyDayTypeMultipliers !== "boolean") throw new ConflictException("原报价缺少唯一费率、日历或时区快照");
+      const group = { id: line.itemGroupId, code: line.itemGroupCode, name: line.itemGroupName };
+      const pricingGroup = line.pricingGroupId ? { id: line.pricingGroupId, code: line.pricingGroupCode!, name: line.pricingGroupName! } : undefined;
+      sourceEnd = total?.newEndAt ?? order.endAt;
+      if (total && !total.pricingSnapshot) throw new ConflictException("原全租期续租缺少原重算收据");
+      if (matches[0].unit === "usage" || matches[0].unit === "package") throw new ConflictException("使用量和包段没有可拆分的时间计价依据");
+      const segment = this.newExchangePricingSegment(context, line.id, group, pricingGroup, line.quantity, order.startAt, sourceEnd,
+        matches[0], total?.ruleSnapshot ?? quote.ruleSnapshot, pricingContext, true,
+        { kind: total ? "extension" : "quote", id: total?.id ?? quote.id, priceVersionId: total?.priceVersionId ?? quote.priceVersionId,
+          priceVersion: total?.priceVersion ?? quote.priceVersion ?? quote.pricingPlanVersion });
+      const amounts = total?.pricingSnapshot?.fullChargeLines ?? quote.chargeLines;
+      const rows = amounts.filter(row => row.type === "rental" && row.code === `rental:${matches[0].pricingGroupCode ?? matches[0].itemGroupCode}`);
+      if (rows.length !== 1 || !Number.isFinite(rows[0].amount) || roundMoney(rows[0].amount) !== segment.amount
+        || !total && (!Number.isFinite(line.amount) || roundMoney(line.amount) !== segment.amount)) {
+        throw new ConflictException("原稳定行租金无法按冻结价格复算，不能改用当前配置");
+      }
+      segments = [segment];
+    }
+    for (const extension of effective.filter(row => Date.parse(row.newEndAt) > Date.parse(sourceEnd))) {
+      if (extension.executionBasis?.pricingMode === "original_total" || extension.originalEndAt !== sourceEnd) {
+        throw new ConflictException("换货后的全租期续租或期间缺口没有稳定行来源，须核对原账");
+      }
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const rates = extension.rateSnapshot.filter(row => pricingTargetId(row) === target && row.unit === segments.at(-1)!.rate.unit);
+      const saved = extension.executionBasis?.incrementalPricing;
+      if (!saved) throw new ConflictException("原独立续租缺少可拆分的逐行计价日历，换货须人工核价");
+      assertIncrementalPricingSnapshot(saved, extension.rentalAmount, extension.billableUnits);
+      if (extension.executionBasis?.pricingMode !== "incremental" || extension.pricingSnapshot
+        || Date.parse(saved.startAt) !== Date.parse(extension.originalEndAt) || Date.parse(saved.endAt) !== Date.parse(extension.newEndAt)
+        || saved.context.calendars.some(row => row.tenantId !== tenantId)
+        || typeof extension.priceVersion !== "string" || !extension.priceVersion) {
+        throw new ConflictException("原独立续租缺少本租户计价上下文或原价格版本");
+      }
+      const lines = saved.lines.filter(row => row.orderLineId === line.id && row.itemGroupId === line.itemGroupId
+        && row.pricingGroupId === line.pricingGroupId && row.quantity === line.quantity && row.pricingUnit === segments.at(-1)!.rate.unit);
+      const pricingContext = saved.context;
+      if (rates.length !== 1 || lines.length !== 1) throw new ConflictException("原独立续租缺少唯一稳定行来源，换货须人工核价");
+      const group = { id: line.itemGroupId, code: line.itemGroupCode, name: line.itemGroupName };
+      const pricingGroup = line.pricingGroupId ? { id: line.pricingGroupId, code: line.pricingGroupCode!, name: line.pricingGroupName! } : undefined;
+      const segment = this.newExchangePricingSegment(context, line.id, group, pricingGroup, line.quantity, sourceEnd, extension.newEndAt,
+        rates[0], extension.ruleSnapshot, pricingContext, false, { kind: "extension", id: extension.id,
+          priceVersionId: extension.priceVersionId, priceVersion: extension.priceVersion ?? "" });
+      const savedLine = lines[0];
+      if (savedLine.exchangeId !== latest?.id) throw new ConflictException("原独立续租与当前换货来源不一致");
+      if (roundMoney(savedLine.amount) !== segment.amount || savedLine.billableUnits !== segment.billableUnits
+        || savedLine.billedHours !== segment.billedHours || savedLine.selectedUnitAmount !== segment.selectedUnitAmount) {
+        throw new ConflictException("原独立续租行金额或已计单位无法复算");
+      }
+      segments.push(segment); sourceEnd = extension.newEndAt;
+    }
+    assertExchangePricingSegments(segments, line.id, line.quantity, order.startAt, order.effectiveEndAt ?? order.endAt,
+      roundMoney(segments.reduce((sum, row) => sum + row.amount, 0)));
+    return segments;
+  }
+
+  /** Extend only the return calculation's original billed source. A pending
+   * refund does not prevent receiving the item and does not become a reduction. */
+  exchangeReturnPricingSources(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1,
+    order: RentalOrder, extensions: RentalOrderExtension[], changes: RentalOrderChange[],
+    items?: readonly { allocationId: string; quantity: number }[]): Map<string, RentalOrderExchangePricingSegment[]> {
+    const sources = new Map<string, RentalOrderExchangePricingSegment[]>();
+    const selectedIds = items && new Set(items.map(row => row.allocationId));
+    for (const line of order.lines) {
+      const active = order.allocations.filter(row => row.orderLineId === line.id
+        && ["picked_up", "locked"].includes(row.status) && row.metadata?.exchangeId
+        && (!selectedIds || selectedIds.has(row.id)));
+      if (!active.length) continue;
+      const ids = [...new Set(active.map(row => row.metadata!.exchangeId))];
+      if (ids.length !== 1) throw new ConflictException("当前稳定行存在不一致的换货分配来源");
+      const change = changes.find(row => row.id === ids[0]);
+      const pricing = change && exchangeBasis(change)?.linePricing;
+      const dueAt = order.effectiveEndAt ?? order.endAt;
+      if (pricing && !Array.isArray(pricing.segments)) throw new ConflictException("换货归还缺少有效计价段");
+      if (pricing?.segments.at(-1)?.endAt === dueAt) continue;
+      if (!pricing) {
+        if (dueAt !== order.endAt) throw new ConflictException("旧换货后续租缺少稳定行计价来源，须人工核价");
+        continue;
+      }
+      sources.set(line.id, this.exchangeLinePricingSources(tenantId, context, quote, order, line, extensions, changes, "return"));
+    }
+    return sources;
+  }
+
   /**
-   * ORDER-CHANGE-01E：取货后换货的全租期重算。
-   * 只替换一条完整订单行；原价模式复用订单费率快照，现价模式只替换目标行的
-   * 当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
+   * ORDER-CHANGE-01E：按稳定行的原计价收据保留已履行段，只替换剩余租期。
+   * 原价不重新启动最低起租、阶梯或优惠。现价只作用于确认后的时间，差额仍由
+   * Core 追加落账；旧来源缺失或不能确定优惠分摊时拒绝自动核价。
    */
   async quotePostPickupExchange(
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">
+        & Partial<Pick<RentalOrder, "tenantId" | "ruleSnapshot" | "allocations" | "finalPayableAmount" | "feeReviews" | "chargeLines">>;
       previousExtensions?: RentalOrderExtension[];
+      previousChanges?: RentalOrderChange[];
+      tx?: RentalBusinessFactTx;
       orderLineId: string;
       replacementItemGroupId: string;
       replacementPricingGroupId?: string;
@@ -6966,7 +7486,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       customerType: "personal" | "corporate";
     }
   ) {
-    const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
+    const originalQuote = await this.loadQuote(tenantId, context, args.order.quoteId, args.tx);
+    if (!hasOriginalRentalCurrency(originalQuote.currency, args.priceBasis === "replacement_current_price"
+      ? context.settings.pricing.currency : originalQuote.currency)) {
+      throw new ConflictException("换货原币种缺失或当前替换价格币种不一致，不能换汇或改标金额");
+    }
     const line = args.order.lines.find((row) => row.id === args.orderLineId);
     if (!line) throw new ConflictException("换货订单行不存在");
     if (line.inventoryMode === RentalInventoryMode.Consumable || line.inventoryMode === RentalInventoryMode.Bundle) {
@@ -6991,61 +7515,159 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const originalTarget = line.pricingGroupId ?? line.itemGroupId;
     const effectiveReplacementPricingGroup = replacementPricingGroup ?? inheritedPricingGroup;
     const target = effectiveReplacementPricingGroup?.id ?? replacementGroup.id;
-    const originalRequestLine = originalQuote.request.lines.find((row) =>
-      row.itemGroupId === line.itemGroupId && (row.pricingGroupId ?? row.itemGroupId) === originalTarget
-    );
-    const originalRate = originalQuote.rateSnapshot.find((row) =>
-      pricingTargetId(row) === originalTarget && (!originalRequestLine?.pricingUnit || row.unit === originalRequestLine.pricingUnit)
-    );
-    if (!originalRate) throw new ConflictException("原订单缺少商品费率快照，无法安全换货");
+    const dueAt = args.order.effectiveEndAt ?? args.order.endAt;
+    const exchangeAt = Date.parse(args.appliedAt);
+    const latestExchangeAt = (args.previousChanges ?? []).filter(row => exchangeBasis(row)
+      && (row.diff.exchange as { orderLineId?: string }).orderLineId === line.id)
+      .reduce((latest, row) => Math.max(latest, Date.parse(row.appliedAt ?? "")), Date.parse(args.order.startAt));
+    if (!Number.isFinite(latestExchangeAt) || exchangeAt <= latestExchangeAt && latestExchangeAt !== Date.parse(args.order.startAt)
+      || !Number.isFinite(exchangeAt) || exchangeAt < Date.parse(args.order.startAt) || exchangeAt >= Date.parse(dueAt)) {
+      throw new ConflictException("换货确认必须在实际租期内；已逾时订单须先核定原逾期及新约定租期");
+    }
+    const quantity = line.quantity - (line.cancelledQuantity ?? 0);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity !== line.quantity) {
+      throw new ConflictException("换货行已经部分取消，须先核对原逐行计价来源");
+    }
+    const previousSegments = this.exchangeLinePricingSources(tenantId, context, originalQuote, args.order,
+      line, args.previousExtensions ?? [], args.previousChanges ?? []);
+    const originalRate = previousSegments.at(-1)!.rate;
+    const pricingRule = args.order.ruleSnapshot ?? originalQuote.ruleSnapshot;
     const currentVersion = args.priceBasis === "replacement_current_price"
-      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt)
-      : undefined;
-    const rate = args.priceBasis === "original_order_price"
-      ? originalRate
-      : currentVersion?.rates.find((row) => pricingTargetId(row) === target && row.unit === originalRate.unit);
-    if (!rate) throw new ConflictException(`${replacementGroup.name} 缺少当前价格版本中的 ${originalRate.unit} 价格`);
-    const lines = args.order.lines.map((row) => row.id === args.orderLineId
-      ? { ...row, itemGroupId: replacementGroup.id, pricingGroupId: effectiveReplacementPricingGroup?.id, id: row.id }
-      : { ...row, id: row.id });
-    const priced = await this.quoteOrderExtension(tenantId, context, {
-      order: args.order,
-      previousExtensions: args.previousExtensions,
-      lines,
-      newEndAt: args.order.effectiveEndAt ?? args.order.endAt,
-      services: undefined,
-      appliedAt: args.appliedAt,
-      settlementMode: "immediate",
-      fulfillmentMode: args.fulfillmentMode,
-      locationIds: args.locationIds,
-      customerType: args.customerType,
-      mode: "post_pickup_exchange",
-      exchangeCancelledServiceOccurrenceIds: args.exchangeCancelledServiceOccurrenceIds,
-      exchangeReplacement: {
-        lineId: args.orderLineId,
-        targetId: target,
-        rate,
-        dayRate: (currentVersion?.rates ?? originalQuote.rateSnapshot).find((row) => pricingTargetId(row) === target && row.unit === "day_24h"),
-        planId: currentVersion && "versionId" in currentVersion ? String(currentVersion.versionId) : (originalQuote.priceVersionId ?? originalQuote.id),
-        planVersion: currentVersion && "version" in currentVersion ? String(currentVersion.version) : (originalQuote.priceVersion ?? originalQuote.pricingPlanVersion),
-        calendars: currentVersion ? this.calendarsForDateRange(tenantId, context, args.order.startAt, args.order.effectiveEndAt ?? args.order.endAt) : undefined
-      }
+      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt, args.tx) : undefined;
+    if (currentVersion && (!("versionId" in currentVersion) || !("version" in currentVersion)
+      || typeof currentVersion.versionId !== "string" || !currentVersion.versionId
+      || typeof currentVersion.version !== "string" || !currentVersion.version)) {
+      throw new ConflictException("替换商品缺少已发布价格版本，不能用原报价身份冒充当前版本");
+    }
+    const matches = currentVersion?.rates.filter(row => pricingTargetId(row) === target && row.unit === originalRate.unit);
+    if (currentVersion && matches?.length !== 1) throw new ConflictException(`${replacementGroup.name} 缺少唯一当前 ${originalRate.unit} 价格`);
+    const rate = currentVersion ? matches![0] : originalRate;
+    if (!["original_order_price", "replacement_current_price"].includes(args.priceBasis)) throw new ConflictException("换货价格基准无效");
+    if (pricingRule.pricing?.hourToDayEnabled && previousSegments.some(row => row.rate.unit === "hour"
+      && ((row.rate.tiers?.length ?? 0) > 0 || row.context.dayRates?.some(day => (day.tiers?.length ?? 0) > 0)))) {
+      throw new ConflictException("原时租转日租的阶梯逐块来源不足，不能缩短已用段后重新选档");
+    }
+    if (rate.unit === "usage" || rate.unit === "package") throw new ConflictException("使用量和包段不能按剩余时间自动折算换货");
+    const segments: RentalOrderExchangePricingSegment[] = [];
+    const remaining: RentalOrderExchangePricingSegment[] = [];
+    for (const segment of previousSegments) {
+      if (Date.parse(segment.endAt) <= exchangeAt) { segments.push(structuredClone(segment)); continue; }
+      if (Date.parse(segment.startAt) >= exchangeAt) { remaining.push(structuredClone(segment)); continue; }
+      const used = this.splitExchangePricingSegment(context, segment, args.appliedAt);
+      segments.push(used);
+      const origin = segment.splitBasis ?? { startAt: segment.startAt, endAt: segment.endAt, amount: segment.amount,
+        billableUnits: segment.billableUnits, billedHours: segment.billedHours, applyMinimumUnits: segment.applyMinimumUnits,
+        consumedAmount: 0, consumedUnits: 0, consumedHours: 0 };
+      remaining.push({ ...structuredClone(segment), startAt: args.appliedAt, applyMinimumUnits: false,
+        amount: roundMoney(segment.amount - used.amount), billableUnits: Math.max(0, segment.billableUnits - used.billableUnits),
+        billedHours: Math.max(0, segment.billedHours - used.billedHours), splitBasis: { ...origin,
+          consumedAmount: roundMoney(origin.consumedAmount + used.amount), consumedUnits: origin.consumedUnits + used.billableUnits,
+          consumedHours: origin.consumedHours + used.billedHours } });
+    }
+    const retainedAmount = roundMoney(segments.reduce((sum, row) => sum + row.amount, 0));
+    let replacementContext: RentalRepricingContext;
+    if (args.priceBasis === "original_order_price") {
+      replacementContext = structuredClone(remaining.at(-1)!.context);
+      segments.push(...remaining.map(segment => ({ ...segment, itemGroupId: replacementGroup.id, pricingGroupId: effectiveReplacementPricingGroup?.id })));
+    } else {
+      const timeZone = previousSegments.at(-1)!.context.timeZone;
+      replacementContext = { timeZone, legacyDayTypeMultipliers: context.settings.pricing.holidayPricingEnabled,
+        calendars: this.calendarsForDateRange(tenantId, { ...context,
+          settings: { ...context.settings, calendar: { ...context.settings.calendar, timeZone } } }, args.appliedAt, dueAt),
+        dayRates: currentVersion!.rates.filter(row => pricingTargetId(row) === target && row.unit === "day_24h").map(row => structuredClone(row)) };
+      // A replacement is not another initial rental. The new rate's cap is the
+      // single-line ceiling, with performed rental already consuming that budget.
+      const availableCap = rate.maxAmount === undefined ? undefined : Math.max(0, rate.maxAmount - retainedAmount / quantity);
+      const pricedRate = { ...rate, maxAmount: availableCap };
+      const version = currentVersion as { versionId?: string; version?: string };
+      const replacement = this.newExchangePricingSegment(context, line.id, replacementGroup, effectiveReplacementPricingGroup,
+        quantity, args.appliedAt, dueAt, pricedRate, pricingRule, replacementContext, false,
+        { kind: "price_version", id: version.versionId!, priceVersionId: version.versionId,
+          priceVersion: version.version! });
+      // Keep the published rate intact; the remaining cap is a calculation input
+      // and the exact billed amount/units are frozen separately in the receipt.
+      replacement.rate = structuredClone(rate);
+      segments.push(replacement);
+    }
+    const originalAmount = roundMoney(previousSegments.reduce((sum, row) => sum + row.amount, 0));
+    const replacementAmount = roundMoney(segments.reduce((sum, row) => sum + row.amount, 0));
+    assertExchangePricingSegments(segments, line.id, quantity, args.order.startAt, dueAt, replacementAmount);
+    const rentalDelta = roundMoney(replacementAmount - originalAmount);
+    if (rentalDelta !== 0 && ((originalQuote.discountEvaluations ?? []).some(row => row.applied && row.discountAmount > 0)
+      || originalQuote.couponAmount > 0 || (originalQuote.membershipBenefitEvaluations ?? []).some(row => row.appliedAmount > 0
+        && (row.appliesTo === "rental" || row.appliesTo === "service"))
+      || (args.previousExtensions ?? []).some(row => row.status === "effective" && row.pricingSnapshot
+        && (row.pricingSnapshot.recalculatedDiscountAmount > 0 || row.pricingSnapshot.recalculatedCouponAmount > 0)))) {
+      throw new ConflictException("原优惠的已用与剩余逐段分摊尚不可核实，不能全租期重算或静默取消优惠");
+    }
+    const cancelledServiceIds = args.exchangeCancelledServiceOccurrenceIds ?? [];
+    if (new Set(cancelledServiceIds).size !== cancelledServiceIds.length) throw new ConflictException("换货服务取消不可重复");
+    const serviceRefund = roundMoney(cancelledServiceIds.reduce((sum, occurrenceId) => {
+      const row = args.order.serviceSnapshots?.find(item => item.occurrenceId === occurrenceId);
+      if (!row || (row.executionStatus ?? "not_started") !== "not_started" || row.requiredByRule
+        || row.refundStatus && row.refundStatus !== "none") throw new ConflictException("换货服务缺少可取消的原发生项");
+      return sum + serviceCancellationAmounts(row, row.quantity).refundAmount;
+    }, 0));
+    const differenceAmount = roundMoney(rentalDelta - serviceRefund);
+    const beforePayable = args.order.finalPayableAmount ?? originalQuote.payableAmount;
+    if (!Number.isFinite(beforePayable) || beforePayable + differenceAmount < 0) throw new ConflictException("换货差额超出原应收，须核对");
+    if (!originalQuote.currency) throw new ConflictException("原报价缺少币种，不能用当前空间币种补写换货金额");
+    const securityLines: SecurityLineInput[] = args.order.lines.map(row => {
+      const replaced = row.id === line.id;
+      const sourceRate = replaced ? rate : originalQuote.rateSnapshot.find(item => pricingTargetId(item) === (row.pricingGroupId ?? row.itemGroupId));
+      if (!sourceRate || !Number.isFinite(row.amount) || row.amount < 0) throw new ConflictException("换货保证金缺少其他稳定行原金额及费率");
+      return { itemGroupId: replaced ? replacementGroup.id : row.itemGroupId,
+        pricingGroupId: replaced ? effectiveReplacementPricingGroup?.id : row.pricingGroupId,
+        groupName: replaced ? replacementGroup.name : row.itemGroupName, quantity: row.quantity,
+        lineRental: replaced ? replacementAmount : row.amount, depositUnit: sourceRate.depositAmount,
+        depositMultiple: sourceRate.depositMultiple ?? 0, preAuthUnit: sourceRate.preAuthAmount ?? sourceRate.depositAmount,
+        preAuthMultiple: sourceRate.preAuthMultiple ?? sourceRate.depositMultiple ?? 0 };
     });
-    const originalAmount = originalQuote.rentalLineAmounts?.[originalTarget]
-      ?? originalQuote.chargeLines.filter((row) => row.type === "rental" && row.code === `rental:${originalRate.pricingGroupCode ?? originalRate.itemGroupCode}`).reduce((sum, row) => sum + row.amount, 0);
-    const replacementAmount = priced.pricingSnapshot?.fullChargeLines
-      .filter((row) => row.type === "rental" && row.code === `rental:${effectiveReplacementPricingGroup?.code ?? replacementGroup.code}`)
-      .reduce((sum, row) => sum + row.amount, 0) ?? originalAmount;
-    return {
-      priced,
-      originalAmount: roundMoney(originalAmount),
-      replacementAmount: roundMoney(replacementAmount),
-      originalTarget,
-      target,
-      replacementGroup,
-      replacementPricingGroupId: effectiveReplacementPricingGroup?.id,
-      currentVersion
+    const security = computeSecurityAmounts(securityLines, effectiveDepositRule(pricingRule), effectivePreauthorizationRule(pricingRule));
+    const deposit = this.repriceMembershipSecurity(originalQuote, context, securityLines, "deposit", security.deposit.amount, this.workspaceOf(tenantId), true);
+    const preAuth = this.repriceMembershipSecurity(originalQuote, context, securityLines, "preauthorization", security.preauthorization.amount, this.workspaceOf(tenantId), true);
+    if ((deposit.evaluation || preAuth.evaluation) && (!this.memberships?.hasOpenRiskForBooking
+      || !originalQuote.membershipSnapshot || await this.memberships.hasOpenRiskForBooking(tenantId, this.workspaceOf(tenantId), originalQuote.membershipSnapshot))) {
+      throw new ConflictException("会员当前保证金风险无法核实，不能批准换货减免");
+    }
+    const previous = (args.previousExtensions ?? []).filter(row => row.status === "effective");
+    const depositDelta = roundMoney(deposit.amount - args.order.depositAmount - previous.reduce((sum, row) => sum + row.depositDelta, 0));
+    const preAuthDelta = roundMoney(preAuth.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0));
+    const deltaLines: RentalQuoteSnapshotV1["chargeLines"] = [{ code: `exchange:${line.id}:rental`, name: "换货剩余租期租金差额",
+      type: "order_change", amount: rentalDelta, detail: `保留已履行租金 ${retainedAmount}；仅重算 ${args.appliedAt} 至 ${dueAt}` },
+      ...(serviceRefund > 0 ? [{ code: `exchange:${line.id}:service`, name: "原未开始服务净退款", type: "order_change" as const, amount: -serviceRefund }] : [])];
+    const fullLines = segments.map((segment, index) => ({ code: `exchange:${line.id}:segment:${index}`, name: "原计价段租金", type: "rental" as const,
+      amount: segment.amount, sourceId: segment.source.id, sourceVersion: segment.source.priceVersion,
+      detail: `${segment.startAt} 至 ${segment.endAt}；${segment.billableUnits} ${segment.rate.unit} × ${segment.quantity} 件` }));
+    const previousExchange = (args.previousChanges ?? []).filter(row => exchangeBasis(row)
+      && (row.diff.exchange as { orderLineId?: string }).orderLineId === line.id).sort((a, b) => a.sequence - b.sequence).at(-1);
+    const previousLinePricing = previousExchange && exchangeBasis(previousExchange)?.linePricing;
+    const latestBilled = previousSegments.at(-1)!;
+    // Retain purchased coverage across original-price splits, unless an effective
+    // extension after that exchange supplied a newer amount/rate/time denominator.
+    const extendedAfterExchange = previousLinePricing
+      && Date.parse(latestBilled.endAt) > Date.parse(previousLinePricing.segments.at(-1)!.endAt);
+    const overdueBasis = args.priceBasis === "replacement_current_price" ? segments.at(-1)!
+      : extendedAfterExchange ? latestBilled : previousLinePricing?.overdueBasis ?? latestBilled;
+    const linePricing: NonNullable<RentalOrderExchangeExecutionBasis["linePricing"]> = { version: 1, orderLineId: line.id,
+      originalAmount, replacementAmount, previousSegments, segments, overdueBasis: { ...structuredClone(overdueBasis),
+        itemGroupId: replacementGroup.id, pricingGroupId: effectiveReplacementPricingGroup?.id } };
+    const priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig;
+      linePricing: typeof linePricing } = {
+      orderId: args.order.id, originalEndAt: dueAt, newEndAt: dueAt, billableUnits: segments.reduce((sum, row) => sum + row.billableUnits, 0),
+      rentalAmount: rentalDelta, serviceAmount: -serviceRefund, payableAmount: Math.max(0, differenceAmount), depositDelta, preAuthDelta,
+      currency: originalQuote.currency, settlementMode: "immediate", paymentRequired: false, chargeLines: deltaLines,
+      calendarSnapshot: segments.flatMap(row => row.calendarSnapshot), priceVersionId: originalQuote.priceVersionId,
+      priceVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion, ruleVersion: originalQuote.ruleVersion,
+      rateSnapshot: [structuredClone(rate)], ruleSnapshot: structuredClone(pricingRule), linePricing,
+      pricingSnapshot: { method: "original_version_difference", scope: "exchange_line", context: replacementContext,
+        fullChargeLines: fullLines, previousPayableAmount: beforePayable, recalculatedPayableAmount: roundMoney(beforePayable + differenceAmount),
+        recalculatedRentalAmount: replacementAmount, recalculatedServiceAmount: 0, recalculatedDiscountAmount: 0, recalculatedCouponAmount: 0,
+        totalBillableUnits: segments.reduce((sum, row) => sum + row.billableUnits, 0), differenceAmount, discountEvaluations: [], chargeLines: deltaLines,
+        refundReview: differenceAmount < 0 ? { amount: -differenceAmount, status: "pending" } : undefined }
     };
+    return { priced, originalAmount, replacementAmount, originalTarget, target, replacementGroup,
+      replacementPricingGroupId: effectiveReplacementPricingGroup?.id, currentVersion };
   }
 
   /**
@@ -7093,7 +7715,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       serviceItems?: ServiceCancellationSelection[];
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
-    const quote = this.getQuote(tenantId, context, args.order.quoteId);
+    const quote = await this.loadQuote(tenantId, context, args.order.quoteId);
     const snapshots = args.order.serviceSnapshots ?? [];
     const selections = args.serviceItems?.length
       ? args.serviceItems
@@ -7362,7 +7984,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const day = calendar?.days.find((item) => item.date === date);
     const type: RentalDayType = day?.dayType ?? "workday";
     const overridden = day?.source === "tenant_override";
-    const calendarVersion = calendar ? (calendar.status === "published" ? calendar.version : "draft") : "draft";
+    const calendarVersion = calendar ? (["published", "superseded"].includes(calendar.status) ? calendar.version : "draft") : "draft";
     const baseResult = {
       type,
       overridden,

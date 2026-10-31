@@ -153,4 +153,7 @@ assert.match(routeSection('@Post("notification-logs/:id/query-delivery")', '@Pos
 assert.match(routeSection('@Post("notification-logs/:id/retry")', '@Post("notifications/send")'), /this\.assertNotificationLogScope\(req\.user\.tenantId, id\)/u, "单条通知重试必须校验关联订单的数据范围");
 assert.match(routeSection('@Post("notifications/send")', '@Post("quotes")'), /this\.assertWorkspaceWideNotificationScope\(\)/u, "手工通知发送必须要求完整运营数据范围");
 
+const unknownTodos = buildRentalWorkbenchTodos([base({ feeReviews: [{ id: "unknown", type: "early_return_refund", suggestedAmount: null, maximumAmount: 100, status: "pending", createdAt: at }] })], [], {}, {}, [], at);
+const unknownTodo = unknownTodos.items.find(row => row.type === "fee_review");
+assert.ok(unknownTodo); assert.equal(unknownTodo.amount, undefined);
 console.log(`\n工作台统一待办专项：${todos.items.length + visibleLogs.length + 20} 项全部通过`);

@@ -53,6 +53,7 @@ void (async () => {
   await business.onApplicationBootstrap();
 
   const ctx = context();
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', ctx);
   const group = ctx.groups.find((row) => row.status === "enabled") ?? ctx.groups[0];
   const location = ctx.locations.find((row) => row.status === "enabled") ?? ctx.locations[0];
 
@@ -66,6 +67,7 @@ void (async () => {
     lines: [{ itemGroupId: group.id, quantity: 1 }]
   });
 
+  business.factStore.findQuote = async (_tenant, id) => id === quote.id ? structuredClone(quote) : undefined;
   const order = {
     // 本专项覆盖新增的完整重算方式；缺省旧订单仍走独立续租。
     id: "order_ext_test",
@@ -173,7 +175,8 @@ void (async () => {
   const secondRound = await business.quoteOrderExtension(tenantId, ctx, {
     ...baseArgs,
     order: { ...order, effectiveEndAt: extendedTo },
-    previousExtensions: [{ ...preview, id: "ext-first", sequence: 1, status: "effective" }],
+    previousExtensions: [{ ...preview, id: "ext-first", tenantId, workspaceId: business.workspaceOf(tenantId),
+      sequence: 1, status: "effective" }],
     newEndAt: new Date(now + 9 * 24 * 60 * 60 * 1000).toISOString()
   });
   assert.equal(secondRound.originalEndAt, extendedTo);

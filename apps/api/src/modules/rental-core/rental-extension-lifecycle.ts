@@ -20,11 +20,11 @@ export interface ExtensionPaymentInput {
  * 押金与预授权差额同样算"要补的钱"：只看租金差额会让「租金不变、押金要补 100」的续租
  * 直接生效，那 100 从此收不回来——续租生效后押金应收额已经变了，却没有任何待收记录。
  *
- * 企业月结不走补款：金额进月结账单，由账期结算（需求 4.7.5）。
+ * 企业账期只豁免租赁费用补款，不豁免押金或预授权；所有直接生效路径仍须核对原资金缺口。
  */
 export function extensionPaymentRequired(priced: ExtensionPaymentInput): boolean {
-  if (priced.settlementMode !== "immediate") return false;
-  return priced.payableAmount > 0 || priced.depositDelta > 0 || priced.preAuthDelta > 0;
+  return (priced.settlementMode === "immediate" && priced.payableAmount > 0)
+    || priced.depositDelta > 0 || priced.preAuthDelta > 0;
 }
 
 /**

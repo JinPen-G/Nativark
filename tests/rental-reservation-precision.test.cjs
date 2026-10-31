@@ -7,7 +7,7 @@ const models = [
   { id: "body-b", code: "BODY-B", status: "enabled" }
 ];
 const pricingGroup = {
-  id: "group", code: "CAM-BODY", name: "相机机身", status: "enabled",
+  id: "group", code: "CAM-BODY", name: "相机机身", status: "enabled", defaultPricingUnit: "day_24h",
   memberItemGroupIds: models.map((model) => model.id)
 };
 const service = {
@@ -30,6 +30,16 @@ void (async () => {
   assert.equal(groupQuote.lines[0].reservationPrecision, "group", "客户端不能自报准确型号精度");
   assert.deepEqual(groupQuote.lines[0].pricingGroupMemberItemGroupIds, ["body-a", "body-b"], "成员范围必须来自服务端");
   assert.equal(groupQuote.lines[0].pricingGroupCode, "CAM-BODY", "名称编码快照必须来自服务端");
+  assert.equal(groupQuote.lines[0].pricingUnit, "day_24h", "未显式选择时冻结分组默认计价单位");
+  const explicit = await RentalCoreService.prototype.resolvePricingGroupQuoteRequest.call(service, "tenant", {
+    ...base, lines: [{ pricingGroupId: "group", quantity: 1, pricingUnit: "hour" }]
+  });
+  assert.equal(explicit.lines[0].pricingUnit, "hour", "显式单位不被默认值覆盖");
+  pricingGroup.defaultPricingUnit = undefined;
+  await assert.rejects(RentalCoreService.prototype.resolvePricingGroupQuoteRequest.call(service, "tenant", {
+    ...base, lines: [{ pricingGroupId: "group", quantity: 1 }]
+  }), /缺少默认计价单位/);
+  pricingGroup.defaultPricingUnit = "day_24h";
 
   const exactQuote = await RentalCoreService.prototype.resolvePricingGroupQuoteRequest.call(service, "tenant", {
     ...base, lines: [{ pricingGroupId: "group", itemGroupId: "body-b", quantity: 1,
@@ -50,6 +60,7 @@ void (async () => {
   let clientResolved = false;
   const clientService = {
     requireActiveMembership: () => undefined,
+    currentWorkspace: async () => undefined,
     context: () => ({}),
     core: {
       resolvePricingGroupQuoteRequest: async (_tenantId, request) => {

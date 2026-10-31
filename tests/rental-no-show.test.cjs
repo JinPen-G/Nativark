@@ -94,6 +94,20 @@ void (async () => {
   assert.equal(service.saved, true);
   ok("最终确认爽约按订单规则计算费用，并保留取消核减与爽约原因事实");
 
+  {
+    const servedOrder = orderWith({ id: "order_no_show_served", status: "pickup_overdue", pickupOverdueAt: "2026-09-10T09:31:00.000Z", noShowNoticeAt: "2026-09-10T09:32:00.000Z",
+      payableAmount: 190, finalPayableAmount: 190, serviceSnapshots: [{ occurrenceId: "served", serviceId: "s", serviceName: "预先配送",
+        quantity: 1, amount: 120, discountAllocatedAmount: 20, couponAllocatedAmount: 10, requiresCapacity: false,
+        executionStatus: "completed", executedQuantity: 1, executionSegments: [{ quantity: 1, actualEndAt: "2026-09-10T08:00:00.000Z", result: "delivered" }] }] });
+    const served = serviceWith(servedOrder);
+    const result = await served.confirmNoShowOrder("tenant_1", servedOrder.id, "未领取但服务已提供", {}, "Operator", "2026-09-10T10:32:00.000Z");
+    assert.equal(result.status, "no_show"); assert.equal(result.finalPayableAmount, 137.5);
+    assert.equal(result.chargeLines.find(row => row.code.startsWith("cancellation_reversal:")).amount, -100);
+    assert.equal(result.serviceSnapshots[0].executionStatus, "completed");
+    assert.equal(result.serviceSnapshots[0].executionSegments.length, 1);
+    ok("爽约沿同一取消核减保留已经履约服务净额，原爽约规则与原服务事实不被覆盖");
+  }
+
   const disabled = orderWith({ id: "order_no_show_disabled", ruleSnapshot: { cancellation: { noShow: { enabled: false, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "none", feeValue: 0 } }, fulfillment: {} } });
   const disabledService = serviceWith(disabled);
   await assert.rejects(

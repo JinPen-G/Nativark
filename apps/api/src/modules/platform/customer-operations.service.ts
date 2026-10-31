@@ -24,7 +24,7 @@ import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository, type CustomerTx } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerMergeService } from "./customer-merge.service";
-import { getRequestDataScope, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
 export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
@@ -236,6 +236,25 @@ export class CustomerOperationsService {
       select: { id: true }
     });
     if (!profileVisible && !orderVisible) throw new NotFoundException("客户不存在或不在当前账号的数据范围内");
+  }
+
+  /** 附件不做脱敏投影，因此必须同时具备原资料查看和敏感资料权限。 */
+  async assertCustomerFileReadAccess(tenantId: string, customerId: string, corporate = false) {
+    const identity = getRequestIdentity();
+    const permissions = new Set(identity?.permissions ?? []);
+    const has = (code: string) => identity?.isPlatformAdmin || permissions.has("*") || permissions.has(code);
+    if (!identity?.userId || identity.tenantId !== tenantId || identity.isSaasAdmin
+      || !["operator", "staff"].includes(identity.audience ?? "") || !identity.workspaceId || !identity.dataScope || !identity.locationScope
+      || (identity.dataScope === "organization" && identity.locationScope.mode !== "selected")
+      || !has(CUSTOMER_REVEAL_PERMISSION)
+      || !(corporate ? has("rental-os:corporate:view") || has("rental-os:corporate:manage") : has("rental-os:member:view"))) {
+      throw new ForbiddenException("缺少原客户资料查看与敏感附件读取权限");
+    }
+    if (identity.dataScope !== "all" || getRequestLocationIds() !== undefined) {
+      await this.assertCustomerVisibleInRequestScope(tenantId, identity.workspaceId, customerId, identity.dataScope, identity.userId);
+    }
+    const customer = await this.prisma.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException("客户不存在或不在当前账号的数据范围内");
   }
 
   private canReveal(user?: SystemUserRow) {
@@ -905,7 +924,16 @@ export class CustomerOperationsService {
     user?: SystemUserRow,
     query: CustomerProfileOrderQuery = {}
   ): Promise<CustomerProfileOverview> {
-    if (!workspaceId) throw new ForbiddenException("查看会员经营资料需要已授权的经营空间");
+    if (!workspaceId || !user?.isActive || user.isSaasAdmin || user.tenantId !== tenantId
+      || getRequestWorkspaceId() !== workspaceId) throw new ForbiddenException("查看会员经营资料需要已授权的经营空间");
+    const hasPermission = (code: string) => Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(code));
+    if (!hasPermission("rental-os:order:view")) throw new ForbiddenException("经营资料中的订单摘要需要当前空间订单查看权限；共享主档请使用客户详情入口");
+    // 权益账户/奖励目前没有订单或地点归属，不能借可见客户开放其空间总账。
+    const restricted = user.dataScope !== "all" || user.locationScope?.mode === "selected"
+      || getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined;
+    if (restricted || !hasPermission("rental-os:marketing:manage") || !hasPermission("rental-os:finance:view")) {
+      throw new ForbiddenException("完整经营资料需要当前空间全范围订单、行销与财务权限；共享主档仍可独立读取");
+    }
     const profile = await this.getCustomerDetail(tenantId, workspaceId, customerId, user);
     const page = Math.max(1, Math.floor(query.page ?? 1));
     const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));

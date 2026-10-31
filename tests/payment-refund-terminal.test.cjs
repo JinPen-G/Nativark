@@ -81,7 +81,6 @@ async function testDefinitiveMapping() {
 
 async function testRefundNotFoundOverdue() {
   const stale = refundHarness({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) });
-  let captured;
   const svc = stale.service;
   // simulate an Alipay query response w/o refund_status via private method patch: call queryAlipayRefund with fetch stub
   global.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ alipay_trade_fastpay_refund_query_response: { code: "10000", msg: "Success" } }) });
@@ -89,13 +88,12 @@ async function testRefundNotFoundOverdue() {
   const config = { provider: "alipay", capability: "payment", settings: { appId: "app", gatewayUrl: "https://openapi.alipay.com/gateway.do" }, credentials: { appPrivateKey: privateKey.export({ type: "pkcs8", format: "pem" }) } };
   await assert.rejects(
     () => svc.queryAlipayRefund(config, { merchantOrderNo: "RO-1", externalTransactionId: "t1" }, stale.refund, 0),
-    (error) => { captured = error; return error instanceof PaymentProviderDefinitiveError && error.providerCode === "REFUND_NOT_FOUND"; },
-    "24 小时后仍查不到的退款必须判定失败"
+    PaymentProviderUnknownError,
+    "24 小时后仍查不到也不能证明原退款未执行"
   );
-  assert.ok(captured);
   const fresh = refundHarness();
-  const outcome = await svc.queryAlipayRefund(config, { merchantOrderNo: "RO-1", externalTransactionId: "t1" }, fresh.refund, 0);
-  assert.equal(outcome.status, "accepted", "24 小时内查不到保持 accepted");
+  await assert.rejects(() => svc.queryAlipayRefund(config, { merchantOrderNo: "RO-1", externalTransactionId: "t1" }, fresh.refund, 0),
+    PaymentProviderUnknownError, "新旧退款的记录缺失都保持未知，不能虚构已受理");
   delete global.fetch;
 }
 
@@ -190,7 +188,7 @@ async function testRefundTxLocksProviderConfig() {
   assert.deepEqual(calls, [{ tenantId: "tenant-1", capability: "payment", provider: "alipay" }], "退款事务必须锁配置行");
 }
 
-async function testExpiredPendingAutoClosedOnCreate() {
+async function testExpiredPendingBlocksNewCreate() {
   const closedUpdates = [];
   const expired = { id: "intent-old", status: "pending", method: "alipay", merchantOrderNo: "RO-OLD", expiresAt: new Date(Date.now() - 60_000) };
   let created;
@@ -228,21 +226,19 @@ async function testExpiredPendingAutoClosedOnCreate() {
     assert.ok(intent.expiresAt instanceof Date);
     return { checkoutUrl: "https://qr", responseCode: "10000", responseJson: {} };
   };
-  const response = await service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "new-key" });
-  assert.equal(response.status, "pending");
-  assert.equal(closedUpdates.length, 1);
-  assert.equal(closedUpdates[0].where.id, "intent-old");
-  assert.deepEqual(closedUpdates[0].data, { status: "closed", failureReason: "expired" });
-  assert.deepEqual(providerCalls, ["close:RO-OLD"], "平台侧关单是尽力而为但必须尝试");
+  await assert.rejects(() => service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "new-key" }), /待核对或待入账的支付/u);
+  assert.equal(closedUpdates.length, 0, "本地过期不允许先关闭旧单并让出名额");
+  assert.equal(created, undefined, "必须先确认原支付终态，不能创建替代单");
+  assert.deepEqual(providerCalls, [], "新建入口不能异步关闭原支付");
 
   // not-yet-expired pending still blocks
   expired.expiresAt = new Date(Date.now() + 60_000);
-  await assert.rejects(() => service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "another" }), /待完成的支付/u);
+  await assert.rejects(() => service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "another" }), /待核对或待入账的支付/u);
 
   // verified_pending_funding is never treated as expired even if past expiresAt
   expired.expiresAt = new Date(Date.now() - 60_000);
   expired.status = "verified_pending_funding";
-  await assert.rejects(() => service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "third" }), /待完成的支付/u);
+  await assert.rejects(() => service.createPaymentIntent("tenant-1", "workspace-1", "order-1", { instrument: "rental", method: "alipay", idempotencyKey: "third" }), /待核对或待入账的支付/u);
 }
 
 async function testExpireStaleJob() {
@@ -452,7 +448,7 @@ async function main() {
   await testStripeRefundWithoutReceipt();
   await testLateRefundFundingFailure();
   await testRefundTxLocksProviderConfig();
-  await testExpiredPendingAutoClosedOnCreate();
+  await testExpiredPendingBlocksNewCreate();
   await testExpireStaleJob();
   await testCloseAllowsResetLiveTest();
   await testWebhookRateLimit();

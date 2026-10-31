@@ -36,6 +36,20 @@ export function feeReviewStatusText(row: Pick<RentalOrderFeeReview, "status" | "
     : "已批准：已计入应收";
 }
 
+/** 未知建议额不补零；原快照上限只约束人工认定，不是建议金额。 */
+export function feeReviewAmountCeiling(row: Pick<RentalOrderFeeReview, "suggestedAmount" | "maximumAmount">) {
+  const value = row.suggestedAmount === null ? row.maximumAmount : row.suggestedAmount;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+export function feeReviewAmountError(row: Pick<RentalOrderFeeReview, "suggestedAmount" | "maximumAmount"> | undefined, value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "请填写有效的非负认定金额";
+  const ceiling = row && feeReviewAmountCeiling(row);
+  if (ceiling === undefined) return "原快照最大核减依据缺失，不能批准";
+  if (value > ceiling) return row?.suggestedAmount === null ? "认定额不能超过原快照最大核减额" : "认定额不能超过建议额";
+  return undefined;
+}
+
 /** 订单上是否还有需要人工裁定的费用事项。列表标记与筛选共用它，避免两处判据分叉。 */
 export function hasPendingFeeReview(order: { feeReviews?: RentalOrderFeeReview[] }) {
   return (order.feeReviews ?? []).some((row) => row.status === "pending");

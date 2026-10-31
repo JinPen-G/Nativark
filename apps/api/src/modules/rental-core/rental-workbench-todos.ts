@@ -169,7 +169,7 @@ export function buildRentalWorkbenchTodos(
         href: orderHref,
         orderId: order.id,
         orderNo: order.orderNo,
-        amount: review.suggestedAmount,
+        amount: review.suggestedAmount ?? undefined,
         createdAt: review.createdAt
       });
     }
@@ -187,7 +187,7 @@ export function buildRentalWorkbenchTodos(
           href: orderHref,
           orderId: order.id,
           orderNo: order.orderNo,
-          amount: refundDue.suggestedAmount,
+          amount: refundDue.suggestedAmount ?? undefined,
           createdAt: refundDue.createdAt
         });
       }

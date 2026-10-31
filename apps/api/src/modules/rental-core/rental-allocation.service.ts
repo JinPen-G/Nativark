@@ -269,13 +269,10 @@ export class RentalAllocationService
       ].includes(order.status)
     )
       throw new ConflictException("只有已确认、尚未交付的订单可以分配");
-    if (
-      !["release", "unlock"].includes(input.action) &&
-      this.core
-        .listLocations(tenantId)
-        .find((l) => l.id === order.fulfillmentLocationId)?.status !== "enabled"
-    )
-      throw new ConflictException("领取地点已停用，不能继续分配");
+    // Partial preassignment is new work too. Admit it before inventory locks;
+    // release/unlock remain possible after a location or operator is disabled.
+    if (!["release", "unlock"].includes(input.action))
+      await this.core.assertOrderFulfillmentAdmission(tenantId, order, tx);
     const state = order.assignment ?? { revision: 0, history: [] };
     if (state.revision !== input.expectedRevision)
       throw new ConflictException("分配结果已更新，请刷新后重试");

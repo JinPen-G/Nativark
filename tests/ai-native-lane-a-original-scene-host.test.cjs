@@ -225,6 +225,7 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
     fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: location.id, startAt, endAt,
     lines: [{ itemGroupId: group.id, quantity: 1, pricingUnit: h.b.candidate.items[0].pricingUnit }] });
   quote.ruleSnapshot.extension = { enabled: true, forceImmediateWhenOverdue: true, pricingMode: 'original_total' };
+  h.b.businessFacts.findQuote = async (_tenant, id) => _tenant === tenantId && id === quote.id ? structuredClone(quote) : undefined;
   const row = require('./fixtures/ai-native/authorization-baseline.cjs').order({ tenantId, status: 'renting', startAt, endAt,
     quoteId: quote.id, ruleSnapshot: quote.ruleSnapshot, customerType: 'personal', fulfillmentMode: 'store_pickup_return',
     fulfillmentLocationId: location.id, lines: quote.request.lines.map((line, i) => ({ ...line, id: `line-${i}`, inventoryMode: group.inventoryMode,
@@ -254,6 +255,8 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
   const preview = result.result.preview;
   assert.equal(preview.pricingSnapshot.method, 'original_version_difference');
   assert.ok(preview.pricingSnapshot.context.calendars.length > 0);
+  const withScope = structuredClone(result); withScope.result.preview.pricingSnapshot.scope = 'order';
+  assert.deepEqual(validateAiExtensionPreviewResponse(withScope, command), withScope, 'optional scope survives the closed public schema');
   assert.equal(result.result.source.inputFingerprint, requestFingerprint(command.extension));
   assert.equal(h.b.facts.writes.length, factsBefore); assert.equal(h.b.businessFacts.writes.length, businessBefore);
   assert.equal(h.state.aiStep.length, 0); assert.equal(h.state.aiRun[0].status, 'QUEUED');
@@ -290,7 +293,21 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
     stackableWithDiscountPlans: true, checkedAt: startAt, rentalStartAt: startAt, baseBeforeDiscount: 10, runningBase: 9,
     formula: '9 - 1', discountAmount: 1, rentalAllocations: { 'line-0': 1 } };
   priced.pricingSnapshot.refundReview = { amount: 2.75, status: 'pending' };
+  priced.pricingSnapshot.membershipBenefitEvaluations = [{ source: 'personal', planId: 'member-plan', planVersionId: 'member-v1',
+    planName: 'Frozen service benefit', type: 'service_benefit', calculation: 'percentage', configuredValue: 50,
+    appliesTo: 'service', appliedAmount: 0.5, base: 1, applicableServiceIds: ['service-a'],
+    scope: { type: 'workspaces', workspaceIds: ['workspace-a'] }, scopeMatched: true, allocations: { 'service-a': 0.5 }, detail: 'Original allocation' },
+    { source: 'personal', planId: 'member-plan', planVersionId: 'member-v1', planName: 'Frozen security benefit',
+      type: 'deposit_reduction', calculation: 'percentage', configuredValue: 50, appliesTo: 'deposit', appliedAmount: 5,
+      base: 10, allocations: { deposit: 5 }, securityRiskCheck: 'clear', securityOriginalAmount: 10, securityEligibleBase: 10,
+      securityPolicySnapshot: { enabled: true, allowedRiskLevels: ['low'], maxReductionPercent: 50, maxReductionAmount: 5 },
+      securityRiskAssessments: [{ itemGroupId: group.id, riskLevel: 'low', allowed: true, quantity: 1 }], detail: 'Original net security' }];
   assert.deepEqual(validateAiExtensionPreviewResponse(historical, command), historical);
+  const invalidBenefit = structuredClone(historical);
+  invalidBenefit.result.preview.pricingSnapshot.membershipBenefitEvaluations[0].credential = 'unregistered';
+  assert.throws(() => validateAiExtensionPreviewResponse(invalidBenefit, command), { code: 'AI_STORAGE_UNAVAILABLE' });
+  const oldMembershipSnapshot = structuredClone(historical); delete oldMembershipSnapshot.result.preview.pricingSnapshot.membershipBenefitEvaluations;
+  assert.deepEqual(validateAiExtensionPreviewResponse(oldMembershipSnapshot, command), oldMembershipSnapshot);
   const minimal = structuredClone(result);
   delete minimal.result.preview.pricingSnapshot; delete minimal.result.preview.executionBasis; delete minimal.result.preview.serviceSnapshots;
   assert.deepEqual(validateAiExtensionPreviewResponse(minimal, command), minimal);
@@ -301,6 +318,30 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
     const invalid = structuredClone(result); change(invalid);
     assert.throws(() => validateAiExtensionPreviewResponse(invalid, command), { code: 'AI_STORAGE_UNAVAILABLE' });
   }
+  const originalExtensionRule = structuredClone(quote.ruleSnapshot.extension);
+  quote.ruleSnapshot.extension.pricingMode = 'incremental';
+  const incremental = await http.previewOrderExtension(request, command);
+  quote.ruleSnapshot.extension = originalExtensionRule;
+  assert.equal(incremental.result.status, 'previewed', JSON.stringify(incremental));
+  assert.equal(incremental.result.preview.pricingSnapshot, undefined);
+  assert.equal(incremental.result.preview.executionBasis.pricingMode, 'incremental');
+  const incrementalSource = incremental.result.preview.executionBasis.incrementalPricing;
+  assert.equal(incrementalSource.lines[0].orderLineId, 'line-0');
+  assert.ok(incrementalSource.context.calendars.length > 0);
+  assert.deepEqual(validateAiExtensionPreviewResponse(incremental, command), incremental);
+  for (const change of [value => { value.result.preview.executionBasis.incrementalPricing.context.calendars[0].tenantId = 'other'; },
+    value => { value.result.preview.executionBasis.incrementalPricing.lines[0].credential = 'unregistered'; },
+    value => { value.result.preview.executionBasis.incrementalPricing.lines[0] = null; },
+    value => { value.result.preview.executionBasis.incrementalPricing.version = 2; },
+    value => { value.result.preview.executionBasis.incrementalPricing.startAt = startAt; },
+    value => { value.result.preview.executionBasis.incrementalPricing.endAt = endAt; },
+    value => { value.result.preview.executionBasis.pricingMode = 'original_total'; },
+    value => { value.result.preview.pricingSnapshot = structuredClone(preview.pricingSnapshot); }]) {
+    const invalid = structuredClone(incremental); change(invalid);
+    assert.throws(() => validateAiExtensionPreviewResponse(invalid, command), { code: 'AI_STORAGE_UNAVAILABLE' });
+  }
+  const oldIncremental = structuredClone(incremental); delete oldIncremental.result.preview.executionBasis.incrementalPricing;
+  assert.deepEqual(validateAiExtensionPreviewResponse(oldIncremental, command), oldIncremental, 'old read observations do not invent missing receipt fields');
   const corrupt = new AiOriginalScenesController({ ...requests, previewOrderExtension: async (_req, input) => {
     input.extension.newEndAt = endAt;
     return { ...result, result: { ...result.result, source: { ...result.result.source, inputFingerprint: requestFingerprint(input.extension) } } };
@@ -498,6 +539,169 @@ test('conversation metadata and original admission share CAS, owner scope and im
   await assert.rejects(app.list({ draftVersion, status: 'active', limit: 20 }), { code: 'AI_ACCESS_DENIED' });
 });
 
+test('conversation unstarted closure permanently fences late creation and preserves original receipts', { timeout: 60000 }, async () => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiDataErasure: [] });
+  const shared = require('@rental-os/shared'), { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  const app = new AiConversationRepository(h.dependencies, h.app.requests), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  const created = await app.create({ draftVersion, operationKey: 'close-create', capabilityCode: 'order_explanation' });
+  const ref = { draftVersion, conversationId: created.conversationId }, admission = { ...ref, expectedRevision: 1,
+    admissionKey: 'close-message', request: { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } } };
+  const accepted = await app.admit(admission), original = accepted.result.original;
+  const command = { draftVersion: shared.AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, conversationId: ref.conversationId,
+    operationKey: 'close-original', expectedRevision: 2, turnId: accepted.result.turnId, originalInputRef: original.inputRef };
+  await assert.rejects(app.closeUnstarted({ ...command, turnId: 'different-turn' }));
+  await assert.rejects(app.closeUnstarted({ ...command, expectedRevision: 1 }), { code: 'AI_REVISION_CONFLICT' });
+  await assert.rejects(app.closeUnstarted({ ...command, actor: 'forged' }), { code: 'AI_INVALID_INPUT' });
+  h.b.h.control.now = new Date(h.b.h.control.now.getTime() + 3600001);
+  await assert.rejects(h.app.requests.createTask(original), { code: 'AI_ACCESS_DENIED' });
+  await assert.rejects(app.releaseTurn({ ...ref, operationKey: 'ordinary-release', expectedRevision: 2 }), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  assert.equal((await app.read(ref)).currentTurn.turnId, command.turnId, 'expiry alone never releases the turn');
+  h.state.aiTaskPlanPolicy.forEach(row => { row.enabled = false; });
+  const resourceReader = h.app.requests.authority.read;
+  h.app.requests.authority.read = async () => { throw Error('current resources unavailable'); };
+  h.control.loseReply = true;
+  await assert.rejects(app.closeUnstarted(command), { code: 'AI_RESULT_UNKNOWN' });
+  const closed = await app.readOperation({ draftVersion, operationKey: command.operationKey });
+  assert.equal(closed.creation, 'permanently_closed'); assert.equal(closed.task, 'not_created');
+  assert.equal(h.state.aiTask.length, 0); assert.equal(h.state.aiRun.length, 0);
+  assert.equal((await app.read(ref)).currentTurn, null); assert.equal(closed.revision, 3);
+  const observed = await app.readAdmission({ ...ref, admissionKey: admission.admissionKey });
+  assert.equal(observed.result.creation, 'permanently_closed'); assert.equal(observed.result.task, null);
+  assert.equal(observed.result.material, 'retained'); assert.equal(observed.result.closeOperationKey, command.operationKey);
+  assert.equal('request' in observed.result, false);
+  assert.doesNotThrow(() => conversationResponse('admission', observed, { ...ref, admissionKey: admission.admissionKey }));
+  assert.doesNotThrow(() => conversationResponse('closeUnstarted', closed, command));
+  assert.throws(() => conversationResponse('closeUnstarted', { ...closed, request: admission.request }, command), { code: 'AI_RESULT_UNKNOWN' });
+  const operation = h.state.aiConversationOperation.find(row => row.operationKey === command.operationKey), hash = operation.inputHash;
+  operation.inputHash = '0'.repeat(64); await assert.rejects(app.readAdmission({ ...ref, admissionKey: admission.admissionKey }));
+  operation.inputHash = hash;
+  const input = h.state.aiTaskOriginalRequest[0], closeKey = input.creationCloseKey;
+  input.creationCloseKey = null; await assert.rejects(app.readAdmission({ ...ref, admissionKey: admission.admissionKey })); input.creationCloseKey = closeKey;
+  h.app.requests.authority.read = resourceReader; h.state.aiTaskPlanPolicy.forEach(row => { row.enabled = true; });
+  // Move the fixture clock back into the original validity window: even restored
+  // execution policy/expiry cannot reopen a permanently closed request.
+  h.b.h.control.now = new Date(input.createdAt.getTime() + 1);
+  await assert.rejects(h.app.requests.createTask(original), { code: 'AI_ACCESS_DENIED' });
+  await assert.rejects(h.app.requests.save({ draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: input.requestKey,
+    ...admission.request }), { code: 'AI_ACCESS_DENIED' });
+  assert.deepEqual(await app.closeUnstarted(command), closed);
+  const next = await app.admit({ ...admission, expectedRevision: 3, admissionKey: 'next-target' });
+  assert.notEqual(next.result.original.inputRef, original.inputRef); assert.equal(h.state.aiTask.length, 0);
+  assert.deepEqual(await app.closeUnstarted(command), closed, 'same-key recovery does not close the next turn');
+  await app.mutate({ ...ref, operationKey: 'close-delete', expectedRevision: 4 }, 'delete');
+  assert.deepEqual(await app.closeUnstarted(command), closed, 'original closure receipt survives deletion');
+  assert.deepEqual(await app.readOperation({ draftVersion, operationKey: command.operationKey }), closed);
+  h.b.h.identity.session = false;
+  await assert.rejects(app.readOperation({ draftVersion, operationKey: command.operationKey }), { code: 'AI_ACCESS_DENIED' });
+});
+
+test('conversation creation and closure compete on the original transaction fence, never TTL or missing Task alone', { timeout: 60000 }, async () => {
+  const shared = require('@rental-os/shared'), { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { AiTaskCreationRepository } = require('../apps/api/src/modules/ai-native/ai-task-creation.repository');
+  const make = async suffix => {
+    const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
+    const app = new AiConversationRepository(h.dependencies, h.app.requests), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+    const created = await app.create({ draftVersion, operationKey: `race-create-${suffix}`, capabilityCode: 'order_explanation' });
+    const ref = { draftVersion, conversationId: created.conversationId }, admission = { ...ref, expectedRevision: 1,
+      admissionKey: 'race-message', request: { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } } };
+    const accepted = await app.admit(admission), original = accepted.result.original;
+    const command = { draftVersion: shared.AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, conversationId: ref.conversationId,
+      operationKey: 'race-close', expectedRevision: 2, turnId: accepted.result.turnId, originalInputRef: original.inputRef };
+    return { ...h, app, originals: h.app.requests, ref, original, command };
+  };
+  const closing = await make('closing');
+  const grant = await closing.originals.resolve('order_explanation', closing.original.inputRef);
+  // Freeze a previously authorized host grant to reach the inner transaction
+  // fence after closure. Public callers cannot supply this authority.
+  let resume;
+  const gate = new Promise(resolve => { resume = resolve; });
+  const queued = new AiTaskCreationRepository(closing.db, { resolve: async () => { await gate; return grant; },
+    assertCreationOpen: closing.originals.assertCreationOpen.bind(closing.originals) }, closing.dependencies.clock);
+  const late = { creationKey: `scene-request:${closing.original.inputRef}`, sceneCode: 'order_explanation', inputRef: closing.original.inputRef };
+  const pending = queued.create(late);
+  await closing.app.closeUnstarted(closing.command); resume();
+  await assert.rejects(pending, { code: 'AI_ACCESS_DENIED' });
+  assert.equal(closing.state.aiTask.length, 0); assert.equal(closing.state.aiRun.length, 0);
+  await assert.rejects(queued.create(late), { code: 'AI_ACCESS_DENIED' });
+  const competing = await make('competing');
+  const results = await Promise.allSettled([competing.app.closeUnstarted(competing.command), competing.originals.createTask(competing.original)]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1, 'creation and closure cannot both win');
+  if (results[0].status === 'fulfilled') {
+    assert.equal(competing.state.aiTask.length, 0); assert.equal(competing.state.aiRun.length, 0);
+    assert.equal(competing.state.aiConversation[0].activeTurnId, null);
+    await assert.rejects(competing.originals.createTask(competing.original));
+  } else {
+    assert.equal(competing.state.aiTask.length, 1); assert.equal(competing.state.aiRun.length, 1);
+    assert.equal(competing.state.aiTaskOriginalRequest[0].creationClosedAt, null);
+    assert.equal(competing.state.aiConversation[0].activeTurnId, competing.command.turnId);
+  }
+  const created = await make('created'), task = await created.originals.createTask(created.original);
+  for (const state of ['QUEUED', 'RUNNING', 'UNKNOWN', 'SUCCEEDED', 'CANCELLED']) {
+    created.state.aiTask[0].status = state;
+    await assert.rejects(created.app.closeUnstarted(created.command), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  }
+  created.state.aiTask[0].archivedAt = new Date(created.dependencies.clock());
+  await assert.rejects(created.app.closeUnstarted(created.command), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  assert.equal(created.state.aiTaskOriginalRequest[0].creationClosedAt, null);
+  assert.equal(created.state.aiConversation[0].activeTurnId, created.command.turnId); assert.equal(created.state.aiTask[0].id, task.taskId);
+  const rollback = await make('rollback');
+  const write = rollback.control.beforeWrite;
+  rollback.control.beforeWrite = async (table, args, data) => {
+    await write?.(table, args, data);
+    if (table === 'aiConversationOperation' && args.data.operation === 'close_unstarted') throw Error('receipt write failure');
+  };
+  await assert.rejects(rollback.app.closeUnstarted(rollback.command), { code: 'AI_RESULT_UNKNOWN' });
+  assert.equal((await rollback.app.readOperation({ draftVersion: rollback.ref.draftVersion, operationKey: rollback.command.operationKey })).status, 'not_observed');
+  assert.equal(rollback.state.aiTaskOriginalRequest[0].creationClosedAt, null);
+  assert.equal(rollback.state.aiConversation[0].activeTurnId, rollback.command.turnId);
+  rollback.control.beforeWrite = write;
+  const replacement = await rollback.originals.createTask(rollback.original);
+  assert.equal(rollback.state.aiTask[0].id, replacement.taskId, 'transaction rollback preserves the original creation path');
+});
+
+test('conversation unstarted closure retains no-Task history after original privacy erasure', { timeout: 60000 }, async () => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiDataErasure: [] });
+  const shared = require('@rental-os/shared'), { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { AiRetentionService } = require('../apps/api/src/modules/ai-native/privacy/retention.service');
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  const app = new AiConversationRepository(h.dependencies, h.app.requests), draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  const created = await app.create({ draftVersion, operationKey: 'erased-close-create', capabilityCode: 'order_explanation' });
+  const ref = { draftVersion, conversationId: created.conversationId }, admission = { ...ref, expectedRevision: 1,
+    admissionKey: 'erased-close-message', request: { sceneCode: 'order_explanation', input: { orderId: 'order-a', question: 'status' } } };
+  const accepted = await app.admit(admission), original = accepted.result.original;
+  h.b.h.identity.user.permissions.push('system:params:manage');
+  h.b.h.control.now = new Date(h.b.h.control.now.getTime() + 31 * 86400000);
+  const privacy = new AiRetentionService(h.db, h.dependencies.auth, h.dependencies.credentials, undefined, h.dependencies.clock);
+  assert.equal((await privacy.erase('request', original.inputRef)).state, 'erased');
+  const command = { draftVersion: shared.AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, conversationId: ref.conversationId,
+    operationKey: 'erased-close', expectedRevision: 2, turnId: accepted.result.turnId, originalInputRef: original.inputRef };
+  assert.equal((await app.closeUnstarted(command)).creation, 'permanently_closed');
+  const observed = await app.readAdmission({ ...ref, admissionKey: admission.admissionKey });
+  assert.equal(observed.result.material, 'erased'); assert.equal(observed.result.task, null);
+  assert.equal(observed.result.creation, 'permanently_closed'); assert.equal('request' in observed.result, false);
+  assert.doesNotThrow(() => conversationResponse('admission', observed, { ...ref, admissionKey: admission.admissionKey }));
+  const page = await app.turns({ ...ref, limit: 20 }); assert.equal(page.items[0].material, 'erased');
+  await assert.rejects(h.app.requests.createTask(original)); assert.equal(h.state.aiTask.length, 0);
+  const erasure = h.state.aiDataErasure[0], targetHash = erasure.targetHash;
+  erasure.targetHash = '0'.repeat(64); await assert.rejects(app.readAdmission({ ...ref, admissionKey: admission.admissionKey }));
+  erasure.targetHash = targetHash;
+  const before = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
+  assert.deepEqual(await app.closeUnstarted(command), await app.readOperation({ draftVersion, operationKey: command.operationKey }));
+  assert.deepEqual(h.state, before, 'recovery does not restore erased plaintext or start work');
+  const next = await app.create({ draftVersion, operationKey: 'close-before-erasure-create', capabilityCode: 'order_explanation' });
+  const nextRef = { draftVersion, conversationId: next.conversationId }, nextAdmission = { ...admission, ...nextRef };
+  const pending = await app.admit(nextAdmission), close = { ...command, conversationId: next.conversationId,
+    operationKey: 'close-before-erasure', turnId: pending.result.turnId, originalInputRef: pending.result.original.inputRef };
+  await app.closeUnstarted(close);
+  h.b.h.control.now = new Date(h.b.h.control.now.getTime() + 31 * 86400000);
+  assert.equal((await privacy.erase('request', close.originalInputRef)).state, 'erased');
+  const after = await app.readAdmission({ ...nextRef, admissionKey: nextAdmission.admissionKey });
+  assert.equal(after.result.material, 'erased'); assert.equal(after.result.creation, 'permanently_closed');
+  assert.equal(after.result.closeOperationKey, close.operationKey); assert.equal(after.result.task, null);
+  assert.equal(h.state.aiTaskOriginalRequest.find(row => row.id === close.originalInputRef).creationCloseKey, close.operationKey);
+});
+
 test('conversation history reopens only attested erased locators under current task authority', { timeout: 60000 }, async () => {
   const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiDataErasure: [],
     aiTaskExecutionCharge: [], aiApprovalConsumption: [], aiGatewayInvocation: [], aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [] });
@@ -547,7 +751,7 @@ test('conversation history reopens only attested erased locators under current t
     assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
   assert.deepEqual(contracts.compileConsumer(`import type { AiConversationTurnObservationDraft } from '../packages/shared/src';
     declare const turn: AiConversationTurnObservationDraft;
-    if (turn.material === 'erased') { const taskId: string = turn.task.taskId;
+    if (turn.material === 'erased' && turn.task) { const taskId: string = turn.task.taskId;
       // @ts-expect-error erased history exposes no recovered plaintext
       const request = turn.request;
     }
@@ -611,7 +815,13 @@ test('conversation standard provider and Controller preserve explicit admission 
   assert.doesNotThrow(() => conversationResponse('admission', { ...original, result: null }, { ...ref, admissionKey: command.admissionKey }));
   assert.equal((await http.operation(request, { draftVersion, operationKey: 'archive' })).revision, 3);
   assert.equal((await http.read(request, ref)).status, 'archived');
-  const erase = await http.delete(request, { ...ref, operationKey: 'delete', expectedRevision: 3 });
+  const close = { draftVersion: shared.AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, conversationId: ref.conversationId,
+    operationKey: 'http-close', expectedRevision: 3, turnId: original.result.turnId, originalInputRef: original.result.original.inputRef };
+  const closure = await http.closeUnstarted(request, close);
+  assert.equal(closure.creation, 'permanently_closed'); assert.equal(closure.revision, 4);
+  assert.equal(h.state.aiTask.length, 0); assert.equal((await http.read(request, ref)).currentTurn, null);
+  assert.equal((await http.admission(request, { ...ref, admissionKey: command.admissionKey })).result.creation, 'permanently_closed');
+  const erase = await http.delete(request, { ...ref, operationKey: 'delete', expectedRevision: 4 });
   assert.equal(erase.taskCancellation, 'not_requested'); assert.equal(h.state.aiTaskOriginalRequest.length, 1);
   const before = h.state.aiConversation.length;
   await assert.rejects(http.create(request, { ...create, operationKey: 'new', actor: 'forged' }), rejected(400));

@@ -40,7 +40,7 @@ import { PrismaService } from "../database/prisma.service";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
-import { bufferedRentalPeriod } from "./rental-occupancy";
+import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { rentalOrderListSort } from "./rental-order-list-sort";
 import { allocateRentalOrderNumber } from "./rental-order-number";
@@ -92,6 +92,7 @@ interface AssetStatusHistoryInput {
   sourceId?: string;
   reason: string;
   operator?: string;
+  recordUnchanged?: boolean;
 }
 
 /**
@@ -319,7 +320,7 @@ function upper<T extends string>(value: string): T {
 async function appendAssetStatusHistory(client: RentalFactTx, input: AssetStatusHistoryInput) {
   const fromStatus = input.fromStatus ? upper<$Enums.RentalAssetState>(input.fromStatus) : null;
   const toStatus = upper<$Enums.RentalAssetState>(input.toStatus);
-  if (fromStatus === toStatus) return;
+  if (fromStatus === toStatus && !input.recordUnchanged) return;
   await client.rentalAssetStatusHistory.create({
     data: {
       id: randomUUID(),
@@ -484,6 +485,33 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       ] } : { id: "__no_current_user__" });
     }
     return clauses.length ? { AND: clauses } : {};
+  }
+
+  /** 文件读取与订单详情共用原范围；凭证额外限定实际取/还阶段地点。 */
+  async assertFileOrderReadAccess(tenantId: string, orderId: string, stage?: "pickup" | "return") {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const locationIds = getRequestLocationIds();
+    const stageWhere = stage && locationIds !== undefined
+      ? stage === "pickup" ? { fulfillmentLocationId: { in: locationIds } }
+        : { OR: [{ returnLocationId: { in: locationIds } }, { returnLocationId: null, fulfillmentLocationId: { in: locationIds } }] }
+      : {};
+    const row = await this.prisma.rentalOrder.findFirst({ where: { id: orderId, tenantId, workspaceId,
+      AND: [this.requestOrderVisibilityWhere(), stageWhere] }, select: { id: true } });
+    if (!row) throw new NotFoundException("文件关联订单不在当前业务范围内");
+  }
+
+  async assertFileWorkOrderReadAccess(tenantId: string, workOrderId: string) {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const row = await this.prisma.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId,
+      ...this.workOrderVisibilityWhere() }, select: { id: true } });
+    if (!row) throw new NotFoundException("文件关联工单不在当前业务范围内");
+  }
+
+  async assertFileAssetReadAccess(tenantId: string, assetId: string) {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const row = await this.prisma.rentalAsset.findFirst({ where: { id: assetId, tenantId, workspaceId,
+      AND: [await this.assetVisibilityWhere(this.prisma, tenantId, workspaceId)] }, select: { id: true } });
+    if (!row) throw new NotFoundException("文件关联资产不在当前业务范围内");
   }
 
   async listOrders(tenantId: string): Promise<RentalOrder[]> {
@@ -866,7 +894,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           // 预占自带期间，使可用量查询不必回连订单表。
           // 结束端用 effectiveEndAt：续租后占用必须跟着延长，否则同一资产在延长出来的
           // 那段时间里对可用量查询是"空闲"的，会被另一张订单同时占走。
-          startAt: new Date(order.fulfillmentMode === "carrier_shipping" ? (order.actualRentalStartAt ?? order.startAt) : order.startAt),
+          startAt: new Date(order.allocations.some(allocation => allocation.metadata?.reservationId === reservation.id && allocation.metadata.exchangeId)
+            ? reservation.createdAt
+            : order.fulfillmentMode === "carrier_shipping" ? (order.actualRentalStartAt ?? order.startAt) : order.startAt),
           endAt: new Date(rentalOrderDueAt(order)),
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
@@ -1013,12 +1043,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const destination = byLocation.get(transfer.toLocationId);
     if (!source || !destination) throw new ConflictException("归还调拨库存台账不完整，不能确认实物转移");
     const reservations = await this.activeReservations(order.tenantId, client);
-    const reservedAtSource = reservations
-      .filter((row) => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.fromLocationId)
-      .reduce((sum, row) => sum + row.quantity, 0);
+    const reservedAtSource = peakReservedQuantity(reservations
+      .filter(row => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.fromLocationId),
+      new Date().toISOString(), "9999-12-31T00:00:00.000Z");
     const sourceAfter = source.onHandQuantity - transfer.quantity;
     const destinationAfter = destination.onHandQuantity + transfer.quantity;
-    if (sourceAfter < reservedAtSource + source.maintenanceQuantity) {
+    // 实际返还转移不因未来预约不足而拒记；未来承诺由分配异常核对，不能把它当现在的实物。
+    if (sourceAfter < source.maintenanceQuantity) {
       throw new ConflictException("来源地点实物库存不足，不能完成异地归还调拨；请先核对在途和库存账");
     }
     const sourceUpdated = await client.rentalStockBalance.updateMany({
@@ -1035,9 +1066,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const operationId = `return_${fingerprint.slice(0, 32)}`;
     const rows = [
       { kind: "out" as const, locationId: transfer.fromLocationId, before: source.onHandQuantity, after: sourceAfter, reserved: reservedAtSource },
-      { kind: "in" as const, locationId: transfer.toLocationId, before: destination.onHandQuantity, after: destinationAfter, reserved: reservations
-        .filter((row) => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.toLocationId)
-        .reduce((sum, row) => sum + row.quantity, 0) }
+      { kind: "in" as const, locationId: transfer.toLocationId, before: destination.onHandQuantity, after: destinationAfter,
+        reserved: peakReservedQuantity(reservations.filter(row => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.toLocationId),
+          new Date().toISOString(), "9999-12-31T00:00:00.000Z") }
     ];
     for (const entry of rows) {
       await client.rentalStockLedgerEntry.create({ data: {
@@ -1085,12 +1116,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const balance = rows[0];
     if (!balance) throw new ConflictException(`商品 ${change.itemGroupId} 在网点 ${change.locationId} 没有库存台账，无法记录维修隔离变更`);
     const reservations = await this.activeReservations(tenantId, client);
-    const reservedQuantity = reservations
-      .filter((row) => row.itemGroupId === change.itemGroupId && row.locationId === change.locationId)
-      .reduce((sum, row) => sum + row.quantity, 0);
+    const reservedQuantity = peakReservedQuantity(reservations
+      .filter(row => row.itemGroupId === change.itemGroupId && row.locationId === change.locationId),
+      new Date().toISOString(), "9999-12-31T00:00:00.000Z");
     const nextMaintenance = balance.maintenanceQuantity + delta;
     if (nextMaintenance < 0) throw new ConflictException("库存维修隔离量不足，不能恢复可租数量");
-    if (nextMaintenance + reservedQuantity > balance.onHandQuantity) throw new ConflictException("维修隔离量不能超过扣除其他订单预占后的在手库存");
+    // 坏货已实际归还，未来预占冲突不能使本次检查/隔离回滚为仍在租。
+    if (nextMaintenance > balance.onHandQuantity) throw new ConflictException("维修隔离量不能超过实际在手库存");
     const updated = await client.rentalStockBalance.updateMany({
       where: { id: balance.id, tenantId, workspaceId, maintenanceQuantity: balance.maintenanceQuantity },
       data: { maintenanceQuantity: nextMaintenance }
@@ -1220,9 +1252,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   /* ---------- 资产 ---------- */
 
-  async listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]> {
-    const client = tx ?? this.prisma;
-    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+  private async assetVisibilityWhere(client: Prisma.TransactionClient, tenantId: string, workspaceId: string): Promise<Prisma.RentalAssetWhereInput> {
     const ownScope = getRequestDataScope() === "own";
     const userId = getRequestUserId();
     const ownAssetIds = ownScope && userId
@@ -1232,13 +1262,15 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           distinct: ["assetId"]
         })).map((row) => row.assetId).filter((id): id is string => Boolean(id))
       : undefined;
+    return { ...this.staffLocationWhere(),
+      ...(ownScope ? { id: { in: ownAssetIds?.length ? ownAssetIds : ["__no_owned_asset__"] } } : {}) };
+  }
+
+  async listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalAsset.findMany({
-      where: {
-        tenantId,
-        workspaceId,
-        ...this.staffLocationWhere(),
-        ...(ownScope ? { id: { in: ownAssetIds?.length ? ownAssetIds : ["__no_owned_asset__"] } } : {})
-      },
+      where: { tenantId, workspaceId, ...await this.assetVisibilityWhere(client, tenantId, workspaceId) },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" }
     });
@@ -1330,6 +1362,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           throw new ConflictException("资产事实已属于其他租户或经营空间，拒绝覆盖");
         }
         if (existing) {
+          await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_assets WHERE id = ${asset.id} AND tenantId = ${asset.tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
+          if (data.status === "AVAILABLE" && await tx.rentalStockDisposition.count({ where: {
+            tenantId: asset.tenantId, workspaceId, assetId: asset.id, status: { in: ["blocked", "buffered"] }
+          } }) > 0) throw new ConflictException("资产仍有未完成的归还处置，不能通过资料维护恢复可租");
           await tx.rentalAsset.update({ where: { id: asset.id }, data: { ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, serialNo: activeWrite.serialNo ?? null } });
         } else {
           await tx.rentalAsset.create({
@@ -1345,7 +1381,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           toStatus: asset.status,
           source: existing ? "manual" : "onboarding",
           reason: statusChange?.reason ?? (existing ? "资产资料维护" : "资产登记"),
-          operator: statusChange?.operator
+          operator: statusChange?.operator,
+          recordUnchanged: Boolean(existing && ["MAINTENANCE", "DISABLED"].includes(data.status))
         });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
@@ -1972,6 +2009,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         operator
       }, -remaining, "maintenance_release");
     }
+    if (row.assetId) await client.$queryRaw(Prisma.sql`SELECT id FROM rental_assets WHERE id = ${row.assetId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`);
     const restoredAt = new Date();
     const updatedCount = await client.rentalStockDisposition.updateMany({
       where: { id: row.id, tenantId, workspaceId, restoredQuantity: { lt: row.quantity }, status: "buffered" },
@@ -1980,11 +2018,20 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     if (updatedCount.count === 0) throw new ConflictException("库存处置已被其他操作恢复，请刷新后重试");
     if (row.assetId) {
       const remainingBlocks = await client.rentalStockDisposition.count({
-        where: { tenantId, workspaceId, assetId: row.assetId, id: { not: row.id }, status: { in: ["buffered", "blocked"] }, restoredQuantity: { lt: row.quantity } }
+        where: { tenantId, workspaceId, assetId: row.assetId, id: { not: row.id }, status: { in: ["buffered", "blocked"] } }
       });
       if (remainingBlocks === 0) {
         const assetBefore = await client.rentalAsset.findFirst({ where: { id: row.assetId, tenantId, workspaceId }, select: { assetNo: true, status: true } });
-        const updatedAsset = await client.rentalAsset.updateMany({ where: { id: row.assetId, tenantId, workspaceId }, data: { status: "AVAILABLE" } });
+        const latestStatus = await client.rentalAssetStatusHistory.findFirst({
+          where: { tenantId, workspaceId, assetId: row.assetId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { source: true, sourceId: true, toStatus: true }
+        });
+        // 只解除本订单处置形成的维护；后来的人工停用/维护或缺失来源均不能被覆盖。
+        const ownHold = assetBefore?.status === "MAINTENANCE" && latestStatus?.source === "order"
+          && latestStatus.sourceId === row.orderId && latestStatus.toStatus === "MAINTENANCE";
+        const updatedAsset = ownHold ? await client.rentalAsset.updateMany({
+          where: { id: row.assetId, tenantId, workspaceId, status: "MAINTENANCE" }, data: { status: "AVAILABLE" }
+        }) : { count: 0 };
         if (updatedAsset.count === 1 && assetBefore && assetBefore.status !== "AVAILABLE") {
           await appendAssetStatusHistory(client, {
             tenantId,
@@ -2009,18 +2056,17 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus, tx?: RentalFactTx): Promise<RentalWorkOrder[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
-    const userId = getRequestUserId();
     const rows = await client.rentalWorkOrder.findMany({
-      where: {
-        tenantId,
-        workspaceId,
-        ...(status ? { status } : {}),
-        ...this.staffLocationWhere(),
-        ...(getRequestDataScope() === "own" ? { OR: userId ? [{ createdBy: userId }, { assigneeId: userId }] : [{ id: "__no_current_user__" }] } : {})
-      },
+      where: { tenantId, workspaceId, ...(status ? { status } : {}), ...this.workOrderVisibilityWhere() },
       orderBy: { createdAt: "desc" }
     });
     return rows.map(toWorkOrder);
+  }
+
+  private workOrderVisibilityWhere(): Prisma.RentalWorkOrderWhereInput {
+    const userId = getRequestUserId();
+    return { ...this.staffLocationWhere(),
+      ...(getRequestDataScope() === "own" ? { OR: userId ? [{ createdBy: userId }, { assigneeId: userId }] : [{ id: "__no_current_user__" }] } : {}) };
   }
 
   private staffLocationWhere() {

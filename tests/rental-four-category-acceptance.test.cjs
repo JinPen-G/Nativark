@@ -103,6 +103,7 @@ void (async () => {
     rawState.businessSettings.pricing.defaultUnit = "package";
     rawState.businessSettings.fulfillment.enabledModes = [...RENTAL_FULFILLMENT_MODES];
     const ctx = context(core);
+    require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, item.workspaceId, ctx);
     const definition = ctx.category;
     const itemGroups = ctx.groups;
     const pricingGroups = core.listPricingGroups(tenantId);
@@ -154,6 +155,7 @@ void (async () => {
     assert.equal(quote.categoryCode, item.categoryCode, `${item.categoryCode}: 报价快照不得串品类`);
     assert.equal(quote.request.lines[0].itemGroupId, itemGroups[0].id, `${item.categoryCode}: 报价必须引用本空间商品`);
 
+    business.factStore.findQuote = async (tenant, id) => tenant === tenantId && id === quote.id ? structuredClone(quote) : undefined;
     // 服务级矩阵：四品类均使用同一续租入口，并各自保留原单位与执行依据。
     // 这里只验试算契约，不把替身仓储当作库存冲突/真实订单状态验收。
     const newEndAt = new Date(Date.parse(endAt) + 24 * 60 * 60 * 1000).toISOString();

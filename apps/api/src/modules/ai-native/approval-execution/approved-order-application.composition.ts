@@ -1,4 +1,4 @@
-import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
 import type { composeApprovedOrderHumanApproval } from './approved-order-human.composition';
 import { approvalApplicationContract } from './approval-application-contracts';
@@ -17,7 +17,7 @@ export function composeApprovedOrderApplication(d: ControlledApprovedOrderDepend
       const reference = approvalApplicationContract('AiApprovalApplicationReferenceDraft', value);
       const { proposal, deterministic, generatedText } = await human.readProposal(taskId, reference);
       return approvalApplicationContract('AiApprovalApplicationReviewDraft', {
-        draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, proposal, deterministic, generatedText
+        draftVersion: AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, proposal, deterministic, generatedText
       }, true);
     },
     decide: async (taskId: string, value: unknown) => {

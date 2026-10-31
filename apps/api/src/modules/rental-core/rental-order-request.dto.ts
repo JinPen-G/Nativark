@@ -1060,7 +1060,7 @@ export class ReviewRentalOrderFeeReviewDto implements ReviewRentalOrderFeeReview
   @IsNotEmpty()
   reason!: string;
 
-  // 认定金额。省略即按规则建议额；服务端拒绝超过建议额的值——多收要另立异常费用。
+  // 已知建议额可省略；未知须显式填数并受服务端原快照上限约束，不授实际退款权限。
   @IsOptional() @IsNumber() @Min(0) amount?: number;
 }
 

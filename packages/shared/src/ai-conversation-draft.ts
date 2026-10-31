@@ -9,6 +9,16 @@ import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as inte
 
 export const AI_CONVERSATION_DRAFT_VERSION = 'ain-conversation-draft-2' as const;
 interface Version { draftVersion: typeof AI_CONVERSATION_DRAFT_VERSION }
+export const AI_CONVERSATION_UNSTARTED_DRAFT_VERSION = 'ain-conversation-unstarted-draft-1' as const;
+export interface AiConversationUnstartedCloseDraft {
+  draftVersion: typeof AI_CONVERSATION_UNSTARTED_DRAFT_VERSION;
+  conversationId: string; operationKey: string; expectedRevision: number; turnId: string; originalInputRef: string;
+}
+export interface AiConversationUnstartedReceiptDraft {
+  draftVersion: typeof AI_CONVERSATION_UNSTARTED_DRAFT_VERSION; operationKey: string; retryable: false;
+  status: 'observed'; conversationId: string; revision: number; operation: 'close_unstarted';
+  creation: 'permanently_closed'; task: 'not_created'; taskCancellation: 'not_requested'; businessRecords: 'not_modified';
+}
 export interface AiConversationCreateDraft extends Version { operationKey: string; capabilityCode: AiSceneCode }
 export interface AiConversationReferenceDraft extends Version { conversationId: string }
 export interface AiConversationOperationRequestDraft extends Version { operationKey: string }
@@ -31,9 +41,9 @@ export type AiConversationModelResultResponseDraft = AiConversationTurnReference
   | { status: 'observed'; result: AiSceneModelResultObservationDraft }
   | { status: 'material_erased'; result: null; nextAction: 'original_task_center' }
 );
-/** An erased body is not reconstructed from metadata. The original erasure and
- * current task-read authority must attest its retained locator; the hash is only
- * the immutable admission reference, never available plaintext or a send grant. */
+/** An erased body is not reconstructed from metadata. A Task locator needs its
+ * current task-read authority; a no-Task closure needs the permanent creation
+ * fence and original closure/erasure receipts. Neither grants a new send. */
 export type AiConversationTurnObservationDraft = {
   admissionKey: string; turnId: string; originalRequestKey: string;
   requestHash: string; capabilityCode: AiSceneCode; capabilityVersion: string;
@@ -43,6 +53,7 @@ export type AiConversationTurnObservationDraft = {
 } & (
   | { material: 'retained'; task: { taskId: string; runId: string } | null }
   | { material: 'erased'; task: { taskId: string; runId: string } }
+  | { material: 'retained' | 'erased'; task: null; creation: 'permanently_closed'; closeOperationKey: string }
 );
 export interface AiConversationAdmissionResponseDraft extends AiConversationTurnReferenceDraft {
   result: AiConversationTurnObservationDraft | null; absence: 'not_proof_of_no_commit'; retryable: false;
@@ -53,11 +64,11 @@ export interface AiConversationObservationDraft extends AiConversationReferenceD
   createdAt: string; updatedAt: string;
   taskCancellation: 'separate_original_operation'; businessRecords: 'not_modified';
 }
-export type AiConversationOperationObservationDraft = Version & { operationKey: string; retryable: false } & (
+export type AiConversationOperationObservationDraft = AiConversationUnstartedReceiptDraft | (Version & { operationKey: string; retryable: false } & (
   | { status: 'observed'; conversationId: string; revision: number; operation: 'create' | 'archive' | 'delete' | 'release_turn';
       taskCancellation: 'not_requested'; businessRecords: 'not_modified' }
   | { status: 'not_observed'; nextAction: 'read_original_operation'; absence: 'not_proof_of_no_commit' }
-);
+));
 export interface AiConversationListResponseDraft extends Version {
   items: Array<Pick<AiConversationObservationDraft, 'conversationId' | 'revision' | 'capabilityCode' | 'status' | 'createdAt' | 'updatedAt'>>;
   nextBeforeId: string | null; coverage: 'page_not_total';
@@ -79,6 +90,7 @@ export const AI_CONVERSATION_HTTP_DRAFT = Object.freeze({ basePath: 'ai-native/c
   turns: { request: 'AiConversationTurnListDraft', response: 'AiConversationTurnPageDraft', write: false },
   release: { request: 'AiConversationMutationDraft', response: 'AiConversationOperationObservationDraft', write: true },
   modelResult: { request: 'AiConversationModelResultReadDraft', response: 'AiConversationModelResultResponseDraft', write: false },
+  closeUnstarted: { request: 'AiConversationUnstartedCloseDraft', response: 'AiConversationUnstartedReceiptDraft', write: true },
 } } as const);
 const key = { ...id(), maxLength: 128 };
 const version = { draftVersion: choice(AI_CONVERSATION_DRAFT_VERSION) }, revision = integer(1, 4294967294);
@@ -89,7 +101,13 @@ const capability = choice(...AI_SCENE_CODES);
 const turn = { admissionKey: key, turnId: id(), originalRequestKey: text(128), requestHash: hash,
   capabilityCode: capability, capabilityVersion: id(), createdAt: time, automaticRetry: no };
 const summary = { conversationId: id(), revision, capabilityCode: capability, status: choice('active', 'archived'), createdAt: time, updatedAt: time };
+const unstartedReceipt = object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED_DRAFT_VERSION), operationKey: key, retryable: no,
+  status: choice('observed'), conversationId: id(), revision, operation: choice('close_unstarted'),
+  creation: choice('permanently_closed'), task: choice('not_created'), taskCancellation: choice('not_requested'), businessRecords: choice('not_modified') });
 export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiConversationUnstartedCloseDraft: object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED_DRAFT_VERSION),
+    conversationId: id(), operationKey: key, expectedRevision: revision, turnId: id(), originalInputRef: id() }),
+  AiConversationUnstartedReceiptDraft: unstartedReceipt,
   AiConversationCreateDraft: object({ ...version, operationKey: key, capabilityCode: capability }),
   AiConversationReferenceDraft: object(reference),
   AiConversationOperationRequestDraft: object({ ...version, operationKey: { ...id(), maxLength: 128 } }),
@@ -110,12 +128,14 @@ export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
       task: { oneOf: [object({ taskId: id(), runId: id() }), nil] }, execution: choice('not_inferred_from_association') }),
     object({ ...turn, status: choice('original_bound'), original: ref('AiSceneRequestReadDraft'), material: choice('erased'),
       task: object({ taskId: id(), runId: id() }), execution: choice('not_inferred_from_association') }),
+    object({ ...turn, status: choice('original_bound'), original: ref('AiSceneRequestReadDraft'), material: choice('retained', 'erased'), task: nil,
+      creation: choice('permanently_closed'), closeOperationKey: key, execution: choice('not_inferred_from_association') }),
   ] },
   AiConversationAdmissionResponseDraft: object({ ...reference, admissionKey: key, result: { oneOf: [ref('AiConversationTurnObservationDraft'), nil] },
     absence: choice('not_proof_of_no_commit'), retryable: no }),
   AiConversationObservationDraft: object({ ...version, ...summary, currentTurn: { oneOf: [ref('AiConversationTurnObservationDraft'), nil] },
     taskCancellation: choice('separate_original_operation'), businessRecords: choice('not_modified') }),
-  AiConversationOperationObservationDraft: { oneOf: [object({ ...version, operationKey: key, retryable: no, status: choice('observed'),
+  AiConversationOperationObservationDraft: { oneOf: [unstartedReceipt, object({ ...version, operationKey: key, retryable: no, status: choice('observed'),
     conversationId: id(), revision, operation: choice('create', 'archive', 'delete', 'release_turn'), taskCancellation: choice('not_requested'), businessRecords: choice('not_modified') }),
     object({ ...version, operationKey: key, retryable: no, status: choice('not_observed'), nextAction: choice('read_original_operation'),
       absence: choice('not_proof_of_no_commit') })] },

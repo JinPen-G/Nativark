@@ -127,6 +127,19 @@ test('selected quote task HTTP uses normal runner and current human decision wit
     assert.equal(events.taskId, h.selection.taskId);
     const snapshot = await requests.readTaskSnapshot(request, original);
     assert.equal(snapshot.taskId, h.selection.taskId); assert.equal(snapshot.status, 'waiting_confirmation');
+    if (mode === 'approve') {
+      const { composeTaskCenterApproval } = require('../apps/api/src/modules/ai-native/task-center-approval.composition');
+      const tasks = require('../apps/api/src/modules/ai-native/task-authorization.composition').composePersistedTaskAuthorization(h.sceneDependencies).tasks;
+      const center = composeTaskCenterApproval({ order: dependencies, settings: { db: dependencies.db }, decisions: { order: true, settings: false } }, credentials, tasks);
+      const query = { taskId: h.selection.taskId, runId: h.selection.runId, stepId: r.aiStep[0].id };
+      const material = await center.review(query);
+      assert.equal(material.review.draftVersion, 'ain-approval-order-review-draft-2');
+      assert.equal(material.review.deterministic.order.customer.id, 'customer-a');
+      assert.equal(material.review.deterministic.order.lines[0].quantity, 1);
+      assert.equal(material.review.deterministic.order.fulfillment.returnLocationId, 'location-a');
+      await assert.rejects(center.decision({ ...query, proposal: { ...wait.proposal, decision: 'approve' } }), error => error.code === 'AI_INVALID_INPUT');
+      assert.equal(h.state.records.aiApproval.length, 0);
+    }
     assert.equal(typeof snapshot.cursor, 'string');
     await assert.rejects(requests.readTaskSnapshot(request, { ...original, runId: h.selection.runId }), e => e.code === 'AI_INVALID_INPUT');
     const sceneRequest = { kind: 'original', original, taskId: h.selection.taskId,
@@ -190,7 +203,7 @@ test('selected quote task HTTP uses normal runner and current human decision wit
       assert.equal(result.outcome.status, 'failed'); assert.equal(h.state.records.rentalOrder.length, 0);
       assert.equal((await task.readResult(request, command)).status, 'not_observed');
     } else {
-      const decision = await human.decideSelectedProposal(request, { ...command, proposal: { ...wait.proposal, decision: 'approve' } });
+      const decision = await human.decideSelectedProposal(request, { ...command, proposal: { ...wait.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' } });
       assert.equal(decision.order, 'not_created_by_decision'); assert.equal(h.state.records.rentalOrder.length, 0);
       h.state.ackLost = mode === 'unknown';
       const continued = await task.continueConfirmation(request, continuation);
@@ -298,15 +311,16 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);
   const displayed = await h.app.readSelectedProposal(review);
   assert.equal(displayed.deterministic.quoteAmounts.payableAmount, 123); assert.equal(displayed.generatedText, null);
-  assert.equal(displayed.draftVersion, 'ain-approval-application-draft-1'); assert.equal(displayed.facts, undefined);
+  assert.equal(displayed.draftVersion, 'ain-approval-order-review-draft-2'); assert.equal(displayed.facts, undefined);
+  assert.equal(displayed.deterministic.order.customer.id, 'customer-a');
   const shared = require('./fixtures/ai-native/local-shared.cjs');
   assert.equal(shared.AI_QUOTE_SELECTION_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION);
   const components = require('../apps/api/src/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS;
   assert.deepEqual(components.AiApprovalApplicationReviewDraft.properties.generatedText, { type: 'string', nullable: true, enum: [null] });
-  const eligibility = { selection: h.selection, request: { draftVersion: displayed.draftVersion, original: h.proposal, intent: 'inspect' } };
+  const eligibility = { selection: h.selection, request: { draftVersion: 'ain-approval-application-draft-1', original: h.proposal, intent: 'inspect' } };
   assert.equal((await h.app.readSelectedReprepareEligibility(eligibility)).state, 'pending');
   await assert.rejects(h.app.readSelectedProposal({ ...review, selection: { ...h.selection, inputHash: 'f'.repeat(64) } }), e => e.code === 'AI_ACCESS_DENIED');
-  const decision = { ...review, proposal: { ...h.proposal, decision: 'approve' } };
+  const decision = { ...review, proposal: { ...h.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' } };
   await assert.rejects(h.app.decideSelectedProposal({ ...decision, actorId: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
   assert.deepEqual(await h.app.readSelectedDecisionReceipt(decision), { kind: 'absent', retryable: false });
   h.state.decisionAckLost = true;
@@ -495,7 +509,7 @@ test('request-bound quote selection and human decision share only the current re
     reviewedPayloadHash: pending.proposal.reviewedPayloadHash };
   const view = await human.readSelectedProposal(request, { selection, proposal });
   assert.equal(view.facts, undefined); assert.equal(view.generatedText, null);
-  const decision = { selection, proposal: { ...proposal, decision: 'approve' } };
+  const decision = { selection, proposal: { ...proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' } };
   const Ajv = require('ajv'), schemaAjv = new Ajv({ strict: false }); require('ajv-formats')(schemaAjv);
   const validDecision = schemaAjv.compile(require('../packages/shared/src/ai-quote-selection-draft-schemas').AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiHumanQuoteOrderDecisionRequestDraft);
   assert.equal(validDecision(decision), true); assert.equal(validDecision({ ...decision, lease: held }), false);
@@ -546,7 +560,7 @@ test('selected new human materials reprepare through the formal factory and reta
   assert.equal(h.state.records.aiTaskQuoteSelection.length, 2); assert.equal(h.state.records.rentalOrder.length, 0);
   assert.deepEqual(await app.reprepareSelectedProposal(request, input), result);
   const approved = await app.decideSelectedProposal(request, { selection: result.replacement.selection,
-    proposal: { ...result.receipt.proposal, decision: 'approve' } });
+    proposal: { ...result.receipt.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' } });
   assert.equal(approved.approval.decision, 'approved'); assert.equal(approved.order, 'not_created_by_decision');
   assert.equal(h.state.records.aiApproval.length, 2); assert.equal(h.state.records.rentalOrder.length, 0);
   assert.equal(h.state.records.aiApprovalReprepare.length, 1);
@@ -657,7 +671,10 @@ test('human quote selection binds consumed model answers and prevents a competin
     assert.equal(h.execution.sent.length,1);
     continue;
   }
-  const declined=await human.decideSelectedProposal({selection,proposal:{...waiting.proposal,decision}});
+  const reviewed=await human.readSelectedProposal({selection,proposal:waiting.proposal});
+  assert.equal(reviewed.deterministic.order.customer.id,'customer-a');
+  const declined=await human.decideSelectedProposal({selection,proposal:{...waiting.proposal,decision,
+    ...(decision==='approve'?{reviewVersion:reviewed.draftVersion}:{})}});
   assert.equal(declined.approval.decision,decision==='approve'?'approved':'rejected');
   if(mode==='lost_commit') h.control.beforeCommit=async draft=>{
     if(draft.rentalOrder.length===1 && h.state.rentalOrder.length===0) {

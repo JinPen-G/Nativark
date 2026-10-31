@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT } from '@rental-os/shared';
+import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
+  AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION } from '@rental-os/shared';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -36,7 +37,8 @@ const preparation = z.object({ selection: z.unknown(), command: approvedOrderCom
 const reviewReference = approvedOrderCommandSchema.pick({ proposalId: true, proposalRevision: true, reviewedPayloadHash: true })
   .extend({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION) }).strict();
 const reviewCommand = z.object({ selection: z.unknown(), proposal: reviewReference }).strict();
-const decisionCommand = z.object({ selection: z.unknown(), proposal: reviewReference.extend({ decision: z.enum(['approve', 'reject']) }) }).strict();
+const decisionCommand = z.object({ selection: z.unknown(), proposal: reviewReference.extend({ decision: z.enum(['approve', 'reject']),
+  reviewVersion: z.literal(AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION).optional() }) }).strict();
 const executionCommand = z.object({ selection: z.unknown(), command: approvedOrderCommandSchema }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 // New effects need a current independent payer authority, which this host does
@@ -61,7 +63,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     const readSelection = () => selections.read({ draftVersion: ref.draftVersion, originalInputRef: ref.originalInputRef, selectionId: ref.selectionId });
     const selected = await readSelection();
     if (selected.taskId !== ref.taskId || selected.runId !== ref.runId || selected.inputHash !== ref.inputHash) throw denied();
-    const review = await controlled.approvals.readProposal(ref.taskId, reference);
+    const review = await controlled.approvals.readOriginal(ref.taskId, reference);
     const access = await controlled.tasks.resolveAccess(ref.taskId, 'read_metadata');
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true, inputRef: true } });
     if (!task || task.id !== ref.taskId || task.inputRef !== ref.originalInputRef) throw denied();
@@ -120,20 +122,20 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     async decideSelectedProposal(value: unknown) {
       const parsed = decisionCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { decision, ...reference } = parsed.data.proposal;
+      const { decision, reviewVersion, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
       const selected = await selections.readAuthorized(ref);
       if (decision === 'approve') assertPayerSupported(selected.body);
-      const receipt = await controlled.application.decide(ref.taskId, { ...reference, decision });
+      const receipt = await controlled.application.decide(ref.taskId, { ...reference, decision, ...(reviewVersion ? { reviewVersion } : {}) });
       if (receipt.kind !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return freezeOriginalInput({ approval: receipt.record, order: 'not_created_by_decision' as const });
     },
     async readSelectedDecisionReceipt(value: unknown) {
       const parsed = decisionCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { decision, ...reference } = parsed.data.proposal;
+      const { decision, reviewVersion, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
-      return freezeOriginalInput(await controlled.application.readReceipt(ref.taskId, { ...reference, decision }));
+      return freezeOriginalInput(await controlled.application.readReceipt(ref.taskId, { ...reference, decision, ...(reviewVersion ? { reviewVersion } : {}) }));
     },
     async readSelectedReprepareEligibility(value: unknown) {
       const parsed = z.object({ selection: z.unknown(), request: z.unknown() }).strict().safeParse(structuredClone(value));

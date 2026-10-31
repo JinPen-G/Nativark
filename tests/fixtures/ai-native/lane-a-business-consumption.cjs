@@ -57,6 +57,9 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
   const reports = new RentalWorkspaceReportRepository({ rentalOrder: { groupBy: async () => [], aggregate: async () => ({ _sum: {} }), findMany: async () => [] }, rentalAsset: { groupBy: async () => [] }, rentalStockBalance: { aggregate: async () => ({ _sum: {} }) } });
   const tools = composeAiAuthorizedBusinessTools({ core, business, memberships, reports,
     guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}), credentials: h.authorization.credentials });
+  require('../../helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], 'tenant_001', 'workspace-a', {
+    locations: core.listLocations('tenant_001'), operators: core.listOperators('tenant_001')
+  });
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
   const candidate = { customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name };

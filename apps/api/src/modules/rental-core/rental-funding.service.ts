@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException } from "@nestjs/common";
+import { Injectable, ConflictException, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type {
@@ -12,8 +12,11 @@ import { PrismaService } from "../database/prisma.service";
 import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, isRealFundingEvent, nextBalanceAfter, rentalPaymentBalance, resolveOfflineFundingEvents } from "./rental-funding-events";
 import { roundMoney } from "./rental-money";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
+import { RentalOrderReceivableRepository } from "./rental-order-receivable.repository";
 
-type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string; ruleSnapshot: { payment?: { timing?: string } } };
+type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string;
+  membershipSnapshot?: unknown; payerSubjectCustomerId?: string | null; contractSubjectCustomerId?: string | null; currency?: string;
+  ruleSnapshot: { payment?: { timing?: string } } };
 
 /**
  * 订单资金事实与门禁；不派发支付、不改写订单状态，线上入账仍由原支付运行器核验。
@@ -26,7 +29,26 @@ type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: num
  */
 @Injectable()
 export class RentalFundingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly receivables?: RentalOrderReceivableRepository) {}
+
+  private async corporatePaid(tenantId: string, workspaceId: string, orderId: string,
+    order: Pick<FundingOrder, "membershipSnapshot" | "payerSubjectCustomerId" | "contractSubjectCustomerId" | "currency">, tx?: Prisma.TransactionClient) {
+    if ((order.membershipSnapshot as { enterpriseContractAndPayer?: boolean } | null)?.enterpriseContractAndPayer !== true) return 0;
+    if (!this.receivables) throw new ConflictException("企业回款应收投影不可用，不能假定尚未付款");
+    return this.receivables.corporatePaid(tenantId, workspaceId, orderId, order, tx);
+  }
+
+  private async orderFundingContext(tenantId: string, workspaceId: string, orderId: string,
+    order: Pick<FundingOrder, "membershipSnapshot" | "payerSubjectCustomerId" | "contractSubjectCustomerId" | "currency">,
+    tx?: Prisma.TransactionClient, realOnly = false) {
+    const corporatePaid = await this.corporatePaid(tenantId, workspaceId, orderId, order, tx);
+    const corporate = (order.membershipSnapshot as { enterpriseContractAndPayer?: boolean } | null)?.enterpriseContractAndPayer === true;
+    // Real repayment allocations cannot be combined with mock cash, even in a
+    // development workspace. Cash-only reads for the corporate domain stay separate.
+    const context = await this.loadBalanceContext(tx ?? this.prisma, tenantId, workspaceId, orderId,
+      realOnly || corporatePaid > 0, Boolean(tx && corporate));
+    return { ...context, corporatePaid };
+  }
 
   private async loadOrderScope(
     db: Prisma.TransactionClient | PrismaService,
@@ -73,25 +95,35 @@ export class RentalFundingService {
     db: Prisma.TransactionClient | PrismaService,
     tenantId: string,
     workspaceId: string,
-    orderId: string
+    orderId: string,
+    currentRead = false
   ): Promise<RentalFundingEvent[]> {
-    const rows = await db.rentalFundingEvent.findMany({
-      where: { tenantId, workspaceId, orderId },
-      orderBy: { at: "asc" }
-    });
+    const rows = currentRead
+      ? await db.$queryRaw<Prisma.RentalFundingEventGetPayload<object>[]>(Prisma.sql`
+          SELECT * FROM rental_funding_events WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId}
+          ORDER BY at, id LOCK IN SHARE MODE`)
+      : await db.rentalFundingEvent.findMany({ where: { tenantId, workspaceId, orderId }, orderBy: { at: "asc" } });
     const events = rows.map((row) => this.toEvent(row));
     if (!events.some(event => event.provider === "mock")) return events;
+    // Legacy confirmations keep their original reader. Do not add a locking
+    // registration read while holding order: its confirm path still locks the
+    // registration first. That cross-path lock order needs separate closure.
     const registrations = await db.rentalOfflinePaymentRegistration.findMany({
       where: { tenantId, workspaceId, orderId, status: "confirmed", fundingEventId: { not: null } }
     });
-    return resolveOfflineFundingEvents(events, registrations);
+    const resolved = resolveOfflineFundingEvents(events, registrations);
+    if (currentRead && resolved.some(event => event.provider === "mock"
+      && (event.paymentMethod || event.idempotencyKey.startsWith("staff-offline:")))) {
+      throw new ConflictException("原线下资金确认依据不可核实，请按原收据核对，不能当作未付款");
+    }
+    return resolved;
   }
 
   private async loadBalanceContext(
     db: Prisma.TransactionClient | PrismaService, tenantId: string, workspaceId: string, orderId: string,
-    realOnly = false
+    realOnly = false, currentRead = false
   ) {
-    const events = await this.loadEvents(db, tenantId, workspaceId, orderId);
+    const events = await this.loadEvents(db, tenantId, workspaceId, orderId, currentRead);
     let simulationAllowed = false;
     if (!realOnly && process.env.NODE_ENV !== "production" && events.every(event => event.provider === "mock")) {
       // 执行门内锁住空间模式，不能在演练门检查后并发切为生产；读取页面不持锁。
@@ -128,6 +160,22 @@ export class RentalFundingService {
     const db = tx ?? this.prisma;
     await this.loadOrderScope(db, tenantId, workspaceId, orderId);
     const order = await db.rentalOrder.findFirstOrThrow({ where: { id: orderId, tenantId, workspaceId } });
+    const corporate = (order.membershipSnapshot as { enterpriseContractAndPayer?: boolean } | null)?.enterpriseContractAndPayer === true;
+    if (!tx && corporate) {
+      // One order lock stabilizes cash and allocations even for a summary read;
+      // separate reads can otherwise combine opposite sides of a new repayment.
+      return this.prisma.$transaction(current => this.listEvents(tenantId, workspaceId, orderId, current, options),
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }
+    if (tx && corporate) {
+      const current = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
+      order.finalPayableAmount = new Prisma.Decimal(current.payable);
+      order.membershipSnapshot = current.membershipSnapshot as typeof order.membershipSnapshot;
+      order.payerSubjectCustomerId = current.payerSubjectCustomerId ?? null;
+      order.contractSubjectCustomerId = current.contractSubjectCustomerId ?? null;
+      order.currency = current.currency!;
+      order.status = current.status as typeof order.status;
+    }
     const extensions = await db.rentalOrderExtension.findMany({
       where: { tenantId, workspaceId, orderId, status: { in: ["pending_payment", "effective"] } }
     });
@@ -137,13 +185,15 @@ export class RentalFundingService {
       preAuthDelta: Number(row.preAuthDelta)
     })));
     const pending = aggregatePendingExtensionFunding((pendingExtensionCountsAsDue(order.status) ? extensions.filter((row) => row.status === "pending_payment") : []).map((row) => ({
-      payableAmount: Number(row.payableAmount),
+      payableAmount: row.settlementMode === "monthly" ? 0 : Number(row.payableAmount),
       depositDelta: Number(row.depositDelta),
       preAuthDelta: Number(row.preAuthDelta)
     })));
-    const { events, accountingEvents, balanceBasis, simulationAllowed } = await this.loadBalanceContext(db, tenantId, workspaceId, orderId, options.realOnly);
+    const { events, accountingEvents, balanceBasis, simulationAllowed, corporatePaid } = await this.orderFundingContext(
+      tenantId, workspaceId, orderId, order, tx, options.realOnly);
     const ledgers = deriveFundingLedgers(accountingEvents);
-    const rentalBase = rentalPaymentBalance(Number(order.finalPayableAmount), accountingEvents);
+    const cashBase = rentalPaymentBalance(Number(order.finalPayableAmount), accountingEvents);
+    const rentalBase = { ...cashBase, corporatePaid, balance: roundMoney(cashBase.balance - corporatePaid) };
     const depositRequired = Number(order.depositAmount) + effective.depositAmount + pending.depositAmount;
     return {
       orderId, balanceBasis, simulationAllowed,
@@ -175,8 +225,9 @@ export class RentalFundingService {
     workspaceId: string,
     orderId: string
   ): Promise<FundingOrder> {
-    const rows = await tx.$queryRaw<Array<{ depositAmount: Prisma.Decimal; preAuthAmount: Prisma.Decimal; finalPayableAmount: Prisma.Decimal; status: string; ruleSnapshot: FundingOrder["ruleSnapshot"] }>>(Prisma.sql`
-      SELECT depositAmount, preAuthAmount, finalPayableAmount, status, ruleSnapshot
+    const rows = await tx.$queryRaw<Array<{ depositAmount: Prisma.Decimal; preAuthAmount: Prisma.Decimal; finalPayableAmount: Prisma.Decimal; status: string;
+      membershipSnapshot: unknown; payerSubjectCustomerId: string | null; contractSubjectCustomerId: string | null; currency: string; ruleSnapshot: FundingOrder["ruleSnapshot"] }>>(Prisma.sql`
+      SELECT depositAmount, preAuthAmount, finalPayableAmount, status, ruleSnapshot, membershipSnapshot, payerSubjectCustomerId, contractSubjectCustomerId, currency
         FROM rental_orders
        WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
        FOR UPDATE
@@ -189,7 +240,10 @@ export class RentalFundingService {
       depositDelta: Number(row.depositDelta),
       preAuthDelta: Number(row.preAuthDelta)
     })));
-    return { depositAmount: Number(order.depositAmount) + effective.depositAmount, preAuthAmount: Number(order.preAuthAmount) + effective.preauthorizationAmount, payable: Number(order.finalPayableAmount), status: order.status.toLowerCase(), ruleSnapshot: order.ruleSnapshot };
+    return { depositAmount: Number(order.depositAmount) + effective.depositAmount, preAuthAmount: Number(order.preAuthAmount) + effective.preauthorizationAmount,
+      payable: Number(order.finalPayableAmount), status: order.status.toLowerCase(), ruleSnapshot: order.ruleSnapshot,
+      membershipSnapshot: order.membershipSnapshot, payerSubjectCustomerId: order.payerSubjectCustomerId,
+      contractSubjectCustomerId: order.contractSubjectCustomerId, currency: order.currency };
   }
 
   /** 领取前必须已经按订单快照足额收取押金、冻结预授权。 */
@@ -201,7 +255,7 @@ export class RentalFundingService {
     options: { skipRentalPayment?: boolean } = {}
   ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const ledgers = deriveFundingLedgers((await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
+    const ledgers = deriveFundingLedgers((await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx)).accountingEvents);
     if (order.depositAmount > 0 && ledgers.deposit.balance < order.depositAmount) {
       throw new ConflictException(`领取前须足额收取押金 ¥${order.depositAmount.toFixed(2)}`);
     }
@@ -213,8 +267,10 @@ export class RentalFundingService {
 
   async assertPaid(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient, payable?: number) {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const balance = rentalPaymentBalance(payable ?? order.payable, (await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
-    if (balance.balance > 0.005) throw new ConflictException(`租金及费用尚需收款 ${balance.balance.toFixed(2)}，请先登记收款`);
+    const { accountingEvents, corporatePaid } = await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx);
+    const balance = rentalPaymentBalance(payable ?? order.payable, accountingEvents);
+    const due = roundMoney(balance.balance - corporatePaid);
+    if (due > 0.005) throw new ConflictException(`租金及费用尚需收款 ${due.toFixed(2)}，请先登记收款`);
   }
 
   async assertReadyForConfirmation(
@@ -230,15 +286,40 @@ export class RentalFundingService {
     }
   }
 
-  async assertExtensionPaid(tenantId: string, workspaceId: string, orderId: string, extensionId: string, tx: Prisma.TransactionClient) {
+  async assertExtensionPaid(tenantId: string, workspaceId: string, orderId: string, extensionId: string, tx: Prisma.TransactionClient,
+    options: { skipRentalPayment?: boolean } = {}) {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
     const extension = await tx.rentalOrderExtension.findFirst({ where: { id: extensionId, orderId, tenantId, workspaceId } });
     if (!extension) throw new NotFoundException("续租记录不存在");
     if (extension.status === "effective") return;
-    const { accountingEvents: events } = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId);
+    await this.assertReadyForExtension(tenantId, workspaceId, orderId, {
+      payableAmount: Number(extension.payableAmount), depositDelta: Number(extension.depositDelta), preAuthDelta: Number(extension.preAuthDelta)
+    }, tx, options);
+  }
+
+  /** 每条续租生效路径共用；账期只跳过租金，原押金缺口及本次增额仍须足额。 */
+  async assertReadyForExtension(tenantId: string, workspaceId: string, orderId: string,
+    extension: { payableAmount: number; depositDelta: number; preAuthDelta: number }, tx: Prisma.TransactionClient,
+    options: { skipRentalPayment?: boolean } = {}) {
+    const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
+    const { accountingEvents: events, corporatePaid } = await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx);
     const ledgers = deriveFundingLedgers(events);
-    if (ledgers.deposit.balance < order.depositAmount + Number(extension.depositDelta) || ledgers.preauthorization.balance < order.preAuthAmount + Number(extension.preAuthDelta)) throw new ConflictException("续租保证金不足，请先追加押金或预授权");
-    await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable + Number(extension.payableAmount));
+    const amounts = [extension.payableAmount, extension.depositDelta, extension.preAuthDelta];
+    if (amounts.some(value => !Number.isFinite(value) || value < 0)) throw new ConflictException("续租资金要求无效，请核对原记录");
+    if (ledgers.deposit.balance + 0.005 < roundMoney(order.depositAmount + extension.depositDelta)
+      || ledgers.preauthorization.balance + 0.005 < roundMoney(order.preAuthAmount + extension.preAuthDelta)) {
+      throw new ConflictException("续租保证金不足，请先追加押金或预授权");
+    }
+    if (!options.skipRentalPayment) await this.assertPaid(tenantId, workspaceId, orderId, tx, roundMoney(order.payable + extension.payableAmount));
+  }
+
+  /** Cash-only facts for the corporate domain. Do not re-enter its repayment
+   * projection while it owns credit; the caller separately reads allocations. */
+  async netCashPaid(tenantId: string, workspaceId: string, orderId: string, tx?: Prisma.TransactionClient) {
+    const db = tx ?? this.prisma;
+    await this.loadOrderScope(db, tenantId, workspaceId, orderId);
+    const events = (await this.loadBalanceContext(db, tenantId, workspaceId, orderId, true, Boolean(tx))).accountingEvents;
+    return roundMoney(-rentalPaymentBalance(0, events).balance);
   }
 
   /** 关闭前按同一证据口径检查资金已结清。 */
@@ -250,14 +331,18 @@ export class RentalFundingService {
     options: { skipRentalPayment?: boolean } = {}
   ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    const ledgers = deriveFundingLedgers((await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents);
+    const { accountingEvents: events, corporatePaid } = await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx);
+    const ledgers = deriveFundingLedgers(events);
     if (order.depositAmount > 0 && ledgers.deposit.collected < order.depositAmount) throw new ConflictException("订单押金尚未足额收取，不能关闭");
     if (order.preAuthAmount > 0 && ledgers.preauthorization.frozen < order.preAuthAmount) throw new ConflictException("订单预授权尚未足额冻结，不能关闭");
     if (ledgers.deposit.balance > 0) throw new ConflictException("仍有押金余额，请先抵扣或退款");
     if (ledgers.preauthorization.balance > 0) throw new ConflictException("仍有预授权冻结额度，请先转扣或释放");
-    if (!options.skipRentalPayment) {
-      const balance = rentalPaymentBalance(order.payable, (await this.loadBalanceContext(tx, tenantId, workspaceId, orderId)).accountingEvents).balance;
-      if (Math.abs(balance) > 0.005) throw new ConflictException(balance > 0 ? `尚有费用 ${balance.toFixed(2)} 未收取` : `尚有退款 ${(-balance).toFixed(2)} 未完成`);
+    const cashBalance = rentalPaymentBalance(order.payable, events).balance;
+    const balance = roundMoney(cashBalance - corporatePaid);
+    // Credit may carry unpaid debt, never an unresolved overpayment. Corporate
+    // allocations stay visible even when there is no cash source to refund.
+    if (balance < -0.005 || !options.skipRentalPayment && balance > 0.005) {
+      throw new ConflictException(balance > 0 ? `尚有费用 ${balance.toFixed(2)} 未收取` : `尚有退款 ${(-balance).toFixed(2)} 未完成`);
     }
   }
 
@@ -279,22 +364,19 @@ export class RentalFundingService {
     tx: Prisma.TransactionClient,
     payableOverride?: number
   ): Promise<{ depositBalance: number; preauthBalance: number; rentalOverpaid: number }> {
-    const { accountingEvents: events } = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId);
+    const order = await tx.rentalOrder.findFirst({ where: { id: orderId, tenantId, workspaceId },
+      select: { finalPayableAmount: true, membershipSnapshot: true, payerSubjectCustomerId: true,
+        contractSubjectCustomerId: true, currency: true } });
+    if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
+    const { accountingEvents: events, corporatePaid } = await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx);
     const ledgers = deriveFundingLedgers(events);
-    let payable = payableOverride;
-    if (payable === undefined) {
-      const order = await tx.rentalOrder.findFirst({
-        where: { id: orderId, tenantId, workspaceId },
-        select: { finalPayableAmount: true }
-      });
-      payable = order ? Number(order.finalPayableAmount) : 0;
-    }
+    const payable = payableOverride ?? Number(order.finalPayableAmount);
     const rental = rentalPaymentBalance(payable, events);
     return {
       depositBalance: ledgers.deposit.balance,
       preauthBalance: ledgers.preauthorization.balance,
       // 负值表示多收：与 rentalPaymentBalance 的口径一致，由调用方按 < -0.005 判定。
-      rentalOverpaid: rental.balance
+      rentalOverpaid: roundMoney(rental.balance - corporatePaid)
     };
   }
 
@@ -354,12 +436,6 @@ export class RentalFundingService {
         throw new ConflictException("真实资金必须提供原核验收据");
       }
       if (input.allowPartialInitiate && provider !== "offline") throw new ConflictException("部分线下收款必须来自原确认登记");
-      const context = await this.loadBalanceContext(tx, tenantId, workspaceId, orderId, provider !== "mock");
-      if (provider === "mock" && !context.simulationAllowed) {
-        throw new ConflictException("模拟资金仅限纯演练订单，不能用于生产空间或抵消真实资金，请走原收退款流程");
-      }
-      const events = context.accountingEvents;
-
       // 命中既有同键事件即回放（重试/恢复）。来源不能跨模拟与实款借键。
       const existing = await tx.rentalFundingEvent.findUnique({
         where: {
@@ -373,6 +449,9 @@ export class RentalFundingService {
         }
       });
       if (existing) {
+        if (provider === "mock" && !(await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx)).simulationAllowed) {
+          throw new ConflictException("模拟资金仅限纯演练订单，不能用于生产空间或抵消真实资金，请走原收退款流程");
+        }
         if (existing.provider !== provider || (existing.paymentMethod ?? undefined) !== input.paymentMethod) {
           throw new ConflictException("相同幂等键已用于不同来源的资金事件");
         }
@@ -385,8 +464,14 @@ export class RentalFundingService {
         return this.toEvent(existing);
       }
 
+      const context = await this.orderFundingContext(tenantId, workspaceId, orderId, order, tx, provider !== "mock");
+      if (provider === "mock" && !context.simulationAllowed) {
+        throw new ConflictException("模拟资金仅限纯演练订单，不能用于生产空间或抵消真实资金，请走原收退款流程");
+      }
+      const { accountingEvents: events, corporatePaid } = context;
       const ledgers = deriveFundingLedgers(events);
-      const payment = rentalPaymentBalance(order.payable, events);
+      const cashPayment = rentalPaymentBalance(order.payable, events);
+      const payment = { ...cashPayment, balance: roundMoney(cashPayment.balance - corporatePaid) };
       // 订单已终结时，遗留的待补款续租不再计入待收：订单都关了还为它收款，
       // 等于给一笔永远不可能生效的续租继续收钱（payOrderExtension 会因订单状态拒绝生效）。
       // 这类遗留申请由订单终态统一作废，见 rental-core.service 的 voidPendingExtensions。
@@ -396,7 +481,7 @@ export class RentalFundingService {
         ? []
         : await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "pending_payment" } });
       const pendingFunding = aggregatePendingExtensionFunding(pending.map((row) => ({
-        payableAmount: Number(row.payableAmount),
+        payableAmount: row.settlementMode === "monthly" ? 0 : Number(row.payableAmount),
         depositDelta: Number(row.depositDelta),
         preAuthDelta: Number(row.preAuthDelta)
       })));
@@ -436,7 +521,10 @@ export class RentalFundingService {
         // 已核验收退款按原操作如实入账；当前应收变化形成待退或待收，
         // 不能否定外部已发生事实。新申请仍由原支付退款入口核准额度。
         if (!externalReceipt && ["initiate", "append"].includes(input.action) && effectiveAmount > Math.max(0, due)) throw new ConflictException("收款不能超过订单及待补款续租应收");
-        if (!externalReceipt && input.action === "refund" && effectiveAmount > Math.max(0, -payment.balance)) throw new ConflictException("退款不能超过已核准的待退金额，请先完成应收核减");
+        if (!externalReceipt && input.action === "refund" && effectiveAmount > Math.min(Math.max(0, -payment.balance),
+          Math.max(0, payment.collected - payment.refunded))) {
+          throw new ConflictException("退款不能超过已核准的待退金额及原租金实收，企业回款须沿原账务处理");
+        }
         balanceAfter = roundMoney(payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount));
       } else balanceAfter = nextBalanceAfter(input.instrument, input.action, effectiveAmount, ledgers);
       const created = await tx.rentalFundingEvent.create({
@@ -459,10 +547,18 @@ export class RentalFundingService {
           at: new Date()
         }
       });
-      return this.toEvent(created);
+      const recorded = this.toEvent(created);
+      if (provider !== "mock" && (input.instrument === "rental" && ["initiate", "append", "refund"].includes(input.action)
+        || input.instrument !== "rental" && input.action === "capture")) {
+        if ((order.membershipSnapshot as { enterpriseContractAndPayer?: boolean } | null)?.enterpriseContractAndPayer === true) {
+          if (!this.receivables) throw new ConflictException("企业资金核销不可用，原资金保持待核对");
+          await this.receivables.reconcileCash(tenantId, workspaceId, orderId, recorded, [...events, recorded], tx);
+        }
+      }
+      return recorded;
     };
     // 服务退款等复合动作需要把资金事件与订单服务快照放进同一事务；
     // 原有单一资金接口不传 tx 时仍保持自己的事务边界。
-    return tx ? run(tx) : this.prisma.$transaction(run);
+    return tx ? run(tx) : this.prisma.$transaction(run, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 }

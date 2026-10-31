@@ -232,8 +232,18 @@ export class ClientAuthService {
     customerId: string,
     workspaceId: string,
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
-    wechatIdentityId?: string | null
+    wechatIdentityId?: string | null,
+    expectedPasswordHash?: string
   ): Promise<ClientMembershipSessionResponse> {
+    if (tx === this.prisma) return this.prisma.$transaction(client =>
+      this.issueSession(tenantId, customerId, workspaceId, client, wechatIdentityId, expectedPasswordHash),
+    { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    // 与后台重置共用客户行锁：验密后被重置的旧口令不能在撤销之后再签出新会话。
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${tenantId} AND id = ${customerId} FOR UPDATE`);
+    const account = await tx.customerAccount.findFirst({ where: { tenantId, customerId } });
+    if (!account || account.status !== "active" || (expectedPasswordHash !== undefined && account.passwordHash !== expectedPasswordHash)) {
+      throw new UnauthorizedException("账号或登录依据已变化，请重新登录");
+    }
     const [customer, workspace, workspaces, wechatIdentities, membership] = await Promise.all([
       tx.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true, customerType: true, name: true, phone: true, status: true } }),
       tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId, status: "ACTIVE" }, select: { id: true, code: true, name: true, categoryCode: true, isDefault: true } }),
@@ -536,7 +546,7 @@ export class ClientAuthService {
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
     if (!workspace) throw new ForbiddenException("该租户没有可访问的经营空间");
-    return this.issueSession(tenant.id, account.customerId, workspace.id);
+    return this.issueSession(tenant.id, account.customerId, workspace.id, undefined, undefined, account.passwordHash);
   }
 
   async refresh(refreshToken: string) {
@@ -548,12 +558,14 @@ export class ClientAuthService {
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now() || session.tenant.status !== "ACTIVE") throw new UnauthorizedException("刷新令牌已失效");
     const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: session.tenantId, customerId: session.customerId }, include: { customer: { select: { status: true } } } });
     const membership = await this.prisma.customerMembership.findFirst({ where: { tenantId: session.tenantId, customerId: session.customerId, status: { notIn: [...BLOCKED_MEMBERSHIP_STATUSES] } } });
-    if (!account || account.status !== "active" || account.customer.status !== "active" || !membership) throw new UnauthorizedException("客户端会话已失效");
+    if (!account || account.status !== "active" || account.customer.status !== "active" || !membership
+      || (account.passwordUpdatedAt && session.createdAt < account.passwordUpdatedAt)) throw new UnauthorizedException("客户端会话已失效");
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${session.tenantId} AND id = ${session.customerId} FOR UPDATE`);
       const revoked = await tx.clientAuthSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date(), lastUsedAt: new Date() } });
       if (revoked.count !== 1) throw new UnauthorizedException("刷新令牌已失效");
-      return this.issueSession(session.tenantId, session.customerId, session.workspaceId, tx, session.wechatIdentityId);
-    });
+      return this.issueSession(session.tenantId, session.customerId, session.workspaceId, tx, session.wechatIdentityId, account.passwordHash ?? undefined);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async logout(refreshToken: string) {
@@ -561,13 +573,17 @@ export class ClientAuthService {
     return { success: true };
   }
 
-  async authenticate(accessToken: string): Promise<ClientRequestContext> {
+  async authenticate(accessToken: string, recovery?: { method: string; path: string }): Promise<ClientRequestContext> {
     const payload = this.parse(accessToken);
     const session = await this.prisma.clientAuthSession.findFirst({ where: { id: payload.sid, tenantId: payload.tid, customerId: payload.sub, workspaceId: payload.wid, revokedAt: null }, include: { customer: true, workspace: true, tenant: { select: { code: true, status: true } } } });
     if (!session || session.expiresAt.getTime() <= Date.now() || session.tenant.status !== "ACTIVE") throw new UnauthorizedException("客户端会话已失效");
     const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub }, include: { customer: { select: { status: true } } } });
     const membership = await this.prisma.customerMembership.findFirst({ where: { tenantId: payload.tid, customerId: payload.sub, status: { notIn: [...BLOCKED_MEMBERSHIP_STATUSES] } } });
     if (!account || account.status !== "active" || account.customer.status !== "active" || !membership || session.workspace.tenantId !== payload.tid || session.workspace.status !== "ACTIVE") throw new UnauthorizedException("客户端会话已失效");
+    if (account.passwordUpdatedAt && session.createdAt < account.passwordUpdatedAt) throw new UnauthorizedException("密码已变更，请重新登录");
+    if (account.mustChangePassword && !(recovery?.method === "POST" && recovery.path === "/client/v1/auth/change-password")) {
+      throw new ForbiddenException("临时密码仅可用于修改密码，请先完成改密后重新登录");
+    }
     void this.prisma.clientAuthSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { lastUsedAt: new Date() } });
     return { tenantId: payload.tid, tenantCode: session.tenant.code, customerId: payload.sub, customerType: session.customer.customerType as "personal" | "corporate", displayName: session.customer.name, phone: session.customer.phone, workspaceId: payload.wid, workspaceCode: session.workspace.code, workspaceName: session.workspace.name, categoryCode: String(session.workspace.categoryCode), membershipStatus: membership.status, sessionId: session.id, wechatIdentityId: session.wechatIdentityId ?? undefined };
   }
@@ -588,9 +604,19 @@ export class ClientAuthService {
 
   async changePassword(context: ClientRequestContext, currentPassword: string, newPassword: string) {
     assertPassword(newPassword);
-    const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId } });
-    if (!account?.passwordHash || !verifyPassword(account.passwordHash, currentPassword)) throw new UnauthorizedException("当前密码错误");
-    await this.customers.updateAccount(context.tenantId, { accountId: account.id }, { passwordHash: hashPassword(newPassword), passwordUpdatedAt: new Date(), mustChangePassword: false });
+    if (newPassword === currentPassword) throw new BadRequestException("新密码不能与当前密码相同");
+    await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_profiles WHERE tenantId = ${context.tenantId} AND id = ${context.customerId} FOR UPDATE`);
+      const account = await tx.customerAccount.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId } });
+      const session = await tx.clientAuthSession.findFirst({ where: { id: context.sessionId, tenantId: context.tenantId,
+        customerId: context.customerId, workspaceId: context.workspaceId, revokedAt: null, expiresAt: { gt: new Date() } } });
+      if (!session || (account?.passwordUpdatedAt && session.createdAt < account.passwordUpdatedAt)) throw new UnauthorizedException("会话已失效，请重新登录");
+      if (!account || account.status !== "active" || !account.passwordHash || !verifyPassword(account.passwordHash, currentPassword)) throw new UnauthorizedException("当前密码错误或账号已停用");
+      const updated = await this.customers.updateAccount(context.tenantId, { accountId: account.id },
+        { passwordHash: hashPassword(newPassword), passwordUpdatedAt: new Date(), mustChangePassword: false }, undefined, tx);
+      if (updated !== 1) throw new ConflictException("账号已变化，请重新登录");
+      await this.revokeSessions(context.tenantId, context.customerId, tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return { success: true };
   }
 

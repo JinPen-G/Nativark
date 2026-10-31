@@ -5,6 +5,7 @@ import { motionPreferenceAdapter, motionPreferenceStyles } from "./config/motion
 import tailwindcss from "@tailwindcss/vite";
 import { nativeSidebarStyles } from "./config/nativeSidebarStyles.js";
 import { actionButtonIconAdapter } from "./config/actionButtonIconAdapter.js";
+import { copilotArchiveStyles } from "./config/copilotArchiveStyles.js";
 
 export default defineConfig(({ mode }) => {
   const offline = mode === "ai-offline";
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => {
     envDir: offline ? false : undefined,
     build: offline ? { outDir: "dist-ai-offline" } : undefined,
     plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), tailwindcss(), react()],
-    css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles()] } },
+    css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles(), copilotArchiveStyles()] } },
     resolve: {
       // Prefer source contracts over stray CommonJS build artifacts in shared/src.
       extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],

@@ -7,6 +7,8 @@ require("ts-node").register({
 
 const { Prisma } = require("@prisma/client");
 const { CustomerCorporateSettlementService } = require("../apps/api/src/modules/platform/customer-corporate-settlement.service");
+const { PlatformRepository } = require("../apps/api/src/modules/platform/platform.repository");
+const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
 
 const money = (value) => new Prisma.Decimal(value);
 const tenantId = "tenant-credit-test";
@@ -56,10 +58,9 @@ class FakeDb {
     this.ledger = new FakeLedger();
     this.credit = { id: "credit-1", tenantId, customerId, creditLimit: money(500), status: "active", billingCycle: "monthly", settlementTermDays: 30, revision: 1 };
     this.cash = 0;
-    this.funding = { listEvents: async (_tenant, _workspace, _order, _tx, options) => {
-      assert.deepEqual(options, { realOnly: true }, "企业债权只扣可信实收，不用模拟资金");
-      return { rental: { collected: this.cash, refunded: 0, securityCaptured: 0 } };
-    } };
+    // Explicit net real-cash fact; allocations are deliberately not included.
+    this.funding = { netCashPaid: async () => this.cash };
+    this.originalOrders = new Map();
     this.currentOrder = {
       id: orderId,
       tenantId,
@@ -70,6 +71,11 @@ class FakeDb {
           creditId: "credit-1", creditRevision: 1, confirmedAt: "2026-10-22T00:00:00.000Z" } },
       finalPayableAmount: money(100)
     };
+    this.baseUser = { id: "operator", tenantId, isActive: true, isSaasAdmin: false, isPlatformAdmin: true,
+      permissions: ["*"], dataScope: "all", locationScope: { mode: "all", locationIds: [] } };
+    this.members = new Map([["workspace-credit-test", { isActive: true, dataScope: "ALL", locationScope: { mode: "all", locationIds: [] }, role: null }]]);
+    this.workspaceMember = { findFirst: async ({ where }) => where.userId === this.baseUser.id ? this.members.get(where.workspaceId) ?? null : null };
+    this.businessWorkspace = { findFirst: async ({ where }) => where.tenantId === tenantId && this.members.has(where.id) ? { id: where.id } : null };
     this.customerCorporateCreditLedger = this.ledger;
     this.maturities = new Map();
     this.operationLog = { findUnique: async ({ where }) => this.maturities.get(where.id) ?? null,
@@ -88,17 +94,39 @@ class FakeDb {
     };
   }
 
-  async $queryRaw() { return this.credit ? [{ id: this.credit.id }] : []; }
-  async $transaction(callback) { return callback(this); }
+  get currentOrder() { return this._currentOrder; }
+  set currentOrder(order) {
+    this._currentOrder = order;
+    this.originalOrders.set(order.id, order);
+  }
+
+  async $queryRaw(query) {
+    if (query.sql.includes("FROM rental_orders")) {
+      const [tenant, workspace, id] = query.values;
+      const order = this.originalOrders.get(id);
+      return order?.tenantId === tenant && order.workspaceId === workspace ? [{ id: order.id }] : [];
+    }
+    if (query.sql.includes("FROM customer_corporate_credits")) return this.credit ? [{ id: this.credit.id }] : [];
+    throw new Error(`Unexpected credit fixture SQL: ${query.sql}`);
+  }
+  async $transaction(callback) {
+    const rows = this.ledger.rows.map(row => ({ ...row })), maturities = new Map(this.maturities);
+    try { return await callback(this); } catch (error) { this.ledger.rows = rows; this.maturities = maturities; throw error; }
+  }
 }
 
-const serviceFor = (db) => new CustomerCorporateSettlementService(db, db.funding);
+const serviceFor = (db) => {
+  const principals = new PlatformRepository(db);
+  principals.findUserById = async () => db.baseUser;
+  return new CustomerCorporateSettlementService(db, db.funding, principals);
+};
 const service = serviceFor(new FakeDb());
 const db = service.prisma;
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
-(async () => {
+runWithRequestIdentity({ tenantId, workspaceId: "workspace-credit-test", userId: "operator", audience: "operator",
+  isSaasAdmin: false, permissions: ["*"], dataScope: "all", locationScope: { mode: "all", locationIds: [] } }, async () => {
   assert.equal(await service.requiresCreditSettlement(tenantId, orderId), true);
   const reserved = await service.reserveOrderCredit(tenantId, orderId, db, "operator");
   assert.equal(reserved.reservedAmount, 100);
@@ -367,5 +395,199 @@ const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
   assert.equal(snapshotDb.maturities.size, 1);
   ok("财务原到期收据幂等且不覆盖，未核定/逾期阻断新挂账，部分回款不解除、全额核销解除");
 
+  const reducedDb = new FakeDb(), reducedService = serviceFor(reducedDb);
+  await reducedService.reserveOrderCredit(tenantId, orderId, reducedDb);
+  const change = { id: 'partial-change', tenantId, workspaceId: reducedDb.currentOrder.workspaceId, orderId,
+    status: 'applied', type: 'partial_line_cancel', refundAmount: money(40), additionalAmount: money(0) };
+  reducedDb.rentalOrderChange = { findFirst: async () => change };
+  reducedDb.currentOrder.finalPayableAmount = money(60);
+  const source = { kind: 'change', id: change.id };
+  reducedDb.credit.status = 'disabled'; // Current new-admission gate must not stop old releases.
+  await reducedService.releaseReducedOrderCredit(tenantId, change.workspaceId, orderId, source, reducedDb, 'operator');
+  assert.equal((await reducedService.account(tenantId, customerId)).reservedAmount, 60);
+  const releaseRows = reducedDb.ledger.rows.filter(row => row.idempotencyKey.includes('reduction:'));
+  assert.equal(releaseRows.length, 1); assert.equal(Number(releaseRows[0].reservedDelta), -40);
+  assert.equal(Number(releaseRows[0].receivableDelta), 0);
+  const countBefore = reducedDb.ledger.rows.length;
+  reducedDb.cash = 60;
+  await reducedService.releaseReducedOrderCredit(tenantId, change.workspaceId, orderId, source, reducedDb, 'operator');
+  assert.equal(reducedDb.ledger.rows.length, countBefore, 'same original reduction cannot release newly redundant cash-backed balance');
+  assert.equal((await reducedService.account(tenantId, customerId)).reservedAmount, 60);
+  await assert.rejects(reducedService.releaseReducedOrderCredit(tenantId, 'other-space', orderId, source, reducedDb), /经营空间/u);
+  change.status = 'requested';
+  await assert.rejects(reducedService.releaseReducedOrderCredit(tenantId, change.workspaceId, orderId, source, reducedDb), /确定核减/u);
+  ok('确定负变更按原身份单次释放授信占用，停新授信不阻断善后，跨空间和未应用来源拒绝');
+
+  for (const [reservedAmount, debt, cash, expectedRelease] of [[70, 0, 30, 40], [20, 50, 30, 20], [0, 100, 0, 0]]) {
+    const split = new FakeDb(), service = serviceFor(split);
+    split.cash = cash; split.currentOrder.finalPayableAmount = money(60);
+    split.ledger.rows.push({ id: 'prior', tenantId, customerId, workspaceId: split.currentOrder.workspaceId, orderId,
+      entryType: 'reserve', currency: 'CNY', reservedDelta: money(reservedAmount), receivableDelta: money(debt), amount: money(reservedAmount),
+      occurredAt: new Date(), createdAt: new Date() });
+    const row = { ...change, status: 'applied', workspaceId: split.currentOrder.workspaceId };
+    split.rentalOrderChange = { findFirst: async () => row };
+    await service.releaseReducedOrderCredit(tenantId, row.workspaceId, orderId, { kind: 'change', id: row.id }, split);
+    const release = split.ledger.rows.at(-1);
+    assert.equal(Number(release.amount), expectedRelease);
+    assert.equal(Number(release.receivableDelta), 0);
+    assert.equal((await service.account(tenantId, customerId)).receivableAmount, debt, 'no debt/payment reversal in a reservation release');
+  }
+  ok('混合现金和已转债权只释放冗余占用，不冲销原债权、回款或资金');
+
+  const refundDb = new FakeDb(), refundService = serviceFor(refundDb);
+  await refundService.reserveOrderCredit(tenantId, orderId, refundDb);
+  refundDb.currentOrder.finalPayableAmount = money(75);
+  refundDb.currentOrder.feeReviews = [{ id: 'approved-fee', type: 'early_return_refund', status: 'approved', decidedAmount: 25 }];
+  await refundService.releaseReducedOrderCredit(tenantId, refundDb.currentOrder.workspaceId, orderId, { kind: 'fee_review', id: 'approved-fee' }, refundDb);
+  assert.equal((await refundService.account(tenantId, customerId)).reservedAmount, 75);
+  refundDb.currentOrder.finalPayableAmount = money(65);
+  refundDb.rentalOrderExtension = { findFirst: async () => ({ id: 'approved-extension', tenantId, workspaceId: refundDb.currentOrder.workspaceId, orderId, status: 'effective',
+    pricingSnapshot: { refundReview: { status: 'approved', amount: 10 } } }) };
+  await refundService.releaseReducedOrderCredit(tenantId, refundDb.currentOrder.workspaceId, orderId,
+    { kind: 'extension_refund', id: 'approved-extension' }, refundDb);
+  assert.equal((await refundService.account(tenantId, customerId)).reservedAmount, 65);
+  refundDb.currentOrder.feeReviews[0].status = 'pending';
+  await assert.rejects(refundService.releaseReducedOrderCredit(tenantId, refundDb.currentOrder.workspaceId, orderId,
+    { kind: 'fee_review', id: 'approved-fee' }, refundDb), /尚未批准/u);
+  ok('费用和续租负差额在原批准核减后释放，待审核时不提前释放');
+  const { RentalCoreService } = require('../apps/api/src/modules/rental-core/rental-core.service');
+  const core = Object.create(RentalCoreService.prototype), coreOrder = { id: orderId, tenantId, status: 'settling',
+    membershipSnapshot: { enterpriseContractAndPayer: true }, payableAmount: 100, finalPayableAmount: 100,
+    adjustmentAmount: 0, chargeLines: [], ruleVersion: '1', feeReviews: [{ id: 'fee-core', type: 'early_return_refund',
+      suggestedAmount: 20, status: 'pending', basis: [], createdAt: new Date().toISOString() }] };
+  core.lockedOrder = async () => coreOrder; core.resolveWorkspaceId = () => 'workspace-credit-test';
+  let saved = false, calls = [];
+  core.factStore = { saveOrderAggregate: async () => { saved = true; } };
+  core.corporateSettlement = { releaseReducedOrderCredit: async (_tenant, _workspace, _order, source, tx) => {
+    assert.equal(saved, true); assert.equal(coreOrder.feeReviews[0].status, 'approved');
+    assert.equal(coreOrder.finalPayableAmount, 80); assert.equal(tx, refundDb); calls.push(source);
+  } };
+  await core.reviewOrderFeeReview(tenantId, orderId, 'fee-core', { decision: 'approved', reason: '原核减确认' }, 'operator', refundDb);
+  assert.deepEqual(calls, [{ kind: 'fee_review', id: 'fee-core' }]);
+  saved = false; calls = []; coreOrder.status = 'renting';
+  const extension = { id: 'ext-core', status: 'effective', sequence: 1, priceVersion: '1',
+    pricingSnapshot: { refundReview: { status: 'pending', amount: 10 } } };
+  core.factStore.listExtensions = async () => [extension];
+  core.factStore.updateExtensionPricingSnapshot = async (_tenant, _order, _id, snapshot) => { extension.pricingSnapshot = snapshot; };
+  core.corporateSettlement.releaseReducedOrderCredit = async (_tenant, _workspace, _order, source, tx) => {
+    assert.equal(saved, true); assert.equal(extension.pricingSnapshot.refundReview.status, 'approved');
+    assert.equal(coreOrder.finalPayableAmount, 70); assert.equal(tx, refundDb); calls.push(source);
+  };
+  await core.reviewExtensionRefund(tenantId, orderId, 'ext-core', { decision: 'approved', reason: '原续租核减' }, 'operator', refundDb);
+  assert.deepEqual(calls, [{ kind: 'extension_refund', id: 'ext-core' }]);
+  ok('Core批准费用/续租核减与释放使用同一事务并保存原来源，不依赖Controller漏补');
+
+  const debtRow = (id, targetOrder, amount, occurredAt, entryType = "settle") => ({ id, tenantId, customerId,
+    workspaceId: targetOrder ? "workspace-credit-test" : null, orderId: targetOrder,
+    entryType, amount: money(Math.abs(amount)), reservedDelta: money(0), receivableDelta: money(amount),
+    reservedAfter: money(0), receivableAfter: money(0), currency: "CNY", idempotencyKey: id,
+    reason: "original debt", operator: "operator", occurredAt: new Date(occurredAt), createdAt: new Date(occurredAt) });
+  {
+    const fifoDb = new FakeDb(), fifo = serviceFor(fifoDb);
+    fifoDb.ledger.rows.push(debtRow("reserve-a", "order-a", 0, 1000, "reserve"),
+      debtRow("debt-b", "order-b", 60, 2000), debtRow("debt-a", "order-a", 100, 3000));
+    for (const id of ["order-a", "order-b"]) fifoDb.originalOrders.set(id, { ...fifoDb.currentOrder, id });
+    await fifo.recordPayment(tenantId, customerId, { amount: 80, reason: "按债权时点核销", idempotencyKey: "fifo-payment" });
+    const applied = fifoDb.ledger.rows.filter(row => row.entryType === "payment_allocation");
+    assert.deepEqual(applied.map(row => [row.orderId, Number(row.amount)]), [["order-b", 60], ["order-a", 20]]);
+    const count = fifoDb.ledger.rows.length;
+    await fifo.recordPayment(tenantId, customerId, { amount: 80, reason: "按债权时点核销", idempotencyKey: "fifo-payment" });
+    assert.equal(fifoDb.ledger.rows.length, count);
+    assert.equal((await fifo.account(tenantId, customerId)).receivableAmount, 80);
+    ok("企业回款先抵较早形成的债权，不被更早预约占用带偏，原回款重放不重新分配");
+  }
+  {
+    for (const sameTime of [false, true]) {
+      const fifoDb = new FakeDb(), fifo = serviceFor(fifoDb);
+      // A's first debt has already been extinguished; only its new later debt
+      // may compete with B. Equal timestamps are ordered by original ledger ID.
+      fifoDb.ledger.rows.push(debtRow("old-a", "order-a", 100, 1000),
+        debtRow("old-a-paid", "order-a", -100, 1500, "payment_allocation"),
+        debtRow("b-later-debt", "order-a", 100, sameTime ? 2000 : 3000),
+        debtRow("a-earlier-debt", "order-b", 60, 2000));
+      for (const id of ["order-a", "order-b"]) fifoDb.originalOrders.set(id, { ...fifoDb.currentOrder, id });
+      await fifo.recordPayment(tenantId, customerId, { amount: 80, reason: "剩余正债权排序", idempotencyKey: "fifo-new" });
+      const applied = fifoDb.ledger.rows.filter(row => row.idempotencyKey.startsWith("payment.allocation:"));
+      assert.deepEqual(applied.map(row => [row.orderId, Number(row.amount)]), [["order-b", 60], ["order-a", 20]]);
+      assert.equal((await fifo.account(tenantId, customerId)).receivableAmount, 80);
+    }
+    ok("已经结清的旧债权不抢新债权顺位，同时间按稳定原流水ID排序");
+  }
+
+  {
+    const scopedDb = new FakeDb(), scoped = serviceFor(scopedDb);
+    scopedDb.baseUser = { ...scopedDb.baseUser, isPlatformAdmin: false,
+      permissions: ["rental-os:corporate:view", "rental-os:corporate:manage"] };
+    const member = permissions => ({ isActive: true, dataScope: "ALL", locationScope: { mode: "all", locationIds: [] },
+      role: { id: "role", name: "Finance", scope: "RENTAL", isActive: true, fixedAllPermissions: false,
+        dataScope: "ALL", buttonPermissions: [], permissions: permissions.map(code => ({ permission: { code } })) } });
+    const currentPermissions = ["rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:finance:view", "rental-os:finance:manage"];
+    scopedDb.members.set("workspace-credit-test", member(currentPermissions));
+    scopedDb.members.set("workspace-other", member([]));
+    scopedDb.ledger.rows.push(debtRow("debt-current", "order-current", 40, 1000),
+      { ...debtRow("debt-other", "order-other", 60, 2000), workspaceId: "workspace-other" });
+    scopedDb.originalOrders.set("order-current", { ...scopedDb.currentOrder, id: "order-current" });
+    scopedDb.originalOrders.set("order-other", { ...scopedDb.currentOrder, id: "order-other", workspaceId: "workspace-other" });
+    const payment = { amount: 20, reason: "scope test", idempotencyKey: "scope-payment" };
+    const count = scopedDb.ledger.rows.length;
+    for (const work of [() => scoped.financialAccount(tenantId, customerId), () => scoped.listLedger(tenantId, customerId),
+      () => scoped.recordPayment(tenantId, customerId, payment)]) {
+      await assert.rejects(work, error => error.status === 403);
+      assert.equal(scopedDb.ledger.rows.length, count, "no partial payment across an unauthorized workspace");
+    }
+    scopedDb.members.set("workspace-other", member(["rental-os:finance:view", "rental-os:finance:manage"]));
+    assert.equal((await scoped.listLedger(tenantId, customerId)).length, 2);
+    assert.equal((await scoped.financialAccount(tenantId, customerId)).receivableAmount, 100);
+    await scoped.recordPayment(tenantId, customerId, payment);
+    assert.equal((await scoped.listLedger(tenantId, customerId)).length, 4, "aggregate payment linked to authorized original allocation");
+    assert.equal((await scoped.financialAccount(tenantId, customerId)).receivableAmount, 80);
+    const validMember = scopedDb.members.get("workspace-other");
+    for (const invalid of [{ ...validMember, dataScope: "OWN" }, { ...validMember, locationScope: { mode: "selected", locationIds: ["loc"] } },
+      { ...validMember, role: { ...validMember.role, isActive: false } }, null]) {
+      if (invalid) scopedDb.members.set("workspace-other", invalid); else scopedDb.members.delete("workspace-other");
+      await assert.rejects(scoped.recordPayment(tenantId, customerId, { ...payment, idempotencyKey: "scope-other" }), error => error.status === 403);
+      await assert.rejects(scoped.listLedger(tenantId, customerId), error => error.status === 403);
+    }
+    scopedDb.members.set("workspace-other", validMember);
+    for (const identity of [{}, { tenantId, workspaceId: "workspace-credit-test", userId: "operator", audience: "client", dataScope: "all", locationScope: { mode: "all" } },
+      { tenantId: "wrong", workspaceId: "workspace-credit-test", userId: "operator", audience: "operator", dataScope: "all", locationScope: { mode: "all" } },
+      { tenantId, workspaceId: "workspace-credit-test", userId: "operator", audience: "operator", dataScope: "own", locationScope: { mode: "all" } },
+      { tenantId, workspaceId: "workspace-credit-test", userId: "operator", audience: "operator", isSaasAdmin: true, dataScope: "all", locationScope: { mode: "all" } }]) {
+      await assert.rejects(runWithRequestIdentity(identity, () => scoped.listLedger(tenantId, customerId)), error => error.status === 403);
+    }
+    const withoutDependency = new CustomerCorporateSettlementService(scopedDb, scopedDb.funding);
+    await assert.rejects(withoutDependency.listLedger(tenantId, customerId), error => error.status === 403);
+    scopedDb.ledger.rows.push(debtRow("legacy-unbound", null, 10, 3000));
+    await assert.rejects(scoped.listLedger(tenantId, customerId), error => error.status === 403);
+    await assert.rejects(scoped.recordPayment(tenantId, customerId, { ...payment, idempotencyKey: "legacy-payment" }), error => error.status === 403);
+    ok("企业主档权限不授跨空间账务权；完整原空间财务权才可读/核销，撤权、own/地点、缺依赖与无绑定历史拒绝");
+  }
+  {
+    const revokedDb = new FakeDb(), revoked = serviceFor(revokedDb);
+    revokedDb.ledger.rows.push(debtRow("debt-revoked", "order-current", 100, 1000));
+    revokedDb.originalOrders.set("order-current", { ...revokedDb.currentOrder, id: "order-current" });
+    const original = revokedDb.workspaceMember.findFirst;
+    let reads = 0;
+    revokedDb.workspaceMember.findFirst = async input => {
+      if (++reads === 3) return null;
+      return original(input);
+    };
+    await assert.rejects(revoked.recordPayment(tenantId, customerId, { amount: 20, reason: "revoked before return", idempotencyKey: "revoked-payment" }), error => error.status === 403);
+    assert.equal(revokedDb.ledger.rows.length, 1, "in-transaction recheck rejection rolls back payment and allocations");
+    assert.equal(Number(revokedDb.ledger.rows[0].receivableDelta), 100);
+    const { isTenantMembershipRoute } = require("../apps/api/src/common/api-auth.guard");
+    for (const path of ["account", "ledger", "payments", "maturities", "maturities/original"]) {
+      assert.equal(isTenantMembershipRoute(`/platform/customers/customer/credit/${path}`), false);
+    }
+    assert.equal(isTenantMembershipRoute("/platform/customers/customer/credit"), true, "shared credit configuration retains tenant access");
+    const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
+    const platform = Object.create(PlatformService.prototype);
+    platform.requireWorkspaceDataSource = () => undefined;
+    platform.customerCorporateSettlement = revoked;
+    reads = 0;
+    assert.equal((await platform.getCustomerCreditAccount(customerId, revokedDb.baseUser)).receivableAmount, 100);
+    ok("原事务写入后复验撤权会回滚整笔回款，Guard分离共享配置与空间账务，摘要消费者统一财务读取");
+  }
+
   console.log(`\n企业授信账期专项：${passed} 项全部通过`);
-})().catch((error) => { console.error(error); process.exitCode = 1; });
+}).catch((error) => { console.error(error); process.exitCode = 1; });

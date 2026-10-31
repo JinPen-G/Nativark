@@ -2058,6 +2058,8 @@ export interface CustomerMembershipBenefit {
 
 /** 报价实际消费的会员权益快照；方案后续调整不得改写这次取价与减免依据。 */
 export interface RentalMembershipBenefitEvaluation {
+  /** Frozen service applicability; [] means all. Legacy absence uses original allocation keys, never current plans. */
+  applicableServiceIds?: string[];
   scope?: CustomerMembershipBenefitScope;
   scopeMatched?: boolean;
   source: "personal" | "corporate";
@@ -3695,7 +3697,8 @@ export const RENTAL_SERVICE_REFUND_STATUSES = [
 ] as const;
 export type RentalServiceRefundStatus = (typeof RENTAL_SERVICE_REFUND_STATUSES)[number];
 
-/** APP 与管理端共用的服务实际履约动作入参。 */
+/** APP 与管理端共用的服务实际履约动作入参。完成的每一段必须使用独立稳定的
+ * Idempotency-Key 请求头；重试保持原键和原请求，不能按当前剩余数量重建请求。 */
 export interface UpdateRentalServiceOccurrenceRequest {
   action: RentalServiceExecutionAction;
   actualAt?: string;
@@ -3767,6 +3770,11 @@ export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot
   refundedBy?: string;
   compensationAmount?: number;
 }
+
+/** Original service-operation observation. Unknown does not prove rollback or allow resubmission. */
+export type RentalServiceExecutionReceipt =
+  | { status: "committed"; order: RentalOrder; occurrence: RentalOrderServiceOccurrence }
+  | { status: "unknown" };
 
 export interface RentalServiceCapacity {
   id: string;
@@ -3955,8 +3963,11 @@ export interface RentalFundingBalance {
   balanceBasis: "real" | "simulated";
   /** 仅服务端确认的纯演练订单可用；不是客户端写入授权。 */
   simulationAllowed: boolean;
-  /** 保证金只有实际抵扣后才计入已付，退款减少净收款。due 为当前待收（含待补款续租，已下限 0），由服务端计算，客户端与门面统一读取，勿再自行推导。 */
-  rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number; due: number };
+  /** 保证金只有实际抵扣后才计入已付；企业原核销独立抵应收、不并入现金collected。balance扣原净实收/抵扣/核销，负值为未处理多收；due为当前待收（含待补款续租，下限0），消费者不自行推导。 */
+  rental: { payable: number; collected: number; refunded: number; securityCaptured: number;
+    /** Original corporate payment allocations, not extra cash events. Old responses may omit it. */
+    corporatePaid?: number;
+    balance: number; pendingExtensionAmount: number; due: number };
   /** pendingExtensionAmount 是尚未生效续租申请带来的新增资金要求；due 为当前待收押金（requiredAmount - collected，已下限 0），服务端计算。 */
   deposit: { collected: number; captured: number; refunded: number; balance: number; requiredAmount: number; pendingExtensionAmount: number; due: number };
   preauthorization: { frozen: number; captured: number; released: number; balance: number; requiredAmount: number; pendingExtensionAmount: number };
@@ -4543,7 +4554,17 @@ export interface RentalQuoteChargeLine {
   detail?: string;
 }
 
+/** 服务端报价来源，不是客户端输入或永久授权；存量缺失不得推断创建者。 */
+export interface RentalQuoteSourceSnapshot {
+  version: 'rental-quote-source-1';
+  tenantId: string;
+  workspaceId: string;
+  actor: { kind: 'user' | 'customer'; id: string };
+  audience: 'operator' | 'staff' | 'client';
+}
+
 export interface RentalQuoteSnapshotV1 {
+  sourceSnapshot?: RentalQuoteSourceSnapshot;
   /** 报价时完整取还检查模板；空数组表示无启用模板，缺省仅表示存量无证据。 */
   inspectionTemplateSnapshots?: RentalInspectionTemplate[];
   /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
@@ -5652,12 +5673,14 @@ export interface RentalOrderFeeReview {
   type: "overdue" | "early_return_refund" | "service_refund" | "refund_due" | "carrier_rental_refund";
   /** 服务退款审核对应的服务发生项；逾时审核时可记录归还批次，其他类型为空。 */
   sourceId?: string;
-  /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
-  suggestedAmount: number;
+  /** 规则算出的建议金额；null 表示尚待核定，绝不表示零。退款类落账时取负。 */
+  suggestedAmount: number | null;
+  /** 金额待核定的租金退款，服务端冻结的最大应收核减额；批准须显式填认定额。 */
+  maximumAmount?: number;
   /** 逐条依据：应归还/实际归还时间、规则模式与金额构成。客服据此向客户解释。 */
   basis: string[];
   status: "pending" | "approved" | "rejected";
-  /** 审核认定的金额。批准时缺省取 `suggestedAmount`，可核减但不得超过它。 */
+  /** 审核认定额。已知建议可缺省；建议为null必须显式填数（含零），且不超过原快照上限。 */
   decidedAmount?: number;
   reason?: string;
   reviewedBy?: string;
@@ -6171,14 +6194,18 @@ export interface RentalRepricingContext {
 
 export interface RentalExtensionPricingSnapshot {
   method: "original_version_difference";
-  /** 全租期租金与本次新增服务的计算明细；差额落账另见 chargeLines。 */
+  /** Original-total calculation details. For an exchange this contains only
+   * the stable changed line's retained/remaining periods; not an order total. */
   fullChargeLines: RentalQuoteChargeLine[];
+  scope?: "order" | "exchange_line";
   context: RentalRepricingContext;
   previousPayableAmount: number;
   recalculatedPayableAmount: number;
   recalculatedRentalAmount: number;
   recalculatedServiceAmount: number;
   recalculatedDiscountAmount: number;
+  /** Original adopted membership evaluations under the recalculated bases; not a new entitlement. */
+  membershipBenefitEvaluations?: RentalMembershipBenefitEvaluation[];
   recalculatedCouponAmount: number;
   totalBillableUnits: number;
   differenceAmount: number;
@@ -6261,10 +6288,10 @@ export interface ReviewRentalOrderFeeReviewRequest {
   decision: "approved" | "rejected";
   reason: string;
   /**
-   * 认定金额。省略即按规则建议额。
+   * 认定金额。已知建议额可省略；金额待核定必须显式填数（含零）。
    *
-   * 服务端拒绝超过建议额的值：那已经不是"审核"而是另立一笔费用，
-   * 要走异常费用流程并留下自己的依据。
+   * 已知金额不超过建议，待核定退款不超过服务端原快照最大核减额与当前应收；
+   * 不授予另立费用或实际退款权限。
    */
   amount?: number;
 }
@@ -6323,7 +6350,23 @@ export interface RentalOrderExtensionPreview {
 }
 
 export type RentalOrderExchangePriceBasis = "original_order_price" | "replacement_current_price";
+export interface RentalIncrementalPricingSnapshot {
+  version: 1;
+  startAt: string;
+  endAt: string;
+  context: RentalRepricingContext;
+  /** Exact newly billed lines; absence of a stable id cannot be repaired from
+   * today's item group. The billed period must match the owning extension. */
+  lines: Array<{ orderLineId?: string; itemGroupId: string; pricingGroupId?: string; quantity: number;
+    /** Bind a post-exchange extension to the original currently held exchange. */
+    exchangeId?: string;
+    pricingUnit: RentalPricingUnit; amount: number; billableUnits: number;
+    /** Zero for usage/package: they have no time-based denominator. */
+    billedHours: number; selectedUnitAmount: number }>;
+}
+
 export interface RentalOrderActionExecutionBasis {
+  incrementalPricing?: RentalIncrementalPricingSnapshot;
   pricingMode: "incremental" | "original_total";
   policySource: "current_workspace" | "original_quote";
   categoryCode: RentalCategoryCode;
@@ -6345,6 +6388,31 @@ export interface RentalOrderExchangeInspectionSnapshot {
   customerConfirmed: boolean;
 }
 
+/** Immutable billed period for a stable order line. Amounts are gross rental,
+ * not cash receipts; a split retains the original selected tier and paid units. */
+export interface RentalOrderExchangePricingSegment {
+  orderLineId: string;
+  itemGroupId: string;
+  pricingGroupId?: string;
+  quantity: number;
+  startAt: string;
+  endAt: string;
+  source: { kind: "quote" | "extension" | "price_version"; id: string; priceVersionId?: string; priceVersion: string };
+  rate: RentalPricingRate;
+  context: RentalRepricingContext;
+  ruleSnapshot: RentalRuleConfig;
+  calendarSnapshot: RentalQuoteCalendarDay[];
+  applyMinimumUnits: boolean;
+  selectedUnitAmount: number;
+  billableUnits: number;
+  billedHours: number;
+  amount: number;
+  /** A carried original-price tail still belongs to the same billed blocks;
+   * another split subtracts the prior prefix instead of restarting unit rounding. */
+  splitBasis?: { startAt: string; endAt: string; amount: number; billableUnits: number; billedHours: number;
+    applyMinimumUnits: boolean; consumedAmount: number; consumedUnits: number; consumedHours: number };
+}
+
 /** Server-created replacement-goods evidence; never supplied by an exchange request. */
 export interface RentalOrderExchangeExecutionBasis {
   categoryCode: RentalCategoryCode;
@@ -6358,6 +6426,13 @@ export interface RentalOrderExchangeExecutionBasis {
   ruleSnapshot: RentalRuleConfig;
   calendarSnapshot: RentalQuoteCalendarDay[];
   pricingSnapshot?: RentalExtensionPricingSnapshot;
+  /** Versioned line sources, including retained performed periods and the new
+   * remaining period. Legacy absence is not permission to infer past prices. */
+  linePricing?: { version: 1; orderLineId: string; originalAmount: number; replacementAmount: number;
+    previousSegments: RentalOrderExchangePricingSegment[]; segments: RentalOrderExchangePricingSegment[];
+    /** Exact billed numerator/denominator for overdue; original-price exchange
+     * retains its prior basis even when the remaining period is already paid. */
+    overdueBasis: RentalOrderExchangePricingSegment };
   inspectionTemplateSnapshots: RentalInspectionTemplate[];
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
 }

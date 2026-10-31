@@ -18,6 +18,7 @@ import type {
   RentalAvailabilityRequest,
   RentalMembershipSnapshot,
   RentalOrder,
+  RentalServiceExecutionReceipt,
   SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
   SaveRentalFulfillmentLocationRequest,
@@ -85,6 +86,7 @@ import { RentalAllocationService } from "./rental-allocation.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
+import { requestFingerprint } from "./rental-idempotency.repository";
 import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { getRequestIdentity } from "../../common/request-identity";
@@ -102,6 +104,7 @@ import { CustomerCorporateSettlementService } from "../platform/customer-corpora
 import { OperationLogService } from "../../common/operation-log.service";
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { canRecordCarrierShipmentEventDirectly, carrierBillableWindow, carrierShipmentEventError, rentalOrderDueAt } from "./rental-carrier-shipment";
+import { returnPricingSlices } from "./rental-return-pricing";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -151,10 +154,21 @@ function hasPermissionCode(user: SystemUserRow, code: string) {
  * 续过租的订单只会退到应退的一部分。待补款的续租不在明细里，也不在 `effectiveEndAt` 里，
  * 两边天然对齐。
  */
-function extensionRentalOf(order: RentalOrder): number {
+function extensionRentalOf(order: RentalOrder, extensions: RentalOrderExtension[]): number {
   return (order.chargeLines ?? [])
     .filter((line) => line.type === "extension")
-    .reduce((sum, line) => sum + Number(line.amount ?? 0), 0);
+    .reduce((sum, line) => {
+      const original = extensions.find(row => row.status === "effective" && row.id === line.sourceId
+        && line.code === `extension:${row.sequence}`);
+      // 旧增量明细混记租金与服务，只能从其原续租分项恢复；新分项直接用该租金明细。
+      if (/^extension:\d+$/.test(line.code)) {
+        if (!original || original.pricingSnapshot || !Number.isFinite(original.rentalAmount)) {
+          throw new ConflictException("旧续租租金分项依据缺失，须人工核对，不能将服务费当租金退款");
+        }
+        return sum + original.rentalAmount;
+      }
+      return sum + line.amount;
+    }, 0);
 }
 
 /**
@@ -224,6 +238,12 @@ export class RentalCoreController {
     const profile = this.service.getProfile(tenantId);
     const category = await this.service.getWorkspaceCategory(tenantId);
     return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
+  }
+
+  private assertHandoverPermission(user: AuthenticatedRequest["user"], stage: "pickup" | "return") {
+    if (!hasPermissionCode(user, "rental-os:order:operate") && !hasPermissionCode(user, `rental-os:order:${stage}`)) {
+      throw new ForbiddenException(stage === "pickup" ? "缺少领取交接权限" : "缺少归还交接权限");
+    }
   }
 
   /** 员工端交接证据必须是当前员工刚上传到同一订单、空间、地点和幂等批次的已完成文件。 */
@@ -678,10 +698,13 @@ export class RentalCoreController {
 
     const cancelledServiceOccurrenceIds = [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+    const previousChanges = await this.service.listOrderChanges(tenantId, orderId, tx);
     const appliedAt = new Date().toISOString();
     const quoted = await this.business.quotePostPickupExchange(tenantId, context, {
       order,
       previousExtensions,
+      previousChanges,
+      tx,
       orderLineId,
       replacementItemGroupId,
       replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
@@ -742,7 +765,7 @@ export class RentalCoreController {
         originalAmount: quoted.originalAmount,
         replacementAmount: quoted.replacementAmount,
         differenceAmount,
-        originalPriceVersion: quoted.priced.priceVersion,
+        originalPriceVersion: quoted.priced.linePricing.previousSegments.at(-1)?.source.priceVersion ?? quoted.priced.priceVersion,
         replacementPriceVersion: currentVersion ?? quoted.priced.priceVersion,
         replacementAssetId,
         replacementAssetNo: selectedCandidate?.assetNo,
@@ -975,10 +998,14 @@ export class RentalCoreController {
   ) {
     const workspaceId = this.service.resolveWorkspaceId(tenantId);
     const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
-    const depositRefund = Math.max(0, -priced.depositDelta);
-    const preAuthRelease = Math.max(0, -priced.preAuthDelta);
-    if (depositRefund > funding.deposit.balance + 0.005) throw new ConflictException("当前已收押金不足以自动退款，请人工处理");
-    if (preAuthRelease > funding.preauthorization.balance + 0.005) throw new ConflictException("当前预授权冻结余额不足以自动释放，请人工处理");
+    const values = [priced.depositDelta, priced.preAuthDelta, funding.deposit.requiredAmount, funding.deposit.balance,
+      funding.preauthorization.requiredAmount, funding.preauthorization.balance];
+    if (!values.every(Number.isFinite)) throw new ConflictException("保证金要求或原资金余额缺失，不能自动释放");
+    // 应收下降不是退款事实：只释放本次降额形成的实际超额，仍保留剩余订单及待生效申请的要求。
+    const depositRefund = roundMoney(Math.min(Math.max(0, -priced.depositDelta), Math.max(0,
+      funding.deposit.balance - Math.max(0, roundMoney(funding.deposit.requiredAmount + priced.depositDelta)))));
+    const preAuthRelease = roundMoney(Math.min(Math.max(0, -priced.preAuthDelta), Math.max(0,
+      funding.preauthorization.balance - Math.max(0, roundMoney(funding.preauthorization.requiredAmount + priced.preAuthDelta)))));
     if (depositRefund > 0) {
       await this.funding.recordEvent(tenantId, workspaceId, orderId, {
         instrument: "deposit", action: "refund", amount: depositRefund,
@@ -1761,10 +1788,10 @@ export class RentalCoreController {
           req.user.tenantId,
           id,
           body.reason,
-          (lockedOrder) => this.business.calculateCancellationCharge(
+          async (lockedOrder) => this.business.calculateCancellationCharge(
             req.user.tenantId,
             context,
-            this.business.getQuote(req.user.tenantId, context, lockedOrder.quoteId),
+            await this.business.loadQuote(req.user.tenantId, context, lockedOrder.quoteId, tx),
             undefined,
             Boolean(body.weatherException),
             // 取消费改按订单冻结的规则快照计算（订单无冻结费率，费率仍取报价）；缺失时计算侧回落报价并告警一次。
@@ -1818,6 +1845,8 @@ export class RentalCoreController {
     }
     await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt, tx);
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+    const previousChanges = order.allocations.some(row => ["picked_up", "locked"].includes(row.status) && row.metadata?.exchangeId)
+      ? await this.service.listOrderChanges(tenantId, orderId, tx) : [];
     const rule = effectiveExtensionRule(order.ruleSnapshot);
     const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue, tx);
     return {
@@ -1825,6 +1854,8 @@ export class RentalCoreController {
       priced: await this.business.quoteOrderExtension(tenantId, context, {
         order,
         previousExtensions,
+        previousChanges,
+        tx,
         lines: order.lines,
         newEndAt: body.newEndAt,
         services: body.services,
@@ -2048,17 +2079,8 @@ export class RentalCoreController {
           tx
         );
         await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
-        // 企业月结无需补款、申请即生效，因此这里就要占住新增服务的容量。
-        // 待补款的申请不占：占用与租期都等补款到账（需求 4.6.9）。
+        // Core 已在同一事务核对资金/授信；只有真正生效才占用新增服务容量。
         if (result.extension.status === "effective") {
-          await this.corporateSettlement?.reserveExtensionCredit(
-            tenantId,
-            id,
-            result.extension.id,
-            result.extension.payableAmount,
-            tx,
-            req.user.displayName
-          );
           await this.occupyExtensionServices(tenantId, id, result.extension, tx);
         }
         return result;
@@ -2088,7 +2110,6 @@ export class RentalCoreController {
       request: { orderId: id, extensionId },
       orderId: id,
       run: async (tx) => {
-        await this.funding.assertExtensionPaid(tenantId, this.service.resolveWorkspaceId(tenantId), id, extensionId, tx);
         const result = await this.service.payOrderExtension(tenantId, id, extensionId, tx);
         await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
         // 补款到账、续租生效：这一刻才占住新增服务的容量，与延长租期同一个事务。
@@ -2168,13 +2189,28 @@ export class RentalCoreController {
     includeEarlyReturn = true
   ) {
     const locked = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
-    const quote = this.business.getQuote(tenantId, context, locked.quoteId);
+    const quote = await this.business.loadQuote(tenantId, context, locked.quoteId, tx);
     const dueAt = locked.fulfillmentMode === "carrier_shipping" ? rentalOrderDueAt(locked) : (locked.effectiveEndAt ?? locked.endAt);
-    const extensions = (await this.service.listOrderExtensions(tenantId, orderId, tx))
-      .filter((row) => row.status === "effective").at(-1)?.pricingSnapshot;
+    const effectiveExtensions = (await this.service.listOrderExtensions(tenantId, orderId, tx))
+      .filter((row) => row.status === "effective");
+    const extensions = effectiveExtensions.at(-1)?.pricingSnapshot;
+    const hasExchange = locked.allocations.some(row => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId);
+    const changes = includeEarlyReturn || hasExchange ? await this.service.listOrderChanges(tenantId, orderId, tx) : [];
     const quantityScope = partialReturnItems
       ? returnedQuantitiesOf(locked, partialReturnItems)
       : outstandingQuantitiesOf(locked);
+    const overdueAmount = (actualReturnedAt: string) => {
+      if (!hasExchange) return this.business.calculateOverdueCharge(tenantId, context, quote, actualReturnedAt, dueAt,
+        quantityScope, { ruleSnapshot: locked.ruleSnapshot });
+      const extendedSources = this.business.exchangeReturnPricingSources(tenantId, context, quote, locked, effectiveExtensions, changes, partialReturnItems);
+      const slices = returnPricingSlices(tenantId, this.service.resolveWorkspaceId(tenantId), quote, locked, changes, partialReturnItems, extendedSources);
+      const amount = roundMoney(slices.reduce((sum, slice) => sum + this.business.calculateOverdueCharge(tenantId, context,
+        slice.quote, actualReturnedAt, dueAt, slice.quantities,
+        { ruleSnapshot: locked.ruleSnapshot, billedLinePricing: slice.billedLinePricing }), 0));
+      // Per-source calculation must not turn the original order cap into one
+      // cap per exchanged line. Apply it once to this actual return batch.
+      return roundMoney(Math.min(amount, locked.ruleSnapshot.overdue.maximumFee ?? amount));
+    };
     if (locked.fulfillmentMode === "carrier_shipping") {
       if (partialReturnItems) throw new ConflictException("承运寄送必须在仓库实物验收时整单结算，不能部分释放在途库存");
       const events = await this.carrierShipmentEvents(tenantId, orderId, tx);
@@ -2209,7 +2245,7 @@ export class RentalCoreController {
       return {
         overdue: {
           amount: Date.parse(handoffAt) > Date.parse(dueAt)
-            ? this.business.calculateOverdueCharge(tenantId, context, quote, handoffAt, dueAt, quantityScope, { ruleSnapshot: locked.ruleSnapshot })
+            ? overdueAmount(handoffAt)
             : 0,
           returnedAt: handoffAt,
           batchId
@@ -2226,12 +2262,12 @@ export class RentalCoreController {
     return {
       overdue: {
         // 归还计费的规则与费率取订单冻结快照（§4.2），而非报价缓存；缺字段时计算侧回落报价并告警一次。
-        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, quantityScope, { ruleSnapshot: locked.ruleSnapshot }),
+        amount: overdueAmount(returnedAt),
         returnedAt,
         batchId
       },
       earlyReturn: includeEarlyReturn
-        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensions, { ruleSnapshot: locked.ruleSnapshot })
+        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked, effectiveExtensions), extensions, { ...locked, changes })
         : undefined
     };
   }
@@ -2249,6 +2285,8 @@ export class RentalCoreController {
     const template = (await this.service.listInspectionTemplates(tenantId, undefined, current)).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
     const stage = template?.stage;
+    if (stage !== "pickup" && stage !== "return") throw new BadRequestException("检查模板不存在或阶段无效");
+    this.assertHandoverPermission(req.user, stage);
     const partialReturn = stage === "return" && Boolean(body.returnItems?.length);
     // 带 returnItems 的归还检查是分批归还的**第二个入口**，与 partial-return 同一个坑：
     // 分配项内容哈希分不清"第二次归还相同数量"和"第一次的网络重试"。同样 fail-closed。
@@ -2304,7 +2342,6 @@ export class RentalCoreController {
     // 与订单当前事实无关的判定。
     if (stage === "pickup" && current.fulfillmentMode !== "carrier_shipping") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     // 归还只进入待结算；资金账处理完后再独立关闭订单。
-    const targetStatus = stage === "pickup" || partialReturn ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     // 逾期通知要按真实逾期费判断是否发。它在 run 里才算出来，而只有 run 真的执行过
     // （未被幂等回放）时下面才会读它——回放路径不重复发通知。
     let overdueAmount = 0;
@@ -2386,10 +2423,12 @@ export class RentalCoreController {
         if (stage === "return" && !partialReturn) await this.serviceCapacities.settleReturnForOrder(tenantId, created.order, returnedAt, tx);
         return created;
       },
-      replay: async () => {
+      replay: async (response) => {
+        const original = response as { inspection?: { id?: unknown } } | null;
+        if (typeof original?.inspection?.id !== "string") return undefined;
         const latest = await this.service.getOrder(tenantId, id);
-        if (latest.status !== targetStatus) return undefined;
-        const recorded = (await this.service.listInspections(tenantId, id)).filter((row) => row.stage === stage).at(-1);
+        const recorded = (await this.service.listInspections(tenantId, id))
+          .find(row => row.id === original.inspection!.id && row.stage === stage);
         return recorded ? { inspection: recorded, order: latest } : undefined;
       }
     });
@@ -2439,6 +2478,7 @@ export class RentalCoreController {
     @Body() body: RentalHandoverDto = {}
   ) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
+    this.assertHandoverPermission(req.user, stage);
     const tenantId = req.user.tenantId;
     const context = (await this.context(tenantId));
     const current = await this.service.getOrder(tenantId, id);
@@ -2547,6 +2587,53 @@ export class RentalCoreController {
     return this.committed(tenantId, order);
   }
 
+  /** Recover only the original service fact under current order visibility. */
+  private async serviceExecutionReceipt(tenantId: string, id: string, occurrenceId: string, response: unknown,
+    request?: UpdateRentalServiceOccurrenceDto) {
+    const current = await this.service.getOrder(tenantId, id);
+    const occurrence = current.serviceSnapshots?.find((row) => row.occurrenceId === occurrenceId);
+    const original = response as { order?: RentalOrder; occurrence?: typeof occurrence } | undefined;
+    if (!occurrence || original?.order?.id !== id || original.order.tenantId !== tenantId
+      || original.occurrence?.occurrenceId !== occurrenceId || original.occurrence.serviceId !== occurrence.serviceId) return undefined;
+    const receipt = original.occurrence;
+    const originalSegments = receipt.executionSegments ?? [], currentSegments = occurrence.executionSegments ?? [];
+    if (originalSegments.length > 0) {
+      const originalQuantity = receipt.executedQuantity, currentQuantity = occurrence.executedQuantity;
+      if (!Number.isInteger(originalQuantity) || !Number.isInteger(currentQuantity)
+        || originalQuantity! < 1 || currentQuantity! < originalQuantity!
+        || originalSegments.some(row => !Number.isInteger(row.quantity) || row.quantity < 1)
+        || originalSegments.reduce((sum, row) => sum + row.quantity, 0) !== originalQuantity
+        || currentSegments.some(row => !Number.isInteger(row.quantity) || row.quantity < 1)
+        || currentSegments.reduce((sum, row) => sum + row.quantity, 0) !== currentQuantity
+        || requestFingerprint(currentSegments.slice(0, originalSegments.length)) !== requestFingerprint(originalSegments)) return undefined;
+    }
+    if (request?.action === "complete") {
+      const segment = originalSegments.at(-1);
+      if (!segment || !["in_progress", "completed"].includes(receipt.executionStatus ?? "")
+        || request.executedQuantity !== undefined && segment.quantity !== request.executedQuantity
+        || segment.result !== request.result?.trim()
+        || request.actualAt && segment.actualEndAt !== request.actualAt
+        || Boolean(segment.customerConfirmedAt) !== request.customerConfirmed
+        || request.evidenceAttachments && requestFingerprint(segment.evidenceAttachments) !== requestFingerprint(request.evidenceAttachments)) return undefined;
+    } else if (request?.action === "start" || !request && receipt.executionStatus === "in_progress") {
+      if (!receipt.actualStartAt || occurrence.actualStartAt !== receipt.actualStartAt) return undefined;
+    } else if (!["completed", "cancelled", "failed", "no_show"].includes(receipt.executionStatus ?? "")
+      || receipt.executionStatus !== occurrence.executionStatus || receipt.actualEndAt !== occurrence.actualEndAt) return undefined;
+    // The order is a current projection; occurrence remains the original receipt.
+    return { order: current, occurrence: receipt };
+  }
+
+  @Get("orders/:id/services/:occurrenceId/execution-receipt")
+  async getServiceExecutionReceipt(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("occurrenceId") occurrenceId: string): Promise<RentalServiceExecutionReceipt> {
+    const tenantId = req.user.tenantId, key = idempotencyKeyOf(req);
+    if (!key) throw new BadRequestException("读取原服务收据必须携带 Idempotency-Key");
+    // Check current scope even when no receipt exists; key possession grants nothing.
+    await this.service.getOrder(tenantId, id);
+    const receipt = await this.idempotent.readReceipt({ tenantId, action: "order.service-execution", key, orderId: id,
+      replay: (response) => this.serviceExecutionReceipt(tenantId, id, occurrenceId, response) });
+    return receipt ? { status: "committed" as const, ...receipt } : { status: "unknown" as const };
+  }
+
   @Post("orders/:id/services/:occurrenceId/execution")
   async updateServiceOccurrence(
     @Req() req: AuthenticatedRequest,
@@ -2555,23 +2642,26 @@ export class RentalCoreController {
     @Body() body: UpdateRentalServiceOccurrenceDto
   ) {
     const tenantId = req.user.tenantId;
+    const operationKey = idempotencyKeyOf(req);
+    // Complete may be one of many segments. A fixed action fallback cannot
+    // distinguish another segment from recovery of the original one.
+    if (body.action === "complete" && !operationKey) throw new BadRequestException("分次服务完成必须携带原 Idempotency-Key");
+    // This marker is emitted only before the executor is entered. Database or
+    // post-commit errors cannot establish that a previous operation rolled back.
+    if (body.action === "complete" && (!body.result?.trim() || body.customerConfirmed === undefined
+      || body.executedQuantity !== undefined && (!Number.isInteger(body.executedQuantity) || body.executedQuantity < 1))) {
+      throw new BadRequestException({ statusCode: 400, message: "完成服务必须填写有效数量、执行结果和客户确认",
+        serviceExecutionNotCommitted: true });
+    }
     const result = await this.idempotent.execute({
       tenantId,
       action: "order.service-execution",
-      key: idempotencyKeyOf(req),
+      key: operationKey,
       fallbackKey: `order.service-execution:${id}:${occurrenceId}:${body.action}`,
       request: { orderId: id, occurrenceId, ...body },
       orderId: id,
       run: (tx) => this.service.updateServiceOccurrence(tenantId, id, occurrenceId, body, req.user.displayName, tx),
-      replay: async (response) => {
-        const current = await this.service.getOrder(tenantId, id);
-        const occurrence = current.serviceSnapshots?.find((row) => row.occurrenceId === occurrenceId);
-        if (!occurrence) return undefined;
-        const terminal = body.action === "start"
-          ? occurrence.executionStatus === "in_progress"
-          : ["completed", "cancelled", "failed", "no_show"].includes(occurrence.executionStatus ?? "");
-        return terminal ? { order: current, occurrence } : undefined;
-      }
+      replay: (response) => this.serviceExecutionReceipt(tenantId, id, occurrenceId, response, body)
     });
     return this.committed(tenantId, result);
   }

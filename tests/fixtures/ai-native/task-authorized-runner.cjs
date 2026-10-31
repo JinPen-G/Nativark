@@ -43,7 +43,7 @@ async function authorizedRunnerHarness(extraTables = {}) {
   // falsely simulates identity replacement at each wall-clock second boundary.
   const tokenExpiresAt = Math.floor(Date.now() / 1000) + 600;
   const authorization = { auth, credentials: { current: async () => ({ requestId: 'synthetic-runner-request', audience: 'operator',
-    authorization: `Bearer ${auth.signAccessToken({ sub: identity.user.id, tid: identity.user.tenantId, sid: 'session-a', aud: 'operator', exp: tokenExpiresAt })}` }) },
+    authorization: `Bearer ${auth.signAccessToken({ sub: identity.user.id, tid: identity.user.tenantId, sid: 'session-a', wid: identity.workspace, aud: 'operator', exp: tokenExpiresAt })}` }) },
     subscriptions: new SubscriptionService(h.db) };
   const current = composePersistedTaskAuthorization({ ...authorization, db: h.db, clock: () => new Date(h.control.now) });
   h.control.needsInput = false;

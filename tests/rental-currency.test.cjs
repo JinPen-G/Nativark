@@ -123,6 +123,7 @@ void (async () => {
     locations: core.listLocations(tenantId),
     operators: core.listOperators(tenantId)
   };
+  require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', ctx);
   const group = ctx.groups.find((row) => row.status === "enabled") ?? ctx.groups[0];
   const location = ctx.locations.find((row) => row.status === "enabled") ?? ctx.locations[0];
 

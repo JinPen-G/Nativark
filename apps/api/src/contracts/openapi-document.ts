@@ -222,6 +222,66 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_CREDIT_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  RentalExchangePricingSegment: objectOf({ orderLineId: stringSchema, itemGroupId: stringSchema, pricingGroupId: stringSchema,
+    quantity: { type: "integer", minimum: 1 }, startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+    source: objectOf({ kind: { type: "string", enum: ["quote", "extension", "price_version"] }, id: stringSchema,
+      priceVersionId: stringSchema, priceVersion: stringSchema }, ["kind", "id", "priceVersion"]),
+    rate: objectSchema, context: objectOf({ timeZone: stringSchema, legacyDayTypeMultipliers: booleanSchema,
+      calendars: arrayOf(objectSchema), dayRates: arrayOf(objectSchema) }, ["timeZone", "legacyDayTypeMultipliers", "calendars"]),
+    ruleSnapshot: objectSchema, calendarSnapshot: arrayOf(objectSchema), applyMinimumUnits: booleanSchema,
+    selectedUnitAmount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, amount: numberSchema,
+    splitBasis: objectOf({ startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+      amount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, applyMinimumUnits: booleanSchema,
+      consumedAmount: numberSchema, consumedUnits: numberSchema, consumedHours: numberSchema },
+    ["startAt", "endAt", "amount", "billableUnits", "billedHours", "applyMinimumUnits", "consumedAmount", "consumedUnits", "consumedHours"]) },
+  ["orderLineId", "itemGroupId", "quantity", "startAt", "endAt", "source", "rate", "context", "ruleSnapshot", "calendarSnapshot",
+    "applyMinimumUnits", "selectedUnitAmount", "billableUnits", "billedHours", "amount"]),
+  RentalExchangeExecutionBasis: objectOf({ effectiveFrom: { type: "string", format: "date-time" },
+    priceBasis: { type: "string", enum: ["original_order_price", "replacement_current_price"] },
+    categoryCode: stringSchema, categoryVersionId: stringSchema, adoptionRevision: numberSchema, categoryPolicySnapshot: objectSchema,
+    pricingStrategies: arrayOf(objectOf({ unit: stringSchema, implementationVersion: stringSchema }, ["unit", "implementationVersion"])),
+    rateSnapshot: arrayOf(objectSchema), ruleSnapshot: objectSchema, calendarSnapshot: arrayOf(objectSchema), pricingSnapshot: objectSchema,
+    inspectionTemplateSnapshots: arrayOf(objectSchema), capabilitySnapshot: arrayOf(objectSchema),
+    linePricing: objectOf({ version: { type: "integer", enum: [1] }, orderLineId: stringSchema,
+      originalAmount: numberSchema, replacementAmount: numberSchema, previousSegments: arrayOf("RentalExchangePricingSegment"),
+      segments: arrayOf("RentalExchangePricingSegment"), overdueBasis: ref("RentalExchangePricingSegment") },
+    ["version", "orderLineId", "originalAmount", "replacementAmount", "previousSegments", "segments", "overdueBasis"]) },
+  ["effectiveFrom", "priceBasis", "categoryCode", "pricingStrategies", "rateSnapshot", "ruleSnapshot", "calendarSnapshot", "inspectionTemplateSnapshots"]),
+  RentalOrderChangeRecord: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    type: stringSchema, status: stringSchema, sequence: numberSchema, request: objectSchema, beforeSnapshot: objectSchema, afterSnapshot: objectSchema,
+    diff: objectOf({ exchange: objectOf({ executionBasis: ref("RentalExchangeExecutionBasis") }) }),
+    refundAmount: numberSchema, additionalAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema,
+    idempotencyKey: stringSchema, requestedBy: stringSchema, appliedBy: stringSchema, requestedAt: stringSchema, appliedAt: stringSchema, createdAt: stringSchema }),
+  RentalPostPickupExchangePreview: objectOf({ orderId: stringSchema, type: { type: "string", enum: ["post_pickup_exchange"] },
+    beforePayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema,
+    additionalAmount: numberSchema, refundAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema, currency: stringSchema,
+    exchange: objectOf({ orderLineId: stringSchema, allocationId: stringSchema, originalAmount: numberSchema, replacementAmount: numberSchema,
+      executionBasis: ref("RentalExchangeExecutionBasis") }), pricingSnapshot: objectOf({ scope: { type: "string", enum: ["exchange_line"] },
+      fullChargeLines: arrayOf(objectSchema), previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema }) }),
+  RentalPostPickupExchangeResult: objectOf({ order: objectSchema, change: ref("RentalOrderChangeRecord") }, ["order", "change"]),
+  RentalFundingEvent: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+    action: { type: "string", enum: ["initiate", "append", "capture", "refund", "release", "fail"] },
+    amount: numberSchema, balanceAfter: numberSchema,
+    provider: { type: "string", enum: ["mock", "offline", "alipay", "wechat_pay", "stripe"] },
+    paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer"] },
+    idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
+    at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
+    ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
+  RentalFundingBalance: objectOf({ orderId: stringSchema, balanceBasis: { type: "string", enum: ["real", "simulated"] },
+    simulationAllowed: booleanSchema,
+    rental: objectOf({ payable: numberSchema, collected: numberSchema, refunded: numberSchema, securityCaptured: numberSchema,
+      corporatePaid: { type: "number", description: "Original corporate repayment allocations reconciled to their aggregate payment; not extra cash. Legacy responses may omit it." },
+      balance: { type: "number", description: "Signed remaining receivable after original cash, security captures and corporate allocations; negative means unresolved overpayment." },
+      pendingExtensionAmount: numberSchema, due: { type: "number", minimum: 0, description: "Server-computed current rental cash demand, including pending payable extensions." } },
+      ["payable", "collected", "refunded", "securityCaptured", "balance", "pendingExtensionAmount", "due"]),
+    deposit: objectOf({ collected: numberSchema, captured: numberSchema, refunded: numberSchema, balance: numberSchema,
+      requiredAmount: numberSchema, pendingExtensionAmount: numberSchema, due: numberSchema },
+      ["collected", "captured", "refunded", "balance", "requiredAmount", "pendingExtensionAmount", "due"]),
+    preauthorization: objectOf({ frozen: numberSchema, captured: numberSchema, released: numberSchema, balance: numberSchema,
+      requiredAmount: numberSchema, pendingExtensionAmount: numberSchema },
+      ["frozen", "captured", "released", "balance", "requiredAmount", "pendingExtensionAmount"]), events: arrayOf("RentalFundingEvent") },
+    ["orderId", "balanceBasis", "simulationAllowed", "rental", "deposit", "preauthorization", "events"]),
   RegisterPersonalMembershipRequest: objectOf({
     name: { type: "string", minLength: 1, maxLength: 120 }, phone: { type: "string", minLength: 1, maxLength: 40 },
     email: { type: "string", maxLength: 160 }, identityNo: { type: "string", maxLength: 80 },
@@ -1651,10 +1711,30 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"]
   ),
+  RentalQuoteSourceSnapshot: objectOf({
+    version: { type: 'string', enum: ['rental-quote-source-1'], readOnly: true },
+    tenantId: stringSchema, workspaceId: stringSchema,
+    actor: objectOf({ kind: { type: 'string', enum: ['user', 'customer'] }, id: stringSchema }, ['kind', 'id'], false),
+    audience: { type: 'string', enum: ['operator', 'staff', 'client'] }
+  }, ['version', 'tenantId', 'workspaceId', 'actor', 'audience'], false),
+  RentalQuoteSnapshot: objectOf({
+    id: stringSchema, tenantId: stringSchema, quoteNo: stringSchema, request: objectSchema,
+    sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true,
+      description: 'Server-derived provenance, never authorization. Legacy records may omit it; own-scope access then fails closed.' },
+    deliveryAddressSnapshot: objectSchema, rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
+    chargeLines: arrayOf(objectSchema), rentalAmount: numberSchema, discountAmount: numberSchema,
+    couponAmount: numberSchema, serviceAmount: numberSchema, fulfillmentAmount: numberSchema,
+    depositAmount: numberSchema, preAuthAmount: numberSchema, payableAmount: numberSchema, receivableAmount: numberSchema,
+    expiresAt: { type: 'string', format: 'date-time' }, createdAt: { type: 'string', format: 'date-time' },
+    consumedAt: { type: 'string', format: 'date-time' }, consumedOrderId: stringSchema
+  }, ['id', 'tenantId', 'quoteNo', 'request', 'chargeLines', 'rentalAmount', 'discountAmount', 'couponAmount',
+    'serviceAmount', 'fulfillmentAmount', 'depositAmount', 'preAuthAmount', 'payableAmount', 'receivableAmount', 'expiresAt', 'createdAt']),
   ClientQuote: objectOf(
     {
       id: stringSchema,
       quoteNo: stringSchema,
+      sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true },
+      rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
       request: ref("ClientQuoteRequest"),
       rentalAmount: numberSchema,
       discountAmount: numberSchema,
@@ -1898,23 +1978,23 @@ const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = [
 ];
 
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
-  backlogOperation("get", "/api/files", "Files", "listFileAssets", "List file assets", ["system:integration:manage"]),
+  backlogOperation("get", "/api/files", "Files", "listFileAssets", "List files authorized by their original business objects; credential and knowledge metadata are excluded", ["system:integration:manage"]),
   backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:integration:manage"]),
-  backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create a tenant-scoped presigned upload session", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
-  backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Confirm a presigned upload and activate its file metadata", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create or recover the original staging upload; remaining TTL only, completed/freeze_pending never issue PUT", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
+  backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Hash actual staging bytes and freeze one original server-only content destination; unknown completion only observes that destination", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("post", "/api/files/customer-identity/{customerId}/upload-sessions", "Files", "createCustomerIdentityUploadSession", "Create a customer identity evidence upload session bound to the tenant customer", ["rental-os:member:manage", "rental-os:customer:reveal-sensitive"], true, "CreateCustomerIdentityUploadRequest", "FileUploadSessionSummary"),
-  backlogOperation("post", "/api/files/customer-identity/{customerId}/upload-sessions/{id}/complete", "Files", "completeCustomerIdentityUpload", "Complete a customer identity evidence upload bound to the same customer and uploader", ["rental-os:member:manage", "rental-os:customer:reveal-sensitive"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("post", "/api/files/customer-identity/{customerId}/upload-sessions/{id}/complete", "Files", "completeCustomerIdentityUpload", "Freeze actual identity evidence bytes for the same customer/uploader; original staging PUT cannot overwrite completed evidence", ["rental-os:member:manage", "rental-os:customer:reveal-sensitive"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("get", "/api/files/customer-identity/{customerId}/{fileAssetId}/download-url", "Files", "customerIdentityDownloadUrl", "Create a short-lived customer identity evidence URL; also requires sensitive-data reveal and member-view permissions", ["rental-os:member:view", "rental-os:customer:reveal-sensitive"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("post", "/api/files/rental-orders/{orderId}/carrier-evidence/upload-sessions", "Files", "createCarrierEvidenceUploadSession", "Create an order/workspace-bound carrier shipment evidence upload session", ["rental-os:order:operate"], true, "CreateCarrierEvidenceUploadRequest", "FileUploadSessionSummary"),
-  backlogOperation("post", "/api/files/rental-orders/{orderId}/carrier-evidence/upload-sessions/{id}/complete", "Files", "completeCarrierEvidenceUpload", "Complete a carrier evidence upload for the same carrier-shipping order", ["rental-os:order:operate"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("post", "/api/files/rental-orders/{orderId}/carrier-evidence/upload-sessions/{id}/complete", "Files", "completeCarrierEvidenceUpload", "Freeze actual carrier evidence content for the same order; repeated completion observes the original content identity", ["rental-os:order:operate"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("get", "/api/files/rental-orders/{orderId}/carrier-evidence/{fileAssetId}/download-url", "Files", "carrierEvidenceDownloadUrl", "Create a short-lived download URL for evidence attached to the current carrier-shipping order", ["rental-os:order:view"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("post", "/api/files/upload-sessions/cleanup-expired", "Files", "cleanupExpiredFileUploads", "Invalidate expired upload sessions and clean their provider objects", ["system:integration:manage"], true, undefined, "FileUploadCleanupSummary"),
-  backlogOperation("get", "/api/files/{id}/download-url", "Files", "getFileDownloadUrl", "Create a short-lived tenant-scoped download URL", ["system:integration:manage"], true, undefined, "FileDownloadUrlSummary"),
+  backlogOperation("get", "/api/files/{id}/download-url", "Files", "getFileDownloadUrl", "Create an audited short-lived URL only after the original business permission and current workspace/data/location scope pass", ["system:integration:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/integrations/adapter-logs", "Integrations", "listAdapterLogs", "List adapter logs", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/adapters/mock-call", "Integrations", "invokeMockAdapter", "Invoke mock adapter", ["system:integrations:manage"]),
   backlogOperation("get", "/api/integrations/data-exchange/templates", "Integrations", "listDataExchangeTemplates", "List data exchange templates", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/data-exchange/jobs", "Integrations", "createDataExchangeJob", "Create data exchange job", ["system:integrations:manage"]),
-  backlogOperation("get", "/api/integrations/dashboard", "Integrations", "getInfraDashboard", "Get integrations dashboard", ["system:integrations:manage"]),
+  backlogOperation("get", "/api/integrations/dashboard", "Integrations", "getInfraDashboard", "Get integrations dashboard with files filtered by their original business ACL", ["system:integrations:manage"]),
   backlogOperation("get", "/api/integrations/tbox-devices", "Integrations", "listIntegrationTboxDevices", "List integration TBox devices", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/tbox-devices", "Integrations", "saveIntegrationTboxDevice", "Save integration TBox device", ["system:integrations:manage"]),
   backlogOperation("put", "/api/integrations/tbox-devices/{id}", "Integrations", "updateIntegrationTboxDevice", "Update integration TBox device", ["system:integrations:manage"]),
@@ -1980,11 +2060,11 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("put", "/api/platform/customers/{customerId}/contracts", "Platform", "saveCustomerContract", "Create or update a corporate contract", ["rental-os:corporate:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/credit", "Platform", "getCustomerCredit", "Get corporate credit limit and settlement terms", ["rental-os:corporate:view"]),
   backlogOperation("put", "/api/platform/customers/{customerId}/credit", "Platform", "saveCustomerCredit", "Set corporate credit limit and settlement terms", ["rental-os:corporate:manage"]),
-  backlogOperation("get", "/api/platform/customers/{customerId}/credit/account", "Platform", "getCustomerCreditAccount", "Read the current corporate credit reserve and receivable summary", ["rental-os:corporate:view"]),
-  backlogOperation("get", "/api/platform/customers/{customerId}/credit/ledger", "Platform", "listCustomerCreditLedger", "Read the append-only corporate credit ledger", ["rental-os:corporate:view"]),
-  backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments", "Platform", "recordCustomerCreditPayment", "Record an idempotent corporate credit payment", ["rental-os:corporate:manage"]),
-  backlogOperation("post", "/api/platform/customers/{customerId}/credit/maturities", "Platform", "recordCustomerCreditMaturity", "Record the original debt maturity date explicitly determined by finance", ["rental-os:corporate:manage"], true, "RecordCustomerCorporateCreditMaturityRequest", "CustomerCorporateCreditMaturityReceipt"),
-  { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/maturities/{ledgerId}", "Platform", "readCustomerCreditMaturity", "Read the immutable original debt maturity receipt", ["rental-os:corporate:view"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditMaturityReceipt"), { type: "null" }] } },
+  backlogOperation("get", "/api/platform/customers/{customerId}/credit/account", "Platform", "getCustomerCreditAccount", "Read shared credit balances only with current corporate permission and complete financial read authority in every original ledger workspace; unauthorized portions are never shown as zero", ["rental-os:corporate:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/credit/ledger", "Platform", "listCustomerCreditLedger", "Read the append-only corporate ledger only with complete financial read authority in every original workspace; missing legacy binding refuses the complete view", ["rental-os:corporate:view"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments", "Platform", "recordCustomerCreditPayment", "Record an idempotent corporate payment with current corporate manage and full finance manage authority in every original workspace; never omit unauthorized debts or change FIFO to bypass scope", ["rental-os:corporate:manage"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/credit/maturities", "Platform", "recordCustomerCreditMaturity", "Record the original debt maturity explicitly determined by finance under current corporate and full original-workspace financial management authority", ["rental-os:corporate:manage"], true, "RecordCustomerCorporateCreditMaturityRequest", "CustomerCorporateCreditMaturityReceipt"),
+  { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/maturities/{ledgerId}", "Platform", "readCustomerCreditMaturity", "Read the immutable original maturity receipt with current corporate and full original-workspace financial read authority", ["rental-os:corporate:view"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditMaturityReceipt"), { type: "null" }] } },
   // CUSTOMER-01D：重复识别、人工合并与注销。需求 4.8.14 要求合并与注销**分别授权**——
   // 两者都不可逆且影响面不同（合并改身份归属、注销终止业务资格），共用「会员管理」
   // 等于让任何能改会员等级的人都能合并或注销客户。
@@ -3498,7 +3578,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/execution", tag: "RentalCore", operationId: "updateRentalServiceOccurrenceExecution",
-    summary: "Record a value-added service execution outcome and settle its capacity/refund review", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Record service execution; each complete segment requires its own stable Idempotency-Key header. Replay returns the original occurrence receipt and current authorized order", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject",
+    parameters: [{ name: "Idempotency-Key", in: "header", required: false, description: "Required for complete; each new segment uses a new key, retries preserve the original request and key", schema: { type: "string", minLength: 1, maxLength: 191 } }]
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/execution-receipt", tag: "RentalCore", operationId: "getRentalServiceExecutionReceipt",
+    summary: "Observe the original service operation using Idempotency-Key header; committed returns the original receipt and current order, unknown never authorizes another execution", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
+    parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 191 } }]
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/refund", tag: "RentalCore", operationId: "refundRentalServiceOccurrence",
@@ -3510,7 +3596,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/changes", tag: "RentalCore", operationId: "listRentalOrderChanges",
-    summary: "List append-only order change records", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "List append-only order change records", permissions: ["rental-os:order:view"], responseSchema: arrayOf("RentalOrderChangeRecord")
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/partial-cancel/preview", tag: "RentalCore", operationId: "previewRentalOrderPartialCancellation",
@@ -3522,11 +3608,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange/preview", tag: "RentalCore", operationId: "previewRentalOrderPostPickupExchange",
-    summary: "Preview a confirmed post-pickup item exchange", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Preview remaining-period exchange pricing without repricing performed rental", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalPostPickupExchangePreview"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange", tag: "RentalCore", operationId: "applyRentalOrderPostPickupExchange",
-    summary: "Apply a post-pickup exchange, freeze replacement policy/inspection/capability evidence and defer the difference to settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Apply remaining-period exchange, freeze stable line pricing and handover evidence, defer settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalPostPickupExchangeResult"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
@@ -3542,7 +3628,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/fee-reviews/{reviewId}/review", tag: "RentalCore", operationId: "reviewRentalOrderFeeReview",
-    summary: "Decide a pending fee review (manual overdue collection or early-return refund)", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Decide a pending fee review; an unknown refund suggestion requires an explicit assessed amount bounded by its original snapshot, not a cash refund", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
@@ -3692,7 +3778,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/rental/v1/rule-versions/{version}/publish", "RentalBusiness", "publishRentalRuleVersionV1", "Publish or schedule a rental rule version", ["rental-os:rules:publish"]),
   backlogOperation("post", "/api/rental/v1/rule-versions/{version}/void", "RentalBusiness", "voidRentalRuleVersionV1", "Void a pending or effective rental rule version", ["rental-os:rules:publish"]),
   // RULE-01B：押金/预授权模拟资金事件（需求 4.4.7、4.6.3）。读用 order:view 或 order:settle；资金动作只认 order:settle。
-  backlogOperation("get", "/api/rental/v1/orders/{orderId}/funding-events", "RentalBusiness", "listRentalOrderFundingEventsV1", "List order deposit/pre-auth funding events and balances", ["rental-os:order:view", "rental-os:order:settle"]),
+  backlogOperation("get", "/api/rental/v1/orders/{orderId}/funding-events", "RentalBusiness", "listRentalOrderFundingEventsV1", "List order cash/security events and balances, with separately reconciled original corporate allocations", ["rental-os:order:view", "rental-os:order:settle"], true, undefined, "RentalFundingBalance"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/initiate", "RentalBusiness", "initiateRentalOrderFundingV1", "Initiate a deposit collection or pre-auth freeze (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/append", "RentalBusiness", "appendRentalOrderFundingV1", "Append to a deposit or pre-auth (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/capture", "RentalBusiness", "captureRentalOrderFundingV1", "Capture/deduct from a deposit or pre-auth (mock)", ["rental-os:order:settle"]),
@@ -3703,11 +3789,11 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "listRentalPaymentRefunds", "List provider refund records for a payment intent", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "createRentalPaymentRefund", "Create a real provider refund after an approved order credit", ["rental-os:finance:reconcile"], true, "CreatePaymentRefundRequest", "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds/{refundId}/refresh", "Payments", "refreshRentalPaymentRefund", "Query and recover a provider refund", ["rental-os:finance:reconcile"], true, undefined, "PaymentRefundResponse"),
-  backlogOperation("post", "/api/rental/v1/payment-reconciliation", "Payments", "reconcileRentalPayments", "Reconcile unresolved payment intents and refunds in the current workspace", ["rental-os:finance:reconcile"], true, undefined, "PaymentReconciliationSummary", [queryParam("limit", numberSchema)]),
-  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements", "Payments", "importRentalPaymentStatement", "Import a tenant-scoped payment provider statement without mutating payment facts", ["rental-os:finance:reconcile"], true, "ImportPaymentStatementRequest", "PaymentStatementBatchDetail"),
-  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements", "Payments", "listRentalPaymentStatements", "List imported payment provider statements for the current workspace", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchList", [queryParam("limit", numberSchema)]),
-  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements/{batchId}", "Payments", "getRentalPaymentStatement", "Get one imported payment provider statement and its differences", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchDetail"),
-  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements/{batchId}/lines/{lineId}/review", "Payments", "reviewRentalPaymentStatementLine", "Acknowledge or query one payment statement difference without changing funding facts", ["rental-os:finance:reconcile"], true, "ReviewPaymentStatementLineRequest", "PaymentStatementBatchDetail"),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation", "Payments", "reconcileRentalPayments", "Reconcile unresolved payments and refunds; requires current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentReconciliationSummary", [queryParam("limit", numberSchema)]),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements", "Payments", "importRentalPaymentStatement", "Import a statement under current full-workspace financial scope without mutating payment facts", ["rental-os:finance:reconcile"], true, "ImportPaymentStatementRequest", "PaymentStatementBatchDetail"),
+  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements", "Payments", "listRentalPaymentStatements", "List imported statements only under current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchList", [queryParam("limit", numberSchema)]),
+  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements/{batchId}", "Payments", "getRentalPaymentStatement", "Get one statement and its differences only under current full-workspace financial scope", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchDetail"),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements/{batchId}/lines/{lineId}/review", "Payments", "reviewRentalPaymentStatementLine", "Acknowledge or query a statement difference under current full-workspace financial scope; funding facts stay unchanged", ["rental-os:finance:reconcile"], true, "ReviewPaymentStatementLineRequest", "PaymentStatementBatchDetail"),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/claim", "RentalBusiness", "claimRentalCustomerCoupon", "Claim customer coupon", ["rental-os:marketing:manage"]),
@@ -3728,8 +3814,8 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/payments/webhooks/stripe", "Integrations", "receiveStripeWebhook", "Receive and verify a Stripe webhook (checkout session and refund events)", [], false, "GenericObject", "GenericObject"),
   backlogOperation("post", "/api/payments/webhooks/alipay/refund", "Integrations", "receiveAlipayRefundWebhook", "Receive a signed Alipay refund notification when the provider supplies a definitive result", [], false, "GenericObject", "GenericObject"),
   backlogOperation("post", "/api/payments/webhooks/wechat_pay/refund", "Integrations", "receiveWechatRefundWebhook", "Receive and verify a WeChat Pay API v3 refund result notification", [], false, "GenericObject", "GenericObject"),
-  backlogOperation("post", "/api/rental/v1/quotes", "RentalBusiness", "createRentalQuote", "Create server-side rental quote", ["rental-os:order:operate"]),
-  backlogOperation("get", "/api/rental/v1/quotes/{id}", "RentalBusiness", "getRentalQuote", "Get rental quote snapshot", ["rental-os:order:view"]),
+  backlogOperation("post", "/api/rental/v1/quotes", "RentalBusiness", "createRentalQuote", "Create server-side rental quote", ["rental-os:order:operate"], true, undefined, "RentalQuoteSnapshot"),
+  backlogOperation("get", "/api/rental/v1/quotes/{id}", "RentalBusiness", "getRentalQuote", "Get rental quote snapshot in current object scope", ["rental-os:order:view"], true, undefined, "RentalQuoteSnapshot"),
 
   // CLIENT-01：移动端/小程序独立 API。客户端路径不使用运营 RBAC 权限码，
   // 但受独立客户 bearer token 保护；这里使用字段级 schema 供小程序/App 生成客户端。

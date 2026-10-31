@@ -1014,7 +1014,7 @@ export class ClientApiService {
     const request: RentalQuoteRequest = { ...input, customerType: 'personal', customerId: context.customerId,
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
     const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
-    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved), business);
     if (prepared && (prepared.inputHash !== requestFingerprint(normalized)
       || prepared.configurationHash !== requestFingerprint(business))) throw new ConflictException('报价准备依据已变化，请重新确认');
     this.clientQuoteOriginalKey(context, reference);
@@ -1036,7 +1036,7 @@ export class ClientApiService {
     const request: RentalQuoteRequest = { ...input, customerType: 'personal', customerId: context.customerId,
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
     const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
-    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved), business);
     this.clientQuoteOriginalKey(context, 'preparation');
     return { request: structuredClone(normalized), inputHash: requestFingerprint(normalized),
       configurationHash: requestFingerprint(business), tenantId: context.tenantId,
@@ -1081,7 +1081,7 @@ export class ClientApiService {
   }
 
   async getQuote(context: ClientRequestContext, quoteId: string) {
-    const quote = this.business.getQuote(context.tenantId, (await this.context(context.tenantId)), quoteId);
+    const quote = await this.business.loadQuote(context.tenantId, await this.context(context.tenantId), quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     return quote;
   }
@@ -1100,7 +1100,7 @@ export class ClientApiService {
     // 即使客户在取消发布前拿到报价，也不能在关闭渠道后新建订单。
     await this.currentWorkspace(context);
     const business = (await this.context(context.tenantId));
-    const quote = this.business.getQuote(context.tenantId, business, input.quoteId);
+    const quote = await this.business.loadQuote(context.tenantId, business, input.quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     const lines = quote.request.lines.map((line) => {
       if (!line.itemGroupId) throw new ConflictException("报价缺少承接商品型号，不能下单");
@@ -1387,7 +1387,7 @@ export class ClientApiService {
     const business = (await this.context(context.tenantId));
     const calculatedAt = new Date().toISOString();
     const cancellationCharge = this.business.calculateCancellationCharge(
-      context.tenantId, business, this.business.getQuote(context.tenantId, business, order.quoteId), calculatedAt
+      context.tenantId, business, await this.business.loadQuote(context.tenantId, business, order.quoteId), calculatedAt
     );
     return { apiVersion: CLIENT_API_VERSION, orderId, cancellationCharge, currency: order.currency ?? "CNY", calculatedAt, estimated: true };
   }
@@ -1406,7 +1406,7 @@ export class ClientApiService {
       orderId,
       run: async (tx) => {
         await this.assertClientOrder(context, orderId);
-        const order = await this.core.cancelOrder(context.tenantId, orderId, input.reason, (locked) => this.business.calculateCancellationCharge(context.tenantId, business, this.business.getQuote(context.tenantId, business, locked.quoteId)), tx, `client:${context.customerId}`);
+        const order = await this.core.cancelOrder(context.tenantId, orderId, input.reason, async (locked) => this.business.calculateCancellationCharge(context.tenantId, business, await this.business.loadQuote(context.tenantId, business, locked.quoteId, tx)), tx, `client:${context.customerId}`);
         await this.business.releaseCouponInTransaction(context.tenantId, orderId, tx);
         await this.serviceCapacities.releaseForOrder(context.tenantId, orderId, "client_order_cancelled", new Date().toISOString(), tx);
         await this.corporateSettlement?.settleCancelledOrderCredit(context.tenantId, orderId, "client_order_cancelled", tx, `client:${context.customerId}`);
@@ -1464,14 +1464,6 @@ export class ClientApiService {
         const result = await this.core.requestOrderExtension(context.tenantId, orderId, priced, { idempotencyKey: key, memo: input.memo, operator: `client:${context.customerId}` }, tx);
         await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
         if (result.extension.status === "effective") {
-          await this.corporateSettlement?.reserveExtensionCredit(
-            context.tenantId,
-            orderId,
-            result.extension.id,
-            result.extension.payableAmount,
-            tx,
-            `client:${context.customerId}`
-          );
           await this.occupyExtensionServices(context, orderId, result.extension, tx);
         }
         return result;
@@ -1503,7 +1495,6 @@ export class ClientApiService {
       orderId,
       run: async (tx) => {
         await this.assertClientOrder(context, orderId);
-        await this.fundingService.assertExtensionPaid(context.tenantId, context.workspaceId, orderId, extensionId, tx);
         const result = await this.core.payOrderExtension(context.tenantId, orderId, extensionId, tx);
         await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
         await this.occupyExtensionServices(context, orderId, result.extension, tx);

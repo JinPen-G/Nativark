@@ -20,9 +20,15 @@ test('Core original quote storage keeps exact scoped operation through replay an
   const transaction = store.db.$transaction;
   const { Prisma } = require('../apps/api/node_modules/@prisma/client');
   store.db.$transaction = work => transaction(tx => work({ ...tx,
-    rentalQuote: { ...tx.rentalQuote, create: args => tx.rentalQuote.create({ ...args,
-      data: Object.fromEntries(Object.entries(args.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v])) }) },
-    $queryRaw: async () => [{ categoryVersionId: null, categoryAdoptionRevision: 0 }] }));
+    rentalQuote: { ...tx.rentalQuote,
+      update: async ({ where, data }) => { await tx.rentalQuote.updateMany({ where, data }); return tx.rentalQuote.findFirst({ where }); },
+      create: args => tx.rentalQuote.create({ ...args,
+        data: Object.fromEntries(Object.entries(args.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v])) }) },
+    $queryRaw: async query => {
+      if (query.sql.includes('rental_fulfillment_locations')) return b.core.listLocations('tenant_001').map(row => ({ ...row, tenantId: 'tenant_001', workspaceId: 'workspace-a' }));
+      if (query.sql.includes('rental_fulfillment_operators')) return b.core.listOperators('tenant_001').map(row => ({ ...row, tenantId: 'tenant_001', workspaceId: 'workspace-a' }));
+      return [{ id: 'workspace-a', status: 'ACTIVE', categoryVersionId: null, categoryAdoptionRevision: 0 }];
+    } }));
   const repository = new RentalBusinessFactRepository(store.db);
   // Only the storage transport is replaced. Price calculation and Core quote
   // persistence methods are product code; this is not a MySQL lock test.
@@ -35,13 +41,16 @@ test('Core original quote storage keeps exact scoped operation through replay an
     locations: b.core.listLocations('tenant_001'), operators: b.core.listOperators('tenant_001') };
   const original = { key: requestFingerprint({ tenant: 'tenant_001', workspace: 'workspace-a', actor: 'synthetic-user', operation: 'original-quote' }),
     inputHash: requestFingerprint(formal) };
-  await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a' }, async () => {
+  await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a', userId: 'synthetic-user',
+    audience: 'operator', dataScope: 'all', isSaasAdmin: false }, async () => {
     store.control.loseReply = true;
     await assert.rejects(b.business.createQuoteForOriginalOperation('tenant_001', context, formal, original), /lost COMMIT reply/);
     assert.equal(store.state.rentalQuote.length, 1);
     const restarted = new RentalBusinessFactRepository(store.db);
     const recovered = await restarted.findQuoteForOriginalOperation('tenant_001', original);
     assert.equal(recovered.id, store.state.rentalQuote[0].id);
+    assert.equal(recovered.sourceSnapshot.actor.id, 'synthetic-user');
+    assert.equal(recovered.sourceSnapshot.workspaceId, 'workspace-a');
     const replay = await b.business.createQuoteForOriginalOperation('tenant_001', context, formal, original);
     assert.equal(replay.id, recovered.id); assert.equal(store.state.rentalQuote.length, 1);
     assert.equal(b.business.getQuote('tenant_001', context, replay.id).id, replay.id);
@@ -100,7 +109,7 @@ test('Core confirmation binds the delivery snapshot inside the quote consumption
       injected = true; records.quote[0].deliveryAddressSnapshot.detail = 'Changed destination';
     }
   };
-  const create = () => runWithRequestIdentity({ tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'operator-a' },
+  const create = () => runWithRequestIdentity({ tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'operator-a', audience: 'operator', dataScope: 'all', isSaasAdmin: false },
     () => h.dependencies.confirmation.createOrder('tenant-a', h.body, 'Synthetic operator', { category: { code: 'camera' } }, 'delivery-binding'));
   await assert.rejects(create(), error => error.getStatus?.() === 409 && /报价事实已变化/u.test(error.message));
   assert.equal(injected, true);

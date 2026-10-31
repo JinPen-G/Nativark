@@ -206,6 +206,73 @@ void (async () => {
   ok("非法金额无副作用，重复来源拒绝再批准但可驳回收口");
 }
 
+/* ---------- 未知建议额与确认零必须分别保留 ---------- */
+{
+  const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
+  const business = Object.create(RentalBusinessService.prototype);
+  const quote = { id: "mixed-original", rentalAmount: 700,
+    ruleSnapshot: { earlyReturn: { mode: "auto", minAdvanceHours: 0, refundPercent: 100 } },
+    rateSnapshot: [{ unit: "day_24h" }, { unit: "week" }],
+    membershipBenefitEvaluations: [{ appliesTo: "rental", appliedAmount: 20 }] };
+  const pricing = { recalculatedRentalAmount: 1000,
+    discountEvaluations: [{ applied: true, appliesTo: "rental", discountAmount: 80 }],
+    couponEvaluation: { appliesTo: "rental", discountAmount: 50 } };
+  const refund = business.calculateEarlyReturnRefund("tenant_1", {}, quote, "2026-11-10T00:00:00Z", "2026-11-05T00:00:00Z", 0, pricing);
+  assert.equal(refund.amount, null); assert.equal(refund.rentalRefund, null); assert.equal(refund.requiresReview, true);
+  assert.equal(refund.maximumAmount, 850);
+  const { instance, saved } = service(), row = order(); instance.__order = row;
+  instance.applyEarlyReturnRefundTo(row, refund);
+  const review = row.feeReviews[0]; assert.equal(review.suggestedAmount, null); assert.equal(review.maximumAmount, 850);
+  assert.equal(row.finalPayableAmount, 1000); assert.equal(row.chargeLines.length, 1);
+  await assert.rejects(instance.settleOrder("tenant_1", "order_1", {}, "operator"), /还有费用审核单待处理/u);
+  for (const amount of [undefined, null, NaN, Infinity, -1, -0.001, 851]) {
+    await assert.rejects(instance.reviewOrderFeeReview("tenant_1", "order_1", review.id,
+      { decision: "approved", reason: "核对原单", amount }, "operator", {}));
+  }
+  assert.equal(saved.length, 0); assert.equal(review.status, "pending");
+  const approved = await instance.reviewOrderFeeReview("tenant_1", "order_1", review.id,
+    { decision: "approved", reason: "原计价段人工核定", amount: 120 }, "operator", {});
+  assert.equal(approved.finalPayableAmount, 880); assert.equal(approved.feeReviews[0].decidedAmount, 120);
+  assert.equal(approved.chargeLines.at(-1).amount, -120); assert.match(approved.chargeLines.at(-1).detail, /建议金额待核定/u);
+  await assert.rejects(instance.reviewOrderFeeReview("tenant_1", "order_1", review.id,
+    { decision: "approved", reason: "重复核定", amount: 120 }, "operator", {}));
+  quote.ruleSnapshot.earlyReturn.refundPercent = 50;
+  assert.equal(business.calculateEarlyReturnRefund("tenant_1", {}, quote, "2026-11-10T00:00:00Z", "2026-11-05T00:00:00Z", 0, pricing).maximumAmount, 425);
+  quote.ruleSnapshot.earlyReturn.maxRefundAmount = 100;
+  assert.equal(business.calculateEarlyReturnRefund("tenant_1", {}, quote, "2026-11-10T00:00:00Z", "2026-11-05T00:00:00Z", 0, pricing).maximumAmount, 100);
+  quote.ruleSnapshot.earlyReturn.mode = "none";
+  assert.equal(business.calculateEarlyReturnRefund("tenant_1", {}, quote, "2026-11-10T00:00:00Z", "2026-11-05T00:00:00Z", 0, pricing).requiresReview, false);
+  ok("混合计费缺依据返回未知而非零，待审阻止结清、显式核定单次核减且不冒充退款");
+}
+{
+  const { instance } = service(), row = order(); instance.__order = row;
+  instance.applyEarlyReturnRefundTo(row, { amount: 0, requiresReview: true, basis: ["旧混合计费待人工核定"] });
+  assert.equal(row.feeReviews[0].suggestedAmount, 0);
+  await assert.rejects(instance.reviewOrderFeeReview("tenant_1", "order_1", row.feeReviews[0].id,
+    { decision: "approved", reason: "零额不能授予正额退款", amount: 1 }, "operator", {}), /不能超过规则建议/u);
+  await instance.reviewOrderFeeReview("tenant_1", "order_1", row.feeReviews[0].id,
+    { decision: "approved", reason: "核对确认无核减", amount: 0 }, "operator", {});
+  assert.equal(row.feeReviews[0].status, "approved"); assert.equal(row.feeReviews[0].decidedAmount, 0);
+  assert.equal(row.chargeLines.length, 1); assert.equal(row.finalPayableAmount, 1000);
+  assert.equal((await instance.settleOrder("tenant_1", "order_1", {}, "operator")).status, RentalCoreOrderStatus.Completed);
+  const clean = order(); instance.applyEarlyReturnRefundTo(clean, { amount: 0, requiresReview: false, basis: [] });
+  assert.equal(clean.feeReviews, undefined);
+  assert.throws(() => instance.applyEarlyReturnRefundTo(clean, { amount: null, requiresReview: false, maximumAmount: 100, basis: [] }), /不能自动落账/u);
+  assert.throws(() => instance.applyEarlyReturnRefundTo(clean, { amount: null, requiresReview: true, basis: [] }), /最大核减依据/u);
+  ok("已知零额人工确认不授权正额，确认零不记钱，自动零无待办，未知缺上限拒绝裁定");
+}
+{
+  const { instance } = service(), row = order({ finalPayableAmount: 50, adjustmentAmount: -950 }); instance.__order = row;
+  instance.applyEarlyReturnRefundTo(row, { amount: null, maximumAmount: 850, requiresReview: true, basis: ["原快照核定"] });
+  await assert.rejects(instance.reviewOrderFeeReview("tenant_1", "order_1", row.feeReviews[0].id,
+    { decision: "approved", reason: "不得重复核减", amount: 100 }, "operator", {}), /剩余应收不足/u);
+  assert.equal(row.finalPayableAmount, 50); assert.equal(row.feeReviews[0].status, "pending");
+  await instance.reviewOrderFeeReview("tenant_1", "order_1", row.feeReviews[0].id,
+    { decision: "rejected", reason: "已另行核减" }, "operator", {});
+  assert.equal(row.finalPayableAmount, 50); assert.equal(row.feeReviews[0].decidedAmount, 0);
+  ok("未知金额核定再次约束当前未核减余额，驳回不生成费用或资金");
+}
+
 console.log(`\n费用审核单专项：${passed} 项全部通过`);
 
 })().catch((error) => { console.error(error); process.exitCode = 1; });

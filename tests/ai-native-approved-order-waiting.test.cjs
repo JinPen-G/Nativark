@@ -24,7 +24,7 @@ test('registered order executor actually prepares, waits, reads human approval a
   assert.equal(h.state.records.aiProposal.length, 1);
   assert.equal((await executor.execute({ ...input, clarifications: [{ requestId: 'text', receiptId: 'yes', answers: {} }] }, signal())).kind, 'paused');
   assert.equal(h.state.records.aiApproval.length, 0);
-  await h.root.approvals.decide(input.taskId, { ...pending.payload.proposal, decision: 'approve' });
+  await h.root.approvals.decide(input.taskId, { ...pending.payload.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' });
   const submitted = await executor.execute(input, signal());
   assert.equal(submitted.kind, 'succeeded');
   assert.equal(submitted.payload.effectState, 'committed');

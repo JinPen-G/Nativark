@@ -35,6 +35,9 @@ function checkedCore(value: unknown, orderId: string, newEndAt: string): RentalO
   if (!coreSchema(snapshot)) throw Error('preview shape');
   const copy = snapshot as RentalOrderExtensionPreview;
   if (copy.orderId !== orderId || !sameTime(copy.newEndAt, newEndAt)
+    || copy.executionBasis?.incrementalPricing && (copy.executionBasis.pricingMode !== 'incremental' || copy.pricingSnapshot
+      || !sameTime(copy.executionBasis.incrementalPricing.startAt, copy.originalEndAt)
+      || !sameTime(copy.executionBasis.incrementalPricing.endAt, copy.newEndAt))
     || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072) throw Error('preview binding');
   return copy;
 }
@@ -56,6 +59,7 @@ export function validateAiExtensionPreviewResponse(value: unknown,
       const preview = checkedCore(copy.result.preview, copy.result.orderId, command.extension.newEndAt), scope = copy.result.scope;
       if (preview.serviceSnapshots?.some(row => row.workspaceId !== scope.workspaceId)
         || preview.pricingSnapshot?.context.calendars.some(row => row.tenantId !== scope.tenantId)
+        || preview.executionBasis?.incrementalPricing?.context.calendars.some(row => row.tenantId !== scope.tenantId)
         || preview.pricingSnapshot?.discountEvaluations.some(row => row.workspaceId !== scope.workspaceId
           || row.planSnapshot && row.planSnapshot.tenantId !== scope.tenantId)) throw Error('snapshot scope');
     }

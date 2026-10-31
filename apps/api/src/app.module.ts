@@ -20,6 +20,7 @@ import { TenantIntegrationConnectivityService } from "./modules/integrations/ten
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
+import { FileBusinessAccessService } from "./modules/files/file-business-access.service";
 import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
 import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
 import { PaymentOperationsController } from "./modules/integrations/payment-operations.controller";
@@ -67,6 +68,7 @@ import { RentalBusinessFactRepository } from "./modules/rental-core/rental-busin
 import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
 import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "./modules/rental-core/rental-funding.service";
+import { RentalOrderReceivableRepository } from "./modules/rental-core/rental-order-receivable.repository";
 import { StaffOfflinePaymentController } from "./modules/rental-core/staff-offline-payment.controller";
 import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-payment.service";
 import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
@@ -300,6 +302,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     RentalIdempotencyRepository,
     RentalIdempotentActionService,
     RentalFundingService,
+    RentalOrderReceivableRepository,
     StaffOfflinePaymentService,
     RentalDocumentService,
     RentalOrderConfirmationService,
@@ -330,6 +333,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     TenantIntegrationConnectivityService,
     TenantIntegrationRuntimeService,
     FileStorageRuntimeService,
+    FileBusinessAccessService,
     PaymentRuntimeService,
     PaymentReconciliationFileService,
     SecretBox,

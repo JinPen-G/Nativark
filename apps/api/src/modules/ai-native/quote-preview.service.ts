@@ -176,9 +176,14 @@ export class AiQuotePreviewService {
         let formalRequest = this.resolver
           ? structuredClone(await this.resolver.resolvePricingGroupQuoteRequest(scope.tenantId, structuredClone(parsed.data) as RentalQuoteRequest))
           : structuredClone(parsed.data) as RentalQuoteRequest;
-        // Only the existing Core resolver may add selection metadata. It must
-        // not change quantities, dates, customer, discounts, or selected IDs.
+        // Compare against the original producer's current defaults, not against
+        // an omitted unit and not against a default claimed by the resolver. An
+        // explicit unit, quantity, period, customer or selected ID cannot change.
+        const expectedInput = this.core.normalizeQuoteInput
+          ? structuredClone(this.core.normalizeQuoteInput(structuredClone(parsed.data) as RentalQuoteRequest, business))
+          : structuredClone(parsed.data) as RentalQuoteRequest;
         if (!Array.isArray(formalRequest?.lines) || formalRequest.lines.length !== parsed.data.lines.length) throw new ModelGatewayError('INVALID_RESPONSE');
+        if (this.core.normalizeQuoteInput) formalRequest = structuredClone(this.core.normalizeQuoteInput(formalRequest, business));
         const comparable = { ...formalRequest, lines: formalRequest.lines.map((resolved, index) => {
           const { reservationPrecision: _precision, pricingGroupMemberItemGroupIds: _members,
             pricingGroupCode: _code, pricingGroupName: _name, ...candidate } = resolved;
@@ -186,10 +191,7 @@ export class AiQuotePreviewService {
           if (!parsed.data.lines[index].itemGroupId) delete candidate.itemGroupId;
           return candidate;
         }) };
-        if (requestFingerprint(comparable) !== requestFingerprint(parsed.data)) throw new ModelGatewayError('INVALID_RESPONSE');
-        // Fingerprint the request that the original Core producer will persist,
-        // including its own defaults; never synthesize identity in the AI layer.
-        if (this.core.normalizeQuoteInput) formalRequest = structuredClone(this.core.normalizeQuoteInput(formalRequest));
+        if (requestFingerprint(comparable) !== requestFingerprint(expectedInput)) throw new ModelGatewayError('INVALID_RESPONSE');
         const expectedRequest = requestFingerprint(formalRequest);
         const outcome = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
           if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');

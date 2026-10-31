@@ -2,6 +2,7 @@
  * Persist only the original operation reference; never credentials or drafts.
  * An ambiguous save blocks further writes until its own receipt is observed. */
 import type { AiLegacyModelConfigurationDraft, AiTenantModelSettingsInputDraft, AiTenantModelSettingsSummaryDraft } from "@rental-os/shared";
+import { readSettingsReference, retainSettingsReference, clearSettingsReference } from './settings-operation-reference';
 
 type Row = Record<string, unknown>;
 const object = (v: unknown): v is Row => !!v && typeof v === "object" && !Array.isArray(v);
@@ -47,7 +48,7 @@ function legacySummary(value: unknown): AiLegacyModelConfigurationDraft {
 }
 
 type Pending = { operationKey: string; expectedRevision: number; mode: "tenant_managed" | "platform_managed" };
-export type SettingsFeedback = "idle" | "saved" | "recorded" | "unknown" | "conflict" | "denied" | "unavailable" | "invalid";
+export type SettingsFeedback = "idle" | "saved" | "recorded" | "unknown" | "conflict" | "denied" | "unavailable" | "invalid" | "reference_unavailable";
 export type ModelSettingsState = Readonly<{ busy: boolean; summary: AiTenantModelSettingsSummaryDraft | null;
   legacy: AiLegacyModelConfigurationDraft | null; pending: Pending | null; feedback: SettingsFeedback }>;
 type Ports = { read(): Promise<unknown>; legacy(): Promise<unknown>; save(input: AiTenantModelSettingsInputDraft): Promise<unknown>;
@@ -58,17 +59,17 @@ export class ModelSettingsSession {
   private state: ModelSettingsState;
   private generation = 0;
   private active = true;
+  private referenceBlocked = false;
   private listeners = new Set<() => void>();
   constructor(private readonly tenantId: string, private readonly ports: Ports, private readonly current: () => boolean,
     private readonly operationKey: () => string, private readonly storage?: Storage, private readonly storageKey = "") {
-    let pending: Pending | null = null;
-    try {
-      const value: unknown = JSON.parse(storage?.getItem(storageKey) ?? "null");
-      if (object(value) && Object.keys(value).length === 3 && key(value.operationKey) && revision(value.expectedRevision)
-        && value.expectedRevision < 4294967295 && ["platform_managed", "tenant_managed"].includes(String(value.mode)))
-        pending = { operationKey: value.operationKey, expectedRevision: value.expectedRevision, mode: value.mode as Pending["mode"] };
-    } catch { /* Missing storage is not an execution fallback. */ }
-    this.state = { busy: false, summary: null, legacy: null, pending, feedback: pending ? "unknown" : "idle" };
+    const reference = readSettingsReference<Pending>(storage, storageKey, value => object(value) && Object.keys(value).length === 3
+      && key(value.operationKey) && revision(value.expectedRevision) && value.expectedRevision < 4294967295
+      && ["platform_managed", "tenant_managed"].includes(String(value.mode))
+      ? { operationKey: value.operationKey, expectedRevision: value.expectedRevision, mode: value.mode as Pending['mode'] } : null);
+    this.referenceBlocked = reference.blocked;
+    this.state = { busy: false, summary: null, legacy: null, pending: reference.pending,
+      feedback: reference.blocked ? 'reference_unavailable' : reference.pending ? 'unknown' : 'idle' };
   }
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -77,13 +78,15 @@ export class ModelSettingsSession {
   private valid(generation = this.generation) { return this.active && this.current() && generation === this.generation; }
   private update(next: Partial<ModelSettingsState>) {
     if (!this.valid()) return;
-    this.state = Object.freeze({ ...this.state, ...next });
+    this.state = Object.freeze({ ...this.state, ...next, ...(this.referenceBlocked ? { feedback: 'reference_unavailable' as const } : {}) });
     for (const listener of this.listeners) listener();
   }
   private remember(pending: Pending | null) {
-    // Failure to persist the reference must not cause a second save or lose the
-    // in-memory unknown. The page also displays the key for manual recovery.
-    try { if (pending) this.storage?.setItem(this.storageKey, JSON.stringify(pending)); else this.storage?.removeItem(this.storageKey); } catch { /* memory retained */ }
+    if (pending) retainSettingsReference(this.storage, this.storageKey, pending);
+    else {
+      if (!this.state.pending) throw Error('AI_SETTINGS_REFERENCE_UNAVAILABLE');
+      clearSettingsReference(this.storage, this.storageKey, this.state.pending);
+    }
   }
   async load() {
     if (!this.valid() || this.state.busy) return;
@@ -110,7 +113,7 @@ export class ModelSettingsSession {
     return write ? "unknown" : "unavailable";
   }
   async save(value: AiTenantModelSettingsInputDraft) {
-    if (!this.valid() || this.state.busy || this.state.pending) throw new Error("AI_SETTINGS_BLOCKED");
+    if (!this.valid() || this.state.busy || this.state.pending || this.referenceBlocked) throw new Error("AI_SETTINGS_BLOCKED");
     const command = structuredClone(value), previous = this.state.summary;
     const legacy = this.state.legacy;
     const explicitLegacy = !previous && legacy?.state === "review_required" && legacy.currentConfiguration === "absent";
@@ -123,7 +126,9 @@ export class ModelSettingsSession {
     command.operationKey = operationKey;
     const pending: Pending = { operationKey, expectedRevision: command.expectedRevision, mode: command.mode };
     const generation = this.generation;
-    this.remember(pending);
+    try { this.remember(pending); }
+    catch { this.referenceBlocked = true; this.update({ feedback: 'reference_unavailable' }); throw Error('AI_SETTINGS_REFERENCE_UNAVAILABLE'); }
+    if (!this.valid(generation)) return;
     this.update({ busy: true, pending, feedback: "idle" });
     try {
       const summary = settingsSummary(await this.ports.save(command), this.tenantId);
@@ -135,8 +140,9 @@ export class ModelSettingsSession {
     } catch (error) {
       if (!this.valid(generation)) return;
       const feedback = this.classify(error, true);
-      if (feedback !== "unknown") this.remember(null);
-      this.update({ feedback, pending: feedback === "unknown" ? pending : null,
+      let retained = feedback === 'unknown';
+      if (!retained) { try { this.remember(null); } catch { retained = true; } }
+      this.update({ feedback: retained ? 'unknown' : feedback, pending: retained ? pending : null,
         ...(feedback === "denied" || feedback === "conflict" ? { summary: null, legacy: null } : {}) });
       throw new Error("AI_SETTINGS_SAVE_NOT_CONFIRMED");
     } finally { if (this.valid(generation)) this.update({ busy: false }); }

@@ -10,9 +10,9 @@ import { ModelGatewayError } from '../model-gateway.ports';
  * used to locate the workspace's existing quote store, NOT as historical rate,
  * rule/calendar/template evidence. No global quote-ID lookup or price fallback. */
 export class AiOrderSavedQuoteSource implements AiOrderHistoricalQuoteSource {
-  constructor(private readonly business: Pick<RentalBusinessService, 'getQuote'>,
+  constructor(private readonly business: Pick<RentalBusinessService, 'loadQuote'>,
     private readonly contexts: AiQuoteCoreContextSource) {
-    if (typeof business?.getQuote !== 'function' || typeof contexts?.current !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if (typeof business?.loadQuote !== 'function' || typeof contexts?.current !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async read(expected: AiWorkspaceScope, quoteId: string): ReturnType<AiOrderHistoricalQuoteSource['read']> {
     if (expected?.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
@@ -24,7 +24,9 @@ export class AiOrderSavedQuoteSource implements AiOrderHistoricalQuoteSource {
       const context = await this.contexts.current(structuredClone(scope));
       const current = getRequestIdentity();
       if (current?.userId !== identity.userId || current?.tenantId !== scope.tenantId || current?.workspaceId !== scope.workspaceId) throw new ModelGatewayError('FORBIDDEN');
-      const quote = structuredClone(this.business.getQuote(scope.tenantId, context, quoteId));
+      const quote = structuredClone(await this.business.loadQuote(scope.tenantId, context, quoteId));
+      const after = getRequestIdentity();
+      if (after?.userId !== identity.userId || after?.tenantId !== scope.tenantId || after?.workspaceId !== scope.workspaceId) throw new ModelGatewayError('FORBIDDEN');
       if (quote?.id !== quoteId || quote.tenantId !== scope.tenantId) throw new ModelGatewayError('INVALID_RESPONSE');
       return { status: 'available', quote };
     } catch (error) {

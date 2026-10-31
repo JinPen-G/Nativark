@@ -12,6 +12,7 @@ const { FileStorageRuntimeService } = require(path.join(__dirname, "../apps/api/
 const { PaymentRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/payment.runtime.service"));
 const { TenantIntegrationRuntimeService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.runtime.service"));
 const { TenantIntegrationConnectivityService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.connectivity.service"));
+const { TenantIntegrationService } = require(path.join(__dirname, "../apps/api/src/modules/integrations/tenant-integration.service"));
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
 const calls = [];
@@ -128,11 +129,12 @@ async function runOrchestratorChecks() {
       provider: "aliyun_sms",
       settings: {},
       credentials: {},
+      revision: { updatedAt: new Date('2026-10-31T01:00:00Z'), enabled: true, isDefault: true, settings: {}, credentialsEncrypted: null, secretFields: [] },
       missingFields: mode === "missing" ? ["accessKeyId"] : [],
       configurationError: mode === "configuration-error" ? "平台地址无法安全使用" : undefined
     }),
-    claimLiveTest: async () => claim,
-    recordTestResult: async (input) => { recorded.push(input); return true; }
+    claimLiveTest: async (input) => { assert.equal(input.revision.updatedAt.toISOString(), '2026-10-31T01:00:00.000Z'); return claim; },
+    recordTestResult: async (input) => { assert.equal(input.revision.updatedAt.toISOString(), '2026-10-31T01:00:00.000Z'); recorded.push(input); return true; }
   };
   const connectivity = new TenantIntegrationConnectivityService(
     integrationService,
@@ -168,8 +170,62 @@ async function runOrchestratorChecks() {
   assert.doesNotMatch(recorded.at(-1).error, /provider secret leaked/u);
 }
 
+async function runRevisionChecks() {
+  let row = { id: 'cfg-version', tenantId: 'tenant-version', capability: 'sms', provider: 'aliyun_sms', enabled: true, isDefault: true,
+    settings: structuredClone(smsConfig.settings), credentialsEncrypted: JSON.stringify(smsConfig.credentials), secretFields: ['accessKeyId', 'accessKeySecret'],
+    updatedAt: new Date('2026-10-31T01:00:00Z'), createdAt: new Date('2026-10-31T01:00:00Z'), lastTestAt: null, lastTestStatus: 'not_tested', lastTestMode: 'none' };
+  const matches = (where) => Object.entries(where).every(([key, value]) => {
+    if (key === 'OR') return value.some(matches);
+    if (value instanceof Date) return row[key] instanceof Date && row[key].getTime() === value.getTime();
+    if (value && typeof value === 'object') {
+      if ('equals' in value) return JSON.stringify(row[key]) === JSON.stringify(value.equals);
+      if ('lt' in value) return row[key] && row[key] < value.lt;
+    }
+    return row[key] === value;
+  });
+  const service = new TenantIntegrationService({ tenantIntegrationConfig: {
+    findUnique: async () => structuredClone(row),
+    updateMany: async ({ where, data }) => { if (!matches(where)) return { count: 0 }; Object.assign(row, structuredClone(data)); return { count: 1 }; }
+  } }, { decrypt: value => JSON.parse(value) }, { record: async () => undefined });
+  const read = () => service.testConfig('sms', 'aliyun_sms', { tenantId: row.tenantId });
+  const claim = config => service.claimLiveTest({ tenantId: row.tenantId, configId: row.id, startedAt: new Date(), cooldownMs: 30000, revision: config.revision });
+  const stale = await read();
+  row.settings.signName = 'new-signature';
+  assert.equal(await claim(stale), false, 'read A then save B cannot claim a test of B using A');
+  assert.equal(await service.recordTestResult({ tenantId: row.tenantId, configId: row.id, revision: stale.revision,
+    status: 'failed', mode: 'configuration', checkedAt: new Date() }), false, 'stale configuration errors cannot replace a new config result');
+  const config = await read(), startedAt = new Date();
+  assert.equal(await service.claimLiveTest({ tenantId: row.tenantId, configId: row.id, revision: config.revision, startedAt, cooldownMs: 30000 }), true);
+  const resultInput = { tenantId: row.tenantId, configId: row.id, revision: config.revision, status: 'passed', mode: 'live', checkedAt: startedAt, startedAt };
+  assert.equal(await service.recordTestResult(resultInput), true);
+  assert.equal(row.lastTestStatus, 'passed');
+  assert.equal(row.updatedAt.getTime(), config.revision.updatedAt.getTime(), 'test bookkeeping must not mutate the tested config version');
+  assert.equal(await service.recordTestResult(resultInput), false, 'one claimed result cannot be overwritten by a duplicate late result');
+  row.lastTestAt = null;
+  const beforeSecretChange = await read();
+  assert.equal(await claim(beforeSecretChange), true);
+  row.credentialsEncrypted = JSON.stringify({ ...smsConfig.credentials, accessKeySecret: 'rotated-offline-secret' });
+  assert.equal(await service.recordTestResult({ ...resultInput, revision: beforeSecretChange.revision, startedAt: row.lastTestAt }), false,
+    'same timestamp with changed encrypted credentials still rejects the old probe result');
+  assert.equal(row.lastTestStatus, 'not_tested');
+  row.lastTestAt = null;
+  let adapterCalls = 0;
+  const connectivity = new TenantIntegrationConnectivityService(service, { testConnection: async () => {
+    adapterCalls += 1;
+    row.settings.verificationTemplateCode = 'changed-during-probe';
+    return 'offline probe';
+  } }, {}, {});
+  const staleResult = await connectivity.test('sms', 'aliyun_sms', { tenantId: row.tenantId });
+  assert.equal(adapterCalls, 1);
+  assert.equal(staleResult.ok, false);
+  assert.match(staleResult.message, /未采用旧测试结果/);
+  assert.equal(row.lastTestStatus, 'not_tested');
+  console.log('integration test revision checks passed: read/claim/probe/result binding, credential change and duplicate result rejection');
+}
+
 void (async () => {
   await runAdapterChecks();
+  await runRevisionChecks();
   await runOrchestratorChecks();
   console.log("tenant integration connectivity tests passed: read-only probes, no-send/no-write boundaries, safe failures and atomic cooldown");
 })().catch((error) => {

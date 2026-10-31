@@ -1,4 +1,4 @@
-import type { RentalEarlyReturnRule, RentalQuoteServiceSnapshot } from "@rental-os/shared";
+import type { RentalEarlyReturnRule, RentalOrderServiceOccurrence } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
 
 /**
@@ -35,16 +35,18 @@ export interface EarlyReturnContext {
   rentalDiscountAmount: number;
   /** 分摊到租金的券优惠金额。 */
   rentalCouponAmount: number;
-  /** 增值服务快照，用于退「未发生且可取消」的服务费。 */
-  services?: RentalQuoteServiceSnapshot[];
+  /** 当前原服务发生项，amount已由调用方扣原优惠。计划时间不能证明未履行。 */
+  services?: RentalOrderServiceOccurrence[];
 }
 
 export interface EarlyReturnRefund {
   /** 退款总额，**正数**。落到订单时取负值进费用明细。 */
-  amount: number;
-  rentalRefund: number;
-  serviceRefund: number;
-  /** 规则要求人工审批时为 true：金额已算好，但不得直接落账。 */
+  amount: number | null;
+  rentalRefund: number | null;
+  serviceRefund: number | null;
+  /** 金额未知时的原快照最大核减额；不是建议退款金额。 */
+  maximumAmount?: number;
+  /** 规则要求人工审批或缺少可自动复算依据时为 true，不得直接落账。 */
   requiresReview: boolean;
   /** 逐条依据，进订单费用明细的 detail，客服据此向客户解释。 */
   basis: string[];
@@ -77,19 +79,35 @@ export function computeEarlyReturnRefund(
       ` × 未使用 ${ctx.unusedUnits}/${ctx.totalUnits} × ${rule.refundPercent}% = ${rentalRefund}`
   );
 
-  // 未发生的服务：计划开始时刻不早于实际归还时刻，说明这份服务还没执行，可退。
-  let serviceRefund = 0;
+  let serviceRefund = 0, serviceUnknown = false, serviceMaximum = 0;
   if (rule.refundUndeliveredServices) {
-    const returnedMs = new Date(ctx.returnedAt).getTime();
     for (const service of ctx.services ?? []) {
-      const startMs = new Date(service.scheduledStartAt).getTime();
-      // 时间读不出来（早于该字段的历史快照）就**不退**：说不清有没有履行过的服务，
-      // 宁可不退也不能退。`NaN < returnedMs` 是 false，只判前者会把它当成未发生。
-      if (!Number.isFinite(startMs) || startMs < returnedMs) continue;
-      serviceRefund = roundMoney(serviceRefund + service.amount);
-      basis.push(`未发生服务「${service.serviceName}」退 ${service.amount}`);
+      // Another original cancellation/refund owns this service reduction. The
+      // early-return path cannot issue it again under a different charge code.
+      if (service.refundStatus && service.refundStatus !== "none") continue;
+      // Terminal failure/cancellation owns its separate original service review,
+      // including a zero or rejected refund; never repeat it as early return.
+      if (["completed", "cancelled", "failed", "no_show"].includes(service.executionStatus ?? "")) continue;
+      if (!Number.isFinite(service.amount) || service.amount < 0) throw new Error("原服务净额无效");
+      serviceMaximum = roundMoney(serviceMaximum + service.amount);
+      if (!service.occurrenceId || service.executionStatus !== "not_started"
+        || !Number.isInteger(service.quantity) || service.quantity < 1 || service.actualStartAt) {
+        serviceUnknown = true; basis.push(`服务「${service.serviceName}」实际履约依据不全，不能按计划时间退款`); continue;
+      }
+      const executed = service.executedQuantity ?? 0;
+      if (!Number.isInteger(executed) || executed !== 0
+        || service.executionSegments?.length && (service.executionSegments.some(segment => !Number.isInteger(segment.quantity) || segment.quantity < 1)
+          || service.executionSegments.reduce((sum, segment) => sum + segment.quantity, 0) !== executed)) {
+        serviceUnknown = true; basis.push(`服务「${service.serviceName}」已执行数量待核对`); continue;
+      }
+      // Core's service completion/cancellation path is the only writer of these facts.
+      const refundable = roundMoney(Math.max(0, service.amount) * (service.quantity - executed) / service.quantity);
+      serviceRefund = roundMoney(serviceRefund + refundable);
+      basis.push(`原服务「${service.serviceName}」未执行 ${service.quantity - executed}/${service.quantity}，净额核减 ${refundable}`);
     }
   }
+  if (serviceUnknown) return { amount: null, rentalRefund, serviceRefund: null,
+    maximumAmount: roundMoney(Math.min(rentalRefund + serviceMaximum, rule.maxRefundAmount ?? Infinity)), requiresReview: true, basis };
 
   let amount = roundMoney(rentalRefund + serviceRefund);
   if (rule.maxRefundAmount !== undefined && amount > rule.maxRefundAmount) {

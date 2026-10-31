@@ -19,6 +19,10 @@ exports.formalReprepareHarness = async () => {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
   Object.assign(h.dependencies.core, {
+    // Candidate preparation now requires bounded original reader ports. Empty
+    // pages express missing choices, never a fabricated quote or permission.
+    listItemGroupsPage: async () => ({ rows: [], truncated: false, nextCursor: null,
+      source: 'persisted_workspace_configuration', configurationVersion: '0'.repeat(64) }),
     getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
     getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
     getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
@@ -31,7 +35,7 @@ exports.formalReprepareHarness = async () => {
   });
   const configuration = { holderId: 'formal-worker', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
     audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
-    memberships: { listPersonalOptions: async () => [] } };
+    memberships: { listPersonalOptions: async () => [], listPersonalOptionsPage: async () => ({ rows: [], truncated: false }) } };
   const dependencies = { ...h.dependencies, scene: { code: 'quote_clarification', version: '1' },
     reprepareServices: deps => composeFormalApprovedOrderReprepareServices(deps, configuration) };
   const compose = () => composeControlledApprovedOrder(dependencies), app = compose();

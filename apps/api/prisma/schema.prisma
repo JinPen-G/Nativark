@@ -5548,6 +5548,11 @@ model RentalNotificationTemplate {
 // 需求要求的不可变时点快照保留 JSON（需求 4.7）。
 
 model RentalQuote {
+  /// 当前可信创建主体及空间来源；存量无证据不回填，不从报价DTO取值。
+  sourceSnapshot                Json?
+  /// 原报价配送地址与逐行租金；回源不得从当前地址/费率重建。
+  deliveryAddressSnapshot       Json?
+  rentalLineAmounts             Json?
   /// 可选服务器原操作绑定；存量无证据不回填，不向客户端报价DTO透传。
   originalOperationKey           String? @db.VarChar(64)
   originalInputHash              String? @db.VarChar(64)
@@ -6264,6 +6269,9 @@ model AiTaskOriginalRequest {
   policyRevision           Int @db.UnsignedInt
   policyHash               String @db.Char(64)
   previousRequestId        String? @db.VarChar(36)
+  /// Permanent metadata-only creation fence; historical reads keep the original body/hash.
+  creationClosedAt         DateTime? @db.DateTime(3)
+  creationCloseKey          String? @db.VarChar(128)
   status                   AiTaskOriginalRequestStatus @default(STORED)
   expiresAt                DateTime @db.DateTime(3)
   createdAt                DateTime @default(now()) @db.DateTime(3)

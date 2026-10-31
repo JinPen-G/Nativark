@@ -89,7 +89,10 @@ function setup() {
   const filesControllerSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/files/files.controller.ts"), "utf8");
   const storageRuntimeSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/integrations/file-storage.runtime.service.ts"), "utf8");
   assert.match(filesControllerSource, /实名凭证必须通过客户专用上传入口/u, "generic uploads cannot bypass customer scope checks");
-  assert.match(filesControllerSource, /asset\.businessType === "customer" && asset\.uploadScene === "identity-verification"/u, "general file ledger must not expose identity evidence metadata");
+  assert.match(filesControllerSource, /integrationsService\.listFiles\(query\)/u, "general ledger must use the same business ACL as the dashboard");
+  const fileAccessSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/files/file-business-access.service.ts"), "utf8");
+  assert.match(fileAccessSource, /\['ai_knowledge_document', 'customer', 'customer_profile', 'membership_review'\]\.includes\(file.businessType\)/u,
+    "generic ledger must exclude identity and qualification evidence metadata");
   assert.match(storageRuntimeSource, /当前授权的客户实名核验资料/u, "generic file download URLs cannot expose identity evidence");
   const base = { credentialType: "identity_card", result: "verified", evidenceFileAssetIds: ["identity-file-1"], reason: "人工核验通过" };
 

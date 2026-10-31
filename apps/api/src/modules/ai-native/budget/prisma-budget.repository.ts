@@ -6,6 +6,7 @@ import { quantityAtoms, sameUnit } from './budget-quantity';
 import { assertPlatformCreditLimit } from './platform-credit-limit';
 import { byokMeterScene } from './byok-usage-meter';
 import { platformCreditScene } from './platform-credit-policy';
+import { assertBudgetPolicyBinding } from './budget-policy-binding';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { BudgetSettingsOperation } from './budget.ports';
@@ -24,6 +25,14 @@ const decimalAtoms = (value: Prisma.Decimal | null) => value === null ? 0n : Big
 const decimalString = (atoms: bigint) => {
   const raw = atoms.toString().padStart(7, '0');
   return `${raw.slice(0, -6)}.${raw.slice(-6)}`;
+};
+const policyMeterFields = (settings: AiUsageSettingsDraft) => {
+  const quantity = settings.budget.state === 'not_configured' ? undefined : settings.budget.quantity;
+  return { unitKind: quantity?.unit ?? 'tokens',
+    tokenLimit: quantity?.unit === 'tokens' ? quantityAtoms(quantity) : null,
+    callLimit: quantity?.unit === 'calls' ? Number(quantityAtoms(quantity)) : null,
+    moneyLimit: quantity?.unit === 'money' ? decimalString(quantityAtoms(quantity)) : null,
+    moneyCurrency: quantity?.unit === 'money' ? quantity.currency : null };
 };
 const policyEnabled = (settings: AiUsageSettingsDraft) => Object.values(settings.gates).every(gate => gate.enabled)
   && settings.budget.state === 'limited' && settings.maxConcurrent > 0 && settings.maxCallsPerRun > 0
@@ -124,7 +133,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         const where = policyWhere(key);
         if (expectedRevision === 0) {
           const created = await tx.aiBudgetPolicy.create({ data: {
-            id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), unitKind: settings.budget.state === 'limited' ? settings.budget.quantity.unit : 'tokens',
+            id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings),
             maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined
           }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
           await revalidate();
@@ -133,7 +142,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           callbackCompleted = true;
           return saved;
         }
-        const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), unitKind: settings.budget.state === 'limited' ? settings.budget.quantity.unit : 'tokens', maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
+        const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), ...policyMeterFields(settings), maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
         if (changed.count !== 1) throw new BudgetError('REVISION_CONFLICT');
         await revalidate();
         const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
@@ -298,6 +307,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     quote = structuredClone(quote);
     command = structuredClone(command);
     quantityAtoms(quote.quantity);
+    assertBudgetPolicyBinding(quote, command.sceneCode);
     const consumer = quote.consumerScope;
     const tenantId = quote.association.scope.kind === 'platform' ? null : quote.association.scope.tenantId;
     const workspaceId = quote.association.scope.kind === 'workspace' ? quote.association.scope.workspaceId : null;

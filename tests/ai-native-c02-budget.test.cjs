@@ -50,11 +50,46 @@ test('actual budget settings keep the authorized input across awaits and retain 
   assert.equal(writes.length, 2, 'real CAS conflict does not become unknown or write again');
 });
 
+test('budget settings and indexed unit/currency projections commit together without stale money metadata', async () => {
+  const key = { scopeId: 'platform', scopeKind: 'PLATFORM', sceneCode: 'scene' };
+  const settings = { draftVersion: 'ain-c07-draft-2', scope: { kind: 'platform' }, config: association.config,
+    gates: { platform: { enabled: true, revision: 1 }, tenant: { enabled: true, revision: 1 }, scene: { enabled: true, revision: 1 } },
+    sceneCode: 'scene', allowedModels: ['model'], allowedScenes: ['scene'], budget: { state: 'limited', quantity: { unit: 'money', amount: '10.250000', currency: 'USD', scale: 6 } }, maxConcurrent: 2, maxCallsPerRun: 2 };
+  let row, failRevalidation = false;
+  const db = { aiBudgetPolicy: { create: async ({ data }) => { row = structuredClone(data); return row; },
+    updateMany: async ({ data }) => { const revision = row.configRevision; Object.assign(row, structuredClone(data)); row.configRevision = revision + data.configRevision.increment; return { count: 1 }; },
+    findUnique: async () => row }, aiBudgetAllocation: { findFirst: async () => null },
+    $transaction: async work => { const before = structuredClone(row); try { return await work(db); } catch (error) { row = before; throw error; } } };
+  const repository = new PrismaBudgetRepository(db);
+  await repository.saveSettings(key, settings, 0, async () => {});
+  assert.equal(row.moneyCurrency, 'USD'); assert.equal(row.moneyLimit, '10.250000'); assert.equal(row.unitKind, 'money');
+  const disabled = { ...settings, gates: { ...settings.gates, scene: { enabled: false, revision: 2 } } };
+  await repository.saveSettings(key, disabled, 1, async () => {});
+  assert.equal(row.enabled, false); assert.equal(row.moneyCurrency, 'USD');
+  const calls = { ...settings, budget: { state: 'limited', quantity: { unit: 'calls', value: 7 } } };
+  await repository.saveSettings(key, calls, 2, async () => {});
+  assert.equal(row.unitKind, 'calls'); assert.equal(row.callLimit, 7); assert.equal(row.moneyCurrency, null); assert.equal(row.moneyLimit, null); assert.equal(row.tokenLimit, null);
+  const before = structuredClone(row);
+  await assert.rejects(repository.saveSettings(key, settings, 3, async () => {
+    if (failRevalidation) throw Error('revoked after write'); failRevalidation = true;
+  }));
+  assert.deepEqual(row, before);
+  const notConfigured = { ...settings, budget: { state: 'not_configured' } };
+  await repository.saveSettings(key, notConfigured, 3, async () => {});
+  assert.equal(row.moneyCurrency, null); assert.equal(row.callLimit, null); assert.equal(row.enabled, false);
+});
+
 function fakeDb() {
-  const row = { id: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, actorId: record.actorId, status: 'reserved', dispatchState: 'dispatched', reservedTokens: 10n, reservedCalls: null, reservedMoney: null, moneyCurrency: null, actualTokens: null, actualCalls: null, actualMoney: null, unknownReason: null, expiresAt: record.expiresAt, updatedAt: record.storageVersion, callId: record.callId, idempotencyKey: 'idem', sceneCode: 'scene', configRevision: 2, tenantId: 'tenant', workspaceId: 'workspace' };
+  const row = { id: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, actorId: record.actorId, status: 'reserved', dispatchState: 'dispatched', unitKind: 'tokens', reservedTokens: 10n, reservedCalls: null, reservedMoney: null, moneyCurrency: null, actualTokens: null, actualCalls: null, actualMoney: null, unknownReason: null, expiresAt: record.expiresAt, updatedAt: record.storageVersion, callId: record.callId, idempotencyKey: 'idem', sceneCode: 'scene', configRevision: 2, tenantId: 'tenant', workspaceId: 'workspace' };
   const ledger = new Map();
   Object.assign(row, { configurationHash: requestFingerprint(association.config), requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, priceVersion: association.priceVersion });
+  const keys = ['PLATFORM', 'TENANT', 'WORKSPACE'].map((scopeKind, index) => ({ id: `p-${index}`, scopeId: `s-${index}`, scopeKind, sceneCode: 'scene', configRevision: 2 }));
   const db = {
+    aiScope: { findUnique: async ({ where }) => { const key = keys.find(item => item.scopeId === where.id); return { id: key.scopeId,
+      kind: key.scopeKind, tenantId: key.scopeKind === 'PLATFORM' ? null : 'tenant', workspaceId: key.scopeKind === 'WORKSPACE' ? 'workspace' : null }; } },
+    aiBudgetPolicy: { findUnique: async ({ where }) => keys.find(item => where.id ? item.id === where.id : item.scopeId === where.scopeId_scopeKind_sceneCode.scopeId) },
+    aiBudgetAllocation: { findMany: async () => keys.map(item => ({ policyId: item.id, policyRevision: 2 })) },
+    $queryRaw: async () => [],
     aiBudgetLedgerEntry: { findUnique: async ({ where }) => ledger.get(`${where.reservationId_eventKey.reservationId}:${where.reservationId_eventKey.eventKey}`) ?? null,
       create: async ({ data }) => { ledger.set(`${data.reservationId}:${data.eventKey}`, data); return data; } },
     aiBudgetReservation: { updateMany: async ({ data }) => { Object.assign(row, data); if (data.actualTokens !== undefined) row.actualTokens = data.actualTokens; row.updatedAt = new Date(row.updatedAt.getTime() + 1); return { count: 1 }; },
@@ -101,8 +136,15 @@ test('settled actual usage remains in the durable budget aggregate', async () =>
     gates: { platform: { enabled: true, revision: 1 }, tenant: { enabled: true, revision: 1 }, scene: { enabled: true, revision: 1 } },
     sceneCode: 'scene', allowedModels: ['model'], allowedScenes: ['scene'], budget: { state: 'limited', quantity: { unit: 'tokens', value: 10 } }, maxConcurrent: 2, maxCallsPerRun: 2 };
   const policyRow = { id: 'policy', scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene', configRevision: 2, settingsJson: settings };
-  const db = { aiScope: { findUnique: async () => ({ id: 'workspace', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' }) }, aiBudgetPolicy: { findUnique: async () => policyRow }, aiBudgetAllocation: { findMany: async () => [{ reservation: { status: 'settled', reservedTokens: 4n, reservedCalls: null, reservedMoney: null, actualTokens: 10n, actualCalls: null, actualMoney: null, moneyCurrency: null, runId: 'old' } }] }, aiBudgetReservation: { create: async () => { throw new Error('must reject before create'); } }, $transaction: async callback => callback(db), $queryRaw: async () => [{ id: 'policy' }] };
+  const policies = ['PLATFORM', 'TENANT', 'WORKSPACE'].map((scopeKind, index) => ({ ...policyRow, id: `policy-${index}`, scopeId: `scope-${index}`, scopeKind }));
+  const db = { aiScope: { findUnique: async ({ where }) => { const key = policies.find(item => item.scopeId === where.id); return { id: key.scopeId,
+    kind: key.scopeKind, tenantId: key.scopeKind === 'PLATFORM' ? null : 'tenant', workspaceId: key.scopeKind === 'WORKSPACE' ? 'workspace' : null }; } },
+    aiBudgetPolicy: { findUnique: async ({ where }) => policies.find(item => item.scopeId === where.scopeId_scopeKind_sceneCode.scopeId) },
+    aiBudgetReservation: { findUnique: async () => null,
+      groupBy: async () => [{ status: 'settled', unitKind: 'tokens', moneyCurrency: null, _count: { _all: 1, actualTokens: 1 }, _sum: { actualTokens: 10n } }],
+      count: async () => 0, create: async () => { throw new Error('must reject before create'); } },
+    $transaction: async callback => callback(db), $queryRaw: async () => [] };
   const repo = new PrismaBudgetRepository(db);
-  const quote = { association, callId: 'call-new', sceneCode: 'scene', model: 'model', actorId: 'actor', quantity: { unit: 'tokens', value: 1 }, policies: [{ scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene' }], consumerScope: { scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene' }, evidenceHash: 'b'.repeat(64), expiresAt: new Date('2026-10-04T12:01:00.000Z') };
+  const quote = { association, callId: 'call-new', sceneCode: 'scene', model: 'model', actorId: 'actor', quantity: { unit: 'tokens', value: 1 }, policies: policies.map(({ scopeId, scopeKind, sceneCode }) => ({ scopeId, scopeKind, sceneCode })), consumerScope: { scopeId: 'scope-2', scopeKind: 'WORKSPACE', sceneCode: 'scene' }, evidenceHash: 'b'.repeat(64), expiresAt: new Date('2026-10-04T12:01:00.000Z') };
   await assert.rejects(() => repo.reserve(quote, { association, callId: 'call-new', sceneCode: 'scene', expiresAt: quote.expiresAt }, 'identity', async () => {}), error => error instanceof BudgetError && error.code === 'EXHAUSTED');
 });

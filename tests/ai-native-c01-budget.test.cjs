@@ -54,7 +54,7 @@ function harness({ changing = false } = {}) {
   const authority = { resolve: async () => { resolveCount += 1; if (changing && resolveCount > 2) throw new Error('revoked'); return { context: clone(context), authorizationKey: 'grant-1', expiresAt: new Date(now.getTime() + 60_000), entitled: true }; } };
   const quotes = { quote: async command => ({ association: clone(command.association), callId: command.callId, sceneCode: command.sceneCode, model: 'model-1', actorId: 'actor-1', quantity: { unit: 'tokens', value: 5 }, policies: [{ scopeId: 'tenant-scope-1', scopeKind: 'TENANT', sceneCode: command.sceneCode }, { scopeId: 'scope-1', scopeKind: 'WORKSPACE', sceneCode: command.sceneCode }], consumerScope: { scopeId: 'scope-1', scopeKind: 'WORKSPACE', sceneCode: command.sceneCode }, evidenceHash: 'a'.repeat(64), expiresAt: command.expiresAt }) };
   const evidence = { dispatch: async record => record.dispatched ? 'dispatched' : 'not_dispatched', usage: async () => ({ quantity: { unit: 'tokens', value: 4 }, evidenceHash: 'b'.repeat(64) }) };
-  return { service: new BudgetService(repository, authority, quotes, evidence, () => now), repository };
+  return { service: new BudgetService(repository, authority, quotes, evidence, () => now), repository, quotes };
 }
 function command() { return { association: clone(association), callId: 'call-1', sceneCode: 'rental.order.explain', expiresAt: new Date(now.getTime() + 30_000) }; }
 
@@ -71,6 +71,78 @@ test('reserve is durable at the port, binds association and rejects changed idem
   const replay = await service.reserve(command());
   assert.equal(replay.id, first.id);
   await assert.rejects(() => service.reserve({ ...command(), callId: 'call-other' }), (error) => error instanceof BudgetError && error.code === 'IDEMPOTENCY_CONFLICT');
+});
+
+test('deterministic BYOK and platform-credit policy keys bind the original business scene without accepting arbitrary namespaces', async () => {
+  const { byokMeterScene } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
+  const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
+  for (const mode of ['tenant_managed', 'platform_managed']) {
+    const request = command(); request.association.config.serviceMode = mode;
+    if (mode === 'platform_managed') Object.assign(request.association.config, { tenantId: undefined, configurationScope: { kind: 'platform' } });
+    const scene = mode === 'tenant_managed' ? byokMeterScene(request.sceneCode, request.association) : platformCreditScene(request.sceneCode, request.association);
+    const { service, repository, quotes } = harness();
+    let altered = value => value;
+    quotes.quote = async received => altered({ association: structuredClone(received.association), callId: received.callId,
+      sceneCode: received.sceneCode, model: 'model-1', actorId: 'actor-1',
+      quantity: mode === 'tenant_managed' ? { unit: 'calls', value: 1 } : { unit: 'money', amount: '1.250000', currency: 'CNY', scale: 6 },
+      policies: [{ scopeId: 'platform', scopeKind: 'PLATFORM', sceneCode: mode === 'platform_managed' ? received.sceneCode : scene },
+        { scopeId: 'tenant', scopeKind: 'TENANT', sceneCode: scene }, { scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: scene }],
+      consumerScope: { scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: scene }, evidenceHash: 'a'.repeat(64), expiresAt: received.expiresAt });
+    for (const tamper of [value => ({ ...value, consumerScope: { ...value.consumerScope, sceneCode: `${scene}:forged` } }),
+      value => ({ ...value, policies: value.policies.map((row, i) => i === 1 ? { ...row, sceneCode: 'another-scene' } : row) }),
+      value => ({ ...value, association: { ...value.association, priceVersion: 'other-price' } }),
+      value => ({ ...value, quantity: { unit: 'tokens', value: 1 } })]) {
+      altered = tamper; await assert.rejects(service.reserve(request), error => error.code === 'INVALID');
+      assert.equal(repository.record, null);
+    }
+    altered = value => value;
+    const reserved = await service.reserve(request);
+    assert.equal(reserved.sceneCode, request.sceneCode); assert.equal(reserved.reserved.unit, mode === 'tenant_managed' ? 'calls' : 'money');
+  }
+});
+
+test('namespaced admission still reaches original repository locks, policies and platform allowance', async () => {
+  const { Prisma } = require('@prisma/client');
+  const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
+  const { byokMeterScene } = require('../apps/api/src/modules/ai-native/budget/byok-usage-meter');
+  const { platformCreditScene } = require('../apps/api/src/modules/ai-native/budget/platform-credit-policy');
+  for (const mode of ['tenant_managed', 'platform_managed']) {
+    const request = command(); request.association.config.serviceMode = mode;
+    const unit = mode === 'tenant_managed' ? { unit: 'calls', value: 1 } : { unit: 'money', amount: '1.000000', currency: 'USD', scale: 6 };
+    const mapped = mode === 'tenant_managed' ? byokMeterScene(request.sceneCode, request.association) : platformCreditScene(request.sceneCode, request.association);
+    const keys = ['PLATFORM', 'TENANT', 'WORKSPACE'].map((scopeKind, i) => ({ scopeId: `scope-${i}`, scopeKind,
+      sceneCode: mode === 'platform_managed' && scopeKind === 'PLATFORM' ? request.sceneCode : mapped }));
+    let writes = 0, accountEnabled = true, policyEnabled = true, locks = 0;
+    const rows = keys.map((key, i) => ({ ...key, id: `policy-${i}`, configRevision: 1,
+      settingsJson: { ...settings, sceneCode: request.sceneCode, allowedScenes: [request.sceneCode],
+        budget: { state: 'limited', quantity: mode === 'tenant_managed' ? { unit: 'calls', value: 10 } : { ...unit, amount: '10.000000' } } } }));
+    const db = { aiScope: { findUnique: async ({ where }) => { const key = keys.find(row => row.scopeId === where.id); return { id: key.scopeId, kind: key.scopeKind,
+      tenantId: key.scopeKind === 'PLATFORM' ? null : request.association.scope.tenantId,
+      workspaceId: key.scopeKind === 'WORKSPACE' ? request.association.scope.workspaceId : null }; } },
+      aiBudgetPolicy: { findUnique: async ({ where }) => { const row = structuredClone(rows.find(row => row.scopeId === where.scopeId_scopeKind_sceneCode.scopeId));
+        row.settingsJson.gates.scene.enabled = policyEnabled; return row; } },
+      $queryRaw: async () => { locks++; return []; },
+      aiTenantAiAllowance: { findUnique: async () => accountEnabled ? { grantedAmount: new Prisma.Decimal(10), allocationsJson: { 'workspace-1': '10.000000' } } : null },
+      aiBudgetReservation: { findUnique: async () => null, groupBy: async () => [], count: async () => 0,
+        create: async ({ data }) => { writes++; return { reservedTokens: null, reservedCalls: null, reservedMoney: null,
+          actualTokens: null, actualCalls: null, actualMoney: null, moneyCurrency: null, unknownReason: null, updatedAt: now,
+          ...data, ...(data.reservedMoney ? { reservedMoney: new Prisma.Decimal(data.reservedMoney) } : {}) }; } },
+      aiBudgetAllocation: { createMany: async () => ({ count: 3 }) }, $transaction: async work => work(db) };
+    const priced = { ...request, model: 'model-1', actorId: 'actor-1', quantity: unit, policies: keys,
+      consumerScope: keys[2], evidenceHash: 'a'.repeat(64) };
+    const repo = new PrismaBudgetRepository(db, () => now);
+    policyEnabled = false;
+    await assert.rejects(repo.reserve(priced, request, 'identity', async () => {}), error => error.code === 'EXHAUSTED');
+    assert.equal(writes, 0); policyEnabled = true;
+    if (mode === 'platform_managed') {
+      accountEnabled = false;
+      await assert.rejects(repo.reserve(priced, request, 'identity', async () => {}), error => error.code === 'EXHAUSTED');
+      assert.equal(writes, 0); accountEnabled = true;
+    }
+    const result = await repo.reserve(priced, request, 'identity', async () => {});
+    assert.equal(result.sceneCode, request.sceneCode); assert.equal(result.reserved.unit, unit.unit);
+    assert.equal(writes, 1); assert.ok(locks >= 6);
+  }
 });
 
 test('unknown retains reservation and release is refused until reconciliation', async () => {

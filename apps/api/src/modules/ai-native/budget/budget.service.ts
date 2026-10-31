@@ -6,6 +6,7 @@ import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
 import { modelRequestSchema } from '../model-gateway.ports';
 import type { BudgetSettingsOperation } from './budget.ports';
+import { assertBudgetPolicyBinding } from './budget-policy-binding';
 
 function fingerprint(value: unknown): string {
   const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical) : item && typeof item === 'object'
@@ -101,9 +102,9 @@ export class BudgetService {
     if (!same(quote.association, command.association) || quote.callId !== command.callId || quote.sceneCode !== command.sceneCode
       || !modelRequestSchema.shape.model.safeParse(quote.model).success || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
       || !Array.isArray(quote.policies) || quote.policies.length < 1 || quote.policies.length > 3
-      || !quote.consumerScope || quote.consumerScope.sceneCode !== command.sceneCode || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)
-      || !quote.policies.some(policy => policy.scopeId === quote.consumerScope.scopeId && policy.scopeKind === quote.consumerScope.scopeKind)) throw new BudgetError('INVALID');
+      || !quote.consumerScope || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)) throw new BudgetError('INVALID');
     assertPositiveQuantity(quote.quantity);
+    assertBudgetPolicyBinding(quote, command.sceneCode);
     await session.revalidate();
     return this.repository.reserve(quote, command, session.identityHash, session.revalidate);
   }

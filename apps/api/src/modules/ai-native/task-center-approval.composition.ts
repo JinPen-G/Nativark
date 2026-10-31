@@ -1,7 +1,7 @@
 /** Human consumer of original order/settings approvals. Never prepares a
  * proposal, claims a lease, continues a runner or writes Rental Core. */
 import { z } from 'zod';
-import { AI_APPROVAL_APPLICATION_DRAFT_VERSION, AI_APPROVED_SETTINGS_DRAFT_VERSION,
+import { AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVED_SETTINGS_DRAFT_VERSION,
   AI_PROPOSAL_DRAFT_VERSION, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
 import type { AiTaskCredentialSource } from './task-current-action.authority';
@@ -18,7 +18,8 @@ export const taskCenterReviewSchema = z.object({ taskId: id, runId: id, stepId: 
 export const taskCenterDecisionSchema = taskCenterReviewSchema.extend({ proposal: z.object({
   contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: id,
   proposalRevision: z.number().int().min(1).max(4294967294),
-  reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u), decision: z.enum(['approve', 'reject'])
+  reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u), decision: z.enum(['approve', 'reject']),
+  reviewVersion: z.literal(AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION).optional()
 }).strict() }).strict();
 export interface TaskCenterApprovalDependencies {
   order: Omit<ControlledApprovedOrderDependencies, 'credentials'>;
@@ -70,7 +71,7 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
     if (before.kind === 'order') {
       const { proposal, deterministic, generatedText } = await order().readProposal(query.taskId, wait.proposal);
       const review = approvalApplicationContract('AiApprovalApplicationReviewDraft', {
-        draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, proposal, deterministic, generatedText
+        draftVersion: AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, proposal, deterministic, generatedText
       }, true);
       await recheck(query, before);
       return { ...query, taskRevision: wait.taskRevision, checkpointRef: wait.checkpointRef,
@@ -83,8 +84,10 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
   };
   const act = async (value: unknown, write: boolean): Promise<AiTaskHumanDecisionReceiptDraft> => {
     const { proposal, ...query } = taskCenterDecisionSchema.parse(structuredClone(value)), before = await ownedStep(query);
-    const { decision, ...reference } = proposal;
+    const { decision, reviewVersion, ...reference } = proposal;
     if (write) {
+      if (before.kind === 'order' && decision === 'approve' && reviewVersion !== AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION)
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (!d.decisions[before.kind]) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const wait = await checkpoint(query);
       if (requestFingerprint(wait.proposal) !== requestFingerprint(reference)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');

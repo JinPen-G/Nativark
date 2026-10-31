@@ -42,7 +42,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
     | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage' | 'queryOrders'>>;
   memberships: AiMembershipCandidateReadPort;
-  business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
+  business: Pick<RentalBusinessService, 'createQuote' | 'loadQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   payments?: AiOrderPaymentReadPort;
   /** Human Core preview only; absence never falls back to AI pricing. */
@@ -53,7 +53,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   approvedSettings?: Omit<AiSettingsBusinessDependencies, 'guard' | 'credentials'>;
   clock?: () => Date;
 }) {
-  for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getBoundedOperationReport']] as const) {
+  for (const [port, method] of [[input?.business, 'loadQuote'], [input?.reports, 'getBoundedOperationReport']] as const) {
     if (!port || typeof (port as unknown as Record<string, unknown>)[method] !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);
