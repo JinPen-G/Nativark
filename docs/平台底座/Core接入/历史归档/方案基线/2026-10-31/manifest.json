@@ -1,0 +1,24 @@
+{
+  "baseline": "6820e06e9daef877637bc2de4effba2bfa0713b1",
+  "date": "2026-10-31",
+  "files": [
+    {
+      "source": "docs/AI Native/未来规划/AI Native-通用SaaS底座方案.md",
+      "snapshot": "AI Native-通用SaaS底座方案.md",
+      "bytes": 13161,
+      "sha256": "0b161ea4ddb6341dfb9171338405fa14add775c26953fb64a1b67c22defa7684"
+    },
+    {
+      "source": "README.md",
+      "snapshot": "项目README-原文.md",
+      "bytes": 12687,
+      "sha256": "189846b21592b39908f6b34fa0cb37fbd6a2259d19fe3b5e79ab056b87094287"
+    },
+    {
+      "source": "docs/文档导航.md",
+      "snapshot": "文档导航.md",
+      "bytes": 11105,
+      "sha256": "e1eee8b51b3ab17b6968f90cb25214c4f34c85495993f549eb13cd50508738bc"
+    }
+  ]
+}

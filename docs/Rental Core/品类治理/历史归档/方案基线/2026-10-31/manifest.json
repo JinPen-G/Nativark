@@ -1,0 +1,30 @@
+{
+  "baseline": "6820e06e9daef877637bc2de4effba2bfa0713b1",
+  "date": "2026-10-31",
+  "files": [
+    {
+      "source": "docs/品类治理/品类治理-需求.md",
+      "snapshot": "品类治理-需求.md",
+      "bytes": 39432,
+      "sha256": "13447fd70a9197a26dfaf5f1425848d9d4d5de960b255012f069d49af7e7fa0c"
+    },
+    {
+      "source": "docs/品类治理/品类治理-开发任务.md",
+      "snapshot": "品类治理-开发任务.md",
+      "bytes": 31293,
+      "sha256": "31326eba8c844fa088be93e1ee36d65a9c178acbb1eb038204ed2fbc0561b3ac"
+    },
+    {
+      "source": "docs/品类治理/品类治理-开发记录.md",
+      "snapshot": "品类治理-开发记录.md",
+      "bytes": 6271,
+      "sha256": "dfd7f861dd01cf90c0aaaa30e039a610a98e60f46221f092af348ded4c42051c"
+    },
+    {
+      "source": "docs/品类治理/品类治理-协作接续.md",
+      "snapshot": "品类治理-协作接续.md",
+      "bytes": 1091,
+      "sha256": "881161ac414da281fef58811384202ef237032d041e354d9214847e7535fbc73"
+    }
+  ]
+}

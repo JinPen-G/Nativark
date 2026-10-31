@@ -15,7 +15,8 @@ AI Native 是在原有业务上的智能入口：理解需求、读取受权事�
 | 让 AI 或开发者接手修改 | 先读 [AGENTS.md](AGENTS.md)，再读本次专项的正式依据与当前接续 |
 | 继续 AI Native | [需求](<docs/AI Native/AI Native-需求.md>)、[开发任务](<docs/AI Native/AI Native-开发任务.md>)、[当前接续](<docs/AI Native/AI Native-协作接续.md>)、[开发记录](<docs/AI Native/AI Native-开发记录.md>) |
 | 继续 MCP / Harness 接入 | [MCP 接续](docs/MCP服务/MCP服务-协作接续.md)、[Harness 插件接续](docs/Harness插件/Harness插件-协作接续.md)；原[Agent 接入改造接续](docs/Agent接入改造/Agent接入改造-协作接续.md)保留独立状态，不继承旧进度 |
-| 继续品类治理与版本发布 | [需求](docs/品类治理/品类治理-需求.md)、[开发任务](docs/品类治理/品类治理-开发任务.md)、[当前接续](docs/品类治理/品类治理-协作接续.md)；暂停状态不代表需求取消 |
+| 继续品类治理与版本发布（Rental内部） | [需求](<docs/Rental Core/品类治理/品类治理-需求.md>)、[开发任务](<docs/Rental Core/品类治理/品类治理-开发任务.md>)、[当前接续](<docs/Rental Core/品类治理/品类治理-协作接续.md>)、[接手导读](<docs/Rental Core/品类治理/品类治理-接手与验收导读.md>)；暂停不取消原租赁品类需求 |
+| 平台接入其他业务Core（跨行业） | [需求](docs/平台底座/Core接入/平台Core接入-需求.md)、[开发任务](docs/平台底座/Core接入/平台Core接入-开发任务.md)、[当前接续](docs/平台底座/Core接入/平台Core接入-协作接续.md)、[接入指南](docs/平台底座/Core接入/平台Core接入-接入指南.md)；仅文档准备，不代表已经可换装CRM/TMS |
 | 了解架构或接口 | [项目开发指南](docs/公共技术资料/开发指南/项目-开发指南.md)、[客户端 API 说明](docs/公共技术资料/接口说明/客户端-API说明.md)、[OpenAPI 源码](apps/api/src/contracts/openapi-document.ts) |
 
 AI 开发规则只在 `AGENTS.md` 维护一份；[CLAUDE.md](CLAUDE.md) 是引用它的 Claude Code 入口，不维护另一套规则。其他工具若不能自动发现项目规则，应在其项目入口显式引用并读取 `AGENTS.md`。入口文件不是强制权限机制，安全约束仍须由代码和验证落实。
