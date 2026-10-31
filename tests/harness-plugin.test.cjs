@@ -20,55 +20,26 @@ const publicResolve = name => (name.startsWith("@modelcontextprotocol/") ? mcp
   : name === "@deepseek-ai/dsh-commands" ? commandPackage
     : ["@deepseek-ai/dsh-mcp-client", "@deepseek-ai/dsh-scope", "@deepseek-ai/dsh-tools"].includes(name) ? mcp : cli).resolve(name);
 
-function compilePlugin(destination) {
-  const dependencyTypes = {
-    "@modelcontextprotocol/client": path.join(path.dirname(mcp.resolve("@modelcontextprotocol/client")), "index.d.mts"),
-    "@deepseek-ai/cordis": path.join(harness, "vendor/cordis/lib/types/index.d.ts"),
-    "@deepseek-ai/schemastery": path.join(harness, "vendor/schemastery/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-commands": path.join(harness, "packages/interaction/commands/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-host-webserver": path.join(harness, "packages/host/webserver/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-system-prompt": path.join(harness, "packages/core/system-prompt/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-agent": path.join(harness, "packages/core/agent/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-llm": path.join(harness, "packages/llm/llm/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-scope": path.join(harness, "packages/core/scope/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-tools": path.join(harness, "packages/core/tools/lib/types/index.d.ts"),
-    "@deepseek-ai/dsh-mcp-client": path.join(harness, "packages/mcp/mcp-client/lib/types/index.d.ts"),
-    "open": path.join(harness, "node_modules/.pnpm/open@11.0.4/node_modules/open/index.d.ts"),
-  };
-  const parsed = ts.readConfigFile(path.join(pluginRoot, "tsconfig.json"), ts.sys.readFile);
-  assert.equal(parsed.error, undefined);
-  const config = ts.parseJsonConfigFileContent(parsed.config, ts.sys, pluginRoot);
-  const program = ts.createProgram(config.fileNames, {
-    ...config.options, outDir: path.join(destination, "dist"),
-    typeRoots: [path.join(harness, "node_modules/@types")],
-    paths: Object.fromEntries(Object.entries(dependencyTypes).map(([key, value]) => [key, [value]])),
-  });
-  const diagnostics = ts.getPreEmitDiagnostics(program);
-  assert.equal(diagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-    getCanonicalFileName: x => x, getCurrentDirectory: () => root, getNewLine: () => "\n",
-  }));
-  const emitted = program.emit();
-  assert.equal(emitted.emitSkipped, false);
-  assert.equal(emitted.diagnostics.length, 0);
-}
+const { buildBundle } = require("../clients/harness-plugin/scripts/build-bundle.cjs");
+const { createHash } = require("node:crypto");
+const npmCli = path.join(root, "output/agent-desktop-install-20261023-q16gtnf6/node-extracted/node-v24.21.0-win-x64/node_modules/npm/bin/npm-cli.js");
+const tar = createRequire(npmCli)("tar");
 
-function syntheticEndpoint(verifyAccessToken = async () => { throw new Error("The pre-login path must not verify a token"); }, overrides = {}) {
-  const source = fs.readFileSync(path.join(root, "packages/mcp-server/src/index.ts"), "utf8");
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  const module = { exports: {} };
+function transportSource(name) {
   const load = specifier => {
     if (!specifier.startsWith("./")) return mcp(specifier);
     const file = path.join(root, "packages/mcp-server/src", specifier.replace(/\.js$/, ".ts"));
-    const nested = { exports: {} };
+    const module = { exports: {} };
     new Function("require", "module", "exports", ts.transpileModule(fs.readFileSync(file, "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    }).outputText)(load, nested, nested.exports);
-    return nested.exports;
+    }).outputText)(load, module, module.exports);
+    return module.exports;
   };
-  new Function("require", "module", "exports", compiled)(load, module, module.exports);
-  return module.exports.createProtectedMcpEndpoint({
+  return load(`./${name}.js`);
+}
+
+function syntheticEndpoint(verifyAccessToken = async () => { throw new Error("The pre-login path must not verify a token"); }, overrides = {}) {
+  return transportSource("index").createProtectedMcpEndpoint({
     enabled: true, resourceUrl: "https://mcp.example.invalid/mcp", authorizationServerUrl: "https://auth.example.invalid/",
     allowedOrigins: [], maxRequestBytes: 4096, authorizationTimeoutMs: 1000, ...overrides,
   }, { verifyAccessToken });
@@ -79,15 +50,56 @@ function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
 
+test("Bundle pack refuses an incomplete archive report before recording delivery", async () => {
+  const output = fs.mkdtempSync(path.join(root, "output/harness-plugin-pack-denial-"));
+  // The packer is the external subprocess boundary; compilation still uses real installed declarations.
+  const packer = path.join(output, "incomplete-pack.cjs");
+  fs.writeFileSync(packer, `console.log(JSON.stringify([{ filename: ${JSON.stringify(`${manifest.name.replace(/^@/, "").replace(/\//g, "-")}-${manifest.version}.tgz`)}, files: [] }]));\n`);
+  await assert.rejects(buildBundle({ outputDir: path.join(output, "delivery"), harnessRoot: harness, npmCli: packer }),
+    /archive file set does not match/);
+  assert.equal(fs.existsSync(path.join(output, "delivery/bundle-manifest.json")), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(output, "delivery/pack.log"), "utf8")).status, 0,
+    "a successful pack process does not attest a complete Bundle");
+});
+
 // One owner contains global resolver/fetch changes; no unrelated tests run inside it.
 test("Rental bundle loads through real profile and Loader without granting business access", async t => {
   const output = fs.mkdtempSync(path.join(root, "output/harness-plugin-loader-"));
   const profile = path.join(output, "profile");
   const staged = path.join(profile, "node_modules/@rental-os/harness-plugin");
-  writeJson(path.join(staged, "package.json"), manifest);
-  fs.copyFileSync(path.join(pluginRoot, "cordis.patch.yml"), path.join(staged, "cordis.patch.yml"));
-  fs.copyFileSync(path.join(pluginRoot, "README.md"), path.join(staged, "README.md"));
-  compilePlugin(staged);
+  const bundle = await buildBundle({ outputDir: path.join(output, "delivery"), harnessRoot: harness, npmCli });
+  const archive = fs.readFileSync(bundle.tarball);
+  assert.equal(createHash("sha256").update(archive).digest("hex"), bundle.sha256);
+  assert.equal(`sha512-${createHash("sha512").update(archive).digest("base64")}`, bundle.integrity);
+  const expectedFiles = ["package.json", "README.md", "cordis.patch.yml",
+    ...fs.readdirSync(path.join(pluginRoot, "src")).filter(name => name.endsWith(".ts"))
+      .flatMap(name => [`dist/${name.replace(/\.ts$/, ".js")}`, `dist/${name.replace(/\.ts$/, ".d.ts")}`])].sort();
+  assert.deepEqual(bundle.files, expectedFiles);
+  const deliveryManifest = JSON.parse(fs.readFileSync(path.join(output, "delivery/bundle-manifest.json"), "utf8"));
+  assert.equal(deliveryManifest.tarball, path.basename(bundle.tarball));
+  assert.equal(deliveryManifest.buildDependencies.typescript, manifest.devDependencies.typescript);
+  assert.equal(deliveryManifest.hostVersion, manifest.engines.dsh);
+  assert.deepEqual(deliveryManifest.sourceHashes["scripts/build-bundle.cjs"],
+    createHash("sha256").update(fs.readFileSync(path.join(pluginRoot, "scripts/build-bundle.cjs"))).digest("hex"));
+  const entries = [];
+  tar.t({ file: bundle.tarball, sync: true, strict: true, onReadEntry(entry) {
+    assert.equal(entry.type, "File");
+    assert.match(entry.path, /^package\//);
+    assert.ok(!entry.path.split("/").includes(".."));
+    assert.ok(!entry.path.includes("\\"));
+    entries.push(entry.path.slice("package/".length));
+  } });
+  assert.deepEqual(entries.sort(), expectedFiles);
+  fs.mkdirSync(staged, { recursive: true });
+  tar.x({ file: bundle.tarball, cwd: staged, strip: 1, sync: true, strict: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(staged, "package.json"), "utf8")), manifest);
+  assert.ok(!fs.existsSync(path.join(staged, "node_modules")), "Host peers are not embedded");
+  assert.ok(!fs.existsSync(path.join(staged, "src")), "precompiled Bundle needs no source checkout");
+  for (const name of expectedFiles) {
+    assert.deepEqual(fs.readFileSync(path.join(staged, name)), fs.readFileSync(path.join(output, "delivery/package", name)));
+  }
+  await assert.rejects(buildBundle({ outputDir: path.join(output, "delivery"), harnessRoot: harness, npmCli }), { code: "EEXIST" });
+  assert.deepEqual(fs.readFileSync(bundle.tarball), archive, "a repeated build cannot overwrite delivered artifacts");
   const consumerFile = path.join(profile, "consumer.mts");
   fs.writeFileSync(consumerFile, [
     'import { name, inject, Config, apply } from "@rental-os/harness-plugin";',
@@ -353,10 +365,12 @@ export function createServer(options) {
   const listenerFixture = path.join(output, "listener-fixture.mjs");
   fs.writeFileSync(listenerFixture, `import { Service } from ${JSON.stringify(pathToFileURL(cli.resolve("@deepseek-ai/cordis")).href)};
 export const routes = new Map();
+export let failClose = false;
+export function setFailClose(value) { failClose = value; }
 export default class extends Service {
   constructor(ctx) { super(ctx, 'webServer'); }
   getOrigin() { return 'http://127.0.0.1:49152'; }
-  register(route) { if (routes.has(route.path)) throw new Error('duplicate route'); routes.set(route.path, route); return () => routes.delete(route.path); }
+  register(route) { if (routes.has(route.path)) throw new Error('duplicate route'); routes.set(route.path, route); return () => { routes.delete(route.path); if (failClose) throw new Error('synthetic-private-callback-close'); }; }
 }\n`);
   const listener = await import(pathToFileURL(listenerFixture).href);
   let guidance = { version: "reviewed-v1", text: "Choose the user's format. {{literal}} is data, not a variable." };
@@ -399,34 +413,60 @@ export default class extends Service {
     assert.equal(authorizationUrl.searchParams.get("client_id"), oauthSettings.clientId);
     assert.ok(!authorizationUrl.searchParams.has("code_verifier"));
     callbackHandler = listener.routes.get("/rental/callback").handler;
-    const callback = new URL(oauthSettings.redirectUri);
-    callback.searchParams.set("code", "synthetic-code");
-    callback.searchParams.set("state", "wrong");
-    assert.equal(deliverCallback(callback), 400);
-    callback.searchParams.set("state", authorizationUrl.searchParams.get("state"));
-    callback.searchParams.set("iss", "https://different.invalid/");
-    assert.equal(deliverCallback(callback), 400);
-    callback.searchParams.set("iss", asMetadata.issuer);
+    const authorized = await authorizationHandle(new Request(authorizationUrl, { headers: { Cookie: "original-web-fixture" } }));
+    assert.equal(authorized.status, 303);
+    const callback = new URL(authorized.headers.get("location"));
+    assert.equal(callback.searchParams.get("code"), "synthetic-code");
+    const wrongState = new URL(callback);
+    wrongState.searchParams.set("state", "wrong");
+    assert.equal(deliverCallback(wrongState), 400);
+    const wrongIssuer = new URL(callback);
+    wrongIssuer.searchParams.set("iss", "https://different.invalid/");
+    assert.equal(deliverCallback(wrongIssuer), 400);
     assert.equal(deliverCallback(callback), 204);
     assert.equal(deliverCallback(callback), 410);
   });
+  const tokenRegistration = { clientId: oauthSettings.clientId, revision: 1, enabled: true,
+    expiresAt: Date.now() / 1000 + 60, redirectUris: [oauthSettings.redirectUri], scopes: oauthSettings.scopes };
+  let originalCodeBinding;
+  const authorizationHandle = transportSource("public-client-authorization-endpoint").createPublicClientAuthorizationEndpoint({ enabled: true,
+    issuer: asMetadata.issuer, authorizationEndpoint: oauthSettings.authorizationEndpoint,
+    resourceUrl: configured[0].config.connection.resourceUrl, allowedScopes: oauthSettings.scopes,
+    allowedOrigins: [], timeoutMs: 1000 }, { read: async () => tokenRegistration }, {
+      authorize: async (input, request) => {
+        assert.equal(input.clientId, oauthSettings.clientId);
+        assert.equal(input.clientRevision, 1);
+        assert.equal(request.headers.get("cookie"), "original-web-fixture");
+        originalCodeBinding = { clientId: input.clientId, resource: input.resource, redirectUri: input.redirectUri,
+          codeChallengeMethod: "S256", codeChallenge: input.codeChallenge };
+        return { kind: "code", code: "synthetic-code" };
+      },
+    });
+  const tokenHandle = transportSource("oauth-token-endpoint").createOAuthTokenEndpoint({ enabled: true,
+    tokenEndpoint: oauthSettings.tokenEndpoint, revocationEndpoint: oauthSettings.revocationEndpoint,
+    resourceUrl: configured[0].config.connection.resourceUrl, allowedScopes: oauthSettings.scopes,
+    allowedOrigins: [], timeoutMs: 1000, maxRequestBytes: 32768 }, { read: async () => tokenRegistration }, {
+      // Actual transport/SDK, but no synthetic implementation is claimed as a
+      // durable authorization server. These are its external issuance boundaries.
+      exchangeCode: async command => {
+        assert.equal(command.clientId, oauthSettings.clientId);
+        assert.equal(command.code, "synthetic-code");
+        assert.equal(command.resource, configured[0].config.connection.resourceUrl);
+        transportSource("authorization-code-binding").assertAuthorizationCodeBinding(command, originalCodeBinding);
+        return { access_token: "synthetic-access", refresh_token: "synthetic-refresh", token_type: "Bearer", expires_in: 60, scope: oauthSettings.scopes.join(" ") };
+      },
+      refresh: async () => { throw new Error("This external refresh fixture is supplied separately below"); },
+      revoke: async command => { assert.equal(command.token, "synthetic-refresh"); },
+    });
+  const asMetadataHandle = transportSource("authorization-server-metadata").createAuthorizationServerMetadata({ enabled: true,
+    issuer: asMetadata.issuer, authorizationEndpoint: oauthSettings.authorizationEndpoint,
+    tokenEndpoint: oauthSettings.tokenEndpoint, revocationEndpoint: oauthSettings.revocationEndpoint,
+    allowedScopes: oauthSettings.scopes, allowedOrigins: [], timeoutMs: 1000, maxMetadataBytes: 4096 }, { read: async () => asMetadata });
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     wire.push(request);
-    if (request.url === "https://auth.example.invalid/.well-known/oauth-authorization-server") return Response.json(asMetadata);
-    if (request.url === oauthSettings.tokenEndpoint) {
-      const params = new URLSearchParams(await request.text());
-      assert.equal(params.get("grant_type"), "authorization_code");
-      assert.equal(params.get("code"), "synthetic-code");
-      assert.equal(params.get("resource"), configured[0].config.connection.resourceUrl);
-      assert.equal(require("node:crypto").createHash("sha256").update(params.get("code_verifier")).digest("base64url"), authorizationUrl.searchParams.get("code_challenge"));
-      return Response.json({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", token_type: "Bearer", expires_in: 60, scope: oauthSettings.scopes.join(" ") });
-    }
-    if (request.url === oauthSettings.revocationEndpoint) {
-      const params = new URLSearchParams(await request.text());
-      assert.equal(params.get("token"), "synthetic-refresh");
-      return new Response(null, { status: 200 });
-    }
+    if (request.url === "https://auth.example.invalid/.well-known/oauth-authorization-server") return asMetadataHandle(request);
+    if (request.url === oauthSettings.tokenEndpoint || request.url === oauthSettings.revocationEndpoint) return tokenHandle(request);
     return authenticatedEndpoint.fetch(request);
   };
   const loggedIn = await loginInvoke("login");
@@ -461,6 +501,27 @@ export default class extends Service {
   assert.deepEqual(await rentalGuidance(loginAgent), []);
   assert.equal(wire.filter(request => request.url === oauthSettings.revocationEndpoint).length, 1);
   assert.match((await loginInvoke("status")).result.text, /已配置/);
+  t.after(() => listener.setFailClose(false));
+  listener.setFailClose(true);
+  const failedCallbackClose = await loginInvoke("login");
+  assert.equal(failedCallbackClose.result.kind, "error");
+  assert.match((await loginInvoke("status")).result.text, /可能已经签发授权/,
+    "failed callback cleanup cannot leave a usable connected identity after a failed login");
+  assert.deepEqual(await rentalGuidance(loginAgent), []);
+  const beforeCallbackRecovery = wire.length;
+  assert.equal((await loginInvoke("check")).result.kind, "error");
+  assert.equal((await loginInvoke("login")).result.kind, "error");
+  assert.equal(wire.length, beforeCallbackRecovery, "unknown cleanup cannot reuse or reissue the grant");
+  listener.setFailClose(false);
+  assert.equal((await loginInvoke("disconnect")).result.kind, "error", "revocation acceptance does not erase cleanup uncertainty");
+  assert.equal(wire.at(-1).url, oauthSettings.revocationEndpoint, "known credentials remain available only for original revocation");
+  assert.doesNotMatch(JSON.stringify(loginAgent.session.snapshotEvents()), /synthetic-private-callback-close|synthetic-refresh/);
+  // Reload explicitly creates a new instance; it does not reconcile the previous
+  // unknown grant. No new login is issued here until this test continues below.
+  const loginEntry = [...login.loader.entries()].find(entry => entry.options?.id === "rental-os");
+  await loginEntry.update({ config: { ...loginEntry.options.config,
+    login: { ...loginEntry.options.config.login, sessionLifetimeMs: 119000 } } });
+  await login.loader.await(); await loginEntry.fiber.await();
   // Use the original clock only to advance token expiry deterministically; no sleep.
   const realNow = Date.now;
   let clock = realNow();
@@ -491,12 +552,30 @@ export default class extends Service {
   assert.equal((await checkingOne).result.kind, "success");
   assert.equal((await checkingTwo).result.kind, "success");
   let deniedRequests = 0;
-  globalThis.fetch = async () => { deniedRequests++; return new Response(null, { status: 401, headers: { "WWW-Authenticate": "Bearer" } }); };
-  assert.equal((await loginInvoke("check")).result.kind, "error");
+  const discoverStarted = Promise.withResolvers();
+  const releaseDiscover = Promise.withResolvers();
+  globalThis.fetch = async (input, init) => {
+    deniedRequests++;
+    if (deniedRequests === 1) {
+      const response = await normalFetch(input, init);
+      discoverStarted.resolve();
+      await releaseDiscover.promise;
+      return response;
+    }
+    return new Response(null, { status: 401, headers: { "WWW-Authenticate": "Bearer" } });
+  };
+  const lateDiscover = loginInvoke("check");
+  const lateOutcome = lateDiscover.then(value => value);
+  try {
+    await Promise.race([discoverStarted.promise, lateOutcome.then(result => assert.fail(`check completed before response barrier: ${JSON.stringify(result.result)}`))]);
+    assert.equal((await loginInvoke("check")).result.kind, "error");
+    releaseDiscover.resolve();
+    assert.equal((await lateOutcome).result.kind, "error", "a late successful discovery cannot commit after another request invalidated the connection");
+  } finally { releaseDiscover.resolve(); }
   assert.deepEqual(await rentalGuidance(loginAgent), [], "failed discovery withdraws guidance");
-  assert.equal(deniedRequests, 1, "401 does not reauthorize or resend");
+  assert.equal(deniedRequests, 2, "each concurrent request is sent once; 401 does not reauthorize or resend");
   assert.equal((await loginInvoke("check")).result.kind, "error");
-  assert.equal(deniedRequests, 1, "invalidated token is not sent again");
+  assert.equal(deniedRequests, 2, "invalidated token is not sent again");
   globalThis.fetch = async (input, init) => {
     assert.equal(String(input), oauthSettings.revocationEndpoint);
     assert.equal(new URLSearchParams(init.body).get("token"), "rotated-refresh");
@@ -544,10 +623,9 @@ export default class extends Service {
     assert.equal(server.options.maxHeaderSize, 8192);
     assert.equal(authorizationUrl.searchParams.get("redirect_uri"), "http://127.0.0.1:49153/rental/callback");
     callbackHandler = (req, res) => server.emit("request", req, res);
-    const callback = new URL(authorizationUrl.searchParams.get("redirect_uri"));
-    callback.searchParams.set("code", "synthetic-code");
-    callback.searchParams.set("state", authorizationUrl.searchParams.get("state"));
-    callback.searchParams.set("iss", asMetadata.issuer);
+    const authorized = await authorizationHandle(new Request(authorizationUrl, { headers: { Cookie: "original-web-fixture" } }));
+    assert.equal(authorized.status, 303);
+    const callback = new URL(authorized.headers.get("location"));
     assert.equal(deliverCallback(callback), 204);
   });
   globalThis.fetch = normalFetch;
@@ -587,12 +665,16 @@ export default class extends Service {
   let promptText = "Optional template, not an instruction loaded by the Host.";
   let promptFailure = false;
   let changePromptReply;
+  let changeToolsReply;
   let holdPrompt;
+  let resourcePublished = true, resourceVersion = "resource-v1", resourceText = "Released original reference, not approval or execution.";
+  let resourceReads = 0, resourceLists = 0, holdResource, changeResourceReply;
+  const resourceUri = "https://mcp.example.invalid/resources/original-reference";
   const readSchema = { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false };
   const readOutput = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"], additionalProperties: false };
   const readsEndpoint = syntheticEndpoint(async () => ({ subject: "synthetic-actor", clientId: oauthSettings.clientId, resource: configured[0].config.connection.resourceUrl,
     scopes: oauthSettings.scopes, expiresAt: Date.now() / 1000 + 60 }), { readTools: {
-    tools: [{ name: "synthetic_read", description: "Read the currently released test facts.", inputSchema: readSchema, outputSchema: readOutput,
+    tools: [{ name: "rental_catalog_search", description: "Synthetic mapping fixture only; not a production catalog reader or schema.", inputSchema: readSchema, outputSchema: readOutput,
       read: async input => {
         actualReads++;
         if (holdRead) { readStarted(); await new Promise(resolve => { readRelease = resolve; }); }
@@ -621,8 +703,26 @@ export default class extends Service {
       }
       return { version: promptVersion, text: promptText };
     },
+  }, resources: {
+    list: async () => { resourceLists++; return resourcePublished ? [
+      { name: "original_reference", uri: resourceUri, version: resourceVersion, description: "Original released reference." },
+      { name: "not_configured", uri: resourceUri + "/other", version: resourceVersion, description: "Not selected locally." },
+    ] : []; },
+    read: async (_auth, _descriptor, signal) => {
+      resourceReads++;
+      const held = holdResource;
+      if (held) {
+        signal.addEventListener("abort", () => held.stopped.resolve(), { once: true });
+        if (signal.aborted) held.stopped.resolve();
+        held.started.resolve(); await held.release.promise; held.settled.resolve();
+      }
+      return { text: resourceText, private: "synthetic-private-resource" };
+    },
+    authority: { withRead: async (_auth, _descriptor, consume) => consume() },
+    accounting: { withRead: async (_auth, _descriptor, consume) => consume() },
+    release: { project: async (_auth, _descriptor, value) => ({ version: resourceVersion, text: value.text }) },
   } });
-  t.after(async () => { holdPrompt?.release.resolve(); await readsEndpoint.close(); });
+  t.after(async () => { holdPrompt?.release.resolve(); holdResource?.release.resolve(); await readsEndpoint.close(); });
   const bridge = await open([
     { insert: [
       { id: "system-prompt", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-system-prompt")).href },
@@ -634,7 +734,7 @@ export default class extends Service {
     ] },
     { id: "rental-os", config: { ...configured[0].config, oauth: oauthSettings,
       login: { enabled: true, attemptTimeoutMs: 2000, sessionLifetimeMs: 120000, maxAccessTtlSeconds: 300, callbackMode: "loopback" },
-      readTools: ["synthetic_read"], readPrompts: ["synthetic_optional_prompt"] } },
+      readTools: ["rental_catalog_search"], readPrompts: ["synthetic_optional_prompt"], readResources: ["original_reference"] } },
   ]);
   const owner = { id: SessionId("bridge-owner"), session: bridge.sessions.create(SessionId("bridge-owner")) };
   const stranger = { id: SessionId("bridge-other"), session: bridge.sessions.create(SessionId("bridge-other")) };
@@ -645,7 +745,7 @@ export default class extends Service {
   await bridge.agents.announce(owner, "startup");
   await bridge.agents.register(stranger);
   const human = action => bridge.commands.execute(owner, `/rental ${action}`, [], new AbortController().signal);
-  const publicName = "mcp__rental_os__synthetic_read";
+  const publicName = "mcp__rental_os__rental_catalog_search";
   const execute = (agent, query = "bounded facts", abort = new AbortController().signal) => bridge.tools.execute({
     name: publicName, callId: "synthetic-call", arguments: { query }, agent, signal: abort,
   });
@@ -675,12 +775,22 @@ export default class extends Service {
       changePromptReply(reply.result);
       return Response.json(reply);
     }
+    if (changeResourceReply && request.method === "POST" && ["resources/list", "resources/read"].includes(JSON.parse(init.body).method)) {
+      const reply = await response.json();
+      changeResourceReply(reply.result, JSON.parse(init.body).method);
+      return Response.json(reply);
+    }
+    if (changeToolsReply && request.method === "POST" && JSON.parse(init.body).method === "tools/list") {
+      const reply = await response.json();
+      changeToolsReply(reply.result);
+      return Response.json(reply);
+    }
     return response;
   };
   assert.equal((await human("login")).result.kind, "success");
   assert.deepEqual(bridge.tools.schemas(owner).map(tool => tool.name), [publicName]);
   assert.deepEqual(bridge.tools.schemas(stranger), []);
-  const { LlmAdapter, createUserMessage, markAgentLoopRequest } = await import(pathToFileURL(cli.resolve("@deepseek-ai/dsh-llm")).href);
+  const { LlmAdapter, createUserMessage, createSystemMessage, markAgentLoopRequest } = await import(pathToFileURL(cli.resolve("@deepseek-ai/dsh-llm")).href);
   let modelDispatches = 0;
   bridge.llm.registerAdapter(["synthetic-model-provider"], new class extends LlmAdapter {
     async *stream() { modelDispatches++; yield { type: "finish", reason: { kind: "stop" } }; }
@@ -733,10 +843,12 @@ export default class extends Service {
   assert.equal((await human("check")).result.kind, "success");
   assert.equal(bridge.tools.get(publicName, owner), undefined);
   publishedRead = true;
-  readSchema.properties.query.minLength = 1;
+  // The endpoint captures fixed definitions. Change only this owned wire reply
+  // to exercise a Host-incompatible future publication, not the old source object.
+  changeToolsReply = result => { result.tools[0].inputSchema.properties.query.minLength = 1; };
   assert.equal((await human("check")).result.kind, "error", "unsupported Host schema constraints fail closed rather than being stripped");
   assert.equal(bridge.tools.get(publicName, owner), undefined);
-  delete readSchema.properties.query.minLength;
+  changeToolsReply = undefined;
   assert.equal((await human("check")).result.kind, "success");
   const stale = bridge.tools.get(publicName, owner);
   holdRead = true;
@@ -937,6 +1049,80 @@ export default class extends Service {
   assert.equal(disposalHandle.agent.session.deriveMessages().some(message => message.source.kind === "rental-prompt"), false, "disposing the original Agent prevents late Prompt history");
   assert.equal(loopRequests.length, beforeCancelledModel);
   assert.equal(bridge.tools.get(publicName, loopAgent), undefined);
+  // Clear the disposed owner's confirmed binding before this fixture switches back to its earlier Agent.
+  assert.equal((await promptCommand("disconnect", undefined, disposalHandle.agent)).result.kind, "success");
+  assert.equal((await promptCommand("login")).result.kind, "success");
+  const selectedResources = () => loopAgent.session.deriveMessages().filter(message => message.source.kind === "rental-resource");
+  const beforeResources = loopRequests.length, beforeResourceBody = resourceReads;
+  const resourceCatalog = await promptCommand("resources");
+  assert.equal(resourceCatalog.result.kind, "success"); assert.match(resourceCatalog.result.text, /original_reference/);
+  assert.doesNotMatch(resourceCatalog.result.text, /not_configured|synthetic-private|https:/);
+  assert.equal(resourceReads, beforeResourceBody); assert.equal(loopRequests.length, beforeResources);
+  const beforeInvalidResource = resourceRequests;
+  for (const action of ["resource https://foreign.invalid/private", "resource not_configured", "resource original_reference extra"]) {
+    assert.equal((await promptCommand(action)).result.kind, "error");
+  }
+  assert.equal((await promptCommand("resource original_reference", undefined, stranger)).result.kind, "error");
+  assert.equal((await promptCommand("resource original_reference", undefined, sameSessionStranger)).result.kind, "error");
+  assert.equal(resourceRequests, beforeInvalidResource);
+  assert.equal((await promptCommand("resource original_reference")).result.kind, "success"); await loopAgent.whenIdle();
+  assert.equal(resourceReads, beforeResourceBody + 1); assert.equal(loopRequests.length, beforeResources + 1);
+  assert.deepEqual(selectedResources()[0].source, { kind: "rental-resource", name: "original_reference", version: "resource-v1", uri: resourceUri, form: "relay" });
+  assert.equal(selectedResources()[0].content[0].text, `Rental OS resource (resource-v1)\n${resourceText}`);
+  assert.doesNotMatch(JSON.stringify(loopRequests.at(-1)), /synthetic-private-resource|synthetic-access|synthetic-refresh/);
+  const resourceEvents = loopAgent.session.snapshotEvents();
+  const resourcesRestored = Session.create(loopAgent.session.id, JSON.parse(JSON.stringify(resourceEvents)), loopAgent.session.header);
+  assert.deepEqual(resourcesRestored.deriveMessages(), loopAgent.session.deriveMessages());
+  const resourceOnly = { ...personalRequest, messages: [selectedResources()[0]], system: "界".repeat(90000) };
+  await assert.rejects(() => collectModel(resourceOnly), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
+  resourcePublished = false; assert.equal((await promptCommand("resource original_reference")).result.kind, "error"); resourcePublished = true;
+  const afterResourceCount = selectedResources().length, afterResourceModel = loopRequests.length;
+  for (const rewrite of [
+    (result, method) => { if (method === "resources/read") result.contents[0].uri = resourceUri + "/wrong"; },
+    (result, method) => { if (method === "resources/read") result.contents[0].mimeType = "text/html"; },
+    (result, method) => { if (method === "resources/read") { delete result.contents[0].text; result.contents[0].blob = "cHJpdmF0ZQ=="; } },
+    (result, method) => { if (method === "resources/read") result.contents[0].text = "Rental OS resource (resource-v1)\n" + "x".repeat(2000); },
+    (result, method) => { if (method === "resources/read") result.contents.push({ ...result.contents[0] }); },
+    (result, method) => { if (method === "resources/read") result.contents[0].text = "Rental OS resource (different-version)\nprivate body"; },
+    (result, method) => { if (method === "resources/list") result.resources[0].uri = "https://foreign.invalid/private"; },
+    (result, method) => { if (method === "resources/list") result.nextCursor = "unexpected"; },
+  ]) {
+    changeResourceReply = rewrite;
+    assert.equal((await promptCommand("resource original_reference")).result.kind, "error");
+    assert.equal(selectedResources().length, afterResourceCount); assert.equal(loopRequests.length, afterResourceModel);
+  }
+  changeResourceReply = undefined;
+  const resourceMaintenanceStarted = Promise.withResolvers(), resourceMaintenanceRelease = Promise.withResolvers();
+  const resourceMaintenance = loopAgent.runMaintenance(async () => { resourceMaintenanceStarted.resolve(); await resourceMaintenanceRelease.promise; });
+  await resourceMaintenanceStarted.promise;
+  const beforeResourceBusy = resourceRequests;
+  assert.equal((await promptCommand("resource original_reference")).result.kind, "error");
+  assert.equal(resourceRequests, beforeResourceBusy, "busy resource selection never reads or queues");
+  resourceMaintenanceRelease.resolve(); await resourceMaintenance;
+  resourceVersion = "resource-v2";
+  assert.equal((await promptCommand("resource original_reference")).result.kind, "success"); await loopAgent.whenIdle();
+  assert.equal(selectedResources().at(-1).source.version, "resource-v2");
+  const currentResourceCount = selectedResources().length, currentResourceModel = loopRequests.length;
+  function holdResourceRead() {
+    holdResource = { started: Promise.withResolvers(), stopped: Promise.withResolvers(), release: Promise.withResolvers(), settled: Promise.withResolvers() };
+    return holdResource;
+  }
+  async function releaseResourceRead(held) {
+    await held.stopped.promise; held.release.resolve(); await held.settled.promise; holdResource = undefined;
+  }
+  holdResourceRead();
+  const resourceAbort = new AbortController(), resourceSelection = promptCommand("resource original_reference", resourceAbort.signal);
+  await holdResource.started.promise;
+  assert.equal((await promptCommand("prompt synthetic_optional_prompt")).result.kind, "error", "templates and resources share one pending owner");
+  const resourceCancelled = assert.rejects(resourceSelection, error => error.name === "AbortError"); resourceAbort.abort(); await resourceCancelled;
+  await releaseResourceRead(holdResource);
+  assert.equal(selectedResources().length, currentResourceCount); assert.equal(loopRequests.length, currentResourceModel);
+  const disconnectedResource = holdResourceRead(), disconnectResourceSelection = promptCommand("resource original_reference");
+  await disconnectedResource.started.promise;
+  await promptCommand("disconnect");
+  assert.equal((await disconnectResourceSelection).result.kind, "error"); await releaseResourceRead(disconnectedResource);
+  assert.equal(selectedResources().length, currentResourceCount); assert.equal(loopRequests.length, currentResourceModel);
+  assert.equal((await promptCommand("resource original_reference")).result.kind, "error");
   const beforeOversized = loopRequests.length;
   loopAgent.followup(createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "界".repeat(90000) }] }));
   await loopAgent.whenIdle();
@@ -946,9 +1132,14 @@ export default class extends Service {
   assert.equal(rejectedTurn.data.reason.error.code, "RENTAL_MATERIAL_UNAVAILABLE");
   const rentalEntry = [...bridge.loader.entries()].find(entry => entry.options?.id === "rental-os");
   assert.ok(rentalEntry);
+  assert.equal((await promptCommand("login")).result.kind, "success");
+  const reloadedResource = holdResourceRead(), reloadResourceSelection = promptCommand("resource original_reference");
+  await reloadedResource.started.promise;
   await rentalEntry.update({ config: { ...rentalEntry.options.config, language: "en" } });
   await bridge.loader.await();
   await rentalEntry.fiber.await();
+  assert.equal((await reloadResourceSelection).result.kind, "error"); await releaseResourceRead(reloadedResource);
+  assert.equal(selectedResources().length, currentResourceCount); assert.equal(loopRequests.length, currentResourceModel);
   const beforeReplay = modelDispatches;
   const replay = { ...personalRequest, messages: restored.deriveMessages(), toolHistory: restored.toolHistory(), system: "x".repeat(262144) };
   await assert.rejects(() => collectModel(replay), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
@@ -959,8 +1150,31 @@ export default class extends Service {
   assert.equal(modelDispatches, beforeReplay, "recorded tool calls retain the size check without declarations");
   await assert.rejects(() => collectModel({ ...promptOnly, tools: [], toolHistory: undefined }), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
   assert.equal(modelDispatches, beforeReplay, "a reloaded plugin recognizes Prompt-only logged material without restoring access");
+  await assert.rejects(() => collectModel(resourceOnly), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
+  assert.equal(modelDispatches, beforeReplay, "resource-only source also retains the complete material check after reload");
+  const recordedGuidance = restored.deriveMessages().filter(message => message.role === "system");
+  assert.ok(recordedGuidance.some(message => JSON.stringify(message).includes("Rental OS guidance (reviewed-loop-v1)")));
+  const guidanceOnly = { ...personalRequest, messages: recordedGuidance, toolHistory: undefined, system: "x".repeat(262144) };
+  await assert.rejects(() => collectModel(guidanceOnly), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
+  assert.equal(modelDispatches, beforeReplay, "recorded automatic instructions alone retain the material check after reload");
+  await assert.rejects(() => collectModel({ ...guidanceOnly, messages: [], system: "Rental OS guidance (reviewed-replay-v1)\n" + "x".repeat(262144) }), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
+  assert.equal(modelDispatches, beforeReplay, "one-shot system instructions also require admission without current authorization");
   await bridge.agents.withInitiator(stranger, () => collectModel(personalRequest));
   assert.equal(modelDispatches, beforeReplay + 1, "reload does not restrict personal requests without Rental material");
+  const boundedGuidance = { ...guidanceOnly, system: "" };
+  boundedGuidance.system = "x".repeat(262144 - neutralBytes(boundedGuidance));
+  const beforeGuidanceDispatch = modelDispatches;
+  await collectModel(boundedGuidance);
+  assert.equal(modelDispatches, beforeGuidanceDispatch + 1, "retained guidance at the exact complete byte limit remains usable");
+  await assert.rejects(() => collectModel({ ...boundedGuidance, system: boundedGuidance.system + "界" }), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
+  assert.equal(modelDispatches, beforeGuidanceDispatch + 1);
+  await collectModel({ ...guidanceOnly, messages: [createUserMessage({ source: { kind: "user" }, content: [
+    { type: "text", text: "Rental OS guidance (reviewed-replay-v1)\nThis is quoted user text." },
+  ] })] });
+  assert.equal(modelDispatches, beforeGuidanceDispatch + 2, "quoted personal input does not become a system instruction or Rental permission");
+  await collectModel({ ...guidanceOnly, messages: [createSystemMessage("Personal guidance (reviewed-v1)\nNot a Rental instruction.")] });
+  assert.equal(modelDispatches, beforeGuidanceDispatch + 3, "unrelated system instructions retain personal behavior");
+  assert.deepEqual(restored.deriveMessages().filter(message => message.role === "system"), recordedGuidance, "admission does not rewrite retained system messages");
   const beforeReplayAccess = resourceRequests;
   assert.equal(bridge.tools.get(publicName, loopAgent), undefined);
   assert.equal((await execute(loopAgent)).isError, true);
@@ -982,8 +1196,22 @@ export default class extends Service {
   const bridgeRuntime = bridge.tools;
   const beforeLlmRemoval = bridgeRuntime.get(publicName, loopAgent);
   assert.ok(beforeLlmRemoval);
+  const removedResource = holdResourceRead(), removedResourceSelection = promptCommand("resource original_reference");
+  await removedResource.started.promise;
+  await llmEntry.update({ disabled: true }); await bridge.loader.await();
+  assert.equal((await removedResourceSelection).result.kind, "error"); await releaseResourceRead(removedResource);
+  assert.equal(selectedResources().length, currentResourceCount);
+  await llmEntry.update({ disabled: false }); await bridge.loader.await(); await llmEntry.fiber.await();
+  assert.equal((await promptCommand("disconnect")).result.kind, "success");
+  assert.equal((await promptCommand("login")).result.kind, "error", "restoring LlmRuntime does not reopen the closed credential owner");
+  await rentalEntry.update({ config: { ...rentalEntry.options.config, language: "en" } });
+  await bridge.loader.await(); await rentalEntry.fiber.await();
+  // Restoring the factory does not revive Agents disposed with its model dependency.
+  const restartedHandle = await bridge.agents.create({ sessionId: SessionId("resource-model-restored"), agentOptions: { provider: "synthetic-loop-model", model: "synthetic-model" } });
+  t.after(() => restartedHandle.dispose());
+  assert.equal((await promptCommand("login", undefined, restartedHandle.agent)).result.kind, "success");
   const removalTemplate = holdTemplate();
-  const removalSelection = promptCommand("prompt synthetic_optional_prompt");
+  const removalSelection = promptCommand("prompt synthetic_optional_prompt", undefined, restartedHandle.agent);
   await removalTemplate.started.promise;
   await llmEntry.update({ disabled: true });
   await bridge.loader.await();
@@ -1000,6 +1228,94 @@ export default class extends Service {
   await bridge.fiber.dispose();
   running.delete(bridge);
   assert.equal(bridgeRuntime.get(publicName, owner), undefined);
+
+  // Product lifecycle/SDK plus the real AS token service. Only original Web
+  // consent/current grant and serializable persistence remain external fixtures.
+  const persistentGrant = { id: "original-host-grant", subject: "original-host-subject", revision: 5,
+    clientId: oauthSettings.clientId, resource: configured[0].config.connection.resourceUrl,
+    scopes: oauthSettings.scopes, expiresAt: Math.floor(realNow() / 1000) + 3600 };
+  let persistentState = { code: [], family: [], access: [], refresh: [] }, transactionTail = Promise.resolve();
+  const persistentStore = { async transaction(consume) {
+    const previous = transactionTail, done = Promise.withResolvers(); transactionTail = done.promise;
+    await previous;
+    const draft = structuredClone(persistentState);
+    const find = (name, key, value) => draft[name].find(row => row[key] === value);
+    const insert = (name, key, value) => { assert.equal(find(name, key, value[key]), undefined); draft[name].push(structuredClone(value)); };
+    const tx = {
+      readCode: async digest => find("code", "digest", digest),
+      readCodeForAuthorization: async id => find("code", "authorizationId", id),
+      insertCode: async value => { assert.equal(find("code", "authorizationId", value.authorizationId), undefined); insert("code", "digest", value); },
+      readRefresh: async digest => find("refresh", "digest", digest),
+      readAccess: async digest => find("access", "digest", digest),
+      readFamily: async id => find("family", "id", id),
+      insertFamily: async value => insert("family", "id", value),
+      consumeCode: async (digest, familyId) => { const row = find("code", "digest", digest); assert.equal(row.consumedFamilyId, null); row.consumedFamilyId = familyId; },
+      consumeRefresh: async digest => { const row = find("refresh", "digest", digest); assert.equal(row.used, false); row.used = true; },
+      insertAccess: async value => insert("access", "digest", value),
+      insertRefresh: async value => insert("refresh", "digest", value),
+      revokeFamily: async id => { find("family", "id", id).revoked = true; },
+    };
+    try { const value = await consume(tx); persistentState = draft; return value; }
+    finally { done.resolve(); }
+  } };
+  const registration = { read: async () => tokenRegistration };
+  let originalConsent;
+  const persistentResource = transportSource("service").createRentalMcpService({ enabled: true,
+    resource: { resourceUrl: persistentGrant.resource, authorizationServerUrl: asMetadata.issuer,
+      allowedOrigins: [], maxRequestBytes: 4096, authorizationTimeoutMs: 1000 },
+    authorization: { issuer: asMetadata.issuer, authorizationEndpoint: oauthSettings.authorizationEndpoint,
+      tokenEndpoint: oauthSettings.tokenEndpoint, revocationEndpoint: oauthSettings.revocationEndpoint,
+      allowedScopes: oauthSettings.scopes, allowedOrigins: [], timeoutMs: 1000, maxMetadataBytes: 4096 },
+    tokens: { tokenEndpoint: oauthSettings.tokenEndpoint, revocationEndpoint: oauthSettings.revocationEndpoint,
+      resourceUrl: persistentGrant.resource, allowedScopes: oauthSettings.scopes, allowedOrigins: [], timeoutMs: 1000, maxRequestBytes: 32768 },
+    lifetimes: { codeTtlSeconds: 60, accessTtlSeconds: 60, refreshTtlSeconds: 600 },
+  }, { store: persistentStore, registrations: registration, metadata: { read: async () => asMetadata },
+    consent: { current: async () => originalConsent },
+    issuance: {
+      current: async (grantId, clientId, revision) => grantId === persistentGrant.id && clientId === oauthSettings.clientId && revision === 1 ? persistentGrant : undefined,
+      revocationOwner: async (grantId, clientId) => grantId === persistentGrant.id && clientId === oauthSettings.clientId,
+    }, access: { current: async () => persistentGrant } });
+  t.after(() => persistentResource.close());
+  browserModule.setOpen(async target => {
+    const url = new URL(target), server = httpModule.listeners.at(-1);
+    callbackHandler = (req, res) => server.emit("request", req, res);
+    const browserRequest = new Request(url);
+    const selected = await transportSource("public-client-authorization").createPublicClientAuthorization({
+      authorizationEndpoint: oauthSettings.authorizationEndpoint, resourceUrl: persistentGrant.resource,
+      allowedScopes: oauthSettings.scopes, timeoutMs: 1000 }, registration)(browserRequest, new AbortController().signal);
+    // Original authenticated Web consent is the external boundary, never model input.
+    originalConsent = { kind: "approved", id: "original-host-consent", revision: 1,
+      expiresAt: Math.floor(realNow() / 1000) + 60, request: selected, grant: persistentGrant };
+    const authorized = await persistentResource.fetch(browserRequest);
+    assert.equal(authorized.status, 303);
+    assert.equal(deliverCallback(authorized.headers.get("location")), 204);
+  });
+  let observedAccess;
+  globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (request.headers.has("authorization")) observedAccess = request.headers.get("authorization").slice("Bearer ".length);
+    return persistentResource.fetch(request);
+  };
+  const persistentHost = await open([{ id: "rental-os", config: { ...configured[0].config, oauth: oauthSettings,
+    login: { enabled: true, attemptTimeoutMs: 2000, sessionLifetimeMs: 120000, maxAccessTtlSeconds: 300, callbackMode: "loopback" } } }]);
+  const persistentAgent = { id: SessionId("persistent-oauth-owner"), session: persistentHost.sessions.create(SessionId("persistent-oauth-owner")) };
+  const persistentLogin = await persistentHost.commands.execute(persistentAgent, "/rental login", [], new AbortController().signal);
+  assert.equal(persistentLogin.result.kind, "success", persistentLogin.result.text);
+  assert.match(observedAccess, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(persistentState.family.length, 1);
+  assert.equal(persistentState.access.length, 1);
+  assert.equal(persistentState.refresh.length, 1);
+  assert.ok(!JSON.stringify(persistentState).includes(observedAccess));
+  assert.ok(!JSON.stringify(persistentAgent.session.snapshotEvents()).includes(observedAccess));
+  const persistentDisconnect = await persistentHost.commands.execute(persistentAgent, "/rental disconnect", [], new AbortController().signal);
+  assert.equal(persistentDisconnect.result.kind, "success", persistentDisconnect.result.text);
+  assert.equal(persistentState.family[0].revoked, true);
+  const revokedAccess = await persistentResource.fetch(new Request(persistentGrant.resource, { method: "POST",
+    headers: { Authorization: `Bearer ${observedAccess}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }));
+  assert.equal(revokedAccess.status, 401);
+  await persistentHost.fiber.dispose(); running.delete(persistentHost);
+  await persistentResource.close();
 
   const disabled = await open([{ id: "rental-os", disabled: true }]);
   const disabledAgent = { id: SessionId("disabled-rental"), session: disabled.sessions.create(SessionId("disabled-rental")) };
@@ -1023,6 +1339,8 @@ export default class extends Service {
     { oauth: oauthSettings },
     ...[ ["duplicate", "duplicate"], ["invalid/name"], ["x".repeat(65)], Array.from({ length: 51 }, (_, index) => `prompt_${index}`), ["without_login"] ]
       .map(readPrompts => ({ ...configured[0].config, readPrompts })),
+    ...[ ["duplicate", "duplicate"], ["invalid/name"], ["x".repeat(65)], Array.from({ length: 51 }, (_, index) => `resource_${index}`), ["without_login"] ]
+      .map(readResources => ({ ...configured[0].config, readResources })),
   ]) {
     const invalid = await open([{ id: "rental-os", config }]);
     const failed = [...invalid.loader.entries()].find(entry => entry.options?.id === "rental-os");

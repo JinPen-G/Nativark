@@ -2,7 +2,8 @@
 import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { McpReadAuthorization } from "./read-tools.js";
-import { formatReleasedGuidance } from "./instructions.js";
+import { formatReleasedGuidance, snapshotReleasedGuidance } from "./instructions.js";
+import { snapshotJsonFields } from "./json-snapshot.js";
 
 /** A reviewed, currently published template descriptor, not a business capability. */
 export interface McpPromptDescriptor {
@@ -39,15 +40,22 @@ export function registerPrompts(server: McpServer, provider: McpPromptsProvider,
     await revalidate();
     if (signal.aborted) throw unavailable();
     const descriptors = await provider.list(authorization, signal);
-    if (signal.aborted || descriptors.length > 50) throw unavailable();
+    if (signal.aborted || !Array.isArray(descriptors) || Object.getPrototypeOf(descriptors) !== Array.prototype) throw unavailable();
+    const array = Object.getOwnPropertyDescriptors(descriptors);
+    const length = Object.getOwnPropertyDescriptor(descriptors, "length")?.value;
+    if (!Number.isSafeInteger(length) || length > 50) throw unavailable();
     const names = new Set<string>();
-    // Capture descriptor values once so a mutable provider object cannot change
-    // the advertised version after its checks or supply unreviewed extra fields.
-    const published = descriptors.map(descriptor => {
-      const { name, version, description } = descriptor;
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name) || names.has(name)) throw unavailable();
+    // Snapshot only approved descriptor fields before awaiting identity checks.
+    // Neither array accessors nor ignored private fields may run provider code.
+    const published = Array.from({ length }, (_, index) => {
+      const entry = array[index];
+      if (!entry?.enumerable || !Object.hasOwn(entry, "value")) throw unavailable();
+      const { name, version, description } = snapshotJsonFields(entry.value, ["name", "version", "description"],
+        { stringCharacters: 2000, arrayItems: 50 });
+      if (typeof name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(name) || names.has(name)) throw unavailable();
       names.add(name);
-      return { name, version, description: formatReleasedGuidance({ version, text: description }) };
+      const guidance = snapshotReleasedGuidance({ version, text: description });
+      return { name, version: guidance.version, description: formatReleasedGuidance(guidance) };
     });
     await revalidate();
     if (signal.aborted) throw unavailable();
@@ -71,9 +79,9 @@ export function registerPrompts(server: McpServer, provider: McpPromptsProvider,
     try {
       const value = await provider.read(authorization, descriptor.name, requestSignal);
       if (value === undefined || requestSignal.aborted) throw unavailable();
-      const { version, text } = value;
-      if (version !== descriptor.version) throw unavailable();
-      const released = formatReleasedGuidance({ version, text });
+      const guidance = snapshotReleasedGuidance(value);
+      if (guidance.version !== descriptor.version) throw unavailable();
+      const released = formatReleasedGuidance(guidance);
       const current = (await listing(requestSignal)).find(prompt => prompt.name === descriptor.name);
       if (!current || current.version !== descriptor.version || current.description !== descriptor.description) throw unavailable();
       return { description: descriptor.description, messages: [{ role: "user" as const, content: { type: "text" as const, text: released } }] };

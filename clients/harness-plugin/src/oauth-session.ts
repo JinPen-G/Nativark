@@ -44,6 +44,20 @@ export interface RentalPrompt {
   description: string;
 }
 
+/** One currently published text resource, selected by name rather than a model URI. */
+export interface RentalResource {
+  name: string;
+  uri: string;
+  version: string;
+  description: string;
+}
+
+function resourceText(text: string): { version: string; text: string } {
+  const matched = /^Rental OS resource \(([A-Za-z0-9._-]{1,64})\)\n([\s\S]+)$/.exec(text);
+  if (!matched || !matched[2]!.trim() || [...text].length > 2000) throw new OAuthSessionError("unavailable");
+  return { version: matched[1]!, text };
+}
+
 /** Extract only this server's bounded versioned guidance, without interpolation. */
 function promptGuidance(text: string): { version: string; text: string } {
   const matched = /^Rental OS guidance \(([A-Za-z0-9._-]{1,64})\)\n([\s\S]+)$/.exec(text);
@@ -255,7 +269,24 @@ export class RentalOAuthSession {
       catch { this.#unknown = true; }
       if (this.#unknown) throw new OAuthSessionError("unknown");
       throw new OAuthSessionError(signal.aborted ? "cancelled" : error instanceof OAuthSessionError ? error.code : "unavailable");
-    } finally { await closeCallback?.(); }
+    } finally {
+      try { await closeCallback?.(); }
+      catch {
+        // Callback disposal is part of login completion. A failed command must
+        // not leave a connected client; keep known tokens only for revocation.
+        this.#unknown = true;
+        this.#instructions = "";
+        this.#lifetime.abort();
+        this.#withdraw();
+        clearTimeout(this.#expiryTimer);
+        this.#expiryTimer = undefined;
+        const client = this.#client;
+        this.#client = undefined;
+        try { await client?.close(); }
+        catch { this.#unknown = true; }
+        throw new OAuthSessionError("unknown");
+      }
+    }
   }
 
   #scheduleExpiry(credential: Credential): void {
@@ -357,7 +388,9 @@ export class RentalOAuthSession {
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(this.#connection.timeoutMs)]);
     const operation = wait(client.discover({ signal: abort, timeout: this.#connection.timeoutMs }), abort).then(result => {
-      if (abort.aborted || client !== this.#client) throw new OAuthSessionError("cancelled");
+      // Concurrent requests can invalidate the same client without replacing it.
+      // Only a still-current connection may publish a successful discovery.
+      if (abort.aborted || client !== this.#client || this.status(owner) !== "connected") throw new OAuthSessionError("unavailable");
       this.#instructions = this.#admitInstructions(result.instructions);
     });
     this.#checks.add(operation);
@@ -423,6 +456,55 @@ export class RentalOAuthSession {
       if (description.version !== descriptor.version || description.text !== descriptor.description
         || guidance.version !== descriptor.version) throw new OAuthSessionError("unavailable");
       return { ...descriptor, text: result.messages[0].content.text };
+    })();
+    this.#checks.add(operation);
+    try { return await operation; }
+    catch { throw new OAuthSessionError("unavailable"); }
+    finally { this.#checks.delete(operation); }
+  }
+
+  /** Read one current resource catalog without aggregating pages or fetching bodies. */
+  async listResources(owner: object, signal: AbortSignal): Promise<RentalResource[]> {
+    if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
+    const client = this.#client;
+    const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
+    const operation = wait(client.listResources({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+    this.#checks.add(operation);
+    try {
+      const listed = await operation;
+      if (abort.aborted || client !== this.#client || this.status(owner) !== "connected" || listed.nextCursor !== undefined
+        || listed.resources.length > 50 || new Set(listed.resources.map(item => item.name)).size !== listed.resources.length
+        || new Set(listed.resources.map(item => item.uri)).size !== listed.resources.length) throw new OAuthSessionError("unavailable");
+      return listed.resources.map(item => {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(item.name) || item.mimeType !== "text/plain" || !item.description) throw new OAuthSessionError("unavailable");
+        const uri = new URL(item.uri);
+        if (uri.href !== item.uri || uri.origin !== new URL(this.#connection.resourceUrl).origin || uri.protocol !== "https:"
+          || uri.username || uri.password || uri.search || uri.hash) throw new OAuthSessionError("unavailable");
+        const description = resourceText(item.description);
+        return { name: item.name, uri: item.uri, version: description.version, description: description.text };
+      });
+    } catch { throw new OAuthSessionError("unavailable"); }
+    finally { this.#checks.delete(operation); }
+  }
+
+  /** Fetch one exact listed name on the same connection, with version and post-read catalog checks. */
+  async getResource(owner: object, name: string, signal: AbortSignal): Promise<RentalResource & { text: string }> {
+    if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
+    const client = this.#client;
+    const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
+    const operation = (async () => {
+      const descriptor = (await this.listResources(owner, abort)).find(item => item.name === name);
+      if (!descriptor || abort.aborted) throw new OAuthSessionError("unavailable");
+      const result = await wait(client.readResource({ uri: descriptor.uri }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+      const content = result.contents[0];
+      if (abort.aborted || client !== this.#client || this.status(owner) !== "connected" || result.contents.length !== 1
+        || !content || content.uri !== descriptor.uri || content.mimeType !== "text/plain" || !("text" in content)
+        || "blob" in content) throw new OAuthSessionError("unavailable");
+      const released = resourceText(content.text);
+      const current = (await this.listResources(owner, abort)).find(item => item.name === descriptor.name);
+      if (!current || current.uri !== descriptor.uri || current.version !== descriptor.version || current.description !== descriptor.description
+        || released.version !== descriptor.version || abort.aborted || client !== this.#client || this.status(owner) !== "connected") throw new OAuthSessionError("unavailable");
+      return { ...descriptor, text: released.text };
     })();
     this.#checks.add(operation);
     try { return await operation; }

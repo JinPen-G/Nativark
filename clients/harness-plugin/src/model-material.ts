@@ -2,10 +2,15 @@
 import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { LlmError } from "@deepseek-ai/dsh-llm";
 
-/** Recognize logged Rental selections and tool records; never infer current authorization. */
+/** Recognize logged Rental guidance, selections and tool records; never infer current authorization. */
 export function hasRentalMaterial(options: GenerateOptions): boolean {
   const rentalName = (name: string) => name.startsWith("mcp__rental_os__");
-  return options.messages.some(message => message.source?.kind === "rental-prompt")
+  // Automatic sections become ordinary system messages in the Host log. The
+  // server's version marker only retains a size check; copied text grants no access.
+  const guidance = (text: string) => /(?:^|\n)Rental OS guidance \([A-Za-z0-9._-]{1,64}\)\n/.test(text);
+  return options.system !== undefined && guidance(options.system)
+    || options.messages.some(message => message.role === "system" && message.content.some(block => block.type === "text" && guidance(block.text)))
+    || options.messages.some(message => message.source?.kind === "rental-prompt" || message.source?.kind === "rental-resource")
     || options.tools?.some(tool => rentalName(tool.name)) === true
     || options.toolHistory?.tools.some(tool => rentalName(tool.name)) === true
     || options.toolHistory?.updates.some(update => update.additions.some(tool => rentalName(tool.name))) === true

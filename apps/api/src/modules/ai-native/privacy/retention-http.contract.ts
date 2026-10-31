@@ -10,13 +10,14 @@ import { AiRetentionUnknown } from './retention.service';
 type Action = keyof typeof AI_RETENTION_HTTP_CONTRACTS;
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false }); addFormats(ajv);
 for (const [name, schema] of Object.entries(AI_RETENTION_HTTP_SCHEMAS)) ajv.addSchema(schema, `#/components/schemas/${name}`);
-function wire(value: unknown): unknown {
+function wire(value: unknown, budget = { nodes: 0 }, depth = 0): unknown {
+  if (++budget.nodes > 10000 || depth > 16) throw Error('Retention wire limit');
   if (value instanceof Date) return value.toISOString();
   if (value === null || ['string', 'boolean'].includes(typeof value)) return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return value.map(wire);
+  if (Array.isArray(value)) return value.map(child => wire(child, budget, depth + 1));
   if (value && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value)))
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, wire(child)]));
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, wire(child, budget, depth + 1)]));
   throw Error('Invalid retention wire value');
 }
 export function retentionHttpRequest<A extends Action>(action: A, value: unknown): AiRetentionHttpRequestsDraft[A] {

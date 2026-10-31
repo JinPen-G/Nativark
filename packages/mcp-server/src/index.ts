@@ -19,12 +19,15 @@ export { ResourceAuthorizationError } from "./resource-authorization.js";
 export type { ResourceTokenVerifier, VerifiedResourceToken } from "./resource-authorization.js";
 export { createIntrospectionVerifier } from "./token-introspection.js";
 export type { IntrospectionConfiguration, IntrospectionClientAuthentication } from "./token-introspection.js";
-import { registerReadTools, validateReadTools } from "./read-tools.js";
+import { registerReadTools, captureReadTools } from "./read-tools.js";
 import type { McpReadAuthorization, McpReadTools } from "./read-tools.js";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { releasedInstructions } from "./instructions.js";
 import type { McpInstructionsProvider } from "./instructions.js";
 export type { McpInstructionsProvider } from "./instructions.js";
+import { captureResources, registerResources } from "./resources.js";
+import type { McpResources } from "./resources.js";
+export type { McpResources, McpResourceDescriptor } from "./resources.js";
 import { registerPrompts } from "./prompts.js";
 import type { McpPromptsProvider } from "./prompts.js";
 export type { McpPromptsProvider, McpPromptDescriptor } from "./prompts.js";
@@ -41,6 +44,7 @@ export interface ProtectedMcpConfig {
   readTools?: McpReadTools;
   instructions?: McpInstructionsProvider;
   prompts?: McpPromptsProvider;
+  resources?: McpResources;
 }
 
 export interface ProtectedMcpEndpoint {
@@ -113,14 +117,20 @@ export function createProtectedMcpEndpoint(
   // Keep subject metadata on the verified SDK auth object only; it must not be
   // projected into protocol metadata, instructions or a tool response.
   const identities = new WeakMap<AuthInfo, McpReadAuthorization>();
-  const readTools = config.readTools;
-  const instructionsProvider = config.instructions;
-  const promptsProvider = config.prompts;
-  const boundedOutput = readTools !== undefined || instructionsProvider !== undefined || promptsProvider !== undefined;
-  if (readTools) validateReadTools(readTools);
-  if (promptsProvider && (typeof promptsProvider.list !== "function" || typeof promptsProvider.read !== "function")) {
+  const readTools = config.readTools ? captureReadTools(config.readTools) : undefined;
+  const instructions = config.instructions, prompts = config.prompts;
+  if (instructions && typeof instructions.read !== "function") {
+    throw new TypeError("MCP instructions require original current guidance providers");
+  }
+  if (prompts && (typeof prompts.list !== "function" || typeof prompts.read !== "function")) {
     throw new TypeError("MCP prompts require original current publication and guidance providers");
   }
+  // Capture approved method identities, not their policy state. Replacement
+  // methods require a new endpoint; revocation still comes from the original owner.
+  const instructionsProvider = instructions ? Object.freeze({ read: instructions.read.bind(instructions) }) : undefined;
+  const promptsProvider = prompts ? Object.freeze({ list: prompts.list.bind(prompts), read: prompts.read.bind(prompts) }) : undefined;
+  const resourcesProvider = config.resources ? captureResources(config.resources) : undefined;
+  const boundedOutput = readTools !== undefined || instructionsProvider !== undefined || promptsProvider !== undefined || resourcesProvider !== undefined;
   const handler = createMcpHandler(async context => {
     const authorization = context.authInfo ? identities.get(context.authInfo) : undefined;
     if (context.authInfo && !authorization) throw new ResourceAuthorizationError("unavailable");
@@ -130,7 +140,11 @@ export function createProtectedMcpEndpoint(
     }
     const server = new McpServer(
       { name: "rental-os", version: "0.1.0" },
-      { capabilities: { tools: {} }, instructions },
+      { capabilities: { tools: {} }, instructions,
+        // SDK defaults include older revisions outside this endpoint's contract.
+        supportedProtocolVersions: ["2026-07-28", "2025-11-25"],
+        cacheHints: { "resources/list": { ttlMs: 0, cacheScope: "private" },
+          "resources/templates/list": { ttlMs: 0, cacheScope: "private" }, "resources/read": { ttlMs: 0, cacheScope: "private" } } },
     );
     if (authorization && context.requestInfo && verifier) {
       // The request signal already includes the endpoint's complete read deadline.
@@ -145,6 +159,7 @@ export function createProtectedMcpEndpoint(
       // published, advertise an empty list without a fake business result.
       if (count === 0) server.server.setRequestHandler("tools/list", async () => ({ tools: [] }));
       if (promptsProvider) registerPrompts(server, promptsProvider, authorization, signal, revalidate);
+      if (resourcesProvider) registerResources(server, resourcesProvider, authorization, signal, revalidate);
     } else {
       server.server.setRequestHandler("tools/list", async () => ({ tools: [] }));
     }

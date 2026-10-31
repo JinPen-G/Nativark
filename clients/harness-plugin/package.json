@@ -1,6 +1,6 @@
 {
   "name": "@rental-os/harness-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Rental OS OAuth and session-bound MCP connection for Harness",
@@ -28,6 +28,7 @@
   "files": ["dist", "cordis.patch.yml", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "node scripts/build-bundle.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

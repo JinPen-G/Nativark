@@ -432,6 +432,50 @@ test('original policy HTTP contracts preserve current-row CAS and deny damaged r
   assert.equal(h.state.aiTask.length, 1); assert.equal(h.state.aiStep.length, 0);
 });
 
+test('retention HTTP contracts preserve original cleanup receipts and reject damaged or cross-command output', { timeout: 60000 }, async () => {
+  const h = await setup({ aiDataErasure: [], aiTaskExecutionCharge: [], aiApprovalConsumption: [], aiGatewayInvocation: [],
+    aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [] });
+  const { AiRetentionService } = require('../apps/api/src/modules/ai-native/privacy/retention.service');
+  const { AiRetentionController } = require('../apps/api/src/modules/ai-native/privacy/retention.controller');
+  const { retentionHttpResponse } = require('../apps/api/src/modules/ai-native/privacy/retention-http.contract');
+  const shared = require('@rental-os/shared'), created = await h.app.create(h.command());
+  h.state.aiTask.find(row => row.id === created.task.taskId).status = 'SUCCEEDED';
+  h.b.h.identity.user.permissions.push('system:params:manage');
+  h.b.h.control.now = new Date(h.b.h.control.now.getTime() + 31 * 86400000);
+  // The transaction double does not fill this nullable Prisma column. Seed its
+  // actual default so the real cleanup candidate query can see the request.
+  h.state.aiTaskOriginalRequest.find(row => row.id === created.receipt.inputRef).erasedAt = null;
+  const service = new AiRetentionService(h.db, h.dependencies.auth, h.dependencies.credentials, undefined, h.dependencies.clock);
+  let closed = 0;
+  const http = new AiRetentionController(() => ({ cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
+    receipts: value => service.receipts(value), close: () => { closed++; } }));
+  const request = { headers: { authorization: (await h.dependencies.credentials.current()).authorization } };
+  const cleaned = await http.cleanup(request, { kind: 'request', limit: 1 });
+  assert.equal(cleaned.scanned, 1); assert.equal(cleaned.results[0].state, 'erased');
+  const id = cleaned.results[0].id, observed = await http.receipt(request, { id });
+  assert.equal(typeof observed.createdAt, 'string'); assert.equal(typeof observed.erasedAt, 'string');
+  assert.equal(observed.resourceId, created.receipt.inputRef); assert.equal((await http.receipts(request, {})).rows.length, 1);
+  for (const patch of [{ actor: 'forged' }, { kind: 'business_order' }, { limit: 11 }])
+    await assert.rejects(http.cleanup(request, { kind: 'request', ...patch }), error => error.getStatus() === 400);
+  const damaged = new AiRetentionController(() => ({ cleanup: async () => ({ ...cleaned, credential: 'hidden' }),
+    receipt: async () => ({ ...observed, id: '0'.repeat(64) }), receipts: async () => ({ rows: [], coverage: 'bounded_page', retryable: false }), close() {} }));
+  await assert.rejects(damaged.cleanup(request, { kind: 'request', limit: 1 }), error => error.getStatus() === 409 && error.getResponse().nextAction === 'list_retention_receipts');
+  await assert.rejects(damaged.receipt(request, { id }), error => error.getStatus() === 503);
+  for (const result of [{ id, state: 'held', reason: 'unresolved_effects' }, { id, state: 'unavailable', reason: 'storage_erasure_not_assembled' },
+    { id, state: 'unknown', retryable: false, nextAction: 'observe_original_object_absence' },
+    { state: 'unavailable', retryable: false, nextAction: 'list_retention_receipts' }]) {
+    assert.doesNotThrow(() => retentionHttpResponse('cleanup', { ...cleaned, results: [result] }, { kind: 'request', limit: 1 }));
+  }
+  assert.throws(() => retentionHttpResponse('cleanup', { ...cleaned, scanned: 0 }, { kind: 'request', limit: 1 }), { code: 'AI_RESULT_UNKNOWN' });
+  const f = require('./fixtures/ai-native/contract-consumer.cjs'), { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  f.checkClosed(shared.AI_RETENTION_HTTP_SCHEMAS, OPENAPI_DOCUMENT.components.schemas);
+  for (const [name, schema] of Object.entries(shared.AI_RETENTION_HTTP_SCHEMAS)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  h.state.aiDataErasure[0].workspaceId = 'other'; await assert.rejects(http.receipt(request, { id }), error => error.getStatus() === 503);
+  h.b.h.identity.session = false; await assert.rejects(http.receipts(request, {}), error => error.getStatus() === 403);
+  assert.equal(closed, 5); assert.equal(h.state.aiTask.length, 1);
+});
+
 test('conversation metadata and original admission share CAS, owner scope and immutable recovery', { timeout: 60000 }, async () => {
   const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [], aiTaskExecutionCharge: [],
     aiApprovalConsumption: [], aiGatewayInvocation: [], aiBudgetReservation: [], aiInvocationAdmission: [], aiUsageReservation: [] });
