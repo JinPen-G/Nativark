@@ -3,18 +3,23 @@ import { useRef } from "react";
 import { ActionButton as ArcActionButton, type ActionButtonProps as ArcProps } from "@/registry/components/action-button/action-button";
 import { useLocale } from "@/app/locale";
 import { formSnapshotFingerprint, notifyFormSaved } from "@/app/serverFormSnapshot";
+import { ActionButtonIconContext } from "./ActionButtonIcon";
+import { resolveActionButtonIntent, type ActionButtonIntent } from "./actionButtonIntent";
 
 export interface ActionButtonProps extends Omit<ArcProps, "onAction"> {
   /** Resolve only after the real operation completes. Throw on failure. */
   onAction: () => Promise<unknown>;
   pending?: boolean;
   variant?: "primary" | "secondary";
+  /** Semantic idle icon; unknown labels stay text-only instead of suggesting navigation. */
+  intent?: ActionButtonIntent;
 }
 
 /** Original Arc motion, with tenant tokens, locale and a synchronous double-click guard. */
-export function ActionButton({ onAction, pending, disabled, pendingLabel, successLabel, variant = "primary", ...props }: ActionButtonProps) {
+export function ActionButton({ onAction, pending, disabled, pendingLabel, successLabel, variant = "primary", intent, ...props }: ActionButtonProps) {
   const { componentDisabled } = ConfigProvider.useConfig();
   const { t } = useLocale();
+  const idleIcon = intent ?? resolveActionButtonIntent(props.label);
   const inFlight = useRef<Promise<void> | null>(null);
   const latest = useRef({ onAction, disabled: disabled ?? componentDisabled });
   latest.current = { onAction, disabled: disabled ?? componentDisabled };
@@ -26,9 +31,10 @@ export function ActionButton({ onAction, pending, disabled, pendingLabel, succes
     void request.finally(() => { if (inFlight.current === request) inFlight.current = null; }).catch(() => undefined);
     return request;
   }
-  return <ArcActionButton {...props} data-rental-arc-action="" data-rental-arc-button="" data-button-kind={variant}
+  return <ActionButtonIconContext.Provider value={idleIcon}><ArcActionButton {...props} data-rental-arc-action="" data-rental-arc-button="" data-button-kind={variant}
+    data-action-icon={idleIcon}
     label={t(props.label)} disabled={(disabled ?? componentDisabled) || Boolean(pending && !inFlight.current)} onAction={run}
-    pendingLabel={pendingLabel ?? t("处理中")} successLabel={successLabel ?? t("已完成")} />;
+    pendingLabel={pendingLabel ?? t("处理中")} successLabel={successLabel ?? t("已完成")} /></ActionButtonIconContext.Provider>;
 }
 
 export interface SaveButtonProps<Values> extends Omit<ActionButtonProps, "onAction" | "form"> {
@@ -39,7 +45,7 @@ export interface SaveButtonProps<Values> extends Omit<ActionButtonProps, "onActi
 /** Validate first, then await the same mutation as Enter-key submission. No synthetic submit/click. */
 export function SaveButton<Values>({ form, onSave, ...props }: SaveButtonProps<Values>) {
   const { t } = useLocale();
-  return <ActionButton {...props} type="submit" onClickCapture={(event) => {
+  return <ActionButton {...props} intent={props.intent ?? resolveActionButtonIntent(props.label, "save")} type="submit" onClickCapture={(event) => {
     // Preserve the browser's implicit Enter-key submit button, but prevent a second native
     // onFinish request. Arc's click handler below validates and awaits the single mutation.
     props.onClickCapture?.(event);

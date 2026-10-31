@@ -32,6 +32,7 @@ export { FeedbackProvider, useFeedback } from "./Feedback";
 export { ConfirmAction } from "./ConfirmAction";
 export { Switch } from "./Switch";
 export { ActionButton, SaveButton } from "./ActionButton";
+export type { ActionButtonIntent } from "./actionButtonIntent";
 export { CopyButton } from "./CopyButton";
 export { Alert } from "./Alert";
 export { Progress } from "./Progress";

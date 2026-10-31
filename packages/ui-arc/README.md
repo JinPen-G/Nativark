@@ -33,6 +33,8 @@ New pages should first use this adapter entry for Button, ActionButton, SaveButt
 
 ActionButton uses the original upstream text morph, spring width, spinner and drawn success check. `onAction` must return a real promise and reject on failed results (including HTTP-success responses whose business `ok` is false). SaveButton validates its supplied AntD form before awaiting `onSave`; retain the same payload transforms and domain checks as the existing Enter-key `onFinish`. CopyButton uses the original clipboard feedback, defaulting to icon-only so upstream hard-coded English result text does not leak into Chinese pages. Ordinary navigation/cancel buttons retain press/hover animation without pretending to perform a save.
 
+ActionButton idle icons are adapted by `apps/admin/config/actionButtonIconAdapter.ts`: a guarded import replacement reads the shared semantic context instead of always rendering ArrowRight. Reserved TSX/CSS remain byte-for-byte unchanged. Use `intent` for dynamic command labels; standard Chinese/English action prefixes share `actionButtonIntent.ts`, with no icon for unknown commands and Save as the SaveButton fallback. Pending, success, accessibility and native transitions remain upstream-owned. The former connection-test CSS mask is removed; tests use a real Lucide PlugZap.
+
 Examples of additional available source: number-field, phone-input, tag-input, select, combobox, multi-select, calendar, time-picker, confirm-morph, file-upload, charts and layout blocks.
 
 Do not replace complex table, tree, nullable/string-mode number fields, search/OTP/password contracts or keep-alive drawers by silently dropping unsupported features. The adapters deliberately fall back to AntD for those cases.

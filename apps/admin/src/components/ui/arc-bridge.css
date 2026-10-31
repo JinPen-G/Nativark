@@ -13,13 +13,9 @@
   border-color: var(--border-strong);
   color: var(--foreground);
 }
-/* Replace only the idle arrow glyph; its original Arc motion container, pending
-   spinner and drawn success check remain untouched. */
-.arc-action-connect[data-state="idle"] svg {
-  stroke: transparent;
-  background: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22v-5M9 8V2M15 8V2M7 8h10v4a5 5 0 0 1-10 0V8Z'/%3E%3C/svg%3E") center / contain no-repeat;
-}
+/* The original final content slot holds the phase icon. Text-only idle commands
+   reserve no empty icon space; pending/success keep the native slot and motion. */
+[data-rental-arc-action][data-action-icon="none"][data-state="idle"] > span[aria-hidden="true"] > span:last-child { display: none; }
 .arc-copy-action button { border-radius: var(--rental-ui-radius-button, 18px); }
 [data-rental-arc-button][data-button-kind="link"] { padding-inline: var(--rental-control-padding-small); min-height: var(--rental-control-height-small); }
 [data-rental-arc-button][data-button-kind="link"]:not([data-button-danger]) { color: var(--accent); }
