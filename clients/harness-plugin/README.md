@@ -18,6 +18,8 @@
 | `/rental disconnect` | 先停止本地新请求、清除凭据，再向精确撤销端点发送一次请求；服务器接受请求不等于整个grant已独立核实撤销 |
 | `/rental prompts` | 显式配置后查看当前会话获准且位于本地名称白名单的模板及版本；不读模板正文、不启动模型 |
 | `/rental prompt <名称>` | 人主动选择一个当前模板；原Agent空闲时读取版本化正文，提交为原用户消息并启动自配模型，费用照常；不是业务授权或模型完成证明 |
+| `/rental resources` | 显式配置后列出当前会话获准且在本地名称白名单内的资源 / 版本，不读正文或启动模型 |
+| `/rental resource <名称>` | 人选择一个当前发布的text/plain资源，由同一MCP连接读取并提交为当前Agent的有来源消息；照常启动自配模型，不接任意URI / 文件 / HTML |
 | 其他参数 / 附件 | 拒绝；命令原始参数不写`command/run`，避免误粘贴凭据进入这份日志。适配器在命令分派之前的输入留存不由本插件保证 |
 
 一次插件实例最多一个检查；重复发起返回忙碌状态。请求同时受命令取消、插件卸载和配置截止控制。重载重新注册一份命令，不自动复查；卸载先移除命令、取消并等待本片有界操作，迟到响应不能继续发现或取得授权。第三方插件配置错误只令该插件失败，原Harness继续运行；原Loader报告错误，不伪装加载成功。
@@ -53,9 +55,9 @@ Bundle默认只设中文，无部署地址、token或自动请求。配置可覆
 
 可选`login`对象必须明确给出`enabled`、`attemptTimeoutMs`（1～600000）、`sessionLifetimeMs`（1～28800000）、`maxAccessTtlSeconds`（1～900）和`callbackMode`（`host / loopback`），并完整配置`connection / oauth`。默认Bundle不提供此对象、不启用登录。此处限制是本地寿命上限，不延长服务端grant、原任务或access token。
 
-[登录所有者](src/oauth-session.ts)复用官方SDK生成S256、交换授权码与刷新，校验state、issuer、精确回调、重复参数、资源和返回scope。token只保留在私有内存字段 / 闭包，无共享token getter、不写默认credentials、文件、环境或日志。SDK逐请求取当前凭据，刷新为单所有者且必须轮换refresh token；首次应答丢失、取消或轮换不明保持unknown，不重试交换或刷新，不换ID重新登录。已知401 / 403会使旧凭据不可用，不能自动重新授权 / 重发；本片只现代协议，不用已删除的ping。
+[登录所有者](src/oauth-session.ts)复用官方SDK生成S256、交换授权码与刷新，校验state、issuer、精确回调、重复参数、资源和返回scope。token只保留在私有内存字段 / 闭包，无共享token getter、不写默认credentials、文件、环境或日志。SDK逐请求取当前凭据，刷新为单所有者且必须轮换refresh token；首次应答丢失、取消或轮换不明保持unknown，不重试交换或刷新，不换ID重新登录。已知401 / 403会使旧凭据不可用，不能自动重新授权 / 重发；并发check的迟到成功仍须核对当前连接，不能在另一请求失权后提交成功或恢复指引。本片只现代协议，不用已删除的ping。
 
-[Host交互](src/oauth-host.ts)使用固定`open`依赖启动系统浏览器，登录回调要求数字loopback、非根path且无尾斜杠。`host`模式注册现有`webServer`的精确路由，origin必须与已绑定监听器一致；`loopback`模式仅HTTP，由操作系统以`listen(0)`原子分配临时端口，只改变登记地址的端口，scheme / 数字host / path保持原值。两种模式都精确核对HTTP Host并在登录结束 / 取消后关闭本片路由或监听器；无适用回调在打开浏览器前拒绝。临时模式不依赖Harness WebServer、不修改Electron，但真实OS端口 / 浏览器 / Electron组合未验；远端Web及HTTPS回调仍未接通。
+[Host交互](src/oauth-host.ts)使用固定`open`依赖启动系统浏览器，登录回调要求数字loopback、非根path且无尾斜杠。`host`模式注册现有`webServer`的精确路由，origin必须与已绑定监听器一致；`loopback`模式仅HTTP，由操作系统以`listen(0)`原子分配临时端口，只改变登记地址的端口，scheme / 数字host / path保持原值。两种模式都精确核对HTTP Host并在登录结束 / 取消后关闭本片路由或监听器；清理失败使本次登录保持unknown，撤回指引 / 工具并关闭客户端，不留下可用connected状态。已知凭据只保留给原撤销请求，接受撤销不消除清理不确定性；本地拒绝不证明监听器实际关闭。无适用回调在打开浏览器前拒绝。临时模式不依赖Harness WebServer、不修改Electron，但真实OS端口 / 浏览器 / Electron组合未验；远端Web及HTTPS回调仍未接通。
 
 一次插件实例只持有一条连接，绑定原命令会话对象，其他会话 / fork不继承。进程重启不恢复凭据，用户需重新登录。断开 / 卸载 / 本地最长寿命到期先取消、等待本地操作并清除已知凭据和指引，再关闭transport并请求撤销。transport关闭失败仍尝试远端撤销，但结果保持未确认、不重复使用本地凭据；迟到撤销应答由原请求负责取消body，不恢复已清身份。unknown不会因清除而解锁，用户到可信后台核对。RFC7009接受不证明整个grant已撤销，未收到的远端token不能声称已删除。
 
@@ -89,19 +91,37 @@ Bundle默认只设中文，无部署地址、token或自动请求。配置可覆
 
 命令取消、Agent取消 / 销毁、断开、401 / unknown、插件卸载 / 重载及模型服务移除中止未提交选择并等待本地操作结算，迟到正文不进入原消息；读取、提交共用原15秒及更短连接截止，无自动重试。人类命令取消沿原CommandRuntime抛出`AbortError`并记错误结算。原消息提交后，本插件不取消用户整个模型任务或删除普通Host历史；此时按Harness自身取消 / 留存机制处理，不能把本地断开说成撤销模型消耗或远端删除。
 
+### 人主动选择可选资源
+
+可选`readResources`最多50个互异的`A-Za-z0-9_-`名称，每名最长64字符；默认省略 / 空列表不启用，非空须完整显式OAuth及原`llm / agents`材料接点。名称只限本地可选范围，原服务端逐次验权 / 计量 / release；不允许用Resources代替尚不兼容的业务Tools，也不提供任意URI参数。
+
+人调用`/rental resources`时经同一私有官方SDK连接读取一页当前目录，过滤配置名称；不读正文或启动模型。目录须完整、最多50项，无续页 / 重名 / 重复URI，只接受同资源origin的规范化HTTPS URI及text/plain版本化说明，无凭据、query或fragment。选择`/rental resource <名称>`先读目录定位原URI，再读取一条text/plain正文，核对URI / MIME / 版本后重新读取目录复验，禁止缓存 / 自动重试，整操作受原15秒及更短连接期限约束。正文 / 说明含`Rental OS resource (版本)`后最多2,000字符，不接HTML、blob、外域或缺字段；各完整响应仍受64 KiB保护。
+
+资源选择与模板共用[原消息消费者](src/mcp-prompts.ts)的唯一在途操作和原idle maintenance占用；忙碌 / 错Agent / 改Session立即拒绝，不排队。原`followup`只向精确登录Agent提交一条`rental-resource`来源、name / version / 原URI及relay形式的普通用户消息，正文按资料而非指令使用。消息进入原inbox / user-message日志及自配模型，费用照常，提交反馈不证明模型完成、批准或业务执行。未提交选择的取消 / 断开 / Agent销毁 / 重载 / 模型服务移除由同一所有者撤回、等待；已提交普通Host历史不承诺删除或撤销模型消耗。
+
+当前没有注册第二套资源Tools或原继承式`mcpResources` provider，避免未绑定子Agent自动看到同一服务器；这是显式人类消费，不宣称模型自主资源访问已验收。`rental-resource`来源在日志重建 / 插件重载后仍触发完整256 KiB材料检查，标记不恢复身份或读取资格。普通复制 / 失去来源的摘要、最终Provider线包、目的地及所有留存控制仍未覆盖，严格资料保持不可用。
+
 ## 模型材料的本地上限
 
 [材料检查](src/model-material.ts)通过原`llm/stream` waterfall，在实际模型adapter派发前检查中立`GenerateOptions`：除取消signal外，消息、系统文字、工具、历史及其重复表示整体按JSON序列化UTF-8计量，最多262,144字节；超限或无法序列化返回`RENTAL_MATERIAL_UNAVAILABLE`，不截断、改写日志或自动重发。
 
-检查覆盖本插件明确登录绑定过的原Session，由原`AgentRegistry.currentInitiator()`定位；断开清除调用资格和当前指引，但不会删除Harness历史，因此同一Session在本插件仍加载时继续受上限限制。请求中含`rental-prompt`来源的原消息、`mcp__rental_os__`工具声明、原toolHistory声明 / 更新或工具调用 / 增删记录时，即使没有发起Agent也检查整体材料；插件重载后可由这些原记录重新收紧检查，而不恢复凭据、工具或授权。未含Rental材料且未标记的个人Session保持原行为，断开后的正常大小输入仍可用。进程内Session标记不跨插件卸载 / 重载、Session重建或进程重启保存。
+检查覆盖本插件明确登录绑定过的原Session，由原`AgentRegistry.currentInitiator()`定位；断开清除调用资格和当前指引，但不会删除Harness历史，因此同一Session在本插件仍加载时继续受上限限制。请求中含`rental-prompt / rental-resource`来源的原消息、`mcp__rental_os__`工具声明、原toolHistory声明 / 更新或工具调用 / 增删记录时，即使没有发起Agent也检查整体材料。原system消息或一次调用的system文字包含行首`Rental OS guidance (版本)`标记时，同样收紧检查；自动section名未保留在原日志，故仅用已记录文字保留大小限制，不把标记当可信身份或授权。插件重载后可由这些原记录重新收紧检查，而不恢复凭据、工具或授权。普通user消息引用该标记不会被视为system指引；无关system文字、未含Rental材料且未标记的个人Session保持原行为，断开后的正常大小输入仍可用。进程内Session标记不跨插件卸载 / 重载、Session重建或进程重启保存。
 
-此处不是最终Provider HTTP线包限制：后续文件 / 图片投影、adapter中间件、供应商序列化及重定向可能改变材料；没有原发起Agent且没有上述来源 / 工具记录的直接调用未纳入。fork / 恢复保留这些原记录时会重新检查，但丢失来源、仅含结果正文、自动instructions或派生摘要的材料无法据此可靠识别；普通复制、摘要、导出与卸载后的读取仍不保证，更不能继承业务授权。需要精确目的地、全部重放或强制到期证据的资料仍不得发布；普通用户输入不是被本插件预脱敏的材料。
+此处不是最终Provider HTTP线包限制：后续文件 / 图片投影、adapter中间件、供应商序列化及重定向可能改变材料；没有原发起Agent且没有上述来源 / 工具记录的直接调用未纳入。fork / 恢复保留这些原记录及system指引标记时会重新检查，但丢失来源 / 标记、仅含结果正文或派生摘要的材料无法据此可靠识别；普通复制、摘要、导出与卸载后的读取仍不保证，更不能继承业务授权。需要精确目的地、全部重放或强制到期证据的资料仍不得发布；普通用户输入不是被本插件预脱敏的材料。
 
-## 构建与安装状态
+## 预构建安装包
 
-包使用ESM，发布文件为`dist`、patch和README。TS构建保留宿主peer外部依赖，不打包第二份Cordis；第三方MCP client和Schemastery为正式依赖。现有`./connection`出口保留上一片兼容，新插件运行入口为`.`。
+包使用ESM，分发文件仅为`dist`中的JS / 声明、`cordis.patch.yml`、README及package.json。不附带源码、后台构建、node_modules或用户配置；宿主peer保持外部依赖，不打包第二份Cordis，第三方MCP client、Schemastery和open仍按正式依赖安装。现有`./connection`出口保留，新插件运行入口为`.`。当前包未发布到npm，不要直接按包名从registry安装。
 
-本轮测试把当前源码严格编译到独立output，按包manifest和patch让真实profile / Loader加载编译产物；没有安装到用户的Harness profile，没有运行GUI或真实OAuth。实际依赖安装与锁文件尚未完成，不把源目录直接当作已安装的发布包。后续在获准环境按原[Bundle安装要求](../agent-desktop/harness/docs/user/develop/basic/publish.zh.md)使用预构建包 / tarball，不运行来源不明的安装脚本、不修改应用安装文件。
+[构建入口](scripts/build-bundle.cjs)在调用方指定的全新目录严格编译，再用明确指定的已安装npm执行离线、禁安装脚本的pack。它检查已安装声明版本、完整文件集合、公开入口和局部 / 已声明外部import，生成`.tgz`及`bundle-manifest.json`；清单包含源码 / 构建器SHA-256、构建依赖版本、归档SHA-256 / SHA-512完整性和文件列表，不含本机绝对路径。目录已存在或构建失败就拒绝，不覆盖旧产物，失败保留pack日志。它不安装依赖、不写源码dist或根lock、不发布或启动Host。可明确使用本树已有Harness的声明构建，归档运行时不依赖该源码目录；这是离线构建方式，不代表插件独立依赖安装已验。
+
+既有[Loader组合测试](../../tests/harness-plugin.test.cjs)现在消费真正的`.tgz`：先核对完整性 / 文件集合并解包到独立profile，再沿原公开Bundle / Loader加载，验证原命令、OAuth / MCP及释放。HTTP、浏览器、监听器和原服务端仍是外部夹具；没有通过`dsh plugin add`安装到用户profile、运行GUI或联调真实OAuth，不将这份归档当正式发布或业务可用证明。
+
+### 独立原版Harness的安装入口
+
+获准安装后使用原[Bundle安装机制](../agent-desktop/harness/docs/user/develop/basic/publish.zh.md#安装进-profile)。目标宿主须符合`engines.dsh`的`0.2.1-rc.2`，其他版本未验，不自动豁免。将交付清单与归档一起保存并核对SHA-256；选择当前实际使用的profile，不重置它，不复制宿主node_modules，也不装另一套Rental客户端。
+
+原CLI接受`dsh plugin --profile <实际名称> add <安装包绝对路径>`，卸载为`dsh plugin --profile <实际名称> remove @rental-os/harness-plugin`；这两条是原版文档提供的入口，本树尚未执行安装 / 卸载。安装可能联网取得声明依赖，预构建不等于离线安装；依赖下载及构建脚本授权须单独核对，不批量允许脚本。安装完成后按原管理器的实际结果重启 / 重载同一profile，在聊天输入`/rental status`检查命令。默认无部署地址或业务授权，只能显示未配置；实际OAuth / grant、权限 / 字段 / 持久计量未齐不能访问Rental业务。
 
 ## 验证与下一片
 

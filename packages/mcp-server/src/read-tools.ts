@@ -5,6 +5,7 @@
  */
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import type { McpServer, JsonSchemaType } from "@modelcontextprotocol/server";
+import { snapshotJson } from "./json-snapshot.js";
 
 /** Trusted internal request identity; never a model argument or returned result. */
 export interface McpReadAuthorization {
@@ -77,50 +78,38 @@ export function validateReadTools(bindings: McpReadTools): void {
   }
 }
 
+/** Capture one endpoint's approved definitions and provider method identities.
+ * Provider state remains live: a captured publication method must still observe
+ * current grants/revocation. Replacement definitions require a new endpoint.
+ */
+export function captureReadTools(bindings: McpReadTools): McpReadTools {
+  const freeze = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+  const tools = bindings.tools.map(tool => {
+    const inputSchema = structuredClone(tool.inputSchema), outputSchema = structuredClone(tool.outputSchema);
+    freeze(inputSchema); freeze(outputSchema);
+    return Object.freeze({ name: tool.name, description: tool.description, inputSchema, outputSchema, read: tool.read.bind(tool) });
+  });
+  const fixed: McpReadTools = Object.freeze({ tools: Object.freeze(tools),
+    publication: Object.freeze({ allows: bindings.publication.allows.bind(bindings.publication) }),
+    authority: Object.freeze({ withRead: bindings.authority.withRead.bind(bindings.authority) }),
+    accounting: Object.freeze({ withCall: bindings.accounting.withCall.bind(bindings.accounting) }),
+    release: Object.freeze({ project: bindings.release.project.bind(bindings.release) }),
+  });
+  validateReadTools(fixed);
+  return fixed;
+}
+
 function live(signal: AbortSignal): void {
   if (signal.aborted) throw new Error("Read unavailable");
 }
 
-/** Snapshot only ordinary JSON fields, without invoking getters or toJSON. */
-function releasedFields(value: unknown, ancestors = new Set<object>()): unknown {
-  if (value === null || typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    if ([...value].length > 2000) throw new Error("Read unavailable");
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error("Read unavailable");
-    return value;
-  }
-  if (typeof value !== "object" || ancestors.has(value)) throw new Error("Read unavailable");
-  const prototype = Object.getPrototypeOf(value);
-  const array = Array.isArray(value);
-  if (array ? prototype !== Array.prototype || value.length > 50
-    : prototype !== Object.prototype && prototype !== null) throw new Error("Read unavailable");
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const keys = Reflect.ownKeys(descriptors);
-  const fields = array ? keys.filter(key => key !== "length") : keys;
-  if (fields.some(key => typeof key !== "string") || array && fields.length !== value.length) throw new Error("Read unavailable");
-  ancestors.add(value);
-  try {
-    const snapshot: Record<string, unknown> = Object.create(null);
-    for (const key of fields) {
-      if (typeof key !== "string") throw new Error("Read unavailable");
-      const descriptor = descriptors[key];
-      if (!descriptor?.enumerable || !Object.hasOwn(descriptor, "value")) throw new Error("Read unavailable");
-      snapshot[key] = releasedFields(descriptor.value, ancestors);
-    }
-    if (!array) return snapshot;
-    return Array.from({ length: value.length }, (_, index) => {
-      if (!Object.hasOwn(snapshot, index)) throw new Error("Read unavailable");
-      return snapshot[index];
-    });
-  } finally { ancestors.delete(value); }
-}
-
 /** One JSON snapshot supplies text and structured output, never two mutable projections. */
 function releasedResult(output: Record<string, unknown>) {
-  const text = JSON.stringify(releasedFields(output));
+  const text = JSON.stringify(snapshotJson(output, { stringCharacters: 2000, arrayItems: 50 }));
   if (Buffer.byteLength(text, "utf8") > 32_000) throw new Error("Read unavailable");
   const structuredContent: unknown = JSON.parse(text);
   if (structuredContent === null || typeof structuredContent !== "object" || Array.isArray(structuredContent)) {
@@ -140,9 +129,22 @@ export async function registerReadTools(server: McpServer, bindings: McpReadTool
     live(signal);
     if (!allowed) continue;
     count++;
+    const originalInput = fromJsonSchema(tool.inputSchema);
+    // The SDK renders validation issues before our handler. Keep its original
+    // schema/converter, but never expose paths containing caller-supplied keys.
+    const inputSchema: typeof originalInput = { "~standard": {
+      ...originalInput["~standard"],
+      validate: async value => {
+        try {
+          const result = await originalInput["~standard"].validate(value);
+          if (!result.issues) return result;
+        } catch (_error: unknown) { /* Validator failures are unavailable, never valid input. */ }
+        return { issues: [{ message: "Read unavailable. Check current authorization in Rental OS." }] };
+      },
+    } };
     const outputSchema = fromJsonSchema(tool.outputSchema);
     server.registerTool(tool.name, {
-      description: tool.description, inputSchema: fromJsonSchema(tool.inputSchema), outputSchema,
+      description: tool.description, inputSchema, outputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false },
     }, async input => {
       try {

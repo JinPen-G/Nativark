@@ -8,9 +8,69 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./service": {
+      "types": "./dist/service.d.ts",
+      "import": "./dist/service.js"
+    },
+    "./persistent-oauth-authorization": {
+      "types": "./dist/persistent-oauth-authorization.d.ts",
+      "import": "./dist/persistent-oauth-authorization.js"
+    },
+    "./persistent-oauth-tokens": {
+      "types": "./dist/persistent-oauth-tokens.d.ts",
+      "import": "./dist/persistent-oauth-tokens.js"
+    },
+    "./authorization-code-binding": {
+      "types": "./dist/authorization-code-binding.d.ts",
+      "import": "./dist/authorization-code-binding.js"
+    },
+    "./authorization-server-metadata": {
+      "types": "./dist/authorization-server-metadata.d.ts",
+      "import": "./dist/authorization-server-metadata.js"
+    },
+    "./oauth-token-endpoint": {
+      "types": "./dist/oauth-token-endpoint.d.ts",
+      "import": "./dist/oauth-token-endpoint.js"
+    },
+    "./public-client-authorization-endpoint": {
+      "types": "./dist/public-client-authorization-endpoint.d.ts",
+      "import": "./dist/public-client-authorization-endpoint.js"
+    },
+    "./public-client-authorization": {
+      "types": "./dist/public-client-authorization.d.ts",
+      "import": "./dist/public-client-authorization.js"
+    },
+    "./capability-mapping": {
+      "types": "./dist/capability-mapping.d.ts",
+      "import": "./dist/capability-mapping.js"
+    },
     "./conversation-result-read": {
       "types": "./dist/conversation-result-read.d.ts",
       "import": "./dist/conversation-result-read.js"
+    },
+    "./selected-proposal-read": {
+      "types": "./dist/selected-proposal-read.d.ts",
+      "import": "./dist/selected-proposal-read.js"
+    },
+    "./quote-selection-read": {
+      "types": "./dist/quote-selection-read.d.ts",
+      "import": "./dist/quote-selection-read.js"
+    },
+    "./selected-order-result-read": {
+      "types": "./dist/selected-order-result-read.d.ts",
+      "import": "./dist/selected-order-result-read.js"
+    },
+    "./original-task-recovery-read": {
+      "types": "./dist/original-task-recovery-read.d.ts",
+      "import": "./dist/original-task-recovery-read.js"
+    },
+    "./conversation-operation-read": {
+      "types": "./dist/conversation-operation-read.d.ts",
+      "import": "./dist/conversation-operation-read.js"
+    },
+    "./conversation-list-read": {
+      "types": "./dist/conversation-list-read.d.ts",
+      "import": "./dist/conversation-list-read.js"
     }
   },
   "files": ["dist"],

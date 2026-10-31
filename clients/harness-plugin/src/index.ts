@@ -31,6 +31,7 @@ export interface Config {
   login?: LoginConfiguration;
   readTools?: string[];
   readPrompts?: string[];
+  readResources?: string[];
 }
 
 function https(value: string): string {
@@ -82,17 +83,21 @@ const ConfigFields: Schema<Config> = Schema.object({
   login: Schema.transform(LoginFields, value => Object.freeze({ ...value })),
   readTools: Schema.array(Schema.string()),
   readPrompts: Schema.array(Schema.string()),
+  readResources: Schema.array(Schema.string()),
 });
 
 /** Deployment settings are validated by the Loader; no token/header input is accepted. */
 export const Config: Schema<Config> = Schema.transform(ConfigFields, value => {
-  rejectUnknown(value, ["language", "connection", "oauth", "login", "readTools", "readPrompts"]);
+  rejectUnknown(value, ["language", "connection", "oauth", "login", "readTools", "readPrompts", "readResources"]);
   if (value.readTools && (value.readTools.length > 50 || new Set(value.readTools).size !== value.readTools.length
     || value.readTools.some(name => !/^[A-Za-z0-9_-]{1,48}$/.test(name)))) throw new Error("Invalid Rental read-tool allowlist");
   if (value.readTools?.length && !value.login?.enabled) throw new Error("Rental read tools require explicitly enabled OAuth login");
   if (value.readPrompts && (value.readPrompts.length > 50 || new Set(value.readPrompts).size !== value.readPrompts.length
     || value.readPrompts.some(name => !/^[A-Za-z0-9_-]{1,64}$/.test(name)))) throw new Error("Invalid Rental prompt allowlist");
   if (value.readPrompts?.length && !value.login?.enabled) throw new Error("Rental prompts require explicitly enabled OAuth login");
+  if (value.readResources && (value.readResources.length > 50 || new Set(value.readResources).size !== value.readResources.length
+    || value.readResources.some(name => !/^[A-Za-z0-9_-]{1,64}$/.test(name)))) throw new Error("Invalid Rental resource allowlist");
+  if (value.readResources?.length && !value.login?.enabled) throw new Error("Rental resources require explicitly enabled OAuth login");
   if (value.oauth && !value.connection) throw new Error("OAuth inspection requires MCP connection settings");
   if (value.login) {
     rejectUnknown(value.login, ["enabled", "attemptTimeoutMs", "sessionLifetimeMs", "maxAccessTtlSeconds", "callbackMode"]);
@@ -135,10 +140,10 @@ export function apply(ctx: Context, config: Config): void {
       } else if (agent && materialSessions.has(agent.session)) admitModelMaterial(options, copy.materialUnavailable);
       return next();
     });
-    if (session && config.readPrompts?.length) {
-      const consumer = new RentalMcpPrompts(inner, session, [...config.readPrompts], copy,
+    if (session && (config.readPrompts?.length || config.readResources?.length)) {
+      const consumer = new RentalMcpPrompts(inner, session, [...config.readPrompts ?? []], copy,
         agent => agent === boundScope && agent.session === boundSession,
-        selectedSession => materialSessions.add(selectedSession));
+        selectedSession => materialSessions.add(selectedSession), [...config.readResources ?? []]);
       prompts = consumer;
       inner.on("agent/disposed", ({ agent }) => {
         if (agent !== boundScope) return;
@@ -191,7 +196,8 @@ export function apply(ctx: Context, config: Config): void {
     handler(invocation) {
       const action = invocation.rawInput.trim();
       const selectedPrompt = /^prompt ([A-Za-z0-9_-]{1,64})$/.exec(action)?.[1];
-      if (!["", "status", "check", "oauth-check", "login", "disconnect", "prompts"].includes(action) && !selectedPrompt) {
+      const selectedResource = /^resource ([A-Za-z0-9_-]{1,64})$/.exec(action)?.[1];
+      if (!["", "status", "check", "oauth-check", "login", "disconnect", "prompts", "resources"].includes(action) && !selectedPrompt && !selectedResource) {
         return { kind: "error", text: copy.usage };
       }
       if (invocation.attachments.length) return { kind: "error", text: copy.usage };
@@ -203,8 +209,12 @@ export function apply(ctx: Context, config: Config): void {
           : state === "connecting" ? copy.connecting : state === "unknown" ? copy.loginUnknown
             : state === "other_session" ? copy.otherSession : state === "expired" ? copy.expired : copy.configured };
       }
+      if (action === "resources" || selectedResource) {
+        if (!prompts || !config.readResources?.length) return { kind: "error", text: copy.resourceUnavailable };
+        return prompts.executeResource(selectedResource, invocation);
+      }
       if (action === "prompts" || selectedPrompt) {
-        if (!prompts) return { kind: "error", text: copy.promptUnavailable };
+        if (!prompts || !config.readPrompts?.length) return { kind: "error", text: copy.promptUnavailable };
         return prompts.execute(selectedPrompt, invocation);
       }
       if (action === "login" || action === "disconnect"
@@ -212,6 +222,7 @@ export function apply(ctx: Context, config: Config): void {
         if (!session) return { kind: "error", text: copy.loginDisabled };
         if (action !== "disconnect" && config.readTools?.length && !tools) return { kind: "error", text: copy.toolsUnavailable };
         if (action !== "disconnect" && config.readPrompts?.length && !prompts) return { kind: "error", text: copy.promptUnavailable };
+        if (action !== "disconnect" && config.readResources?.length && !prompts) return { kind: "error", text: copy.resourceUnavailable };
         if ((tools || prompts) && boundScope && invocation.agent !== boundScope) return { kind: "error", text: copy.otherSession };
         const owner = invocation.agent;
         const originalSession = owner.session;
