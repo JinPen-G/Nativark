@@ -2,6 +2,7 @@
  * The original persistent AS owns code/PKCE verification, grant policy, refresh
  * rotation/reuse and revocation atomically. No fallback issuer or local token store. */
 import type { OAuthTokens } from "@modelcontextprotocol/server";
+import { isDeepStrictEqual } from "node:util";
 import type { PublicClientRegistrations } from "./public-client-authorization.js";
 import { snapshotJson } from "./json-snapshot.js";
 
@@ -231,7 +232,7 @@ export function createOAuthTokenEndpoint(config: OAuthTokenEndpointConfig, regis
       // registration, but leave consumption/revocation recovery with the AS.
       const current = await currentClient();
       if (!current || !current.enabled || current.expiresAt <= Date.now() / 1000
-        || JSON.stringify(current) !== JSON.stringify(row) || signal.aborted) throw new Error("unavailable");
+        || !isDeepStrictEqual(current, row) || signal.aborted) throw new Error("unavailable");
       const result = response(200);
       result.headers.set("Content-Type", "application/json");
       return new Response(text, { status: result.status, headers: result.headers });

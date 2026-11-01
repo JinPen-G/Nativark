@@ -151,7 +151,7 @@ import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { exchangeBasis } from "./rental-exchange-inspection";
 import { assertExchangePricingSegments, assertIncrementalPricingSnapshot, currentExchangePricingIds } from "./rental-exchange-pricing-source";
-import { assertOriginalTotalExtensionReceipts, restoreRentalRepricingContext } from "./rental-repricing-context";
+import { assertOriginalTotalExtensionLedger, assertOriginalTotalExtensionReceipts, restoreRentalRepricingContext } from "./rental-repricing-context";
 import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
 import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveQuoteValidityMinutes, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
@@ -6829,7 +6829,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     args: {
       order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "actualRentalStartAt" | "carrierRentalDueAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">
-        & Partial<Pick<RentalOrder, "tenantId" | "allocations" | "feeReviews" | "chargeLines">>;
+        & Partial<Pick<RentalOrder, "tenantId" | "allocations" | "feeReviews" | "chargeLines" | "payableAmount" | "adjustmentAmount" | "finalPayableAmount" | "currency">>;
       previousExtensions?: RentalOrderExtension[];
       previousChanges?: RentalOrderChange[];
       tx?: RentalBusinessFactTx;
@@ -6881,8 +6881,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (lineCancellation && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
       throw new ConflictException("本轮部分取消暂不支持已包含增值服务的订单，请先人工处理服务释放与退款");
     }
-    if (!lineCancellation && !carrierRepricing) {
-      assertOriginalTotalExtensionReceipts(tenantId, this.workspaceOf(tenantId), args.order, from, originalQuote.currency, previous, originalQuote);
+    const receiptPayableAmount = !lineCancellation && !carrierRepricing
+      ? assertOriginalTotalExtensionReceipts(tenantId, this.workspaceOf(tenantId), args.order, from, originalQuote.currency, previous, originalQuote)
+      : undefined;
+    if (receiptPayableAmount !== undefined && args.order.chargeLines !== undefined) {
+      assertOriginalTotalExtensionLedger({ id: args.order.id, tenantId: args.order.tenantId!, currency: args.order.currency,
+        chargeLines: args.order.chargeLines, payableAmount: args.order.payableAmount!,
+        adjustmentAmount: args.order.adjustmentAmount!, finalPayableAmount: args.order.finalPayableAmount! }, previous, receiptPayableAmount);
     }
     const latestExtension = previous.at(-1);
     const latestPricing = latestExtension?.pricingSnapshot;
@@ -7197,7 +7202,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 与原报价的 `discountAmount` 组成保持一致（方案 + 会员），否则
     // previousPayableAmount 与 recalculatedPayableAmount 不是同一口径，差额必然错。
     const fullDiscountAmount = roundMoney(planDiscountAmount + fullMembershipAmount);
-    const previousPayableAmount = roundMoney(originalQuote.payableAmount + previous.reduce((sum, row) => sum + row.payableAmount -
+    const previousPayableAmount = receiptPayableAmount ?? roundMoney(originalQuote.payableAmount + previous.reduce((sum, row) => sum + row.payableAmount -
       (row.pricingSnapshot?.refundReview?.status === "approved" ? row.pricingSnapshot.refundReview.amount : 0), 0));
     const recalculatedPayableAmount = roundMoney(fullRentalAmount + fullServiceAmount + originalQuote.fulfillmentAmount - fullDiscountAmount - fullCouponAmount);
     const differenceAmount = roundMoney(recalculatedPayableAmount - previousPayableAmount);
@@ -7239,6 +7244,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
       pricingSnapshot: {
         method: "original_version_difference", context: pricingContext, previousPayableAmount, recalculatedPayableAmount,
+        ...(!lineCancellation ? { balanceBasis: { version: 1 as const,
+          approvedReductionExtensionIds: previous.filter(row => row.pricingSnapshot?.refundReview?.status === "approved").map(row => row.id).sort() } } : {}),
         recalculatedRentalAmount: fullRentalAmount, recalculatedServiceAmount: fullServiceAmount,
         recalculatedDiscountAmount: fullDiscountAmount, recalculatedCouponAmount: fullCouponAmount, membershipBenefitEvaluations,
         totalBillableUnits, differenceAmount, discountEvaluations: discounts.evaluations, couponEvaluation,

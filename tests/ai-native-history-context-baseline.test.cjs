@@ -315,7 +315,13 @@ test("original-total successor rejects broken receipt amounts instead of calcula
     row => { row.pricingSnapshot.recalculatedDiscountAmount = NaN; }, row => { row.pricingSnapshot.recalculatedCouponAmount = -1; },
     row => { row.pricingSnapshot.totalBillableUnits = Infinity; }, row => { row.pricingSnapshot.chargeLines[0].amount++; },
     row => { row.pricingSnapshot.fullChargeLines[0].amount++; },
-    row => { row.pricingSnapshot.refundReview = { amount: 1, status: 'approved' }; }]) {
+    row => { row.pricingSnapshot.refundReview = { amount: 1, status: 'approved' }; },
+    row => {
+      row.pricingSnapshot.previousPayableAmount++;
+      row.pricingSnapshot.differenceAmount--;
+      row.payableAmount = Math.max(0, row.pricingSnapshot.differenceAmount);
+      row.pricingSnapshot.chargeLines.push({ code: 'counterfeit-balance', type: 'extension', amount: -1 });
+    }]) {
     const row = structuredClone(original); mutate(row);
     await assert.rejects(h.preview({ ...changes, previousExtensions: [row] }), error => error.getStatus() === 409);
   }

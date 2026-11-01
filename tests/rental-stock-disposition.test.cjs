@@ -62,6 +62,13 @@ void (async () => {
   let restored = false;
   let maintenanceDelta;
   const tx = {
+    $queryRaw: async query => {
+      if (/rental_allocations/.test(query.sql)) return [];
+      if (/rental_orders/.test(query.sql)) return [{ id: 'order_1', workspaceId: 'ws_1' }];
+      if (/rental_stock_dispositions/.test(query.sql)) return [original];
+      if (/rental_work_orders/.test(query.sql)) return [];
+      throw Error(`Unexpected SQL: ${query.sql}`);
+    },
     businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
     rentalStockDisposition: {
       findFirst: async () => restored ? { ...original, status: "restored", restoredQuantity: 2, restoredAt: new Date(), restoredBy: "运营" } : original,

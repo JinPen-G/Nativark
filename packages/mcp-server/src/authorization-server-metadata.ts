@@ -2,6 +2,7 @@
  * Original AS readiness supplies reviewed metadata. No login, token issuance,
  * registration, network listener or fallback authorization server is created. */
 import type { OAuthMetadata } from "@modelcontextprotocol/server";
+import { isDeepStrictEqual } from "node:util";
 import { snapshotJson } from "./json-snapshot.js";
 
 /** Original AS publication source; undefined means it cannot advertise readiness. */
@@ -77,7 +78,7 @@ export function createAuthorizationServerMetadata(config: AuthorizationMetadataC
     const origin = request.headers.get("origin");
     if (origin !== null && !origins.has(origin)) return response(403);
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]);
-    const current = async (): Promise<string> => {
+    const current = async (): Promise<{ row: Record<string, unknown>; text: string }> => {
       if (signal.aborted) throw new Error("Metadata unavailable");
       const originalValue: unknown = await read(signal);
       if (signal.aborted || originalValue === undefined) throw new Error("Metadata unavailable");
@@ -97,12 +98,13 @@ export function createAuthorizationServerMetadata(config: AuthorizationMetadataC
         || row.scopes_supported.some(scope => typeof scope !== "string" || !allowed.has(scope))) throw new Error("Metadata unavailable");
       const text = JSON.stringify(row);
       if (Buffer.byteLength(text, "utf8") > maxBytes) throw new Error("Metadata unavailable");
-      return text;
+      return { row, text };
     };
     const publish = async () => {
       const first = await current(), second = await current();
-      if (signal.aborted || first !== second) throw new Error("Metadata unavailable");
-      return response(200, first);
+      // Object key order does not change publication; arrays and values do.
+      if (signal.aborted || !isDeepStrictEqual(first.row, second.row)) throw new Error("Metadata unavailable");
+      return response(200, first.text);
     };
     let onAbort: () => void = () => {};
     try {

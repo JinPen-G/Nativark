@@ -1,0 +1,222 @@
+{
+  "title": "租户官网 · 视觉方向",
+  "question": "我建议采用影像画册：克制、清晰、让商品与场景成为主角。你可以确认，也可以改选或重新出一轮。",
+  "options": [
+    {
+      "id": "contact-sheet",
+      "kind": "assigned",
+      "label": "影像画册",
+      "thesis": "像翻阅一本精心编排的影像画册，选到需要的好装备。",
+      "palette": [
+        "#f9f9f6",
+        "#202422",
+        "#707b72",
+        "#e9ece6"
+      ],
+      "materials": [
+        "矿物白留白",
+        "直立精确字排",
+        "大幅影像与选品轨道"
+      ],
+      "viewport": "标题横跨上缘，主场景展开为宽幅影像，底部直接选择品类、门店和租期。",
+      "risk": "过度克制会显空，因此必须用真实商品与清晰功能充实节奏。",
+      "raised": [
+        {
+          "from": "撕贴海报",
+          "raise": "保留渐进披露的层次，不使用破纸或残缺文字。"
+        },
+        {
+          "from": "双色印刷",
+          "raise": "选中态坚定且单一，布局保持精确。"
+        },
+        {
+          "from": "层叠剪纸",
+          "raise": "只用真实的表面层次，不用装饰阴影。"
+        },
+        {
+          "from": "服装纸样",
+          "raise": "规格表与用户选择严格对齐，详情无需猜测。"
+        },
+        {
+          "from": "车站翻牌",
+          "raise": "跨页面保持字段位置，移动端按优先级重排。"
+        },
+        {
+          "from": "动态门户",
+          "raise": "空间转换连续而轻，不引入加载表演。"
+        }
+      ],
+      "html": ".impeccable/mocks/decision/contact-sheet.html",
+      "comp": ".impeccable/mocks/decision/contact-sheet.png"
+    },
+    {
+      "id": "gallery",
+      "kind": "pick",
+      "label": "设计藏品馆",
+      "thesis": "以展览般的开放空间呈现每件租赁商品。",
+      "palette": [
+        "#ffffff",
+        "#252b2b",
+        "#dde2df"
+      ],
+      "materials": [
+        "明净展厅",
+        "陈列式商品图片",
+        "中性细线"
+      ],
+      "viewport": "一幅完整场景占据主空间，品牌主张和选择入口沿展厅边缘排列。",
+      "risk": "直观、耐看，也更接近常见的精品生活方式网站。",
+      "html": ".impeccable/mocks/decision/gallery.html",
+      "comp": ".impeccable/mocks/decision/gallery.png"
+    },
+    {
+      "id": "decollage",
+      "kind": "challenger",
+      "catalogId": "design-canon-decollage-torn-billboard",
+      "label": "撕贴海报",
+      "verdict": "declined",
+      "thesis": "分层阅读能组织商品历史，但撕纸导航增加租赁理解成本。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "保留渐进披露的层次，不使用破纸或残缺文字。",
+      "palette": [
+        "#d4d2c9",
+        "#252525"
+      ],
+      "materials": [
+        "撕贴海报"
+      ],
+      "viewport": "分层阅读能组织商品历史，但撕纸导航增加租赁理解成本。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    },
+    {
+      "id": "risograph",
+      "kind": "challenger",
+      "catalogId": "posters-covers-sleeves-risograph-zine-cover",
+      "label": "双色印刷",
+      "verdict": "declined",
+      "thesis": "套色能强调当前选择，但亮色错位弱化高奢与规格可读性。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "选中态坚定且单一，布局保持精确。",
+      "palette": [
+        "#f04884",
+        "#2359aa",
+        "#f6f2ea"
+      ],
+      "materials": [
+        "双色印刷"
+      ],
+      "viewport": "套色能强调当前选择，但亮色错位弱化高奢与规格可读性。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    },
+    {
+      "id": "papercut",
+      "kind": "challenger",
+      "catalogId": "craft-making-lowicz-layered-papercut",
+      "label": "层叠剪纸",
+      "verdict": "declined",
+      "thesis": "叠层可以表达类别，但对称装饰抢占商品和预约入口。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "只用真实的表面层次，不用装饰阴影。",
+      "palette": [
+        "#df253b",
+        "#006747",
+        "#f9f2df"
+      ],
+      "materials": [
+        "层叠剪纸"
+      ],
+      "viewport": "叠层可以表达类别，但对称装饰抢占商品和预约入口。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    },
+    {
+      "id": "pattern",
+      "kind": "challenger",
+      "catalogId": "fashion-folded-worlds-sewing-pattern-envelope",
+      "label": "服装纸样",
+      "verdict": "declined",
+      "thesis": "视图和参数可以承载选品，但纸样编号及裁剪交互与租赁无关。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "规格表与用户选择严格对齐，详情无需猜测。",
+      "palette": [
+        "#e5d6b8",
+        "#302b26",
+        "#a43229"
+      ],
+      "materials": [
+        "服装纸样"
+      ],
+      "viewport": "视图和参数可以承载选品，但纸样编号及裁剪交互与租赁无关。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    },
+    {
+      "id": "splitflap",
+      "kind": "challenger",
+      "catalogId": "signals-instruments-split-flap-concourse",
+      "label": "车站翻牌",
+      "verdict": "declined",
+      "thesis": "时间列可承载租期，但字符翻牌打断浏览且无法突出真实商品。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "跨页面保持字段位置，移动端按优先级重排。",
+      "palette": [
+        "#161616",
+        "#fafafa",
+        "#c99747"
+      ],
+      "materials": [
+        "车站翻牌"
+      ],
+      "viewport": "时间列可承载租期，但字符翻牌打断浏览且无法突出真实商品。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    },
+    {
+      "id": "shader",
+      "kind": "challenger",
+      "catalogId": "webgl-shader-portal",
+      "label": "动态门户",
+      "verdict": "declined",
+      "thesis": "全屏氛围能引导探索，但渲染、加载与自定义指针降低预约效率。",
+      "case": "对租赁用户的认同与产品清晰度，均不及画册方向。",
+      "kept": "空间转换连续而轻，不引入加载表演。",
+      "palette": [
+        "#122125",
+        "#7eada3",
+        "#fcfcfa"
+      ],
+      "materials": [
+        "动态门户"
+      ],
+      "viewport": "全屏氛围能引导探索，但渲染、加载与自定义指针降低预约效率。",
+      "risk": "会让视觉比真实租赁任务更抢眼。"
+    }
+  ],
+  "reroll": {
+    "registers": [
+      "safer",
+      "bolder"
+    ]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": true
+  },
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "经典租赁商城",
+    "thesis": "按消费者熟悉的商城路径，直接浏览并预约。",
+    "palette": [
+      "#ffffff",
+      "#222222",
+      "#667c72"
+    ],
+    "materials": [
+      "规则网格",
+      "商品与类别卡片"
+    ],
+    "viewport": "标题与场景并列，下方接品类网格和搜索入口。",
+    "risk": "容易使用，但视觉辨识度更低。",
+    "html": ".impeccable/mocks/decision/canon.html",
+    "comp": ".impeccable/mocks/decision/canon.png"
+  },
+  "steer": true
+}

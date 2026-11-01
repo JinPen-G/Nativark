@@ -6200,6 +6200,9 @@ export interface RentalExtensionPricingSnapshot {
   scope?: "order" | "exchange_line";
   context: RentalRepricingContext;
   previousPayableAmount: number;
+  /** 原价整单续租实际消费的已批准核减来源，准备时冻结、锁内受理/生效复核。
+   * 缺省是旧收据，不得用审核/准备墙钟推断因果或补写历史来源。 */
+  balanceBasis?: { version: 1; approvedReductionExtensionIds: string[] };
   recalculatedPayableAmount: number;
   recalculatedRentalAmount: number;
   recalculatedServiceAmount: number;

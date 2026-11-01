@@ -41,7 +41,7 @@ Host的MCP客户端
 | [桌面业务应用](../../apps/api/src/modules/ai-native/desktop-business/desktop-business.application.ts) | 最少投影 / 当前政策 / 审计经验；原`human_preview / not_sent`和Web身份不能直接输出为MCP |
 | [原订单回读](../../apps/api/src/modules/ai-native/scenes/original-order-read.controller.ts)、[人类报价选择](../../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller.ts) | 精确原引用和可信选择路径；部分方法有推进 / 接管效果，不能按名称视为只读 |
 | [Harness MCP客户端](../../clients/agent-desktop/harness/packages/mcp/mcp-client/README.md)、[运输工厂](../../clients/agent-desktop/harness/packages/mcp/mcp-client/src/transport.ts) | 已有Tools / instructions / HTTP接点；当前所读运输仅传配置headers，不能宣称OAuth、安全refresh已接通；SDK重试和超时须核对 |
-| [原v0.3研究](../Agent接入改造/MCP服务-接入方案.md) | 协议代次、拟议工具名、scope与官方资料，仅研究输入；现行需求和安排由本专项两册决定 |
+| [原v0.3研究](../Agent接入改造/历史归档/四册整理/2026-10-31/MCP服务-接入方案.md) | 协议代次、拟议工具名、scope与官方资料，仅研究输入；现行需求和安排由本专项两册决定 |
 
 ### 2.3 固定公共交付
 
@@ -108,6 +108,6 @@ MCP-10记录Harness原生直连和需要插件补齐的差异；原生OAuth / �
 
 ## 6. 文档与保留
 
-本册和需求是当前MCP依据；[原v0.3方案](../Agent接入改造/MCP服务-接入方案.md)保留原研究正文及当时命令 / 协议说明，实施前重核官方资料，不按旧建议表另开队列。插件只维护Host消费者，原AI Native / AGC不改范围或百分比。
+本册和需求是当前MCP依据；[原v0.3方案](../Agent接入改造/历史归档/四册整理/2026-10-31/MCP服务-接入方案.md)保留原研究正文及当时命令 / 协议说明，实施前重核官方资料，不按旧建议表另开队列。插件只维护Host消费者，原AI Native / AGC不改范围或百分比。
 
 验证前读根package及脚本，离线Node沿本树既有preload、固定无效DATABASE_URL与绝对audit / TEMP / cache，不覆盖共享client / dist。仅文档变更检查链接 / 编号 / 依赖 / 保全，不安装依赖、启服务、连接真实HTTP / DB / 模型或运行迁移；提交、推送、合main和生产启用仍另需授权。

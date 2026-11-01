@@ -71,6 +71,10 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
   }
 
   async readUploadContentHash(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
+    return (await this.readUploadContent(tenantId, fileAssetId, owner)).contentHash;
+  }
+
+  async readUploadContent(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
     const boundOwner = structuredClone(owner);
     return this.session.run(async context => {
       const target = this.owner(context, tenantId, boundOwner);
@@ -87,7 +91,7 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
         documentId: target.documentId, fileAssetId }, 262144);
       if (!/^[a-f0-9]{64}$/u.test(result.contentHash) || fingerprint(asset) !== fingerprint(await load())) return unavailable();
       await this.authorizeUpload(tenantId, input, boundOwner);
-      return result.contentHash;
+      return { bytes: Uint8Array.from(result.bytes), contentHash: result.contentHash };
     });
   }
 

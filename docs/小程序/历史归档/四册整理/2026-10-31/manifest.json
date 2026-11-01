@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/小程序/客户小程序-需求.md",
+      "file": "docs/小程序/历史归档/四册整理/2026-10-31/客户小程序-需求.md",
+      "bytes": 99833,
+      "sha256": "38aa795cbed6f0d0551f1b99a3841bc1e62c72737550b2906d6d2ca88ed59796"
+    },
+    {
+      "source": "docs/小程序/员工小程序-需求.md",
+      "file": "docs/小程序/历史归档/四册整理/2026-10-31/员工小程序-需求.md",
+      "bytes": 48999,
+      "sha256": "aaac8ff3ce76105a5339b6e3daabcba5ca3140f8ca16955257799731997e895c"
+    },
+    {
+      "source": "docs/小程序/客户与员工小程序-开发任务.md",
+      "file": "docs/小程序/历史归档/四册整理/2026-10-31/客户与员工小程序-开发任务.md",
+      "bytes": 10197,
+      "sha256": "026c075639f27a2b473c8939b0773cc6e171cbc9813a3b3649a5a4cacd456793"
+    },
+    {
+      "source": "docs/小程序/小程序-开发记录.md",
+      "file": "docs/小程序/历史归档/四册整理/2026-10-31/小程序-开发记录.md",
+      "bytes": 12552,
+      "sha256": "867f13a8848113627fe4a981829bb822a9c58611b4c18c951921de99e836f560"
+    }
+  ]
+}

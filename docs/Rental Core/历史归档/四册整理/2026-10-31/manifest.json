@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/Rental Core/README.md",
+      "file": "docs/Rental Core/历史归档/四册整理/2026-10-31/README.md",
+      "bytes": 1807,
+      "sha256": "7cce0f8deba37c32a98c96d2ebbc0905482d4dea3cce0ace17a4a6383597c67b"
+    },
+    {
+      "source": "docs/Rental Core/Rental Core-开发任务.md",
+      "file": "docs/Rental Core/历史归档/四册整理/2026-10-31/Rental Core-开发任务.md",
+      "bytes": 6961,
+      "sha256": "a8e1039253fdda9ba6c9539701150c60ec903385f54cb42de35983d9b5819205"
+    }
+  ]
+}

@@ -10,5 +10,8 @@ export interface KnowledgeFileAccess {
   /** Original pending-upload bytes only; current upload authority is mandatory.
    * The original completion transaction persists the digest before activation. */
   readUploadContentHash?(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<string>;
+  /** Same original upload authority, exposing bounded bytes only internally to
+   * the storage completion path so it can freeze an independent object. */
+  readUploadContent?(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<{ bytes: Uint8Array; contentHash: string }>;
   read(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal?: AbortSignal): Promise<{ mediaType: string; bytes: Uint8Array }>;
 }

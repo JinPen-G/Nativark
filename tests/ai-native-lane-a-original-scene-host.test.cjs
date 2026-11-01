@@ -228,6 +228,9 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
   h.b.businessFacts.findQuote = async (_tenant, id) => _tenant === tenantId && id === quote.id ? structuredClone(quote) : undefined;
   const row = require('./fixtures/ai-native/authorization-baseline.cjs').order({ tenantId, status: 'renting', startAt, endAt,
     quoteId: quote.id, ruleSnapshot: quote.ruleSnapshot, customerType: 'personal', fulfillmentMode: 'store_pickup_return',
+    rentalAmount: quote.rentalAmount, serviceAmount: quote.serviceAmount, fulfillmentAmount: quote.fulfillmentAmount,
+    discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, payableAmount: quote.payableAmount,
+    finalPayableAmount: quote.payableAmount, adjustmentAmount: 0, chargeLines: structuredClone(quote.chargeLines),
     fulfillmentLocationId: location.id, lines: quote.request.lines.map((line, i) => ({ ...line, id: `line-${i}`, inventoryMode: group.inventoryMode,
       itemGroupName: group.name, amount: quote.rentalAmount })),
     reservations: [{ id: 'reservation-a', orderId: 'order-a', itemGroupId: group.id, locationId: location.id,

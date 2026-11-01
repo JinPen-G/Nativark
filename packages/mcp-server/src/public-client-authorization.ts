@@ -2,6 +2,7 @@
  * This is not an OAuth AS: original login, consent, grant storage and atomic code
  * issuance remain the AS owner's responsibility. No redirect or token is issued. */
 import { OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
+import { isDeepStrictEqual } from "node:util";
 import { snapshotJson } from "./json-snapshot.js";
 
 /** Current public client metadata from the original persistent registration owner. */
@@ -136,7 +137,9 @@ export function createPublicClientAuthorization(config: PublicClientAuthorizatio
     const validate = async () => {
       const first = await current();
       const second = await current();
-      if (abort.aborted || JSON.stringify(first) !== JSON.stringify(second)) throw unavailable();
+      // Persistent object key order is not a registration change. Array order,
+      // extra facts and every value still participate in this exact comparison.
+      if (abort.aborted || !isDeepStrictEqual(first, second)) throw unavailable();
       return Object.freeze({ ...command, clientRevision: first.revision });
     };
     let onAbort: () => void = () => {};

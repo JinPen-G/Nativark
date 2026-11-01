@@ -1,0 +1,5 @@
+# Preserve byte-exact originals recorded in manifest.json.
+"客户小程序-需求.md" -text
+"员工小程序-需求.md" -text
+"客户与员工小程序-开发任务.md" -text
+"小程序-开发记录.md" -text

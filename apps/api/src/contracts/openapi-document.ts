@@ -222,6 +222,36 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_CREDIT_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  RentalExtensionBalanceBasis: objectOf({ version: { type: "integer", enum: [1] },
+    approvedReductionExtensionIds: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } },
+    ["version", "approvedReductionExtensionIds"], false),
+  RentalExtensionPricingSnapshot: objectOf({ method: { type: "string", enum: ["original_version_difference"] },
+    scope: { type: "string", enum: ["order", "exchange_line"] }, context: objectSchema,
+    balanceBasis: { ...ref("RentalExtensionBalanceBasis"), description: "Frozen approved reduction sources actually consumed; absent on legacy receipts. Never infer or backfill from wall-clock timestamps." },
+    previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema,
+    recalculatedRentalAmount: numberSchema, recalculatedServiceAmount: numberSchema,
+    recalculatedDiscountAmount: numberSchema, recalculatedCouponAmount: numberSchema, totalBillableUnits: numberSchema,
+    differenceAmount: numberSchema, fullChargeLines: arrayOf(objectSchema), chargeLines: arrayOf(objectSchema),
+    discountEvaluations: arrayOf(objectSchema), couponEvaluation: objectSchema, membershipBenefitEvaluations: arrayOf(objectSchema),
+    refundReview: objectOf({ amount: numberSchema, status: { type: "string", enum: ["pending", "approved", "rejected", "superseded"] },
+      reason: stringSchema, reviewedBy: stringSchema, reviewedAt: { type: "string", format: "date-time" } }, ["amount", "status"]) }),
+  RentalOrderExtensionRecord: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+    sequence: { type: "integer", minimum: 1 }, status: { type: "string", enum: ["pending_payment", "effective", "cancelled", "expired"] },
+    originalEndAt: stringSchema, newEndAt: stringSchema, billableUnits: numberSchema, rentalAmount: numberSchema,
+    serviceAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema, payableAmount: numberSchema,
+    currency: stringSchema, settlementMode: { type: "string", enum: ["immediate", "monthly"] }, executionBasis: objectSchema,
+    pricingSnapshot: ref("RentalExtensionPricingSnapshot"), rateSnapshot: arrayOf(objectSchema), ruleSnapshot: objectSchema,
+    calendarSnapshot: arrayOf(objectSchema), serviceSnapshots: arrayOf(objectSchema), priceVersionId: stringSchema, priceVersion: stringSchema,
+    ruleVersion: stringSchema, memo: stringSchema, createdBy: stringSchema, createdAt: stringSchema, paidAt: stringSchema,
+    effectiveAt: stringSchema, idempotencyKey: stringSchema }),
+  RentalOrderExtensionPreview: objectOf({ orderId: stringSchema, originalEndAt: stringSchema, newEndAt: stringSchema,
+    billableUnits: numberSchema, rentalAmount: numberSchema, serviceAmount: numberSchema, depositDelta: numberSchema,
+    preAuthDelta: numberSchema, payableAmount: numberSchema, currency: stringSchema,
+    settlementMode: { type: "string", enum: ["immediate", "monthly"] }, paymentRequired: booleanSchema,
+    executionBasis: objectSchema, pricingSnapshot: ref("RentalExtensionPricingSnapshot"), chargeLines: arrayOf(objectSchema),
+    calendarSnapshot: arrayOf(objectSchema), serviceSnapshots: arrayOf(objectSchema), priceVersionId: stringSchema,
+    priceVersion: stringSchema, ruleVersion: stringSchema }),
+  RentalOrderExtensionResult: objectOf({ order: objectSchema, extension: ref("RentalOrderExtensionRecord") }, ["order", "extension"]),
   RentalExchangePricingSegment: objectOf({ orderLineId: stringSchema, itemGroupId: stringSchema, pricingGroupId: stringSchema,
     quantity: { type: "integer", minimum: 1 }, startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
     source: objectOf({ kind: { type: "string", enum: ["quote", "extension", "price_version"] }, id: stringSchema,
@@ -1845,8 +1875,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["newEndAt"]
   ),
-  ClientExtensionList: arrayOf(objectSchema),
-  ClientExtensionPreview: objectSchema,
+  ClientExtensionList: arrayOf("RentalOrderExtensionRecord"),
+  ClientExtensionPreview: ref("RentalOrderExtensionPreview"),
   ClientCancelOrderRequest: objectOf({ reason: stringSchema }, ["reason"]),
   ClientFunding: arrayOf(objectSchema),
   ClientPaymentSimulationRequest: objectOf(
@@ -3592,7 +3622,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "listRentalOrderExtensions",
-    summary: "List order extension records", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "List order extension records", permissions: ["rental-os:order:view"], responseSchema: arrayOf("RentalOrderExtensionRecord")
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/changes", tag: "RentalCore", operationId: "listRentalOrderChanges",
@@ -3616,15 +3646,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
-    summary: "Quote an order extension without persisting", permissions: ["rental-os:order:extend", "rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Quote an order extension without persisting", permissions: ["rental-os:order:extend", "rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalOrderExtensionPreview"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "requestRentalOrderExtension",
-    summary: "Apply for an order extension", permissions: ["rental-os:order:extend", "rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Apply for an order extension", permissions: ["rental-os:order:extend", "rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalOrderExtensionResult"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/pay", tag: "RentalCore", operationId: "payRentalOrderExtension",
-    summary: "Confirm extension payment and extend the rental period", permissions: ["rental-os:order:extend", "rental-os:order:operate"], responseSchema: "GenericObject"
+    summary: "Confirm extension payment and extend the rental period", permissions: ["rental-os:order:extend", "rental-os:order:operate"], responseSchema: "RentalOrderExtensionResult"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/fee-reviews/{reviewId}/review", tag: "RentalCore", operationId: "reviewRentalOrderFeeReview",
@@ -3632,7 +3662,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
-    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "RentalOrderExtensionResult"
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",

@@ -72,7 +72,8 @@ export class TenantKnowledgeObjectReader {
       }
       const config = structuredClone(await wait(this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible')));
       if (!config) throw unavailable();
-      const request = s3ObjectReadRequest(config, asset.storageKey, this.clock());
+      const objectKey = upload && metadata.fileUploadVersion === 2 ? `${asset.storageKey}.pending-upload` : asset.storageKey;
+      const request = s3ObjectReadRequest(config, objectKey, this.clock());
       const url = await wait(this.egress(request.url, '知识正文对象地址', { allowQuery: false }));
       if (control.signal.aborted) throw unavailable();
       if (!this.transport) throw unavailable();

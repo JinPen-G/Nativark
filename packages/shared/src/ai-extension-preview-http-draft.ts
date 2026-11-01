@@ -182,6 +182,7 @@ export const AI_EXTENSION_PREVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiExtensionPricingSnapshotDraft: shape<RentalExtensionPricingSnapshot>({ method: choice('original_version_difference'), scope: choice('order', 'exchange_line'), fullChargeLines: list(ref('AiExtensionChargeLineDraft'), 131072),
     context: object({ dayRates: list(ref('AiExtensionPricingRateDraft'), 131072), timeZone: string, legacyDayTypeMultipliers: boolean,
       calendars: list(ref('AiExtensionCalendarYearDraft'), 131072) }, ['timeZone', 'legacyDayTypeMultipliers', 'calendars']),
+    balanceBasis: object({ version: { type: 'integer', enum: [1] }, approvedReductionExtensionIds: { ...list(text(131072), 131072), uniqueItems: true } }),
     previousPayableAmount: number, recalculatedPayableAmount: number, recalculatedRentalAmount: number, recalculatedServiceAmount: number,
     recalculatedDiscountAmount: number, membershipBenefitEvaluations: list(ref('AiExtensionMembershipBenefitDraft'), 131072),
     recalculatedCouponAmount: number, totalBillableUnits: number, differenceAmount: number,

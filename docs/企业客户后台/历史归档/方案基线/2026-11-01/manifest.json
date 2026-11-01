@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-01",
+  "note": "Original bytes before confirmed guarantee and employee-submit clarification. Resolve historical relative links from source.",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "file": "docs/企业客户后台/历史归档/方案基线/2026-11-01/企业客户后台-需求.md",
+      "bytes": 30881,
+      "sha256": "d8c40df9c5e71fd456cb6804989a9ed51d11464994c00cd1375c9ba27d5582a2"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "file": "docs/企业客户后台/历史归档/方案基线/2026-11-01/企业客户后台-开发任务.md",
+      "bytes": 10519,
+      "sha256": "bd64a53c7be9fdf7357b23e66205ff1139933893904785e463d0a5298f9589f1"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "file": "docs/企业客户后台/历史归档/方案基线/2026-11-01/企业客户后台-开发记录.md",
+      "bytes": 8007,
+      "sha256": "23718c75a9c7085b062f5fde85ddab57440958695db15a0e986f25e3c3d22142"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "file": "docs/企业客户后台/历史归档/方案基线/2026-11-01/企业客户后台-协作接续.md",
+      "bytes": 3286,
+      "sha256": "c6be4bebc647efa5faa9148e675b489fe6719db7f89cadf1738f017d825c53c6"
+    }
+  ]
+}

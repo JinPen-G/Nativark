@@ -133,5 +133,20 @@ void (async () => {
   assert.equal(inspectionRow.exceptions[0].waiverCustomerChargeCeiling, 30, "复核不能覆盖首次保障上限");
   ok("旧免赔不能直接加收，新裁定上限贯穿控制器和费用内核");
 
+  {
+    const legacy = { id: 'legacy-half-cent', status: RentalCoreOrderStatus.Settling, payableAmount: 100,
+      adjustmentAmount: 0.02, finalPayableAmount: 100.02, ruleVersion: 'original', ruleSnapshot: { damage: {} },
+      chargeLines: [0, 1].map(index => ({ code: `damage:legacy-half-cent:inspection:${index}`, type: 'damage', amount: 0.005 })) };
+    const original = structuredClone(legacy.chargeLines), review = Object.create(RentalCoreService.prototype);
+    review.lockedOrder = async () => legacy; review.factStore = { saveOrderAggregate: async () => {} };
+    const result = await review.adjustInspectionExceptionCharge('tenant', legacy.id, 'inspection', 0,
+      0.005, 0.03, 0.015, '按分复核原异常费用', '审核员', 1, {});
+    assert.equal(result.previousAmount, 0.01); assert.equal(result.approvedChargeAmount, 0.02);
+    assert.equal(legacy.finalPayableAmount, 100.03);
+    assert.deepEqual(legacy.chargeLines.slice(0, 2), original, '不覆盖存量原始精度费用');
+    assert.deepEqual(legacy.chargeLines.slice(2).map(line => line.amount), [-0.01, 0.02]);
+    ok('存量半分原费用按逐行口径冲销，新裁定与入账同值且保留历史');
+  }
+
   console.log(`\n检查异常费用复核专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

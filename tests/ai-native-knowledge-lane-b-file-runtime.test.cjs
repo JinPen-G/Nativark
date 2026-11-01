@@ -176,11 +176,17 @@ test('memory management request uses persisted human consent and fails closed wi
 });
 
 async function completed(f, t) {
-  const old = FileStorageRuntimeService.prototype.objectExists;
-  FileStorageRuntimeService.prototype.objectExists = async function (_config, key, mime, size) {
-    assert.ok([...f.db.state.assets.values()].some(row => row.storageKey === key)); assert.equal(mime, 'text/plain'); assert.equal(size, f.text.length); return true;
+  const old = FileStorageRuntimeService.prototype.objectRequest;
+  FileStorageRuntimeService.prototype.objectRequest = async function (url, init) {
+    const key = decodeURIComponent(new URL(url).pathname).replace(/^\//, '');
+    if (init.method === 'PUT') {
+      assert.ok(key.includes('.committed/')); assert.deepEqual(Buffer.from(init.body), f.text);
+      return new Response(null, { status: 200 });
+    }
+    assert.ok(key.includes('.committed/'));
+    return new Response(Buffer.from(f.state.body), { headers: { 'content-type': 'text/plain', 'content-length': String(f.text.length) } });
   };
-  t.after(() => { FileStorageRuntimeService.prototype.objectExists = old; });
+  t.after(() => { FileStorageRuntimeService.prototype.objectRequest = old; });
   f.allowUpload();
   const upload = await f.api.uploads.begin(f.input);
   return { upload, bound: await f.api.uploads.complete({ documentId: 'doc-1', sessionId: upload.sessionId }) };
@@ -415,8 +421,14 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
   head.revision++; head.state.revision++; head.state.document.aclRevision++;
   await assert.rejects(f.api.uploads.completeRevision(completion), { code: 'unavailable' });
   f.db.state.documents.set('doc-1', original);
-  f.db.responseError = new Error('revision upload completed but reply lost');
-  await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/); f.db.responseError = null;
+  const completionTransaction = f.db.$transaction;
+  f.db.$transaction = async work => {
+    const result = await completionTransaction(work);
+    if (result?.status === 'active') throw Error('revision upload completed but reply lost');
+    return result;
+  };
+  await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/);
+  f.db.$transaction = completionTransaction;
   const transaction = f.db.$transaction, objectExists = FileStorageRuntimeService.prototype.objectExists;
   f.db.$transaction = async () => { throw Error('observation must not write'); };
   FileStorageRuntimeService.prototype.objectExists = async () => { throw Error('observation must not access storage'); };

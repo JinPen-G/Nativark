@@ -31,6 +31,13 @@ function fakeTx() {
     workOrderUpdates,
     logs,
     businessWorkspace: { findFirst: async () => ({ id: "workspace_1" }) },
+    $queryRaw: async query => {
+      if (/rental_allocations/.test(query.sql)) return [];
+      if (/rental_orders/.test(query.sql)) return [{ id: 'order_1', workspaceId: 'workspace_1' }];
+      if (/rental_stock_dispositions/.test(query.sql)) return [{ id: 'disp_1', status: 'blocked' }];
+      if (/rental_work_orders/.test(query.sql)) return [{ ...state }];
+      throw Error(`Unexpected SQL: ${query.sql}`);
+    },
     rentalWorkOrder: {
       findFirst: async () => ({ ...state }),
       updateMany: async ({ data }) => { Object.assign(state, data); workOrderUpdates.push(data); return { count: 1 }; },
@@ -83,6 +90,21 @@ void (async () => {
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelledTx.dispositionUpdates[0].data.status, "blocked");
   ok("取消工单保留异常阻断，不会释放资源");
+
+  const staleTx = fakeTx();
+  staleTx.rentalWorkOrder.findFirst = async () => ({ ...row() });
+  staleTx.state.status = 'completed';
+  await assert.rejects(repo.transitionWorkOrder('tenant_1', 'work_1', 'start', 'operator', {}, staleTx), /只有待处理/);
+  assert.equal(staleTx.workOrderUpdates.length, 0); assert.equal(staleTx.logs.length, 0);
+  ok('锁后当前工单已完成时拒绝旧待处理快照，不推进或写审计');
+
+  const endedTx = fakeTx();
+  const originalQuery = endedTx.$queryRaw;
+  endedTx.$queryRaw = async query => /rental_stock_dispositions/.test(query.sql)
+    ? [{ id: 'disp_1', status: 'restored' }] : originalQuery(query);
+  await assert.rejects(repo.transitionWorkOrder('tenant_1', 'work_1', 'cancel', 'operator', { reason: 'stale' }, endedTx), /原库存处置已结束/);
+  assert.equal(endedTx.dispositionUpdates.length, 0); assert.equal(endedTx.workOrderUpdates.length, 0);
+  ok('处置已恢复后不能通过旧工单取消重新打开隔离');
 
   console.log(`\n养护工单专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

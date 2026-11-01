@@ -116,6 +116,7 @@ import { hasOriginalRentalCurrency, roundMoney } from "./rental-money";
 import { assertExchangePricingSegments, assertIncrementalPricingSnapshot, currentExchangePricingIds } from "./rental-exchange-pricing-source";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
+import { assertCurrentExtensionReductionBasis, assertOriginalTotalExtensionLedger } from "./rental-repricing-context";
 import { effectiveExtensionRule, effectiveNoShowRule, effectiveUnpaidHoldRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, rentalOrderDueAt, shiftedCarrierDueAt } from "./rental-carrier-shipment";
@@ -3145,14 +3146,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       || !Number.isFinite(order.adjustmentAmount + line.amount) || !Number.isFinite(order.payableAmount + order.adjustmentAmount + line.amount)) {
       throw new BadRequestException("费用及订单金额必须为有限数字，不能写入无效账目");
     }
-    if (line.amount === 0 || order.chargeLines.some((row) => row.code === line.code)) return false;
-    const nextAdjustment = roundMoney(order.adjustmentAmount + line.amount);
+    // 与报价一致：先舍入每条明细，再汇总；不能累计舍入却保存原始半分金额。
+    const amount = roundMoney(line.amount);
+    if (amount === 0 || order.chargeLines.some((row) => row.code === line.code)) return false;
+    const nextAdjustment = roundMoney(order.adjustmentAmount + amount);
     const nextPayable = roundMoney(order.payableAmount + nextAdjustment);
     const nextTax = inclusiveTaxAmount(nextPayable, order.taxRate ?? 0);
     if (![nextAdjustment, nextPayable, nextTax].every(Number.isFinite)) {
       throw new BadRequestException("费用重算超出有效金额范围，不能写入无效账目");
     }
-    order.chargeLines.push(line);
+    order.chargeLines.push({ ...line, amount });
     order.adjustmentAmount = nextAdjustment;
     order.finalPayableAmount = nextPayable;
     order.totalAmount = order.finalPayableAmount;
@@ -4115,6 +4118,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!snapshot) return; // 旧版待补款记录仍按已经确认的原快照生效。
     const expected = roundMoney(order.payableAmount + rows.filter((row) => row.status === "effective").reduce((sum, row) => sum + row.payableAmount -
       (row.pricingSnapshot?.refundReview?.status === "approved" ? row.pricingSnapshot.refundReview.amount : 0), 0));
+    assertOriginalTotalExtensionLedger(order, rows, expected);
+    assertCurrentExtensionReductionBasis(snapshot, rows);
     if (expected !== snapshot.previousPayableAmount) throw new ConflictException("已计金额或退款审核状态已变化，请重新试算续租差额");
   }
 
@@ -4127,6 +4132,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const snapshot = extension?.pricingSnapshot;
     const review = snapshot?.refundReview;
     if (!extension || extension.status !== "effective" || !snapshot || review?.status !== "pending") throw new ConflictException("该续租没有待审核退款，或已被后续续租替代");
+    if (input.decision === "approved") {
+      this.assertExtensionPriceBase(order, rows, snapshot);
+      if (review.amount > order.finalPayableAmount) throw new ConflictException("原续租核减超过当前应收，须核对已有核减");
+    }
     const at = now();
     if (input.decision === "approved") this.applyChargeTo(order, {
       code: `extension:${extension.sequence}:refund`, name: "续租重算差额核减（实际退款另办）", type: "early_return_refund",
@@ -4775,8 +4784,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (amount > 0 && waiverReview?.waiverDecision === "covered" && !waiver) {
       throw new ConflictException("没有覆盖该事故时点及异常商品的免赔快照，请核对异常关联资源和条款");
     }
-    const coveredAmount = selected?.customerAmount ?? amount;
-    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + line.amount, 0);
+    const coveredAmount = roundMoney(selected?.customerAmount ?? amount);
+    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + roundMoney(line.amount), 0);
     const limit = order.ruleSnapshot.damage.chargeLimit;
     if (limit !== undefined && existingDamage + coveredAmount > limit) throw new ConflictException(`异常费用超过订单规则上限 ${limit}`);
     if (coveredAmount > 0) {
@@ -4823,6 +4832,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以复核异常费用");
     if (!Number.isFinite(previousAmount) || previousAmount <= 0) throw new ConflictException("当前异常费用没有可复核的正数裁定");
     if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("复核后的异常费用必须是非负数字");
+    previousAmount = roundMoney(previousAmount);
+    amount = roundMoney(amount);
+    if (previousAmount <= 0) throw new ConflictException("当前异常费用没有可复核的正数入账");
     if (!reason.trim()) throw new BadRequestException("金额复核必须填写原因");
     if (Math.abs(amount - previousAmount) <= 0.005) throw new ConflictException("复核后的金额没有变化");
     if (waiverCustomerChargeCeiling !== undefined && (!Number.isFinite(waiverCustomerChargeCeiling)
@@ -4837,11 +4849,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!sourceLines.length) {
       throw new ConflictException("原异常费用行不存在，不能复核金额");
     }
-    const sourceNet = roundMoney(sourceLines.reduce((sum, line) => sum + line.amount, 0));
+    const sourceNet = roundMoney(sourceLines.reduce((sum, line) => sum + roundMoney(line.amount), 0));
     if (!Number.isFinite(sourceNet) || Math.abs(sourceNet - previousAmount) > 0.005) {
       throw new ConflictException("检查裁定金额与订单费用净额不一致，须先核对账目，不能重复冲销");
     }
-    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + line.amount, 0);
+    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + roundMoney(line.amount), 0);
     const nextDamage = roundMoney(existingDamage - previousAmount + amount);
     const limit = order.ruleSnapshot.damage.chargeLimit;
     if (limit !== undefined && nextDamage > limit + 0.005) throw new ConflictException(`复核后的异常费用超过订单规则上限 ${limit}`);

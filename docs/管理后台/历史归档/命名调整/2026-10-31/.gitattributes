@@ -1,0 +1,5 @@
+# Preserve original bytes, including line endings.
+"租赁平台-需求.md" -text
+"租赁平台-开发任务.md" -text
+"租赁平台-开发记录.md" -text
+"租赁平台-协作接续.md" -text

@@ -16,7 +16,14 @@ const assets = new Map();
 const histories = [];
 
 const fakeClient = {
-  $queryRaw: async () => [{ categoryCode: "VEHICLE", categoryVersionId: "vehicle_v1", categoryAdoptionRevision: 0, status: "ACTIVE" }],
+  $queryRaw: async query => {
+    if (/rental_assets/.test(query.sql)) {
+      const row = assets.get(query.values[0]);
+      return row ? [{ ...row, status: row.status.toLowerCase() }] : [];
+    }
+    if (/rental_stock_dispositions|rental_work_orders/.test(query.sql)) return [];
+    return [{ categoryCode: "VEHICLE", categoryVersionId: "vehicle_v1", categoryAdoptionRevision: 0, status: "ACTIVE" }];
+  },
   rentalCategoryVersion: { findUnique: async () => ({ categoryCode: "VEHICLE", structureVersion: 1, status: "published", definition }) },
   businessWorkspace: { findFirst: async () => ({ id: workspaceId }) },
   rentalAttributeUniqueValue: {
@@ -104,5 +111,11 @@ const asset = {
   await assert.rejects(() => facts.listAssetStatusHistory("other_tenant", asset.id), /资产不存在或不属于当前经营空间/u);
   console.log("  PASS 查询按租户和经营空间隔离");
 
-  console.log("\n序列化资产状态历史专项：4 项全部通过");
+  await facts.upsertAsset({ ...asset, status: "inspection" }, [], { reason: "人工独立待检", operator: "管理员" });
+  await facts.upsertAsset({ ...asset, status: "inspection" }, [], { reason: "重新确认人工待检", operator: "管理员" });
+  assert.equal(histories.at(-1).source, 'manual'); assert.equal(histories.at(-1).fromStatus, 'INSPECTION');
+  assert.equal(histories.at(-1).toStatus, 'INSPECTION');
+  console.log("  PASS 相同待检状态仍保留独立人工限制来源");
+
+  console.log("\n序列化资产状态历史专项：5 项全部通过");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

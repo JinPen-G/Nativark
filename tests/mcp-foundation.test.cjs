@@ -205,6 +205,19 @@ async function verifyPublicClientAuthorization(t, create) {
   const httpsRequest = () => editRequest(url => url.searchParams.set("redirect_uri", registered.redirectUris[0]));
   assert.equal((await validate(httpsRequest(), signal())).redirectUri, registered.redirectUris[0]);
   await assert.rejects(() => validate(editRequest(url => url.searchParams.set("redirect_uri", "https://app.example.invalid:8443/oauth/callback")), signal()));
+  registered = baseline; visits = 0;
+  changeOnSecond = () => { registered = Object.fromEntries(Object.entries(baseline).reverse()); };
+  assert.deepEqual(await validate(request(), signal()), observed, "registration key order does not change its current facts");
+  assert.equal(visits, 2);
+  const multiple = { ...baseline, scopes: [...baseline.scopes, "rental.order.read"],
+    redirectUris: [...baseline.redirectUris, "http://127.0.0.1:49152/other-callback"] };
+  for (const change of [row => ({ ...row, scopes: [...row.scopes].reverse() }),
+    row => ({ ...row, redirectUris: [...row.redirectUris].reverse() }), row => ({ ...row, extra: true })]) {
+    registered = multiple; visits = 0;
+    changeOnSecond = () => { registered = change(multiple); };
+    await assert.rejects(() => validate(request(), signal()), error => error instanceof OAuthError,
+      "array order and extra registration facts still change the captured record");
+  }
   registered = baseline;
   visits = 0;
   changeOnSecond = () => { registered = { ...baseline, revision: 2 }; };
@@ -729,11 +742,12 @@ async function verifyAuthorizationMetadata(t, create) {
     code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"],
     revocation_endpoint_auth_methods_supported: ["none"], scopes_supported: configuration.allowedScopes };
   const endpoint = "https://auth.example.invalid/.well-known/oauth-authorization-server";
-  let current = baseline, reads = 0, hold, withdrawOnSecond = false;
+  let current = baseline, reads = 0, hold, withdrawOnSecond = false, changeOnSecond;
   const original = { async read(signal) {
     reads++;
     if (hold) { hold.signal = signal; hold.started.resolve(); await hold.release.promise; }
     if (withdrawOnSecond && reads % 2 === 0) return undefined;
+    if (reads % 2 === 0 && changeOnSecond) changeOnSecond();
     return current;
   } };
   const handle = create(configuration, original);
@@ -747,6 +761,21 @@ async function verifyAuthorizationMetadata(t, create) {
     assert.deepEqual(visited, [endpoint]);
   }
   assert.equal(reads, 4, "each discovery rechecks the current AS rather than caching publication");
+  reads = 0;
+  changeOnSecond = () => { current = Object.fromEntries(Object.entries(baseline).reverse()); };
+  const reordered = await handle(new Request(endpoint));
+  assert.equal(reordered.status, 200, "metadata object key order is not a publication change");
+  assert.deepEqual(await reordered.json(), baseline);
+  assert.equal(reads, 2);
+  current = baseline; reads = 0;
+  changeOnSecond = () => { current = { ...baseline, grant_types_supported: ["authorization_code"] }; };
+  assert.equal((await handle(new Request(endpoint))).status, 503, "a supported grant removal still changes the published document");
+  const expanded = { ...baseline, scopes_supported: ["rental.catalog.read", "rental.order.read"] };
+  let scopeReads = 0;
+  const changedScopes = create({ ...configuration, allowedScopes: expanded.scopes_supported }, { read: async () =>
+    ++scopeReads % 2 === 0 ? { ...expanded, scopes_supported: [...expanded.scopes_supported].reverse() } : expanded });
+  assert.equal((await changedScopes(new Request(endpoint))).status, 503, "scope array order still participates in exact publication comparison");
+  changeOnSecond = undefined; current = baseline;
   const ordinary = await handle(new Request(endpoint));
   assert.equal(ordinary.status, 200); assert.equal(ordinary.headers.get("cache-control"), "no-store");
   const byteLimit = Buffer.byteLength(JSON.stringify(baseline), "utf8");
@@ -937,6 +966,22 @@ async function verifyOAuthTokenEndpoint(t, module, checkBinding = source("packag
   hold = undefined;
   // Current registration can change while the original AS commits. A refused
   // response proves no token was released, not that issuance was rolled back.
+  for (const values of [form, { grant_type: "refresh_token", client_id: clientId, refresh_token: "synthetic-refresh", resource }]) {
+    client = baseline;
+    issued = { ...tokens, refresh_token: "rotated-refresh" };
+    hold = { started: Promise.withResolvers(), release: Promise.withResolvers() };
+    const before = calls.length;
+    const pending = handle(post(values));
+    try {
+      await hold.started.promise;
+      client = Object.fromEntries(Object.entries(baseline).reverse());
+      hold.release.resolve();
+      const result = await pending;
+      assert.equal(result.status, 200, "unchanged registration facts may release the original token despite object key order");
+      assert.deepEqual(await result.json(), issued);
+      assert.equal(calls.length, before + 1, "a key-order difference never reissues code or refresh");
+    } finally { hold.release.resolve(); await pending; hold = undefined; client = baseline; }
+  }
   for (const values of [form, { grant_type: "refresh_token", client_id: clientId, refresh_token: "synthetic-refresh", resource }]) {
     for (const changed of [undefined, { ...baseline, enabled: false }, { ...baseline, expiresAt: 0 },
       { ...baseline, revision: 3 }, { ...baseline, scopes: ["rental.other.read"] }]) {
