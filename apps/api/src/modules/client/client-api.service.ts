@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import {
@@ -54,13 +55,15 @@ import {
   type RentalPaymentMethod,
   type RentalQuoteRequest
 } from "@rental-os/shared";
-import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { MembershipService } from "../platform/membership.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { RentalCategoryResolver } from "../rental-core/rental-category-resolver.service";
 import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
 import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
+import type { ApprovedOrderTransaction } from "../rental-core/approved-order-transaction.ports";
+import type { ApprovedExtensionBinding } from "../rental-core/approved-extension.ports";
+import type { RentalOrderExtensionPreview, RentalPricingRate, RentalRuleConfig } from "@rental-os/shared";
 import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { RentalServiceCapacityService } from "../rental-core/rental-service-capacity.service";
@@ -75,6 +78,7 @@ import { ClientWechatAuthService } from "./client-wechat-auth.service";
 import { validateInspectionCustomerResponse } from "../rental-core/rental-inspection-customer-response";
 import { getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import type { RentalMembershipSnapshot } from '@rental-os/shared';
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
 
@@ -1135,20 +1139,55 @@ export class ClientApiService {
   }
 
   /** Accepted request comes from server persistence, not an AI response or HTTP
-   * hash. The original key is read only; absence does not authorize resubmission. */
+   * hash. The original key is read only; absence does not authorize resubmission.
+   * committedOrderId is an internal persisted approval-consumption link, never HTTP input. */
   async readOrderSubmission(context: ClientRequestContext, accepted: {
     tenantId: string; workspaceId: string; customerId: string; request: CreateRentalOrderRequest;
-  }, operationKey: string) {
+  }, operationKey: string, committedOrderId?: string) {
     context = structuredClone(context);
     const original = structuredClone(accepted);
     await this.currentWorkspace(context);
     if (original.tenantId !== context.tenantId || original.workspaceId !== context.workspaceId
       || original.customerId !== context.customerId || original.request.customerId !== context.customerId
       || original.request.customerType !== 'personal') throw new NotFoundException("原下单操作不存在");
-    const result = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey);
+    const result = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey, committedOrderId);
     if (result.state !== 'observed' || !result.orderId) return result;
     await this.assertClientOrder(context, result.orderId);
     return { ...result, payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const };
+  }
+
+  /** Original regular enterprise order lookup. Read the original Core receipt,
+   * then prove its persisted order/quote belongs to this customer and workspace.
+   * Missing receipts never authorize another dispatch or reconstruct today's quote. */
+  async readEnterpriseOrderOriginal(context: ClientRequestContext, quoteId: string, operationKey: string) {
+    const identity = getRequestIdentity();
+    if (!quoteId?.trim() || quoteId.length > 191 || !operationKey?.trim() || operationKey.length > 191) throw new BadRequestException("原报价和提交键必须有效");
+    if (!identity || identity.tenantId !== context.tenantId || identity.userId !== context.customerId || identity.workspaceId !== context.workspaceId
+      || identity.isSaasAdmin || identity.staffApi || identity.dataScope !== undefined) throw new ForbiddenException("原提交必须在当前客户及空间核对");
+    if (!context.workspaceId) throw new ForbiddenException("当前经营空间缺失");
+    const hit = await this.prisma.rentalOrderIdempotencyRecord.findFirst({ where: { tenantId: context.tenantId, workspaceId: context.workspaceId,
+      action: "rental.order.create", idempotencyKey: operationKey.trim() }, select: { orderId: true } });
+    if (!hit) return { state: "not_observed" as const, orderId: null, retryable: false as const };
+    if (!hit.orderId) return { state: "unknown" as const, orderId: null, retryable: false as const };
+    const persisted = await this.prisma.rentalOrder.findFirst({ where: { tenantId: context.tenantId, workspaceId: context.workspaceId, id: hit.orderId },
+      select: { id: true, customerId: true, quoteId: true, membershipSnapshot: true } });
+    const snapshot = persisted?.membershipSnapshot as RentalMembershipSnapshot | null;
+    if (!persisted || persisted.quoteId !== quoteId || snapshot?.bookingIdentity !== "enterprise_employee"
+      || snapshot.personalCustomerId !== context.customerId) throw new NotFoundException("本人企业原提交不存在");
+    const order = await this.assertClientOrder(context, persisted.id);
+    return { state: "observed" as const, orderId: order.id, retryable: false as const };
+  }
+
+  /** Explicit enterprise submission consumes a server-persisted request with the
+   * original Core transaction participant. Caller input cannot replace its facts. */
+  async executeApprovedSubmission(context: ClientRequestContext, accepted: { tenantId: string; workspaceId: string; customerId: string; request: CreateRentalOrderRequest }, operationKey: string, participant: ApprovedOrderTransaction) {
+    this.requireActiveMembership(context);
+    if (accepted.tenantId !== context.tenantId || accepted.workspaceId !== context.workspaceId || accepted.customerId !== context.customerId || accepted.request.customerId !== context.customerId) throw new ForbiddenException("企业批准不属于当前使用人或空间");
+    await this.currentWorkspace(context);
+    const business = await this.context(context.tenantId);
+    const created = await this.orders.createApprovedOrder(context.tenantId, accepted.request, `client:${context.customerId}`, business, operationKey, participant);
+    await this.assertClientOrder(context, created.order.id);
+    return { orderId: created.order.id, replayed: created.replayed };
   }
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
@@ -1421,12 +1460,12 @@ export class ClientApiService {
     return { order: this.orderView(outcome.result), replayed: outcome.replayed };
   }
 
-  private async extensionSettlement(context: ClientRequestContext, order: RentalOrder) {
+  private async extensionSettlement(context: Pick<ClientRequestContext, "tenantId">, order: RentalOrder, tx?: Prisma.TransactionClient) {
     const overdue = new Date(order.effectiveEndAt ?? order.endAt).getTime() < Date.now();
     if (overdue) return "immediate" as const;
     if (!order.membershipSnapshot?.enterpriseContractAndPayer) return "immediate" as const;
     if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪，不能判断续租付款方式");
-    return await this.corporateSettlement.allowsExtensionCredit(context.tenantId, order.id) ? "monthly" as const : "immediate" as const;
+    return await this.corporateSettlement.allowsExtensionCredit(context.tenantId, order.id, tx) ? "monthly" as const : "immediate" as const;
   }
 
   private async priceExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
@@ -1435,6 +1474,52 @@ export class ClientApiService {
     const priced = await this.business.quoteOrderExtension(context.tenantId, (await this.context(context.tenantId)), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
     const { rateSnapshot: _rateSnapshot, ruleSnapshot: _ruleSnapshot, ...preview } = priced;
     return { order, priced, preview };
+  }
+
+  /** Server-only preparation from the locked original order and persisted pricing. */
+  async prepareEnterpriseExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest, tx: Prisma.TransactionClient) {
+    this.requireActiveMembership(context);
+    const order = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);
+    if (!this.clientOwnsOrder(context, order)) throw new NotFoundException("本人订单不存在");
+    if (![RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(order.status)) throw new ConflictException("当前订单状态不可申请续租批准");
+    const extensions = await this.core.listOrderExtensions(context.tenantId, orderId, tx);
+    const priced = await this.business.quoteEnterpriseExtension(context.tenantId, order, extensions, structuredClone(input), await this.extensionSettlement(context, order, tx), tx);
+    // The original monthly extension contract cannot prove collection/freezing of
+    // an added guarantee. Do not let a rental credit approval fill that gap.
+    if (priced.settlementMode === "monthly" && (priced.depositDelta > 0 || priced.preAuthDelta > 0)) throw new ConflictException("账期续租新增保证金的真实补足合同尚未接通，不能用企业批准代替收款或冻结");
+    return { order, priced };
+  }
+
+  /** Compare a fresh original producer result under this transaction, never silently
+   * substitute it for the approved snapshot. A changed version/amount requires review. */
+  async assertEnterpriseExtensionPrice(tenantId: string, order: RentalOrder, input: ClientOrderExtensionRequest,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }, tx: Prisma.TransactionClient) {
+    const current = await this.business.quoteEnterpriseExtension(tenantId, order, await this.core.listOrderExtensions(tenantId, order.id, tx), input, await this.extensionSettlement({ tenantId }, order, tx), tx);
+    if (requestFingerprint(current) !== requestFingerprint(priced)) throw new ConflictException("续租价格、规则、品类或结算依据已变化，须重新试算与批准");
+  }
+
+  /** Original extension flow inside the caller's authorized transaction. Prices are
+   * the stored Core preview, never HTTP/model values; no payment is inferred here. */
+  async executeEnterpriseExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }, binding: ApprovedExtensionBinding, tx: Prisma.TransactionClient) {
+    this.requireActiveMembership(context);
+    if (requestFingerprint({ orderId, extension: input, expectedOrderUpdatedAt: binding.expectedOrderUpdatedAt }) !== binding.requestFingerprint
+      || requestFingerprint(priced) !== binding.previewFingerprint || !binding.idempotencyKey?.trim() || binding.idempotencyKey.length > 128) throw new ForbiddenException("续租原意图或试算绑定不一致");
+    const current = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);
+    if (!this.clientOwnsOrder(context, current) || current.updatedAt !== binding.expectedOrderUpdatedAt) throw new ConflictException("原订单修订或使用人已变化，须重新试算和批准");
+    const outcome = await this.idempotent.executeInTransaction({ tenantId: context.tenantId, action: "order.extend", key: binding.idempotencyKey,
+      fallbackKey: binding.idempotencyKey, orderId, request: { orderId, newEndAt: input.newEndAt, services: input.services ?? [] },
+      run: async () => {
+        const result = await this.core.requestOrderExtension(context.tenantId, orderId, priced, { idempotencyKey: binding.idempotencyKey, memo: input.memo, operator: `client:${context.customerId}`, approval: binding }, tx);
+        await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
+        if (result.extension.status === "effective") {
+          if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪");
+          await this.corporateSettlement.reserveExtensionCredit(context.tenantId, orderId, result.extension.id, result.extension.payableAmount, tx, `client:${context.customerId}`);
+          await this.occupyExtensionServices(context, orderId, result.extension, tx);
+        }
+        return result;
+      }, replay: async () => undefined }, tx);
+    return { orderId: outcome.result.order.id, extensionId: outcome.result.extension.id, extensionState: outcome.result.extension.status };
   }
 
   async previewExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {

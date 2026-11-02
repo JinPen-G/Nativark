@@ -16,6 +16,8 @@ interface SiteContextValue {
   tenantCode: string | null;
   /** 是否为真实租户模式（?tenantCode= 触发，消费后端接口）。 */
   isRemote: boolean;
+  /** True only after the real host binding was resolved, never inferred from query absence. */
+  enterpriseDomainBound: boolean;
   /** 商品目录是否已就绪（真实租户模式下第二阶段加载）；演示模式恒为 true。 */
   productsReady: boolean;
   mode: CategoryMode;
@@ -52,14 +54,19 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // 自定义域名需向后端反查（异步）；其余识别是同步的。effective 是反查后的最终归属。
   const [effective, setEffective] = useState<SiteResolution>(() => resolution.kind === 'host' ? resolution.fallback : resolution);
   const [hostResolving, setHostResolving] = useState(resolution.kind === 'host');
+  const [resolvedBinding, setResolvedBinding] = useState<{ host: string; tenantCode: string } | null>(null);
 
   useEffect(() => {
+    setResolvedBinding(null);
     if (resolution.kind !== 'host') { setEffective(resolution); setHostResolving(false); return; }
     let cancelled = false;
     setHostResolving(true);
     clientApi.resolveHost(resolution.host)
-      .then(result => { if (!cancelled) setEffective(result.tenantCode ? { kind: 'remote', tenantCode: result.tenantCode } : resolution.fallback); })
-      .catch(() => { if (!cancelled) setEffective(resolution.fallback); })
+      .then(result => { if (!cancelled) {
+        setEffective(result.tenantCode ? { kind: 'remote', tenantCode: result.tenantCode } : resolution.fallback);
+        setResolvedBinding(result.tenantCode ? { host: resolution.host, tenantCode: result.tenantCode } : null);
+      } })
+      .catch(() => { if (!cancelled) { setEffective(resolution.fallback); setResolvedBinding(null); } })
       .finally(() => { if (!cancelled) setHostResolving(false); });
     return () => { cancelled = true; };
   }, [resolution]);
@@ -170,7 +177,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     return <div className="remote-gate" role="status">{remoteError ? remoteError : '正在加载…'}</div>;
   }
 
-  return <SiteContext.Provider value={{ tenant, tenantKey, tenantCode: remoteTenantCode, isRemote, productsReady, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
+  return <SiteContext.Provider value={{ tenant, tenantKey, tenantCode: remoteTenantCode, isRemote, enterpriseDomainBound: resolution.kind === 'host' && resolvedBinding?.host === resolution.host && resolvedBinding?.tenantCode === remoteTenantCode, productsReady, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
 }
 
 export function useSite() {

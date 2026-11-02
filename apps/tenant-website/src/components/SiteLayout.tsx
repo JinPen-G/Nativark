@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { CloseOutlined, DownOutlined, GlobalOutlined, MenuOutlined, MoonOutlined, SearchOutlined, SunOutlined, UserOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
+import { enterpriseHref } from '@rental-os/web-client';
 
 function LanguagePicker() {
   const { language, setLanguage, t } = useSite();
@@ -19,7 +20,7 @@ function LanguagePicker() {
 }
 
 export function SiteHeader() {
-  const { tenant, href, mode, isRemote, language, toggleLanguage, theme, toggleTheme, t } = useSite();
+  const { tenant, tenantCode, enterpriseDomainBound, href, mode, isRemote, language, toggleLanguage, theme, toggleTheme, t } = useSite();
   const { isAuthenticated, customerName } = useAuth();
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -60,6 +61,7 @@ export function SiteHeader() {
       </form>
       <button className="language-switcher-header" type="button" onClick={toggleLanguage} aria-label={t('switchLanguage')} title={t('switchLanguage')}><GlobalOutlined aria-hidden="true" /><span>{language === 'zh' ? 'EN' : '中'}</span></button>
       <button className="theme-switcher-header" type="button" onClick={toggleTheme} aria-label={t('switchTheme')} title={t('switchTheme')}>{theme === 'dark' ? <MoonOutlined aria-hidden="true" /> : <SunOutlined aria-hidden="true" />}</button>
+      {isRemote && tenantCode && <a className="header-account" href={enterpriseHref(tenantCode, enterpriseDomainBound)}>{language === 'zh' ? '企业服务' : 'Enterprise'}</a>}
       <Link className="header-orders" to={href('/orders')} aria-label={t('orders')}><UserOutlined aria-hidden="true" /><span>{t('orders')}</span></Link>
       {isRemote && (isAuthenticated
         ? <Link className="header-account" to={href('/account')} onClick={() => setMenuOpen(false)} title={t('accountTitle')}>{customerName || t('accountTitle')}</Link>

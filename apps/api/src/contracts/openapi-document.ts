@@ -1,4 +1,5 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
+import { ENTERPRISE_COMPONENT_SCHEMAS } from "./enterprise-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
@@ -220,6 +221,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_LEAF_COMPONENT_SCHEMAS,
   ...DESKTOP_BUSINESS_SCHEMAS,
   ...AI_CREDIT_COMPONENT_SCHEMAS,
+  ...ENTERPRISE_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
   RegisterPersonalMembershipRequest: objectOf({
@@ -1636,7 +1638,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ),
   ClientQuoteRequest: objectOf(
     {
-      bookingIdentity: objectSchema,
+      bookingIdentity: { $ref: "#/components/schemas/RentalBookingIdentityInput" },
       fulfillmentMode: stringSchema,
       fulfillmentLocationId: stringSchema,
       returnLocationId: stringSchema,
@@ -3609,6 +3611,72 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
 
+function enterpriseWorkflowOperations(): ContractOperation[] {
+  const clientRoutes: Array<[HttpMethod, string, string, string?]> = [
+    ["get", "tasks", "enterpriseOwnTasks"], ["get", "corporates/{corporateId}/tasks", "enterpriseCorporateTasks"], ["get", "my-audit", "enterpriseOwnAudit"],
+    ["get", "corporates/{corporateId}/profile", "enterpriseProfile"], ["get", "management-requests", "enterpriseManagementRequests"],
+    ["post", "corporates/{corporateId}/management-requests", "saveEnterpriseManagementRequest", "SaveEnterpriseManagementRequest"],
+    ["post", "management-requests/{id}/withdraw", "withdrawEnterpriseManagementRequest", "EnterpriseChangeRequest"],
+    ["get", "applications", "enterpriseApplications"], ["post", "applications", "saveEnterpriseApplication", "SaveEnterpriseApplicationRequest"],
+    ["post", "applications/{id}/withdraw", "withdrawEnterpriseApplication", "EnterpriseChangeRequest"],
+    ["get", "my-requests", "enterpriseOwnRequests"], ["get", "my-relations", "enterpriseOwnRelations"], ["post", "join", "joinEnterprise", "JoinEnterpriseRequest"],
+    ["post", "join-requests/{id}/withdraw", "withdrawEnterpriseJoin", "EnterpriseChangeRequest"],
+    ["post", "invites/preview", "previewEnterpriseInvite", "PreviewEnterpriseInviteRequest"],
+    ["get", "corporates/{corporateId}/invites", "enterpriseInvites"], ["post", "corporates/{corporateId}/invites", "createEnterpriseInvite", "CreateEnterpriseInviteRequest"],
+    ["post", "corporates/{corporateId}/invites/{id}/revoke", "revokeEnterpriseInvite", "EnterpriseChangeRequest"],
+    ["get", "corporates/{corporateId}/join-requests", "enterpriseJoinRequests"], ["post", "corporates/{corporateId}/join-requests/{id}/decision", "reviewEnterpriseJoin", "ReviewEnterpriseJoinRequest"],
+    ["put", "corporates/{corporateId}/members/{id}", "changeEnterpriseMember", "ChangeEnterpriseMemberRequest"], ["post", "corporates/{corporateId}/members/{id}/exit", "exitEnterpriseMember", "ChangeEnterpriseMemberRequest"],
+    ["get", "corporates/{corporateId}/members/{id}/administrator", "readEnterpriseAdministrator"],
+    ["put", "corporates/{corporateId}/members/{id}/administrator", "changeEnterpriseAdministrator", "ChangeEnterpriseAdministratorRequest"],
+    ["post", "corporates/{corporateId}/transfers", "transferEnterpriseAdmin", "TransferEnterpriseAdministratorRequest"], ["post", "transfers/{id}/decision", "acceptEnterpriseAdminTransfer", "DecideEnterpriseTransferRequest"],
+    ["get", "corporates/{corporateId}/policy", "readEnterpriseScopePolicy"], ["put", "corporates/{corporateId}/policy", "saveEnterpriseScopePolicy", "SaveEnterpriseScopePolicyRequest"],
+    ["get", "corporates/{corporateId}/members/{id}/policy", "readEnterpriseMemberPolicy"], ["put", "corporates/{corporateId}/members/{id}/policy", "saveEnterpriseMemberPolicy", "SaveEnterpriseScopePolicyRequest"],
+    ["get", "my-rental-policies", "enterpriseOwnRentalPolicies"],
+    ["get", "quotes/{quoteId}/order-operations/{key}", "enterpriseOrderOriginalResult"],
+    ["get", "orders/{orderId}/extension-eligibility", "enterpriseExtensionEligibility"],
+    ["get", "my-extension-approvals", "enterpriseOwnExtensionApprovals"], ["get", "corporates/{corporateId}/extension-approvals", "enterpriseExtensionReviewQueue"],
+    ["post", "extension-approvals", "requestEnterpriseExtensionApproval", "RequestEnterpriseExtensionApproval"],
+    ["post", "extension-approvals/{id}/decision", "decideEnterpriseExtensionApproval", "DecideEnterpriseExtensionApproval"],
+    ["post", "extension-approvals/{id}/close-execution", "closeEnterpriseExtensionExecution", "CloseEnterpriseExtensionExecution"],
+    ["get", "extension-approvals/{id}/result", "enterpriseExtensionOriginalResult"], ["post", "extension-approvals/submit", "submitEnterpriseExtensionApproval", "SubmitEnterpriseExtensionApproval"],
+    ["get", "my-approvals", "enterpriseOwnApprovals"], ["post", "approvals", "requestEnterpriseApproval", "RequestEnterpriseBookingApproval"],
+    ["get", "corporates/{corporateId}/approvals", "enterpriseReviewQueue"], ["post", "approvals/{id}/decision", "decideEnterpriseApproval", "DecideEnterpriseBookingApproval"],
+    ["post", "approvals/{id}/close-execution", "closeEnterpriseApprovalExecution", "CloseEnterpriseApprovalExecution"],
+    ["get", "approvals/{id}/result", "enterpriseApprovalOriginalResult"], ["post", "approvals/submit", "submitEnterpriseApproval", "SubmitEnterpriseApprovedBooking"],
+    ["get", "operations/{key}", "readEnterpriseWorkflowOperation"],
+    ["get", "authority/upload-operations/{key}", "enterpriseAuthorityOriginalUpload"],
+    ["post", "authority/upload-sessions", "enterpriseAuthorityUpload", "EnterpriseAuthorityUploadRequest"], ["post", "authority/upload-sessions/{id}/complete", "completeEnterpriseAuthorityUpload", "ClientQualificationUploadCompleteRequest"]
+  ];
+  const responses: Record<string, string> = {
+    enterpriseApplications: "EnterpriseWorkflowList", enterpriseOwnRequests: "EnterpriseWorkflowList", enterpriseJoinRequests: "EnterpriseWorkflowList", enterpriseOwnRelations: "EnterpriseOwnRelations", previewEnterpriseInvite: "EnterpriseInvitePreview",
+    enterpriseExtensionEligibility: "EnterpriseExtensionEligibility",
+    enterpriseOwnExtensionApprovals: "EnterpriseExtensionApprovalList", enterpriseExtensionReviewQueue: "EnterpriseExtensionApprovalList",
+    requestEnterpriseExtensionApproval: "EnterpriseExtensionCommandResult", decideEnterpriseExtensionApproval: "EnterpriseExtensionCommandResult",
+    enterpriseExtensionOriginalResult: "EnterpriseExtensionOriginalResult", submitEnterpriseExtensionApproval: "EnterpriseExtensionOriginalResult", closeEnterpriseExtensionExecution: "EnterpriseExtensionOriginalResult",
+    enterpriseOwnRentalPolicies: "EnterpriseOwnRentalPolicies", enterpriseOwnApprovals: "EnterpriseBookingApprovalList", enterpriseReviewQueue: "EnterpriseBookingApprovalList",
+    closeEnterpriseApprovalExecution: "EnterpriseApprovalOriginalResult", enterpriseApprovalOriginalResult: "EnterpriseApprovalOriginalResult", enterpriseOrderOriginalResult: "EnterpriseOrderOriginalResult",
+    readEnterpriseWorkflowOperation: "EnterprisePortalOperationResponse", readEnterpriseAdministrator: "EnterpriseAdministratorView",
+    enterpriseOwnTasks: "EnterpriseTaskCenter", enterpriseCorporateTasks: "EnterpriseTaskCenter", enterpriseOwnAudit: "EnterpriseOwnAudit",
+    enterpriseProfile: "EnterpriseProfileView", enterpriseManagementRequests: "EnterpriseManagementRequestList",
+    saveEnterpriseManagementRequest: "EnterpriseCommandResult", withdrawEnterpriseManagementRequest: "EnterpriseCommandResult",
+    requestEnterpriseApproval: "EnterpriseApprovalRequestResult", decideEnterpriseApproval: "EnterpriseApprovalDecisionResult", submitEnterpriseApproval: "EnterpriseApprovalSubmissionResult",
+    enterpriseInvites: "EnterpriseInviteList", createEnterpriseInvite: "EnterpriseInviteCreated"
+  };
+  return [...clientRoutes.map(([method, route, operationId, requestSchema]) => clientOperation(method, `/api/client/v1/enterprise/${route}`, operationId, "Controlled enterprise workflow; current customer and action authorization required", { requestSchema,
+    responseSchema: responses[operationId] ?? (method === "get" && route.endsWith("/policy") ? "EnterpriseScopePolicyView" : objectSchema) })),
+    { method: "get", path: "/api/membership/enterprise-workflows/applications/{id}/files/{fileId}", tag: "Membership", operationId: "readEnterpriseApplicationEvidence", summary: "Read authenticated application evidence; no bearer download link", permissions: ["rental-os:corporate:manage"], authRequired: true, responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "application/octet-stream" },
+    backlogOperation("get", "/api/membership/enterprise-workflows/operations/{key}", "Membership", "readMerchantEnterpriseWorkflowOperation", "Read this operator's original workflow result", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
+    backlogOperation("get", "/api/membership/enterprise-workflows/corporates/{corporateId}/policy", "Membership", "readMerchantEnterpriseScopePolicy", "Read explicit enterprise rental upper bounds", ["rental-os:corporate:manage"], true, undefined, "EnterpriseScopePolicyView"),
+    backlogOperation("put", "/api/membership/enterprise-workflows/corporates/{corporateId}/policy", "Membership", "saveMerchantEnterpriseScopePolicy", "Set explicit enterprise rental upper bounds", ["rental-os:corporate:manage"], true, "SaveEnterpriseScopePolicyRequest", "EnterpriseCommandResult"),
+    { method: "get", path: "/api/membership/enterprise-workflows/management-requests/{id}/files/{fileId}", tag: "Membership", operationId: "readEnterpriseManagementEvidence", summary: "Authenticated request-bound evidence; financial proposals require financial authority", permissions: ["rental-os:corporate:manage"], authRequired: true, responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "application/octet-stream" },
+    backlogOperation("get", "/api/membership/enterprise-workflows/management-requests", "Membership", "merchantEnterpriseManagementRequests", "Review-only enterprise requests; financial proposals require current financial authority", ["rental-os:corporate:manage"], true, undefined, "EnterpriseManagementRequestList"),
+    backlogOperation("post", "/api/membership/enterprise-workflows/management-requests/{id}/decision", "Membership", "merchantEnterpriseManagementDecision", "Record review without applying master, policy or financial changes", ["rental-os:corporate:manage"], true, "ReviewEnterpriseManagementRequest", "EnterpriseCommandResult"),
+    backlogOperation("get", "/api/membership/enterprise-workflows/applications", "Membership", "merchantEnterpriseApplications", "Merchant application queue", ["rental-os:corporate:manage"], true, undefined, "EnterpriseWorkflowList"),
+    backlogOperation("post", "/api/membership/enterprise-workflows/applications/{id}/decision", "Membership", "merchantEnterpriseApplicationDecision", "Verify representative and atomically bind first admin", ["rental-os:corporate:manage"], true, "ReviewEnterpriseApplicationRequest", "EnterpriseCommandResult"),
+    backlogOperation("get", "/api/membership/enterprise-workflows/invite-policy", "Membership", "readEnterpriseInvitePolicy", "Read explicit bounded invitation policy", ["rental-os:corporate:manage"], true, undefined, "EnterpriseInvitePolicyView"),
+    backlogOperation("put", "/api/membership/enterprise-workflows/invite-policy", "Membership", "saveEnterpriseInvitePolicy", "Configure bounded invitation policy", ["rental-os:corporate:manage"], true, "SaveEnterpriseInvitePolicyRequest", "EnterpriseInvitePolicyView")];
+}
+
 function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/fulfillment-operators", "RentalCore", "listRentalFulfillmentOperators", "List fulfillment operators", ["rental-os:station:view"]),
   backlogOperation("post", "/api/rental/v1/fulfillment-operators", "RentalCore", "createRentalFulfillmentOperator", "Create fulfillment operator", ["rental-os:station:manage"]),
@@ -3773,6 +3841,14 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/membership/plans", "listClientMembershipPlans", "List published APP-visible membership plans for the current workspace", { responseSchema: "ClientMembershipPlans" }),
   clientOperation("get", "/api/client/v1/membership/assignments", "listClientMembershipAssignments", "List the current customer's membership plan assignments", { responseSchema: "ClientMembershipAssignments" }),
   clientOperation("get", "/api/client/v1/membership/benefits", "getClientMembershipBenefits", "Resolve personal and optionally selected enterprise benefits", { responseSchema: "ClientMembershipBenefits", parameters: [queryParam("corporateCustomerId", stringSchema)] }),
+  ...enterpriseWorkflowOperations(),
+  clientOperation("get", "/api/client/v1/enterprise/entry", "readEnterpriseEntry", "Read current personal customer's explicitly granted enterprise access", { responseSchema: "EnterpriseEntryResponse", parameters: [{ ...queryParam("tenantCode"), required: true }] }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateCustomerId}/members", "readEnterpriseMembers", "Read minimal enterprise members after current members:read authorization", { responseSchema: "EnterpriseMembersResponse", parameters: [{ ...queryParam("tenantCode"), required: true }, queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
+  backlogOperation("get", "/api/membership/enterprise-portal/operations/{operationKey}", "Membership", "readEnterprisePortalOperation", "Read current operator original activation result without reapplying it", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
+  backlogOperation("get", "/api/membership/enterprise-portal/settings", "Membership", "readEnterpriseTenantSettings", "Read tenant enterprise portal activation", ["rental-os:corporate:view", "rental-os:corporate:manage"], true, undefined, "EnterpriseTenantSettings"),
+  backlogOperation("put", "/api/membership/enterprise-portal/settings", "Membership", "saveEnterpriseTenantSettings", "Change tenant activation with revision and original operation receipt", ["rental-os:corporate:manage"], true, "SaveEnterpriseTenantSettingsRequest", "EnterpriseTenantSettings"),
+  backlogOperation("get", "/api/membership/corporate/{corporateCustomerId}/enterprise-portal", "Membership", "readEnterprisePortalConfiguration", "Read explicit corporate activation and grants", ["rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:corporate:employee-manage"], true, undefined, "EnterprisePortalConfiguration"),
+  backlogOperation("put", "/api/membership/corporate/{corporateCustomerId}/enterprise-portal", "Membership", "saveEnterprisePortalConfiguration", "Change activation and grants; service additionally requires corporate:manage", ["rental-os:corporate:employee-manage"], true, "SaveEnterprisePortalConfigurationRequest", "EnterprisePortalChangeResult"),
   clientOperation("get", "/api/client/v1/membership/corporates", "listClientCorporateIdentities", "List active enterprise identities available to the current personal member", { responseSchema: "ClientCorporateIdentities" }),
   clientOperation("get", "/api/client/v1/membership/qualification-types", "listClientQualificationTypes", "List qualification types for the current workspace", { responseSchema: arrayOf(objectSchema) }),
   clientOperation("get", "/api/client/v1/membership/qualifications", "listClientQualifications", "List current customer qualification submissions", { responseSchema: arrayOf(objectSchema) }),

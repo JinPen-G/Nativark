@@ -1,21 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { useToast } from './Toast';
-import { sessionApi } from '../data/authClient';
+import { captureEnterpriseHostSession, sessionApi } from '../data/authClient';
+import { useEnterpriseOrderSubmission } from './useEnterpriseOrderSubmission';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
+import type { EnterpriseOwnRentalPolicy, RentalQuoteSnapshotV1 } from '@rental-os/shared';
+import { EnterpriseBookingApproval } from './EnterpriseBookingApproval';
 import type { AiBookingHandoff } from '../../../../packages/shared/src/ai-booking-draft';
 import { readOriginalBookingQuote, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
-
-interface QuoteView {
-  id: string;
-  rentalAmount?: number; depositAmount?: number; preAuthAmount?: number;
-  payableAmount?: number; discountAmount?: number; couponAmount?: number; currency?: string;
-}
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
 interface RemoteBookingProps {
@@ -38,7 +35,7 @@ function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
     let disposed = false;
     setQuoteRead(null);
     // Read only after the user's explicit continue. Never create/recalculate a quote.
-    void readOriginalBookingQuote(handoff, session?.customer.id, sessionApi.getQuote).then(quote => {
+    void readOriginalBookingQuote(handoff, session?.customer.customerId, sessionApi.getQuote).then(quote => {
       if (disposed) return;
       setQuoteRead({ owner: quoteOwner, facts: quote });
     }).catch(() => { if (!disposed) setQuoteRead(null); });
@@ -71,7 +68,18 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const [coupons, setCoupons] = useState<any[]>([]);
   const [couponId, setCouponId] = useState<string>('');
   const [ready, setReady] = useState(false);
-  const [quote, setQuote] = useState<QuoteView | null>(null);
+  const [quote, setQuote] = useState<RentalQuoteSnapshotV1 | null>(null);
+  const [policies, setPolicies] = useState<EnterpriseOwnRentalPolicy[]>([]), [policyError, setPolicyError] = useState('');
+  const [enterprise, setEnterprise] = useState(''), [paymentMode, setPaymentMode] = useState('personal'), [noticeAccepted, setNoticeAccepted] = useState(false);
+  const policy = policies.find(row => row.corporateCustomerId === enterprise);
+  const quoteVersion = useRef(0), host = captureEnterpriseHostSession();
+  const hostIdentity = host?.identity;
+  const identity = JSON.stringify([hostIdentity, enterprise, paymentMode]);
+  const enterpriseOrder = useEnterpriseOrderSubmission(id => navigate(href(`/orders/${encodeURIComponent(id)}`)));
+  useEffect(() => { let cancelled = false; setPolicies([]); setPolicyError(''); setEnterprise(''); setPaymentMode('personal'); setNoticeAccepted(false); setQuote(null); quoteVersion.current++;
+    void sessionApi.enterpriseRentalPolicies().then(rows => { if (!cancelled) setPolicies(rows); }).catch(e => { if (!cancelled) setPolicyError(e instanceof Error ? e.message : '企业身份不可用'); });
+    return () => { cancelled = true; quoteVersion.current++; };
+  }, [hostIdentity]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const days = rentalDays(startDate, endDate);
@@ -117,29 +125,35 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const getQuote = useCallback(async () => {
     if (!locationId || days < 1) { setError(t('invalidDate')); return; }
     if (isDelivery && !addressId) { setError(t('deliveryNeedsAddress')); return; }
+    if (enterprise && (!noticeAccepted || !policy?.available || (paymentMode === 'enterprise' ? !policy.enterprisePaymentAllowed : !policy.personalPaymentAllowed))) { setError(language === 'en' ? 'Review current enterprise authority and explicitly accept the notice.' : '请核对当前企业授权并明确同意企业订单告知。'); return; }
+    const version = ++quoteVersion.current;
     setBusy(true); setError(''); setQuote(null);
     try {
       const q = await sessionApi.createQuote({
+        bookingIdentity: enterprise ? { bookingIdentity: 'enterprise_employee', corporateCustomerId: enterprise, enterpriseContractAndPayer: paymentMode === 'enterprise', enterpriseDisclosure: { noticeVersion: policy!.noticeVersion, acknowledged: noticeAccepted } } : { bookingIdentity: 'personal' },
         fulfillmentMode, fulfillmentLocationId: locationId, startAt: toIsoDateTime(startDate), endAt: toIsoDateTime(endDate),
         lines: [{ itemGroupId: product.id, quantity }],
         ...(isDelivery && addressId ? { deliveryAddressId: addressId } : {}),
         ...(couponId ? { customerCouponId: couponId } : {}),
       });
-      setQuote(q as unknown as QuoteView);
-    } catch (e: any) { setError(e?.message || t('quoteFailed')); }
-    finally { setBusy(false); }
-  }, [locationId, fulfillmentMode, isDelivery, addressId, couponId, startDate, endDate, quantity, product.id, days]);
+      if (version === quoteVersion.current && host?.current()) setQuote(q as unknown as RentalQuoteSnapshotV1);
+    } catch (e: any) { if (version === quoteVersion.current && host?.current()) setError(e?.message || t('quoteFailed')); }
+    finally { if (version === quoteVersion.current && host?.current()) setBusy(false); }
+  }, [locationId, fulfillmentMode, isDelivery, addressId, couponId, startDate, endDate, quantity, product.id, days, enterprise, paymentMode, noticeAccepted, policy, language, hostIdentity]);
 
   // 自动报价：就绪且参数有效时，输入变化后自动重新计价（防抖），无需手动点按钮。
   useEffect(() => {
-    if (!ready || !locationId || days < 1) return;
+    if (!ready || !locationId || days < 1 || enterpriseOrder.blocked) return;
     if (isDelivery && !addressId) return;
     const timer = window.setTimeout(() => { getQuote(); }, 450);
     return () => window.clearTimeout(timer);
-  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote]);
+  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote, enterpriseOrder.blocked]);
 
   const submitOrder = useCallback(async () => {
-    if (!quote?.id) return;
+    if (!quote?.id || enterpriseOrder.blocked) return;
+    if (quote.membershipSnapshot?.bookingIdentity === 'enterprise_employee') {
+      await enterpriseOrder.submit(quote.id).catch(() => undefined); return;
+    }
     setBusy(true); setError('');
     try {
       // 幂等键按报价固定：一份报价对应一次下单，网络重试可安全重放，不会重复建单。
@@ -149,7 +163,7 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       else { setError(t('orderFailed')); toast.error(t('orderFailed')); }
     } catch (e: any) { const msg = e?.message || t('orderFailed'); setError(msg); toast.error(msg); }
     finally { setBusy(false); }
-  }, [quote, href]);
+  }, [quote, href, enterpriseOrder]);
 
   if (!ready) {
     return <div className="booking-card"><p className="mock-note">{error ? error : <><LoadingOutlined /> {t('loading')}</>}</p></div>;
@@ -159,6 +173,9 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const addrLabel = (a: any) => `${a.recipient} ${a.phoneMasked || a.phone || ''} · ${[a.province, a.city, a.district, a.detail].filter(Boolean).join('')}`.trim();
   return <div className="booking-card booking-total">
     <h2>{t('costConfirm')}</h2>
+    <label className="booking-field">{language === 'en' ? 'Booking identity' : '预约身份'}<select value={enterprise} disabled={busy} onChange={event => { quoteVersion.current++; setQuote(null); setEnterprise(event.target.value); setPaymentMode('personal'); setNoticeAccepted(false); }}><option value="">{language === 'en' ? 'Personal' : '个人签约付款'}</option>{policies.map(row => <option key={row.corporateCustomerId} value={row.corporateCustomerId} disabled={!row.available}>{row.corporateName}{row.available ? '' : '（不可用）'}</option>)}</select></label>
+    {policyError && <p role="alert">{policyError}</p>}
+    {enterprise && policy && <><label className="booking-field">{language === 'en' ? 'Payment responsibility' : '费用归属'}<select value={paymentMode} disabled={busy} onChange={event => { quoteVersion.current++; setQuote(null); setPaymentMode(event.target.value); setNoticeAccepted(false); }}><option value="personal" disabled={!policy.personalPaymentAllowed}>{language === 'en' ? 'Corporate benefits, personal contract/payment' : '企业优惠，个人签约付款'}</option><option value="enterprise" disabled={!policy.enterprisePaymentAllowed}>{language === 'en' ? 'Enterprise contract and payment' : '企业签约付款'}</option></select></label><p>{policy.noticeText}</p><label><input type="checkbox" checked={noticeAccepted} disabled={busy} onChange={event => { quoteVersion.current++; setQuote(null); setNoticeAccepted(event.target.checked); }} />{language === 'en' ? 'I understand authorized administrators can view enterprise identity orders, including personal-payment benefits orders.' : '我知悉受权管理员可见本企业身份订单（含企业优惠个人付款），纯个人订单不共享。'}</label><p className="mock-note">{language === 'en' ? 'Deposit defaults to the enterprise contract; no payment/freeze is implied. Employee-funded deposits are unavailable without supported payment contracts.' : '保证金按商户/企业合同默认企业承担，不代表已付款或冻结；原资金端口未支持员工承担时，该模式不可用。'}</p></>}
     {isDelivery && (addresses.length
       ? <label className="booking-field">{t('selectAddress')}<select value={addressId} onChange={e => { setAddressId(e.target.value); setQuote(null); }}>{addresses.map(a => <option key={a.id} value={a.id}>{addrLabel(a)}</option>)}</select></label>
       : <p className="mock-note">{t('noAddress')} <Link to={href('/account')}>{t('addAddress')}</Link></p>)}
@@ -174,7 +191,9 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       <p className="mock-note">{t('quoteServerNote')}</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <button type="button" className="button button-dark button-block" disabled={busy || !quote} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>
+    {enterpriseOrder.error && <p className="form-error" role="alert">{enterpriseOrder.error}</p>}
+    {enterpriseOrder.pending && <button type="button" className="button button-outline" disabled={enterpriseOrder.busy} onClick={() => void enterpriseOrder.recover()}>{language === 'en' ? 'Read original enterprise order' : '核对原企业订单结果'}</button>}
+    {quote?.membershipSnapshot?.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order' ? <EnterpriseBookingApproval key={JSON.stringify([identity, quote.id])} quoteId={quote.id} identity={identity} english={language === 'en'} onOrder={id => navigate(href(`/orders/${encodeURIComponent(id)}`))} onNewQuote={() => { setQuote(null); void getQuote(); }} /> : <button type="button" className="button button-dark button-block" disabled={busy || !quote || enterpriseOrder.blocked || Boolean(enterprise && !enterpriseOrder.ready)} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>}
     <p className="mock-note">{language === 'en' ? 'Rental term' : '租期'}: {days} {language === 'en' ? 'day(s)' : '天'}</p>
   </div>;
 }

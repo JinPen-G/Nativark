@@ -23,6 +23,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
+import { EnterprisePortalConfiguration } from "./EnterprisePortalConfiguration";
+import { EnterpriseApplications } from "./EnterpriseApplications";
+import { EnterpriseManagementRequests } from "./EnterpriseManagementRequests";
+import { EnterpriseRentalPolicy } from "./EnterpriseRentalPolicy";
 
 const relationMeta: Record<string, { text: string; color: string }> = { active: { text: "有效", color: "success" }, suspended: { text: "暂停", color: "warning" }, exited: { text: "已退出", color: "default" } };
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
@@ -57,7 +61,7 @@ export function CorporateMembershipPage() {
   const navigate = useNavigate();
   const { customerId } = useParams<{ customerId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const allowedTabs = ["profile", "employees", "invoice", "contracts", "credit"];
+  const allowedTabs = ["profile", "employees", "invoice", "contracts", "credit", "enterprise"];
   const corporateTab = allowedTabs.includes(searchParams.get("tab") ?? "") ? searchParams.get("tab")! : "profile";
   const setCorporateTab = (key: string) => setSearchParams(key === "profile" ? {} : { tab: key });
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
@@ -106,7 +110,7 @@ export function CorporateMembershipPage() {
     onSuccess: async () => { await refresh(); setDrawer(undefined); corporateForm.resetFields(); message.success(t("企业会员已保存")); },
   });
   const saveEmployee = useMutation({
-    mutationFn: (values: SaveCustomerCorporateMembershipRequest) => membershipApi.saveCorporateEmployee(selected!.customerId, values),
+    mutationFn: (values: SaveCustomerCorporateMembershipRequest) => membershipApi.saveCorporateEmployee(selected!.customerId, { ...values, expectedUpdatedAt: employees.data?.find(row => row.personalCustomerId === values.personalCustomerId)?.updatedAt }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["membership-corporate-employees", selected?.customerId] });
       await refresh();
@@ -404,6 +408,8 @@ export function CorporateMembershipPage() {
     {!customerId && <>
     <PageHeader title={t("企业会员管理")} description={t("企业资料在租户内共享；会员状态变更影响全部空间。")} extra={<Button type="primary" disabled={!canManage} onClick={() => openCorporate()}>{t("新增企业会员")}</Button>} />
 
+    <details><summary>{t("企业申请与邀请设置")}</summary><EnterpriseApplications /></details>
+    <details><summary>{t("企业资料与调整申请")}</summary><EnterpriseManagementRequests /></details>
     <ListSection controls={<ListFilters filter={corporateFilter} placeholder="企业、联系人或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}>
       <Table<CorporateMembershipMember> emptyScene={corporateFilter.keyword || corporateFilter.status ? "search" : "empty"}
         importConfig={corporateImport(t, () => corporates.refetch({ throwOnError: true }))}
@@ -444,7 +450,8 @@ export function CorporateMembershipPage() {
         ]} /> },
         { key: "employees", label: t("管理员与员工"), children: employeesPanel },
         corporatePanels[1], corporatePanels[2],
-        ...(canViewCredit ? [{ key: "credit", label: t("授信账务"), children: creditPanel }] : [])
+        ...(canViewCredit ? [{ key: "credit", label: t("授信账务"), children: creditPanel }] : []),
+        { key: "enterprise", label: t("企业后台"), children: <><EnterprisePortalConfiguration corporateCustomerId={selected.customerId} /><EnterpriseRentalPolicy corporateCustomerId={selected.customerId} /></> }
       ]} />}
     </RecordDetailLayout>}
 

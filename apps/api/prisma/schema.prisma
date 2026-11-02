@@ -247,6 +247,15 @@ model Tenant {
   membershipRegistrationSettings    CustomerMembershipRegistrationSettings?
   membershipReviews                 CustomerMembershipReview[]
   membershipQualificationTypes      CustomerMembershipQualificationType[]
+  enterprisePortalSettings          EnterprisePortalTenantSettings?
+  enterpriseCorporatePortals         EnterpriseCorporatePortal[]
+  enterprisePortalOperations         EnterprisePortalOperation[]
+  enterpriseWorkflowRequests         EnterpriseWorkflowRequest[]
+  enterpriseInvitePolicy             EnterpriseInvitePolicy?
+  enterpriseInvites                  EnterpriseInvite[]
+  enterpriseScopePolicies            EnterpriseScopePolicy[]
+  enterpriseBookingApprovals         EnterpriseBookingApproval[]
+  enterpriseExtensionApprovals       EnterpriseExtensionApproval[]
   corporateMemberships              CustomerCorporateMembership[]
   customerMembershipPlans           CustomerMembershipPlan[]
   customerMembershipPlanVersions    CustomerMembershipPlanVersion[]
@@ -320,6 +329,8 @@ model BusinessWorkspace {
   membershipQualificationTypes      CustomerMembershipQualificationType[]
   clientRegistrationChallenges      ClientRegistrationChallenge[]
   clientAuthSessions                ClientAuthSession[]
+  enterpriseBookingApprovals         EnterpriseBookingApproval[]
+  enterpriseExtensionApprovals       EnterpriseExtensionApproval[]
   clientChannelPublications         ClientChannelWorkspace[]
   clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
@@ -2271,6 +2282,15 @@ model CustomerProfile {
   wechatIdentities               ClientWechatIdentity[]
   deliveryAddresses              CustomerDeliveryAddress[]
   deliverySnapshots              ClientOrderDeliverySnapshot[]
+  enterprisePortal               EnterpriseCorporatePortal?
+  enterpriseApplications         EnterpriseWorkflowRequest[] @relation("EnterpriseApplicant")
+  enterpriseWorkflowCompany      EnterpriseWorkflowRequest[] @relation("EnterpriseWorkflowCompany")
+  enterpriseInvites              EnterpriseInvite[]
+  enterpriseScopePolicies        EnterpriseScopePolicy[]
+  enterpriseApprovalApplicants   EnterpriseBookingApproval[] @relation("EnterpriseApprovalApplicant")
+  enterpriseApprovalCompanies    EnterpriseBookingApproval[] @relation("EnterpriseApprovalCompany")
+  enterpriseExtensionApplicants  EnterpriseExtensionApproval[] @relation("EnterpriseExtensionApplicant")
+  enterpriseExtensionCompanies   EnterpriseExtensionApproval[] @relation("EnterpriseExtensionCompany")
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
@@ -3141,9 +3161,209 @@ model CustomerCorporateMembership {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
+  portalGrants        EnterprisePortalGrant[]
+
+  @@unique([tenantId, corporateCustomerId, id], map: "corporate_memberships_portal_scope_key")
   @@unique([tenantId, corporateCustomerId, personalCustomerId], map: "customer_corporate_memberships_tenant_company_person_key")
   @@index([tenantId, personalCustomerId, status], map: "customer_corporate_memberships_person_scope_status_idx")
   @@map("customer_corporate_memberships")
+}
+
+/// Enterprise portal activation is independent of website publishing and rental authority.
+model EnterprisePortalTenantSettings {
+  tenantId  String   @id
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  enabled   Boolean  @default(false)
+  revision  Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("enterprise_portal_tenant_settings")
+}
+
+model EnterpriseCorporatePortal {
+  tenantId            String
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  corporateCustomerId String
+  corporateCustomer   CustomerProfile @relation(fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict)
+  enabled             Boolean         @default(false)
+  revision            Int             @default(0)
+  updatedAt           DateTime        @updatedAt
+  grants              EnterprisePortalGrant[]
+
+  @@id([tenantId, corporateCustomerId])
+  @@unique([corporateCustomerId])
+  @@map("enterprise_corporate_portals")
+}
+
+/// An admin relationship is only eligibility: actions must be explicitly granted.
+model EnterprisePortalGrant {
+  tenantId            String
+  corporateCustomerId String
+  membershipId        String
+  action              String                      @db.VarChar(40)
+  /// Relationship edits invalidate existing grants, including suspend/restore cycles.
+  membershipUpdatedAt DateTime                    @db.DateTime(3)
+  portal              EnterpriseCorporatePortal    @relation(fields: [tenantId, corporateCustomerId], references: [tenantId, corporateCustomerId], onDelete: Restrict)
+  membership          CustomerCorporateMembership @relation(fields: [tenantId, corporateCustomerId, membershipId], references: [tenantId, corporateCustomerId, id], onDelete: Restrict)
+
+  @@id([tenantId, corporateCustomerId, membershipId, action])
+  @@map("enterprise_portal_grants")
+}
+
+/// Workflow payloads contain approved application fields and controlled file references only.
+model EnterpriseWorkflowRequest {
+  tenantId            String
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  applicant           CustomerProfile @relation("EnterpriseApplicant", fields: [tenantId, applicantCustomerId], references: [tenantId, id], onDelete: Restrict)
+  company             CustomerProfile? @relation("EnterpriseWorkflowCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict)
+  id                  String
+  kind                String @db.VarChar(40)
+  applicantCustomerId String
+  corporateCustomerId String?
+  state               String @default("draft") @db.VarChar(40)
+  revision            Int @default(1)
+  payload             Json
+  decisionReason      String? @db.VarChar(500)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@id([tenantId, id])
+  @@index([tenantId, applicantCustomerId, kind, createdAt], map: "enterprise_request_applicant")
+  @@index([tenantId, corporateCustomerId, kind, state], map: "enterprise_request_company")
+  @@map("enterprise_workflow_requests")
+}
+
+model EnterpriseInvitePolicy {
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  revision Int @default(1)
+  policy   Json
+
+  @@map("enterprise_invite_policies")
+}
+
+model EnterpriseInvite {
+  tenantId            String
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  company             CustomerProfile @relation(fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict)
+  id                  String
+  corporateCustomerId String
+  tokenHash           String @unique(map: "enterprise_invite_token") @db.Char(64)
+  status              String @default("active") @db.VarChar(20)
+  revision            Int @default(1)
+  expiresAt           DateTime
+  maxUses             Int
+  used                Int @default(0)
+  createdAt           DateTime @default(now())
+
+  @@id([tenantId, id])
+  @@index([tenantId, corporateCustomerId, createdAt], map: "enterprise_invite_company")
+  @@map("enterprise_invites")
+}
+
+/// Explicit new-business policy; history reading is authorized separately.
+model EnterpriseScopePolicy {
+  tenantId            String
+  corporateCustomerId String
+  scopeKey            String
+  membershipUpdatedAt DateTime? @db.DateTime(3)
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "enterprise_scope_tenant_fk")
+  company             CustomerProfile @relation(fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_scope_company_fk")
+  revision            Int @default(1)
+  policy              Json
+
+  @@id([tenantId, corporateCustomerId, scopeKey])
+  @@map("enterprise_scope_policies")
+}
+
+/// A quote-bound authorization, never an inventory reservation or a payment receipt.
+model EnterpriseBookingApproval {
+  tenantId            String
+  id                  String
+  corporateCustomerId String
+  applicantCustomerId String
+  workspaceId         String
+  quoteId             String
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "enterprise_approval_tenant_fk")
+  company             CustomerProfile @relation("EnterpriseApprovalCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_approval_company_fk")
+  applicant           CustomerProfile @relation("EnterpriseApprovalApplicant", fields: [tenantId, applicantCustomerId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_approval_applicant_fk")
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_approval_workspace_fk")
+  state               String @default("pending") @db.VarChar(20)
+  revision            Int @default(1)
+  requestFingerprint  String @db.Char(64)
+  request             Json
+  quote               Json
+  basis               Json
+  amount              Decimal @db.Decimal(18, 2)
+  currency            String @db.VarChar(3)
+  purpose             String @db.VarChar(500)
+  expiresAt           DateTime @db.DateTime(3)
+  orderId             String?
+  approvedBy          String?
+  reviewerMembershipId String?
+  reviewerMembershipUpdatedAt DateTime? @db.DateTime(3)
+  executionKey        String? @db.VarChar(128)
+  createdAt           DateTime @default(now())
+
+  @@id([tenantId, id])
+  @@unique([tenantId, quoteId], map: "enterprise_approval_quote")
+  @@index([tenantId, corporateCustomerId, state], map: "enterprise_approval_company")
+  @@map("enterprise_booking_approvals")
+}
+
+/// Single-use authorization for an original extension preview; not an extension or funding ledger.
+model EnterpriseExtensionApproval {
+  tenantId            String
+  id                  String
+  corporateCustomerId String
+  applicantCustomerId String
+  workspaceId         String
+  orderId             String
+  expectedOrderUpdatedAt String @db.VarChar(40)
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, map: "enterprise_extension_tenant_fk")
+  company             CustomerProfile @relation("EnterpriseExtensionCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_extension_company_fk")
+  applicant           CustomerProfile @relation("EnterpriseExtensionApplicant", fields: [tenantId, applicantCustomerId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_extension_applicant_fk")
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, map: "enterprise_extension_workspace_fk")
+  order               RentalOrder @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Restrict, map: "enterprise_extension_order_fk")
+  requestFingerprint  String @db.Char(64)
+  previewFingerprint  String @db.Char(64)
+  request             Json
+  preview             Json
+  basis               Json
+  state               String @default("pending") @db.VarChar(20)
+  revision            Int @default(1)
+  reason              String @db.VarChar(500)
+  decisionReason      String? @db.VarChar(500)
+  expiresAt           DateTime @db.DateTime(3)
+  approvedBy          String?
+  reviewerMembershipId String?
+  reviewerMembershipUpdatedAt DateTime? @db.DateTime(3)
+  extensionId         String?
+  executionKey        String? @db.VarChar(128)
+  closedOperationKey  String? @db.VarChar(128)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+
+  @@id([tenantId, id])
+  @@index([tenantId, applicantCustomerId, workspaceId, state], map: "enterprise_extension_applicant")
+  @@index([tenantId, corporateCustomerId, workspaceId, state], map: "enterprise_extension_company")
+  @@unique([tenantId, workspaceId, extensionId], map: "enterprise_extension_consumed")
+  @@map("enterprise_extension_approvals")
+}
+
+/// Durable original result and audit: replay never restores permissions revoked later.
+model EnterprisePortalOperation {
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  operationKey String   @db.VarChar(128)
+  actorUserId  String
+  requestHash  String   @db.Char(64)
+  target       String   @db.VarChar(191)
+  reason       String   @db.VarChar(500)
+  result       Json
+  createdAt    DateTime @default(now())
+
+  @@id([tenantId, operationKey])
+  @@map("enterprise_portal_operations")
 }
 
 /// MEMBER-01E：新会员方案主体。版本内容不回写本表，已发布版本必须不可变。
@@ -4378,6 +4598,7 @@ model RentalOrder {
   paymentIntents                RentalPaymentIntent[]
   paymentRefunds                RentalPaymentRefund[]
   extensions                    RentalOrderExtension[]
+  enterpriseExtensionApprovals   EnterpriseExtensionApproval[]
   changes                       RentalOrderChange[]
   documentSnapshots             RentalOrderDocumentSnapshot[]
   auditLogs                     OperationLog[]

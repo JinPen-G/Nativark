@@ -96,6 +96,17 @@ export class SharedCustomerRepository {
     return tx ?? this.prisma;
   }
 
+  /** Enterprise lifecycle writers share the caller's lock/transaction, never duplicate identity. */
+  async saveEnterpriseRelation(tenantId: string, corporateCustomerId: string, personalCustomerId: string,
+    data: { role: string; status: string; department?: string | null; employeeNo?: string | null; effectiveFrom: Date; effectiveTo?: Date | null; reason: string; createdBy: string }, tx: SharedCustomerTx) {
+    const { createdBy: _createdBy, ...changes } = data;
+    return tx.customerCorporateMembership.upsert({
+      where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId } },
+      create: { tenantId, corporateCustomerId, personalCustomerId, ...data },
+      update: { ...changes, updatedAt: new Date() }
+    });
+  }
+
   /** 4 位及以下不再原样返回：原样返回等于把整段值存进“脱敏”列。 */
   private mask(value: string) {
     const trimmed = value.trim();

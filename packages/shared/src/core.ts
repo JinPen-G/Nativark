@@ -2007,6 +2007,8 @@ export interface CustomerCorporateMembership {
 }
 
 export interface SaveCustomerCorporateMembershipRequest {
+  /** Required for edits to a portal-enabled enterprise; absent retains legacy non-portal behavior. */
+  expectedUpdatedAt?: string;
   personalCustomerId: string;
   role: "admin" | "employee";
   department?: string;
@@ -2179,6 +2181,7 @@ export interface CustomerMembershipPlanAssignment {
 
 /** 新建报价/订单的预约身份。个人始终是实际使用人与资质校验来源。 */
 export interface RentalBookingIdentityInput {
+  enterpriseDisclosure?: import("./enterprise-policy").EnterpriseDisclosure;
   /** 默认 personal；enterprise_employee 必须同时指定当前空间的有效企业员工关系。 */
   bookingIdentity?: "personal" | "enterprise_employee";
   corporateCustomerId?: string;
@@ -2188,6 +2191,7 @@ export interface RentalBookingIdentityInput {
 
 /** 由服务端解析并冻结，页面和客户端不能自行构造。 */
 export interface RentalMembershipSnapshot {
+  enterpriseBasis?: import("./enterprise-policy").EnterpriseBookingBasis;
   bookingIdentity: "personal" | "enterprise_employee";
   personalCustomerId: string;
   personalCustomerName: string;

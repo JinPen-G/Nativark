@@ -1,0 +1,19 @@
+.enterprise-brand { min-height: var(--rental-layout-context-height); display: flex; align-items: center; gap: var(--space-2); overflow: hidden; }
+.enterprise-brand svg { width: var(--rental-sidebar-icon-size); height: var(--rental-sidebar-icon-size); flex: none; }
+.enterprise-brand span, .enterprise-context { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-collapsible="icon"] .enterprise-brand span { display: none; }
+.enterprise-login { max-width: var(--rental-control-width-wide); padding-block: var(--space-4); }
+.enterprise-login h2 { font-size: var(--rental-typography-section-title-size); }
+.enterprise-login p { color: var(--text-secondary); }
+.enterprise-login a { color: var(--foreground); text-decoration: underline; }
+.native-workspace-context { min-height: var(--rental-layout-context-height); }
+.enterprise-context { min-width: 0; }
+.enterprise-approval-review { display: grid; gap: var(--space-4); }
+.enterprise-review-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-2) var(--space-4); margin: 0; }
+.enterprise-review-facts dt { color: var(--text-secondary); }
+.enterprise-review-facts dd { margin: 0; overflow-wrap: anywhere; }
+.enterprise-review-fact { display: contents; }
+.enterprise-approval-review small { display: block; color: var(--text-secondary); }
+@media (max-width: 40rem) {
+  .enterprise-review-facts { grid-template-columns: minmax(0, 1fr); }
+}

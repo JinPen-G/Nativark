@@ -1,5 +1,6 @@
 import { Checkbox as AntCheckbox, ConfigProvider, type CheckboxProps } from "antd";
-import { createContext, forwardRef, useContext, useImperativeHandle, useRef, useState, type ComponentProps, type ElementRef, type MouseEvent } from "react";
+import type { CheckboxRef } from "antd/es/checkbox";
+import { createContext, forwardRef, useContext, useImperativeHandle, useRef, useState, type ComponentProps, type MouseEvent } from "react";
 import { Checkbox as ArcCheckbox } from "@/registry/components/checkbox/checkbox";
 
 // Ant groups own value propagation; do not silently detach their children.
@@ -7,13 +8,13 @@ const AntGroupContext = createContext(false);
 function Group(props: ComponentProps<typeof AntCheckbox.Group>) {
   return <AntGroupContext.Provider value><AntCheckbox.Group {...props} /></AntGroupContext.Provider>;
 }
-const Control = forwardRef<ElementRef<typeof AntCheckbox>, CheckboxProps>(function Checkbox(props, ref) {
+const Control = forwardRef<CheckboxRef, CheckboxProps>(function Checkbox(props, ref) {
   const group = useContext(AntGroupContext);
   const { componentDisabled } = ConfigProvider.useConfig();
   const [internal, setInternal] = useState(props.defaultChecked ?? false);
   const eventRef = useRef<MouseEvent<HTMLButtonElement> | null>(null);
   const node = useRef<HTMLButtonElement>(null);
-  const ant = useRef<ElementRef<typeof AntCheckbox>>(null);
+  const ant = useRef<CheckboxRef>(null);
   useImperativeHandle(ref, () => ({
     focus: options => ant.current ? ant.current.focus(options) : node.current?.focus(options),
     blur: () => ant.current ? ant.current.blur() : node.current?.blur(),

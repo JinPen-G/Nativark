@@ -1,0 +1,21 @@
+{
+  "baseline": "8b98b1e0",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "sha256": "d2696383d71f559900b5a25e25e48786cc8a5b002c04e1b208c8229e26f747b1"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "sha256": "96edc4e78e039138b65d5d21ac698a66f4973b0a3a2f4318beb7c8c3714ddffe"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "sha256": "ca9a0ec0f63286a5b940ac73cbd84ff055f89a941eae018109b38360f11f14b5"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "sha256": "b35fc089bdc46fd4078369d9336e661f964db9c2ef1b4ac35103754f087a61be"
+    }
+  ]
+}

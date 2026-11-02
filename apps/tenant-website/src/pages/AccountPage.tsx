@@ -108,6 +108,13 @@ export function AccountPage() {
   const { href, isRemote, t } = useSite();
   const { isAuthenticated, customerName, logout } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast(), [loggingOut, setLoggingOut] = useState(false);
+  const signOut = async () => {
+    setLoggingOut(true);
+    try { await logout(); navigate(href('/')); }
+    catch (e) { toast.error(e instanceof Error ? e.message : t('loadFailed')); }
+    finally { setLoggingOut(false); }
+  };
 
   useEffect(() => {
     if (isRemote && !isAuthenticated) navigate(href(`/login?redirect=${encodeURIComponent('/account')}`), { replace: true });
@@ -118,7 +125,7 @@ export function AccountPage() {
 
   return <div className="shell simple-page account-page">
     <div className="page-intro"><h1>{t('accountTitle')}</h1><p>{customerName ? t('accountGreeting', { name: customerName }) : t('accountSubtitle')}</p></div>
-    <div className="account-quicklinks"><Link className="button button-outline" to={href('/orders')}>{t('orders')}</Link><button type="button" className="button button-outline" onClick={() => { logout(); navigate(href('/')); }}>{t('logoutCta')}</button></div>
+    <div className="account-quicklinks"><Link className="button button-outline" to={href('/orders')}>{t('orders')}</Link><button type="button" className="button button-outline" disabled={loggingOut} onClick={() => void signOut()}>{t('logoutCta')}</button></div>
     <AddressBook />
     <Coupons />
     <Notifications />

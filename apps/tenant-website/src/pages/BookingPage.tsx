@@ -80,7 +80,7 @@ export function BookingPage() {
     {remoteMode || handoffHost?.enabled === true
       ? handoffHost?.enabled === true
         ? <BookingHandoffPanel host={handoffHost} sessionIdentity={session} english={language === 'en'}
-            context={{ tenantCode, workspaceCode: currentWorkspace?.workspaceCode, customerId: session?.customer.id, authenticated: isRemote && isAuthenticated, productId: product.id }}
+            context={{ tenantCode, workspaceCode: currentWorkspace?.workspaceCode, customerId: session?.customer.customerId, authenticated: isRemote && isAuthenticated, productId: product.id }}
             onContinue={handoff => {
               setStartDate(handoffLocalInput(handoff.fields.startAt, handoff.fields.timeZone));
               setEndDate(handoffLocalInput(handoff.fields.endAt, handoff.fields.timeZone));

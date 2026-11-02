@@ -5,19 +5,13 @@ import { API_BASE } from './apiClient';
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '../../../../packages/shared/src/ai-booking-draft';
-import type { AiClientHostCapabilities } from '@rental-os/shared';
+import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
-export interface ClientSession {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  customer: { id?: string; name?: string; phone?: string; [k: string]: unknown };
-  workspaces: WorkspaceRef[];
-  workspace?: WorkspaceRef;
-  wechatBound?: boolean;
-}
+import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
+import type { ClientMembershipSessionResponse, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
   workspaceCode: string;
@@ -27,40 +21,16 @@ export interface WorkspaceRef {
   isDefault?: boolean;
 }
 
-const storeKey = (tenantCode: string) => `rental-os-tenant-session:${tenantCode}`;
+export const loadSession = loadCustomerSession;
+export { subscribeCustomerSession };
 
-export function loadSession(tenantCode: string): ClientSession | null {
-  try {
-    const raw = window.localStorage.getItem(storeKey(tenantCode));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ClientSession;
-    return parsed?.accessToken && parsed?.refreshToken ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveSession(tenantCode: string, session: ClientSession | null): void {
-  try {
-    if (session) window.localStorage.setItem(storeKey(tenantCode), JSON.stringify(session));
-    else window.localStorage.removeItem(storeKey(tenantCode));
-  } catch {
-    // 隐私模式等场景下 localStorage 不可用；仅内存态失效，不阻断使用。
-  }
-}
-
-export class AuthError extends Error {
-  constructor(public status: number, message: string, public code?: string) {
-    super(message);
-    this.name = 'AuthError';
-  }
-}
+export { ClientTransportError as AuthError };
 
 async function parse(response: Response) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = Array.isArray(body?.message) ? body.message.join('；') : (body?.message || `请求失败（${response.status}）`);
-    throw new AuthError(response.status, message, body?.code);
+    throw new ClientTransportError(response.status, message, body?.code);
   }
   return body?.data ?? body;
 }
@@ -86,10 +56,10 @@ export const authApi = {
     return postPublic<{ verificationToken: string }>(`/auth/registration/challenges/${encodeURIComponent(challengeId)}/verify`, { code });
   },
   smsLogin(input: { tenantCode: string; loginIdentifier: string; verificationToken: string }) {
-    return postPublic<ClientSession>('/auth/sms-login', input);
+    return customerLogin(input.tenantCode, CLIENT_V1, '/auth/sms-login', input);
   },
   passwordLogin(input: { tenantCode: string; loginIdentifier: string; password: string }) {
-    return postPublic<ClientSession>('/auth/login', input);
+    return customerLogin(input.tenantCode, CLIENT_V1, '/auth/login', input);
   },
   register(input: {
     tenantCode: string; name: string; phone: string; password: string; verificationToken: string;
@@ -97,21 +67,18 @@ export const authApi = {
   }) {
     return postPublic<{ result: string; customerId: string; membershipStatus: string }>('/auth/register', input);
   },
-  refresh(refreshToken: string) {
-    return postPublic<ClientSession>('/auth/refresh', { refreshToken });
-  },
-  logout(refreshToken: string) {
-    return postPublic<unknown>('/auth/logout', { refreshToken }).catch(() => undefined);
+  logout(tenantCode: string) {
+    return logoutCustomerSession(tenantCode, CLIENT_V1);
   },
 };
 
 // ---- 登录态请求层 ----
-// AuthContext 注册当前会话读写器；authedFetch 注入 Bearer，401 时用 refreshToken 续期一次并重试，
-// 续期失败则清空会话（视为登出）并抛出，由页面引导重新登录。
+// AuthContext 订阅共用会话；安全 GET 可续期一次，业务写入不自动重发。
+// 刷新失应答保留原派发标记，不把未知结果推断为登出或未执行。
 
 interface AuthBridge {
+  tenantCode: string;
   getSession: () => ClientSession | null;
-  setSession: (session: ClientSession | null) => void;
 }
 
 let bridge: AuthBridge | null = null;
@@ -127,38 +94,32 @@ export function captureBookingHostSession() {
     && session.customer.customerType === 'personal' && session.workspace?.workspaceCode === workspaceCode };
 }
 
+/** Enterprise commands survive token refresh, but never account/workspace generation changes. */
+export function captureEnterpriseHostSession() {
+  const owner = bridge, session = owner?.getSession();
+  if (!owner || !session?.accessToken || session.customer.customerType !== 'personal' || !session.workspace?.workspaceCode) return null;
+  const generation = customerSessionGeneration(owner.tenantCode), customerId = session.customer.customerId, workspaceCode = session.workspace.workspaceCode;
+  if (generation === 'unavailable') return null;
+  return { tenantCode: owner.tenantCode, customerId, workspaceCode, generation,
+    identity: JSON.stringify([owner.tenantCode, generation, customerId, workspaceCode]),
+    operationScope: JSON.stringify([owner.tenantCode, customerId, workspaceCode]),
+    current: () => {
+      const latest = loadSession(owner.tenantCode);
+      return bridge === owner && customerSessionGeneration(owner.tenantCode) === generation
+        && Boolean(latest?.accessToken) && latest?.customer.customerType === 'personal'
+        && latest.customer.customerId === customerId && latest.workspace?.workspaceCode === workspaceCode;
+    } };
+}
+
 export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
 }
 
-// 单飞刷新：并发 401 只发起一次 refresh，其余复用同一 Promise。
-// refresh token 是一次性轮换的，重复用同一个会被服务端判为失效并误登出。
-let refreshInFlight: Promise<ClientSession> | null = null;
-
-function ensureRefreshed(refreshToken: string): Promise<ClientSession> {
-  if (!refreshInFlight) {
-    refreshInFlight = authApi.refresh(refreshToken)
-      .then(next => { bridge?.setSession(next); return next; })
-      .finally(() => { refreshInFlight = null; });
-  }
-  return refreshInFlight;
-}
-
 async function authedFetch(path: string, init: RequestInit, retry = true): Promise<Response> {
-  const session = bridge?.getSession() ?? null;
-  const headers = new Headers(init.headers);
-  headers.set('Accept', 'application/json');
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`);
-  const response = await fetch(`${CLIENT_V1}${path}`, { ...init, headers });
-  if (response.status === 401 && retry && session?.refreshToken) {
-    try {
-      await ensureRefreshed(session.refreshToken);
-      return authedFetch(path, init, false);
-    } catch {
-      bridge?.setSession(null);
-    }
-  }
+  const owner = bridge;
+  if (!owner?.tenantCode) throw new ClientTransportError(401, '请先登录当前商户');
+  const response = await customerFetch(owner.tenantCode, CLIENT_V1, path, init, retry && (init.method ?? 'GET').toUpperCase() === 'GET');
+  if (bridge !== owner) throw new ClientTransportError(401, '客户会话已变化');
   return response;
 }
 
@@ -177,11 +138,22 @@ export const sessionApi = {
   },
   me() { return authedJson<Record<string, unknown>>('/auth/me'); },
   switchWorkspace(workspaceCode: string) {
-    return authedJson<ClientSession>('/auth/switch-workspace', { method: 'POST', body: JSON.stringify({ workspaceCode }) });
+    const owner = bridge;
+    if (!owner?.tenantCode) throw new ClientTransportError(401, '请先登录当前商户');
+    return switchCustomerWorkspace(owner.tenantCode, CLIENT_V1, workspaceCode);
   },
   /** 登录态目录：含履约地点、履约模式与型号（用于下单时取 locationId / fulfillmentMode）。 */
   catalog() { return authedJson<Record<string, any>>('/catalog'); },
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
+  enterpriseRentalPolicies() { return authedJson<EnterpriseOwnRentalPolicy[]>('/enterprise/my-rental-policies'); },
+  enterpriseApprovals() { return authedJson<EnterpriseBookingApprovalView[]>('/enterprise/my-approvals'); },
+  enterpriseCommand<T>(path: string, payload: unknown) { return authedJson<T>(`/enterprise/${path}`, { method: 'POST', body: JSON.stringify(payload) }); },
+  enterpriseOperation(key: string) { return authedJson<{ state: string; result?: Record<string, unknown> }>(`/enterprise/operations/${encodeURIComponent(key)}`); },
+  enterpriseExtensionEligibility(orderId: string) { return authedJson<EnterpriseExtensionEligibility>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-eligibility`); },
+  enterpriseExtensionApprovals() { return authedJson<EnterpriseExtensionApprovalView[]>('/enterprise/my-extension-approvals'); },
+  enterpriseExtensionResult(id: string) { return authedJson<EnterpriseExtensionOriginalResult>(`/enterprise/extension-approvals/${encodeURIComponent(id)}/result`); },
+  enterpriseApprovalResult(id: string) { return authedJson<EnterpriseApprovalOriginalResult>(`/enterprise/approvals/${encodeURIComponent(id)}/result`); },
+  enterpriseOrderOriginal(quoteId: string, key: string) { return authedJson<EnterpriseOrderOriginalResult>(`/enterprise/quotes/${encodeURIComponent(quoteId)}/order-operations/${encodeURIComponent(key)}`); },
   createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
   getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
   async readBookingAcceptance(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse> {

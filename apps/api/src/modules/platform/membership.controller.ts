@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Optional, Param, Post, Put, Query, Req, ServiceUnavailableException } from "@nestjs/common";
 import type { SystemUserRow } from "@rental-os/shared";
 import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
@@ -17,13 +17,35 @@ import {
   UpdateCustomerMembershipRegistrationSettingsDto
 } from "./membership-request.dto";
 import { MembershipService } from "./membership.service";
+import { EnterprisePortalService } from "./enterprise-portal.service";
+import { SaveEnterprisePortalConfigurationDto, SaveEnterpriseTenantSettingsDto } from "./enterprise-portal-request.dto";
 
 interface RequestWithUser { user?: SystemUserRow; }
 
 /** 会员维护按租户共享；证件配置/提交与业务权益解析才需要当前空间上下文。 */
 @Controller("membership")
 export class MembershipController {
-  constructor(private readonly memberships: MembershipService) {}
+  constructor(private readonly memberships: MembershipService, @Optional() private readonly enterprise?: EnterprisePortalService) {}
+
+  private portal() {
+    if (!this.enterprise) throw new ServiceUnavailableException("企业门户配置服务未就绪");
+    return this.enterprise;
+  }
+
+  @Get("enterprise-portal/operations/:operationKey")
+  enterpriseOperation(@Param("operationKey") key: string, @Req() req: RequestWithUser) { return this.portal().operation(req.user!, key); }
+
+  @Get("enterprise-portal/settings")
+  enterpriseSettings(@Req() req: RequestWithUser) { return this.portal().tenantSettings(req.user!); }
+
+  @Put("enterprise-portal/settings")
+  saveEnterpriseSettings(@Body() body: SaveEnterpriseTenantSettingsDto, @Req() req: RequestWithUser) { return this.portal().saveTenantSettings(req.user!, body); }
+
+  @Get("corporate/:corporateCustomerId/enterprise-portal")
+  enterpriseConfiguration(@Param("corporateCustomerId") id: string, @Req() req: RequestWithUser) { return this.portal().configuration(req.user!, id); }
+
+  @Put("corporate/:corporateCustomerId/enterprise-portal")
+  saveEnterpriseConfiguration(@Param("corporateCustomerId") id: string, @Body() body: SaveEnterprisePortalConfigurationDto, @Req() req: RequestWithUser) { return this.portal().saveConfiguration(req.user!, id, body); }
 
   private tenantScope() {
     return { tenantId: requireRequestTenantId() };

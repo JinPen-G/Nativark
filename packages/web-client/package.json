@@ -1,0 +1,8 @@
+{
+  "name": "@rental-os/web-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@rental-os/shared": "0.1.0" }
+}

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
+import { lockRentalBusinessTenant } from "../rental-core/rental-business-fence";
 import type {
   CustomerCorporateCreditAccountSummary,
   CustomerCorporateCreditLedgerEntry,
@@ -113,6 +114,7 @@ export class CustomerCorporateSettlementService {
 
   /** 由持有订单行锁的确认事务调用；不能在领取或结算时用当前主档补造旧单。 */
   async freezeOrderSettlement(tenantId: string, orderId: string, tx: Prisma.TransactionClient) {
+    await lockRentalBusinessTenant(tx, tenantId);
     const order = await this.order(tenantId, orderId, tx);
     const customerId = this.corporatePayer(order);
     if (!customerId) return false;
@@ -202,6 +204,7 @@ export class CustomerCorporateSettlementService {
   }
 
   private async lockCredit(tx: Prisma.TransactionClient, tenantId: string, customerId: string) {
+    await lockRentalBusinessTenant(tx, tenantId);
     const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT id
         FROM customer_corporate_credits

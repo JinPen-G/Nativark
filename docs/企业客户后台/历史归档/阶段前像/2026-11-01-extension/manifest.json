@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-01",
+  "branch": "feat/enterprise-portal",
+  "head": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "purpose": "Preserve prior originals before extension-approval stage record and continuation maintenance",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "snapshot": "企业客户后台-需求.md",
+      "bytes": 37135,
+      "sha256": "874b550090a67225b84bfbcbae40959b905afaa6898609a3b679617abfc6ba7f"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "snapshot": "企业客户后台-开发任务.md",
+      "bytes": 14798,
+      "sha256": "75f9d1a426dfa2b89165a9881f5462c6e8375369763fa357ff4503fdef8c70d2"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "snapshot": "企业客户后台-开发记录.md",
+      "bytes": 32774,
+      "sha256": "72877669a83bc5325e40fbe4befa56868846b0543507048ef9147dabe6f68319"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "snapshot": "企业客户后台-协作接续.md",
+      "bytes": 6328,
+      "sha256": "e0b7065a8b1acf0669f0d3a8289aafefd308cdd68e286d283f999f6198bf81e8"
+    },
+    {
+      "source": "apps/enterprise-portal/README.md",
+      "snapshot": "enterprise-portal-README.md",
+      "bytes": 7430,
+      "sha256": "14a2d57745a4105b279a95049f9f6e6e1b0f98285cb19a4af6306d9e733c16c1"
+    }
+  ]
+}

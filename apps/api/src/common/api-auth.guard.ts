@@ -63,6 +63,7 @@ export function isNewBusinessRoute(method: string, path: string): boolean {
   if (method.toUpperCase() !== "POST") return false;
   if (path === "/rental/v1/orders" || path === "/rental/v1/quotes") return true;
   if (path === "/client/v1/orders" || path === "/client/v1/quotes") return true;
+  if (path === "/client/v1/enterprise/approvals/submit" || path === "/client/v1/enterprise/extension-approvals/submit") return true;
   if (/^\/(?:rental|client)\/v1\/orders\/[^/]+\/extensions$/u.test(path)) return true;
   if (/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange$/u.test(path)) return true;
   return false;
@@ -542,6 +543,14 @@ export function requiredPermissions(method: string, path: string) {
       return method === "GET"
         ? ["rental-os:member:view", "rental-os:member:manage"]
         : ["rental-os:member:manage"];
+    }
+    if (path.startsWith("/membership/enterprise-workflows/")) return ["rental-os:corporate:manage"];
+    if (/^\/membership\/enterprise-portal\/operations\/[^/]+$/u.test(path)) return ["rental-os:corporate:manage"];
+    if (path === "/membership/enterprise-portal/settings") {
+      return method === "GET" ? ["rental-os:corporate:view", "rental-os:corporate:manage"] : ["rental-os:corporate:manage"];
+    }
+    if (/^\/membership\/corporate\/[^/]+\/enterprise-portal$/u.test(path)) {
+      return method === "GET" ? ["rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:corporate:employee-manage"] : ["rental-os:corporate:employee-manage"];
     }
     if (/^\/membership\/corporate\/[^/]+\/employees$/u.test(path)) {
       return method === "GET"

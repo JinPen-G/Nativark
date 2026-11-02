@@ -3,8 +3,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
-import { authApi, type ClientSession } from '../data/authClient';
+import { authApi } from '../data/authClient';
 import { clientApi } from '../data/apiClient';
+import { parseEnterpriseRoute, safeCustomerReturn } from '@rental-os/web-client';
 
 // 登录与注册是两件事、两个入口：登录页只留「验证码 / 密码」两种登录方式，
 // 注册是登录卡下方「还没有账号？去注册」切到的独立视图（含「已有账号？去登录」返回）。
@@ -16,11 +17,16 @@ function phoneValid(phone: string) {
 }
 
 export function LoginPage() {
-  const { tenantCode, isRemote, href, t } = useSite();
-  const { setSession, isAuthenticated } = useAuth();
+  const { tenantCode, isRemote, href, t, enterpriseDomainBound } = useSite();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const redirect = params.get('redirect') || '/orders';
+  const domainBound = enterpriseDomainBound;
+  const redirect = safeCustomerReturn(params.get('redirect'), tenantCode ?? '', domainBound) ?? '/orders';
+  const returnToTarget = () => {
+    if (parseEnterpriseRoute(redirect)) window.location.assign(redirect);
+    else navigate(href(redirect), { replace: true });
+  };
 
   const [view, setView] = useState<View>('login');
   const [loginMode, setLoginMode] = useState<LoginMode>('sms');
@@ -36,7 +42,7 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
   const timer = useRef<number | null>(null);
 
-  useEffect(() => { if (isAuthenticated) navigate(href(redirect), { replace: true }); }, [isAuthenticated]);
+  useEffect(() => { if (isAuthenticated) returnToTarget(); }, [isAuthenticated]);
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
 
   const isRegister = view === 'register';
@@ -49,11 +55,6 @@ export function LoginPage() {
       if (value <= 1 && timer.current) { window.clearInterval(timer.current); return 0; }
       return value - 1;
     }), 1000);
-  }
-
-  function land(session: ClientSession) {
-    setSession(session);
-    navigate(href(redirect), { replace: true });
   }
 
   async function sendCode() {
@@ -96,14 +97,14 @@ export function LoginPage() {
           },
         });
         // 注册成功后用同一手机号密码直接登录。
-        land(await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password }));
+        await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password });
       } else if (loginMode === 'password') {
         if (!phoneValid(phone)) throw new Error(t('requiredPhone'));
-        land(await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password }));
+        await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password });
       } else {
         if (!challengeId) throw new Error(t('loginNeedCode'));
         const verified = await authApi.verifyChallenge(challengeId, code.trim());
-        land(await authApi.smsLogin({ tenantCode, loginIdentifier: phone.trim(), verificationToken: verified.verificationToken }));
+        await authApi.smsLogin({ tenantCode, loginIdentifier: phone.trim(), verificationToken: verified.verificationToken });
       }
     } catch (e: any) {
       setError(e?.message || t('loginFailed'));

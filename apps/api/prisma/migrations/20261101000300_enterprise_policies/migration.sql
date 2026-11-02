@@ -1,0 +1,43 @@
+CREATE TABLE `enterprise_scope_policies` (
+  `tenantId` VARCHAR(191) NOT NULL,
+  `corporateCustomerId` VARCHAR(191) NOT NULL,
+  `scopeKey` VARCHAR(191) NOT NULL,
+  `membershipUpdatedAt` DATETIME(3) NULL,
+  `revision` INTEGER NOT NULL DEFAULT 1,
+  `policy` JSON NOT NULL,
+  PRIMARY KEY (`tenantId`, `corporateCustomerId`, `scopeKey`),
+  CONSTRAINT `enterprise_scope_tenant_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `enterprise_scope_company_fk` FOREIGN KEY (`tenantId`,`corporateCustomerId`) REFERENCES `customer_profiles` (`tenantId`,`id`) ON DELETE RESTRICT
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `enterprise_booking_approvals` (
+  `tenantId` VARCHAR(191) NOT NULL,
+  `id` VARCHAR(191) NOT NULL,
+  `corporateCustomerId` VARCHAR(191) NOT NULL,
+  `applicantCustomerId` VARCHAR(191) NOT NULL,
+  `workspaceId` VARCHAR(191) NOT NULL,
+  `quoteId` VARCHAR(191) NOT NULL,
+  `state` VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `revision` INTEGER NOT NULL DEFAULT 1,
+  `requestFingerprint` CHAR(64) NOT NULL,
+  `request` JSON NOT NULL,
+  `quote` JSON NOT NULL,
+  `basis` JSON NOT NULL,
+  `amount` DECIMAL(18,2) NOT NULL,
+  `currency` VARCHAR(3) NOT NULL,
+  `purpose` VARCHAR(500) NOT NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `orderId` VARCHAR(191) NULL,
+  `approvedBy` VARCHAR(191) NULL,
+  `reviewerMembershipId` VARCHAR(191) NULL,
+  `reviewerMembershipUpdatedAt` DATETIME(3) NULL,
+  `executionKey` VARCHAR(128) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`tenantId`,`id`),
+  UNIQUE KEY `enterprise_approval_quote` (`tenantId`,`quoteId`),
+  INDEX `enterprise_approval_company` (`tenantId`,`corporateCustomerId`,`state`),
+  CONSTRAINT `enterprise_approval_tenant_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `enterprise_approval_company_fk` FOREIGN KEY (`tenantId`,`corporateCustomerId`) REFERENCES `customer_profiles` (`tenantId`,`id`) ON DELETE RESTRICT,
+  CONSTRAINT `enterprise_approval_applicant_fk` FOREIGN KEY (`tenantId`,`applicantCustomerId`) REFERENCES `customer_profiles` (`tenantId`,`id`) ON DELETE RESTRICT,
+  CONSTRAINT `enterprise_approval_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `business_workspaces` (`tenantId`,`id`) ON DELETE RESTRICT
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

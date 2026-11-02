@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { Grid2X2, Rows3 } from "lucide-react";
 import { AnimatedIcon } from "../AnimatedIcon";
 import { useLocale } from "@/app/locale";
-import { useAuthStore } from "@/features/auth/authStore";
+import { useBusinessUiScope } from "../BusinessUiScope";
 import { Button } from "../Button";
 import { App } from "../App";
 import { Modal } from "../Modal";
@@ -16,14 +16,6 @@ import { RecordCard, type RecordCardConfig } from "./RecordCard";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { SelectionToolbar } from "@/components/selection-toolbar/archive/SelectionToolbar";
 import "@/components/selection-toolbar/adapter.css";
-import { useCopilot } from "@/features/copilot/CopilotProvider";
-import { readSelection } from "@/features/copilot/context";
-import { useLocation } from "react-router-dom";
-
-export function listIdentity() {
-  const state = useAuthStore.getState();
-  return JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id]);
-}
 export type ListCard<T> = RecordCardConfig<T>;
 export interface ListBatchAction<T> {
   key: string; label: string; danger?: boolean; reason?: boolean;
@@ -46,6 +38,7 @@ export function ListTransferTools<T>({ config, rows, busy, importConfig, loadExp
   const [open, setOpen] = useState(false);
   const [importMounted, setImportMounted] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const { currentIdentity: listIdentity } = useBusinessUiScope();
   const exportLocked = useRef(false);
   async function handleExport() {
     if (!config || busy || !rows.length || exportLocked.current) return;
@@ -85,6 +78,7 @@ export function ListCards<T>({ rows, config, getKey, selected, onSelect, busy, c
 
 function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImport<unknown>; onClose: () => void; onClosed: () => void; open: boolean }) {
   const { t } = useLocale();
+  const { currentIdentity: listIdentity } = useBusinessUiScope();
   const [identity] = useState(listIdentity);
   const [items, setItems] = useState<Array<Outcome & { value?: unknown }>>([]);
   const [error, setError] = useState("");
@@ -156,7 +150,7 @@ function ListImportDialog({ config, onClose, onClosed, open }: { config: ListImp
 
 export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, onSelectPage }: { rows: T[]; clear: () => void; config?: ListExport<T>; actions?: ListBatchAction<T>[]; busy?: boolean; onSelectPage?: () => void }) {
   const { t } = useLocale();
-  const copilot = useCopilot(), { pathname } = useLocation();
+  const { currentIdentity: listIdentity, selectionCommand } = useBusinessUiScope();
   const { message } = App.useApp();
   const reduced = usePrefersReducedMotion();
   const [action, setAction] = useState<ListBatchAction<T>>(), [reason, setReason] = useState("");
@@ -210,12 +204,9 @@ export function ListSelectionBar<T>({ rows, clear, config, actions = [], busy, o
           if (returnFocus) requestAnimationFrame(() => host?.querySelector<HTMLElement>('button[role="checkbox"]:not(:disabled), input[type="checkbox"]:not(:disabled)')?.focus({ preventScroll: true }));
         }} actions={[
           ...(onSelectPage ? [{ label: t("选择当前页"), disabled: busy || running, onClick: onSelectPage }] : []),
-          ...(copilot?.available ? [{ label: t("添加到 Copilot"), icon: <AnimatedIcon name="ai" />, disabled: busy || running, onClick: () => {
+          ...(selectionCommand ? [{ label: selectionCommand.label, icon: <AnimatedIcon name="ai" />, disabled: busy || running, onClick: () => {
             const host = barRef.current?.parentElement;
-            if (!host) return;
-            const records = readSelection(host, pathname);
-            if (records.length !== rows.length) { message.warning(t("部分所选记录不在当前视图，请重新选择后添加。")); return; }
-            copilot.add(records, true);
+            if (host) selectionCommand.run(host, rows.length);
           } }] : []),
           ...(config ? [{ label: t("导出所选"), icon: <AnimatedIcon name="download" />, disabled: busy || running, onClick: () => exportRows(config, rows) }] : []),
           ...actions.filter(item => item.allowed()).map(item => ({ label: t(item.label), destructive: item.danger,

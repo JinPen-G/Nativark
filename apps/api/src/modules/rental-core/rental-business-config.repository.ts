@@ -59,6 +59,7 @@ export interface TenantBusinessConfigSnapshot {
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
+  loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -180,6 +181,20 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         )
       };
     });
+  }
+
+  /** Reuse the original decoders for one transaction-scoped pricing context. */
+  async loadWorkspace(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot> {
+    const where = { tenantId, workspaceId };
+    const [workspace, pricing, discounts, services, calendars, rules] = await Promise.all([
+      tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true } }),
+      tx.rentalPricingPlan.findMany({ where }), tx.rentalDiscountPlan.findMany({ where }), tx.rentalValueAddedService.findMany({ where }),
+      tx.rentalBusinessCalendar.findMany({ where }), tx.rentalRuleVersion.findMany({ where }),
+    ]);
+    if (!workspace) throw new ConflictException("经营空间不存在");
+    return { tenantId, workspaceId, categoryCode: lower<RentalCategoryCode>(workspace.categoryCode), pricingPlans: pricing.map(row => this.toPricingPlan(row)),
+      discountPlans: discounts.map(row => this.toDiscountPlan(row)), services: services.map(row => this.toService(row)), calendars: calendars.map(row => this.toCalendar(row)),
+      ruleVersions: rules.map(row => this.toRuleVersion(row)), notificationTemplates: [], hasPersistedConfig: Boolean(pricing.length || services.length || rules.length || calendars.length) };
   }
 
   async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {

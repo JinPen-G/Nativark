@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "strict": true, "skipLibCheck": true,
+    "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "noEmit": true,
+    "esModuleInterop": true, "allowSyntheticDefaultImports": true, "resolveJsonModule": true,
+    "paths": {
+      "@enterprise/*": ["./src/*"],
+      "@/registry/*": ["../../packages/ui-arc/vendor/registry/*"],
+      "@/lib/motion-tokens": ["../../packages/ui-arc/vendor/lib/motion-tokens.ts"],
+      "@/lib/media": ["../../packages/ui-arc/vendor/lib/media.ts"],
+      "@/lib/use-copy-feedback": ["../../packages/ui-arc/vendor/lib/use-copy-feedback.ts"],
+      "@/lib/use-today": ["../../packages/ui-arc/vendor/lib/use-today.ts"],
+      "@/*": ["../admin/src/*"],
+      "@rental-os/shared": ["../../packages/shared/src/index.ts"],
+      "@rental-os/web-client": ["../../packages/web-client/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

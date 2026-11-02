@@ -15,7 +15,8 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": { "@rental-os/web-client": ["../../packages/web-client/src/index.ts"], "@rental-os/shared": ["../../packages/shared/src/index.ts"] }
   },
   "include": ["src"]
 }

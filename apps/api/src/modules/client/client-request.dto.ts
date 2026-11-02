@@ -18,6 +18,7 @@ import {
   ValidateNested
 } from "class-validator";
 import { Type } from "class-transformer";
+import { EnterpriseDisclosureDto } from "../enterprise/enterprise-request.dto";
 import {
   CLIENT_VERIFICATION_METHODS,
   RENTAL_FULFILLMENT_MODES,
@@ -199,6 +200,8 @@ export class ClientContactRequestDto implements ClientContactRequest {
 }
 
 export class ClientBookingIdentityInputDto {
+  @IsOptional() @ValidateNested() @Type(() => EnterpriseDisclosureDto)
+  enterpriseDisclosure?: EnterpriseDisclosureDto;
   @IsOptional() @IsIn(["personal", "enterprise_employee"])
   bookingIdentity?: "personal" | "enterprise_employee";
 

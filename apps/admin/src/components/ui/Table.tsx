@@ -18,7 +18,7 @@ import { DataTableToolbar } from "./data-table/DataTableToolbar";
 import { Pagination } from "./Pagination";
 import styles from "./data-table/DataTable.module.css";
 import { Checkbox as ArcCheckbox } from "@/registry/components/checkbox/checkbox";
-import { useAuthStore } from "@/features/auth/authStore";
+import { useBusinessUiScope } from "./BusinessUiScope";
 import { useDataTableSelection } from "./data-table/DataTableSelection";
 import { ListCards, ListSelectionBar, ListTransferTools, ListViewSwitch, type ListBatchAction, type ListCard } from "./data-table/ListCapabilities";
 import type { ListExport, ListImport } from "./data-table/listTransfer";
@@ -120,7 +120,7 @@ Table.listToolbarHost = true;
 
 function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolbarHeading?: ListToolbarHeading | null }) {
   const { t } = useLocale();
-  const identity = useAuthStore(state => JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id]));
+  const { identity } = useBusinessUiScope();
   const [selection, setSelection] = useDataTableSelection(`${identity}:${window.location.pathname}`);
   const [view, setView] = useState<"list" | "cards">(props.cardView?.defaultView ?? "list");
   const config: TablePaginationConfig = props.pagination && typeof props.pagination === "object" ? props.pagination : {};

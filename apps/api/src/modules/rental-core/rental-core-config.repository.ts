@@ -89,6 +89,7 @@ export function parseRentalItemGroupPageQuery(value: RentalItemGroupPageQuery): 
  */
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
+  loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantConfigSnapshot>;
   listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery): Promise<RentalItemGroupPage>;
   listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
   listCouponTemplates?(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]>;
@@ -236,6 +237,22 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         )
       };
     });
+  }
+
+  /** Scoped transaction read for new expense validation, with no seed/cache fallback. */
+  async loadWorkspace(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantConfigSnapshot> {
+    const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true, status: true } });
+    if (!workspace || workspace.status !== "ACTIVE") throw new ConflictException("当前经营空间不可用");
+    const where = { tenantId, workspaceId };
+    const [profile, settings, groups, pricingGroups, locations, coupons] = await Promise.all([
+      tx.tenantRentalProfile.findFirst({ where: { tenantId } }), tx.rentalTenantBusinessSettings.findFirst({ where }),
+      tx.rentalItemGroup.findMany({ where, include: { bundleComponents: { include: { componentItemGroup: { select: { code: true, name: true } } } } } }),
+      tx.rentalPricingGroup.findMany({ where, include: { members: { orderBy: { sortOrder: "asc" }, include: { itemGroup: true } } } }),
+      tx.rentalFulfillmentLocation.findMany({ where }), tx.rentalCouponTemplate.findMany({ where }),
+    ]);
+    return { tenantId, workspaceId, workspaceCategoryCode: lower<RentalCategoryCode>(workspace.categoryCode), profile: this.toProfile(profile ?? undefined),
+      businessSettings: this.toBusinessSettings(settings ?? undefined), itemGroups: groups.map(row => this.toItemGroup(row)), pricingGroups: pricingGroups.map(row => this.toPricingGroup(row)),
+      locations: locations.map(row => this.toLocation(row)), couponTemplates: coupons.map(row => this.toCouponTemplate(row)), operators: [], inspectionTemplates: [], hasPersistedConfig: Boolean(settings) };
   }
 
   async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void> {

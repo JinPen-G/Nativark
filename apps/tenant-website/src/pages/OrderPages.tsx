@@ -7,6 +7,7 @@ import { sessionApi } from '../data/authClient';
 import { siteRepository } from '../data/siteRepository';
 import { Img } from '../components/Img';
 import { customerOrderFacts } from '../features/ai-native/customer-order-facts';
+import { EnterpriseExtensionApproval } from '../components/EnterpriseExtensionApproval';
 
 const money = (amount: unknown, currency = 'CNY') => `${currency === 'CNY' ? '¥' : ''}${Number(amount ?? 0)}`;
 
@@ -126,6 +127,7 @@ export function OrderDetailPage() {
         {payUrl && <a className="button button-dark button-block" href={payUrl} target="_blank" rel="noreferrer">{t('payGo')}</a>}
         <p className="mock-note">{t('paySettleNote')}</p>
       </div>
+      {orderId && <EnterpriseExtensionApproval key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
       <Link className="button button-dark" to={href('/products')}>{t('continueExplore')}</Link>
     </div>;
   }

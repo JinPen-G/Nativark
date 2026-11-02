@@ -1,0 +1,26 @@
+{
+  "baseline": "8b98b1e0",
+  "note": "Before engineering stage record and progress update; historical source text is retained.",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "sha256": "3455064c1678d920a8d8f27d31ca7920d77db0d96f0b10a8bb261f49a727675e",
+      "bytes": 3782
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "sha256": "3abffdba91dc079f65b7089d194d11dcc707460e416bedff01fd7a199fa9b06d",
+      "bytes": 14557
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "sha256": "d913e9fa19600bf642fe932e0ba8b33adb0ba420d2a3a1c708afafa90e57d8bc",
+      "bytes": 11511
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "sha256": "874b550090a67225b84bfbcbae40959b905afaa6898609a3b679617abfc6ba7f",
+      "bytes": 37135
+    }
+  ]
+}

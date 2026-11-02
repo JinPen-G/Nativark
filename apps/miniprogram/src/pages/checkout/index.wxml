@@ -68,6 +68,28 @@
       </view>
     </view>
 
+    <view class="section section--tight"><view class="card">
+      <view class="subtitle">预约身份：{{enterpriseLabel}}</view>
+      <picker range="{{enterprisePolicies}}" range-key="corporateName" value="{{enterpriseIndex}}" disabled="{{locked || enterprisePending}}" bindchange="onPickEnterprise"><view class="link mt-8">选择本人企业身份</view></picker>
+      <button class="btn mt-8" disabled="{{locked || enterprisePending}}" bindtap="onPersonalIdentity">使用个人签约付款</button>
+      <block wx:if="{{enterpriseIndex >= 0}}">
+        <view class="mt-8">企业优惠个人付款 / 企业签约付款</view><switch checked="{{enterprisePayer}}" disabled="{{locked || enterprisePending}}" bindchange="onEnterprisePayer" />
+        <view class="notice mt-8">{{enterpriseNotice}}</view>
+        <checkbox-group bindchange="onEnterpriseAccept"><label><checkbox value="accept" checked="{{enterpriseAccepted}}" disabled="{{locked || enterprisePending}}" />我知悉企业身份订单（含优惠个人付款）可被受权管理员查看，纯个人订单不共享。</label></checkbox-group>
+        <view class="muted mt-8">保证金按商户/企业合同默认企业承担，不代表已付款或冻结；员工承担须原资金能力支持。</view>
+      </block>
+      <view wx:if="{{enterpriseError}}" class="notice notice--warning mt-8">{{enterpriseError}}</view>
+      <button wx:if="{{enterprisePending}}" class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onReadEnterpriseApproval">只查原企业操作结果，不重发</button>
+      <block wx:if="{{enterprisePayer && quote.membershipSnapshot.enterpriseBasis.approvalMode === 'per_order'}}">
+        <input placeholder="本次租赁用途" value="{{enterprisePurpose}}" disabled="{{enterprisePending}}" bindinput="onEnterprisePurpose" maxlength="500" />
+        <button class="btn mt-8" disabled="{{enterpriseBusy || enterprisePending || !quote || !enterprisePurpose || enterpriseApproval.state === 'closed'}}" bindtap="onEnterpriseApproval">申请企业批准（不自动下单）</button>
+        <view wx:if="{{enterpriseApproval}}">原批准：{{enterpriseApproval.state}} / {{enterpriseApproval.expiresAt}}</view>
+        <button wx:if="{{enterpriseApproval.state === 'closed'}}" class="btn mt-8" disabled="{{enterpriseBusy || enterprisePending}}" bindtap="onRequote">重新获取报价（须新的批准）</button>
+        <button class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onReadEnterpriseApproval">只读原批准及提交结果</button>
+        <view wx:if="{{enterprisePending}}" class="notice mt-8">保留原操作，结果未知不换键重发。</view>
+      </block>
+    </view></view>
+
     <view class="section section--tight">
       <view class="card">
         <view class="line" wx:for="{{lines}}" wx:key="key">

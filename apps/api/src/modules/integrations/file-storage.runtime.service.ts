@@ -777,9 +777,39 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     return this.assetSummary(updated);
   }
 
+  /** Merchant application evidence is read through the authenticated controller,
+   * not a reusable bearer download URL. The controller rechecks its reviewer. */
+  async readAuthorityBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string) {
+    const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: fileAssetId, businessType: "customer", businessId: applicantCustomerId, uploadedBy: applicantCustomerId, uploadScene: "enterprise-authority", status: "active" }, include: { uploadSession: true } });
+    if (!asset || asset.storageProvider === "local_mock" || asset.uploadSession?.status !== "completed" || !asset.uploadSession.completedAt
+      || !["application/pdf", "image/png", "image/jpeg"].includes(asset.mimeType) || asset.sizeBytes < 1 || asset.sizeBytes > MAX_FILE_BYTES) throw new NotFoundException("授权材料未真实归档或不属于当前申请");
+    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
+    if (!config) throw new ServiceUnavailableException("授权材料存储不可用");
+    const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, new Date(Date.now() + 60000));
+    const target = await assertOutboundUrl(signed.url, "授权材料存储地址", { allowQuery: true });
+    const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(8000) });
+    if (!response.ok || !response.body) throw new ServiceUnavailableException("授权材料读取失败");
+    const reader = response.body.getReader(), chunks: Buffer[] = []; let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read(); if (chunk.done) break;
+        size += chunk.value.byteLength; if (size > asset.sizeBytes || size > MAX_FILE_BYTES) throw new BadRequestException("授权材料超过登记大小");
+        chunks.push(Buffer.from(chunk.value));
+      }
+    } finally { await reader.cancel().catch(() => undefined); }
+    const after = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: asset.id, status: "active", updatedAt: asset.updatedAt, storageKey: asset.storageKey } });
+    if (!after || size !== asset.sizeBytes) throw new ConflictException("读取期间授权材料已变化或不完整");
+    const content = Buffer.concat(chunks);
+    const signatures = asset.mimeType === "application/pdf" ? content.subarray(0, 5).toString("ascii") === "%PDF-"
+      : asset.mimeType === "image/png" ? content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : content[0] === 255 && content[1] === 216 && content[2] === 255;
+    if (!signatures) throw new BadRequestException("授权材料格式与登记类型不匹配");
+    return { mimeType: asset.mimeType, content };
+  }
+
   async downloadUrl(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner): Promise<FileDownloadUrlSummary> {
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
     if (asset?.businessType === 'ai_knowledge_document') throw new ServiceUnavailableException('知识附件必须经当前文档权限读取，不签发下载URL');
+    if (asset?.uploadScene === 'enterprise-authority') throw new ServiceUnavailableException('企业授权材料必须经当前申请及审核权限读取，不签发可复用下载URL');
     if (asset && owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId))) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
     if (asset.businessType === "customer" && asset.uploadScene === "identity-verification"

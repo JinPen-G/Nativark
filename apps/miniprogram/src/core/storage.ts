@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   bootstrap: `${PREFIX}bootstrap`,
   lastService: `${PREFIX}last-service`,
   actionKeys: `${PREFIX}action-keys`,
+  enterpriseOperations: `${PREFIX}enterprise-operations`,
   paymentIntents: `${PREFIX}payment-intents`,
   favorites: `${PREFIX}favorites`,
   themeMode: `${PREFIX}theme-mode`
@@ -35,6 +36,12 @@ export function writeStorage(key: string, value: unknown): void {
   }
 }
 
+/** Original operation references must survive a restart before any business write. */
+export function writeRequiredStorage(key: string, value: unknown): void {
+  wx.setStorageSync(key, value);
+  if (JSON.stringify(wx.getStorageSync(key)) !== JSON.stringify(value)) throw new Error("无法保留原操作引用，未派发请求");
+}
+
 export function removeStorage(key: string): void {
   try {
     wx.removeStorageSync(key);
@@ -48,4 +55,9 @@ export function clearPrivateStorage(): void {
   for (const key of Object.values(STORAGE_KEYS)) {
     if (!KEEP_ON_SIGN_OUT.has(key)) removeStorage(key);
   }
+  try {
+    // Opaque extension keys contain no body/credentials and remain account-scoped
+    // for original-result recovery after re-login; signing out is not a rollback.
+    for (const key of wx.getStorageInfoSync().keys) if (key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:`) && !key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:extension:`)) removeStorage(key);
+  } catch { /* A storage failure does not restore the cleared in-memory identity. */ }
 }
