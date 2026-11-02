@@ -14,6 +14,7 @@ export function serviceOccurrenceOriginText(row: Pick<RentalOrderServiceOccurren
     return row.extensionSequence === undefined ? "续租新增" : `第 ${row.extensionSequence} 次续租新增`;
   }
   if (row.origin === "order") return "原订单服务";
+  if (row.origin === "exchange") return "换货确认新增";
   // 存量订单没有来源标记：不猜成原服务，也不猜成续租。
   return "历史记录（无来源标记）";
 }

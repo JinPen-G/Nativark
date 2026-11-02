@@ -1,4 +1,4 @@
-import type { RentalEarlyReturnRule, RentalOrderServiceOccurrence } from "@rental-os/shared";
+import type { RentalEarlyReturnRule, RentalOrderServiceOccurrence, RentalOrder } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
 
 /**
@@ -52,11 +52,21 @@ export interface EarlyReturnRefund {
   basis: string[];
 }
 
+/** Whole-return source only: exchange/service reductions have independent receipts. */
+export function hasWholeEarlyReturnReduction(order?: Partial<Pick<RentalOrder, "id" | "chargeLines" | "feeReviews">>): boolean {
+  const code = order?.id ? `early_return_refund:${order.id}` : undefined;
+  return Boolean(code && order?.chargeLines?.some(line => line.type === "early_return_refund"
+    && (line.code === code || line.code === `${code}:order`) && Number.isFinite(line.amount) && line.amount < 0)
+    || order?.feeReviews?.some(review => review.type === "early_return_refund" && !review.sourceId && review.status === "approved"));
+}
+
 const EMPTY: EarlyReturnRefund = { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: false, basis: [] };
 
 export function computeEarlyReturnRefund(
   rule: RentalEarlyReturnRule | undefined,
-  ctx: EarlyReturnContext
+  ctx: EarlyReturnContext,
+  /** Internal batch aggregation rounds rental cents once after summing all parts. */
+  deferRentalRounding = false
 ): EarlyReturnRefund {
   // 规则整组缺省或明确不退：保持需求 4.6.8「第一阶段默认不自动退租金」的行为。
   if (!rule || rule.mode === "none") return EMPTY;
@@ -73,7 +83,8 @@ export function computeEarlyReturnRefund(
   // 未使用占比夹在 [0, 1]：调用方给出的单位数来自快照，异常数据不应放大成负退款或超额退款。
   const unusedRatio = ctx.totalUnits > 0 ? Math.min(1, Math.max(0, ctx.unusedUnits / ctx.totalUnits)) : 0;
   const netRental = Math.max(0, roundMoney(ctx.rentalAmount - ctx.rentalDiscountAmount - ctx.rentalCouponAmount));
-  const rentalRefund = roundMoney((netRental * unusedRatio * rule.refundPercent) / 100);
+  const rentalBasis = (netRental * unusedRatio * rule.refundPercent) / 100;
+  const rentalRefund = deferRentalRounding ? rentalBasis : roundMoney(rentalBasis);
   basis.push(
     `净租金 ${netRental}（租金 ${ctx.rentalAmount} − 优惠 ${ctx.rentalDiscountAmount} − 券 ${ctx.rentalCouponAmount}）` +
       ` × 未使用 ${ctx.unusedUnits}/${ctx.totalUnits} × ${rule.refundPercent}% = ${rentalRefund}`

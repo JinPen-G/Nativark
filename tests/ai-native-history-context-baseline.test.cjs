@@ -295,6 +295,7 @@ test("original-total successor refuses missing or foreign receipts, mixed mode, 
   await h.preview({ ...changes, previousExtensions: [original] });
   assert.deepEqual(original, before, 'successor reads, never rewrites the original effective receipt');
   const legacy = structuredClone(original); delete legacy.executionBasis; delete legacy.pricingSnapshot.scope;
+  delete legacy.pricingSnapshot.rentalLineAmounts;
   const old = await h.preview({ ...changes, previousExtensions: [legacy] });
   assert.equal(old.pricingSnapshot.context.calendars[0].version, '1.0', 'complete historical whole-order snapshot needs no invented new marker');
   const sequenceGap = { ...structuredClone(original), sequence: 3 };
@@ -315,7 +316,20 @@ test("original-total successor rejects broken receipt amounts instead of calcula
     row => { row.pricingSnapshot.recalculatedDiscountAmount = NaN; }, row => { row.pricingSnapshot.recalculatedCouponAmount = -1; },
     row => { row.pricingSnapshot.totalBillableUnits = Infinity; }, row => { row.pricingSnapshot.chargeLines[0].amount++; },
     row => { row.pricingSnapshot.fullChargeLines[0].amount++; },
-    row => { row.pricingSnapshot.refundReview = { amount: 1, status: 'approved' }; }]) {
+    row => { const target = Object.keys(row.pricingSnapshot.rentalLineAmounts)[0]; row.pricingSnapshot.rentalLineAmounts[target]++; },
+    row => { row.pricingSnapshot.rentalLineAmounts = {}; },
+    row => { row.pricingSnapshot.rentalLineAmounts = { foreign: row.pricingSnapshot.recalculatedRentalAmount }; },
+    row => { const target = Object.keys(row.pricingSnapshot.rentalLineAmounts)[0]; row.pricingSnapshot.rentalLineAmounts[target] = NaN; },
+    row => { const target = Object.keys(row.pricingSnapshot.rentalLineAmounts)[0]; row.pricingSnapshot.rentalLineAmounts[target] = -1; },
+    row => { row.pricingSnapshot.rentalLineAmounts = null; },
+    row => { row.pricingSnapshot.rentalLineAmounts = [row.pricingSnapshot.recalculatedRentalAmount]; },
+    row => { row.pricingSnapshot.refundReview = { amount: 1, status: 'approved' }; },
+    row => {
+      row.pricingSnapshot.previousPayableAmount++;
+      row.pricingSnapshot.differenceAmount--;
+      row.payableAmount = Math.max(0, row.pricingSnapshot.differenceAmount);
+      row.pricingSnapshot.chargeLines.push({ code: 'counterfeit-balance', type: 'extension', amount: -1 });
+    }]) {
     const row = structuredClone(original); mutate(row);
     await assert.rejects(h.preview({ ...changes, previousExtensions: [row] }), error => error.getStatus() === 409);
   }

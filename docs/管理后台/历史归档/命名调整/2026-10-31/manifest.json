@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-31",
+  "note": "Byte-exact before rename. Old archive manifests retain their recorded source/file paths; docs/租赁平台/ maps to docs/管理后台/ physically, but do not rewrite the archived bytes.",
+  "files": [
+    {
+      "source": "docs/租赁平台/租赁平台-需求.md",
+      "file": "docs/管理后台/历史归档/命名调整/2026-10-31/租赁平台-需求.md",
+      "bytes": 219960,
+      "sha256": "56c56bfdc503b653b14854f2ed4536c0d14bb8a79d1bd6215db2946e81890b81"
+    },
+    {
+      "source": "docs/租赁平台/租赁平台-开发任务.md",
+      "file": "docs/管理后台/历史归档/命名调整/2026-10-31/租赁平台-开发任务.md",
+      "bytes": 12048,
+      "sha256": "a77636e13aac71583b0d73aba270e7ceda9c0d9ae967ba3bf339701b521e95b3"
+    },
+    {
+      "source": "docs/租赁平台/租赁平台-开发记录.md",
+      "file": "docs/管理后台/历史归档/命名调整/2026-10-31/租赁平台-开发记录.md",
+      "bytes": 314276,
+      "sha256": "6c70f047c8a131dd0edfd3b5805f7caba83004e437986cb94980e2f2d3c058d8"
+    },
+    {
+      "source": "docs/租赁平台/租赁平台-协作接续.md",
+      "file": "docs/管理后台/历史归档/命名调整/2026-10-31/租赁平台-协作接续.md",
+      "bytes": 2503,
+      "sha256": "f8dcc5d36449d440f88502d40f0506269054add96839ae3f4cff64eed054413b"
+    }
+  ]
+}

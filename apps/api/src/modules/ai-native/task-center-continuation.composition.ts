@@ -46,8 +46,9 @@ export async function continueTaskCenterOriginal(d: TaskCenterContinuationDepend
       || review.review.proposal.payload.proposalId !== proposal.proposalId
       || review.review.proposal.payload.revision !== proposal.proposalRevision
       || review.review.proposal.payload.contractVersion !== proposal.contractVersion) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    const receipt = await human.decisionReceipt({ ...query, proposal: { ...proposal, decision: 'approve' } });
-    if (receipt.receipt.kind !== 'recorded' || receipt.receipt.record.decision !== 'approved') throw unavailable();
+    const decision = review.review.proposal.status === 'cancelled' ? 'reject' as const : 'approve' as const;
+    const receipt = await human.decisionReceipt({ ...query, proposal: { ...proposal, decision } });
+    if (receipt.receipt.kind !== 'recorded' || receipt.receipt.record.decision !== (decision === 'reject' ? 'rejected' : 'approved')) throw unavailable();
     if (!approval.decisions[review.kind]) throw unavailable();
     const selected = review.kind === 'order' ? await readTaskCenterOrderSelection(d.db, target) : null;
     if (selected) await selected.verify(); else await target.verify();

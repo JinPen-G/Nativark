@@ -4,6 +4,7 @@
  * platform.claude.com/docs/en/build-with-claude/streaming. Native event shapes
  * stop here; Rental OS owns response policy, dispatch and original accounting. */
 import { z } from 'zod';
+import { modelResponseContainsSecret } from './model-response-secret';
 import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport } from './chat-completions.adapter';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { modelEgressEvidence } from './model-egress.transport';
@@ -96,9 +97,9 @@ function responseContent(protocol: Protocol, raw: unknown): { text: string; call
 }
 function completed(protocol: Protocol, raw: unknown, policy: ChatProtocolPolicy, credential: string): AdapterResult {
   const value = responseContent(protocol, raw);
-  if (JSON.stringify(value).includes(credential)) invalid();
+  if (modelResponseContainsSecret(value, credential)) invalid();
   const extras = policy.parse(value.text, value.calls);
-  if (JSON.stringify(extras).includes(credential)) invalid();
+  if (modelResponseContainsSecret(extras, credential)) invalid();
   return { text: value.text, ...extras, usage: protocolUsage(protocol, object(raw).usage) };
 }
 

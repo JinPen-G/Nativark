@@ -1,5 +1,24 @@
 import { ConflictException } from "@nestjs/common";
 import type { RentalInspectionTemplate, RentalOrder, RentalOrderChange, RentalOrderExchangeExecutionBasis } from "@rental-os/shared";
+import { requestFingerprint } from "./rental-idempotency.repository";
+
+/** Binds displayed pickup requirements to the unchanged order and actual target.
+ * Not a permission token or an assertion that inspection has been performed. */
+export function exchangePickupInspectionRequirements(input: {
+  orderId: string; expectedUpdatedAt: string; orderLineId: string; allocationId: string;
+  replacementItemGroupId: string; replacementAssetId?: string; locationId: string;
+  basis: RentalOrderExchangeExecutionBasis;
+}) {
+  const templates = input.basis.inspectionTemplateSnapshots.filter(template => template.enabled && template.stage === "pickup");
+  const required = input.basis.ruleSnapshot.fulfillment?.pickupInspectionRequired === true;
+  return { required, templates: structuredClone(templates), confirmationHash: requestFingerprint({
+    orderId: input.orderId, expectedUpdatedAt: input.expectedUpdatedAt, orderLineId: input.orderLineId,
+    allocationId: input.allocationId, replacementItemGroupId: input.replacementItemGroupId,
+    replacementAssetId: input.replacementAssetId, locationId: input.locationId,
+    categoryCode: input.basis.categoryCode, categoryVersionId: input.basis.categoryVersionId,
+    required, evidenceRequired: input.basis.ruleSnapshot.fulfillment?.evidenceRequired, templates
+  }) };
+}
 
 export function exchangeBasis(change: RentalOrderChange): RentalOrderExchangeExecutionBasis | undefined {
   const exchange = change.diff.exchange as { executionBasis?: RentalOrderExchangeExecutionBasis } | undefined;

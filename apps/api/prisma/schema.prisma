@@ -4196,6 +4196,8 @@ model RentalStockDisposition {
   // MySQL utf8mb4 下四个 191 字符列已接近 3072 字节上限，不能再把 status 拼进同一索引。
   @@index([tenantId, workspaceId, itemGroupId, locationId], map: "rental_stock_dispositions_scope_idx")
   @@index([tenantId, workspaceId, status], map: "rental_stock_dispositions_scope_status_idx")
+  // 精确资产范围当前读，避免恢复扫描锁住同空间其他资产的处置。
+  @@index([workspaceId, assetId, status], map: "rental_stock_dispositions_asset_status_idx")
   @@index([orderId, inspectionId])
   @@map("rental_stock_dispositions")
 }
@@ -4236,6 +4238,7 @@ model RentalWorkOrder {
   @@unique([workspaceId, workNo], map: "rental_work_orders_ws_no_key")
   @@unique([workspaceId, dispositionId, type], map: "rental_work_orders_disp_type_key")
   @@index([tenantId, workspaceId, status, type])
+  @@index([workspaceId, assetId, status], map: "rental_work_orders_asset_status_idx")
   @@index([orderId, inspectionId])
   @@map("rental_work_orders")
 }

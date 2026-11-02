@@ -13,6 +13,7 @@ import {
 } from "class-validator";
 import type {
   RecordCustomerCorporateCreditPaymentRequest,
+  ReverseCustomerCorporateCreditPaymentRequest,
   RecordCustomerCorporateCreditMaturityRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
@@ -94,6 +95,12 @@ export class SaveCustomerCreditDto implements SaveCustomerCreditRequest {
 export class RecordCustomerCorporateCreditMaturityDto implements RecordCustomerCorporateCreditMaturityRequest {
   @IsString() @IsNotEmpty() @MaxLength(191) ledgerId!: string;
   @IsISO8601() dueAt!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) basisRef!: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) idempotencyKey!: string;
+}
+
+export class ReverseCustomerCorporateCreditPaymentDto implements ReverseCustomerCorporateCreditPaymentRequest {
   @IsString() @IsNotEmpty() @MaxLength(191) basisRef!: string;
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsString() @IsNotEmpty() @MaxLength(191) idempotencyKey!: string;

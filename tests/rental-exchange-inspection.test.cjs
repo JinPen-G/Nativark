@@ -81,7 +81,8 @@ void (async () => {
   core.applyPartialReturnItems = async (_tenant, _state, value, items) => {
     const returnedIds = new Map();
     for (const item of items) {
-      value.allocations.find((row) => row.id === item.allocationId).status = "returned";
+      const allocation = value.allocations.find((row) => row.id === item.allocationId);
+      allocation.status = "returned"; allocation.quantity = item.quantity;
       returnedIds.set(item.allocationId, item.allocationId);
     }
     return returnedIds;
@@ -104,6 +105,26 @@ void (async () => {
   assert.equal(record.usageReadings[0].baseline, undefined);
   assert.equal(record.usageReadings[0].delta, undefined);
   assert.deepEqual(order.inspectionTemplateSnapshots, [oldTemplate]);
+  const newPickup = { id: 'new-pickup', tenantId: 'tenant', orderId: order.id, stage: 'pickup', exchangeId: 'exchange-one',
+    pickupItems: [{ allocationId: 'new-resource', itemGroupId: 'new-model', quantity: 2 }],
+    results: { counter: 100 }, usageReadings: [{ fieldCode: 'counter', current: 120 }] };
+  order.allocations.find(row => row.id === 'new-resource').quantity = 1;
+  core.factStore.listInspections = async () => [{ id: 'old-pickup', stage: 'pickup', results: { counter: 90000 } }, newPickup];
+  await core.createInspection('tenant', order.id, { templateId: selected, results: { new_required: true, counter: 1000 },
+    returnItems: [{ allocationId: 'new-resource', quantity: 1 }] }, 'operator');
+  assert.equal(record.baselineInspectionId, 'new-pickup');
+  assert.equal(record.usageReadings[0].baseline, 120, 'use corrected current reading from the exact new resource');
+  assert.equal(record.usageReadings[0].delta, 880);
+  for (const patch of [{ exchangeId: 'different-exchange' }, { pickupItems: [{ allocationId: 'other', itemGroupId: 'new-model', quantity: 2 }] }]) {
+    core.factStore.listInspections = async () => [{ ...newPickup, ...patch }];
+    await core.createInspection('tenant', order.id, { templateId: selected, results: { new_required: true, counter: 1000 },
+      returnItems: [{ allocationId: 'new-resource', quantity: 1 }] }, 'operator');
+    assert.equal(record.baselineInspectionId, undefined); assert.equal(record.usageReadings[0].baseline, undefined);
+  }
+  core.factStore.listInspections = async () => [newPickup, { ...newPickup, id: 'ambiguous' }];
+  await assert.rejects(core.createInspection('tenant', order.id, { templateId: selected, results: { new_required: true, counter: 1000 },
+    returnItems: [{ allocationId: 'new-resource', quantity: 1 }] }, 'operator'), /基线不唯一/);
+  core.factStore.listInspections = async () => [{ id: 'old-pickup', stage: 'pickup', results: { counter: 90000 } }];
   order.allocations.push({ id: "other-original", orderLineId: "line-old", itemGroupId: "old-model", status: "picked_up" });
   await core.createInspection("tenant", order.id, { templateId: oldTemplate.id, results: { old_required: true }, returnItems: [{ allocationId: "old-resource", quantity: 1 }] }, "operator");
   assert.deepEqual(hookedOrder.allocations.map((row) => row.id), ["old-resource"], "原商品模板同样只把本批归还资源交给 Hook");

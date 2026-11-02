@@ -1,6 +1,9 @@
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import { ListFilters, useListFilter } from "@/components/ui";
-import { ListSection, SaveButton } from "@/components/ui";
+import { ListSection, SaveButton, ActionButton } from "@/components/ui";
+import { ConfirmAction } from "@/components/ui";
+import { readCorporatePaymentReference, retainCorporatePaymentReference, clearCorporatePaymentReference, matchesCorporatePaymentReversal,
+  type CorporatePaymentReference } from "./corporate-payment-reference";
 import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateContract, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerCorporateInvoiceProfile, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerContractRequest, type SaveCustomerInvoiceProfileRequest, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, InputNumber, Space, Tag } from "antd";
@@ -56,6 +59,8 @@ const creditEntryLabel: Record<CustomerCorporateCreditLedgerEntry["entryType"], 
   settle: "转为应收",
   payment: "企业回款",
   payment_allocation: "回款核销",
+  payment_reversal: "回款冲销",
+  allocation_reversal: "核销冲销",
   adjust: "账务调整"
 };
 
@@ -75,6 +80,8 @@ export function CorporateMembershipPage() {
   const canView = hasTenantMembershipPermission("rental-os:corporate:view") || canManage || canEmployeeManage;
   const canViewCredit = hasTenantMembershipPermission("rental-os:corporate:view") || canManage;
   const canGrant = hasTenantMembershipPermission("rental-os:member:plan:manage");
+  const canFinanceManage = useAuthStore(state => state.hasPermission("rental-os:finance:manage"));
+  const canReversePayment = canManage && canFinanceManage;
   useAuthStore((state) => state.user);
   useAuthStore((state) => state.currentWorkspaceId);
   useAuthStore((state) => state.sessionVerified);
@@ -97,6 +104,10 @@ export function CorporateMembershipPage() {
   const [grantForm] = Form.useForm<GrantForm>();
   const [revokeForm] = Form.useForm<{ reason: string }>();
   const [creditForm] = Form.useForm<SaveCustomerCreditRequest>();
+  const [reversalForm] = Form.useForm<{ basisRef: string; reason: string }>();
+  const [reversalTarget, setReversalTarget] = useState<CustomerCorporateCreditLedgerEntry>();
+  const [reversalReference, setReversalReference] = useState<CorporatePaymentReference | null>(null);
+  const [reversalBlocked, setReversalBlocked] = useState(false);
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
   const corporates = useQuery({ queryKey: ["membership-corporate"], queryFn: membershipApi.corporate, enabled: canView });
   const selected = customerId ? corporates.data?.find(row => row.customerId === customerId) : selectedTarget;
@@ -173,6 +184,69 @@ export function CorporateMembershipPage() {
       message.success(t("企业合同已保存"));
     }
   });
+  const reversalStorage = () => { try { return window.sessionStorage; } catch { return undefined; } };
+  const reversalScope = () => {
+    const auth = useAuthStore.getState();
+    return JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id]);
+  };
+  useEffect(() => {
+    setReversalTarget(undefined); reversalForm.resetFields();
+    if (!selected?.customerId) { setReversalReference(null); setReversalBlocked(true); return; }
+    const journal = readCorporatePaymentReference(reversalStorage(), reversalScope(), selected.customerId);
+    setReversalReference(journal.pending); setReversalBlocked(journal.blocked);
+  }, [creditScope, selected?.customerId, reversalForm]);
+  const refreshReversal = async (customer: string) => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["customer-credit-account", customer] }),
+    queryClient.invalidateQueries({ queryKey: ["customer-credit-ledger", customer] })
+  ]);
+  const reversePayment = useMutation({ mutationFn: async (command: { reference: CorporatePaymentReference; scope: string; input: { basisRef: string; reason: string } }) => {
+    const { reference } = command;
+    const auth = useAuthStore.getState();
+    if (command.scope !== currentCreditScope() || reference.customerId !== creditOwner.current || !auth.sessionVerified
+      || !auth.hasTenantMembershipPermission("rental-os:corporate:manage") || !auth.hasPermission("rental-os:finance:manage")
+      || reference.scope !== reversalScope()) throw new Error(t("资料已变更，请刷新后重新选择"));
+    const receipt = await customerApi.reverseCreditPayment(reference.customerId, reference.paymentId,
+      { ...command.input, idempotencyKey: reference.key });
+    if (receipt.paymentId !== reference.paymentId || receipt.customerId !== reference.customerId || receipt.idempotencyKey !== reference.key) {
+      throw new Error(t("原操作结果尚待核对"));
+    }
+    clearCorporatePaymentReference(reversalStorage(), reference);
+    if (command.scope !== currentCreditScope() || reference.customerId !== creditOwner.current) return;
+    setReversalReference(null); setReversalTarget(undefined); reversalForm.resetFields();
+    await refreshReversal(reference.customerId); message.success(t("回款已冲销，原记录保留；未发起资金退款"));
+  } });
+  const observeReversal = async () => {
+    const reference = reversalReference, scope = currentCreditScope();
+    if (!reference || reference.customerId !== creditOwner.current || reference.scope !== reversalScope()) throw new Error(t("原操作结果尚待核对"));
+    const receipt = await customerApi.creditPaymentReversal(reference.customerId, reference.paymentId);
+    if (!receipt) throw new Error(t("未取得原冲销收据，请保留原操作引用继续核对"));
+    // One immutable full reversal per original payment. Another actor/key's
+    // confirmed receipt proves this payment cannot be reversed again; it does
+    // not claim that our rejected command performed the reversal.
+    if (!matchesCorporatePaymentReversal(reference, receipt)) {
+      throw new Error(t("原操作结果尚待核对"));
+    }
+    clearCorporatePaymentReference(reversalStorage(), reference);
+    if (scope !== currentCreditScope() || reference.customerId !== creditOwner.current) return;
+    setReversalReference(null); setReversalTarget(undefined); reversalForm.resetFields();
+    await refreshReversal(reference.customerId); message.success(t("已读取原冲销收据"));
+  };
+  const submitReversal = async (input: { basisRef: string; reason: string }) => {
+    if (!selected || !reversalTarget || reversalReference || reversalBlocked || reversePayment.isPending) throw new Error(t("原操作结果尚待核对"));
+    const scope = currentCreditScope(), customer = selected.customerId, paymentId = reversalTarget.id;
+    const existing = await customerApi.creditPaymentReversal(customer, paymentId);
+    if (scope !== currentCreditScope() || customer !== creditOwner.current) throw new Error(t("资料已变更，请刷新后重新选择"));
+    if (existing) {
+      if (existing.customerId !== customer || existing.paymentId !== paymentId) throw new Error(t("原操作结果尚待核对"));
+      setReversalTarget(undefined); reversalForm.resetFields();
+      await refreshReversal(customer); message.success(t("已读取原冲销收据")); return;
+    }
+    const reference: CorporatePaymentReference = { version: 1, scope: reversalScope(), customerId: customer,
+      paymentId, key: crypto.randomUUID() };
+    retainCorporatePaymentReference(reversalStorage(), reference);
+    setReversalReference(reference);
+    return reversePayment.mutateAsync({ reference, scope, input });
+  };
   const saveCredit = useMutation({
     mutationFn: (command: CorporateCreditDraftCommand) => {
       if (command.scope !== currentCreditScope() || command.customerId !== creditOwner.current
@@ -407,6 +481,9 @@ export function CorporateMembershipPage() {
               ]} />
               {creditAccount.data.availableAmount < 0 && <Alert type="error" showIcon title={t("当前授信敞口已超过额度，请先处理应收或授信配置。")} style={{ marginTop: 12 }} />}
             </ListSection>
+            {reversalBlocked && <Alert type="warning" showIcon title={t("无法可靠保存原操作引用，暂不能发起冲销")} />}
+            {reversalReference && <Alert type="warning" showIcon title={t("原冲销操作待核对，不能重新提交")}
+              action={<ActionButton label={t("读取原冲销收据")} onAction={observeReversal} />} />}
             <ListSection title={t("授信账务流水")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
               <Table<CustomerCorporateCreditLedgerEntry> rowKey="id" size="small" onRefresh={() => creditLedger.refetch()} loading={creditLedger.isLoading} refreshing={creditLedger.isFetching} dataSource={creditLedger.data ?? []} pagination={{ defaultPageSize: 20 }} scroll={{ x: 960 }} columns={[
                 { title: t("发生时间"), dataIndex: "occurredAt", render: (value: string) => new Date(value).toLocaleString() },
@@ -416,7 +493,10 @@ export function CorporateMembershipPage() {
                 { title: t("应收变化"), render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) => formatRentalMoney(row.receivableDelta, row.currency) },
                 { title: t("订单"), dataIndex: "orderId", render: (value?: string) => value || "—" },
                 { title: t("原因"), dataIndex: "reason" },
-                { title: t("操作人"), dataIndex: "operator", render: (value?: string) => value || "—" }
+                { title: t("操作人"), dataIndex: "operator", render: (value?: string) => value || "—" },
+                { title: t("操作"), key: "actions", render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) =>
+                  row.entryType === "payment" && <Button type="link" disabled={!canReversePayment || reversalBlocked || Boolean(reversalReference) || reversePayment.isPending}
+                    onClick={() => { setReversalTarget(row); reversalForm.resetFields(); }}>{t("冲销回款")}</Button> }
               ]} />
             </ListSection>
           </>}
@@ -512,6 +592,18 @@ export function CorporateMembershipPage() {
         </ListSection>
       </QueryState>}
 
+    </Drawer>
+    <Drawer presentation="dialog" title={t("冲销原企业回款")} size={520} open={Boolean(reversalTarget)}
+      onClose={() => { if (!reversePayment.isPending) { setReversalTarget(undefined); reversalForm.resetFields(); } }} destroyOnHidden>
+      <Alert type="warning" showIcon title={t("冲销将恢复原订单应收，不会发起资金退款；原回款与核销记录保留。")} />
+      <p>{reversalTarget && formatRentalMoney(reversalTarget.amount, reversalTarget.currency)}</p>
+      <Form form={reversalForm} layout="vertical" disabled={!canReversePayment || reversePayment.isPending || Boolean(reversalReference)}>
+        <Form.Item name="basisRef" label={t("冲销依据引用")} rules={[{ required: true, whitespace: true, max: 191 }]}><Input /></Form.Item>
+        <Form.Item name="reason" label={t("冲销原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={3} /></Form.Item>
+        <ConfirmAction label={t("冲销回款")} prompt={t("确认按原回款完整冲销并恢复订单应收？")}
+          disabled={!canReversePayment || reversePayment.isPending || Boolean(reversalReference) || reversalBlocked}
+          onConfirm={async () => submitReversal(await reversalForm.validateFields())} />
+      </Form>
     </Drawer>
     <Drawer presentation="dialog" title={`${t("撤销会员方案")}: ${revokeTarget?.snapshot.planName ?? ""}`} size={520} open={Boolean(revokeTarget)} onClose={() => { setRevokeTarget(undefined); revokeForm.resetFields(); }} destroyOnHidden>
       <Form form={revokeForm} layout="vertical" disabled={!canGrant} onFinish={(values) => canGrant && revokeTarget && revoke.mutate({ assignmentId: revokeTarget.id, reason: values.reason })}>

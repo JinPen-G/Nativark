@@ -26,7 +26,7 @@ async function persistedApprovedOrderHarness() {
       startAt: new Date('2026-01-01'), endAt: new Date('2099-01-01'), serviceTimeZone: 'UTC', billingAnniversary: new Date('2026-01-01') }, subscriptionSegments: [] }],
     subscriptionFeatureCatalog: [{ code: 'ai.native.use', name: 'Synthetic AI', module: 'ai', categories: [], currentOwnership: 'PRO', defaultOwnership: 'PRO',
       releaseStatus: 'RELEASED', valueText: null, externalFeeNote: null }],
-    tenantFeatureGrant: []
+    tenantFeatureGrant: [], aiTenantModelConfiguration: []
   });
   Object.assign(d.db, h.client(null, false));
   const transaction = d.db.$transaction.bind(d.db), active = new AsyncLocalStorage();

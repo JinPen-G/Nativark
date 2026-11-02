@@ -335,6 +335,8 @@ const ENGLISH: Record<string, string> = {
   "当前待收": "Due now",
   "当前应收": "Total due",
   "累计收款": "Collected",
+  "现金实收": "Cash collected",
+  "企业回款已核销": "Corporate repayment applied",
   "累计退款": "Refunded",
   "待退款": "Refund due",
   "订单应付": "Order total",

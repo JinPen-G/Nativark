@@ -133,8 +133,38 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     assert.equal(successor.pricingSnapshot.previousPayableAmount, 480);
     assert.equal(successor.pricingSnapshot.refundReview.amount, 80, '未核减状态不改变账面已计金额');
   }
-  const approved = effective(negative); approved.pricingSnapshot.refundReview.status = 'approved';
+  const approved = effective(negative); approved.createdAt = at(1); approved.effectiveAt = at(1);
+  approved.pricingSnapshot.refundReview = { ...approved.pricingSnapshot.refundReview, status: 'approved', reviewedAt: at(1.5) };
   assert.equal((await price(tier, 96, [approved])).payableAmount, 100);
+  const afterApproval = effective(await price(tier, 96, [approved]), 2);
+  afterApproval.createdAt = at(2); afterApproval.effectiveAt = at(2);
+  assert.equal((await price(tier, 120, [approved, afterApproval])).payableAmount, 100,
+    '后继准备在批准后，原收据必须接已经核减的300余额');
+  const preparedBeforeApproval = effective(tierNext, 2);
+  preparedBeforeApproval.createdAt = at(1.25); preparedBeforeApproval.effectiveAt = at(1.25);
+  assert.equal((await price(tier, 120, [approved, preparedBeforeApproval])).payableAmount, 200,
+    '已有效旧收据保留准备时的480余额，后来的批准不反写旧收据');
+  const missingReviewTime = clone(approved); delete missingReviewTime.pricingSnapshot.refundReview.reviewedAt;
+  await assert.rejects(() => price(tier, 96, [missingReviewTime]), error => error.getStatus() === 409);
+  const skewedPreparation = clone(afterApproval); skewedPreparation.createdAt = at(1.25); skewedPreparation.effectiveAt = at(1.25);
+  assert.equal((await price(tier, 120, [approved, skewedPreparation])).payableAmount, 100,
+    '冻结来源证明已消费核减，不拿两个节点墙钟的大小代替因果');
+  const missingPreparationTime = clone(afterApproval); delete missingPreparationTime.createdAt;
+  assert.equal((await price(tier, 120, [approved, missingPreparationTime])).payableAmount, 100);
+  const skewedReview = clone(approved); skewedReview.pricingSnapshot.refundReview.reviewedAt = at(0.5);
+  assert.equal((await price(tier, 96, [skewedReview])).payableAmount, 100,
+    '有效批准与原收据来源决定余额，时钟回拨不证明批准非法');
+  for (const mutate of [row => { delete row.pricingSnapshot.balanceBasis; },
+    row => { row.pricingSnapshot.balanceBasis.version = 2; }, row => { row.pricingSnapshot.balanceBasis.approvedReductionExtensionIds = ['ext-1', 'ext-1']; },
+    row => { row.pricingSnapshot.balanceBasis.approvedReductionExtensionIds = ['foreign']; },
+    row => { row.pricingSnapshot.balanceBasis.approvedReductionExtensionIds = ['ext-2']; },
+    row => { row.pricingSnapshot.balanceBasis.approvedReductionExtensionIds = []; }]) {
+    const broken = clone(afterApproval); mutate(broken);
+    await assert.rejects(() => price(tier, 120, [approved, broken]), error => error.getStatus() === 409);
+  }
+  const legacyNoReductions = effective(paid); delete legacyNoReductions.pricingSnapshot.balanceBasis;
+  assert.equal((await price(q, 27, [legacyNoReductions])).payableAmount, 0,
+    '无核减来源歧义的旧收据继续只读，不补写历史字段');
   for (const mutate of [row => { row.pricingSnapshot.refundReview.amount++; },
     row => { row.pricingSnapshot.refundReview.status = 'unknown'; }, row => { row.pricingSnapshot.refundReview = null; }]) {
     const broken = clone(approved); mutate(broken);
@@ -171,7 +201,7 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
   facts.activeReservations = async () => clone(reservations);
   facts.listStockBalances = async () => [{ itemGroupId: group.id, locationId: location.id, onHandQuantity: 2, maintenanceQuantity: 0 }];
   facts.listExtensions = async () => clone(extensionRows);
-  facts.insertExtension = async row => { extensionRows.push(clone(row)); };
+  facts.insertExtension = async row => { extensionRows.push({ ...clone(row), workspaceId: core.resolveWorkspaceId(tenant) }); };
   facts.updateExtensionPricingSnapshot = async (_t, _o, id, snapshot) => { extensionRows.find(r => r.id === id).pricingSnapshot = clone(snapshot); };
   facts.saveOrderAggregate = async order => { saved = clone(order); };
   const order = { ...args(q, 3).order, tenantId: tenant, currency: q.currency, status: RentalCoreOrderStatus.Renting, payableAmount: 240, adjustmentAmount: 0, finalPayableAmount: 240, chargeLines: clone(q.chargeLines), ruleSnapshot: clone(q.ruleSnapshot), allocations: [{ status: 'picked_up', assetId: 'specific-asset' }], reservations: [{ itemGroupId: group.id, locationId: location.id, quantity: 1, releasedQuantity: 0, status: RentalReservationStatus.Fulfilled }] };
@@ -193,13 +223,175 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
   const requested = await core.requestOrderExtension(tenant, order.id, free, { idempotencyKey: 'zero', operator: 'tester' }, {});
   assert.equal(requested.extension.status, 'effective'); assert.equal(saved.effectiveEndAt, at(3)); assert.equal(saved.finalPayableAmount, 240);
   pass('零差额续租实际生效且不伪造补款时间');
-  saved = { ...clone(order), endAt: at(48), payableAmount: 480, finalPayableAmount: 480 }; extensionRows = [];
+  saved = { ...clone(order), endAt: at(48), payableAmount: 480, finalPayableAmount: 480, chargeLines: clone(tier.chargeLines) }; extensionRows = [];
   const pendingRefund = await core.requestOrderExtension(tenant, order.id, negative, { idempotencyKey: 'refund', operator: 'tester' }, {});
   assert.equal(saved.finalPayableAmount, 480); assert.equal(saved.effectiveEndAt, at(72));
   await core.reviewExtensionRefund(tenant, order.id, pendingRefund.extension.id, { decision: 'approved', reason: '核对原阶梯价' }, 'finance', {});
   assert.equal(saved.finalPayableAmount, 300);
   await assert.rejects(() => core.reviewExtensionRefund(tenant, order.id, pendingRefund.extension.id, { decision: 'approved', reason: '重复' }, 'finance', {}), /没有待审核退款/);
   pass('负差额只在审核通过后核减一次，不等于已向客户打款');
+
+  // 核减状态不能替代原费用行；后继试算与锁内受理都须核对同一订单账。
+  {
+    const received = clone(extensionRows);
+    const valid = { ...clone(saved), rentalAmount: tier.rentalAmount, serviceAmount: 0, fulfillmentAmount: 0,
+      chargeLines: [...clone(tier.chargeLines), ...saved.chargeLines.filter(line => line.code.startsWith('extension:'))] };
+    received.forEach(row => { row.workspaceId = core.resolveWorkspaceId(tenant); });
+    const base = { previousPayableAmount: 300, balanceBasis: { version: 1, approvedReductionExtensionIds: [received[0].id] } };
+    core.assertExtensionPriceBase(valid, received, base);
+    business.getQuote = () => tier;
+    const successorArgs = { ...args(tier, 96, received), order: valid };
+    const successor = await business.quoteOrderExtension(tenant, ctx, successorArgs);
+    assert.equal(successor.pricingSnapshot.previousPayableAmount, 300);
+    for (const mutate of [target => { target.chargeLines = clone(tier.chargeLines); },
+      target => { target.chargeLines.push(clone(target.chargeLines.at(-1))); },
+      target => { target.chargeLines.at(-1).amount++; },
+      target => { target.chargeLines.at(-1).sourceId = 'foreign-extension'; },
+      target => { target.chargeLines.at(-1).type = 'discount'; },
+      target => { target.finalPayableAmount++; },
+      target => { target.adjustmentAmount++; }]) {
+      const broken = clone(valid); mutate(broken);
+      assert.throws(() => core.assertExtensionPriceBase(broken, received, base), error => error.getStatus() === 409);
+      await assert.rejects(() => business.quoteOrderExtension(tenant, ctx, { ...successorArgs, order: broken }), error => error.getStatus() === 409);
+      const beforeOrder = clone(broken), beforeRows = clone(extensionRows), beforeSaved = clone(saved);
+      core.lockedOrder = async () => clone(broken);
+      await assert.rejects(() => core.requestOrderExtension(tenant, valid.id, successor,
+        { idempotencyKey: 'bad-ledger', operator: 'tester' }, {}), error => error.getStatus() === 409);
+      assert.deepEqual(broken, beforeOrder); assert.deepEqual(extensionRows, beforeRows); assert.deepEqual(saved, beforeSaved);
+      let paymentWrites = 0, fundingReads = 0;
+      const paying = Object.create(RentalCoreService.prototype);
+      const pending = { ...effective(successor, 2), status: 'pending_payment' };
+      paying.state = () => ({ profile: ctx.profile }); paying.resolveWorkspaceId = () => core.resolveWorkspaceId(tenant);
+      paying.lockedOrder = async () => clone(broken); paying.assertOrderQualification = async () => {};
+      paying.assertOrderExtensionAvailable = async () => {};
+      paying.funding = { assertReadyForExtension: async () => { fundingReads++; } };
+      paying.factStore = { listExtensions: async () => [...clone(received), clone(pending)],
+        markExtensionEffective: async () => { paymentWrites++; }, saveOrderAggregate: async () => { paymentWrites++; } };
+      await assert.rejects(() => paying.payOrderExtension(tenant, valid.id, pending.id, {}), error => error.getStatus() === 409);
+      assert.equal(paymentWrites, 0); assert.equal(fundingReads, 0, '坏账不推进补款生效或重新执行资金动作');
+    }
+    core.lockedOrder = async () => clone(saved ?? order);
+    const corrupt = clone(received); corrupt[0].pricingSnapshot.refundReview.amount++;
+    assert.throws(() => core.assertExtensionPriceBase(valid, corrupt, base), error => error.getStatus() === 409);
+    const independentFee = clone(valid);
+    independentFee.chargeLines.push({ code: 'damage:original-inspection', type: 'damage', amount: 7 });
+    independentFee.adjustmentAmount += 7; independentFee.finalPayableAmount += 7;
+    core.assertExtensionPriceBase(independentFee, received, base);
+    const notApproved = clone(received); notApproved[0].pricingSnapshot.refundReview.status = 'pending';
+    assert.throws(() => core.assertExtensionPriceBase(valid, notApproved, { previousPayableAmount: 480 }), error => error.getStatus() === 409);
+    for (const mutate of [target => { target.rows[0].pricingSnapshot.refundReview.amount++; },
+      target => { target.order.chargeLines.push({ code: `extension:${target.rows[0].sequence}:refund`, type: 'early_return_refund',
+        amount: -180, sourceId: 'foreign-extension' }); },
+      target => { target.order.finalPayableAmount++; }]) {
+      const target = { order: { ...clone(valid), adjustmentAmount: 0, finalPayableAmount: 480, chargeLines: clone(tier.chargeLines) },
+        rows: clone(notApproved) };
+      mutate(target); const before = clone(target); let writes = 0;
+      const reviewing = Object.create(RentalCoreService.prototype);
+      reviewing.lockedOrder = async () => clone(target.order);
+      reviewing.factStore = { listExtensions: async () => clone(target.rows), updateExtensionPricingSnapshot: async () => { writes++; },
+        saveOrderAggregate: async () => { writes++; } };
+      await assert.rejects(() => reviewing.reviewExtensionRefund(tenant, valid.id, target.rows[0].id,
+        { decision: 'approved', reason: '原费用来源异常' }, 'finance', {}), error => error.getStatus() === 409);
+      assert.deepEqual(target, before); assert.equal(writes, 0, '坏核减不改审核状态、不加费用行');
+    }
+    const priorSaved = clone(saved), priorRows = clone(extensionRows), markEffective = facts.markExtensionEffective;
+    core.lockedOrder = async () => clone(saved ?? order);
+    facts.markExtensionEffective = async (_t, id, paidAt, effectiveAt) => Object.assign(extensionRows.find(row => row.id === id),
+      { status: 'effective', paidAt, effectiveAt });
+    // 批准节点的时钟领先受理/补款节点；金额与原账已提交，不能比较墙钟拒绝合法来源。
+    extensionRows[0].workspaceId = core.resolveWorkspaceId(tenant);
+    extensionRows[0].pricingSnapshot.refundReview.reviewedAt = at(1.5);
+    for (const ids of [[], ['foreign'], [received[0].id, received[0].id]]) {
+      const changed = clone(successor); changed.pricingSnapshot.balanceBasis.approvedReductionExtensionIds = ids;
+      const beforeOrder = clone(saved), beforeRows = clone(extensionRows);
+      await assert.rejects(() => core.requestOrderExtension(tenant, valid.id, changed,
+        { idempotencyKey: 'bad-causal-source', operator: 'tester' }, {}), error => error.getStatus() === 409);
+      assert.deepEqual(saved, beforeOrder); assert.deepEqual(extensionRows, beforeRows);
+    }
+    const accepted = await core.requestOrderExtension(tenant, valid.id, successor,
+      { idempotencyKey: 'valid-ledger-successor', operator: 'tester' }, {});
+    assert.equal(accepted.extension.status, 'pending_payment'); assert.equal(saved.finalPayableAmount, 300);
+    assert.deepEqual(accepted.extension.pricingSnapshot.balanceBasis, base.balanceBasis);
+    assert.ok(Date.parse(accepted.extension.createdAt) < Date.parse(extensionRows[0].pricingSnapshot.refundReview.reviewedAt));
+    const originalPending = clone(extensionRows[1]), beforePayment = clone(saved);
+    extensionRows[1].pricingSnapshot.balanceBasis.approvedReductionExtensionIds = [];
+    await assert.rejects(() => core.payOrderExtension(tenant, valid.id, accepted.extension.id, {}), error => error.getStatus() === 409);
+    assert.equal(extensionRows[1].status, 'pending_payment'); assert.deepEqual(saved, beforePayment);
+    extensionRows[1] = originalPending;
+    const applied = await core.payOrderExtension(tenant, valid.id, accepted.extension.id, {});
+    assert.equal(applied.extension.status, 'effective'); assert.equal(saved.finalPayableAmount, 400);
+    business.getQuote = () => tier;
+    const third = await business.quoteOrderExtension(tenant, ctx, { ...args(tier, 120, extensionRows), order: saved });
+    assert.equal(third.pricingSnapshot.previousPayableAmount, 400); assert.equal(third.payableAmount, 100);
+    const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+    const components = OPENAPI_DOCUMENT.components.schemas;
+    assert.deepEqual(components.RentalExtensionBalanceBasis.properties.version.enum, [1]);
+    assert.equal(components.RentalExtensionBalanceBasis.properties.approvedReductionExtensionIds.uniqueItems, true);
+    assert.ok(!components.RentalExtensionPricingSnapshot.required.includes('balanceBasis'), '旧收据不伪造新字段');
+    assert.equal(OPENAPI_DOCUMENT.paths['/api/rental/v1/orders/{id}/extensions/preview'].post.responses[200]
+      .content['application/json'].schema.properties.data.$ref, '#/components/schemas/RentalOrderExtensionPreview');
+    assert.equal(components.ClientExtensionPreview.$ref, '#/components/schemas/RentalOrderExtensionPreview');
+    const { validateAiCoreExtensionPreview } = require('../apps/api/src/modules/ai-native/scenes/extension-preview-http.contract');
+    const wirePreview = { orderId: third.orderId, originalEndAt: third.originalEndAt, newEndAt: third.newEndAt,
+      billableUnits: third.billableUnits, rentalAmount: third.rentalAmount, serviceAmount: third.serviceAmount,
+      depositDelta: third.depositDelta, preAuthDelta: third.preAuthDelta, payableAmount: third.payableAmount, currency: third.currency,
+      settlementMode: third.settlementMode, paymentRequired: third.paymentRequired, chargeLines: [], calendarSnapshot: [],
+      ruleVersion: third.ruleVersion, pricingSnapshot: { method: third.pricingSnapshot.method, fullChargeLines: [],
+        context: { timeZone: 'UTC', legacyDayTypeMultipliers: false, calendars: [] },
+        previousPayableAmount: third.pricingSnapshot.previousPayableAmount, balanceBasis: third.pricingSnapshot.balanceBasis,
+        recalculatedPayableAmount: third.pricingSnapshot.recalculatedPayableAmount,
+        recalculatedRentalAmount: third.pricingSnapshot.recalculatedRentalAmount, recalculatedServiceAmount: third.pricingSnapshot.recalculatedServiceAmount,
+        recalculatedDiscountAmount: third.pricingSnapshot.recalculatedDiscountAmount, recalculatedCouponAmount: third.pricingSnapshot.recalculatedCouponAmount,
+        totalBillableUnits: third.pricingSnapshot.totalBillableUnits, differenceAmount: third.pricingSnapshot.differenceAmount,
+        discountEvaluations: [], chargeLines: [] } };
+    assert.deepEqual(validateAiCoreExtensionPreview(wirePreview, valid.id, third.newEndAt), wirePreview,
+      '原AI只读出口保留真实Core核减来源，不执行审批或重新计价');
+    const legacyWire = clone(wirePreview); delete legacyWire.pricingSnapshot.balanceBasis;
+    assert.deepEqual(validateAiCoreExtensionPreview(legacyWire, valid.id, third.newEndAt), legacyWire);
+    for (const mutate of [basis => { basis.version = 2; }, basis => { basis.approvedReductionExtensionIds.push(received[0].id); },
+      basis => { basis.authorization = 'unregistered'; }]) {
+      const invalid = clone(wirePreview); mutate(invalid.pricingSnapshot.balanceBasis);
+      assert.throws(() => validateAiCoreExtensionPreview(invalid, valid.id, third.newEndAt), { code: 'AI_STORAGE_UNAVAILABLE' });
+    }
+    core.assertExtensionPriceBase(saved, extensionRows, { previousPayableAmount: 400, balanceBasis: base.balanceBasis });
+    const beforeReplay = clone(saved), rowsBeforeReplay = clone(extensionRows);
+    await core.payOrderExtension(tenant, valid.id, accepted.extension.id, {});
+    assert.deepEqual(saved, beforeReplay); assert.deepEqual(extensionRows, rowsBeforeReplay);
+    saved = priorSaved; extensionRows = priorRows; facts.markExtensionEffective = markEffective;
+    pass('批准核减必须对应唯一原费用行，坏来源/金额/状态/总账拒绝，独立异常费不混入续租基准');
+  }
+
+  // 异常费逐行按分入账；核减审核不能因原始半分精度与总额口径不同而卡住。
+  {
+    const reviewing = Object.create(RentalCoreService.prototype);
+    let current = { ...clone(order), status: RentalCoreOrderStatus.Settling, endAt: at(48),
+      payableAmount: 480, adjustmentAmount: 0, finalPayableAmount: 480, chargeLines: clone(tier.chargeLines), serviceSnapshots: [] };
+    const receipts = [effective(negative)];
+    reviewing.lockedOrder = async () => clone(current);
+    reviewing.factStore = { listExtensions: async () => clone(receipts),
+      saveOrderAggregate: async row => { current = clone(row); },
+      updateExtensionPricingSnapshot: async (_t, _o, id, snapshot) => { receipts.find(row => row.id === id).pricingSnapshot = clone(snapshot); } };
+    for (const index of [0, 1]) {
+      const result = await reviewing.approveInspectionException(tenant, current.id, 'half-cent-inspection', index,
+        0.005, '客户责任异常费', {}, at(1), { liability: 'customer' });
+      assert.equal(result.approvedChargeAmount, 0.01);
+    }
+    assert.deepEqual(current.chargeLines.filter(line => line.type === 'damage').map(line => line.amount), [0.01, 0.01]);
+    assert.equal(current.adjustmentAmount, 0.02); assert.equal(current.finalPayableAmount, 480.02);
+    await reviewing.reviewExtensionRefund(tenant, current.id, receipts[0].id,
+      { decision: 'approved', reason: '原阶梯价核减' }, 'finance', {});
+    assert.equal(current.finalPayableAmount, 300.02);
+    // 存量原始精度行按同一逐行口径只读核对，不覆盖历史费用。
+    current = { ...clone(order), status: RentalCoreOrderStatus.Settling, payableAmount: 480, adjustmentAmount: 0.02,
+      finalPayableAmount: 480.02, chargeLines: [...clone(tier.chargeLines),
+        ...[0, 1].map(index => ({ code: `damage:legacy:${index}`, type: 'damage', amount: 0.005 }))] };
+    receipts[0] = effective(negative);
+    await reviewing.reviewExtensionRefund(tenant, current.id, receipts[0].id,
+      { decision: 'approved', reason: '存量精度只读核对' }, 'finance', {});
+    assert.equal(current.finalPayableAmount, 300.02);
+    assert.deepEqual(current.chargeLines.filter(line => line.type === 'damage').map(line => line.amount), [0.005, 0.005]);
+    pass('半分异常费逐行舍入入账，存量精度不改写且不阻断原续租核减');
+  }
 
   /* ==== Codex review #2：续租必须继承原报价的完整优惠链 ====
      三个反例共同前提：延长后仍落在原来已购买的那一天内，全租期租金不变，
@@ -217,6 +409,7 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     }];
     const priced = await price(member, 3);
     assert.equal(priced.pricingSnapshot.recalculatedRentalAmount, 240, '全租期租金不变');
+    assert.deepEqual(priced.pricingSnapshot.rentalLineAmounts, { [group.id]: 240 }, '原重算收据冻结逐目标毛租金');
     assert.equal(priced.payableAmount, 0, '会员折扣必须被继承，否则会虚收整个折扣额');
     const twoDays = await price(member, 26);
     assert.equal(business.calculateEarlyReturnRefund(tenant, ctx, member, at(26), at(24), 0, twoDays.pricingSnapshot).amount, 216,
@@ -276,6 +469,19 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     const priced = await price(quote, 3);
     assert.equal(priced.pricingSnapshot.recalculatedCouponAmount, 120, '券减免额不应因整单基数而放大');
     assert.equal(priced.payableAmount, 0, '券必须按原适用范围取基数，不能扩大到整单');
+    const explicit = clone(quote); explicit.couponEvaluation.applicableItemGroupIds = [quote.request.lines[0].itemGroupId];
+    assert.equal((await price(explicit, 3)).pricingSnapshot.recalculatedCouponAmount, 120);
+    for (const scope of [null, [quote.request.lines[0].itemGroupId, quote.request.lines[0].itemGroupId], [12], ['']]) {
+      const bad = clone(explicit); bad.couponEvaluation.applicableItemGroupIds = scope;
+      await assert.rejects(price(bad, 3), /原优惠券商品适用范围/);
+    }
+    const all = clone(quote); all.couponEvaluation.applicableItemGroupIds = [];
+    all.couponEvaluation.discountType = 'fixed_amount'; all.couponEvaluation.discountValue = 120;
+    const expanded = await price(all, 3);
+    assert.equal(expanded.pricingSnapshot.recalculatedCouponAmount, 120);
+    assert.deepEqual(Object.keys(expanded.pricingSnapshot.couponEvaluation.rentalAllocations).sort(), Object.keys(all.rentalLineAmounts).sort(),
+      'explicit all-item scope includes an eligible original line with no prior allocation');
+    assert.deepEqual(expanded.pricingSnapshot.couponEvaluation.applicableItemGroupIds, []);
     pass('反例3 限定商品券：延长仍在已买当天，补款 0（修复前虚退 120）');
   }
 

@@ -16,6 +16,7 @@ import {
 } from "./customer-operations-request.dto";
 import {
   RecordCustomerCorporateCreditPaymentDto,
+  ReverseCustomerCorporateCreditPaymentDto,
   RecordCustomerCorporateCreditMaturityDto,
   SaveCustomerContractDto,
   SaveCustomerCreditDto,
@@ -381,6 +382,18 @@ export class PlatformController {
   @Get("customers/:customerId/credit/maturities/:ledgerId")
   customerCreditMaturity(@Param("customerId") customerId: string, @Param("ledgerId") ledgerId: string, @Req() req: RequestWithUser) {
     return this.platformService.readCustomerCreditMaturity(customerId, ledgerId, req.user);
+  }
+
+  @Get("customers/:customerId/credit/payments/:paymentId/reverse")
+  customerCreditPaymentReversal(@Param("customerId") customerId: string, @Param("paymentId") paymentId: string,
+    @Req() req: RequestWithUser) {
+    return this.platformService.readCustomerCreditPaymentReversal(customerId, paymentId, req.user);
+  }
+
+  @Post("customers/:customerId/credit/payments/:paymentId/reverse")
+  reverseCustomerCreditPayment(@Param("customerId") customerId: string, @Param("paymentId") paymentId: string,
+    @Body() body: ReverseCustomerCorporateCreditPaymentDto, @Req() req: RequestWithUser) {
+    return this.platformService.reverseCustomerCreditPayment(customerId, paymentId, body, req.user);
   }
 
   @Post("customers/:customerId/credit/payments")

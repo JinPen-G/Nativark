@@ -1,4 +1,4 @@
-import type { AiOrderReadFactsDraft } from "../../../../../packages/shared/src/ai-order-facts-draft";
+import type { AiOrderReadFactsDraft } from "@rental-os/shared";
 
 export type DisplayOrderAmount = number | null;
 export interface DisplayOrderFacts {

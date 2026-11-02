@@ -73,6 +73,44 @@ test('original location/operator writers take the same workspace lock before cha
   await assert.rejects(repo.readFulfillmentAdmission('t', 'w', [{ locationId: 'loc', capability: 'pickup' }], tx), /已停用/);
 }));
 
+test('ordinary edits on a stale Core instance preserve the persisted disabled operator and location unless status is explicit', async () => scope(async () => {
+  const source = facts(), fixture = fulfillmentAdmissionFixture('t', 'w', source);
+  const definition = require('@rental-os/shared').RENTAL_CATEGORY_DEFINITIONS.find(row => row.code === 'camera');
+  const tx = { ...fixture.tx, $queryRaw: async query => {
+    const rows = await fixture.tx.$queryRaw(query);
+    return query.sql.includes('business_workspaces') ? [{ status: 'ACTIVE', categoryCode: 'CAMERA', categoryVersionId: 'v1', categoryAdoptionRevision: 0 }] : rows;
+  }, rentalCategoryVersion: { findUnique: async () => ({ categoryCode: 'CAMERA', status: 'published', structureVersion: 1, definition }) },
+    rentalFulfillmentOperator: { findUnique: async () => ({ ...structuredClone(source.operators[0]), workspaceId: 'w' }),
+      findFirst: async () => ({ id: 'op' }), upsert: async ({ update }) => Object.assign(source.operators[0], update) },
+    rentalFulfillmentLocation: { findUnique: async () => ({ ...structuredClone(source.locations[0]), workspaceId: 'w' }),
+      upsert: async ({ update }) => Object.assign(source.locations[0], update) } };
+  const repo = new RentalCoreConfigRepository({ ...tx, $transaction: async work => work(tx) });
+  const instances = [core(source), core(source)];
+  for (const instance of instances) {
+    instance.service.configStore = repo;
+    const state = { profile: { categoryCode: 'camera' }, ...structuredClone(facts()) };
+    instance.service.state = () => state;
+    instance.service.categoryWriteContext = async () => ({ definition });
+  }
+  const [a, b] = instances;
+  const operator = { id: 'op', code: 'OP', name: 'Updated operator', type: 'self_operated' };
+  await a.service.saveOperator('t', { ...operator, status: 'disabled' });
+  await b.service.saveOperator('t', operator);
+  assert.equal(source.operators[0].status, 'disabled');
+  assert.equal(b.service.listOperators('t')[0].status, 'disabled');
+  await assert.rejects(repo.readFulfillmentAdmission('t', 'w', [{ locationId: 'loc', capability: 'pickup' }], tx), /经营主体已停用/);
+  await a.service.saveOperator('t', { ...operator, status: 'enabled' });
+  b.service.state('t').operators[0].status = 'enabled';
+  const location = { id: 'loc', code: 'LOC', name: 'Updated location', type: 'store', operatorId: 'op', capabilities: ['pickup', 'return'] };
+  await a.service.saveLocation('t', { ...location, status: 'disabled' });
+  await b.service.saveLocation('t', location);
+  assert.equal(source.locations[0].status, 'disabled');
+  assert.equal(b.service.listLocations('t')[0].status, 'disabled');
+  await assert.rejects(repo.readFulfillmentAdmission('t', 'w', [{ locationId: 'loc', capability: 'pickup' }], tx), /已停用/);
+  await b.service.saveLocation('t', { ...location, status: 'enabled' });
+  await repo.readFulfillmentAdmission('t', 'w', [{ locationId: 'loc', capability: 'pickup' }], tx);
+}));
+
 test('configuration change during the shared workspace-lock wait is observed before inventory or pickup writes', async () => scope(async () => {
   const source = facts(); let waiting = true;
   const fixture = fulfillmentAdmissionFixture('t', 'w', source, query => {

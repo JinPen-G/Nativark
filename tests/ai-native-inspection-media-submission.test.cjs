@@ -21,27 +21,40 @@ test('formal S3 object producer reads bound bytes via header auth, denies cross-
     assert.ok(host.get(INSPECTION_OBJECT_READER) instanceof TenantInspectionObjectReader);
     assert.equal(configReads,0); // Explicit registration does not open objects or read configuration.
   } finally { await host.close(); }
-  Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length});
-  Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id});
+  const digest=require('node:crypto').createHash('sha256').update(png).digest('hex');
+  const staging=`tenant-files/tenant-a/${asset.id}/blob`,storageKey=`${staging}.committed/12345678-1234-4123-8123-123456789abc/${digest}`;
+  Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length,storageKey,checksum:digest});
+  Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id,storageKey});
   f.db.rentalOrder={findFirst:async({where})=>where.id==='order-a'&&where.tenantId==='tenant-a'&&where.workspaceId==='workspace-a'?{id:'order-a'}:null};
   const config={id:'config-a',capability:'file',provider:'s3_compatible',settings:{endpoint:'https://objects.example.test',bucket:'synthetic-bucket',region:'us-east-1',forcePathStyle:true},credentials:{accessKeyId:'synthetic-access',secretAccessKey:'synthetic-secret'}};
-  const at=new Date('2026-10-08T00:00:00Z'), request=s3ObjectReadRequest(config,'object-a',at);
+  const {fileStorageLocationHash}=require('../apps/api/src/modules/integrations/file-content-binding');
+  asset.metadata={fileUploadVersion:2,fileContentVersion:1,contentHash:digest,stagingStorageKey:staging,storageLocationHash:fileStorageLocationHash(config)};
+  const at=new Date('2026-10-08T00:00:00Z'), request=s3ObjectReadRequest(config,storageKey,at);
   assert.equal(new URL(request.url).search,''); assert.match(request.headers.Authorization,/^AWS4-HMAC-SHA256 /);
   assert.equal(request.headers['x-amz-date'],'20261008T000000Z');
   assert.throws(()=>s3ObjectReadRequest(config,'../escape',at));
-  let calls=0,startedResolve;const started=new Promise(resolve=>{startedResolve=resolve;});let hang=false;
+  let calls=0,startedResolve;const started=new Promise(resolve=>{startedResolve=resolve;});let hang=false,body=png;
   const producer=new TenantInspectionObjectReader(f.db,{runtimeConfig:async()=>structuredClone(config)},async(url,init)=>{
     calls++;assert.equal(url,request.url);assert.equal(init.redirect,'error');assert.equal(new URL(url).search,'');
     if(hang){startedResolve();return new Promise(()=>{});}
-    return new Response(png,{headers:{'content-type':'image/png','content-length':String(png.length)}});
+    return new Response(body,{headers:{'content-type':'image/png','content-length':String(png.length)}});
   },async url=>url,()=>at); // Explicit transport/egress mocks: no DNS or connection.
   const storage=new FileStorageRuntimeService(f.db,{runtimeConfig:async()=>structuredClone(config)},undefined,producer);
   const actual=await storage.readInspectionBytes('tenant-a','file-a',{businessType:'rental_order',businessId:'order-a',workspaceId:'workspace-a',actorUserId:f.state.user.id,uploadScene:'return-evidence'},png.length,new AbortController().signal);
   assert.deepEqual(actual.bytes,png);
-  const ref={tenantId:'tenant-a',workspaceId:'workspace-other',fileAssetId:'file-a',provider:'s3_compatible',storageKey:'object-a'};
+  const ref={tenantId:'tenant-a',workspaceId:'workspace-other',fileAssetId:'file-a',provider:'s3_compatible',storageKey};
   await assert.rejects(producer.open(ref,new AbortController().signal));assert.equal(calls,1);
+  const originalMetadata=structuredClone(asset.metadata);
+  for(const changed of [{fileContentVersion:undefined},{contentHash:'0'.repeat(64)},{storageLocationHash:'changed'}]){
+    asset.metadata={...originalMetadata,...changed};
+    await assert.rejects(producer.open({...ref,workspaceId:'workspace-a'},new AbortController().signal));
+  }
+  asset.metadata=originalMetadata;assert.equal(calls,1,'missing freeze evidence fails before transport');
+  body=Buffer.from(png);body[body.length-1]^=1;
+  await assert.rejects(async()=>readInspectionMedia(await producer.open({...ref,workspaceId:'workspace-a'},new AbortController().signal),png.length,new AbortController().signal));
+  body=png;assert.equal(calls,2,'same-length changed content cannot become a new evidence digest');
   hang=true;const control=new AbortController(), pending=producer.open({...ref,workspaceId:'workspace-a'},control.signal);
-  await started;control.abort();await assert.rejects(pending);assert.equal(calls,2);
+  await started;control.abort();await assert.rejects(pending);assert.equal(calls,3);
 });
 function mediaFixture(bytes=png){
   const f=fixture();

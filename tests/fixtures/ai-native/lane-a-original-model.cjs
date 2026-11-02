@@ -19,7 +19,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     'aiTaskQuoteSelection', 'aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
     'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation',
     'aiDataErasure', 'aiUsageReservation'].map(key => [key, []]));
-  const h = await setup({ ...tables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
+  const h = await setup({ ...tables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
   if (prepareBusiness) await prepareBusiness(h.b);
   h.control.beforeRead = async (table, args) => {
     if (table === 'aiGatewayInvocation' && typeof args.where?.fencingToken === 'string') {

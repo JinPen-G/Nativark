@@ -56,6 +56,8 @@ function serviceWith(order) {
     itemGroups: ITEM_GROUPS
   });
   instance.lockedOrder = async () => order;
+  instance.getWorkspaceCategory = async () => require('@rental-os/shared').RENTAL_CATEGORY_DEFINITIONS.find(row => row.code === 'camera');
+  instance.assertOrderFulfillmentAdmission = async () => {};
   instance.runHook = async () => {};
   instance.orderHookInstances = () => undefined;
   instance.factStore = {

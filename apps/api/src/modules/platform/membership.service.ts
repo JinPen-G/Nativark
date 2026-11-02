@@ -1096,7 +1096,16 @@ export class MembershipService {
     tx?: Prisma.TransactionClient
   ): Promise<RentalMembershipSnapshot> {
     const db = tx ?? this.prisma;
-    if (tx) await this.lockBookingCustomers(tenantId, personalCustomerId, input?.corporateCustomerId, tx);
+    if (tx) {
+      await this.lockBookingCustomers(tenantId, personalCustomerId, input?.corporateCustomerId, tx);
+      // Qualification-type writers serialize on this workspace. Acquire their
+      // mutex before reading target capability acceptance, not afterwards at
+      // inventory admission. This order remains customers -> workspace -> stock.
+      const workspace = (await tx.$queryRaw<Array<{ id: string; status: string }>>(Prisma.sql`
+        SELECT id, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE
+      `))[0];
+      if (!workspace || workspace.id !== workspaceId || workspace.status !== 'ACTIVE') throw new ConflictException("经营空间不可用，不能核定新业务资格");
+    }
     await this.requireWorkspace(tenantId, workspaceId, tx);
     const personal = await this.requireCustomer(tenantId, personalCustomerId, "personal", tx);
     const personalLink = await this.requireMembership(tenantId, personalCustomerId, tx);
@@ -1104,7 +1113,10 @@ export class MembershipService {
       db.customerQualificationRef.findMany({
         where: { tenantId, customerId: personalCustomerId }, include: { currentRevision: true }, orderBy: { qualificationType: "asc" }
       }),
-      db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
+      tx ? tx.$queryRaw<Prisma.CustomerMembershipQualificationTypeGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM customer_membership_qualification_types
+        WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND status = 'enabled' LOCK IN SHARE MODE
+      `) : db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
     ]);
     const qualifications = qualificationRows.filter((row) => {
       const revision = row.currentRevision;

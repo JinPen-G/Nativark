@@ -18,11 +18,11 @@ async function modelHostHarness(kind) {
   h.state.aiRun[0].sequence = 1;
   h.identity.user.permissions.push('system:params:manage');
   const transaction = h.db.$transaction.bind(h.db);
-  h.db.$transaction = callback => transaction(tx => callback({ ...tx,
+  h.db.$transaction = (callback, options) => transaction(tx => callback({ ...tx,
     aiGatewayInvocation: { ...tx.aiGatewayInvocation, create: args => tx.aiGatewayInvocation.create({ ...args, data: { id: randomUUID(), ...args.data } }) },
     aiGatewayAccountingReceipt: { ...tx.aiGatewayAccountingReceipt, create: args => tx.aiGatewayAccountingReceipt.create({ ...args,
       data: { id: randomUUID(), usageHash: null, inputTokens: null, outputTokens: null, ...args.data } }) }
-  }));
+  }), options);
   const clock = () => new Date(h.control.now);
   const authorization = composePersistedTaskAuthorization({ ...h.authorization, db: h.db, clock });
   const bindings = new PrismaGatewayInvocationBindings(h.db, authorization.scopes, clock);

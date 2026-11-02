@@ -117,6 +117,7 @@ void (async () => {
   assert.equal(serviceOccurrenceOriginText({ origin: "order" }), "原订单服务");
   assert.equal(serviceOccurrenceOriginText({ origin: "extension", extensionSequence: 2 }), "第 2 次续租新增");
   assert.equal(serviceOccurrenceOriginText({ origin: "extension" }), "续租新增");
+  assert.equal(serviceOccurrenceOriginText({ origin: "exchange" }), "换货确认新增");
   assert.match(serviceOccurrenceOriginText({}), /无来源标记/u, "存量记录不猜来源");
   ok("界面能区分原订单服务与第几次续租新增，存量记录不瞎猜来源");
 }

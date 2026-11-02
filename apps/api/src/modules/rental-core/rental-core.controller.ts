@@ -93,6 +93,7 @@ import { getRequestIdentity } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { extensionRequestKey } from "./rental-service-occurrence";
+import { exchangeServiceConfirmationHash } from "./rental-service-catalog";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
@@ -105,6 +106,7 @@ import { OperationLogService } from "../../common/operation-log.service";
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { canRecordCarrierShipmentEventDirectly, carrierBillableWindow, carrierShipmentEventError, rentalOrderDueAt } from "./rental-carrier-shipment";
 import { returnPricingSlices } from "./rental-return-pricing";
+import { exchangePickupInspectionRequirements } from "./rental-exchange-inspection";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -710,11 +712,18 @@ export class RentalCoreController {
       replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
       priceBasis,
       exchangeCancelledServiceOccurrenceIds: cancelledServiceOccurrenceIds,
+      services: body.services,
       appliedAt,
       fulfillmentMode: order.fulfillmentMode,
       locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
       customerType: order.customerType
     });
+    const newServices = quoted.priced.serviceSnapshots ?? [];
+    if (newServices.some(row => row.requiresCapacity)) {
+      if (!this.serviceCapacities) throw new ConflictException("换货服务容量组件未就绪，不能只报价收费");
+      await this.serviceCapacities.assertAvailableForExchange(tenantId, orderId, newServices,
+        (order.serviceSnapshots ?? []).filter(row => cancelledServiceOccurrenceIds.includes(row.occurrenceId ?? "")), tx);
+    }
     const beforePayableAmount = order.finalPayableAmount;
     const recalculatedPayableAmount = quoted.priced.pricingSnapshot?.recalculatedPayableAmount ?? beforePayableAmount;
     const differenceAmount = roundMoney(recalculatedPayableAmount - beforePayableAmount);
@@ -733,6 +742,9 @@ export class RentalCoreController {
       ? { ...quoted.priced.pricingSnapshot, previousPayableAmount: beforePayableAmount, recalculatedPayableAmount, differenceAmount }
       : undefined;
     const currentVersion = quoted.currentVersion && "version" in quoted.currentVersion ? String(quoted.currentVersion.version) : undefined;
+    const executionBasis = await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced);
+    const pickupInspection = exchangePickupInspectionRequirements({ orderId, expectedUpdatedAt: order.updatedAt,
+      orderLineId, allocationId, replacementItemGroupId, replacementAssetId, locationId: exchangeLocationId, basis: executionBasis });
     const preview: RentalOrderChangePreview = {
       orderId: order.id,
       type: "post_pickup_exchange",
@@ -770,8 +782,12 @@ export class RentalCoreController {
         replacementAssetId,
         replacementAssetNo: selectedCandidate?.assetNo,
         cancelledServiceOccurrenceIds,
+        serviceSnapshots: newServices,
+        serviceConfirmationHash: exchangeServiceConfirmationHash({ orderId, expectedUpdatedAt: order.updatedAt, orderLineId,
+          replacementItemGroupId, cancelledIds: cancelledServiceOccurrenceIds }, newServices),
         inspectionSnapshot,
-        executionBasis: await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced)
+        pickupInspection,
+        executionBasis
       },
       warnings: [
         "换货差额不在确认时立即收款，统一在归还结算时处理",
@@ -1880,6 +1896,11 @@ export class RentalCoreController {
     return this.service.listOrderChanges(req.user.tenantId, id);
   }
 
+  @Get("orders/:id/changes/post-pickup-exchange/services")
+  async exchangeServiceOptions(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.prisma.$transaction(tx => this.service.exchangeServiceOptions(req.user.tenantId, id, tx));
+  }
+
   @Post("orders/:id/changes/post-pickup-exchange/preview")
   async previewPostPickupExchange(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
     if (body.type !== "post_pickup_exchange") throw new BadRequestException("换货试算请求类型必须是 post_pickup_exchange");
@@ -1917,6 +1938,10 @@ export class RentalCoreController {
       run: async (tx) => {
         const priced = await this.pricePostPickupExchange(tenantId, id, exchangeInput, tx);
         if (body.expectedUpdatedAt !== priced.order.updatedAt) throw new ConflictException("订单已发生变化，请重新试算后再提交");
+        if (priced.preview.differenceAmount >= 0 && priced.preview.exchange?.executionBasis?.linePricing?.couponPricing) {
+          await this.business.repriceCouponForOrder(tenantId, id,
+            priced.preview.exchange.executionBasis.linePricing.couponPricing.replacementReduction, tx);
+        }
         const applied = await this.service.applyPostPickupExchange(
           tenantId,
           id,
@@ -2136,12 +2161,25 @@ export class RentalCoreController {
     const order = await this.idempotent.execute({
       tenantId, action: "order.fee-review", key: idempotencyKeyOf(req),
       fallbackKey: `order.fee-review:${reviewId}`, request: { orderId: id, reviewId, ...body }, orderId: id,
-      run: (tx) => this.service.reviewOrderFeeReview(tenantId, id, reviewId, body, req.user.displayName, tx),
+      run: async (tx) => {
+        const reviewed = await this.service.reviewOrderFeeReview(tenantId, id, reviewId, body, req.user.displayName, tx);
+        const review = reviewed.feeReviews?.find(row => row.id === reviewId);
+        if (review?.type === "early_return_refund" && review.status === "approved" && review.sourceId) {
+          await this.business.synchronizeExchangeCoupon(tenantId, reviewed, reviewId,
+            await this.service.listOrderChanges(tenantId, id, tx), tx,
+            await this.service.listOrderExtensions(tenantId, id, tx));
+        }
+        return reviewed;
+      },
       replay: async () => {
         const latest = await this.service.getOrder(tenantId, id);
         return (latest.feeReviews ?? []).some((row) => row.id === reviewId && row.status === body.decision) ? latest : undefined;
       }
     });
+    const decided = order.feeReviews?.find(row => row.id === reviewId);
+    if (decided?.type === "overdue" && decided.status === "approved" && (decided.decidedAmount ?? 0) > 0) {
+      await this.emitOrderEvent(tenantId, "order.overdue", order);
+    }
     return this.committed(tenantId, order);
   }
 
@@ -2199,7 +2237,32 @@ export class RentalCoreController {
     const quantityScope = partialReturnItems
       ? returnedQuantitiesOf(locked, partialReturnItems)
       : outstandingQuantitiesOf(locked);
+    const pendingBundle = locked.feeReviews?.some(row => row.type === "overdue" && row.sourceId === "bundle-return" && row.status === "pending");
+    const touchedBundles = locked.lines.filter(line => line.inventoryMode === "bundle" && locked.allocations.some(row => row.orderLineId === line.id
+      && !["returned", "released", "consumed"].includes(row.status) && (!partialReturnItems || partialReturnItems.some(item => item.allocationId === row.id))));
+    // Component quantities have no frozen rental share. Only a split bundle
+    // needs manual pricing; a whole bundle handed back once has a known parent
+    // quantity. Preserve a prior review through the final handover.
+    const bundleReturn = pendingBundle || touchedBundles.some(line => Boolean(partialReturnItems)
+      || locked.allocations.some(row => row.orderLineId === line.id && row.status === "returned"));
+    if (!bundleReturn) for (const line of touchedBundles) {
+      quantityScope[line.pricingGroupId ?? line.itemGroupId] = line.quantity - (line.cancelledQuantity ?? 0);
+    }
+    const historicalExchange = locked.allocations.some(row => Boolean(row.metadata?.exchangeId));
+    const bundleReview = (actualReturnedAt: string) => {
+      if (!bundleReturn || locked.ruleSnapshot.overdue.feeMode === "none"
+        || Date.parse(actualReturnedAt) <= Date.parse(dueAt) + locked.ruleSnapshot.overdue.graceMinutes * 60_000) return undefined;
+      const originalAmount = !historicalExchange && !effectiveExtensions.length ? this.business.calculateOverdueCharge(tenantId, context, quote,
+        actualReturnedAt, dueAt, undefined, { ruleSnapshot: locked.ruleSnapshot }) : undefined;
+      const alreadyCharged = locked.chargeLines.filter(row => row.type === "overdue").reduce((sum, row) => sum + row.amount, 0);
+      const maximumAmount = originalAmount === undefined ? undefined : roundMoney(Math.max(0, originalAmount - alreadyCharged));
+      return { maximumAmount, basis: ["套装组件缺少冻结租金分摊依据，整单归还后统一核价", `约定归还时间 ${dueAt}`,
+        `本批实际归还时间 ${actualReturnedAt}`, ...(batchId ? [`归还批次 ${batchId}`] : []),
+        ...locked.allocations.map(row => `实际分配 ${row.id}；订单行 ${row.orderLineId}；数量 ${row.quantity}；状态 ${row.status}`),
+        ...(originalAmount === undefined ? ["存在换货或续租来源，须补充核实费用上限后才能批准"] : [`原规则整单费用上限 ${maximumAmount}`])] };
+    };
     const overdueAmount = (actualReturnedAt: string) => {
+      if (bundleReview(actualReturnedAt)) return 0;
       if (!hasExchange) return this.business.calculateOverdueCharge(tenantId, context, quote, actualReturnedAt, dueAt,
         quantityScope, { ruleSnapshot: locked.ruleSnapshot });
       const extendedSources = this.business.exchangeReturnPricingSources(tenantId, context, quote, locked, effectiveExtensions, changes, partialReturnItems);
@@ -2248,6 +2311,7 @@ export class RentalCoreController {
             ? overdueAmount(handoffAt)
             : 0,
           returnedAt: handoffAt,
+          review: bundleReview(handoffAt),
           batchId
         },
         carrierRentalAdjustment: {
@@ -2264,10 +2328,11 @@ export class RentalCoreController {
         // 归还计费的规则与费率取订单冻结快照（§4.2），而非报价缓存；缺字段时计算侧回落报价并告警一次。
         amount: overdueAmount(returnedAt),
         returnedAt,
+        review: bundleReview(returnedAt),
         batchId
       },
       earlyReturn: includeEarlyReturn
-        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked, effectiveExtensions), extensions, { ...locked, changes })
+        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked, effectiveExtensions), extensions, { ...locked, changes }, effectiveExtensions)
         : undefined
     };
   }
@@ -2516,7 +2581,8 @@ export class RentalCoreController {
         }
         const charges = stage === "return" ? await this.returnCharges(tenantId, context, id, returnedAt, tx) : undefined;
         overdueAmount = charges?.overdue.amount ?? 0;
-        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueAmount, tx, req.user.displayName, charges?.earlyReturn);
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueAmount, tx, req.user.displayName, charges?.earlyReturn,
+          charges?.overdue.review ? { ...charges.overdue.review, returnedAt: charges.overdue.returnedAt } : undefined);
         if (stage === "return") await this.serviceCapacities.settleReturnForOrder(tenantId, completed, returnedAt, tx);
         return completed;
       },

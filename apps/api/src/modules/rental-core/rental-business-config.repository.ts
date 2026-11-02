@@ -62,6 +62,8 @@ export interface RentalBusinessConfigStore {
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  /** Current service admission under the same workspace mutex as service writers. */
+  readServicesForExchange?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]>;
   upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
@@ -252,6 +254,21 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
         update: data
       });
+    });
+  }
+
+  async readServicesForExchange(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]> {
+    if (!workspaceId || workspaceId !== await resolveScopeWorkspaceId(tx, tenantId)) throw new ConflictException("换货服务经营空间不一致");
+    const workspace = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM business_workspaces WHERE id = ${workspaceId} AND tenantId = ${tenantId} FOR UPDATE`);
+    if (!workspace.length) throw new ConflictException("换货服务经营空间不存在");
+    const rows = await tx.$queryRaw<Prisma.RentalValueAddedServiceGetPayload<object>[]>(Prisma.sql`
+      SELECT * FROM rental_value_added_services
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} ORDER BY id FOR UPDATE`);
+    return rows.map(row => {
+      const value: unknown = row.requiresCapacity;
+      if (![true, false, 0, 1].includes(value as boolean | number)) throw new ConflictException("服务容量配置无效");
+      return this.toService({ ...row, requiresCapacity: value === true || value === 1 });
     });
   }
 

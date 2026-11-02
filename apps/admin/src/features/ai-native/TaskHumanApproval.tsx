@@ -214,7 +214,8 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
   const expires = review ? Math.min(Date.parse(review.review.proposal.payload.expiresAt),
     review.kind === "order" ? Date.parse(review.review.deterministic.quoteExpiresAt) : Infinity) : NaN;
   const canDecide = !!review && hasOrderReviewMaterial(review) && review.review.proposal.status === "pending_confirmation" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
-  const canContinue = !!review && hasOrderReviewMaterial(review) && review.review.proposal.status === "confirmed" && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
+  const rejectionContinuation = review?.review.proposal.status === "cancelled";
+  const canContinue = !!review && hasOrderReviewMaterial(review) && (review.review.proposal.status === "confirmed" || rejectionContinuation) && Number.isFinite(expires) && expires > Date.now() && !original && !continuation && !busy;
   const continueOriginal = () => run(async signal => {
     if (!review || !canContinue) throw Error("AI_RESOURCE_UNAVAILABLE");
     const p = review.review.proposal;
@@ -233,7 +234,9 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
       sessionStorage.removeItem(continueKey); setContinuation(null);
       setMessage(t("原宿主明确未启动本次继续。重新读取当前提案后再决定，不能推断其他执行者未提交。"));
     } else if (result.kind === "run_outcome" && ["succeeded", "partially_succeeded", "paused", "cancel_requested", "cancelled", "unavailable", "failed"].includes(result.status)) {
-      setMessage(t("原运行器应答已返回。请读取原业务结果，不能仅凭运行状态认定订单或设置已提交。"));
+      setMessage(t(rejectionContinuation
+        ? "原拒绝已交运行器收尾。请核对原任务及业务收据，拒绝不代表已发生业务已回滚。"
+        : "原运行器应答已返回。请读取原业务结果，不能仅凭运行状态认定订单或设置已提交。"));
     } else throw Error("AI_RESULT_UNKNOWN");
   }, true);
   return <section aria-label={t("原提案人工审阅")} aria-busy={busy}>
@@ -281,8 +284,10 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
       <ConfirmAction key={`reject:${review.review.proposal.payloadHash}`} label={t("拒绝这份提案")}
         prompt={t("确认拒绝这份原提案？不会取消已发生的业务操作。")}
         doneLabel={t("决定已记录")} disabled={!canDecide} onConfirm={() => decide("reject")} />
-      <ConfirmAction key={`continue:${review.checkpointRef}:${review.taskRevision}`} label={t("核对原批准并继续")}
-        prompt={t("确认交由原运行器执行这份已批准提案？服务器将再次核对权限、原计划、资源和Core条件，执行后需读取原业务收据。")}
+      <ConfirmAction key={`continue:${review.checkpointRef}:${review.taskRevision}`} label={t(rejectionContinuation ? "交原运行器处理拒绝" : "核对原批准并继续")}
+        prompt={t(rejectionContinuation
+          ? "确认交原运行器处理这份已记录的拒绝？这不会批准提案或回滚已发生业务，完成后仍须核对原任务和业务收据。"
+          : "确认交由原运行器执行这份已批准提案？服务器将再次核对权限、原计划、资源和Core条件，执行后需读取原业务收据。")}
         doneLabel={t("运行应答已返回，请核对业务收据")} disabled={!canContinue} onConfirm={continueOriginal} />
     </div></>}
     {receipt && <p role="status" aria-live="polite">{t(receipt.receipt.kind === "recorded"

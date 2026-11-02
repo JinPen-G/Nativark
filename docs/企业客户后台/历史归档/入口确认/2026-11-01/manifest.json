@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-01",
+  "note": "Byte-exact originals before the approved enterprise-entry update. Resolve historical relative links from source.",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "file": "docs/企业客户后台/历史归档/入口确认/2026-11-01/企业客户后台-需求.md",
+      "bytes": 33354,
+      "sha256": "f43af3ca92d02b0681c5286f242f8af4fbf9ed1e61400bcefc4829e5d40f9cb1"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "file": "docs/企业客户后台/历史归档/入口确认/2026-11-01/企业客户后台-开发任务.md",
+      "bytes": 11259,
+      "sha256": "e8ce2721be66b79e9b4fec2babd6f3b1528ced26b88cab293c5534c858dfcfa6"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "file": "docs/企业客户后台/历史归档/入口确认/2026-11-01/企业客户后台-开发记录.md",
+      "bytes": 9701,
+      "sha256": "01e0df1293ca7981411c8faf575f932dfdb209b6c717951b08c595a9ee4471e9"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "file": "docs/企业客户后台/历史归档/入口确认/2026-11-01/企业客户后台-协作接续.md",
+      "bytes": 3690,
+      "sha256": "104c9051a80d5e87b106eacfd6dd711b3198a4e6a4bd45d549f4b2b5254ae3c7"
+    }
+  ]
+}

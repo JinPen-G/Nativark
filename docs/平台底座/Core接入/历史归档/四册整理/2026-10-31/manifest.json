@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发任务.md",
+      "file": "docs/平台底座/Core接入/历史归档/四册整理/2026-10-31/平台Core接入-开发任务.md",
+      "bytes": 11774,
+      "sha256": "94a0ac914e905c64e3f602218a5567d4bc277cf1704cf4dd9bce00c934d4c2f5"
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发记录.md",
+      "file": "docs/平台底座/Core接入/历史归档/四册整理/2026-10-31/平台Core接入-开发记录.md",
+      "bytes": 9620,
+      "sha256": "56d7929f811031b6f444344726d4ec2ad6a9a461576d7bd9f701d499fd77a5d9"
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-协作接续.md",
+      "file": "docs/平台底座/Core接入/历史归档/四册整理/2026-10-31/平台Core接入-协作接续.md",
+      "bytes": 3787,
+      "sha256": "b1a656b102580bc4b63ddf762c4e5efc33a2b139329c53203df156885fe6158e"
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-接口与生命周期设计.md",
+      "file": "docs/平台底座/Core接入/历史归档/四册整理/2026-10-31/平台Core接入-接口与生命周期设计.md",
+      "bytes": 11166,
+      "sha256": "948ff41d0e2fa68a1581053fd12807c8606149dcd2c7b89cfd6057473a522e94"
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-接入指南.md",
+      "file": "docs/平台底座/Core接入/历史归档/四册整理/2026-10-31/平台Core接入-接入指南.md",
+      "bytes": 10320,
+      "sha256": "81a6790e8b50568a30a5004e1b7a0d282adce070ca66d72ca4d3d900f7b5ea6f"
+    }
+  ]
+}

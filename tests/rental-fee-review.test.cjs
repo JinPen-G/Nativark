@@ -62,6 +62,21 @@ void (async () => {
   ok("逾期 manual_review 挂出待审单，金额与依据都在，但不动账");
 }
 
+{
+  const { RentalCoreController } = require("../apps/api/src/modules/rental-core/rental-core.controller");
+  const controller = Object.create(RentalCoreController.prototype), events = [];
+  const row = order({ feeReviews: [{ id: "bundle-review", type: "overdue", sourceId: "bundle-return", status: "approved", decidedAmount: 12 }] });
+  controller.idempotent = { execute: async () => row };
+  controller.emitOrderEvent = async (_tenant, code) => { events.push(code); };
+  controller.committed = (_tenant, value) => value;
+  await controller.reviewOrderFeeReview({ user: { tenantId: "tenant_1", displayName: "Operator" }, headers: {} }, "order_1", "bundle-review", { decision: "approved", reason: "checked" });
+  assert.deepEqual(events, ["order.overdue"]);
+  row.feeReviews[0].decidedAmount = 0;
+  await controller.reviewOrderFeeReview({ user: { tenantId: "tenant_1", displayName: "Operator" }, headers: {} }, "order_1", "bundle-review", { decision: "approved", reason: "waived" });
+  assert.equal(events.length, 1);
+  ok("待核套装逾期批准正额才发原逾期事件，零额不虚构通知");
+}
+
 /* ---------- 非 manual_review 仍直接落账 ---------- */
 
 {

@@ -21,7 +21,7 @@ export function OrderFundingPanel({ order, funding, loading, error, refresh, dep
   if (!funding) return <p className={styles.note} role="status">{t(loading ? "正在读取资金摘要" : "资金摘要暂不可用")}</p>;
   const accounts = [
     { key: "rental" as const, name: "租金与费用", target: "当前应收", amount: funding.rental.payable,
-      values: [["累计收款", funding.rental.collected], ["累计退款", funding.rental.refunded], ["保证金抵扣", funding.rental.securityCaptured], ["当前待收", funding.rental.due],
+      values: [["现金实收", funding.rental.collected], ["企业回款已核销", funding.rental.corporatePaid], ["累计退款", funding.rental.refunded], ["保证金抵扣", funding.rental.securityCaptured], ["当前待收", funding.rental.due],
         ...(funding.rental.balance < 0 ? [["待退款", Math.abs(funding.rental.balance)]] : []), ...(funding.rental.pendingExtensionAmount !== 0 ? [["续租待补", funding.rental.pendingExtensionAmount]] : [])] },
     { key: "deposit" as const, name: "押金", target: "应收押金", amount: depositRequirement,
       values: [["已收押金", funding.deposit.collected], ["已抵扣", funding.deposit.captured], ["已退押金", funding.deposit.refunded], ["押金余额", funding.deposit.balance], ...(funding.deposit.pendingExtensionAmount !== 0 ? [["续租待补", funding.deposit.pendingExtensionAmount]] : [])] },

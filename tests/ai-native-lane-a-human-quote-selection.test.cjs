@@ -199,8 +199,17 @@ test('selected quote task HTTP uses normal runner and current human decision wit
       assert.equal((await task.readResult(request, command)).status, 'not_observed');
     } else if (mode === 'reject') {
       await human.decideSelectedProposal(request, { ...command, proposal: { ...wait.proposal, decision: 'reject' } });
-      const result = await task.continueConfirmation(request, continuation);
-      assert.equal(result.outcome.status, 'failed'); assert.equal(h.state.records.rentalOrder.length, 0);
+      const { continueTaskCenterOriginal } = require('../apps/api/src/modules/ai-native/task-center-continuation.composition');
+      const tasks = require('../apps/api/src/modules/ai-native/task-authorization.composition').composePersistedTaskAuthorization(h.sceneDependencies).tasks;
+      const result = await continueTaskCenterOriginal({ db: dependencies.db, order: requests },
+        { order: dependencies, settings: { db: dependencies.db }, decisions: { order: true, settings: false } }, credentials, tasks,
+        request, { taskId: h.selection.taskId, runId: h.selection.runId, stepId: r.aiStep[0].id,
+          checkpointRef: wait.checkpointRef, expectedTaskRevision: wait.taskRevision, proposal: wait.proposal });
+      assert.equal(result.status, 'failed'); assert.equal(h.state.records.rentalOrder.length, 0);
+      const controlled = require('../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition').composeControlledApprovedOrder({ ...dependencies, credentials });
+      const eligibility = await controlled.application.readReprepareEligibility(h.selection.taskId,
+        { draftVersion: 'ain-approval-application-draft-1', original: wait.proposal, intent: 'inspect' });
+      assert.equal(eligibility.state, 'rejected'); assert.equal(eligibility.canRequestReprepare, true);
       assert.equal((await task.readResult(request, command)).status, 'not_observed');
     } else {
       const decision = await human.decideSelectedProposal(request, { ...command, proposal: { ...wait.proposal, decision: 'approve', reviewVersion: 'ain-approval-order-review-draft-2' } });
@@ -596,6 +605,19 @@ test('human quote selection binds consumed model answers and prevents a competin
   await app.resume({original:h.reference,submission},AbortSignal.abort());
   const received={receipt:await app.readAnswer({original:h.reference,submission})};
   const quoted=await harness(false,true,mode==='enterprise_approve');
+  Object.assign(h.state, {
+    customerProfile: structuredClone([quoted.b.membershipRows.customer, ...quoted.b.membershipRows.corporateCustomers]),
+    customerMembership: structuredClone([quoted.b.membershipRows.link, ...quoted.b.membershipRows.corporateLinks]),
+    customerQualificationRef: [], customerMembershipQualificationType: [], customerMembershipPlanAssignment: [],
+    customerCorporateMembership: structuredClone(quoted.b.membershipRows.bookingOptions)
+  });
+  // The transaction client exposes only explicitly declared tables; rebuild its
+  // delegates over these original membership facts, preserving the same store.
+  const membershipDb = quoted.b.memberships.prisma;
+  const decorateMembership = tx => Object.assign(tx, ...['customerProfile', 'customerMembership', 'customerQualificationRef',
+    'customerMembershipQualificationType', 'customerMembershipPlanAssignment', 'customerCorporateMembership'].map(name => ({ [name]: membershipDb[name] })));
+  const transactionWithMembership = h.db.$transaction.bind(h.db);
+  h.db.$transaction = (work, ...options) => transactionWithMembership(tx => work(decorateMembership(tx)), ...options);
   quoted.b.facts.listAssets = async () => [1,2].map(index => ({id:`asset-${index}`,tenantId:'tenant_001',workspaceId:'workspace-a',
     itemGroupId:quoted.b.group.id,locationId:quoted.b.location.id,status:'available'}));
   // Only persistence is simulated: preparation and inventory decisions use Rental Core.
@@ -617,7 +639,7 @@ test('human quote selection binds consumed model answers and prevents a competin
     new RentalIdempotencyRepository(h.db),undefined,undefined,undefined,undefined,quoted.b.memberships);
   const coreErrors=[],createApprovedOrder=confirmation.createApprovedOrder.bind(confirmation);
   confirmation.createApprovedOrder=async (...args)=>{try{return await createApprovedOrder(...args);}
-    catch(error){coreErrors.push(error.message);throw error;}};
+    catch(error){coreErrors.push(error.stack);throw error;}};
   const dependencies={...h.dependencies,originals:h.model.scenes.requests,
     scene:{code:'quote_clarification',version:'1'},
     core:quoted.b.core,business:quoted.b.business,memberships:quoted.b.memberships,confirmation, quoteFacts};

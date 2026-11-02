@@ -45,8 +45,8 @@ export function feeReviewAmountCeiling(row: Pick<RentalOrderFeeReview, "suggeste
 export function feeReviewAmountError(row: Pick<RentalOrderFeeReview, "suggestedAmount" | "maximumAmount"> | undefined, value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "请填写有效的非负认定金额";
   const ceiling = row && feeReviewAmountCeiling(row);
-  if (ceiling === undefined) return "原快照最大核减依据缺失，不能批准";
-  if (value > ceiling) return row?.suggestedAmount === null ? "认定额不能超过原快照最大核减额" : "认定额不能超过建议额";
+  if (ceiling === undefined) return "原快照金额上限依据缺失，不能批准";
+  if (value > ceiling) return row?.suggestedAmount === null ? "认定额不能超过原快照金额上限" : "认定额不能超过建议额";
   return undefined;
 }
 

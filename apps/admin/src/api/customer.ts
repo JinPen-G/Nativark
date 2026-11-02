@@ -8,6 +8,8 @@ import type {
   CustomerCorporateCredit,
   CustomerCorporateCreditAccountSummary,
   CustomerCorporateCreditLedgerEntry,
+  CustomerCorporateCreditPaymentReversalReceipt,
+  ReverseCustomerCorporateCreditPaymentRequest,
   CustomerCorporateInvoiceProfile,
   CustomerDuplicateCandidate,
   CustomerMergePreview,
@@ -99,6 +101,10 @@ export const customerApi = {
     request<CustomerCorporateCreditAccountSummary>(`/platform/customers/${customerId}/credit/account`),
   creditLedger: (customerId: string) =>
     request<CustomerCorporateCreditLedgerEntry[]>(`/platform/customers/${customerId}/credit/ledger`),
+  reverseCreditPayment: (customerId: string, paymentId: string, data: ReverseCustomerCorporateCreditPaymentRequest) =>
+    request<CustomerCorporateCreditPaymentReversalReceipt>(`/platform/customers/${customerId}/credit/payments/${paymentId}/reverse`, { method: "post", data }),
+  creditPaymentReversal: (customerId: string, paymentId: string) =>
+    request<CustomerCorporateCreditPaymentReversalReceipt | null>(`/platform/customers/${customerId}/credit/payments/${paymentId}/reverse`),
   /** 维护授信额度与账期配置；订单占用、应收及回款事实由服务端账务流水维护。 */
   saveCredit: (customerId: string, data: SaveCustomerCreditRequest) =>
     request<CustomerCorporateCredit>(`/platform/customers/${customerId}/credit`, { method: "put", data })

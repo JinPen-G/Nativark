@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/SaaS订阅/SaaS订阅-开发任务.md",
+      "file": "docs/SaaS订阅/历史归档/四册整理/2026-10-31/SaaS订阅-开发任务.md",
+      "bytes": 29801,
+      "sha256": "2f3835c3427e31690121609c78607563bb37378e0791ad8de3ee09da5bac13c8"
+    }
+  ]
+}

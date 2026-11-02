@@ -2,6 +2,7 @@ import type { CreateFileUploadSessionRequest, AiExecutionContext } from '@rental
 import type { PrismaClient } from '@prisma/client';
 import type { FileBusinessOwner } from '../../integrations/file-storage.runtime.service';
 import type { TenantKnowledgeObjectReader } from '../../integrations/knowledge-object-reader';
+import { frozenFileContentHash } from '../../integrations/file-content-binding';
 import type { KnowledgeFileAccess } from './knowledge-file-access';
 import type { KnowledgeAuthorizationPort } from './knowledge.ports';
 import { KnowledgeCurrentSession } from './knowledge-current-session';
@@ -71,6 +72,10 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
   }
 
   async readUploadContentHash(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
+    return (await this.readUploadContent(tenantId, fileAssetId, owner)).contentHash;
+  }
+
+  async readUploadContent(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
     const boundOwner = structuredClone(owner);
     return this.session.run(async context => {
       const target = this.owner(context, tenantId, boundOwner);
@@ -87,7 +92,7 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
         documentId: target.documentId, fileAssetId }, 262144);
       if (!/^[a-f0-9]{64}$/u.test(result.contentHash) || fingerprint(asset) !== fingerprint(await load())) return unavailable();
       await this.authorizeUpload(tenantId, input, boundOwner);
-      return result.contentHash;
+      return { bytes: Uint8Array.from(result.bytes), contentHash: result.contentHash };
     });
   }
 
@@ -103,7 +108,8 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
         || asset.status !== 'active' || asset.uploadedBy !== target.actorUserId || asset.storageProvider === 'local_mock'
         || !metadata || typeof metadata !== 'object' || Array.isArray(metadata) || metadata.workspaceId !== target.workspaceId
         || metadata.knowledgeUploadVersion !== 1 || typeof metadata.knowledgeContentHash !== 'string'
-        || !/^[a-f0-9]{64}$/u.test(metadata.knowledgeContentHash) || session?.status !== 'completed' || !session.completedAt
+        || !/^[a-f0-9]{64}$/u.test(metadata.knowledgeContentHash)
+        || frozenFileContentHash(asset) !== metadata.knowledgeContentHash || session?.status !== 'completed' || !session.completedAt
         || session.fileAssetId !== asset.id || session.tenantId !== tenantId || session.provider !== asset.storageProvider
         || session.storageKey !== asset.storageKey) return unavailable();
       const revision = metadata.knowledgeRevision === undefined ? undefined : parse(knowledgeUploadRevisionSchema, metadata.knowledgeRevision);

@@ -57,6 +57,46 @@ function serviceWith(events, snapshot = order, options = {}) {
 }
 
 void (async () => {
+  {
+    const original = event("deposit", "initiate", 200, "offline"); original.paymentMethod = "offline_transfer";
+    const events = [original], logs = [];
+    const service = serviceWith(events, { ...order, preAuthAmount: 0, payable: 80, status: "settling" });
+    service.testDb.$queryRaw = async () => events;
+    service.testDb.operationLog = {
+      findFirst: async ({ where }) => logs.find(row => row.action === where.action && row.detail.idempotencyKey === where.detail.equals) ?? null,
+      findMany: async () => logs,
+      create: async ({ data }) => { logs.push(data); return data; }
+    };
+    service.testDb.fileAsset = { findFirst: async ({ where }) => where.id === "valid-proof" ? { id: "valid-proof", metadata: { workspaceId: "workspace" } } : null };
+    const request = { action: "capture", amount: 80, idempotencyKey: "original-capture", reason: "approved outstanding charge",
+      sourceEventId: original.id, evidenceFileAssetId: "valid-proof" };
+    const actor = { id: "operator", name: "Operator" };
+    service.testDb.$transaction = async work => {
+      const eventCount = events.length, logCount = logs.length;
+      try { return await work(service.testDb); } catch (error) { events.splice(eventCount); logs.splice(logCount); throw error; }
+    };
+    const appendLog = service.testDb.operationLog.create;
+    service.testDb.operationLog.create = async () => { throw Error("audit unavailable"); };
+    await assert.rejects(service.recordOfflineDepositDisposition("tenant", "workspace", "order", request, actor), /audit unavailable/);
+    assert.equal(events.length, 1); assert.equal(logs.length, 0);
+    service.testDb.operationLog.create = appendLog;
+    const captured = await service.recordOfflineDepositDisposition("tenant", "workspace", "order", request, actor);
+    assert.equal(captured.provider, "offline"); assert.equal(captured.amount, 80);
+    assert.equal(logs[0].detail.request.sourceEventId, original.id);
+    assert.equal((await service.recordOfflineDepositDisposition("tenant", "workspace", "order", request, actor)).id, captured.id);
+    await assert.rejects(service.recordOfflineDepositDisposition("tenant", "workspace", "order", { ...request, amount: 70 }, actor), /原押金操作键/);
+    await assert.rejects(service.recordOfflineDepositDisposition("tenant", "workspace", "order", { ...request, idempotencyKey: "wrong-evidence", evidenceFileAssetId: "absent" }, actor), /凭证/);
+    const refunded = await service.recordOfflineDepositDisposition("tenant", "workspace", "order", { ...request, action: "refund", amount: 120,
+      idempotencyKey: "original-refund", paymentMethod: "offline_transfer" }, actor);
+    assert.equal(refunded.provider, "offline"); assert.equal(events.length, 3); assert.equal(logs.length, 2);
+    await service.assertReadyToClose("tenant", "workspace", "order", service.testDb);
+    await assert.rejects(service.recordOfflineDepositDisposition("tenant", "workspace", "order", { ...request, action: "refund", amount: 1,
+      idempotencyKey: "over-refund", paymentMethod: "offline_transfer" }, actor), /原实收押金尚未处置额度/);
+    await assert.rejects(service.recordEvent("tenant", "workspace", "order", { instrument: "deposit", action: "refund", amount: 1,
+      idempotencyKey: "mock-attempt", reason: "must remain denied" }), /模拟资金/);
+    ok("真实线下押金抵扣与退还绑定原实收和凭证，同键回放不重复，处置后可正常结清且模拟门不放宽");
+  }
+
   // “曾收过”不等于当前可领取：退款或释放后的实际余额必须还足额。
   {
     const events = [event("rental", "append", 800), event("deposit", "initiate", 200), event("preauthorization", "initiate", 300)];

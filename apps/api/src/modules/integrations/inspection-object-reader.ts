@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { assertOutboundUrl } from '../../common/outbound-url';
+import { frozenFileContentHash } from './file-content-binding';
 import type { TenantIntegrationService, TenantIntegrationRuntimeConfig } from './tenant-integration.service';
 
 type Reference = { tenantId: string; workspaceId: string; fileAssetId: string; provider: string; storageKey: string };
@@ -62,6 +63,8 @@ export class TenantInspectionObjectReader {
     if (!order || order.id !== asset.businessId) throw unavailable();
     const config = structuredClone(await this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible'));
     if (!config) throw unavailable();
+    const frozenHash = frozenFileContentHash(asset, config);
+    if (!frozenHash) throw unavailable();
     const request = s3ObjectReadRequest(config, ref.storageKey, this.clock());
     const controller = new AbortController(), abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true });
@@ -98,7 +101,13 @@ export class TenantInspectionObjectReader {
       const currentOrder = await wait(this.db.rentalOrder.findFirst({ where: { id: asset.businessId, tenantId: ref.tenantId, workspaceId: ref.workspaceId }, select: { id: true } }));
       if (JSON.stringify(latest) !== JSON.stringify(asset) || JSON.stringify(currentConfig) !== JSON.stringify(config)
         || !currentOrder || currentOrder.id !== asset.businessId || controller.signal.aborted) throw unavailable();
+      const orderId = asset.businessId;
+      const finalEvidence = () => Promise.all([
+        wait(load()), wait(this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible')),
+        wait(this.db.rentalOrder.findFirst({ where: { id: orderId, tenantId: ref.tenantId, workspaceId: ref.workspaceId }, select: { id: true } }))
+      ]);
       let total = 0;
+      const digest = createHash('sha256');
       return new ReadableStream<Uint8Array>({
         async pull(output) {
           try {
@@ -106,10 +115,14 @@ export class TenantInspectionObjectReader {
             const next = await wait(reader!.read());
             if (controller.signal.aborted) throw unavailable();
             if (next.done) {
-              if (total !== asset.sizeBytes) throw unavailable();
+              if (total !== asset.sizeBytes || digest.digest('hex') !== frozenHash) throw unavailable();
+              const [finalAsset, finalConfig, finalOrder] = await finalEvidence();
+              if (JSON.stringify(finalAsset) !== JSON.stringify(asset) || JSON.stringify(finalConfig) !== JSON.stringify(config)
+                || !finalOrder || finalOrder.id !== asset.businessId || controller.signal.aborted) throw unavailable();
               cleanup(); reader!.releaseLock(); output.close(); return;
             }
             if (!(next.value instanceof Uint8Array) || (total += next.value.byteLength) > asset.sizeBytes) throw unavailable();
+            digest.update(next.value);
             output.enqueue(next.value);
           } catch { stop(); output.error(unavailable()); }
         },

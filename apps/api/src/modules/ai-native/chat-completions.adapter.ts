@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelResponseContainsSecret } from './model-response-secret';
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest, type ModelProtocolInvocation } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
@@ -224,7 +225,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     const text = choice.message.content ?? '', calls = choice.message.tool_calls ?? [];
     if (choice.message.refusal || choice.finish_reason !== (calls.length ? 'tool_calls' : 'stop') || (!calls.length && choice.message.content === null) || text.length > 128_000 || text.includes(credential) || calls.some(call => call.function.arguments.includes(credential))) throw new ModelGatewayError("INVALID_RESPONSE");
     const extras = selected.parse(text, calls);
-    if (JSON.stringify(extras).includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (modelResponseContainsSecret(extras, credential)) throw new ModelGatewayError('INVALID_RESPONSE');
     return { text, ...extras, usage: parsed.data.usage ? chatCompletionsUsage(parsed.data.usage) : undefined };
   }
 }

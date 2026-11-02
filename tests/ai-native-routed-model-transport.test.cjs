@@ -67,6 +67,28 @@ test('a credential split over adapter events is withheld before its prefix is pu
   await assert.rejects(async () => { for await (const event of transport.stream(context, request(), f.route, new AbortController().signal)) out.push(event); }, e => e.code === 'INVALID_RESPONSE');
   assert.deepEqual(out, []);
 });
+test('credential characters escaped by JSON cannot bypass result scanning in text, keys or nested values', async () => {
+  for (const credential of ['synthetic-"secret', 'synthetic-\\secret']) {
+    for (const result of [{ text: credential }, { text: 'safe', structured: { [credential]: 'value' } },
+      { text: 'safe', structured: { nested: [credential] } }]) {
+      const f = setup(); f.state.connection.credential = credential;
+      const adapter = { provider: f.profile.protocol, features: [], generate: async () => result };
+      await assert.rejects(new RoutedModelTransport(f.connections, [adapter]).invoke(context, request(), f.route,
+        new AbortController().signal), error => error.code === 'INVALID_RESPONSE');
+    }
+  }
+});
+test('native decoded Messages and Responses reject credentials containing quotes or backslashes', async () => {
+  const { AnthropicMessagesAdapter, ResponsesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  for (const credential of ['synthetic-"secret', 'synthetic-\\secret']) {
+    for (const [Adapter, raw] of [[AnthropicMessagesAdapter, { type: 'message', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: credential }] }],
+      [ResponsesAdapter, { status: 'completed', output: [{ type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: credential }] }] }]]) {
+      const adapter = new Adapter({ post: async () => ({ status: 200, body: JSON.stringify(raw) }) });
+      await assert.rejects(adapter.generate({ ...request(), signal: new AbortController().signal }, credential,
+        { baseUrl: 'https://provider.invalid/v1' }), error => error.code === 'INVALID_RESPONSE');
+    }
+  }
+});
 test('adapter errors are sanitized rather than carrying credential messages', async () => {
   const f = setup(), adapter = { provider: f.profile.protocol, features: [], generate: async () => { throw Error('synthetic-secret'); } };
   await assert.rejects(new RoutedModelTransport(f.connections, [adapter]).invoke(context, request(), f.route, new AbortController().signal), e => e.code === 'PROVIDER_FAILED' && e.message === 'PROVIDER_FAILED');
@@ -75,7 +97,7 @@ test('BYOK resolver consumes actual encrypted config service and reauthorizes in
   const f = setup(); let record = null; const actions = [];
   const config = new TenantModelConfigService({ authorize: async (_c, action) => { actions.push(action); }, repository: {
     read: async () => structuredClone(record), compareAndSwap: async (_t, revision, next) => { if ((record?.revision ?? 0) !== revision) return false; record = structuredClone(next); return true; }
-  } }, new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-only' : 'production' }));
+  } }, new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-only-32-characters' : key === 'NODE_ENV' ? 'production' : undefined }));
   await config.save(context, { expectedRevision: 0, enabled: true, protocol: 'openai_chat_completions', baseUrl: 'https://provider.invalid/v1', model: 'selected-model', apiKey: 'synthetic-secret' });
   const selected = await config.profile(context); f.profile.credentialRef = selected.credentialRef;
   const resolver = new TenantModelConnectionResolver(config), resolved = await resolver.resolve(context, f.profile);

@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-开发任务.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-开发任务.md",
+      "bytes": 33681,
+      "sha256": "cd4253c0f0ffd8decc0aec3aa1dacfdc323795a4aa46b5fa2729e4639edac2fb"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-开发记录.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-开发记录.md",
+      "bytes": 10737,
+      "sha256": "7a3a9e776854cbcae8594adddf59c59ee457fa59dd87d6e9d743b82fba233ff2"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-协作接续.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-协作接续.md",
+      "bytes": 3970,
+      "sha256": "3c262dc83bd7a63e4563eda986dbcdb45337a49a9d9c8d74e3a58dadcc063a27"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-实施设计.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-实施设计.md",
+      "bytes": 6596,
+      "sha256": "a8b61db24ab5cf229fabd1fe7e76b82378ed50f0d7e87269d1a8560d020f0af3"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-部署检查.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-部署检查.md",
+      "bytes": 3850,
+      "sha256": "bee3ac6f39d085dad4a33ff892489e3050b7b8f1fe8a5171ca9ece93209725fc"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-接手与验收导读.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-接手与验收导读.md",
+      "bytes": 7249,
+      "sha256": "5bbc3c31eb593e4d862a6d4cc66f0beaa340d6435ed6eb67e1b6c4eb5a21288b"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-需求.md",
+      "file": "docs/Rental Core/品类治理/历史归档/四册整理/2026-10-31/品类治理-需求.md",
+      "bytes": 45365,
+      "sha256": "fb48bb4cb2c4d8123287b8809e3726b1d4d47dfcd72ce28ff1a33f190802eda6"
+    }
+  ]
+}

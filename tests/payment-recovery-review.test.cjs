@@ -97,6 +97,27 @@ test('refund query errors never become definitive submission failure or release 
   }
 });
 
+test('expired pending and verified funding-failed original payments block another operation before provider dispatch', async () => {
+  for (const status of ['pending', 'verified_pending_funding', 'funding_failed']) {
+    const intent = { ...originalIntent(), status }, trace = [];
+    const prisma = { rentalPaymentIntent: {
+      findUnique: async () => null,
+      findFirst: async ({ where }) => { assert.ok(where.status.in.includes(status)); assert.equal(where.expiresAt, undefined); return intent; },
+      create: async () => { assert.fail('must not create another local payment'); }
+    }, $queryRaw: async () => [{ id: 'o', orderNo: 'ORDER', currency: 'USD', finalPayableAmount: 10 }] };
+    prisma.$transaction = async work => work(prisma);
+    const service = new PaymentRuntimeService(prisma, { runtimeConfig: async () => config,
+      assertEnabledInTransaction: async () => { trace.push('current-config'); } }, {
+      listEvents: async () => ({ rental: { balance: 10, pendingExtensionAmount: 0 } })
+    });
+    service.createStripeIntent = async () => { assert.fail('must not dispatch another provider payment'); };
+    await assert.rejects(service.createPaymentIntent('t', 'w', 'o', {
+      method: 'stripe', instrument: 'rental', idempotencyKey: 'different-operation'
+    }), error => error.status === 409 && /待核对或待入账/.test(error.message));
+    assert.deepEqual(trace, ['current-config']); assert.equal(intent.status, status);
+  }
+});
+
 test('webhook response survives the actual global interceptor without an API envelope', async () => {
   const interceptor = new RequestIdInterceptor();
   for (const [name, value] of [['alipay', 'success'], ['alipayRefund', 'success'],

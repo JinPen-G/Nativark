@@ -91,7 +91,7 @@ export function parseRentalItemGroupPageQuery(value: RentalItemGroupPageQuery): 
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
   listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery): Promise<RentalItemGroupPage>;
-  listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
+  listInspectionTemplates?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalInspectionTemplate[]>;
   listCouponTemplates?(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]>;
   /** Missing authority is unavailable, never permission to use a cached enabled flag. */
   readFulfillmentAdmission?(tenantId: string, workspaceId: string, requirements: readonly RentalFulfillmentRequirement[], tx?: RentalConfigTx): Promise<{
@@ -102,8 +102,10 @@ export interface RentalConfigStore {
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
   readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null>;
   upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number>;
-  upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
-  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  /** preserveStatus carries an omitted edit field into the writer's lock; the
+   * returned status updates the local cache without reviving a stale flag. */
+  upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus?: boolean): Promise<RentalFulfillmentOperator['status'] | void>;
+  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus?: boolean): Promise<RentalFulfillmentLocation['status'] | void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -165,7 +167,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ? read(tx) : this.prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async listInspectionTemplates(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]> {
+  async listInspectionTemplates(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalInspectionTemplate[]> {
+    if (tx) {
+      // Template writers use the same workspace mutex. Read their committed
+      // fields after waiting, including when the outer transaction uses RR.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`);
+      const rows = await tx.$queryRaw<Prisma.RentalInspectionTemplateGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM rental_inspection_templates WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND enabled = TRUE ORDER BY id LOCK IN SHARE MODE`);
+      return rows.map(row => this.toInspectionTemplate({ ...row, enabled: Boolean(row.enabled) }));
+    }
     const rows = await this.prisma.rentalInspectionTemplate.findMany({
       where: { tenantId, workspaceId, enabled: true }, orderBy: { id: "asc" }
     });
@@ -426,7 +436,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void> {
+  async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus = false): Promise<RentalFulfillmentOperator['status']> {
     const data = {
       tenantId: operator.tenantId,
       code: operator.code,
@@ -440,18 +450,26 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const write = async (client: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(client, operator.tenantId);
       await lockActiveCategoryBinding(client, operator.tenantId, workspaceId);
-      const existing = await client.rentalFulfillmentOperator.findUnique({ where: { id: operator.id }, select: { tenantId: true, workspaceId: true } });
+      const existing = await client.rentalFulfillmentOperator.findUnique({ where: { id: operator.id }, select: { tenantId: true, workspaceId: true, status: true } });
       assertScopedWrite(existing, operator.tenantId, workspaceId, "经营主体");
+      const current = preserveStatus ? (await client.$queryRaw<Array<{ tenantId: string; workspaceId: string; status: string }>>(Prisma.sql`
+        SELECT tenantId, workspaceId, status FROM rental_fulfillment_operators WHERE id = ${operator.id} FOR UPDATE
+      `))[0] : undefined;
+      if (preserveStatus && (!current || current.tenantId !== operator.tenantId || current.workspaceId !== workspaceId)) throw new ConflictException("经营主体原状态不可核实，请重新读取配置");
+      const status = preserveStatus ? current!.status : operator.status;
+      if (status !== 'enabled' && status !== 'disabled') throw new BadRequestException("经营主体状态无效");
+      const saved = { ...data, status };
       await client.rentalFulfillmentOperator.upsert({
         where: { id: operator.id },
-        create: { workspaceId, id: operator.id, ...data, createdAt: new Date(operator.createdAt) },
-        update: data
+        create: { workspaceId, id: operator.id, ...saved, createdAt: new Date(operator.createdAt) },
+        update: saved
       });
+      return status;
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus = false): Promise<RentalFulfillmentLocation['status']> {
     const data = {
       tenantId: location.tenantId,
       organizationId: location.organizationId ?? null,
@@ -479,8 +497,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       const workspaceId = await resolveScopeWorkspaceId(client, location.tenantId);
       const { definition } = await lockActiveCategoryBinding(client, location.tenantId, workspaceId, expectedBinding);
       if (!definition.businessModel.locationTypes.includes(location.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
-      const existing = await client.rentalFulfillmentLocation.findUnique({ where: { id: location.id }, select: { tenantId: true, workspaceId: true } });
+      const existing = await client.rentalFulfillmentLocation.findUnique({ where: { id: location.id }, select: { tenantId: true, workspaceId: true, status: true } });
       assertScopedWrite(existing, location.tenantId, workspaceId, "履约地点");
+      const current = preserveStatus ? (await client.$queryRaw<Array<{ tenantId: string; workspaceId: string; status: string }>>(Prisma.sql`
+        SELECT tenantId, workspaceId, status FROM rental_fulfillment_locations WHERE id = ${location.id} FOR UPDATE
+      `))[0] : undefined;
+      if (preserveStatus && (!current || current.tenantId !== location.tenantId || current.workspaceId !== workspaceId)) throw new ConflictException("履约地点原状态不可核实，请重新读取配置");
+      const status = preserveStatus ? current!.status : location.status;
+      if (status !== 'enabled' && status !== 'disabled') throw new BadRequestException("履约地点状态无效");
       if (location.operatorId) {
         const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
         if (!operator) throw new ConflictException("履约地点引用了其他租户或经营空间的经营主体");
@@ -496,13 +520,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         const parent = await client.rentalFulfillmentLocation.findFirst({ where: { id: location.parentLocationId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
         if (!parent) throw new ConflictException("履约地点引用了其他租户或经营空间的上级地点");
       }
+      const saved = { ...data, status };
       await client.rentalFulfillmentLocation.upsert({
         where: { id: location.id },
-        create: { workspaceId, id: location.id, ...data },
-        update: data
+        create: { workspaceId, id: location.id, ...saved },
+        update: saved
       });
+      return status;
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */

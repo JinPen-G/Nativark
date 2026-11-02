@@ -64,6 +64,15 @@
 | ENTRY-17 | 审计引用、保留/删除及恢复屏障实现 | 外部存储/副本/导出、删除传播及操作验收 |
 | ENTRY-18 | 固定交付、依赖与未验边界分层 | 完整增量组合/独立交接 |
 
+## AIN-02 后台正式出口及包声明消费者（2026-11-02）
+
+- **原问题清单与施工范围：** 原63项与Codex28项/独立押金缺口已按原报告触发二次核验修复，完整阶段及失败证据统一在[业务记录](../管理后台/管理后台-开发记录.md#local-integration-20261101)，原生UI逐编号更新。本片恢复原AIN-02，仅处理用户优先的后台；需求v1.14/任务v1.18及G1～G4不变，不接管官网/小程序或MCP/Harness后继。
+- **实际改动：** [AiServiceSummary](../../apps/admin/src/features/ai-native/AiServiceSummary.tsx)、[CapabilityStatus](../../apps/admin/src/features/ai-native/CapabilityStatus.tsx)及[订单事实投影](../../apps/admin/src/features/ai-native/order-facts-display.ts)仍有旧记录指出的shared叶子深导入，现全部改为`@rental-os/shared`的`import type`。正式index已导出相同类型，不改协议版本/业务语义，不新增私有DTO。实际[工作台](../../apps/admin/src/features/ai-native/AiTaskWorkbench.tsx)、[任务中心](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)、订单事实卡和只读面板消费同一出口；后台src定向核对无剩余shared源码深导入。
+- **包边界验证：** 在本树新私有output编译shared到独立package，沿正式package.json加载其运行时常量，再将后台tsconfig的shared解析明确指向生成的`dist/index.d.ts`。实际工作台等[5入口](../../output/repair-current-20261101-uotDQk/ain02-admin-public-77iiy8hy/package-consumer.log)及任务中心/事实卡/只读面板[4入口](../../output/repair-current-20261101-uotDQk/ain02-admin-public-77iiy8hy/page-consumers.log)均noEmit零诊断、shared源码回退0、退出0。没有覆盖共享dist/installed client，源码路径绿色不被拿来代替包声明兼容。
+- **有界行为与兼容：** 私有runtime加`--test tests/ai-native-b04-service-summary.test.cjs tests/ai-native-b05-ui-arc.test.cjs tests/ai-native-b16-facts.test.cjs tests/ai-native-b10-workbench-contract.test.cjs`，[18/18](../../output/repair-current-20261101-uotDQk/ain02-admin-public-77iiy8hy/behavior.log)、fail/skip/todo均0、退出0，覆盖秘密投影、缺值/零、旧版本拒绝、失效来源及工作台scope/可见门。保留既有编译断言的consumer-runtime加`--test --test-name-pattern='workbench display protocol|C01/C02 wire compatibility|identity discriminants' tests/ai-native-contract-consumer.test.cjs`，[3/3](../../output/repair-current-20261101-uotDQk/ain02-admin-public-77iiy8hy/compatibility.log)、fail/skip/todo均0、退出0；该筛选集合只认三个实际执行用例，不称整文件全跑或真实宿主通过。原C01/C02 wire版本及新context加法兼容保持，未知版本不能升级成权限。
+- **实际后台拒绝消费补核：** TaskHumanApproval原继续按钮只认confirmed，遗漏已修服务端的拒绝收尾消费者；现cancelled可显式交原runner处理拒绝，仍保留原材料/期限/scope/checkpoint/修订/指纹和待核引用。实际回调[测试](../../output/repair-current-20261101-uotDQk/codex-26-admin-final.log)、实际页面包声明[类型](../../output/repair-current-20261101-uotDQk/codex-26-admin-types.log)及原HTTP组合→runner→拒绝重新准备资格[定向](../../output/repair-current-20261101-uotDQk/codex-26-admin-host-final.log)退出0，Codex-26原生UI再次更新；failed状态不证明业务未提交，不据其清待核定位。负责人要求“收口一下”，当前完成片收口后停止扩展。
+- **剩余与门槛：** 官网原四处深导入仍存在，本轮按后台优先暂不改；四端整体兼容/断线矩阵及跨AI整体冻结仍未齐，AIN-02保持75%。后台展示代码/可信输入/完整对话生产消费、隔离宿主及原任务恢复按AIN-12等原后继任务承接，不以本次类型路径变更称其可执行。未独立审查本三行改动，未启服务/浏览器、连接真实HTTP/DB/DNS/模型/支付/对象存储、安装/迁移/推送/合main或发布；无可观察界面变化，未做浏览器验证。
+
 ## AIN-02 上下文、字段草稿及既有政策/隐私合同收口（2026-10-30）
 
 - **固定基线与范围：** foundation分支`ai/ai-native-contracts-s01-20261002`，开工HEAD为`088153af`、暂存/工作树为空，无merge/cherry-pick；上轮未提交的原政策5路与隐私3路已在整合成果中保留。本轮只继续AIN-02，未扩到原运行器/UI/业务执行。新增协议从[shared正式出口](../../packages/shared/src/index.ts)→[展示合同](../../packages/shared/src/ai-workbench-display-draft.ts)→[纯校验](../../apps/api/src/modules/ai-native/workbench-display.contract.ts)→[OpenAPI组件](../../apps/api/src/contracts/ai-leaf-components.ts)发布，不建立第二驱动或注册展示执行路由。
@@ -235,7 +244,7 @@
 
 - 开工现场、当前认领与下一步只看[当前协作接续](<AI Native-协作接续.md>)；未来设计只看[Runtime 方案](<未来规划/AI Native-Runtime替换方案.md>)。
 - “代码实现”“消费者装配”“离线验证”“真实环境验收”“生产开放”分别记录，不用其中一层替代另一层。
-- 全部历史切片和原任务门槛说明见[整理前快照](../历史归档/整理前快照-20261016/README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
+- 全部历史切片和原任务门槛说明见[整理前快照](../../README.md)。查旧方法、红测命令或故障细节时先查快照，使用前复核当前源码。
 - 源码路径以下均相对仓库根目录，不代表本次对所有入口做了重新审计。
 
 ## 近期核心：业务材料、模型结果与复合观察阶段收口（2026-10-27）
@@ -1122,7 +1131,7 @@ HTTP快检沿用本树离线环境、source/private-client resolver与`output/co
 
 - 产品范围、任务依赖与阶段放行：[正式需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。新补的目标驱动和场景闭环原则适用，不改原28项及 ENTRY 的分母；百分比按原门槛及时复核更新，不冻结旧值或凭提交数加分。
 - 已做/剩余、固定功能提交及验证边界只维护在[开发记录](<AI Native-开发记录.md>)。
-- 未来设计分别查[Runtime/Provider SDK替换](<未来规划/AI Native-Runtime替换方案.md>)与[通用SaaS底座](<../平台底座/未来规划/平台底座-通用化与开源方案.md>)；均不授权当前拆库、拆服务、开源或另造通用平台。
+- 未来设计分别查[Runtime/Provider SDK替换](<未来规划/AI Native-Runtime替换方案.md>)与[通用SaaS底座](../平台底座/未来规划/平台底座-通用化与开源方案.md)；均不授权当前拆库、拆服务、开源或另造通用平台。
 - 原总册、旧派工和历史接任提示词只供追溯，不能覆盖本轮文档补充后恢复服务端的指令及离线边界；独立客户端专项不改变原服务端需求或预算规则。
 
 ## 工作树与写入归属

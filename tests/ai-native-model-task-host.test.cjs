@@ -30,7 +30,7 @@ test('formal call task host assembles the original runner and persistent ledger 
     error => ['AI_REVISION_CONFLICT', 'FORBIDDEN', 'AI_RESOURCE_UNAVAILABLE'].includes(error.code));
   const { runtime, priceVersion, financialEvidence, ...config } = h.config;
   const root = composePersistedCallTaskModelHost({ ...config, gateway });
-  await assert.rejects(root.application.start(h.query), error => error.code === 'PROVIDER_UNAVAILABLE');
+  await assert.rejects(root.application.start(h.query), error => ['DISABLED', 'PROVIDER_UNAVAILABLE'].includes(error.code));
   assert.equal(sends, 0); assert.equal(secrets, 0);
   assert.equal(h.state.aiGatewayInvocation.length, 0);
   assert.equal(h.state.aiBudgetReservation.length, 0);
@@ -44,6 +44,21 @@ test('formal call task host assembles the original runner and persistent ledger 
   h.state.aiGatewayInvocation.push({ scopeId: 'scope-a', callId: 'other-call', taskId: 'task-b', actorId: 'user-a' });
   await assert.rejects(bound.authorize('reserve', context, { association: { requestId: 'other-call', scope: context.scope } }),
     error => error.code === 'FORBIDDEN');
+});
+
+for (const mode of ['platform_managed', 'tenant_managed']) test(`explicit ${mode} settings enter the original model host without legacy tenant scene budgets`, async () => {
+  const h = await modelHostHarness();
+  h.state.aiTenantModelConfiguration.push({ tenantId: 'tenant-a', revision: 1, mode, serviceEnabled: true,
+    settings: mode === 'tenant_managed' ? { enabled: true, protocol: 'openai_chat_completions', baseUrl: 'https://synthetic.example.test/v1',
+      model: 'synthetic-model', timeoutMs: 30000, maxConcurrent: 2, maxOutputTokens: 2048 } : null,
+    credentialsEncrypted: mode === 'tenant_managed' ? 'v2:synthetic:YWJj:YWJj:YWJj' : null });
+  h.state.aiBudgetPolicy = h.state.aiBudgetPolicy.filter(policy => policy.scopeKind === 'PLATFORM');
+  const before = h.clone(h.state.aiBudgetPolicy);
+  const result = await h.root.application.start(h.query);
+  assert.equal(result.outcome.status, 'succeeded');
+  assert.equal(h.modelControl.sent.length, 1); assert.equal(h.state.aiGatewayInvocation.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 1n);
+  assert.deepEqual(h.state.aiBudgetPolicy, before);
 });
 
 test('image model host executes the original queued task with one invocation, original accounting and resource charges', async () => {
@@ -279,7 +294,13 @@ test('model host leaves original publication after a lost acknowledgement withou
   h.storeControl.beforeCommit = null;
   assert.equal(lost, true); assert.equal(h.state.aiTaskActionInput.length, 1);
   assert.equal(h.state.aiTaskRunPlan.length, 0); assert.equal(h.state.aiStep.length, 0); assert.equal(h.state.aiGatewayInvocation.length, 0);
-  assert.deepEqual(h.modelControl.sent, []); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.deepEqual(h.modelControl.sent, []);
+  // Unknown publication acknowledgement is not proof that its live holder was
+  // released. Preserve the original generation and forbid immediate re-entry.
+  assert.equal(h.state.aiRun[0].leaseOwnerId, 'model-host');
+  const before = h.clone(h.state);
+  assert.deepEqual(await h.root.application.start(h.query), { kind: 'not_started', reason: 'lease_held' });
+  assert.deepEqual(h.state, before); assert.deepEqual(h.modelControl.sent, []);
   const snapshot = await h.root.application.inspect(h.query); assert.equal(snapshot.plan, null); assert.equal(snapshot.resources, null);
 });
 
@@ -288,8 +309,12 @@ test('model host refuses a changed route after durable step start but before inv
   h.storeControl.beforeCommit = async draft => {
     if (!changed && draft.aiStep[0]?.status === 'RUNNING') { changed = true; draft.aiProviderProfile[0].configRevision++; }
   };
-  await assert.rejects(h.root.application.start(h.query));
-  assert.equal(changed, true); assert.equal(h.state.aiStep[0].status, 'RUNNING');
+  const result = await h.root.application.start(h.query);
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'unknown');
+  assert.equal(result.outcome.completedSteps, 0);
+  assert.equal(changed, true); assert.equal(h.state.aiStep[0].status, 'UNKNOWN');
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+  assert.ok(h.state.aiTaskExecutionCharge.every(charge => charge.status === 'UNKNOWN'));
   assert.equal(h.state.aiGatewayInvocation.length, 0); assert.deepEqual(h.modelControl.sent, []);
   assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, 1n); assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 0n);
 });

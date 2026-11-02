@@ -104,8 +104,17 @@ export function CatalogPage() {
   const save = useMutation({
     mutationFn: async (values: SaveRentalItemGroupRequest) => {
       let group = await rentalCoreApi.saveItemGroup(values);
+      // The model is already committed. Retrying a failed image upload must
+      // update this original id and must not create the model again.
+      setEditing(group);
+      form.setFieldValue("id", group.id);
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] });
       for (const file of pendingFiles) {
-        if (file.originFileObj) group = await rentalCoreApi.uploadItemGroupImage(group.id, file.originFileObj);
+        if (file.originFileObj) {
+          group = await rentalCoreApi.uploadItemGroupImage(group.id, file.originFileObj);
+          setEditing(group);
+          setPendingFiles(current => current.filter(row => row.uid !== file.uid));
+        }
       }
       return group;
     },

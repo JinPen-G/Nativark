@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { modelResponseContainsSecret } from './model-response-secret';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
@@ -127,7 +128,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     return new ModelGatewayError('PROVIDER_FAILED');
   }
   private rejectSecret(value: unknown, credential: string) {
-    if (JSON.stringify(value)?.includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (modelResponseContainsSecret(value, credential)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
   async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
     try {

@@ -67,7 +67,7 @@ test('prepared order ownership comes only from the authenticated principal', asy
     fulfillmentLocationId: 'location', returnLocationId: 'location', startAt: '2026-11-01T00:00:00Z', endAt: '2026-11-02T00:00:00Z',
     operator: 'forged-user-id', lines: [{ itemGroupId: 'group', quantity: 1 }] };
   const quote = { id: 'q', request: input, ruleSnapshot: { qualification: { required: false }, payment: { unpaidHoldMinutes: 15 } },
-    inspectionTemplateSnapshots: [], chargeLines: [{ code: 'rental:GROUP', amount: 10 }], currency: 'CNY', payableAmount: 10 };
+    inspectionTemplateSnapshots: [], chargeLines: [{ code: 'rental:GROUP', type: 'rental', amount: 10 }], currency: 'CNY', payableAmount: 10 };
   const order = await runWithRequestIdentity({ tenantId: 't', workspaceId: 'w', userId: 'authenticated-id' },
     () => service.prepareOrder('t', input, 'Display name', quote));
   assert.equal(order.createdBy, 'authenticated-id');

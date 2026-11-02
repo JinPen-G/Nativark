@@ -168,7 +168,7 @@ export function isTenantMembershipRoute(path: string) {
     return !path.startsWith("/membership/qualification-types");
   }
   // 资料聚合含订单/资金等经营投影，必须走当前空间身份；共享主档详情仍沿租户会员权限。
-  if (/^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?))$/u.test(path)) return false;
+  if (/^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?))$/u.test(path)) return false;
   return path === "/platform/customers" || path.startsWith("/platform/customers/");
 }
 
@@ -467,7 +467,7 @@ export function requiredPermissions(method: string, path: string) {
     // CUSTOMER-01C：企业开票、合同、授信账期属**企业客户**权限，与个人会员权限分开。
     // 同样必须放在通用分支之前，否则「会员管理」就能改企业授信与账期。
     if (/\/(invoice-profiles|contracts|credit)$/u.test(path)
-      || /^\/platform\/customers\/[^/]+\/credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?)$/u.test(path)) {
+      || /^\/platform\/customers\/[^/]+\/credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?)$/u.test(path)) {
       return method === "GET"
         ? ["rental-os:corporate:view", "rental-os:corporate:manage"]
         : ["rental-os:corporate:manage"];
@@ -750,7 +750,8 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes$/)) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
   }
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange(?:\/preview)?$/)) {
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange(?:\/preview)?$/)
+    || method === "GET" && path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange\/services$/u)) {
     return ["rental-os:order:operate"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/partial-cancel\/preview$/)) {
@@ -1179,7 +1180,7 @@ export class ApiAuthGuard implements CanActivate {
       (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
       (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
       path.startsWith("/reports") || path.startsWith("/files") || path.startsWith("/integrations") ||
-      /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments|maturities(?:\/[^/]+)?))$/u.test(path) ||
+      /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?))$/u.test(path) ||
       path === "/platform/workspace-customers" ||
       path.startsWith("/platform/workspace-customers/");
     const locationScope = canManageOrganizationMapping

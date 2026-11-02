@@ -50,7 +50,10 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
       &&(!row.effectiveTo||row.effectiveTo>=where.OR[1].effectiveTo.gte))??null)},
     customerQualificationRef:{findMany:async()=>[]},customerMembershipQualificationType:{findMany:async()=>[]},
     customerMembershipPlanAssignment:{findFirst:async()=>null}
-  }, {});
+  }, { lockCustomerBusinessGate: async (tenantId, customerId, tx) => {
+    if (!tx || tenantId !== 'tenant_001') throw Error('synthetic customer lock scope mismatch');
+    return [membershipRows.customer, ...membershipRows.corporateCustomers].some(row => row.id === customerId && row.tenantId === tenantId);
+  } });
   const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), businessFacts, config,
     undefined,undefined,undefined,undefined,undefined,undefined,withMembership?memberships:undefined);
   await business.onApplicationBootstrap();

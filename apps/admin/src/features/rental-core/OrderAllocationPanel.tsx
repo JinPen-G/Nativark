@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, InputNumber, Space, Tag, Timeline } from "antd";
@@ -48,6 +48,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
   const editable = ["reserved", "ready_for_pickup"].includes(order.status);
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [draftRevision, setDraftRevision] = useState<number>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selection, setSelection] = useState<
     Record<
@@ -74,19 +75,21 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
     queryFn: () => rentalCoreApi.allocationCandidates(order.id),
     enabled: editable && canOperate && open,
   });
+  useEffect(() => {
+    if (open && !confirmation && draftRevision === undefined && candidates.data) setDraftRevision(candidates.data.revision);
+  }, [open, confirmation, draftRevision, candidates.data]);
   const progress = rentalAllocationProgress(order);
   const active = order.allocations.filter((a) => !["released", "returned", "consumed"].includes(a.status));
   const mutation = useMutation({
     mutationFn: (
       input: Omit<ManageRentalAllocationRequest, "expectedRevision">,
-    ) =>
-      rentalCoreApi.manageAllocations(order.id, {
+    ) => {
+      if (draftRevision === undefined) throw new Error(t("请重新打开分配窗口获取原版本"));
+      return rentalCoreApi.manageAllocations(order.id, {
         ...input,
-        expectedRevision:
-          (open && !confirmation ? candidates.data?.revision : undefined) ??
-          order.assignment?.revision ??
-          0,
-      }),
+        expectedRevision: draftRevision,
+      });
+    },
     onSuccess: async () => {
       setOpen(false);
       setConfirmation(undefined);
@@ -113,6 +116,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
     },
   });
   const begin = () => {
+    setDraftRevision(undefined);
     setSelection({});
     setReason("");
     setConfirmation(undefined);
@@ -122,11 +126,16 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
     action: ManageRentalAllocationRequest["action"],
     ids?: string[],
   ) => {
+    setDraftRevision(order.assignment?.revision ?? 0);
     setConfirmation({ action, ids });
     setReason("");
     setOpen(true);
   };
   const submit = () => {
+    if (!confirmation && candidates.data?.revision !== draftRevision) {
+      message.warning(t("资源版本已变化，请关闭窗口重新选择；旧选择不能沿用新版本提交"));
+      return;
+    }
     if (confirmation) {
       mutation.mutate({
         action: confirmation.action,

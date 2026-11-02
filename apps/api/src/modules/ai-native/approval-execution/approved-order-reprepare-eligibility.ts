@@ -22,7 +22,7 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw deniedOrder();
       const view = await human.readOriginal(taskId, original), action = view.proposal.payload.actions[0];
       const key = { scopeId, taskId, actionId: action.actionId };
-      const step = await d.db.aiStep.findFirst({ where: key, select: { scopeId: true, taskId: true, actionId: true,
+      const step = await d.db.aiStep.findFirst({ where: key, select: { id: true, runId: true, inputRef: true, scopeId: true, taskId: true, actionId: true,
         toolCode: true, toolVersion: true, requestFingerprint: true, status: true, effect: true, resultRef: true, revision: true } });
       if (!step || Object.entries(key).some(([k, v]) => step[k as keyof typeof step] !== v)
         || step.toolCode !== action.toolCode || step.toolVersion !== action.toolVersion
@@ -30,6 +30,20 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
       const approval = await d.db.aiApproval.findFirst({ where: { scopeId, taskId, proposalId: original.proposalId,
         proposalRevision: original.proposalRevision, actorKind: 'USER', actorId: context.actor.userId }, select: { decision: true } });
       const receipt = await human.readReceipt(taskId, { ...original, decision: approval?.decision === 'REJECTED' ? 'reject' : 'approve' });
+      let rejectedResult = false;
+      if (step.status === 'FAILED' && step.effect === 'NONE' && step.resultRef && receipt.kind === 'recorded' && receipt.record.decision === 'rejected') {
+        const phase = await d.db.aiTaskExecutionPhaseReceipt.findFirst({ where: { scopeId, taskId, id: step.resultRef } });
+        const payload = phase?.payload as { version?: string; effectState?: string; binding?: { actionId?: string; fingerprint?: string; stepId?: string; runId?: string; scopeId?: string; taskId?: string };
+          proposal?: typeof original; decisionRef?: string; decision?: string; businessResultRef?: string } | undefined;
+        rejectedResult = !!phase && phase.kind === 'failed' && phase.errorCode === 'AI_APPROVAL_REJECTED' && phase.businessResultRef === null
+          && phase.stepId === step.id && phase.runId === step.runId
+          && phase.decisionRef === receipt.record.approvalId && phase.proposalId === original.proposalId && phase.proposalRevision === original.proposalRevision
+          && phase.reviewedPayloadHash === original.reviewedPayloadHash && requestFingerprint(phase.payload) === phase.contentHash
+          && payload?.version === 'approved-order-wait-1' && payload.effectState === 'rejected' && payload.decision === 'rejected'
+          && payload.decisionRef === phase.decisionRef && !payload.businessResultRef && requestFingerprint(payload.proposal) === requestFingerprint(original)
+          && payload.binding?.scopeId === scopeId && payload.binding.taskId === taskId && payload.binding.actionId === action.actionId
+          && payload.binding.fingerprint === action.input.contentHash && payload.binding.stepId === phase.stepId && payload.binding.runId === phase.runId;
+      }
       const consumption = await d.db.aiApprovalConsumption.findFirst({ where: key });
       const idempotencyKey = `ai-order:${requestFingerprint([scopeId, taskId, action.actionId])}`;
       const business = await d.db.rentalOrderIdempotencyRecord.findUnique({
@@ -41,12 +55,12 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
       const latest = await policy.authorizeRead(taskId);
       if (scopeId !== latest.scopeId || orderContextHash(context) !== orderContextHash(latest.context)) throw deniedOrder();
       return { scopeId, identity: orderContextHash(context), scope: context.scope, view, step, receipt, consumption, business, idempotencyKey,
-        quote: quote ? { consumedAt: quote.consumedAt ?? null, consumedOrderId: quote.consumedOrderId ?? null } : null };
+        quote: quote ? { consumedAt: quote.consumedAt ?? null, consumedOrderId: quote.consumedOrderId ?? null } : null, rejectedResult };
     };
     try {
       const first = await observe(), current = await observe();
       if (requestFingerprint(first) !== requestFingerprint(current)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-      const { view, receipt, consumption, business, step, scope, scopeId, idempotencyKey, quote } = current;
+      const { view, receipt, consumption, business, step, scope, scopeId, idempotencyKey, quote, rejectedResult } = current;
       const action = view.proposal.payload.actions[0];
       const result = (state: AiApprovalReprepareEligibilityDraft['state']) => {
         const canRequestReprepare = state === 'rejected' || state === 'expired' || state === 'change_requested';
@@ -67,7 +81,7 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
           && business.requestHash === action.input.contentHash && business.status === 'succeeded' && business.orderId === consumption.resultRef;
         return result(committed ? 'committed' : 'unknown');
       }
-      if (business || step.effect !== 'NONE' || step.resultRef || step.status === 'UNKNOWN' || step.status === 'SUCCEEDED'
+      if (business || step.effect !== 'NONE' || step.resultRef && !rejectedResult || step.status === 'UNKNOWN' || step.status === 'SUCCEEDED'
         || !quote || quote.consumedAt || quote.consumedOrderId) return result('unknown');
       if (receipt.kind === 'recorded' && receipt.record.decision === 'approved') return result('approved_uncommitted');
       if (view.proposal.status === 'superseded') return result('superseded');

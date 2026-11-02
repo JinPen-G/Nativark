@@ -380,10 +380,61 @@ export class RentalFundingService {
     };
   }
 
-  /**
-   * 记录一次资金事件。amount 对 fail 以外的动作必须为正。failureCode 只在 fail 时有意义。
-   * 幂等：命中既有同键事件时校验请求一致后回放；并发下靠唯一键兜底（P2002 → 回读回放）。
-   */
+  /** Explicit confirmation of an already performed offline deposit refund or
+   * approved receivable deduction. Keep original source/evidence in the existing
+   * audit stream in the same order-locked transaction as the funding receipt. */
+  async recordOfflineDepositDisposition(tenantId: string, workspaceId: string, orderId: string,
+    input: { action: "refund" | "capture"; amount: number; idempotencyKey: string; reason: string;
+      paymentMethod?: RentalOfflinePaymentMethod; sourceEventId: string; evidenceFileAssetId: string }, actor: { id: string; name: string }) {
+    return this.prisma.$transaction(async tx => {
+      await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
+      if (!Number.isFinite(input.amount) || input.amount <= 0 || roundMoney(input.amount) !== input.amount
+        || !input.idempotencyKey.trim() || input.idempotencyKey.length > 191) throw new ConflictException("线下押金金额须精确到分并提供有效原操作键");
+      const events = await this.loadEvents(tx, tenantId, workspaceId, orderId, true);
+      const source = events.find(row => row.id === input.sourceEventId && row.instrument === "deposit" && row.provider === "offline"
+        && ["initiate", "append"].includes(row.action));
+      if (!source) throw new ConflictException("须引用本订单原线下实收押金收据");
+      if (input.action === "refund" && source.paymentMethod !== input.paymentMethod) throw new ConflictException("退押方式须与原线下实收方式一致");
+      const reference = { sourceEventId: source.id, evidenceFileAssetId: input.evidenceFileAssetId, amount: roundMoney(input.amount),
+        action: input.action, idempotencyKey: input.idempotencyKey, reason: input.reason.trim(), paymentMethod: input.paymentMethod ?? null };
+      const prior = await tx.operationLog.findFirst({ where: { tenantId, workspaceId, rentalOrderId: orderId,
+        action: `deposit.offline.${input.action}`, detail: { path: "$.idempotencyKey", equals: input.idempotencyKey } } });
+      if (prior) {
+        const detail = prior.detail as unknown as { request: typeof reference; fundingEventId: string };
+        if (JSON.stringify(detail.request) !== JSON.stringify(reference)) throw new ConflictException("原押金操作键已绑定其他凭据或金额");
+        const receipt = events.find(row => row.id === detail.fundingEventId && row.provider === "offline" && row.instrument === "deposit"
+          && row.action === input.action && row.amount === reference.amount && row.idempotencyKey === reference.idempotencyKey
+          && (row.paymentMethod ?? null) === reference.paymentMethod);
+        if (!receipt) throw new ConflictException("原押金资金收据待核对，不能重做");
+        return receipt;
+      }
+      if (events.some(row => row.instrument === "deposit" && row.action === input.action && row.idempotencyKey === input.idempotencyKey)) {
+        throw new ConflictException("原押金操作存在资金事件但缺少完整凭证，不得重新绑定");
+      }
+      const evidence = await tx.fileAsset.findFirst({ where: { id: input.evidenceFileAssetId, tenantId, status: "active", businessModule: "rental-core",
+        businessType: "rental_order", businessId: orderId, uploadScene: "offline-payment-proof" }, select: { id: true, metadata: true } });
+      const metadata = evidence?.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata) ? evidence.metadata : {};
+      if (!evidence || metadata.workspaceId !== workspaceId || !actor.id || !input.reason.trim()) throw new ConflictException("须提供本订单同空间已完成的线下凭证及操作人和原因");
+      const dispositions = await tx.operationLog.findMany({ where: { tenantId, workspaceId, rentalOrderId: orderId,
+        action: { in: ["deposit.offline.refund", "deposit.offline.capture"] } } });
+      const consumed = dispositions.reduce((sum, row) => {
+        const detail = row.detail as unknown as { request?: { sourceEventId?: string; amount?: number } };
+        if (detail.request?.sourceEventId !== source.id) return sum;
+        if (!Number.isFinite(detail.request.amount) || detail.request.amount! < 0) throw new ConflictException("原押金处置收据损坏，须核账");
+        return sum + detail.request.amount!;
+      }, 0);
+      if (!Number.isFinite(input.amount) || input.amount <= 0 || roundMoney(consumed + input.amount) > source.amount) throw new ConflictException("处置金额超过原实收押金尚未处置额度");
+      const receipt = await this.recordEvent(tenantId, workspaceId, orderId, { instrument: "deposit", action: input.action,
+        amount: input.amount, idempotencyKey: input.idempotencyKey, reason: input.reason, paymentMethod: input.paymentMethod,
+        provider: "offline", verifiedOfflineDisposition: true }, `${actor.name} (${actor.id})`, tx);
+      await tx.operationLog.create({ data: { tenantId, workspaceId, rentalOrderId: orderId, userId: actor.id,
+        action: `deposit.offline.${input.action}`, detail: { ...reference, request: reference, fundingEventId: receipt.id } } });
+      return receipt;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  /** Append funding facts under the order lock; replay never changes their
+   * provider or amount. Offline collection and disposition keep separate proofs. */
   async recordEvent(
     tenantId: string,
     workspaceId: string,
@@ -403,6 +454,8 @@ export class RentalFundingService {
       verifiedExternalReceipt?: boolean;
       /** 原员工确认服务传入，必须与本次事件在同一事务内确认；不对 HTTP DTO 开放。 */
       offlineRegistrationId?: string;
+      /** Only recordOfflineDepositDisposition may pass this after binding the original source/evidence. */
+      verifiedOfflineDisposition?: boolean;
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -423,7 +476,10 @@ export class RentalFundingService {
         || !["alipay", "wechat_pay", "stripe"].includes(provider))) {
         throw new ConflictException("真实到账只能由已核验的支付平台登记原收退款");
       }
-      if (provider === "offline") {
+      if (input.verifiedOfflineDisposition && (!tx || provider !== "offline" || input.instrument !== "deposit" || !["refund", "capture"].includes(input.action))) {
+        throw new ConflictException("线下押金处置缺少原确认事务");
+      }
+      if (provider === "offline" && !input.verifiedOfflineDisposition) {
         const registration = input.offlineRegistrationId && await tx.rentalOfflinePaymentRegistration.findFirst({
           where: { id: input.offlineRegistrationId, tenantId, workspaceId, orderId, status: "pending" }
         });
@@ -432,7 +488,7 @@ export class RentalFundingService {
           || !["rental", "deposit"].includes(input.instrument) || !["initiate", "append"].includes(input.action)) {
           throw new ConflictException("线下实收必须沿原登记确认事务入账");
         }
-      } else if (provider !== "mock" && !externalReceipt) {
+      } else if (provider !== "mock" && !externalReceipt && !input.verifiedOfflineDisposition) {
         throw new ConflictException("真实资金必须提供原核验收据");
       }
       if (input.allowPartialInitiate && provider !== "offline") throw new ConflictException("部分线下收款必须来自原确认登记");

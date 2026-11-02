@@ -17,7 +17,7 @@ exports.setup = async (extraTables = {}, withMembership = false) => {
   const policies = sceneCodes.map(sceneCode => ({ scopeId: scope.id, sceneCode, sceneVersion: '1', revision: 1, enabled: true,
     allowedTools: [], limits: {}, expiresAt: new Date('2027-01-01T00:00:00Z') }));
   const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTaskActionInput: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
-    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
+    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], aiTenantModelConfiguration: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
   { aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']], aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
   const decorate = client => {
     const findTask = client.aiTask.findFirst.bind(client.aiTask), findSteps = client.aiStep.findMany.bind(client.aiStep);

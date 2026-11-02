@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 
 require("ts-node").register({
   transpileOnly: false,
@@ -107,6 +108,12 @@ class FakeDb {
       return order?.tenantId === tenant && order.workspaceId === workspace ? [{ id: order.id }] : [];
     }
     if (query.sql.includes("FROM customer_corporate_credits")) return this.credit ? [{ id: this.credit.id }] : [];
+    if (query.sql.includes("FROM customer_corporate_credit_ledger")) {
+      const cursor = query.sql.includes("AND id >") ? query.values.at(-1) : undefined;
+      return this.ledger.scoped({ tenantId: query.values[0], customerId: query.values[1] })
+        .filter(row => cursor === undefined || row.id > cursor)
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).slice(0, 500);
+    }
     throw new Error(`Unexpected credit fixture SQL: ${query.sql}`);
   }
   async $transaction(callback) {
@@ -452,8 +459,8 @@ runWithRequestIdentity({ tenantId, workspaceId: "workspace-credit-test", userId:
   ok('费用和续租负差额在原批准核减后释放，待审核时不提前释放');
   const { RentalCoreService } = require('../apps/api/src/modules/rental-core/rental-core.service');
   const core = Object.create(RentalCoreService.prototype), coreOrder = { id: orderId, tenantId, status: 'settling',
-    membershipSnapshot: { enterpriseContractAndPayer: true }, payableAmount: 100, finalPayableAmount: 100,
-    adjustmentAmount: 0, chargeLines: [], ruleVersion: '1', feeReviews: [{ id: 'fee-core', type: 'early_return_refund',
+    membershipSnapshot: { enterpriseContractAndPayer: true }, currency: 'CNY', payableAmount: 100, finalPayableAmount: 100,
+    adjustmentAmount: 0, chargeLines: [{ code: 'rental:original', type: 'rental', amount: 100 }], ruleVersion: '1', feeReviews: [{ id: 'fee-core', type: 'early_return_refund',
       suggestedAmount: 20, status: 'pending', basis: [], createdAt: new Date().toISOString() }] };
   core.lockedOrder = async () => coreOrder; core.resolveWorkspaceId = () => 'workspace-credit-test';
   let saved = false, calls = [];
@@ -465,8 +472,9 @@ runWithRequestIdentity({ tenantId, workspaceId: "workspace-credit-test", userId:
   await core.reviewOrderFeeReview(tenantId, orderId, 'fee-core', { decision: 'approved', reason: '原核减确认' }, 'operator', refundDb);
   assert.deepEqual(calls, [{ kind: 'fee_review', id: 'fee-core' }]);
   saved = false; calls = []; coreOrder.status = 'renting';
-  const extension = { id: 'ext-core', status: 'effective', sequence: 1, priceVersion: '1',
-    pricingSnapshot: { refundReview: { status: 'pending', amount: 10 } } };
+  const extension = { id: 'ext-core', tenantId, orderId, currency: 'CNY', status: 'effective', sequence: 1, priceVersion: '1', payableAmount: 0,
+    pricingSnapshot: { previousPayableAmount: 100, differenceAmount: -10, chargeLines: [{ code: 'rental:difference', type: 'rental', amount: -10 }],
+      refundReview: { status: 'pending', amount: 10 } } };
   core.factStore.listExtensions = async () => [extension];
   core.factStore.updateExtensionPricingSnapshot = async (_tenant, _order, _id, snapshot) => { extension.pricingSnapshot = snapshot; };
   core.corporateSettlement.releaseReducedOrderCredit = async (_tenant, _workspace, _order, source, tx) => {
@@ -501,13 +509,16 @@ runWithRequestIdentity({ tenantId, workspaceId: "workspace-credit-test", userId:
       const fifoDb = new FakeDb(), fifo = serviceFor(fifoDb);
       // A's first debt has already been extinguished; only its new later debt
       // may compete with B. Equal timestamps are ordered by original ledger ID.
+      const originalPaymentKey = 'original-a-payment';
       fifoDb.ledger.rows.push(debtRow("old-a", "order-a", 100, 1000),
-        debtRow("old-a-paid", "order-a", -100, 1500, "payment_allocation"),
+        { ...debtRow("old-payment", null, 0, 1500, "payment"), amount: money(100), idempotencyKey: originalPaymentKey },
+        { ...debtRow("old-a-paid", "order-a", -100, 1500, "payment_allocation"),
+          idempotencyKey: `payment.allocation:${createHash('sha256').update(`${originalPaymentKey}:order-a`).digest('hex')}` },
         debtRow("b-later-debt", "order-a", 100, sameTime ? 2000 : 3000),
         debtRow("a-earlier-debt", "order-b", 60, 2000));
       for (const id of ["order-a", "order-b"]) fifoDb.originalOrders.set(id, { ...fifoDb.currentOrder, id });
       await fifo.recordPayment(tenantId, customerId, { amount: 80, reason: "剩余正债权排序", idempotencyKey: "fifo-new" });
-      const applied = fifoDb.ledger.rows.filter(row => row.idempotencyKey.startsWith("payment.allocation:"));
+      const applied = fifoDb.ledger.rows.filter(row => row.idempotencyKey.startsWith("payment.allocation:") && row.id !== 'old-a-paid');
       assert.deepEqual(applied.map(row => [row.orderId, Number(row.amount)]), [["order-b", 60], ["order-a", 20]]);
       assert.equal((await fifo.account(tenantId, customerId)).receivableAmount, 80);
     }

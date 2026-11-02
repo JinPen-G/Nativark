@@ -63,6 +63,12 @@ test('budget settings and indexed unit/currency projections commit together with
   const repository = new PrismaBudgetRepository(db);
   await repository.saveSettings(key, settings, 0, async () => {});
   assert.equal(row.moneyCurrency, 'USD'); assert.equal(row.moneyLimit, '10.250000'); assert.equal(row.unitKind, 'money');
+  db.aiBudgetPolicy.findMany = async ({ where }) => row.scopeKind === where.scopeKind && row.enabled === where.enabled
+    && row.unitKind === where.unitKind && row.moneyCurrency !== null ? [{ moneyCurrency: row.moneyCurrency }] : [];
+  const { AiCreditService } = require('../apps/api/src/modules/ai-native/budget/ai-credit.service');
+  const credits = new AiCreditService(db, {});
+  assert.deepEqual(await credits.currencies(), ['USD'], 'the actual credit currency reader discovers the just-saved indexed currency');
+  assert.equal((await repository.settings(key)).settings.budget.quantity.currency, 'USD');
   const disabled = { ...settings, gates: { ...settings.gates, scene: { enabled: false, revision: 2 } } };
   await repository.saveSettings(key, disabled, 1, async () => {});
   assert.equal(row.enabled, false); assert.equal(row.moneyCurrency, 'USD');

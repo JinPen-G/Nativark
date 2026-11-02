@@ -15,6 +15,168 @@ const runtime = f => new PaymentRuntimeService(f.db, {
   assertEnabledInTransaction: async () => undefined
 }, f.funding);
 
+test('corporate repayment reversal restores exact debt and funding due once with an immutable receipt', async () => {
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100);
+  const payment = f.db.rows.find(row => row.entryType === 'payment');
+  const input = { basisRef: 'bank-correction-1', reason: 'incorrect repayment registration', idempotencyKey: 'reverse-original' };
+  const before = f.db.rows.length;
+  const receipt = await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input));
+  assert.equal(receipt.paymentId, payment.id); assert.equal(receipt.amount, 100); assert.equal(receipt.allocations.length, 1);
+  assert.equal(f.db.rows.length, before + 2); assert.equal(f.debt(), 100);
+  assert.equal((await balance(f)).rental.corporatePaid, 0); assert.equal((await balance(f)).rental.due, 100);
+  assert.equal(f.db.events.length, 0, 'accounting reversal cannot dispatch or manufacture cash');
+  assert.deepEqual(await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input)), receipt);
+  assert.equal(f.db.rows.length, before + 2);
+  assert.deepEqual(await f.inScope(() => f.corporate.readPaymentReversal(f.tenantId, f.customerId, payment.id)), receipt);
+  const debts = f.corporate.outstandingDebts(f.db.rows);
+  assert.equal(debts.length, 1);
+  assert.equal(debts[0].row.id, f.db.rows.find(row => row.entryType === 'settle').id, 'reversal retains the original debt date and maturity');
+  await f.inScope(() => assert.rejects(f.corporate.reversePayment(f.tenantId, f.customerId, payment.id,
+    { ...input, idempotencyKey: 'another-key' }), /原冲销收据/));
+  await f.payCash(100, 'cash-after-reversal');
+  assert.equal((await balance(f)).rental.due, 0); assert.equal(f.debt(), 0);
+});
+
+test('corporate reversal failure rolls back all legs and refuses overpaid or damaged original sources', async () => {
+  const input = { basisRef: 'bank-correction', reason: 'wrong repayment', idempotencyKey: 'reverse' };
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(60); await f.payCash(40);
+  const payment = f.db.rows.find(row => row.entryType === 'payment'), before = f.db.rows.length;
+  f.db.failOperationLog = true;
+  await f.inScope(() => assert.rejects(f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input), /audit unavailable/));
+  assert.equal(f.db.rows.length, before); assert.equal((await balance(f)).rental.corporatePaid, 60);
+  f.db.failOperationLog = false;
+  await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input));
+  assert.equal(f.debt(), 60); assert.equal((await balance(f)).rental.due, 60);
+  const broken = receivableFixture(); await broken.seedDebt(); await broken.payCorporate(100); await broken.payCash(10);
+  const original = broken.db.rows.find(row => row.entryType === 'payment');
+  await broken.inScope(() => assert.rejects(broken.corporate.reversePayment(broken.tenantId, broken.customerId, original.id, input), /超收或债权差异/));
+  assert.ok(!broken.db.rows.some(row => row.entryType === 'payment_reversal'));
+});
+
+test('reversal refuses missing legs or authority and preserves a completed repayment when ledger evidence is damaged', async () => {
+  const input = { basisRef: 'original-bank-reference', reason: 'wrong repayment', idempotencyKey: 'reverse-original' };
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100);
+  const payment = f.db.rows.find(row => row.entryType === 'payment');
+  assert.equal(await f.inScope(() => f.corporate.readPaymentReversal(f.tenantId, f.customerId, payment.id)), null);
+  const count = f.db.rows.length;
+  const base = f.corporate.principals.findWorkspaceScopedUser;
+  f.corporate.principals.findWorkspaceScopedUser = async () => ({ id: 'operator', tenantId: f.tenantId, isActive: true,
+    isPlatformAdmin: false, isSaasAdmin: false, permissions: ['rental-os:corporate:manage'], dataScope: 'all', locationScope: { mode: 'all' } });
+  await f.inScope(() => assert.rejects(f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input), error => error.status === 403));
+  assert.equal(f.db.rows.length, count);
+  f.corporate.principals.findWorkspaceScopedUser = base;
+  await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input));
+  f.db.rows = f.db.rows.filter(row => row.entryType !== 'allocation_reversal');
+  await assert.rejects(balance(f), /冲销/);
+  await f.inScope(() => assert.rejects(f.corporate.readPaymentReversal(f.tenantId, f.customerId, payment.id), /冲销/));
+});
+
+test('reversal preserves original debt age across repayment and refuses to reopen a terminal order implicitly', async () => {
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100);
+  const payment = f.db.rows.find(row => row.entryType === 'payment');
+  const input = { basisRef: 'original-bank-record', reason: 'correction', idempotencyKey: 'reverse' };
+  f.order.status = 'COMPLETED'; const before = f.db.rows.length;
+  await f.inScope(() => assert.rejects(f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input), /原订单已终结/));
+  assert.equal(f.db.rows.length, before);
+  f.order.status = 'SETTLING';
+  const receipt = await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input));
+  await f.payCorporate(40);
+  assert.equal((await balance(f)).rental.corporatePaid, 40); assert.equal(f.debt(), 60);
+  const debts = f.corporate.outstandingDebts(f.db.rows);
+  assert.equal(debts[0].row.id, f.db.rows.find(row => row.entryType === 'settle').id);
+  f.order.status = 'COMPLETED';
+  assert.deepEqual(await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id, input)), receipt,
+    'later terminal state cannot erase the original confirmed reversal');
+});
+
+test('multi-order repayment reversal restores every original leg under stable order locks', async () => {
+  const f = receivableFixture(); await f.seedDebt();
+  const other = { ...f.order, id: 'order-z', finalPayableAmount: f.money(50) }; f.db.orders.set(other.id, other);
+  const originalDebt = f.db.rows.find(row => row.entryType === 'settle');
+  f.db.rows.push({ ...originalDebt, id: 'other-debt', orderId: other.id, amount: f.money(50),
+    reservedDelta: f.money(0), receivableDelta: f.money(50), idempotencyKey: `order.credit.settle:${other.id}` });
+  await f.payCorporate(130);
+  const payment = f.db.rows.find(row => row.entryType === 'payment'); f.db.trace.length = 0;
+  const receipt = await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id,
+    { basisRef: 'bank-correction', reason: 'wrong payment', idempotencyKey: 'reverse-multi' }));
+  assert.deepEqual(receipt.allocations.map(row => row.amount).sort((a, b) => a - b), [30, 100]);
+  assert.equal((await balance(f)).rental.corporatePaid, 0); assert.equal(f.debt(), 100);
+  assert.equal((await f.corporate.account(f.tenantId, f.customerId)).receivableAmount, 150);
+  const locks = f.db.trace.filter(row => row.sql.includes('SELECT id FROM rental_orders')).map(row => row.values[2]);
+  assert.deepEqual(locks.slice(0, 2), ['order', 'order-z']);
+});
+
+test('reversing original debt succeeds after released credit was consumed by another order', async () => {
+  const f = receivableFixture(); f.db.credit.creditLimit = f.money(100); await f.seedDebt(); await f.payCorporate(100);
+  const payment = f.db.rows.find(row => row.entryType === 'payment');
+  const template = f.db.rows.find(row => row.entryType === 'settle');
+  f.db.rows.push({ ...template, id: 'other-reserve', orderId: 'another-order', entryType: 'reserve',
+    amount: f.money(100), reservedDelta: f.money(100), receivableDelta: f.money(0), idempotencyKey: 'another-reserve' });
+  await f.inScope(() => f.corporate.reversePayment(f.tenantId, f.customerId, payment.id,
+    { basisRef: 'bank-correction', reason: 'wrong registration', idempotencyKey: 'reverse' }));
+  const account = await f.corporate.account(f.tenantId, f.customerId);
+  assert.equal(account.availableAmount, -100); assert.equal(account.receivableAmount, 100);
+  assert.equal((await balance(f)).rental.due, 100);
+});
+
+test('corporate reversal routes preserve workspace finance authorization and named receipt contracts', () => {
+  const { requiredPermissions, tenantWideMembershipRoute } = require('../apps/api/src/common/api-auth.guard');
+  const path = '/platform/customers/company/credit/payments/payment/reverse';
+  assert.deepEqual(requiredPermissions('POST', path), ['rental-os:corporate:manage']);
+  assert.ok(requiredPermissions('GET', path).includes('rental-os:corporate:view'));
+  if (tenantWideMembershipRoute) assert.equal(tenantWideMembershipRoute(path), false);
+  const { OPENAPI_COMPONENT_SCHEMAS: schemas, API_CONTRACT_OPERATIONS: operations } = require('../apps/api/src/contracts/openapi-document');
+  const routes = operations.filter(row => row.path === '/api/platform/customers/{customerId}/credit/payments/{paymentId}/reverse');
+  assert.equal(routes.length, 2);
+  assert.ok(schemas.ReverseCustomerCorporateCreditPaymentRequest.required.includes('basisRef'));
+  assert.ok(schemas.CustomerCorporateCreditPaymentReversalReceipt.required.includes('allocations'));
+});
+
+test('corporate repayments allocate the final cent and reject a cent above the actual remaining debt', async () => {
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(99.99);
+  assert.equal((await balance(f)).rental.due, 0.01);
+  const before = f.db.rows.length;
+  await f.inScope(() => assert.rejects(f.corporate.recordPayment(f.tenantId, f.customerId,
+    { amount: 0.02, reason: 'exceeds last cent', idempotencyKey: 'too-much' }), /不能超过企业当前应收/));
+  assert.equal(f.db.rows.length, before);
+  await f.payCorporate(0.01);
+  assert.equal((await balance(f)).rental.corporatePaid, 100);
+  assert.equal((await balance(f)).rental.due, 0);
+  const lastPayment = f.db.rows.filter(row => row.entryType === 'payment').at(-1);
+  assert.equal(Number(lastPayment.amount), 0.01);
+  assert.equal(f.db.rows.filter(row => row.entryType === 'payment_allocation').length, 2);
+});
+
+test('complete enterprise original ledgers are paged beyond 500 without losing allocations or blocking maturity admission', async () => {
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100);
+  const template = f.db.rows[0];
+  for (let i = 0; i < 1001; i++) f.db.rows.push({ ...template, id: `historical-${String(i).padStart(5, '0')}`,
+    idempotencyKey: `historical:${i}`, entryType: 'adjust', amount: f.money(0), reservedDelta: f.money(0),
+    receivableDelta: f.money(0), orderId: null, workspaceId: f.workspaceId });
+  f.db.trace.length = 0;
+  const result = await balance(f);
+  assert.equal(result.rental.corporatePaid, 100); assert.equal(result.rental.due, 0);
+  const pages = f.db.trace.filter(row => row.sql.includes('FROM customer_corporate_credit_ledger'));
+  assert.ok(pages.length >= 3); assert.ok(pages.every(row => /LIMIT 500 LOCK IN SHARE MODE/.test(row.sql)));
+  assert.ok(pages.slice(1).every(row => row.sql.includes('AND id >')));
+  await f.corporate.assertMaturityReady(f.db, f.tenantId, f.customerId);
+  const standalone = await f.receivables.corporatePaid(f.tenantId, f.workspaceId, f.orderId, f.order);
+  assert.equal(standalone, 100, 'non-transaction caller receives the same locked complete ledger');
+  f.order.status = 'RENTING'; await f.payCash(20, 'late-overpayment-beyond-window');
+  assert.equal((await balance(f)).rental.balance, -20);
+  await refund(f, 20, 'refund-beyond-window'); assert.equal((await balance(f)).rental.balance, 0);
+  const raw = f.db.$queryRaw; let repeated;
+  f.db.$queryRaw = async query => {
+    const rows = await raw(query);
+    if (query.sql.includes('FROM customer_corporate_credit_ledger')) {
+      if (!repeated) repeated = rows;
+      else return repeated;
+    }
+    return rows;
+  };
+  await assert.rejects(balance(f), /分页来源不一致/);
+});
+
 test('settled debt consumes late cash atomically, without a second corporate income or replay allocation', async () => {
   const f = receivableFixture(); await f.seedDebt();
   const original = await f.payCash(100), rowCount = f.db.rows.length;
@@ -250,6 +412,44 @@ test('a new debt order appearing before the credit lock aborts repayment without
   assert.equal(f.debt(), 100);
 });
 
+test('new corporate repayments and original-key replay reject damaged existing payment sources without appending money', async () => {
+  for (const mode of ['new', 'replay']) {
+    for (const corrupt of [f => { f.db.rows = f.db.rows.filter(row => row.entryType !== 'payment'); },
+      f => { f.db.rows.find(row => row.entryType === 'payment').amount = f.money(61); },
+      f => { f.db.rows.push({ ...f.db.rows.find(row => row.entryType === 'payment'), id: 'duplicate-payment' }); }]) {
+      const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(60);
+      const payment = f.db.rows.find(row => row.entryType === 'payment');
+      const input = mode === 'replay' ? { amount: 60, reason: payment.reason, idempotencyKey: payment.idempotencyKey }
+        : { amount: 40, reason: 'new repayment', idempotencyKey: 'next-payment' };
+      corrupt(f); const before = f.db.rows.map(row => ({ ...row }));
+      await f.inScope(() => assert.rejects(f.corporate.recordPayment(f.tenantId, f.customerId, input, 'operator'),
+        error => [403, 409].includes(error.status)));
+      assert.deepEqual(f.db.rows, before, `${mode} must preserve damaged history without adding or repairing ledger entries`);
+    }
+  }
+});
+
+test('corporate pickup and final settlement consume validated original repayment legs, not unbound deltas', async () => {
+  for (const gate of ['pickup', 'settlement', 'reduction']) {
+    for (const alter of [
+      f => { f.db.rows = f.db.rows.filter(row => row.entryType !== 'payment'); },
+      f => { f.db.rows.find(row => row.entryType === 'payment').amount = f.money(101); },
+      f => { f.db.rows.push({ ...f.db.rows.find(row => row.entryType === 'payment'), id: 'duplicate-original-parent' }); },
+      f => { f.db.rows.find(row => row.entryType === 'payment_allocation').workspaceId = 'foreign'; }
+    ]) {
+      const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100); alter(f);
+      const count = f.db.rows.length;
+      f.order.feeReviews = [{ id: 'original-fee', type: 'early_return_refund', status: 'approved', decidedAmount: 10 }];
+      const work = gate === 'pickup' ? f.corporate.assertReadyForPickup(f.tenantId, f.orderId, f.db)
+        : gate === 'settlement' ? f.corporate.settleOrderCredit(f.tenantId, f.orderId, f.db)
+          : f.corporate.releaseReducedOrderCredit(f.tenantId, f.workspaceId, f.orderId, { kind: 'fee_review', id: 'original-fee' }, f.db);
+      await assert.rejects(work, error => error.status === 409,
+      `${gate}: original allocation/source must be verified before treating the order as paid`);
+      assert.equal(f.db.rows.length, count, 'invalid source does not create a settlement repair');
+    }
+  }
+});
+
 test('per-order enterprise cash keeps its original currency and requires no invented credit account', async () => {
   const f = receivableFixture(); f.db.credit = null; f.order.currency = 'USD';
   Object.assign(f.order.membershipSnapshot.settlement, { mode: 'per_order', billingCycle: 'per_order', currency: 'USD' });
@@ -270,6 +470,48 @@ test('funding public output matches named OpenAPI fields and preserves optional 
   for (const key of schema.properties.rental.required) assert.ok(key in result.rental);
   assert.deepEqual(Object.keys(result.rental).sort(), Object.keys(schema.properties.rental.properties).sort());
   assert.ok(!schemas.RentalFundingEvent.properties.provider.enum.includes('corporate'));
+});
+
+test('admin funding summaries separate corporate allocation from cash and never mark real balances simulated', async () => {
+  const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+  const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
+  const load = (file, overrides) => {
+    const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core', file), 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true }
+    }).outputText;
+    const module = { exports: {} };
+    new Function('require', 'module', 'exports', code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), module, module.exports);
+    return module.exports;
+  };
+  const text = ({ children }) => React.createElement('span', null, children);
+  const presentation = load('orderDetailPresentation.ts', {});
+  const mocks = { '@/app/locale': { useLocale: () => ({ t: value => value }) },
+    '@/components/ui': { DataTableStatus: text, Alert: ({ title }) => text({ children: title }), Button: text, ListSection: text, Table: () => null },
+    '@/features/membership/CustomerPreview': { CustomerPreview: () => null },
+    './orderListPresentation': { plannedReturnAt: order => order.endAt },
+    './orderDetailPresentation': presentation, './OrderDetail.module.css': { __esModule: true, default: {} } };
+  const summary = load('OrderDetailSummary.tsx', mocks);
+  const { OrderFundingPanel } = load('OrderFundingPanel.tsx', { ...mocks, './OrderDetailSummary': summary });
+  const f = receivableFixture(); await f.seedDebt(); await f.payCorporate(100);
+  const funding = await balance(f), location = { id: 'loc', name: 'Warehouse', operator: { id: 'op', name: 'Operator' } };
+  const order = { ...f.order, status: 'renting', customerType: 'corporate', fulfillmentMode: 'store_pickup_return',
+    fulfillmentLocationSnapshot: location, returnLocationSnapshot: location };
+  const renderSummary = value => renderToStaticMarkup(React.createElement(summary.OrderDetailSummary, { order, funding: value, fundingState: 'ready' }));
+  const html = renderSummary(funding);
+  assert.match(html, /现金实收/); assert.match(html, /企业回款已核销/); assert.match(html, /100\.00/);
+  assert.doesNotMatch(html, /模拟资金/);
+  assert.match(renderSummary({ ...funding, balanceBasis: 'simulated' }), /模拟资金/);
+  const missing = renderSummary({ ...funding, rental: { ...funding.rental, corporatePaid: undefined } });
+  assert.match(missing, /企业回款已核销<\/dt><dd><span[^>]*>—/);
+  const panel = renderToStaticMarkup(React.createElement(OrderFundingPanel, { order, funding, loading: false, error: false,
+    refresh() {}, depositRequirement: 0, preauthorizationRequirement: 0, actions: {} }));
+  assert.match(panel, /企业回款已核销/); assert.match(panel, /现金实收/);
+  const page = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx'), 'utf8');
+  assert.match(page, /knownMoney\(value\) \? formatRentalMoney\(value, detail\?\.currency\) : "—"/);
+  const documents = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/rental-core/OrderDocumentsPanel.tsx'), 'utf8');
+  assert.match(documents, /rentalCoreApi\.orderDocumentVersion\(order\.id, type, selection\.snapshotId\)/);
+  assert.match(documents, /rentalCoreApi\.orderDocument\(order\.id, type\)/);
+  assert.doesNotMatch(documents, /function documentHtml/);
 });
 
 test('server settlement document retains corporate allocations separately from cash in its snapshot and HTML', async () => {

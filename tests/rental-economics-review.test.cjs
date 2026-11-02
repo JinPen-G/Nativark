@@ -194,6 +194,18 @@ test('quote selects and freezes configured default unit instead of the first rat
   assert.equal(quote.rentalAmount, 100);
   const explicit = await business.createQuote(tenant, context, { ...input, lines: [{ ...input.lines[0], pricingUnit: 'hour' }] });
   assert.equal(explicit.rateSnapshot[0].unit, 'hour'); assert.equal(explicit.rentalAmount, 20);
+  const originalCode = group.code;
+  group.code = `${originalCode}_RENAMED`;
+  const renamed = await business.createQuote(tenant, context, input);
+  assert.equal(renamed.rateSnapshot[0].itemGroupCode, originalCode);
+  assert.equal(renamed.chargeLines.find(row => row.type === 'rental').code, `rental:${group.code}`);
+  // This consumer check replaces inventory transport only; it does not claim
+  // that the seed's stock covers a future real booking.
+  core.availability = async () => ({ available: true });
+  const prepared = await runWithRequestIdentity({ tenantId: tenant, workspaceId: 'ws_tenant_002', userId: 'operator' }, () =>
+    core.prepareOrder(tenant, { ...input, lines: renamed.request.lines }, 'Operator', renamed));
+  assert.equal(prepared.lines[0].amount, renamed.rentalAmount);
+  group.code = originalCode;
   const normalized = business.normalizeQuoteInput(input, context), original = { key: 'a'.repeat(64), inputHash: requestFingerprint(normalized) };
   assert.equal(input.lines[0].pricingUnit, undefined);
   let stored, saved = 0;
@@ -217,6 +229,51 @@ test('quote selects and freezes configured default unit instead of the first rat
   assert.deepEqual(await business.createQuoteForOriginalOperation(tenant, context, normalized, original), bound);
   assert.equal(saved, 1, 'the original row is returned without re-pricing or another save');
   context.settings.pricing.defaultUnit = 'day_24h';
+  const coupon = { id: 'frozen-scope-coupon', customerId: 'coupon-customer', templateId: 'scope-template', templateCode: 'SCOPE',
+    templateName: 'Frozen scope', templateVersion: '1', discountType: 'percentage', discountValue: 10, minimumSpend: 0,
+    appliesTo: 'rental', stackableWithDiscountPlans: true, applicableItemGroupIds: [group.id, 'eligible-future-replacement'],
+    status: 'claimed', effectiveFrom: '2000-01-01T00:00:00Z', effectiveTo: '2100-01-01T00:00:00Z' };
+  business.state(tenant, context).customerCoupons.push(coupon);
+  const couponInput = { ...input, customerId: coupon.customerId, customerCouponId: coupon.id };
+  const scopedQuote = await business.createQuote(tenant, context, couponInput);
+  assert.deepEqual(scopedQuote.couponEvaluation.applicableItemGroupIds, [group.id, 'eligible-future-replacement']);
+  coupon.applicableItemGroupIds.push('later-added-item');
+  assert.deepEqual(scopedQuote.couponEvaluation.applicableItemGroupIds, [group.id, 'eligible-future-replacement'], 'original scope is copied, not a live list');
+  coupon.applicableItemGroupIds = [];
+  assert.deepEqual((await business.createQuote(tenant, context, couponInput)).couponEvaluation.applicableItemGroupIds, [], 'explicit all-items scope is distinct from legacy absence');
+  const assignment = { id: 'member-assignment', customerId: coupon.customerId, planId: 'producer-member', planVersionId: 'producer-member-v1',
+    source: 'manual', status: 'active', effectiveFrom: input.startAt, createdAt: input.startAt,
+    snapshot: { planName: 'Original rental member', targetType: 'personal', benefits: [{ type: 'rental_discount', calculation: 'percentage', value: 10 }] } };
+  business.memberships = { resolveBookingIdentity: async () => ({ bookingIdentity: 'personal', personalCustomerId: coupon.customerId,
+    enterpriseContractAndPayer: false, benefitSource: 'personal', personalPlan: structuredClone(assignment), qualifications: [], resolvedAt: input.startAt }) };
+  const joint = await business.createQuote(tenant, context, { ...couponInput, bookingIdentity: { bookingIdentity: 'personal' } });
+  const { originalExchangeCoupon } = require('../apps/api/src/modules/rental-core/rental-exchange-coupon');
+  const { originalExchangeMembership } = require('../apps/api/src/modules/rental-core/rental-exchange-membership');
+  assert.equal(originalExchangeCoupon(joint).discountAmount, 10);
+  const adoptedMember = originalExchangeMembership(joint, 'ws_tenant_002');
+  assert.equal(adoptedMember.base, 90); assert.equal(adoptedMember.appliedAmount, 9); assert.equal(joint.payableAmount, 81);
+  business.memberships = undefined;
+  const originalPlan = { id: 'producer-plan', tenantId: tenant, categoryCode: profile.categoryCode, code: 'PRODUCER', name: 'Original producer plan',
+    status: 'enabled', version: '1', discountType: 'percentage', discountValue: 10, minimumSpend: 0, appliesTo: 'rental', customerScope: 'all',
+    applicableItemGroupIds: [group.id], applicablePricingGroupIds: [], applicableDayTypes: [], priority: 1,
+    stackableWithOtherPlans: true, stackableWithCoupon: true, effectiveFrom: '2000-01-01T00:00:00Z' };
+  business.state(tenant, context).discountPlans = [originalPlan];
+  const planQuote = await business.createQuote(tenant, context, input);
+  const { originalExchangeDiscount } = require('../apps/api/src/modules/rental-core/rental-exchange-discount');
+  const adopted = originalExchangeDiscount(planQuote, 'ws_tenant_002');
+  assert.equal(adopted.discountAmount, 10); assert.equal(adopted.planSnapshot.discountValue, 10);
+  business.memberships = { resolveBookingIdentity: async () => ({ bookingIdentity: 'personal', personalCustomerId: coupon.customerId,
+    enterpriseContractAndPayer: false, benefitSource: 'personal', personalPlan: structuredClone(assignment), qualifications: [], resolvedAt: input.startAt }) };
+  const allLayers = await business.createQuote(tenant, context, { ...couponInput, bookingIdentity: { bookingIdentity: 'personal' } });
+  assert.equal(originalExchangeDiscount(allLayers, 'ws_tenant_002').discountAmount, 10);
+  assert.equal(originalExchangeCoupon(allLayers).runningBase, 90);
+  assert.equal(originalExchangeCoupon(allLayers).discountAmount, 9);
+  assert.equal(originalExchangeMembership(allLayers, 'ws_tenant_002').base, 81);
+  assert.equal(originalExchangeMembership(allLayers, 'ws_tenant_002').appliedAmount, 8.1);
+  assert.equal(allLayers.payableAmount, 72.9);
+  business.memberships = undefined;
+  originalPlan.discountValue = 99;
+  assert.equal(originalExchangeDiscount(planQuote, 'ws_tenant_002').planSnapshot.discountValue, 10, 'current plan does not replace the producer-frozen rule');
   business.resolveSpaceRates = async () => ({ rates: [rates[0]] });
   await assert.rejects(business.createQuote(tenant, context, input), /未配置计价单位 day_24h/);
 });
@@ -278,6 +335,200 @@ test('AI quote accepts only producer-owned defaults and retains explicit units a
   assert.equal(request.lines[0].pricingUnit, undefined);
 });
 
+test('early return counts identical shared-target rate snapshots once and retains target net discounts', () => {
+  const business = Object.create(RentalBusinessService.prototype);
+  const rate = { itemGroupId: 'g', itemGroupCode: 'G', pricingGroupId: 'p', pricingGroupCode: 'P', unit: 'day_24h', minimumUnits: 1 };
+  const quote = { id: 'q', request: { startAt: '2026-11-01T00:00:00Z', endAt: '2026-11-11T00:00:00Z',
+    lines: [{ itemGroupId: 'a', pricingGroupId: 'p', quantity: 1, pricingUnit: 'day_24h' },
+      { itemGroupId: 'b', pricingGroupId: 'p', quantity: 2, pricingUnit: 'day_24h' }] },
+    rentalAmount: 300, rentalLineAmounts: { p: 300 }, rateSnapshot: [rate, structuredClone(rate)],
+    chargeLines: [{ type: 'rental', code: 'rental:P', amount: 100 }, { type: 'rental', code: 'rental:P', amount: 200 }],
+    ruleSnapshot: { earlyReturn: { mode: 'auto', minAdvanceHours: 0, refundPercent: 100, refundUndeliveredServices: false }, pricing: {} },
+    discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 30, rentalAllocations: { p: 30 } }],
+    membershipBenefitEvaluations: [], serviceSnapshots: [] };
+  const result = business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
+    quote.request.endAt, '2026-11-06T00:00:00Z');
+  assert.equal(result.rentalRefund, 135); assert.equal(result.amount, 135);
+  assert.equal(result.requiresReview, false);
+  quote.rateSnapshot[1].minimumUnits = 2;
+  const ambiguous = business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
+    quote.request.endAt, '2026-11-06T00:00:00Z');
+  assert.equal(ambiguous.amount, null); assert.equal(ambiguous.rentalRefund, null);
+  assert.equal(ambiguous.requiresReview, true); assert.equal(ambiguous.maximumAmount, 270);
+  assert.match(ambiguous.basis.join(';'), /同一定价对象存在不同费率/);
+});
+
+test('mixed time and usage/package rental refunds only the frozen time-priced net', () => {
+  const business = Object.create(RentalBusinessService.prototype);
+  for (const unit of ['usage', 'package']) {
+    const quote = { id: 'q', request: { startAt: '2026-11-01T00:00:00Z', endAt: '2026-11-11T00:00:00Z',
+      lines: [{ itemGroupId: 'a', quantity: 1, pricingUnit: 'day_24h' }, { itemGroupId: 'b', quantity: 1, pricingUnit: unit }] },
+      rentalAmount: 800, rentalLineAmounts: { a: 100, b: 700 },
+      rateSnapshot: [{ itemGroupId: 'a', itemGroupCode: 'A', unit: 'day_24h', minimumUnits: 1 },
+        { itemGroupId: 'b', itemGroupCode: 'B', unit, minimumUnits: 1 }],
+      chargeLines: [], ruleSnapshot: { earlyReturn: { mode: 'auto', minAdvanceHours: 0, refundPercent: 100 }, pricing: {} },
+      discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 100, rentalAllocations: { b: 100 } }],
+      membershipBenefitEvaluations: [], serviceSnapshots: [] };
+    const result = business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
+      quote.request.endAt, '2026-11-06T00:00:00Z');
+    assert.equal(result.amount, 50); assert.equal(result.rentalRefund, 50);
+    const shared = structuredClone(quote);
+    shared.rateSnapshot[1].itemGroupId = 'a'; shared.request.lines[1].itemGroupId = 'a';
+    shared.rentalLineAmounts = { a: 800 }; shared.discountEvaluations[0].rentalAllocations = { a: 100 };
+    assert.equal(business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, shared,
+      quote.request.endAt, '2026-11-06T00:00:00Z').amount, null, 'same target time/non-time totals are not a line allocation');
+    delete quote.discountEvaluations[0].rentalAllocations;
+    assert.equal(business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
+      quote.request.endAt, '2026-11-06T00:00:00Z').amount, null);
+  }
+});
+
+test('mixed-rate early return keeps missing original benefit allocations unknown instead of guessing their scope', () => {
+  const business = Object.create(RentalBusinessService.prototype);
+  const quote = { id: 'q', request: { startAt: '2026-11-01T00:00:00Z', endAt: '2026-11-08T00:00:00Z',
+    lines: [{ itemGroupId: 'a', quantity: 1, pricingUnit: 'day_24h' }, { itemGroupId: 'b', quantity: 1, pricingUnit: 'week' }] },
+    rentalAmount: 800, rentalLineAmounts: { a: 100, b: 700 },
+    rateSnapshot: [{ itemGroupId: 'a', itemGroupCode: 'A', unit: 'day_24h', minimumUnits: 1 },
+      { itemGroupId: 'b', itemGroupCode: 'B', unit: 'week', minimumUnits: 1 }],
+    chargeLines: [], ruleSnapshot: { earlyReturn: { mode: 'auto', minAdvanceHours: 0, refundPercent: 100 }, pricing: {} },
+    discountEvaluations: [], membershipBenefitEvaluations: [], serviceSnapshots: [] };
+  const calculate = value => business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, value,
+    quote.request.endAt, '2026-11-04T00:00:00Z');
+  for (const benefit of [
+    { discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 100 }] },
+    { couponEvaluation: { appliesTo: 'rental', discountAmount: 100 } },
+    { membershipBenefitEvaluations: [{ appliesTo: 'rental', appliedAmount: 100 }] },
+    { discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 100, rentalAllocations: { a: 20 } }] }
+  ]) {
+    const result = calculate({ ...structuredClone(quote), ...benefit });
+    assert.equal(result.amount, null); assert.equal(result.requiresReview, true);
+    assert.equal(result.maximumAmount, 700);
+    assert.match(result.basis.join(';'), /分摊/);
+  }
+  const exact = calculate({ ...quote, discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 100, rentalAllocations: { a: 100 } }] });
+  assert.equal(exact.amount, 0, 'the fully discounted daily item cannot borrow weekly rental as its refund base');
+  const extended = business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
+    '2026-11-15T00:00:00Z', '2026-11-04T00:00:00Z', 200);
+  assert.equal(extended.amount, null, 'aggregate incremental rental has no per-line amount/period allocation');
+  assert.equal(extended.requiresReview, true); assert.equal(extended.maximumAmount, 1000);
+});
+
+test('partial physical return receipts preserve each batch quantity and time for final early-return net', () => {
+  const business = Object.create(RentalBusinessService.prototype), service = Object.create(RentalCoreService.prototype);
+  const start = '2026-11-01T00:00:00Z', end = '2026-11-11T00:00:00Z';
+  const at = day => new Date(Date.parse(start) + day * 86400000).toISOString();
+  const quote = { id: 'q', tenantId: 't', request: { startAt: start, endAt: end, lines: [{ itemGroupId: 'g', quantity: 3 }] },
+    rentalAmount: 300, rentalLineAmounts: { g: 300 }, discountAmount: 30, couponAmount: 0,
+    chargeLines: [{ type: 'rental', code: 'rental:G', amount: 300 }],
+    rateSnapshot: [{ itemGroupId: 'g', itemGroupCode: 'G', unit: 'day_24h', minimumUnits: 1 }],
+    pricingContext: { timeZone: 'UTC', calendars: [], legacyDayTypeMultipliers: false },
+    discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 30 }], membershipBenefitEvaluations: [], serviceSnapshots: [],
+    ruleSnapshot: { pricing: {}, earlyReturn: { mode: 'auto', minAdvanceHours: 0, refundPercent: 100 } } };
+  const order = { id: 'o', tenantId: 't', ruleSnapshot: quote.ruleSnapshot, finalPayableAmount: 270, serviceSnapshots: [], chargeLines: [],
+    lines: [{ id: 'line', itemGroupId: 'g', inventoryMode: 'quantity', quantity: 3, amount: 300 }],
+    allocations: [{ id: 'returned-1', orderId: 'o', orderLineId: 'line', quantity: 1, status: 'returned' },
+      { id: 'returned-2', orderId: 'o', orderLineId: 'line', quantity: 1, status: 'returned' }, { id: 'holding', orderId: 'o', orderLineId: 'line', quantity: 1, status: 'picked_up' }] };
+  service.stampPartialReturnReceipts(order, [{ allocationId: 'holding', quantity: 1 }], new Map([['holding', 'returned-1']]), 'batch-1', at(2));
+  service.stampPartialReturnReceipts(order, [{ allocationId: 'holding', quantity: 1 }], new Map([['holding', 'returned-2']]), 'batch-2', at(5));
+  const calc = current => business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote, end, at(8), 0, undefined, current, []);
+  assert.equal(calc(order).amount, 135, '90 net per piece: 72 at day2 +45 at day5 +18 at day8');
+  assert.equal(calc(order).requiresReview, false);
+  const rejected = { ...structuredClone(order), changes: [{ id: 'rejected-change', status: 'rejected', type: 'post_pickup_exchange' }] };
+  assert.equal(calc(rejected).amount, 135, 'rejected changes have not altered the original batch pricing');
+  const applied = { ...structuredClone(rejected), changes: [{ ...rejected.changes[0], status: 'applied' }] };
+  assert.equal(calc(applied).amount, null, 'applied pricing changes still require their own complete segment receipts');
+  const unknownChange = { ...structuredClone(rejected), changes: [{ ...rejected.changes[0], status: 'unknown' }] };
+  assert.equal(calc(unknownChange).amount, null, 'an unknown change cannot be treated as a proven rejection');
+  const missingCancellation = { ...structuredClone(order), changes: [{ status: 'applied', type: 'partial_line_cancel' }] };
+  assert.equal(calc(missingCancellation).amount, null, 'a cancellation record without corresponding effective quantity cannot bypass the batch gate');
+  const shuffled = structuredClone(order); shuffled.allocations.reverse();
+  assert.equal(calc(shuffled).amount, 135, 'repository row order does not move net cent remainders');
+  for (const mutate of [value => { value.discountEvaluations = []; },
+    value => { value.couponAmount = 10; }, value => { value.discountAmount = 40; },
+    value => { value.chargeLines[0].amount = 301; },
+    value => { value.discountEvaluations[0].rentalAllocations = { foreign: 30 }; },
+    value => { delete value.discountEvaluations[0].appliesTo; },
+    value => { value.couponAmount = 10; value.couponEvaluation = { discountAmount: 10 }; }]) {
+    const damagedQuote = structuredClone(quote); mutate(damagedQuote);
+    assert.equal(business.calculateEarlyReturnRefund('t', {}, damagedQuote, end, at(8), 0, undefined, order, []).amount, null,
+      'incomplete original gross/benefit facts stay unknown instead of inflating net rental');
+  }
+  const pennies = structuredClone(quote), pennyOrder = structuredClone(order);
+  Object.assign(pennies, { rentalAmount: 0.03, rentalLineAmounts: { g: 0.03 }, discountAmount: 0, discountEvaluations: [] });
+  pennies.chargeLines[0].amount = 0.03; pennyOrder.lines[0].amount = 0.03; pennyOrder.finalPayableAmount = 0.03;
+  pennies.ruleSnapshot.earlyReturn.refundPercent = 50;
+  pennyOrder.ruleSnapshot = pennies.ruleSnapshot;
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, pennies, end, at(8), 0, undefined, pennyOrder, []).amount, 0.01);
+  for (const row of pennyOrder.allocations.filter(row => row.status === 'returned')) row.metadata.returnReceipt.returnedAt = at(1);
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, pennies, end, at(1), 0, undefined, pennyOrder, []).amount, 0.01,
+    'three net cents times unused 9/10 times 50% round once to one cent, not zero per batch');
+  pennies.rentalAmount = 0.09; pennies.rentalLineAmounts.g = 0.09; pennies.chargeLines[0].amount = 0.09;
+  pennyOrder.lines[0].amount = 0.09; pennyOrder.finalPayableAmount = 0.09;
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, pennies, end, at(1), 0, undefined, pennyOrder, []).amount, 0.04,
+    'each 0.0135 batch amount stays unrounded until the original whole-return charge is formed');
+  const legacy = structuredClone(order); delete legacy.allocations[0].metadata.returnReceipt;
+  assert.equal(calc(legacy).amount, null);
+  const damaged = structuredClone(order); damaged.allocations[0].metadata.returnReceipt.quantity = 2;
+  assert.equal(calc(damaged).amount, null);
+  assert.throws(() => service.stampPartialReturnReceipts(order, [{ allocationId: 'holding', quantity: 1 }],
+    new Map([['holding', 'returned-1']]), 'again', at(3)), /原分配来源/);
+  order.ruleSnapshot.earlyReturn.maxRefundAmount = 100;
+  assert.equal(calc(order).amount, 100, 'one order cap, not one per batch');
+  order.ruleSnapshot.earlyReturn.mode = 'manual_review';
+  assert.equal(calc(order).requiresReview, true);
+  const foreign = structuredClone(order); foreign.allocations[0].orderId = 'another-order';
+  assert.equal(calc(foreign).amount, null);
+  const future = structuredClone(order); future.allocations[0].metadata.returnReceipt.returnedAt = at(9);
+  assert.equal(calc(future).amount, null);
+});
+
+test('partial returns on distinct stable lines consume only each original target net and batch time', () => {
+  const business = Object.create(RentalBusinessService.prototype);
+  const start = '2026-11-01T00:00:00Z', end = '2026-11-11T00:00:00Z', returnedAt = '2026-11-09T00:00:00Z';
+  const quote = { id: 'q', tenantId: 't', request: { startAt: start, endAt: end,
+    lines: [{ itemGroupId: 'a', quantity: 2 }, { itemGroupId: 'b', quantity: 1 }] },
+    rentalAmount: 300, rentalLineAmounts: { a: 200, b: 100 }, discountAmount: 60, couponAmount: 10,
+    chargeLines: [{ type: 'rental', amount: 200 }, { type: 'rental', amount: 100 }],
+    rateSnapshot: ['a', 'b'].map(itemGroupId => ({ itemGroupId, unit: 'day_24h', minimumUnits: 1 })),
+    pricingContext: { timeZone: 'UTC', calendars: [], legacyDayTypeMultipliers: false },
+    ruleSnapshot: { pricing: {}, earlyReturn: { mode: 'auto', minAdvanceHours: 0, refundPercent: 100 } },
+    discountEvaluations: [{ applied: true, appliesTo: 'rental', discountAmount: 50, rentalAllocations: { a: 40, b: 10 } }],
+    membershipBenefitEvaluations: [{ appliesTo: 'rental', appliedAmount: 10, allocations: { a: 10 } }],
+    couponEvaluation: { appliesTo: 'rental', discountAmount: 10, rentalAllocations: { b: 10 } }, serviceSnapshots: [] };
+  const order = { id: 'o', tenantId: 't', ruleSnapshot: quote.ruleSnapshot, finalPayableAmount: 230, chargeLines: [], serviceSnapshots: [],
+    lines: [{ id: 'line-b', itemGroupId: 'b', inventoryMode: 'quantity', quantity: 1, amount: 100 },
+      { id: 'line-a', itemGroupId: 'a', inventoryMode: 'quantity', quantity: 2, amount: 200 }], allocations: [
+      { id: 'old-a', orderId: 'o', orderLineId: 'line-a', quantity: 1, status: 'returned', metadata: { returnReceipt: {
+        batchId: 'batch', returnedAt: '2026-11-03T00:00:00Z', sourceAllocationId: 'holding-a', orderLineId: 'line-a', quantity: 1 } } },
+      { id: 'holding-a', orderId: 'o', orderLineId: 'line-a', quantity: 1, status: 'picked_up' },
+      { id: 'holding-b', orderId: 'o', orderLineId: 'line-b', quantity: 1, status: 'picked_up' }] };
+  const calc = value => business.calculateEarlyReturnRefund('t', {}, quote, end, returnedAt, 0, undefined, value, []);
+  assert.equal(calc(order).rentalRefund, 91, 'A net150: 75*.8+75*.2=75; B net80: 80*.2=16');
+  const sameTarget = structuredClone(order); sameTarget.lines[0].itemGroupId = 'a';
+  assert.equal(calc(sameTarget).amount, null, 'target totals cannot prove distinct same-target stable-line benefits');
+  const sourceLess = structuredClone(quote); delete sourceLess.membershipBenefitEvaluations[0].allocations;
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, sourceLess, end, returnedAt, 0, undefined, order, []).amount, null);
+  const wrongScope = structuredClone(quote); wrongScope.discountEvaluations[0].rentalAllocations = { a: 40, other: 10 };
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, wrongScope, end, returnedAt, 0, undefined, order, []).amount, null);
+  const pennies = structuredClone(quote), pennyOrder = structuredClone(order);
+  Object.assign(pennies, { rentalAmount: 0.03, rentalLineAmounts: { a: 0.02, b: 0.01 }, discountAmount: 0, couponAmount: 0,
+    discountEvaluations: [], membershipBenefitEvaluations: [], couponEvaluation: undefined });
+  pennies.chargeLines[0].amount = 0.02; pennies.chargeLines[1].amount = 0.01;
+  pennyOrder.lines.find(line => line.id === 'line-a').amount = 0.02;
+  pennyOrder.lines.find(line => line.id === 'line-b').amount = 0.01;
+  pennyOrder.finalPayableAmount = 0.03; pennyOrder.ruleSnapshot = pennies.ruleSnapshot;
+  pennies.ruleSnapshot.earlyReturn.refundPercent = 50;
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, pennies, end, returnedAt, 0, undefined, pennyOrder, []).amount, 0.01,
+    'line and batch intermediate values do not each round the original whole-return fee');
+  const swapped = structuredClone(quote); swapped.rentalLineAmounts = { a: 100, b: 200 };
+  assert.equal(business.calculateEarlyReturnRefund('t', {}, swapped, end, returnedAt, 0, undefined, order, []).amount, null,
+    'an internally balanced target map still has to match each original request charge');
+  const duplicate = structuredClone(order); duplicate.allocations[2].id = duplicate.allocations[1].id;
+  assert.equal(calc(duplicate).amount, null, 'allocation identity is unique across the whole order, not only one line');
+  order.ruleSnapshot.earlyReturn.maxRefundAmount = 80;
+  assert.equal(calc(order).amount, 80, 'the whole-return cap is not applied per stable line');
+});
+
 test('early return uses original partial-cancellation pricing and current service facts without repeating reductions', () => {
   const business = Object.create(RentalBusinessService.prototype);
   const quote = { id: 'early-original', request: { startAt: '2026-11-01T00:00:00Z', endAt: '2026-11-11T00:00:00Z',
@@ -293,6 +544,17 @@ test('early return uses original partial-cancellation pricing and current servic
   const calculate = snapshot => business.calculateEarlyReturnRefund('t', { settings: { calendar: { timeZone: 'UTC' } } }, quote,
     quote.request.endAt, '2026-11-06T00:00:00Z', 0, undefined, snapshot);
   assert.equal(calculate(order).rentalRefund, 100, 'only remaining two units participate, not original three');
+  const partial = structuredClone(order);
+  partial.tenantId = quote.tenantId = 't'; quote.pricingContext = { timeZone: 'UTC', calendars: [], legacyDayTypeMultipliers: false };
+  partial.allocations = [{ id: 'first', orderId: 'o', orderLineId: 'line', quantity: 1, status: 'returned', metadata: { returnReceipt: {
+    batchId: 'first-batch', returnedAt: '2026-11-03T00:00:00Z', sourceAllocationId: 'remaining', orderLineId: 'line', quantity: 1 } } },
+    { id: 'remaining', orderId: 'o', orderLineId: 'line', quantity: 1, status: 'picked_up' }];
+  partial.lines[0].inventoryMode = 'quantity'; partial.lines[0].amount = 300;
+  assert.equal(calculate(partial).amount, 130, 'cancelled quantity is excluded; remaining two original net100 pieces use day2/day5 return times');
+  const missingBatch = structuredClone(partial); delete missingBatch.allocations[0].metadata.returnReceipt;
+  assert.equal(calculate(missingBatch).amount, null);
+  partial.changes[0].diff.pricingSnapshot.recalculatedRentalAmount = 201;
+  assert.equal(calculate(partial).amount, null, 'bad cancellation receipt cannot be replaced by original gross quote');
   const discounted = structuredClone(order);
   const pricing = discounted.changes[0].diff.pricingSnapshot;
   pricing.recalculatedDiscountAmount = 20;
@@ -301,6 +563,52 @@ test('early return uses original partial-cancellation pricing and current servic
   pricing.couponEvaluation = { appliesTo: 'rental', discountAmount: 10, rentalAllocations: { g: 10 } };
   discounted.finalPayableAmount = 170;
   assert.equal(calculate(discounted).rentalRefund, 85, 'remaining original discount/coupon basis survives quantity change');
+  const discountedBatch = structuredClone(discounted);
+  discountedBatch.tenantId = 't'; discountedBatch.allocations = structuredClone(partial.allocations);
+  discountedBatch.lines[0].inventoryMode = 'quantity'; discountedBatch.lines[0].amount = 300;
+  assert.equal(calculate(discountedBatch).amount, 110.5, 'remaining net170: each85 at day2/day5 contributes68/42.5');
+  for (const mutate of [value => { delete value.couponEvaluation; },
+    value => { delete value.couponEvaluation.rentalAllocations; },
+    value => { value.couponEvaluation.rentalAllocations.g = 5; },
+    value => { value.recalculatedCouponAmount = 0; },
+    value => { value.fullChargeLines.push(structuredClone(value.fullChargeLines[0])); },
+    value => { value.discountEvaluations[0].rentalAllocations.g = 5; },
+    value => { value.recalculatedDiscountAmount = 30; },
+    value => { value.membershipBenefitEvaluations = [{ appliesTo: 'rental', appliedAmount: 10, allocations: { g: 5 } }];
+      value.recalculatedDiscountAmount = 30; }]) {
+    const damaged = structuredClone(discounted); mutate(damaged.changes[0].diff.pricingSnapshot);
+    const result = calculate(damaged);
+    assert.equal(result.amount, null, 'missing cancellation net-allocation evidence stays unknown');
+    assert.equal(result.requiresReview, true);
+  }
+  const member = structuredClone(discounted);
+  member.changes[0].diff.pricingSnapshot.recalculatedDiscountAmount = 30;
+  member.changes[0].diff.pricingSnapshot.membershipBenefitEvaluations = [{ appliesTo: 'rental', appliedAmount: 10, allocations: { g: 10 } }];
+  member.finalPayableAmount = 160;
+  assert.equal(calculate(member).rentalRefund, 80, 'membership uses the cancellation receipt allocation, not the original quote selection');
+  const withService = structuredClone(member);
+  withService.serviceSnapshots = [{ occurrenceId: 'performed', serviceId: 'setup', serviceName: 'Already performed',
+    amount: 50, quantity: 1, executionStatus: 'completed', executedQuantity: 1, discountAllocatedAmount: 5, couponAllocatedAmount: 10 }];
+  const servicePricing = withService.changes[0].diff.pricingSnapshot;
+  servicePricing.recalculatedDiscountAmount = 35;
+  servicePricing.discountEvaluations.push({ applied: true, appliesTo: 'service', discountAmount: 5 });
+  servicePricing.recalculatedCouponAmount = 10;
+  servicePricing.couponEvaluation = { appliesTo: 'service', discountAmount: 10, serviceAllocations: { setup: 10 } };
+  withService.finalPayableAmount = 205;
+  const serviceResult = calculate(withService);
+  assert.equal(serviceResult.rentalRefund, 85, 'completed service benefits stay independent of remaining rental');
+  assert.equal(serviceResult.serviceRefund, 0); assert.equal(serviceResult.amount, 85);
+  const renamed = structuredClone(member);
+  const renamedPricing = renamed.changes[0].diff.pricingSnapshot;
+  renamedPricing.rentalLineAmounts = { g: 200 };
+  renamedPricing.fullChargeLines[0].code = 'rental:RENAMED';
+  assert.equal(calculate(renamed).rentalRefund, 80, 'frozen target amounts survive renamed display codes');
+  for (const map of [null, [200], {}, { foreign: 200 }, { g: -1 }, { g: NaN }]) {
+    const bad = structuredClone(renamed); bad.changes[0].diff.pricingSnapshot.rentalLineAmounts = map;
+    assert.equal(calculate(bad).amount, null, 'malformed map remains an unknown review, not a crash or legacy fallback');
+  }
+  renamedPricing.rentalLineAmounts.g = 201;
+  assert.equal(calculate(renamed).amount, null, 'invalid new map cannot fall back to legacy display-code matching');
   const missing = calculate({ ...order, changes: [] });
   assert.equal(missing.amount, null); assert.equal(missing.requiresReview, true); assert.equal(missing.maximumAmount, 200);
   const service = { occurrenceId: 's-original', serviceId: 's', serviceName: 'Service', quantity: 1, amount: 80,
@@ -314,7 +622,56 @@ test('early return uses original partial-cancellation pricing and current servic
     feeReviews: [{ type: 'service_refund', sourceId: service.occurrenceId, status: 'approved' }] }).serviceRefund, 0);
   const prior = calculate({ ...actual, chargeLines: [{ type: 'early_return_refund', code: 'early_return_refund:o', amount: -150 }] });
   assert.equal(prior.amount, 0, 'existing early-return source is not recreated under another key');
+  for (const changed of [
+    { ...actual, changes: [{ id: 'exchange', type: 'post_pickup_exchange', status: 'applied' }] },
+    { ...order, changes: [] }
+  ]) {
+    const replay = calculate({ ...changed, chargeLines: [{ type: 'early_return_refund', code: 'early_return_refund:o', amount: -50 }] });
+    assert.equal(replay.amount, 0, 'manual pricing branches cannot reopen the original early-return reduction');
+    assert.equal(replay.requiresReview, false);
+  }
+  assert.equal(calculate({ ...actual, chargeLines: [{ type: 'early_return_refund', code: 'early_return_refund:o:order', amount: -50 }] }).amount, 0,
+    'approved whole-order charge code is also an original reduction receipt');
+  const otherSource = calculate({ ...actual, feeReviews: [{ type: 'early_return_refund', sourceId: 'exchange-previous', status: 'approved' }],
+    chargeLines: [{ type: 'early_return_refund', code: 'early_return_refund:o:exchange-previous', amount: -50 }] });
+  assert.equal(otherSource.rentalRefund, 150, 'a separately approved exchange difference does not consume the final early-return source');
   assert.equal(quote.rentalAmount, 300); assert.equal(quote.request.lines[0].quantity, 3, 'history never rewritten');
+});
+
+test('Core whole-return reduction cannot reopen or double-charge an original automatic or approved receipt', () => {
+  const service = Object.create(RentalCoreService.prototype);
+  const reduction = { amount: 20, requiresReview: false, basis: ['original unused units'] };
+  for (const prior of [
+    { chargeLines: [{ code: 'early_return_refund:o', type: 'early_return_refund', amount: -50 }], feeReviews: [] },
+    { chargeLines: [{ code: 'early_return_refund:o:order', type: 'early_return_refund', amount: -50 }], feeReviews: [] },
+    { chargeLines: [], feeReviews: [{ id: 'original', type: 'early_return_refund', status: 'approved', decidedAmount: 50 }] }
+  ]) {
+    const order = { id: 'o', finalPayableAmount: 100, payableAmount: 150, adjustmentAmount: -50, ...structuredClone(prior) };
+    const before = structuredClone(order);
+    service.applyEarlyReturnRefundTo(order, reduction);
+    assert.deepEqual(order, before);
+    service.applyEarlyReturnRefundTo(order, { amount: null, maximumAmount: 100, requiresReview: true, basis: ['missing historic segment'] });
+    assert.deepEqual(order, before, 'manual fallback must not create another pending whole-return review');
+  }
+  const different = { id: 'o', finalPayableAmount: 100, payableAmount: 150, adjustmentAmount: -50,
+    chargeLines: [{ code: 'early_return_refund:o:exchange', type: 'early_return_refund', amount: -50 }],
+    feeReviews: [{ type: 'early_return_refund', sourceId: 'exchange', status: 'approved' }] };
+  service.applyEarlyReturnRefundTo(different, reduction);
+  assert.equal(different.finalPayableAmount, 80);
+  assert.equal(different.chargeLines.length, 2);
+});
+
+test('approving a stale whole-return review cannot double-reduce a prior automatic receipt', async () => {
+  const service = Object.create(RentalCoreService.prototype);
+  const order = { id: 'o', status: 'settling', finalPayableAmount: 100, payableAmount: 150, adjustmentAmount: -50,
+    chargeLines: [{ code: 'early_return_refund:o', type: 'early_return_refund', amount: -50 }],
+    feeReviews: [{ id: 'stale-review', type: 'early_return_refund', status: 'pending', suggestedAmount: 20, basis: ['old proposal'] }] };
+  const before = structuredClone(order); let writes = 0;
+  service.lockedOrder = async () => order; service.factStore = { saveOrderAggregate: async () => { writes++; } };
+  await assert.rejects(service.reviewOrderFeeReview('t', 'o', 'stale-review', { decision: 'approved', reason: 'duplicate' }, 'operator', {}), /来源.*已.*核减/);
+  assert.deepEqual(order, before); assert.equal(writes, 0);
+  await service.reviewOrderFeeReview('t', 'o', 'stale-review', { decision: 'rejected', reason: 'original reduction exists' }, 'operator', {});
+  assert.equal(order.finalPayableAmount, 100); assert.equal(order.feeReviews[0].status, 'rejected'); assert.equal(writes, 1);
 });
 
 test('early-return rental basis recovers old mixed extension from its original rental component', async () => {

@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/Agent接入改造/Agent接入改造-开发记录.md",
+      "file": "docs/Agent接入改造/历史归档/四册整理/2026-10-31/Agent接入改造-开发记录.md",
+      "bytes": 38969,
+      "sha256": "ac4e393b234c000f24730bd05c75b6e938fe27bce81be287028d117f346f5134"
+    },
+    {
+      "source": "docs/Agent接入改造/Agent接入改造-方案评审.md",
+      "file": "docs/Agent接入改造/历史归档/四册整理/2026-10-31/Agent接入改造-方案评审.md",
+      "bytes": 20128,
+      "sha256": "a1c34b78495fa12173697b5df2a82908bff2792dd4ee8b93ae64c204890f24e1"
+    },
+    {
+      "source": "docs/Agent接入改造/MCP服务-接入方案.md",
+      "file": "docs/Agent接入改造/历史归档/四册整理/2026-10-31/MCP服务-接入方案.md",
+      "bytes": 39830,
+      "sha256": "a547d8e33cbe1f0bc76f412dcb5cc59e908624f6321d4819a2c41a74d523a9f7"
+    }
+  ]
+}

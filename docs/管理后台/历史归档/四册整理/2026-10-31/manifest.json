@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-31",
+  "baseline": "8b98b1e08d7abab648edbec7f2a2b8d236dbdd6b",
+  "note": "Byte-exact original sources. Resolve original relative links from source, not the archive path. Historical text is not current authorization.",
+  "files": [
+    {
+      "source": "docs/租赁平台/租赁平台-开发记录.md",
+      "file": "docs/租赁平台/历史归档/四册整理/2026-10-31/租赁平台-开发记录.md",
+      "bytes": 234074,
+      "sha256": "690ad9abd1f48a0b93a8ec8f1d588541eda75d2104a96982c920097d55d090ff"
+    },
+    {
+      "source": "docs/租赁平台/管理后台-整体审查报告.md",
+      "file": "docs/租赁平台/历史归档/四册整理/2026-10-31/管理后台-整体审查报告.md",
+      "bytes": 59295,
+      "sha256": "944a27d000869569816587dd0b30254084a0084f0e2577d918aa006f89652e7e"
+    },
+    {
+      "source": "docs/租赁平台/管理后台-界面核查记录.md",
+      "file": "docs/租赁平台/历史归档/四册整理/2026-10-31/管理后台-界面核查记录.md",
+      "bytes": 15490,
+      "sha256": "f76b2a29809a626c4d1cb17fe5115e581b5ab37a9bbf00bee13bf048cc496c25"
+    },
+    {
+      "source": "docs/租赁平台/管理后台-视觉与交互优化方案.md",
+      "file": "docs/租赁平台/历史归档/四册整理/2026-10-31/管理后台-视觉与交互优化方案.md",
+      "bytes": 43511,
+      "sha256": "492cda38cf25f14a9b858fab97980dfb79ab6e3de544a1d70b8354b6e74c71ff"
+    },
+    {
+      "source": "docs/租赁平台/管理后台-开发任务.md",
+      "file": "docs/租赁平台/历史归档/四册整理/2026-10-31/管理后台-开发任务.md",
+      "bytes": 12112,
+      "sha256": "dc7af17e45f1b00fce38eed022bbcb589d28491cf51a105c1d71f77fbeb4d94d"
+    }
+  ]
+}

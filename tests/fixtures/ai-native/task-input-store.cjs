@@ -186,6 +186,10 @@ function createTaskInputStore(initial, constraints = {}) {
     return {
       $queryRaw: async sql => {
         const text = sql.sql ?? '', values = sql.values ?? [];
+        if (text.includes('FROM business_workspaces')) {
+          if (!Array.isArray(data.businessWorkspace)) throw Error('workspace lock facts not configured');
+          return clone(data.businessWorkspace.filter(row => row.tenantId === values[0] && row.id === values[1]));
+        }
         if (text.includes('FROM ai_client_task_policies')) {
           if (!Array.isArray(data.aiClientTaskPolicy)) throw Error('client policy table not configured');
           const keys = ['tenantId', 'workspaceId', 'channel', 'customerType', 'sceneCode', 'sceneVersion'];
