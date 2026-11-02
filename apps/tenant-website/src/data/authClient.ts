@@ -10,7 +10,7 @@ import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBoo
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
-import type { ClientMembershipSessionResponse, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import type { ClientMembershipSessionResponse, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
 export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
@@ -150,6 +150,7 @@ export const sessionApi = {
   enterpriseCommand<T>(path: string, payload: unknown) { return authedJson<T>(`/enterprise/${path}`, { method: 'POST', body: JSON.stringify(payload) }); },
   enterpriseOperation(key: string) { return authedJson<{ state: string; result?: Record<string, unknown> }>(`/enterprise/operations/${encodeURIComponent(key)}`); },
   enterpriseExtensionEligibility(orderId: string) { return authedJson<EnterpriseExtensionEligibility>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-eligibility`); },
+  enterpriseExtensionRequestOriginal(orderId: string, key: string) { return authedJson<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}`); },
   enterpriseExtensionApprovals() { return authedJson<EnterpriseExtensionApprovalView[]>('/enterprise/my-extension-approvals'); },
   enterpriseExtensionResult(id: string) { return authedJson<EnterpriseExtensionOriginalResult>(`/enterprise/extension-approvals/${encodeURIComponent(id)}/result`); },
   enterpriseApprovalResult(id: string) { return authedJson<EnterpriseApprovalOriginalResult>(`/enterprise/approvals/${encodeURIComponent(id)}/result`); },

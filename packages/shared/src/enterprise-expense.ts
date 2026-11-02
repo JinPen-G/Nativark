@@ -42,6 +42,9 @@ export interface CloseEnterpriseExtensionExecution extends EnterpriseChangeReque
   originalOperationKey: string;
   confirm: true;
 }
+export type EnterpriseExtensionRequestOriginalResult =
+  | { state: "not_recorded"; retryable: false }
+  | { state: "observed"; approval: EnterpriseExtensionApprovalView; retryable: false };
 export interface EnterpriseExtensionOriginalResult {
   approval: EnterpriseExtensionApprovalView;
   original: { state: "not_submitted" | "closed"; retryable: false } | { state: "observed"; extensionId: string; extensionState: string; retryable: false };

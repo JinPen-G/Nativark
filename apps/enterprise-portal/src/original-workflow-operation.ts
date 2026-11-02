@@ -17,7 +17,7 @@ function readReference(key: string): Pending | undefined {
   const value = JSON.parse(raw);
   if (!value || typeof value.key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.key)
     || typeof value.path !== "string" || !/^\/enterprise\/[a-zA-Z0-9_/%-]+$/u.test(value.path) || value.path.length > 600
-    || value.originalTarget !== undefined && (value.path !== "/enterprise/extension-approvals/submit" || typeof value.originalTarget !== "string" || !value.originalTarget || value.originalTarget.length > 191)
+    || value.originalTarget !== undefined && (!["/enterprise/extension-approvals/submit", "/enterprise/extension-approvals"].includes(value.path) || typeof value.originalTarget !== "string" || !value.originalTarget || value.originalTarget.length > 191)
     || !["unknown", "committed"].includes(value.state)) throw new Error("原操作引用不可读取，不能重新派发 / Original reference unavailable");
   return { key: value.key, path: value.path, state: value.state, body: "", originalTarget: value.originalTarget };
 }
@@ -90,7 +90,7 @@ export function useOriginalWorkflowOperation(scope: string) {
       if (saved) { slot.pending = saved; publish(); throw new Error("请先核对原操作，不能重新发送业务写入 / Read the original result before another write"); }
       const command = await prepare(); assertCurrent();
       const pending: Pending = { key: crypto.randomUUID(), path: command.path, body: JSON.stringify(command.input), state: "unknown", originalTarget: command.originalTarget };
-      if (pending.originalTarget !== undefined && (pending.path !== "/enterprise/extension-approvals/submit" || typeof pending.originalTarget !== "string" || !pending.originalTarget || pending.originalTarget.length > 191)) throw new Error("原续租目标引用无效");
+      if (pending.originalTarget !== undefined && (!["/enterprise/extension-approvals/submit", "/enterprise/extension-approvals"].includes(pending.path) || typeof pending.originalTarget !== "string" || !pending.originalTarget || pending.originalTarget.length > 191)) throw new Error("原续租目标引用无效");
       rememberReference(storageKey, pending);
       slot.pending = pending; publish();
       let value: T;

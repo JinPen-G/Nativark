@@ -48,7 +48,13 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
     setOriginal(result); return result;
   };
   const recoverOriginal = async (value: Pending) => {
-    current(); const receipt = await sessionApi.enterpriseOperation(value.key); current();
+    current();
+    if (value.kind === 'request') {
+      const recovered = await sessionApi.enterpriseExtensionRequestOriginal(orderId, value.key); current();
+      if (recovered.state !== 'observed' || recovered.retryable !== false || !recovered.approval.id || recovered.approval.orderId !== orderId || recovered.approval.applicantCustomerId !== host?.customerId) throw new Error('原续租申请尚待精确核对，不能重发');
+      await readResult(recovered.approval.id); clear(value); await refresh(); setSelected(recovered.approval.id); setConfirmed(false); return;
+    }
+    const receipt = await sessionApi.enterpriseOperation(value.key); current();
     if (value.closureKey) {
       const closed = await sessionApi.enterpriseOperation(value.closureKey); current();
       if (closed.state !== 'committed' || closed.result?.approvalId !== value.approvalId) throw new Error('原结束请求尚待核对，不能重发');

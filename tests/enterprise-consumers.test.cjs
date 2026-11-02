@@ -800,6 +800,19 @@ check('Extension approval page preserves unknown submit; exact original extensio
   result = { approval: { ...row, state: 'consumed', extensionId: 'ext1' }, original: { state: 'observed', extensionId: 'wrong', extensionState: 'pending_payment', retryable: false }, retryable: false };
   await assert.rejects(recover().props.onAction(), /unresolved/u); assert.equal(complete, false);
   result.original.extensionId = 'ext1'; await recover().props.onAction(); assert.equal(complete, true);
+  const submitPending = operation.pending, submitRead = operation.read, submitRecover = operation.recover;
+  operation.pending = { key: 'request-key', path: '/enterprise/extension-approvals', originalTarget: 'o1' };
+  operation.recover = async after => { await after({ state: 'committed', result: { id: row.id } }, '/enterprise/extension-approvals'); complete = true; };
+  let recoveredApproval = { ...row, orderId: 'another-order' };
+  operation.read = async path => {
+    assert.equal(path, '/enterprise/orders/o1/extension-request-operations/request-key');
+    return { state: 'observed', approval: plain(recoveredApproval), retryable: false };
+  };
+  complete = false; await assert.rejects(recover().props.onAction(), /精确核对/u); assert.equal(complete, false);
+  recoveredApproval = { ...row, applicantCustomerId: 'another-person' };
+  await assert.rejects(recover().props.onAction(), /精确核对/u); assert.equal(complete, false);
+  recoveredApproval = row; await hooks.act(() => recover().props.onAction()); assert.equal(complete, true);
+  operation.pending = submitPending; operation.read = submitRead; operation.recover = submitRecover;
   const table = nodes(hooks.value).find(n => n.type === 'table'); await hooks.act(() => table.props.columns.find(c => c.key === 'actions').render(null, row).props.onAction());
   const child = nodes(hooks.value).find(n => typeof n.type === 'function'); assert.ok(child);
   hooks.unmount(); hooks.mount(() => child.type(child.props));
@@ -818,6 +831,20 @@ check('Extension approval page preserves unknown submit; exact original extensio
   result = { approval: { ...row, state: 'closed', closedOperationKey: 'submit-key' }, original: { state: 'closed', retryable: false }, retryable: false };
   await closeButton().props.onAction(); assert.equal(closing.length, 1); assert.equal(closing[0].input.originalOperationKey, 'submit-key'); assert.equal(closing[0].input.confirm, true);
   hooks.unmount(); hooks.mount(() => child.type({ ...child.props, closureOperation, row: { ...row, id: 'expense-2', revision: 3 } })); assert.equal(submit().props.disabled, true); assert.equal(closeButton(), undefined, 'another row cannot close an unresolved submit');
+});
+
+check('Extension request recovery rejects an unrelated order and retains the exact original key on both consumers', async () => {
+  for (const web of [false, true]) {
+    const f = extensionFixture(web); await f.settle();
+    f.handlers.command = async () => { throw new Error('acknowledgement lost'); };
+    if (web) { await f.fill('date', '2090-01-03T00:00'); await f.fill('textarea', 'Original purpose'); await f.click('申请续租批准'); }
+    else { await f.page.onPreview(); f.page.onEnterpriseReason({ detail: { value: 'Original purpose' } }); await f.page.onRequestEnterpriseExtension(); }
+    const original = f.pending(); assert.ok(original);
+    f.handlers.requestOriginal = async () => ({ state: 'observed', approval: { ...extensionApproval(), orderId: 'another-order' }, retryable: false });
+    if (web) await f.click('核对原续租申请与结果');
+    else await f.page.onReadEnterpriseExtension();
+    assert.equal(f.pending().key, original.key); assert.equal(f.count('command'), 1);
+  }
 });
 
 function extensionApproval(state = 'pending') {
@@ -863,6 +890,7 @@ function extensionFixture(web = false) {
       setItem(key, value) { if (f.storageMode === 'throw') throw new Error('storage denied'); if (f.storageMode !== 'drop') storage.set(key, value); }, removeItem: key => storage.delete(key) };
     const sessionApi = { enterpriseExtensionEligibility: (...args) => invoke('eligibility', args, eligibility()),
       enterpriseExtensionApprovals: (...args) => invoke('list', args, f.rows), enterpriseExtensionResult: (...args) => invoke('result', args, f.result),
+      enterpriseExtensionRequestOriginal: (...args) => invoke('requestOriginal', args, f.receipt.state === 'committed' ? { state: 'observed', approval: f.result.approval, retryable: false } : { state: 'not_recorded', retryable: false }),
       enterpriseOperation: (...args) => invoke('receipt', args, f.receipt), enterpriseCommand: command };
     const module = load('apps/tenant-website/src/components/EnterpriseExtensionApproval.tsx', { react: hooks.runtime, 'react/jsx-runtime': hooks.jsx,
       '@rental-os/shared': { formatRentalMoney: n => String(n) }, '../data/authClient': { captureEnterpriseHostSession: capture, sessionApi, subscribeCustomerSession: (_t, fn) => events.on(fn) } },
@@ -887,6 +915,7 @@ function extensionFixture(web = false) {
       if (options.method === 'POST') { assert.equal(options.replayAfterRefresh, false); return command(url, options.data); }
       if (url.endsWith('/extension-eligibility')) return invoke('eligibility', [url], eligibility());
       if (url.endsWith('/my-extension-approvals')) return invoke('list', [url], f.rows);
+      if (url.includes('/extension-request-operations/')) return invoke('requestOriginal', [url], f.receipt.state === 'committed' ? { state: 'observed', approval: f.result.approval, retryable: false } : { state: 'not_recorded', retryable: false });
       if (url.includes('/operations/')) return invoke('receipt', [url], f.receipt);
       if (url.endsWith('/result')) return invoke('result', [url], f.result);
       throw new Error(url);

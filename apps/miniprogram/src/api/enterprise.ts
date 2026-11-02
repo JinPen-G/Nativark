@@ -1,8 +1,9 @@
 /** Enterprise eligibility and original approval reads. Writes never refresh/replay automatically. */
 import type { EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseOperationResult, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult, RequestEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking } from "@rental-os/shared";
-import type { EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval, CloseEnterpriseExtensionExecution } from "@rental-os/shared";
+import type { EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval, CloseEnterpriseExtensionExecution } from "@rental-os/shared";
 import { request } from "../core/http";
 export const fetchEnterpriseExtensionEligibility = (orderId: string) => request<EnterpriseExtensionEligibility>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-eligibility`);
+export const readEnterpriseExtensionRequestOriginal = (orderId: string, key: string) => request<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}`);
 export const fetchEnterpriseExtensionApprovals = () => request<EnterpriseExtensionApprovalView[]>("/enterprise/my-extension-approvals");
 export const requestEnterpriseExtensionApproval = (input: RequestEnterpriseExtensionApproval) => request<{ id: string; revision: number; state: string }>("/enterprise/extension-approvals", { method: "POST", data: input, replayAfterRefresh: false });
 export const submitEnterpriseExtensionApproval = (input: SubmitEnterpriseExtensionApproval) => request<EnterpriseExtensionOriginalResult>("/enterprise/extension-approvals/submit", { method: "POST", data: input, replayAfterRefresh: false });

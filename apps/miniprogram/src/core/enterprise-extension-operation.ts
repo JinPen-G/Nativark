@@ -1,7 +1,7 @@
 /** Original extension-command references only: no request body or credentials.
  * Unknown requests never dispatch again; session generations isolate late replies. */
 import type { EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
-import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution } from "../api/enterprise";
+import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionRequestOriginal, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution } from "../api/enterprise";
 import { PUBLIC_CONFIG } from "../config/public";
 import { newKey } from "./keys";
 import { contextVersion, currentServiceCode, currentSession } from "./session";
@@ -37,6 +37,12 @@ export function enterpriseExtensionOperation(orderId: string, assertView: () => 
   };
   const recover = async (): Promise<EnterpriseExtensionOriginalResult | undefined> => {
     const original = read(); if (!original) return;
+    if (original.kind === "request") {
+      const recovered = await readEnterpriseExtensionRequestOriginal(orderId, original.key); current();
+      if (recovered.state !== "observed" || recovered.retryable !== false || recovered.approval.orderId !== orderId || recovered.approval.applicantCustomerId !== customerId || !recovered.approval.id) throw new Error("原续租申请尚待精确核对，不能重发");
+      const value = await result(recovered.approval.id);
+      clear(original); return value;
+    }
     const receipt = await readEnterpriseOperation(original.key); current();
     if (original.closureKey) {
       const closed = await readEnterpriseOperation(original.closureKey); current();

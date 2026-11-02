@@ -61,6 +61,7 @@ export class EnterpriseWorkflowsController {
     return this.approvals.orderOriginal(client(req), quoteId, key);
   }
   @Get("orders/:orderId/extension-eligibility") extensionEligibility(@Req() req: CustomerRequest, @Param("orderId") id: string) { return this.extensions.eligibility(client(req), id); }
+  @Get("orders/:orderId/extension-request-operations/:key") extensionRequestOriginal(@Req() req: CustomerRequest, @Param("orderId") id: string, @Param("key") key: string) { return this.extensions.requestOriginal(client(req), id, key); }
   @Get("my-extension-approvals") ownExtensionApprovals(@Req() req: CustomerRequest) { return this.extensions.list(client(req)); }
   @Get("corporates/:corporateId/extension-approvals") extensionApprovals(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.extensions.list(client(req), id); }
   @Post("extension-approvals") requestExtensionApproval(@Req() req: CustomerRequest, @Body() input: RequestEnterpriseExtensionApprovalDto) { return this.extensions.request(client(req), input); }

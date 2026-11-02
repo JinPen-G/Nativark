@@ -325,4 +325,14 @@ test('explicit original-key closure fences late submission; committed extension 
   }
 });
 
+test('unknown request resolves only its own exact receipt and approval; absence never permits retry', async () => {
+  const f = fixture();
+  const read = (key = 'request-key', order = 'o1', customer = 'p1') => within(customer, () => f.service.requestOriginal(ctx(customer), order, key));
+  assert.deepEqual(plain(await read()), { state: 'not_recorded', retryable: false });
+  f.flags.loseAck = true; await assert.rejects(f.request(), /acknowledgement/u);
+  const result = await read(); assert.equal(result.state, 'observed'); assert.equal(result.approval.id, f.state().approvals[0].id); assert.equal(result.retryable, false);
+  assert.equal(f.state().approvals.length, 1); await assert.rejects(read('request-key', 'other-order')); await assert.rejects(read('request-key', 'o1', 'other-person'));
+  f.state().receipts[0].result = JSON.stringify({ id: 'missing' }); await assert.rejects(read());
+});
+
 process.on('exit', () => { for (const [file, hash] of sources) assert.equal(createHash('sha256').update(fs.readFileSync(file)).digest('hex'), hash, `Source changed during verification: ${file}`); });

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import dayjs from "dayjs";
-import { formatRentalMoney, type ClientOrderView, type EnterpriseExtensionApprovalView, type EnterpriseExtensionOriginalResult, type EnterpriseOperationResult } from "@rental-os/shared";
+import { formatRentalMoney, type ClientOrderView, type EnterpriseExtensionApprovalView, type EnterpriseExtensionOriginalResult, type EnterpriseExtensionRequestOriginalResult, type EnterpriseOperationResult } from "@rental-os/shared";
 import { ActionButton, Alert, Checkbox, Form, Input, SaveButton, Select, Table } from "@/components/ui/customer-entry";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { useLocale } from "@/app/locale";
@@ -106,6 +106,12 @@ export function EnterpriseExtensionApprovalsPage() {
   const refresh = async () => { await rows.refetch({ throwOnError: true }); operation.assertCurrent(); };
   const row = !rows.error && (mode !== "review" || canReview) ? rows.data?.find(r => r.id === selected) : undefined;
   const recover = async (receipt?: EnterpriseOperationResult, originalPath?: string) => {
+    if (originalPath === "/enterprise/extension-approvals" && operation.pending?.originalTarget) {
+      const orderId = operation.pending.originalTarget;
+      const original = await operation.read<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(operation.pending.key)}`);
+      if (original.state !== "observed" || original.retryable !== false || !original.approval.id || original.approval.orderId !== orderId || original.approval.applicantCustomerId !== context.session?.customer.customerId) throw new Error("原申请仍待精确核对，不能重发");
+      setSelected(original.approval.id);
+    }
     if (originalPath === "/enterprise/extension-approvals/submit") {
       const original = receipt ?? (operation.pending ? await operation.read<EnterpriseOperationResult>(`/enterprise/operations/${encodeURIComponent(operation.pending.key)}`) : undefined);
       if (original?.state !== "committed" || typeof original.result?.approvalId !== "string" || operation.pending?.originalTarget && operation.pending.originalTarget !== original.result.approvalId) throw new Error("原续租批准引用不可核对 / Original approval reference unavailable");
@@ -127,7 +133,7 @@ export function EnterpriseExtensionApprovalsPage() {
         const values = await form.validateFields(), orderId = values.orderId.trim();
         const order = await operation.read<ClientOrderView>(`/orders/${encodeURIComponent(orderId)}`); operation.assertCurrent();
         if (order.id !== orderId || !order.updatedAt || !values.newEndAt?.isValid()) throw new Error("原订单修订或时间不可核对 / Original order or time unavailable");
-        return { path: "/enterprise/extension-approvals", input: { orderId, expectedOrderUpdatedAt: order.updatedAt, extension: { newEndAt: values.newEndAt.toISOString() }, expectedRevision: 0, reason: values.reason.trim() } };
+        return { path: "/enterprise/extension-approvals", originalTarget: orderId, input: { orderId, expectedOrderUpdatedAt: order.updatedAt, extension: { newEndAt: values.newEndAt.toISOString() }, expectedRevision: 0, reason: values.reason.trim() } };
       }, async () => { await refresh(); form.resetFields(); }, refresh)} />
     </Form>}
     {mode === "review" && !canReview ? <Alert type="warning" title={english ? "Approval permission revoked" : "当前审批权限已撤销"} /> : rows.error ? <Alert type="error" title={rows.error instanceof Error ? rows.error.message : "读取失败"} /> : <Table rowKey="id" caption={english ? "Extension approval requests" : "续租批准申请"} dataSource={rows.data ?? []} loading={rows.isFetching} pagination={false} sorting={false} onRefresh={refresh} columns={[

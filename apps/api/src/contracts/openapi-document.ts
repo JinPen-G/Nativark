@@ -3634,6 +3634,7 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
     ["get", "my-rental-policies", "enterpriseOwnRentalPolicies"],
     ["get", "quotes/{quoteId}/order-operations/{key}", "enterpriseOrderOriginalResult"],
     ["get", "orders/{orderId}/extension-eligibility", "enterpriseExtensionEligibility"],
+    ["get", "orders/{orderId}/extension-request-operations/{key}", "enterpriseExtensionRequestOriginalResult"],
     ["get", "my-extension-approvals", "enterpriseOwnExtensionApprovals"], ["get", "corporates/{corporateId}/extension-approvals", "enterpriseExtensionReviewQueue"],
     ["post", "extension-approvals", "requestEnterpriseExtensionApproval", "RequestEnterpriseExtensionApproval"],
     ["post", "extension-approvals/{id}/decision", "decideEnterpriseExtensionApproval", "DecideEnterpriseExtensionApproval"],
@@ -3649,7 +3650,7 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
   ];
   const responses: Record<string, string> = {
     enterpriseApplications: "EnterpriseWorkflowList", enterpriseOwnRequests: "EnterpriseWorkflowList", enterpriseJoinRequests: "EnterpriseWorkflowList", enterpriseOwnRelations: "EnterpriseOwnRelations", previewEnterpriseInvite: "EnterpriseInvitePreview",
-    enterpriseExtensionEligibility: "EnterpriseExtensionEligibility",
+    enterpriseExtensionEligibility: "EnterpriseExtensionEligibility", enterpriseExtensionRequestOriginalResult: "EnterpriseExtensionRequestOriginalResult",
     enterpriseOwnExtensionApprovals: "EnterpriseExtensionApprovalList", enterpriseExtensionReviewQueue: "EnterpriseExtensionApprovalList",
     requestEnterpriseExtensionApproval: "EnterpriseExtensionCommandResult", decideEnterpriseExtensionApproval: "EnterpriseExtensionCommandResult",
     enterpriseExtensionOriginalResult: "EnterpriseExtensionOriginalResult", submitEnterpriseExtensionApproval: "EnterpriseExtensionOriginalResult", closeEnterpriseExtensionExecution: "EnterpriseExtensionOriginalResult",

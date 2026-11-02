@@ -3,7 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CloseEnterpriseExtensionExecution, ClientOrderExtensionRequest, DecideEnterpriseExtensionApproval, EnterpriseBookingBasis, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RentalOrder, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import type { CloseEnterpriseExtensionExecution, ClientOrderExtensionRequest, DecideEnterpriseExtensionApproval, EnterpriseBookingBasis, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, EnterpriseExtensionRequestOriginalResult, RentalOrder, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
 import { ClientApiService } from "../client/client-api.service";
 import type { ClientRequestContext } from "../client/client-auth.service";
@@ -95,6 +95,24 @@ export class EnterpriseExtensionApprovalService {
       await tx.$executeRaw`INSERT INTO enterprise_extension_approvals (tenantId,id,corporateCustomerId,applicantCustomerId,workspaceId,orderId,expectedOrderUpdatedAt,requestFingerprint,previewFingerprint,request,preview,basis,reason,expiresAt) VALUES (${context.tenantId},${id},${order.membershipSnapshot.corporateCustomerId},${context.customerId},${context.workspaceId},${order.id},${order.updatedAt},${fingerprint},${requestFingerprint(prepared.priced)},${JSON.stringify(extension)},${JSON.stringify(prepared.priced)},${JSON.stringify(basis)},${input.reason.trim()},${expiresAt})`;
       return { id, state: "pending", revision: 1, expiresAt: expiresAt.toISOString() };
     }, tx => this.commands.customer(context, tx), "shared", tx => this.core.lockOrderForUpdate(context.tenantId, input.orderId, tx));
+  }
+  async requestOriginal(context: ClientRequestContext, orderId: string, key: string): Promise<EnterpriseExtensionRequestOriginalResult> {
+    if (!key?.trim() || key.length > 128) throw new BadRequestException("原申请键无效");
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    const receipts = await this.prisma.$queryRaw<Array<{ actorUserId: string; target: string; result: object | string }>>`SELECT actorUserId,target,result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key}`;
+    const receipt = receipts[0];
+    if (!receipt) {
+      await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+      return { state: "not_recorded", retryable: false };
+    }
+    if (receipt.actorUserId !== `customer:${context.customerId}` || receipt.target !== `extension.request:${orderId}`) throw new NotFoundException("本人原续租申请不存在");
+    const payload = enterpriseJson(receipt.result) as { id?: unknown };
+    if (typeof payload.id !== "string" || !payload.id) throw new ConflictException("原续租申请收据关联缺失");
+    const row = (await this.row(context.tenantId, payload.id))[0];
+    this.owns(context, row);
+    if (row.orderId !== orderId) throw new ConflictException("原续租申请订单关联不一致");
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    return { state: "observed", approval: this.view(row), retryable: false };
   }
   async list(context: ClientRequestContext, corporateId?: string) {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, Boolean(corporateId));
