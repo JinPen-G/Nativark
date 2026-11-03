@@ -41,6 +41,7 @@ export * from "./ai-inspection-persistence";
 export * from "./ai-inspection-manual-http-draft";
 export * from "./ai-inspection-lifecycle-http-draft";
 export { AI_GATEWAY_DRAFT_SCHEMAS } from "./ai-gateway-draft-schemas";
+export type { AiLeafSchemaDraft } from "./ai-gateway-draft-schemas";
 export { AI_KNOWLEDGE_DRAFT_SCHEMAS } from "./ai-knowledge-draft-schemas";
 export { AI_USAGE_DRAFT_SCHEMAS } from "./ai-usage-draft-schemas";
 export { AI_EVENTS_DRAFT_SCHEMAS } from "./ai-events-draft-schemas";

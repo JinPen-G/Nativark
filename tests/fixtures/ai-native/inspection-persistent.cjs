@@ -12,7 +12,7 @@ exports.fixture = () => {
   const auth = new AuthService({ getAuthSession: async () => state.active ? { id: 'session-a', userId: state.user.id, audience: 'staff', currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.user, listUserWorkspaces: async () => [] },
     { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-test-secret' : undefined });
-  const credentials = { current: async () => ({ audience: 'staff', requestId: 'request-a', authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: 'tenant-a', sid: 'session-a', aud: 'staff', exp: Math.floor(Date.now()/1000)+600 })}` }) };
+  const credentials = { current: async () => ({ audience: 'staff', requestId: 'request-a', authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: 'tenant-a', sid: 'session-a', wid: state.workspace, aud: 'staff', exp: Math.floor(Date.now()/1000)+600 })}` }) };
   const guard = new ApiAuthGuard(auth, undefined, undefined, undefined, { rentalOrder: { findFirst: async () => ({ id: 'order-a' }) } });
   const template = { id: 'template-a', tenantId: 'tenant-a', categoryCode: 'vehicle', code: 'return', name: 'Synthetic', stage: 'return', version: 'v1', enabled: true,
     fields: [{ code: 'mileage', label: 'Mileage', type: 'number', required: true, usageMetric: true }, { code: 'photo', label: 'Photo', type: 'photo', required: false }] };

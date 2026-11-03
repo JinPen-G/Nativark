@@ -21,7 +21,7 @@ function setup() {
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.user, listUserWorkspaces: async () => []
   }, { get: name => name === 'AUTH_TOKEN_SECRET' ? 'synthetic-token-signing-only' : undefined });
   const credentials = { current: async () => ({ authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId,
-    sid: 'session-a', aud: 'operator', exp: Math.floor(Date.now() / 1000) + 60 })}`, requestId: 'synthetic-request', audience: state.audience }) };
+    sid: 'session-a', wid: state.workspace, aud: 'operator', exp: Math.floor(Date.now() / 1000) + 60 })}`, requestId: 'synthetic-request', audience: state.audience }) };
   const guard = new ApiAuthGuard(auth, undefined, undefined, undefined, { rentalOrder: { findFirst: async () => ({ id: 'order-a' }) } });
   const invocation = new AiOrderRouteContextAuthority(guard, credentials, 'order-a');
   const authority = new PlatformModelConfigurationAuthority(guard, credentials, 'synthetic-profile', invocation);

@@ -93,20 +93,53 @@ test('staff original receipt stays separate from failed draft linkage and late s
   recognitionBinding.dispose();
   // Load the actual thin transport with only its session/network host replaced.
   const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
-  const transportExports = {}, requests = []; let sessionVersion = 1;
+  const transportExports = {}, requests = []; let sessionVersion = 1, wirePatch = value => value, validateWire;
   const session = { tenant: { tenantId: 'tenant-1' }, currentWorkspaceId: 'space-1', user: { id: 'staff-1' } };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-transport.ts'), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: transportExports, require: module => {
+      if (module === './inspection-wire') {
+        const exported = {};
+        vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts'), 'utf8'),
+          { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: exported, require: name => {
+            assert.equal(name, './inspection-wire-schemas');
+            const registry = {};
+            vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve('apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts'), 'utf8'),
+              { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: registry, require: () => { throw Error('native registry must have no runtime package dependency'); } });
+            const shared = require('@rental-os/shared'), contracts = { ...shared.AI_INSPECTION_MANUAL_HTTP_CONTRACTS, ...shared.AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS };
+            const schemas = { ...shared.AI_INSPECTION_DRAFT_SCHEMAS, ...shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS, ...shared.AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS };
+            assert.deepEqual(JSON.parse(JSON.stringify(registry.contracts)), contracts);
+            for (const [key, value] of Object.entries(registry.schemas)) assert.deepEqual(JSON.parse(JSON.stringify(value)), schemas[key], key);
+            return registry; } });
+        validateWire = exported.validateInspectionWire; return exported;
+      }
       if (module.endsWith('/session')) return { currentSession: () => session, contextVersion: () => sessionVersion };
       if (module.endsWith('/http')) return { request: async (url, options) => {
         requests.push({ url, options });
         if (url.endsWith('host-read')) return { serverEnabled: true, execution: 'not_attested', target, draftId: 'draft-1', revision: 3,
           templateVersion: 'v1', bindingFingerprint: 'a'.repeat(64), actionId: 'action-1', context: recognitionHost.context,
-          capabilities: { edit: true, evidence: true, review: true, submit: true } };
-        if (url.endsWith('result-read')) return { ...reference, candidates: [candidate], status: 'available' };
-        if (url.endsWith('result-save')) return { status: 'saved' };
-        if (url.endsWith('result-save-receipt')) return { status: 'found' };
-        if (url.endsWith('submission-read')) return { status: 'submitted', inspectionId: 'inspection-original', draftLinked: false };
+          capabilities: { edit: true, evidence: true, review: true, submit: true }, observedAt: '2026-11-04T00:00:00Z' };
+        if (url.endsWith('template-read')) return wirePatch({ scope: { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'space-1' },
+          owner: { actorKind: 'user', actorId: 'staff-1' }, audience: 'staff', orderId: target.orderId, allocationId: target.allocationId,
+          assetId: 'asset-1', stage: target.stage, allocationStatus: 'allocated', bindingFingerprint: 'a'.repeat(64), status: 'template_ready',
+          semantics: 'read_projection_not_inspection_or_action_authorization', template: { id: 'template-1', tenantId: 'tenant-1', categoryCode: 'camera',
+            code: 'template-1', name: 'Inspection', stage: 'pickup', version: 'v1', enabled: true,
+            fields: [{ code: 'reading', label: 'Reading', type: 'number', required: true }] } });
+        if (url.endsWith('draft-read')) return wirePatch({ ...structuredClone(detail), revision: 3, assetId: 'asset-1',
+          inspectionId: null, bindingFingerprint: 'a'.repeat(64), recognitionEvidence: 'caller_supplied_not_model_execution_proof' });
+        if (url.endsWith('result-read')) return wirePatch({ ...reference, candidates: [candidate], status: 'available',
+          resultHash: 'a'.repeat(64), inputFingerprint: 'b'.repeat(64), runId: 'run-original', stepId: 'step-original',
+          observedAt: '2026-11-04T00:00:00Z', trust: 'untrusted_candidate', automaticRetry: false, persistence: 'not_saved',
+          execution: 'not_attempted', recognitionEvidence: 'persisted_image_step', nextAction: 'human_review' });
+        if (url.endsWith('result-save')) return wirePatch({ status: 'saved', result: { draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null }, execution: 'not_attempted' });
+        if (url.endsWith('result-save-receipt') || url.endsWith('draft-operation')) return wirePatch({ status: 'found', result: { draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null } });
+        if (url.endsWith('draft-edit') || url.endsWith('evidence-replace')) return wirePatch({ draftId: 'draft-1', revision: 4, status: 'draft_saved', inspectionId: null });
+        if (url.endsWith('submission-review') || url.endsWith('submission-prepare')) return wirePatch({ draftId: 'draft-1', revision: 4,
+          status: 'prepared', inspectionId: null, mode: 'manual_review_only', businessValidation: 'required_at_original_inspection_entry' });
+        if (url.endsWith('submission-preparation')) return wirePatch({ status: 'found', execution: 'not_attested',
+          result: { draftId: 'draft-1', revision: 4, status: 'prepared', inspectionId: null }, mode: 'manual_review_only', businessValidation: 'required_at_original_inspection_entry' });
+        if (url.endsWith('submission-read')) return wirePatch({ draftId: 'draft-1', revision: 3, retryable: false,
+          actionId: 'action-1', requestHash: 'a'.repeat(64), semantics: 'original_receipt_observation_not_submission_or_draft_link',
+          status: 'submitted', inspectionId: 'inspection-original', draftLinked: false });
         throw Error('unexpected operation');
       } };
       throw Error('unexpected dependency');
@@ -116,11 +149,75 @@ test('staff original receipt stays separate from failed draft linkage and late s
     { ...reference, url: 'https://not-a-resource.invalid' })); assert.equal(requests.length, 0);
   const originalReference = structuredClone(reference);
   const transport = await transportExports.createStaffInspectionTransportHost({ ...target, draftId: 'draft-1' }, undefined, originalReference);
+  const shared = require('@rental-os/shared'), validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor({
+    AiInspectionResultReadRequest: shared.AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS.AiInspectionResultReadRequest,
+    AiInspectionDraftReadRequest: shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS.AiInspectionDraftReadRequest }, {});
+  for (const [operation, input] of [['result-read', originalReference], ['draft-read', { ...target, draftId: 'draft-1' }],
+    ['submission-read', { ...target, draftId: 'draft-1' }]]) {
+    const schema = ({ ...shared.AI_INSPECTION_MANUAL_HTTP_CONTRACTS, ...shared.AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS })[operation].request;
+    assert.equal(validateWire(operation, 'request', input), validators[schema](input));
+    assert.equal(validateWire(operation, 'request', { ...input, credential: 'forbidden' }), false);
+  }
+  assert.equal(validateWire('result-read', 'response', undefined), false);
   originalReference.taskId = 'task-other';
+  assert.equal((await transport.templates.read(target)).template.fields[0].code, 'reading');
+  assert.equal((await transport.drafts.read({ ...target, draftId: 'draft-1' })).revision, 3);
+  wirePatch = value => ({ ...value, privateNote: 'forbidden' });
+  await assert.rejects(transport.templates.read(target)); await assert.rejects(transport.drafts.read({ ...target, draftId: 'draft-1' }));
+  wirePatch = value => value;
   await transport.recognition.read(); await transport.recognition.save('save-original'); await transport.recognition.reconcileSave('save-original');
   assert.equal(requests.find(row => row.url.endsWith('result-read')).options.data.taskId, 'task-original');
   assert.equal(requests.find(row => row.url.endsWith('result-save')).options.replayAfterRefresh, false);
+  const editCommand = { ...target, draftId: 'draft-1', operationId: 'edit-original', expectedRevision: 3,
+    bindingFingerprint: 'a'.repeat(64), edits: [{ fieldCode: 'reading', decision: 'manual', value: 42 }] };
+  const evidenceCommand = { ...editCommand, evidence: [] }; delete evidenceCommand.edits;
+  const preparation = { ...target, draftId: 'draft-1', operationId: 'prepare-original', expectedRevision: 3, actionId: 'action-1' };
+  const receiptCalls = [() => transport.drafts.edit(editCommand), () => transport.drafts.replaceEvidence(evidenceCommand),
+    () => transport.drafts.reconcileOperation({ kind: 'edit', request: editCommand }),
+    () => transport.drafts.reconcileOperation({ kind: 'evidence', request: evidenceCommand }),
+    () => transport.recognition.save('save-original'), () => transport.recognition.reconcileSave('save-original'),
+    () => transport.submission.prepareReview(preparation),
+    () => transport.submission.reconcilePreparation({ kind: 'prepareReview', request: preparation })];
+  for (const call of receiptCalls) await call();
+  wirePatch = value => value.result ? { ...value, result: { ...value.result, draftId: 'foreign-draft' } } : { ...value, draftId: 'foreign-draft' };
+  for (const call of receiptCalls) await assert.rejects(call);
+  wirePatch = value => value;
+  const largeDraft = { ...structuredClone(detail), assetId: 'asset-1', inspectionId: null,
+    bindingFingerprint: 'a'.repeat(64), recognitionEvidence: 'caller_supplied_not_model_execution_proof' };
+  const largeFields = Object.fromEntries(Array.from({ length: 65 }, (_, index) => ['field-' + index, '😀'.repeat(2000)]));
+  largeDraft.state.fields = Object.fromEntries(Object.entries(largeFields).map(([key, value]) => [key, { value, decision: 'manual', actorId: 'staff-1' }]));
+  largeDraft.state.submission = { actionId: 'action-1', requestHash: 'a'.repeat(64), body: { templateId: target.templateId, results: largeFields, attachments: [] } };
+  assert.ok(JSON.stringify(largeDraft).length > 512000);
+  const draftSchemas = { ...shared.AI_INSPECTION_DRAFT_SCHEMAS, ...shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS };
+  const responseValidators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
+    Object.fromEntries(Object.entries(draftSchemas).filter(([key]) => ['AiInspectionDraftReadResponse', 'AiInspectionCandidateDraft', 'AiInspectionSourceDraft', 'AiInspectionValueDraft', 'AiStaffInspectionHostProjection'].includes(key))), {});
+  assert.equal(responseValidators.AiInspectionDraftReadResponse(largeDraft), true);
+  assert.equal(validateWire('draft-read', 'response', largeDraft), true);
+  wirePatch = () => largeDraft;
+  assert.equal(Object.keys((await transport.drafts.read({ ...target, draftId: 'draft-1' })).state.fields).length, 65);
+  const lowercaseTime = { serverEnabled: true, execution: 'not_attested', target, draftId: 'draft-1', revision: 3,
+    templateVersion: 'v1', bindingFingerprint: 'a'.repeat(64), actionId: 'action-1', context: recognitionHost.context,
+    capabilities: { edit: true, evidence: true, review: true, submit: true }, observedAt: '2026-11-04t12:00:00z' };
+  assert.equal(responseValidators.AiStaffInspectionHostProjection(lowercaseTime), true);
+  assert.equal(validateWire('host-read', 'response', lowercaseTime), true);
+  for (const observedAt of ['2016-12-31T23:59:60Z', '2026-11-04 12:00:00Z', '2026-02-31T00:00:00Z', '2026-11-04T24:00:00Z']) {
+    const value = { ...lowercaseTime, observedAt };
+    assert.equal(validateWire('host-read', 'response', value), responseValidators.AiStaffInspectionHostProjection(value), observedAt);
+  }
+  wirePatch = value => value;
   const receipt = await transport.submission.reconcile({ ...target, draftId: 'draft-1' }); assert.equal(receipt.draftLinked, false);
+  for (const patch of [value => ({ ...value, resultHash: undefined }), value => ({ ...value, taskId: 'another-task' }),
+    value => ({ ...value, automaticRetry: true }), value => ({ ...value, credential: 'private' }),
+    value => ({ ...value, observedAt: '2026-02-31T00:00:00Z' }),
+    value => ({ ...value, candidates: [{ ...candidate, privateNote: 'not allowed' }] }),
+    value => ({ ...value, candidates: [{ ...candidate, confidence: 2 }] }),
+    value => ({ ...value, candidates: [{ ...candidate, value: { kind: 'number', value: Infinity } }] })]) {
+    wirePatch = patch; await assert.rejects(transport.recognition.read());
+  }
+  wirePatch = value => ({ ...value, draftId: 'another-draft' });
+  await assert.rejects(transport.submission.reconcile({ ...target, draftId: 'draft-1' }));
+  wirePatch = value => ({ ...value, status: 'submission_unknown', candidates: [candidate] });
+  await assert.rejects(transport.recognition.read()); wirePatch = value => value;
   const count = requests.length; sessionVersion++;
   await assert.rejects(transport.recognition.read()); assert.equal(requests.length, count);
 });

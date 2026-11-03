@@ -157,9 +157,9 @@ test("原订单事实：实际页面零金额、缺依据、切身份与卸载�
   assert.equal(switched.calls.length, 0, "page lifecycle runs with explicit offline source boundaries");
 });
 
-test("AI原checkout交接：实例host、人工复读原报价、默认关闭与hide/登录隔离", async () => {
+test("AI原checkout交接：实例host、人工复读原报价、默认关闭与hide/登录隔离", async t => {
   const handoff = {
-    contractVersion: "ain-booking-draft-1", handoffRef: "synthetic-handoff", bookingDraftId: "synthetic-draft", revision: 1,
+    contractVersion: "ain-booking-draft-1", handoffRef: "22222222-2222-4222-8222-222222222222", bookingDraftId: "33333333-3333-4333-8333-333333333333", revision: 1,
     audience: "customer", surface: "client_miniprogram", scope: { kind: "workspace", tenantId: "t", workspaceId: "w" },
     expiresAt: "2035-01-02T00:00:00Z", actionCode: "OPEN_BOOKING", submission: "original_booking_page_required", inventory: "not_reserved",
     fields: { quoteId: "original-quote", timeZone: "Asia/Shanghai", startAt: "2035-01-03T00:00:00Z", endAt: "2035-01-04T00:00:00Z",
@@ -172,13 +172,14 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   const session = r.load("core/session"); session.saveSession(sessionResponse(), "camera", "login");
   r.load("pages/checkout/index");
   const page = { ...r.page, data: JSON.parse(JSON.stringify(r.page.data)), setData(update) { Object.assign(this.data, update); this.writes++; }, writes: 0 };
+  t.after(() => page.onUnload());
   page.onLoad(); page.onShow(); page.onHide();
   assert.equal(r.calls.length, 0); assert.equal(page.data.aiEnabled, false);
   let reads = 0;
-  const host = { enabled: true, handoffRef: handoff.handoffRef,
+  const host = { enabled: true, mode: "interactive", handoffRef: handoff.handoffRef,
     capability: { tenantCode: "merchant", serviceCode: "camera", customerId: "customer-one", tenantId: "t", workspaceId: "w", releaseRevision: "r1" },
     readBookingHandoff: async () => { reads++; return JSON.parse(JSON.stringify(handoff)); } };
-  page.attachHost(host); page.onShow(); assert.equal(reads, 0); assert.equal(r.calls.length, 0);
+  page.onShow(); page.attachHost(host); assert.equal(reads, 0); assert.equal(r.calls.length, 0);
   await page.onReadBookingHandoff(); assert.equal(page.data.aiStatus, "available"); assert.equal(r.calls.length, 0);
   await page.onContinueBookingHandoff(); assert.equal(page.data.aiStatus, "continued"); assert.equal(page.data.payable, 12);
   assert.equal(page.data.deposit, 0); assert.equal(page.data.aiQuoteId, "original-quote"); assert.equal(reads, 2);
@@ -207,7 +208,12 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   assert.equal(submittedCalls, 1, "single flight, not business idempotency");
   page.onHide(); const hiddenWrites = page.writes;
   finishSubmit(receipt); await pendingSubmit; assert.equal(page.writes, hiddenWrites);
-  page.onShow(); assert.equal(page.data.aiStatus, "pending_reconcile");
+  page.onShow(); assert.equal(page.data.aiStatus, "unavailable"); assert.equal(page.aiHost, undefined);
+  page.attachHost({ ...submissionHost, mode: "receipt_only", readBookingHandoff: undefined, acceptBookingSubmission: undefined,
+    submitAcceptedBooking: undefined, readBookingAcceptance: async () => ({ contractVersion: "ain-booking-acceptance-read-1",
+      handoffRef: handoff.handoffRef, operationKey: acceptance.operationKey, currentUse: "not_authorized_by_receipt",
+      execution: "not_attested", retryable: false, state: "observed", acceptance, nextAction: "read_original_submission" }) });
+  assert.equal(page.data.aiStatus, "pending_reconcile");
   await page.onReadBookingSubmission(); assert.equal(receiptCalls, 1); assert.equal(page.data.aiStatus, "order_observed");
   await page.onSubmitAcceptedBooking(); assert.equal(submittedCalls, 1, "recovery never resends");
   page.onOpenAiOrder(); assert.ok(r.navigations.some(value => JSON.stringify(value).includes("original-order")));
@@ -236,7 +242,7 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   assert.equal(lateConsumer.snapshotAcceptance(), undefined);
   lateConsumer.destroy();
   const transport = runtime(req => { assert.equal(req.method, "POST");
-    assert.ok(req.url.includes("/api/client/v1/ai-native/entry/booking-submissions/"));
+    assert.ok(req.url.includes("/api/client/v1/ai-native/wechat-entry/booking-submissions/"));
     ok(req, req.url.endsWith("/accept") ? acceptance : receipt); });
   transport.load("core/session").saveSession(sessionResponse(), "camera", "login");
   const originalBookingApi = transport.load("api/orders");
@@ -257,18 +263,23 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   await page.onReadBookingHandoff(); assert.equal(page.data.aiStatus, "unavailable");
   page.onUnload(); const unloadedWrites = page.writes; await page.onReadBookingHandoff(); assert.equal(page.writes, unloadedWrites);
 
-  const capability = { contractVersion: "ain-client-host-capabilities-1", enabled: true, audience: "customer",
+  const capability = { contractVersion: "ain-client-host-capabilities-2", enabled: true, audience: "customer",
     surface: "client_miniprogram", channel: "wechat_miniprogram", customerId: "customer-one", customerType: "personal",
     tenantCode: "merchant", serviceCode: "camera", scope: { kind: "workspace", tenantId: "t", workspaceId: "w" },
     policy: { revision: 1, allowRead: true, allowCreate: true }, releaseRevision: "r1",
     observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
-    capabilities: { entryActions: ["CREATE_BOOKING_DRAFT", "OPEN_BOOKING"], bookingDrafts: true, savedDeliveryAddresses: false },
+    capabilities: { entryActions: ["CREATE_BOOKING_DRAFT", "OPEN_BOOKING"], bookingDrafts: true, savedDeliveryAddresses: false, bookingReceiptRead: true },
     authorization: "observation_only_recheck_each_action" };
-  let pendingCapability, holdCapability = false, hostSubmitCalls = 0, holdSubmission = false, pendingSubmission;
+  let pendingCapability, holdCapability = false, hostSubmitCalls = 0, hostAcceptanceReads = 0, holdSubmission = false, pendingSubmission;
   const factoryRuntime = runtime(req => {
     assert.equal(req.method, "POST"); assert.equal(req.header.Authorization, "Bearer access-one");
-    if (req.url.endsWith("/api/client/v1/ai-native/entry/host-capabilities/read")) {
+    if (req.url.endsWith("/api/client/v1/ai-native/wechat-entry/host-capabilities/read")) {
       same(req.data, {}); if (holdCapability) pendingCapability = req; else ok(req, plain(capability));
+    } else if (req.url.endsWith("/booking-submissions/acceptance/read")) {
+      hostAcceptanceReads++; same(req.data, { handoffRef: handoff.handoffRef });
+      ok(req, { contractVersion: "ain-booking-acceptance-read-1", handoffRef: handoff.handoffRef,
+        operationKey: acceptance.operationKey, currentUse: "not_authorized_by_receipt", execution: "not_attested",
+        retryable: false, state: "observed", acceptance, nextAction: "read_original_submission" });
     } else if (req.url.endsWith("/booking-submissions/accept")) {
       same(req.data, { handoffRef: handoff.handoffRef }); ok(req, acceptance);
     } else if (req.url.endsWith("/booking-submissions/submit")) {
@@ -277,7 +288,7 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
     } else if (req.url.endsWith("/booking-submissions/read")) {
       same(req.data, { acceptanceRef: acceptance.acceptanceRef }); ok(req, receipt);
     } else {
-      assert.ok(req.url.endsWith("/api/client/v1/ai-native/entry/booking-handoffs/read"));
+      assert.ok(req.url.endsWith("/api/client/v1/ai-native/wechat-entry/booking-handoffs/read"));
       same(req.data, { handoffRef: handoff.handoffRef }); ok(req, handoff);
     }
   });
@@ -290,22 +301,35 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   assert.equal(typeof trusted.submitAcceptedBooking, "function"); assert.equal(JSON.stringify(trusted).includes("access-one"), false);
   same(await trusted.readBookingHandoff({ handoffRef: handoff.handoffRef }), handoff);
   assert.equal(factoryRuntime.calls.length, 4, "one initial read, then capability/handoff/capability for an explicit action");
+  capability.contractVersion = "ain-client-host-capabilities-1";
+  assert.equal(await factory(publication).openFromUser(handoff.handoffRef), null);
+  capability.contractVersion = "ain-client-host-capabilities-2";
+  const receiptOnly = plain(capability);
+  capability.policy.allowCreate = false; capability.capabilities = { entryActions: [], bookingDrafts: false, savedDeliveryAddresses: false, bookingReceiptRead: true };
+  const readOnly = await factory(publication, "receipt_only").openFromUser(handoff.handoffRef);
+  assert.ok(readOnly?.enabled); assert.equal(readOnly.mode, "receipt_only"); assert.equal(readOnly.submitAcceptedBooking, undefined);
+  Object.assign(capability, receiptOnly);
   same(await trusted.acceptBookingSubmission({ handoffRef: handoff.handoffRef }), acceptance);
   const submitDecision = { acceptanceRef: acceptance.acceptanceRef, decision: "submit_original_booking" };
   const sent = trusted.submitAcceptedBooking(submitDecision);
-  await assert.rejects(trusted.submitAcceptedBooking(submitDecision));
+  await assert.rejects(async () => trusted.submitAcceptedBooking(submitDecision));
   assert.equal((await sent).state, "unknown"); assert.equal(hostSubmitCalls, 1);
-  await assert.rejects(trusted.submitAcceptedBooking(submitDecision));
+  await assert.rejects(async () => trusted.submitAcceptedBooking(submitDecision));
   assert.equal((await trusted.readBookingSubmission({ acceptanceRef: acceptance.acceptanceRef })).state, "observed");
   assert.equal(hostSubmitCalls, 1, "unknown recovery only reads the original receipt");
   factoryRuntime.load("pages/checkout/index");
   const boundPage = { ...factoryRuntime.page, data: plain(factoryRuntime.page.data), writes: 0,
     setData(update) { Object.assign(this.data, update); this.writes++; } };
-  boundPage.onLoad(); boundPage.attachHost(trusted); boundPage.onShow();
+  t.after(() => boundPage.onUnload());
+  boundPage.onLoad(); boundPage.onShow(); boundPage.attachHost(trusted);
   assert.equal(await boundPage.attachPublishedBooking(publication, handoff.handoffRef), true);
-  assert.equal(boundPage.data.aiReceiptAvailable, false);
-  const beforeEmptyRecovery = factoryRuntime.calls.length;
-  await boundPage.onReadBookingSubmission(); assert.equal(factoryRuntime.calls.length, beforeEmptyRecovery);
+  assert.equal(boundPage.data.aiReceiptAvailable, true, "original acceptance lookup enables explicit receipt recovery without local acceptance");
+  const beforeRecovery = { calls: factoryRuntime.calls.length, submissions: hostSubmitCalls, acceptanceReads: hostAcceptanceReads };
+  await boundPage.onReadBookingSubmission();
+  assert.equal(hostAcceptanceReads, beforeRecovery.acceptanceReads + 1);
+  assert.equal(hostSubmitCalls, beforeRecovery.submissions, "explicit original acceptance and receipt reads never submit again");
+  assert.equal(factoryRuntime.calls.length, beforeRecovery.calls + 6, "two original reads with current capability checks");
+  assert.equal(boundPage.data.aiStatus, "order_observed");
   holdCapability = true;
   const lateBinding = boundPage.attachPublishedBooking(publication, handoff.handoffRef);
   await new Promise(resolve => setImmediate(resolve)); boundPage.onHide();
