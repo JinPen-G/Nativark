@@ -4,7 +4,7 @@
 
 ## 当前目标与权威入口
 
-负责人要求停止零散切片，集中最接近100%的整项，验证完成的归属批次及时本地提交。当前优先原AIN-02：后台对话受理/原Task元数据、开业九分区、订单原执行及结果消费已固定于`fae3d20a`；本批员工正式HTTP联合→封闭schema→原显示投影、当前客户v2与旧协议拒绝夹具已补。员工独立核查确认的跨draft收据关联、超合同聚合门和日期误拒已修、复读确认原反例；本地微信schema由正式shared运行出口自动生成并验证一致，不引入运行时包依赖或私有DTO。客户小程序隐藏后清私有host，只能显式绑定receipt_only再读原acceptance/submission，unknown不重发；旧测试的自动恢复假设已纠正。员工B11 8项、客户两端各1项、原员工HTTP 1项、平台Auth组合3项与native安全/schema一致性已验；正式私有包声明admin含平台、客户小程序、员工无诊断/源码回退0，网站仍有四处深导入，整体检查退出1。当前未跨AIN-02全文G4，原75%不变；下一入口只补网站正式出口归属、全合同版本与升级回退固定基线和跨AI整体冻结；平台代表能力组件/API兼容与断线隔离已接，不转回完整AIN-12聊天/隔离执行前置。详细实现、失败、命令和门槛见[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)，不在接续另抄修复流水。
+负责人要求停止零散切片，集中最接近100%的整项，验证完成的归属批次及时本地提交。当前优先原AIN-02：后台对话受理/原Task元数据、开业九分区、订单原执行及结果消费已固定于`fae3d20a`；本批员工正式HTTP联合→封闭schema→原显示投影、当前客户v2与旧协议拒绝夹具已补。员工独立核查确认的跨draft收据关联、超合同聚合门和日期误拒已修、复读确认原反例；本地微信schema由正式shared运行出口自动生成并验证一致，不引入运行时包依赖或私有DTO。客户小程序隐藏后清私有host，只能显式绑定receipt_only再读原acceptance/submission，unknown不重发；旧测试的自动恢复假设已纠正。员工B11 8项、客户两端各1项、原员工HTTP 1项、平台Auth组合3项与native安全/schema一致性已验；正式私有包声明admin含平台、客户小程序、员工无诊断/源码回退0，网站仍有四处深导入，整体检查退出1。当前未跨AIN-02全文G4，原75%不变；下一入口只补网站正式出口归属、固定包消费者通过及跨AI整体冻结；当前28版本/601leaf组件/411路径已生成候选哈希，全族出版7项及事件/取消/部分完成语义已验；独立核查指出本套出版矩阵未给每schema有效fixture，已分开原始/发布依赖并输出未命中清单；须与已有专项证据交叉核对，不能用全族遍历冒充每合同已验，也不据本套未命中认定仓库无测试。仍非已批准冻结或发布。平台代表能力组件/API兼容与断线隔离已接，不转回完整AIN-12聊天/隔离执行前置。详细实现、失败、命令和门槛见[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)，不在接续另抄修复流水。
 
 源“AI Native主线-服务端”已停写，本会话“any干活用”在foundation继续原专项；其他客户端文件归属仍按具体文件核验，不凭idle/无diff/未送达消息接管。原63/Codex28与独立押金触发已收口，不恢复旧队列。对话历史/生命周期/原受理日志、关闭及轮换、订单首次模型执行与原结果均保留；局部开业只到Task元数据，未接开业执行/事实/采用；订单仍缺其他能力/旧历史接手/完整恢复消费。unknown始终按原键读取，日志不授权限；清理、隐藏、取消请求和TTL均不证明未消耗。需求v1.14/任务v1.18及G1～G4不变，本轮未启浏览器/真实服务、迁移、外联、推送/合main或生产启用。
 
@@ -33,7 +33,7 @@
 
 | 原任务 / 域 | 尚需处理或核实 | 入口 / 证据 |
 | --- | --- | --- |
-| AIN-02合同冻结 | 后台、客户v2及员工正式wire/schema消费已验；员工独立反例修复、微信本地注册表同源检查通过。官网四处深导入仍待归属；平台代表能力组件/API成功/断线/旧字段及身份隐藏隔离已补，尚缺全版本升级回退/跨AI整体冻结，整体包检查退出1，不判全文100% | [集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)、[正式出口](../../packages/shared/src/index.ts)、[员工wire](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)；未装host保持unavailable |
+| AIN-02合同冻结 | 后台、客户v2及员工正式wire/schema消费已验；员工独立反例修复、微信本地注册表同源检查通过。官网四处深导入仍待归属；平台代表能力组件/API成功/断线/旧字段及身份隐藏隔离已补，尚缺网站固定产物消费通过和跨AI整体冻结；全族出版/版本哈希、原升级回退规则及状态语义已补候选证据，整体包检查仍退出1，不判全文100% | [集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)、[正式出口](../../packages/shared/src/index.ts)、[员工wire](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)；未装host保持unavailable |
 | AIN-05/11/25 | 管理计数、持久CALLS、recorded生成及AppModule已接；三场景HTTP/多轮变体、真实计数/能力/费率、平台专用audit生产者、平台旧任务善后及SLO仍有缺口 | [模型组合](../../apps/api/src/modules/ai-native/task-model-gateway.composition.ts)，记录“标准计数与原任务计数执行链”“平台探测标准入口与停用后历史” |
 | AIN-06/09/13/15/21/22 | 混合模型/业务完整恢复、多行组合与原范围核对、企业身份和完整报价/预约链；客户上下文澄清不等于业务参数选择，unknown不重派 | [请求场景](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)、原28项/ENTRY摘要及“超限澄清有界连续轮” |
 | AIN-12/14/16 | 后台完整消息/事件及实际场景消费；通知设置以外的获准分区、普通资料写入、变化后重确认、原Core提交与失败恢复 | [正式providers](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)、原28项摘要；只读任务中心不等于完整可执行助手 |

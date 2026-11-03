@@ -10,10 +10,21 @@ const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts
 const { AI_LEAF_COMPONENT_SCHEMAS: published } = require("../apps/api/src/contracts/ai-leaf-components");
 const { aiLeafToOpenApi30: convert } = require("../apps/api/src/contracts/ai-leaf-openapi");
 const { OPENAPI_DOCUMENT, API_CONTRACT_OPERATIONS } = require("../apps/api/src/contracts/openapi-document");
-const leaves = [shared.AI_GATEWAY_DRAFT_SCHEMAS, shared.AI_KNOWLEDGE_DRAFT_SCHEMAS, shared.AI_USAGE_DRAFT_SCHEMAS, shared.AI_EVENTS_DRAFT_SCHEMAS, shared.AI_INSPECTION_DRAFT_SCHEMAS, shared.AI_PROPOSAL_DRAFT_SCHEMAS, shared.AI_ORDER_FACTS_DRAFT_SCHEMAS, shared.AI_TASK_INPUT_DRAFT_SCHEMAS, shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS, shared.AI_QUOTE_SELECTION_DRAFT_SCHEMAS, shared.AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS];
-leaves.push(shared.AI_APPROVED_SETTINGS_DRAFT_SCHEMAS);
-leaves.push(shared.AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS);
-const original = Object.assign({}, ...leaves);
+// Scope and task-observation schemas publish through their original component
+// assemblers, not the leaf assembler. Every other exported AI schema family is
+// covered here; embedded families may overlap only with identical definitions.
+const otherAssemblers = new Set(['AI_SCOPE_DRAFT_SCHEMAS', 'AI_TASK_OBSERVATION_DRAFT_SCHEMAS']);
+const normalizeRefs = value => Array.isArray(value) ? value.map(normalizeRefs)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) =>
+    [key, key === '$ref' && typeof child === 'string' ? child.replace(/^urn:rental:counting:/u, '#/components/schemas/') : normalizeRefs(child)])) : value;
+const families = Object.entries(shared).filter(([name, value]) => name.startsWith('AI_') && name.endsWith('SCHEMAS')
+  && value && typeof value === 'object' && !otherAssemblers.has(name));
+const leaves = families.map(([, value]) => normalizeRefs(value));
+const original = {};
+for (const leaf of leaves) for (const [name, schema] of Object.entries(leaf)) {
+  if (Object.hasOwn(original, name)) assert.deepEqual(original[name], schema, `conflicting shared schema ${name}`);
+  else original[name] = schema;
+}
 // AJV consumes JSON Schema, not OpenAPI 3.0's boolean exclusive-bound spelling.
 function forAjv(value) {
   if (Array.isArray(value)) return value.map(forAjv);
@@ -27,16 +38,45 @@ function forAjv(value) {
   }
   return result;
 }
-const rawValidators = h.validatorsFor(original, base), publishedValidators = h.validatorsFor(forAjv(published), base);
+const dependencies = forAjv(OPENAPI_DOCUMENT.components.schemas);
+const rawDependencies = { ...dependencies, ...forAjv(base),
+  ...forAjv(require('../apps/api/src/contracts/ai-task-draft-schemas').AI_TASK_DRAFT_COMPONENT_SCHEMAS),
+  ...Object.assign({}, ...Object.entries(shared).filter(([name, value]) => name.startsWith('AI_') && name.endsWith('SCHEMAS')
+    && value && typeof value === 'object').map(([, value]) => normalizeRefs(value))) };
+const comparedRaw = { ...original, ...Object.assign({}, ...[...otherAssemblers].map(name => shared[name])) };
+const comparedPublished = Object.fromEntries(Object.keys(comparedRaw).map(name => [name, dependencies[name]]));
+const rawValidators = h.validatorsFor(comparedRaw, rawDependencies), publishedValidators = h.validatorsFor(comparedPublished, dependencies);
 
 test("all leaf types/schemas are available through the unique shared entry and OpenAPI components only", () => {
-  assert.equal(new Set(leaves.flatMap(leaf => Object.keys(leaf))).size, Object.keys(original).length);
+  assert.ok(families.length > 30, 'all current shared contract families must participate');
   assert.deepEqual(Object.keys(published).sort(), Object.keys(original).sort());
+  for (const family of otherAssemblers) for (const [name, schema] of Object.entries(shared[family])) {
+    assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], convert(schema, name), `${family}/${name}`);
+  }
   for (const [name, schema] of Object.entries(published)) {
     assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], schema);
     assert.ok(!Object.hasOwn(base, name), `collision with C01/C02: ${name}`);
   }
-  assert.ok(API_CONTRACT_OPERATIONS.every(row => !/\/ai(?:-native)?\//u.test(row.path)));
+  const inspectRefs = value => {
+    if (!value || typeof value !== 'object') return;
+    if (value.$ref) {
+      const match = /^#\/components\/schemas\/([A-Za-z][A-Za-z0-9_]*)$/u.exec(value.$ref);
+      assert.ok(match && Object.hasOwn(OPENAPI_DOCUMENT.components.schemas, match[1]), `unresolved published reference ${value.$ref}`);
+    }
+    Object.values(value).forEach(inspectRefs);
+  };
+  Object.values(published).forEach(inspectRefs);
+  const aiOperations = API_CONTRACT_OPERATIONS.filter(row => row.path.includes('/ai-native/') || row.path.startsWith('/api/platform/ai/'));
+  assert.ok(aiOperations.length > 0, 'existing AI routes remain explicitly published');
+  for (const row of aiOperations) {
+    const operation = OPENAPI_DOCUMENT.paths[row.path][row.method];
+    assert.ok(operation, `${row.method} ${row.path}`);
+    assert.deepEqual(operation['x-requiredPermissions'], row.permissions);
+    for (const schema of [row.requestSchema, row.responseSchema]) {
+      if (typeof schema === 'string') assert.ok(Object.hasOwn(OPENAPI_DOCUMENT.components.schemas, schema), schema);
+      else inspectRefs(schema);
+    }
+  }
   assert.equal(OPENAPI_DOCUMENT.openapi, "3.0.3");
   const types = `import type { AiGatewayCallDraft, AiKnowledgeSourceDraft, AiUsageRecordDraft, AiBusinessEventDraft, AiInspectionExtractDraft } from "../packages/shared/src";
   const source: AiKnowledgeSourceDraft = { kind: "business_fact", fact: ${JSON.stringify(h.fact)} };`;
@@ -70,13 +110,19 @@ test("original and published schemas agree on all nested fixture objects and bou
     if (value && typeof value === "object") Object.values(value).forEach(collect);
   };
   for (const family of ["gateway", "knowledge", "usage", "events", "inspection"]) collect(require(`./fixtures/ai-native/${family}-contracts.cjs`));
+  h.contexts.forEach(collect); collect(h.access); collect(h.unknown); collect(h.denied); collect(h.fact); collect(h.request);
   let accepted = 0;
-  for (const name of Object.keys(original)) for (const value of candidates) {
+  const covered = new Set();
+  for (const name of Object.keys(comparedRaw)) for (const value of candidates) {
     const expected = rawValidators[name](value);
     accepted += Number(expected);
+    if (expected) covered.add(name);
     assert.equal(publishedValidators[name](value), expected, `${name} changed validation behavior`);
   }
   assert.ok(accepted > 50, "matrix must exercise accepted inputs as well as rejections");
+  console.log(JSON.stringify({ publicationSchemas: Object.keys(comparedRaw).length, fixtureAcceptedSchemas: covered.size,
+    schemasWithoutAcceptedFixture: Object.keys(comparedRaw).filter(name => !covered.has(name)),
+    boundary: 'publication coverage is not a valid fixture for every contract' }));
   const raw = { Range: { type: "number", minimum: -1, exclusiveMinimum: 0, maximum: 2, exclusiveMaximum: 1 } };
   const a = h.validatorsFor(raw, {}), b = h.validatorsFor({ Range: forAjv(convert(raw.Range)) }, {});
   for (const value of [-1, 0, Number.EPSILON, 0.5, 1, 2]) assert.equal(b.Range(value), a.Range(value));
