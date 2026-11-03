@@ -18,7 +18,7 @@
 
 | 项目 | 当前定位与限制 |
 | --- | --- |
-| 唯一施工树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`，分支`ai/ai-native-contracts-s01-20261002`，HEAD `fae3d20a`（本批提交后以Git实际HEAD及集中收口阶段为准） |
+| 唯一施工树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`，分支`ai/ai-native-contracts-s01-20261002`，合同功能基线`8375ebf9`（前批`fae3d20a`，当前HEAD以Git核验为准） |
 | 服务端本片 | “any干活用”接手原服务端/API/shared/后台消费者/既有验证及原记录接续；源“AI Native主线-服务端”已停止写入，提交只限核对过的完整切片 |
 | 并行客户端 | 原前端/MCP/Harness后继归原会话，本次整合的固定保全已接入；只协调具体文件冲突，不凭idle或共享文件接管其工作 |
 | 固定整合 | 根目录修复`fd870b3d`、本树独有`69c6c89e`及MCP/Harness保全`08d41945`经本地main同步至`a1013774`。负责人两树停写后又按固定清单同步未提交文档/源码20,676路径；其后本树新业务WIP未再固定同步 |
