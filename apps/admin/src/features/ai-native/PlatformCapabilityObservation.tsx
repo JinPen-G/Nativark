@@ -1,5 +1,5 @@
 /** Explicit platform evidence read, not a probe launcher, enable switch or tenant host. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AiPlatformModelCapabilityObservationDraft } from '@rental-os/shared';
 import { platformAiSettingsApi } from '@/api/platformAiSettings';
 import { useLocale } from '@/app/locale';
@@ -8,37 +8,55 @@ import { useAuthStore } from '@/features/auth/authStore';
 import { ActionButton, Alert } from '@/components/ui';
 import { formatTimestamp } from './formatters';
 
+const exact = (value: unknown, keys: string[]) => !!value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
 const capabilities = ['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning'] as const;
 const labels = { text: '文本', streaming: '流式', tools: '工具调用', structured_output: '结构化输出',
   vision: '视觉', audio: '音频', embedding: '向量', reasoning: '推理' };
 export function PlatformCapabilityObservation({ profileId, identity }: { profileId: string; identity: string }) {
   const { t } = useLocale();
-  const [result, setResult] = useState<AiPlatformModelCapabilityObservationDraft | null>(null);
+  // A new owner hides old evidence on its first render, before effect cleanup.
+  const owner = useMemo(() => ({}), [profileId, identity]);
+  const [observation, setObservation] = useState<{ owner: object; value: AiPlatformModelCapabilityObservationDraft } | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const flight = useRef<AbortController | null>(null), mounted = useRef(true);
-  const active = useRef({ profileId, identity }); active.current = { profileId, identity };
+  const active = useRef(owner); active.current = owner;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; flight.current?.abort(); }; }, []);
   const current = () => {
     const auth = useAuthStore.getState();
-    return mounted.current && !document.hidden && active.current.profileId === profileId && active.current.identity === identity
+    return mounted.current && !document.hidden && active.current === owner
       && JSON.stringify([auth.user, currentSessionEpoch()]) === identity && !!auth.token && !!auth.user?.isSaasAdmin
       && auth.hasPermission('system:ai-provider:view');
   };
+  useEffect(() => {
+    const retract = () => { flight.current?.abort(); flight.current = null; setObservation(null); setBusy(false); setError(false); };
+    retract();
+    const visibility = () => { if (document.hidden) retract(); };
+    const authorization = () => { if (!current()) retract(); };
+    document.addEventListener('visibilitychange', visibility);
+    const unsubscribe = useAuthStore.subscribe(authorization);
+    return () => { document.removeEventListener('visibilitychange', visibility); unsubscribe(); flight.current?.abort(); };
+  }, [owner]);
+  const result = observation?.owner === owner && current() ? observation.value : null;
   const read = async () => {
     if (flight.current || !current()) throw Error('AI_ACCESS_DENIED');
-    const controller = new AbortController(); flight.current = controller; setBusy(true); setError(false); setResult(null);
+    const controller = new AbortController(); flight.current = controller; setBusy(true); setError(false); setObservation(null);
     try {
       const value = structuredClone(await platformAiSettingsApi.capabilities(profileId, controller.signal));
       if (!current() || controller.signal.aborted) return;
-      if (!value || value.profileId !== profileId || !Number.isInteger(value.configurationRevision) || value.configurationRevision < 1
+      if (!value || !exact(value, ['profileId', 'configurationRevision', 'enabled', 'observedAt', 'items', 'execution', 'admission'])
+        || value.profileId !== profileId || !Number.isInteger(value.configurationRevision) || value.configurationRevision < 1
         || value.configurationRevision > 4294967295 || typeof value.enabled !== 'boolean' || !formatTimestamp(value.observedAt).available
         || value.execution !== 'read_only_no_probe_or_dispatch' || value.admission !== 'not_granted'
         || !Array.isArray(value.items) || value.items.length !== capabilities.length
-        || value.items.some((item, i) => !item || item.capability !== capabilities[i] || typeof item.allowed !== 'boolean'
+        || capabilities.some((capability, i) => { const item = value.items[i]; return !item || !exact(item, ['capability', 'allowed', 'readiness', 'recorded'])
+          || item.capability !== capability || typeof item.allowed !== 'boolean'
           || !['verified_supported', 'unverified', 'configuration_disabled'].includes(item.readiness)
           || !value.enabled && item.readiness !== 'configuration_disabled'
           || value.enabled && item.readiness === 'configuration_disabled'
-          || item.recorded !== null && (!item.recorded || !['supported', 'unsupported', 'unverified'].includes(item.recorded.status)
+          || item.recorded !== null && (!item.recorded
+            || !exact(item.recorded, ['status', 'source', 'observedRevision', 'checkedAt', 'expiresAt', 'mode', 'applicability'])
+            || !['supported', 'unsupported', 'unverified'].includes(item.recorded.status)
             || !['connection_test', 'declared', 'manual'].includes(item.recorded.source)
             || !Number.isInteger(item.recorded.observedRevision) || item.recorded.observedRevision < 1
             || item.recorded.observedRevision > value.configurationRevision || !formatTimestamp(item.recorded.checkedAt).available
@@ -48,8 +66,8 @@ export function PlatformCapabilityObservation({ profileId, identity }: { profile
           || item.readiness === 'verified_supported' && (!item.allowed || item.recorded?.status !== 'supported'
             || item.recorded.source !== 'connection_test' || item.recorded.mode !== 'live' || item.recorded.applicability !== 'current_configuration'
             || !item.recorded.expiresAt || Date.parse(item.recorded.expiresAt) <= Date.parse(value.observedAt)
-            || Date.parse(item.recorded.checkedAt) > Date.parse(value.observedAt)))) throw Error('AI_RESOURCE_UNAVAILABLE');
-      setResult(value);
+            || Date.parse(item.recorded.checkedAt) > Date.parse(value.observedAt)); })) throw Error('AI_RESOURCE_UNAVAILABLE');
+      setObservation({ owner, value });
     } catch (failure) {
       if (current() && !controller.signal.aborted) setError(true);
       throw failure;

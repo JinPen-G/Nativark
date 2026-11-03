@@ -77,6 +77,98 @@ test('actual workbench function renders host callbacks without starting transpor
   assert.equal(reads, 0, 'selection schedules host read through React effect, not directly from the list callback');
 });
 
+test('actual platform capability consumer rejects legacy/private replies and retracts on disconnect, identity and hide', async () => {
+  const file = path.join(root, 'apps/admin/src/features/ai-native/PlatformCapabilityObservation.tsx');
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const slots = [], pending = [], cleaners = new Map(); let cursor = 0, calls = [], responder, epoch = 1;
+  let user = { id: 'platform-owner', isSaasAdmin: true }, token = 'synthetic', permitted = true, sessionAbort = new AbortController();
+  const subscribers = new Set(), events = new Map();
+  const hooks = {
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+      return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
+    useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
+    useMemo(factory, deps) { const i = cursor++; if (!slots[i] || deps.some((value, j) => !Object.is(value, slots[i].deps[j]))) slots[i] = { value: factory(), deps }; return slots[i].value; },
+    useEffect(effect, deps) { const i = cursor++; if (!slots[i] || deps.some((value, j) => !Object.is(value, slots[i][j]))) {
+      slots[i] = deps; pending.push(() => { cleaners.get(i)?.(); cleaners.set(i, effect()); });
+    } }
+  };
+  const document = { hidden: false, addEventListener: (key, value) => events.set(key, value), removeEventListener: key => events.delete(key) };
+  const store = { getState: () => ({ user, token, hasPermission: () => permitted }),
+    subscribe: listener => { subscribers.add(listener); return () => subscribers.delete(listener); } };
+  const stub = name => props => React.createElement(name, props), exports = {};
+  const apiExports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root, 'apps/admin/src/api/platformAiSettings.ts'), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
+    { exports: apiExports, AbortSignal, require(name) {
+      if (name === '@rental-os/shared') return require('@rental-os/shared');
+      if (name === '@/app/queryClient') return { currentSessionSignal: () => sessionAbort.signal };
+      if (name === './http') return { request: () => { throw Error('no platform writes or other operations'); }, http: {
+        get: async (url, options) => {
+          assert.match(url, /^\/platform\/ai\/providers\/profile-[ab]\/capabilities$/u);
+          assert.equal(options.headers['Cache-Control'], 'no-store');
+          const profileId = url.split('/').at(-2); calls.push({ profileId, signal: options.signal });
+          return { data: { data: await responder(profileId, options.signal) } };
+        }
+      } };
+      throw Error(name);
+    } });
+  const formatTimestamp = loadLifecycleSession('formatters.ts').formatTimestamp;
+  vm.runInNewContext(output, { exports, document, AbortController, structuredClone, require(name) {
+    if (name === 'react') return hooks;
+    if (name === 'react/jsx-runtime') return require('react/jsx-runtime');
+    if (name === '@/api/platformAiSettings') return apiExports;
+    if (name === '@/app/locale') return { useLocale: () => ({ t: value => value }) };
+    if (name === '@/app/queryClient') return { currentSessionEpoch: () => epoch, currentSessionSignal: () => sessionAbort.signal };
+    if (name === '@/features/auth/authStore') return { useAuthStore: store };
+    if (name === '@/components/ui') return { ActionButton: stub('action'), Alert: stub('alert') };
+    if (name === './formatters') return { formatTimestamp };
+    throw Error(name);
+  } });
+  const identity = () => JSON.stringify([user, epoch]);
+  const nodes = tree => { const found = []; const visit = node => React.Children.toArray(node).forEach(child => {
+    if (React.isValidElement(child)) { found.push(child); visit(child.props.children); }
+  }); visit(tree); return found; };
+  const render = (profileId = 'profile-a', owner = identity(), commit = true) => {
+    cursor = 0; const tree = exports.PlatformCapabilityObservation({ profileId, identity: owner });
+    if (commit) pending.splice(0).forEach(effect => effect()); return tree;
+  };
+  const read = tree => nodes(tree).find(node => node.props.label === '读取平台能力证据').props.onAction;
+  const observation = (profileId = 'profile-a') => ({ profileId, configurationRevision: 1, enabled: true,
+    observedAt: '2026-11-04T00:00:00Z', execution: 'read_only_no_probe_or_dispatch', admission: 'not_granted',
+    items: ['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning']
+      .map(capability => ({ capability, allowed: false, readiness: 'unverified', recorded: null })) });
+  const visible = tree => nodes(tree).some(node => node.props.role === 'status');
+  let tree = render(); assert.equal(calls.length, 0);
+  responder = async id => observation(id); await read(tree)(); tree = render(); assert.equal(visible(tree), true);
+  for (const patch of [value => ({ ...value, draftVersion: 'old-v0' }), value => ({ ...value, privateNote: 'secret' }),
+    value => ({ ...value, items: value.items.map((item, i) => i ? item : { ...item, credential: 'secret' }) }),
+    value => ({ ...value, items: new Array(8) }),
+    value => ({ ...value, profileId: 'foreign-profile' })]) {
+    responder = async () => patch(observation()); await assert.rejects(read(tree)()); tree = render(); assert.equal(visible(tree), false);
+  }
+  responder = async () => { throw Object.assign(Error('offline transport'), { code: 'ERR_NETWORK' }); };
+  await assert.rejects(read(tree)()); tree = render(); assert.equal(visible(tree), false);
+  responder = async id => observation(id); await read(tree)(); tree = render(); assert.equal(visible(tree), true);
+  assert.equal(visible(render('profile-b', identity(), false)), false, 'new profile first paint has no old evidence');
+  tree = render('profile-b'); tree = render('profile-a'); assert.equal(visible(tree), false, 'return does not resurrect old observation');
+  await read(tree)(); tree = render(); permitted = false; subscribers.forEach(listener => listener());
+  tree = render(); assert.equal(visible(tree), false); const beforeDenied = calls.length;
+  await assert.rejects(read(tree)()); assert.equal(calls.length, beforeDenied); permitted = true;
+  await read(render())(); tree = render();
+  document.hidden = true; events.get('visibilitychange')?.(); tree = render(); assert.equal(visible(tree), false);
+  document.hidden = false; events.get('visibilitychange')?.(); tree = render(); assert.equal(visible(tree), false, 'show never restores or rereads');
+  let resolve; responder = () => new Promise(done => { resolve = done; });
+  const late = read(tree)(); document.hidden = true; events.get('visibilitychange')?.();
+  assert.equal(calls.at(-1).signal.aborted, true); document.hidden = false; resolve(observation()); await late;
+  tree = render(); assert.equal(visible(tree), false, 'late hidden response cannot return after show');
+  responder = async id => observation(id); await read(tree)(); tree = render();
+  sessionAbort.abort(); sessionAbort = new AbortController(); epoch++; user = { ...user, id: 'other-platform-owner' };
+  assert.equal(visible(render('profile-a', identity(), false)), false); tree = render();
+  const old = read(tree); cleaners.forEach(cleanup => cleanup?.()); const beforeUnmount = calls.length;
+  await assert.rejects(old()); assert.equal(calls.length, beforeUnmount);
+});
+
 test('actual conversation history stays explicit, capability-bound and retracts late hidden reads', async () => {
   const file = path.join(root, 'apps/admin/src/features/ai-native/ConversationHistory.tsx');
   const source = fs.readFileSync(file, 'utf8');
