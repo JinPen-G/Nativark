@@ -213,7 +213,11 @@ export class AiConversationRepository {
   }
   async list(value: unknown): Promise<AiConversationListResponseDraft> {
     const command = conversationCommand('AiConversationListDraft', value), session = await this.current();
+    if (command.capabilityCode && !this.capabilities.includes(command.capabilityCode)) throw unavailable();
+    // Filtering a client page loses matching history and can expose retired capabilities.
+    // Keep the current registered set in the owned database query, including legacy lists.
     const rows = await this.db.aiConversation.findMany({ where: { ...this.owner(session), status: command.status, deletedAt: null,
+      capabilityCode: command.capabilityCode ?? { in: [...this.capabilities] },
       ...(command.beforeId ? { id: { lt: command.beforeId } } : {}) }, orderBy: { id: 'desc' }, take: command.limit + 1 });
     await this.check(session);
     return { draftVersion: version, items: rows.slice(0, command.limit).map(row => this.summary(row)),

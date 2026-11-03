@@ -10,7 +10,7 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { AI_TOOL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness, planLimits = {}) => {
+exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness, planLimits = {}, extraTables = {}) => {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
     protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const tables = Object.fromEntries(['aiApprovedOrderSnapshot', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
@@ -19,7 +19,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     'aiTaskQuoteSelection', 'aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
     'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation',
     'aiDataErasure', 'aiUsageReservation'].map(key => [key, []]));
-  const h = await setup({ ...tables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
+  const h = await setup({ ...tables, ...extraTables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
   if (prepareBusiness) await prepareBusiness(h.b);
   h.control.beforeRead = async (table, args) => {
     if (table === 'aiGatewayInvocation' && typeof args.where?.fencingToken === 'string') {

@@ -1,5 +1,5 @@
 import type { RentalFulfillmentMode, RentalOrderExtensionRequest, RENTAL_PRICING_UNIT_CODES } from './core';
-import type { AiTaskStatusDraft, AiStepStateDraft } from './ai-task-draft';
+import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, type AiTaskStatusDraft, type AiStepStateDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
 import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
@@ -237,6 +237,50 @@ export type AiSceneRequestRecoveryDraft =
   | { task: Extract<AiSceneTaskReceiptDraft, { state: 'not_observed' }>; nextAction: 'reconcile_request_or_explicit_create_task'; automaticExecution: false }
   | { task: Extract<AiSceneTaskReceiptDraft, { state: 'observed' }>; steps: AiSceneRecoveryStepDraft[]; hasMore: boolean; automaticExecution: false;
       nextAction: 'host_plan_handoff' | 'existing_runner_recovery'; observedResults: 'preserved_even_if_task_cancelled'; snapshot: 'bounded_sequential_read' };
+function sceneMetadataClosed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
+}
+const sceneMetadataUuid = (value: unknown): value is string => typeof value === 'string'
+  && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(value);
+const sceneMetadataId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+const sceneMetadataRevision = (value: unknown, maximum = 4294967294) => typeof value === 'number'
+  && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
+/** Browser-safe closed metadata checks. They authorize no creation, dispatch or
+ * business action; an original-request reader must still revalidate association. */
+export function validateAiSceneCreatedTaskDraft(value: unknown): value is AiSceneCreatedTaskDraft {
+  return sceneMetadataClosed(value, ['taskId', 'runId', 'status', 'revision', 'replayed'])
+    && sceneMetadataUuid(value.taskId) && sceneMetadataUuid(value.runId)
+    && AI_TASK_STATUSES_DRAFT.includes(value.status as AiTaskStatusDraft)
+    && sceneMetadataRevision(value.revision, 4294967295) && typeof value.replayed === 'boolean';
+}
+export function validateAiSceneRequestRecoveryDraft(value: unknown): value is AiSceneRequestRecoveryDraft {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>, task = row.task;
+  if (!task || typeof task !== 'object' || Array.isArray(task) || row.automaticExecution !== false) return false;
+  const metadata = task as Record<string, unknown>;
+  if (metadata.state === 'not_observed') return sceneMetadataClosed(row, ['task', 'nextAction', 'automaticExecution'])
+    && sceneMetadataClosed(metadata, ['state', 'retryable']) && metadata.retryable === false
+    && row.nextAction === 'reconcile_request_or_explicit_create_task';
+  if (!sceneMetadataClosed(row, ['task', 'steps', 'hasMore', 'automaticExecution', 'nextAction', 'observedResults', 'snapshot'])
+    || !sceneMetadataClosed(metadata, ['state', 'taskId', 'runId', 'status', 'revision', 'plan', 'resultAvailable', 'execution'])
+    || metadata.state !== 'observed' || !sceneMetadataUuid(metadata.taskId) || !sceneMetadataUuid(metadata.runId)
+    || !AI_TASK_STATUSES_DRAFT.includes(metadata.status as AiTaskStatusDraft) || !sceneMetadataRevision(metadata.revision)
+    || !['stored', 'not_observed'].includes(metadata.plan as string) || typeof metadata.resultAvailable !== 'boolean'
+    || metadata.execution !== 'not_inferred_from_metadata' || !Array.isArray(row.steps) || row.steps.length > 50
+    || typeof row.hasMore !== 'boolean' || !['host_plan_handoff', 'existing_runner_recovery'].includes(row.nextAction as string)
+    || row.observedResults !== 'preserved_even_if_task_cancelled' || row.snapshot !== 'bounded_sequential_read') return false;
+  const seen = new Set<string>();
+  for (const step of row.steps) {
+    if (!sceneMetadataClosed(step, ['stepId', 'runId', 'actionId', 'revision', 'status', 'effect', 'resultAvailable', 'nextAction'])
+      || !sceneMetadataId(step.stepId) || seen.has(step.stepId as string) || !sceneMetadataId(step.runId) || !sceneMetadataId(step.actionId)
+      || !sceneMetadataRevision(step.revision) || !AI_STEP_STATUSES_DRAFT.includes(step.status as typeof AI_STEP_STATUSES_DRAFT[number])
+      || !['none', 'possible', 'committed'].includes(step.effect as string) || typeof step.resultAvailable !== 'boolean'
+      || !['reconcile_original_action', 'read_authorized_result', 'runner_owned'].includes(step.nextAction as string)) return false;
+    seen.add(step.stepId as string);
+  }
+  return true;
+}
 /** Original request/Task metadata only, not dispatch or business execution.
  * Status 201 preserves the existing Nest POST transport, including its reads. */
 export const AI_SCENE_REQUEST_HTTP_CONTRACTS = Object.freeze({

@@ -19,6 +19,7 @@ import { TaskUsageObservation } from "./TaskUsageObservation";
 import { TaskHumanApproval } from "./TaskHumanApproval";
 import { TaskCancellation } from "./TaskCancellation";
 import { TaskClarification } from "./TaskClarification";
+import { ConversationHistory } from './ConversationHistory';
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -43,6 +44,7 @@ export function TaskCenterPage() {
 function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: string; tenantId: string; workspaceId: string }) {
   const { t } = useLocale();
   const [opened, setOpened] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState<string[]>([]);
   const [status, setStatus] = useState<string>("all");
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [page, setPage] = useState(1);
@@ -156,6 +158,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     if (code === 401 || code === 403) setOpened(false);
   } }, [query.error, followFailed, originalPage, selected, selectedVisible]);
   return <section className={styles.stack} aria-label={t("AI 任务观察")}>
+    <Accordion value={historyOpen} onValueChange={setHistoryOpen} items={[{ key: 'conversations', title: t('本人对话历史'),
+      content: <ConversationHistory current={current} enabled={historyOpen.includes('conversations') && visible}
+        identity={JSON.stringify([tenantId, workspaceId, useAuthStore.getState().user?.id])} /> }]} />
     <div className={styles.toolbar}>
       <Select aria-label={t("任务状态")} value={status} disabled={!opened || query.isFetching}
         options={[{ value: "all", label: t("全部状态") }, ...AI_TASK_STATUSES_DRAFT.map(value => ({ value, label: t(statusLabels[value]) }))]}

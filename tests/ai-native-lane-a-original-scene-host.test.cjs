@@ -18,7 +18,8 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   const { composePersistedTaskCenter } = require('../apps/api/src/modules/ai-native/task-center.composition');
   const { validateAiOrderReadResponse } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
   const tool = { code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION };
-  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], undefined, { maxSteps: 3, maxCalls: 2 });
+  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], undefined, { maxSteps: 3, maxCalls: 2 },
+    { aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
   const dependencies = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
   const model = composeAiOriginalSceneModel(dependencies);
   const chain = model.createModelOrderApplication({ holderId: 'fixed-order-worker', leaseMs: 100000 },
@@ -35,10 +36,60 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
       : chain[action === 'readTaskScene' ? 'readScene' : action === 'reopenModelSource' ? 'reopenOrderSource' : action](command, signal)]));
   const controller = new AiOriginalOrderReadController(methods);
   const before = await controller.readPreparation(request, h.reference);
+  h.state.aiConversation = [{ id: 'order-conversation', scopeId: 'scope-a', ownerId: h.b.h.identity.user.id, capabilityCode: 'order_explanation',
+    status: 'active', revision: 2, activeTurnId: 'order-turn', deletedAt: null, createdAt: h.dependencies.clock(), updatedAt: h.dependencies.clock() }];
+  h.state.aiConversationTurn = [{ id: 'order-turn', conversationId: 'order-conversation', scopeId: 'scope-a', ownerId: h.b.h.identity.user.id,
+    admissionKey: 'order-admission', originalRequestId: h.reference.inputRef, originalRequestKey: h.created.receipt.requestKey,
+    inputHash: '0'.repeat(64),
+    capabilityCode: 'order_explanation', capabilityVersion: '1', admissionRevision: 2, createdAt: h.dependencies.clock() }];
+  // Keep the original body binding exact; this fixture row links the already-created original Task, without another admission.
+  const originalScenes = require('../apps/api/src/modules/ai-native/scenes/original-scenes.composition').composeAiOriginalScenes(h.dependencies);
+  const originalBody = (await originalScenes.requests.readHistorical(h.reference)).request;
+  h.state.aiConversationTurn[0].inputHash = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(originalBody);
+  h.state.aiConversationOperation = [];
+  const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const conversation = new AiConversationRepository(h.dependencies, originalScenes.requests);
+  const admittedTurn = (await conversation.readAdmission({ draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION,
+    conversationId: 'order-conversation', admissionKey: 'order-admission' })).result;
+  const fs = require('node:fs'), vm = require('node:vm'), ts = require('typescript');
+  const load = (file, imports) => {
+    const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src', file), 'utf8'),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {}; vm.runInNewContext(output, { exports, AbortController, AbortSignal, structuredClone, require: name => {
+      if (name === '@rental-os/shared') return shared; if (Object.hasOwn(imports, name)) return imports[name]; throw Error(name);
+    } }); return exports;
+  };
+  const sessionSignal = new AbortController();
+  const api = load('api/aiConversations.ts', {
+    '@/app/queryClient': { currentSessionEpoch: () => 1, currentSessionSignal: () => sessionSignal.signal },
+    '@/features/ai-native/conversation-history-reader': {}, './aiTaskCenter': {},
+    './http': { http: { post: async (url, command, options) => {
+      assert.equal(options.signal.aborted, false);
+      let value;
+      if (url === '/ai-native/conversations/admission') value = await conversation.readAdmission(command);
+      else if (url === '/ai-native/scene-requests/recovery') value = await originalScenes.readRecovery(command);
+      else if (url === '/ai-native/scene-requests/order-read/preparation') value = await controller.readPreparation(request, command);
+      else if (url === '/ai-native/scene-requests/order-read/start') value = await controller.start(request, command);
+      else if (url === '/ai-native/scene-requests/order-read/order-result') value = await controller.readOrderResult(request, command);
+      else if (url === '/ai-native/scene-requests/order-read/answer') value = await controller.readAnswer(request, command);
+      else throw Error(`unexpected execution route ${url}`);
+      return { data: { data: value } };
+    } } }
+  }).aiConversationsApi;
+  const Session = load('features/ai-native/conversation-order-execution-session.ts', {}).ConversationOrderExecutionSession;
+  const journal = new Map(), storage = { getItem: key => journal.get(key) ?? null, setItem: (key, value) => journal.set(key, value) };
+  let started;
+  const consumer = new Session('order-conversation', { ...api, orderStart: async (...args) => {
+    started = await api.orderStart(...args); throw Error('lost original order start response');
+  } }, () => true, storage, 'original-order-start');
+  await consumer.inspect(admittedTurn); assert.equal(consumer.snapshot().ready, true); assert.equal(h.execution.sent.length, 0);
   assert.deepEqual(before.preparation.missing, ['model_request', 'order_read', 'model_answer']);
   assert.equal(before.preparation.planPublished, false); assert.equal(h.execution.sent.length, 0);
-  const started = await controller.start(request, h.reference);
+  await assert.rejects(consumer.start(), /lost original order start response/);
   assert.equal(started.outcome.outcome.status, 'succeeded', JSON.stringify(started));
+  await assert.rejects(consumer.start(), /AI_RESULT_UNKNOWN/);
+  const reopenedConsumer = new Session('order-conversation', api, () => true, storage, 'original-order-start');
+  await reopenedConsumer.reconcile(); assert.equal(reopenedConsumer.snapshot().ready, false);
   assert.equal(h.execution.sent.length, 2); assert.equal(h.state.aiStep.length, 3);
   assert.equal(h.state.aiTaskExecutionBudget.length, 1); assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
   assert.equal((await controller.readPreparation(request, h.reference)).preparation.planPublished, true);
@@ -48,6 +99,32 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   const answer = await controller.readAnswer(request, h.reference);
   assert.equal(answer.result.status, 'available'); assert.equal(answer.result.textSemantics, 'model_text_not_core_fact');
   assert.equal(answer.result.originalReadResultId, facts.result.resultId);
+  const resultsReader = load('features/ai-native/conversation-order-results-reader.ts', {}).readConversationOrderResults;
+  const projected = await resultsReader(api, 'order-conversation', admittedTurn, new AbortController().signal, () => true);
+  assert.equal(projected.answer.result.text, answer.result.text); assert.equal(projected.facts.result.facts.order.amounts.finalPayable, 100);
+  assert.equal(shared.validateAiOrderReadFactsDraft(facts, h.reference, admittedTurn), true);
+  assert.equal(shared.validateAiOrderReadAnswerDraft(answer, h.reference, admittedTurn), true);
+  for (const alter of [v => { v.result.text = '界'.repeat(50000); }, v => { v.result.facts.order.privateNote = 'hidden'; },
+    v => { v.original.createdAt = '2026-02-31T00:00:00Z'; }, v => { v.result.automaticRetry = true; }]) {
+    const invalid = structuredClone(answer); alter(invalid);
+    assert.equal(shared.validateAiOrderReadAnswerDraft(invalid, h.reference, admittedTurn), false);
+  }
+  for (const alter of [v => { v.result.facts.order.amounts.finalPayable = -1; }, v => { v.result.facts.scope = { ...v.result.facts.scope, workspaceId: 'other' }; },
+    v => { v.result.facts.order.privateNote = 'hidden'; }, v => { v.result.facts.paymentEvidence = 'paid'; }]) {
+    const invalid = structuredClone(facts); alter(invalid);
+    assert.equal(shared.validateAiOrderReadFactsDraft(invalid, h.reference, admittedTurn), false);
+  }
+  await assert.rejects(resultsReader({ ...api, orderAnswer: async () => ({ ...answer, result: { ...answer.result, originalReadResultId: 'different-result' } }) },
+    'order-conversation', admittedTurn, new AbortController().signal, () => true), /AI_REVISION_CONFLICT/);
+  assert.equal(h.execution.sent.length, 2);
+  const changedSignal = new AbortController();
+  await assert.rejects(resultsReader({ ...api, orderFacts: async (...args) => { const value = await api.orderFacts(...args); changedSignal.abort(); return value; } },
+    'order-conversation', admittedTurn, changedSignal.signal, () => true), /AI_SCOPE_CHANGED/);
+  let resultReads = 0;
+  await assert.rejects(resultsReader({ ...api, orderFacts: async (...args) => {
+    const value = await api.orderFacts(...args); if (++resultReads === 2) value.result.facts.order.amounts.finalPayable = 101; return value;
+  } }, 'order-conversation', admittedTurn, new AbortController().signal, () => true), /AI_REVISION_CONFLICT/);
+  assert.equal(h.execution.sent.length, 2, 'source checks and rejected reads cannot redispatch');
   assert.equal((await controller.readModelResult(request, h.reference)).toolCandidates.execution, 'not_attempted');
   assert.equal((await controller.reopenModelSource(request, h.reference)).sourceIndex, 0);
   const scene = await controller.readTaskScene(request, h.reference);
@@ -82,6 +159,8 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   h.b.facts.findOrder = async () => structuredClone(changedOrder);
   assert.equal((await controller.readOrderResult(request, h.reference)).result.status, 'stale');
   assert.equal((await controller.readAnswer(request, h.reference)).result.status, 'stale');
+  const staleProjection = await resultsReader(api, 'order-conversation', admittedTurn, new AbortController().signal, () => true);
+  assert.equal(staleProjection.facts.result.facts, null); assert.equal(staleProjection.answer.result.text, null);
   assert.equal(h.execution.sent.length, 2); assert.equal(h.state.aiGatewayInvocation.length, 2);
   h.b.h.identity.session = false;
   await assert.rejects(controller.readOrderResult(request, h.reference), error => error.getStatus() === 403);
@@ -528,6 +607,18 @@ test('conversation metadata and original admission share CAS, owner scope and im
   const release = releases[0]; assert.deepEqual(releases[1], release);
   h.control.beforeRead = priorRead; assert.equal(release.operation, 'release_turn'); assert.equal(release.revision, 3);
   assert.equal((await app.releaseTurn(waiting)).revision, 3);
+  const source = require('node:fs').readFileSync(path.join(__dirname, '../apps/admin/src/features/ai-native/conversation-lifecycle-session.ts'), 'utf8');
+  const output = require('typescript').transpileModule(source, { compilerOptions: { module: require('typescript').ModuleKind.CommonJS,
+    target: require('typescript').ScriptTarget.ES2022 } }).outputText, lifecycleExports = {};
+  require('node:vm').runInNewContext(output, { exports: lifecycleExports, AbortController, structuredClone, require: name => {
+    if (name === '@rental-os/shared') return require('@rental-os/shared'); throw Error(name);
+  } });
+  const journal = new Map(), journalStore = { getItem: key => journal.get(key) ?? null, setItem: (key, value) => journal.set(key, value), removeItem: key => journal.delete(key) };
+  const lifecycle = new lifecycleExports.ConversationLifecycleSession({ release: value => app.releaseTurn(value), operation: value => app.readOperation(value) },
+    () => true, journalStore, 'release-journal', () => waiting.operationKey, true);
+  const replayedRelease = await lifecycle.close('release', conversationId, waiting.expectedRevision, accepted.result.turnId, accepted.result.original.inputRef);
+  assert.deepEqual(replayedRelease, release); assert.equal(lifecycle.snapshot().locked, true); assert.equal(journal.size, 1);
+  await lifecycle.reconcile(); assert.equal(journal.size, 1, 'release receipt remains until explicit original-turn rotation');
   const next = { ...command, expectedRevision: 3, admissionKey: 'message-b' };
   const priorWrite = h.control.beforeWrite;
   h.control.beforeWrite = async (table, args, data) => { await priorWrite?.(table, args, data);
@@ -785,6 +876,9 @@ test('conversation history reopens only attested erased locators under current t
   assert.equal(downgraded.status, 'material_erased'); assert.equal(downgraded.result, null);
   assert.doesNotThrow(() => conversationResponse('modelResult', downgraded, { ...ref, admissionKey: command.admissionKey, resultId: 'unread-erased-result' }));
   assert.equal(page.items[0].material, 'erased');
+  assert.equal(shared.validateAiConversationObservationDraft(opened, ref), true);
+  assert.equal(shared.validateAiConversationTurnPageDraft(page, { ...ref, limit: 20 }, 'order_explanation'), true);
+  assert.equal(shared.validateAiConversationTurnDraft({ ...page.items[0], task: null }), false);
   assert.deepEqual((await app.readAdmission({ ...ref, admissionKey: command.admissionKey })).result, opened.currentTurn);
   assert.deepEqual((await app.admit(command)).result, opened.currentTurn, 'replay observes only the original erased locator');
   assert.deepEqual(h.state, before, 'history and replay do not write, recreate input, start a task or remove an erasure');
@@ -819,6 +913,355 @@ test('conversation history reopens only attested erased locators under current t
   assert.equal(h.state.aiTask.length, 1); assert.equal(h.state.aiTaskOriginalRequest.length, 1);
   assert.equal(originalRow.payload.retention, 'erased');
   h.b.h.identity.session = false; await assert.rejects(app.turns({ ...ref, limit: 20 }), { code: 'AI_ACCESS_DENIED' });
+});
+
+test('opening conversation consumer admits selected sections and creates only original Task metadata', { timeout: 60000 }, async () => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
+  const shared = require('@rental-os/shared'), ts = require('typescript'), vm = require('node:vm'), fs = require('node:fs');
+  const { credentials, ...dependencies } = h.dependencies;
+  const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const conversation = new AiConversationController(composeAiConversationRequests(dependencies, true));
+  const scenes = new AiOriginalScenesController(composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' }));
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const draftVersion = shared.AI_CONVERSATION_DRAFT_VERSION;
+  const created = await conversation.create(request, { draftVersion, operationKey: 'opening-consumer-create', capabilityCode: 'opening_diagnosis' });
+  const ref = { draftVersion, conversationId: created.conversationId }, head = await conversation.read(request, ref);
+  const load = (file, imports = {}) => {
+    const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src', file), 'utf8'),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {}; vm.runInNewContext(output, { exports, AbortController, AbortSignal, structuredClone, TextEncoder, Uint8Array,
+      crypto: require('node:crypto').webcrypto, require: name => {
+        if (name === '@rental-os/shared') return shared; if (Object.hasOwn(imports, name)) return imports[name]; throw Error(name);
+      } }); return exports;
+  };
+  let writes = 0, lostAdmission = true, lostTask = true, epoch = 1;
+  const api = load('api/aiConversations.ts', {
+    '@/app/queryClient': { currentSessionEpoch: () => epoch, currentSessionSignal: () => new AbortController().signal },
+    '@/features/ai-native/conversation-history-reader': {}, './aiTaskCenter': {},
+    './http': { http: { post: async (url, command, options) => {
+      assert.equal(options.signal.aborted, false);
+      assert.match(url, /^\/ai-native\/(conversations\/(admit|admission)|scene-requests\/(create-task|recovery))$/u);
+      const action = url.split('/').at(-1);
+      if (['admit', 'create-task'].includes(action)) writes++;
+      const result = url.includes('/conversations/') ? await conversation[action](request, command)
+        : await scenes[action === 'create-task' ? 'createTask' : 'recovery'](request, command);
+      if (action === 'admit' && lostAdmission) { lostAdmission = false; throw Error('lost opening admission'); }
+      if (action === 'create-task' && lostTask) { lostTask = false; throw Error('lost opening Task creation'); }
+      return { data: { data: result } };
+    } } },
+  }).aiConversationsApi;
+  const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  const Admission = load('features/ai-native/conversation-admission-session.ts', {
+    './budget-settings-session': load('features/ai-native/budget-settings-session.ts') }).ConversationAdmissionSession;
+  const admission = new Admission(ref.conversationId, api, () => true, storage, 'opening-admission', () => 'opening-message');
+  await assert.rejects(admission.prepareOpening(head, []), /AI_INVALID_INPUT/);
+  await assert.rejects(admission.prepareOpening(head, ['item_groups', 'item_groups']), /AI_INVALID_INPUT/);
+  await assert.rejects(admission.prepare(head, 'order-a', 'status'), /AI_INVALID_INPUT/);
+  assert.equal(values.size, 0); assert.equal(writes, 0);
+  const selected = ['workspace_profile', 'accounts_roles', 'fulfillment_network', 'business_rule', 'business_calendar',
+    'item_groups', 'pricing_groups_rates', 'price_version', 'membership_base'];
+  await admission.prepareOpening(head, selected);
+  assert.equal(writes, 0); assert.equal(admission.snapshot().reviewedSections.length, 9);
+  assert.equal(values.get('opening-admission').includes('sections'), false);
+  await assert.rejects(admission.send(), /lost opening admission/); assert.equal(writes, 1);
+  assert.equal(h.state.aiTaskOriginalRequest.length, 1); assert.equal(h.state.aiTask.length, 0);
+  const reopened = new Admission(ref.conversationId, api, () => true, storage, 'opening-admission', () => { throw Error('must not replace original key'); });
+  const accepted = await reopened.reconcile(); assert.equal(writes, 1);
+  assert.equal(accepted.result.capabilityCode, 'opening_diagnosis'); assert.equal(accepted.result.task, null);
+  assert.equal(h.state.aiTaskOriginalRequest[0].sceneCode, 'opening_diagnosis');
+  await assert.rejects(reopened.send(), /AI_RESULT_UNKNOWN/);
+  const Creation = load('features/ai-native/conversation-task-creation-session.ts').ConversationTaskCreationSession;
+  const creation = new Creation(ref.conversationId, api, () => true, storage, 'opening-create');
+  await assert.rejects(creation.create(accepted.result), /lost opening Task creation/); assert.equal(writes, 2);
+  assert.equal(h.state.aiTask.length, 1); assert.equal(h.state.aiRun.length, 1);
+  const taskRow = h.state.aiTask[0];
+  // Read recovery needs its own current policy; Task creation grants none.
+  // First prove the original refusal, then install the explicit fixture policy.
+  const deniedRecovery = new Creation(ref.conversationId, api, () => true, storage, 'opening-create');
+  await assert.rejects(deniedRecovery.reconcile(), error => error.getStatus() === 403 && error.getResponse().code === 'AI_ACCESS_DENIED');
+  assert.equal(deniedRecovery.snapshot().recovery, null); assert.equal(writes, 2);
+  h.state.aiTaskActionPolicy.push({ scopeId: taskRow.scopeId, taskId: taskRow.id, operation: 'read_metadata', revision: 1,
+    enabled: true, audiences: ['operator'], requiredPermissions: ['rental-os:order:operate'], expiresAt: new Date('2027-01-01T00:00:00Z') });
+  const restored = new Creation(ref.conversationId, api, () => true, storage, 'opening-create');
+  const recovery = await restored.reconcile(); assert.equal(recovery.task.state, 'observed'); assert.equal(writes, 2);
+  assert.equal(recovery.task.status, 'queued'); assert.equal(recovery.task.plan, 'not_observed'); assert.equal(recovery.steps.length, 0);
+  await assert.rejects(restored.create(accepted.result), /AI_RESULT_UNKNOWN/);
+  assert.equal(h.state.aiTaskActionInput.length, 0); assert.equal(h.state.aiTaskRunPlan.length, 0); assert.equal(h.state.aiStep.length, 0);
+  const wrong = await conversation.create(request, { draftVersion, operationKey: 'opening-bad-section', capabilityCode: 'opening_diagnosis' });
+  const count = h.state.aiTaskOriginalRequest.length;
+  await assert.rejects(conversation.admit(request, { draftVersion, conversationId: wrong.conversationId, admissionKey: 'opening-unknown-section',
+    expectedRevision: 1, request: { sceneCode: 'opening_diagnosis', input: { sections: ['invented_check'] } } }),
+    error => error.getStatus() === 404 && error.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(h.state.aiTaskOriginalRequest.length, count);
+  const originalOwner = h.b.h.identity.user.id; h.b.h.identity.user.id = 'another-operator';
+  await assert.rejects(restored.reconcile()); assert.equal(restored.snapshot().recovery, null); assert.equal(writes, 2);
+  h.b.h.identity.user.id = originalOwner; epoch++;
+  await restored.reconcile(); assert.equal(h.state.aiTask.length, 1); assert.equal(writes, 2);
+});
+
+test('conversation capability history filters before pagination and preserves owner-bound read-only recovery', { timeout: 60000 }, async t => {
+  const h = await setup({ aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
+  h.b.facts.listInspectionsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  const shared = require('@rental-os/shared');
+  const { draftVersion } = { draftVersion: shared.AI_CONVERSATION_DRAFT_VERSION };
+  const { credentials, ...dependencies } = h.dependencies;
+  const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
+  const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
+  const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
+  const http = new AiConversationController(composeAiConversationRequests(dependencies, true));
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const sceneHttp = new AiOriginalScenesController(composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' }));
+  for (const [index, capabilityCode] of ['order_explanation', 'opening_diagnosis', 'order_explanation', 'quote_clarification', 'opening_diagnosis'].entries()) {
+    await http.create(request, { draftVersion, operationKey: `capability-history-${index}`, capabilityCode });
+  }
+  const query = { draftVersion, status: 'active', limit: 1, capabilityCode: 'order_explanation' };
+  const before = h.state.aiConversation.map(row => ({ ...row }));
+  const page = await http.list(request, query);
+  assert.equal(page.items.length, 1); assert.equal(page.items[0].capabilityCode, query.capabilityCode); assert.ok(page.nextBeforeId);
+  const next = await http.list(request, { ...query, beforeId: page.nextBeforeId });
+  assert.equal(next.items.length, 1); assert.equal(next.items[0].capabilityCode, query.capabilityCode);
+  assert.notEqual(next.items[0].conversationId, page.items[0].conversationId); assert.equal(next.nextBeforeId, null);
+  assert.deepEqual(h.state.aiConversation, before); assert.equal(h.state.aiTask.length, 0); assert.equal(h.state.aiTaskOriginalRequest.length, 0);
+  const legacy = await http.list(request, { draftVersion, status: 'active', limit: 20 });
+  assert.equal(legacy.items.length, 5, 'omitting the additive filter preserves legacy owner history');
+  assert.equal(shared.validateAiConversationListResponseDraft(page, query), true);
+  for (const invalid of [
+    { ...page, credential: 'hidden' }, { ...page, draftVersion: 'old' }, { ...page, coverage: 'total' },
+    { ...page, nextBeforeId: 'unrelated-cursor' }, { ...page, items: [] },
+    { ...page, items: [{ ...page.items[0], capabilityCode: 'opening_diagnosis' }] },
+    { ...page, items: [{ ...page.items[0], status: 'archived' }] },
+    { ...page, items: [{ ...page.items[0], updatedAt: 'invalid-date' }] },
+    { ...page, items: [{ ...page.items[0], updatedAt: '2026-02-31T00:00:00Z' }] },
+    { ...page, items: [{ ...page.items[0], text: 'unauthorized body' }] },
+    { ...page, items: [page.items[0], page.items[0]] },
+  ]) {
+    assert.equal(shared.validateAiConversationListResponseDraft(invalid, query), false);
+    assert.throws(() => conversationResponse('list', invalid, query), { code: 'AI_STORAGE_UNAVAILABLE' });
+  }
+  assert.throws(() => conversationResponse('list', legacy, query), { code: 'AI_STORAGE_UNAVAILABLE' });
+  // Execute the actual admin adapter against the actual Controller, with only
+  // the HTTP wire and session clock doubled. No listening server or credentials cache.
+  const ts = require('typescript'), vm = require('node:vm'), fs = require('node:fs');
+  const loadAdmin = (file, imports) => {
+    const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src', file), 'utf8'),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {};
+    vm.runInNewContext(output, { exports, require: name => {
+      if (Object.hasOwn(imports, name)) return imports[name];
+      if (name === '@rental-os/shared') return shared;
+      throw Error(`Unexpected consumer import: ${name}`);
+    }, AbortSignal, AbortController, structuredClone, TextEncoder, Uint8Array, crypto: require('node:crypto').webcrypto });
+    return exports;
+  };
+  const taskReader = loadAdmin('features/ai-native/task-center-reader.ts', {});
+  const reader = loadAdmin('features/ai-native/conversation-history-reader.ts', { './task-center-reader': taskReader });
+  let epoch = 1, wireReads = 0, afterRead;
+  const sessionSignal = new AbortController();
+  const admin = loadAdmin('api/aiConversations.ts', {
+    '@/app/queryClient': { currentSessionEpoch: () => epoch, currentSessionSignal: () => sessionSignal.signal },
+    '@/features/ai-native/conversation-history-reader': reader,
+    './aiTaskCenter': { aiTaskCenterApi: { snapshot: async () => { throw Error('not used'); }, result: async () => { throw Error('not used'); } } },
+    './http': { http: { post: async (url, command, options) => {
+      wireReads++; assert.match(url, /^\/ai-native\/(conversations\/(list|read|turns|admission|admit|create|archive|delete|operation|release|closeUnstarted)|scene-requests\/(create-task|recovery))$/u); assert.equal(options.signal.aborted, false);
+      const operation = url.split('/').at(-1);
+      const value = url.includes('/scene-requests/') ? await sceneHttp[operation === 'create-task' ? 'createTask' : 'recovery'](request, command)
+        : await http[operation](request, command);
+      await afterRead?.(); return { data: { data: value } };
+    } } },
+  }).aiConversationsApi;
+  const abort = new AbortController();
+  assert.deepEqual(await admin.list(query, abort.signal), page); assert.equal(wireReads, 1);
+  const cancelled = new AbortController(); cancelled.abort();
+  await assert.rejects(admin.list(query, cancelled.signal), /AI_SCOPE_CHANGED/); assert.equal(wireReads, 1);
+  await assert.rejects(admin.list({ ...query, actor: 'forged' }, abort.signal), /AI_INVALID_INPUT/); assert.equal(wireReads, 1);
+  afterRead = () => { epoch++; };
+  await assert.rejects(admin.list(query, abort.signal), /AI_SCOPE_CHANGED/); assert.equal(wireReads, 2);
+  afterRead = undefined;
+  await assert.rejects(reader.readConversationHistory(async sent => {
+    sent.capabilityCode = 'opening_diagnosis'; return { ...page, items: [{ ...page.items[0], capabilityCode: 'opening_diagnosis' }] };
+  }, query, abort.signal, () => true), /AI_RESOURCE_UNAVAILABLE/);
+  await assert.rejects(reader.readConversationHistory(async () => { abort.abort(); return page; }, query, abort.signal, () => true), /AI_SCOPE_CHANGED/);
+  const detailCreated = await http.create(request, { draftVersion, operationKey: 'history-detail', capabilityCode: query.capabilityCode });
+  const detailRef = { draftVersion, conversationId: detailCreated.conversationId }, detailQuery = { ...detailRef, limit: 20 };
+  const detailSignal = new AbortController(), readsBefore = wireReads;
+  const empty = await admin.detail(detailQuery, query.capabilityCode, detailSignal.signal);
+  assert.equal(wireReads, readsBefore + 3); assert.equal(empty.conversation.currentTurn, null); assert.equal(empty.turns.items.length, 0);
+  const admitted = await http.admit(request, { ...detailRef, expectedRevision: 1, admissionKey: 'history-detail-turn',
+    request: { sceneCode: query.capabilityCode, input: { orderId: 'order-a', question: 'status' } } });
+  const detail = await admin.detail(detailQuery, query.capabilityCode, detailSignal.signal);
+  assert.equal(detail.turns.items[0].turnId, admitted.result.turnId); assert.equal(detail.conversation.currentTurn.task, null);
+  const admittedResult = await admin.result({ ...detailRef, admissionKey: admitted.result.admissionKey }, admitted.result, detailSignal.signal);
+  assert.equal(admittedResult.status, 'no_task_observed'); assert.equal(admittedResult.result, null);
+  assert.equal(shared.validateAiConversationObservationDraft(detail.conversation, detailRef), true);
+  assert.equal(shared.validateAiConversationTurnPageDraft(detail.turns, detailQuery, query.capabilityCode), true);
+  for (const damaged of [
+    { ...detail.conversation, credential: 'secret' }, { ...detail.conversation, conversationId: 'foreign' },
+    { ...detail.conversation, currentTurn: { ...detail.conversation.currentTurn, request: { raw: 'body' } } },
+    { ...detail.conversation, currentTurn: { ...detail.conversation.currentTurn, material: 'erased' } },
+    { ...detail.conversation, currentTurn: { ...detail.conversation.currentTurn, original: { ...detail.conversation.currentTurn.original, actor: 'forged' } } },
+    { ...detail.conversation, currentTurn: { ...detail.conversation.currentTurn, capabilityCode: 'opening_diagnosis' } },
+  ]) assert.equal(shared.validateAiConversationObservationDraft(damaged, detailRef), false);
+  for (const damaged of [
+    { ...detail.turns, execution: 'started' }, { ...detail.turns, items: [detail.turns.items[0], detail.turns.items[0]] },
+    { ...detail.turns, items: [{ ...detail.turns.items[0], task: { taskId: 'task-a', runId: 'run-a', approval: true } }] },
+    { ...detail.turns, nextBeforeId: 'unrelated' },
+  ]) assert.equal(shared.validateAiConversationTurnPageDraft(damaged, detailQuery, query.capabilityCode), false);
+  const metadataReads = { read: async () => detail.conversation, turns: async () => detail.turns };
+  await assert.rejects(reader.readConversationDetail({ ...metadataReads, read: async () => ({ ...detail.conversation, capabilityCode: 'opening_diagnosis' }) },
+    detailQuery, query.capabilityCode, detailSignal.signal, () => true), /AI_RESOURCE_UNAVAILABLE/);
+  let observations = 0;
+  await assert.rejects(reader.readConversationDetail({ ...metadataReads, read: async () => ({ ...detail.conversation,
+    revision: detail.conversation.revision + (observations++ ? 1 : 0) }) }, detailQuery, query.capabilityCode, detailSignal.signal, () => true), /AI_REVISION_CONFLICT/);
+  await assert.rejects(reader.readConversationDetail({ ...metadataReads, read: async () => { detailSignal.abort(); return detail.conversation; } },
+    detailQuery, query.capabilityCode, detailSignal.signal, () => true), /AI_SCOPE_CHANGED/);
+  const closed = await http.closeUnstarted(request, { draftVersion: shared.AI_CONVERSATION_UNSTARTED_DRAFT_VERSION,
+    conversationId: detailRef.conversationId, operationKey: 'history-detail-close', expectedRevision: 2,
+    turnId: admitted.result.turnId, originalInputRef: admitted.result.original.inputRef });
+  const closureDetail = await admin.detail(detailQuery, query.capabilityCode, new AbortController().signal);
+  assert.equal(closureDetail.turns.items[0].creation, closed.creation); assert.equal(closureDetail.turns.items[0].task, null);
+  const lifecycle = loadAdmin('features/ai-native/conversation-lifecycle-session.ts', {}).ConversationLifecycleSession;
+  const journal = new Map(), storage = { getItem: key => journal.get(key) ?? null,
+    setItem: (key, value) => journal.set(key, value), removeItem: key => journal.delete(key) };
+  let keys = 0, lost = false;
+  const ports = { ...admin, create: async (...args) => { const value = await admin.create(...args); if (lost) throw Error('lost acknowledgement'); return value; } };
+  const session = new lifecycle(ports, () => true, storage, 'owner-scope-journal', () => `lifecycle-${++keys}`);
+  const lifecycleCreated = await session.create(query.capabilityCode);
+  assert.equal(lifecycleCreated.operation, 'create'); assert.equal(session.snapshot().locked, false); assert.equal(journal.size, 0);
+  const beforeCreate = h.state.aiConversation.length; lost = true;
+  await assert.rejects(session.create(query.capabilityCode), /lost acknowledgement/);
+  assert.equal(h.state.aiConversation.length, beforeCreate + 1); assert.equal(session.snapshot().locked, true); assert.equal(journal.size, 1);
+  await assert.rejects(session.create(query.capabilityCode), /AI_RESULT_UNKNOWN/); assert.equal(keys, 2);
+  session.dispose();
+  const recovered = new lifecycle(admin, () => true, storage, 'owner-scope-journal', () => `lifecycle-${++keys}`);
+  assert.equal(recovered.snapshot().locked, true);
+  const receipt = await recovered.reconcile(); assert.equal(receipt.operationKey, 'lifecycle-2'); assert.equal(keys, 2);
+  assert.equal(h.state.aiConversation.length, beforeCreate + 1); assert.equal(recovered.snapshot().locked, false);
+  const archivedByUi = await recovered.mutate('archive', receipt.conversationId, 1);
+  assert.equal(archivedByUi.revision, 2);
+  const deletedByUi = await recovered.mutate('delete', receipt.conversationId, 2);
+  assert.equal(deletedByUi.revision, 3); assert.equal(deletedByUi.taskCancellation, 'not_requested');
+  assert.equal((await admin.operation({ draftVersion, operationKey: deletedByUi.operationKey }, new AbortController().signal)).operation, 'delete');
+  for (const corrupt of [value => { value.credential = 'secret'; }, value => { value.operationKey = 'other'; },
+    value => { value.revision = 0; }, value => { value.taskCancellation = 'cancelled'; }]) {
+    const bad = structuredClone(deletedByUi); corrupt(bad);
+    assert.equal(shared.validateAiConversationOperationDraft(bad, deletedByUi.operationKey), false);
+  }
+  const admissionCreated = await admin.create({ draftVersion, operationKey: 'admission-consumer', capabilityCode: 'order_explanation' }, new AbortController().signal);
+  const admissionRef = { draftVersion, conversationId: admissionCreated.conversationId };
+  const observation = (await admin.detail({ ...admissionRef, limit: 20 }, 'order_explanation', new AbortController().signal)).conversation;
+  const hashing = loadAdmin('features/ai-native/budget-settings-session.ts', {});
+  const admissionSession = loadAdmin('features/ai-native/conversation-admission-session.ts', { './budget-settings-session': hashing }).ConversationAdmissionSession;
+  let admittedWrites = 0;
+  const messagePorts = { ...admin, admit: async (...args) => { admittedWrites++; try { await admin.admit(...args); }
+    catch (failure) { throw Error(`admission rejected: ${JSON.stringify(failure.getResponse?.() ?? { message: failure.message })}`); }
+    throw Error('lost admission acknowledgement'); } };
+  const message = new admissionSession(admissionRef.conversationId, messagePorts, () => true, storage, 'message-journal', () => 'message-original');
+  await message.prepare(observation, 'order-a', 'fees');
+  assert.equal(admittedWrites, 0); assert.equal(message.snapshot().prepared, true);
+  assert.equal(journal.get('message-journal').includes('order-a'), false, 'journal has key/hash, not original business input');
+  await assert.rejects(message.send(), /lost admission acknowledgement/);
+  assert.equal(admittedWrites, 1); assert.equal(message.snapshot().locked, true);
+  await assert.rejects(message.send(), /AI_RESULT_UNKNOWN/); assert.equal(admittedWrites, 1);
+  message.dispose();
+  const reopenedMessage = new admissionSession(admissionRef.conversationId, admin, () => true, storage, 'message-journal', () => { throw Error('must not choose new key'); });
+  const accepted = await reopenedMessage.reconcile();
+  assert.equal(accepted.result.admissionKey, 'message-original'); assert.equal(accepted.result.task, null);
+  assert.equal(shared.validateAiConversationAdmissionDraft(accepted, { ...admissionRef, admissionKey: 'message-original' }), true);
+  for (const bad of [{ ...accepted, credential: 'secret' }, { ...accepted, conversationId: 'foreign' },
+    { ...accepted, result: { ...accepted.result, admissionKey: 'other' } }, { ...accepted, retryable: true }])
+    assert.equal(shared.validateAiConversationAdmissionDraft(bad, { ...admissionRef, admissionKey: 'message-original' }), false);
+  await assert.rejects(reopenedMessage.prepare(observation, 'order-a', 'status'), /AI_RESULT_UNKNOWN/);
+  const occupied = (await admin.detail({ ...admissionRef, limit: 20 }, 'order_explanation', new AbortController().signal)).conversation;
+  const missingAdmission = new admissionSession(admissionRef.conversationId, admin, () => true, storage, 'missing-admission', () => { throw Error('no replacement key'); });
+  assert.equal(missingAdmission.canClose(occupied), false);
+  assert.throws(() => missingAdmission.assertClosure(occupied), /AI_RESULT_UNKNOWN/);
+  assert.equal(journal.has('close-journal'), false); assert.equal(h.state.aiConversation[ h.state.aiConversation.length - 1 ].activeTurnId, occupied.currentTurn.turnId);
+  reopenedMessage.assertClosure(occupied);
+  const closurePorts = { ...admin, closeUnstarted: async (...args) => { await admin.closeUnstarted(...args); throw Error('lost closure acknowledgement'); } };
+  const closing = new lifecycle(closurePorts, () => true, storage, 'close-journal', () => 'close-original', true);
+  await assert.rejects(closing.close('closeUnstarted', admissionRef.conversationId, occupied.revision,
+    occupied.currentTurn.turnId, occupied.currentTurn.original.inputRef), /lost closure acknowledgement/);
+  assert.equal(closing.snapshot().locked, true); assert.equal(h.state.aiTask.length, 0);
+  const resumedClosing = new lifecycle(admin, () => true, storage, 'close-journal', () => { throw Error('must not resend closure'); }, true);
+  const closureReceipt = await resumedClosing.reconcile();
+  assert.equal(closureReceipt.creation, 'permanently_closed'); assert.equal(resumedClosing.snapshot().locked, true);
+  assert.equal(shared.validateAiConversationOperationDraft(closureReceipt, 'close-original'), true);
+  let failedRemoval;
+  const rotationStore = { ...storage, removeItem: key => {
+    if (key === failedRemoval) { failedRemoval = undefined; throw Error(`interrupted removal: ${key}`); }
+    storage.removeItem(key);
+  } };
+  const rotationMessage = new admissionSession(admissionRef.conversationId, admin, () => true, rotationStore, 'message-journal', () => { throw Error('no new key during rotation'); });
+  const rotationClosing = new lifecycle(admin, () => true, rotationStore, 'close-journal', () => { throw Error('no new closure during rotation'); }, true);
+  await rotationClosing.reconcile();
+  failedRemoval = 'close-journal';
+  await assert.rejects(rotationClosing.completeClosure((proof, acknowledge) => rotationMessage.rotate(admin, proof.operationKey, proof, acknowledge)), /interrupted removal: close-journal/);
+  assert.equal(journal.has('close-journal'), true); assert.equal(JSON.parse(journal.get('message-journal')).rotation.operationKey, 'close-original');
+  assert.equal(rotationMessage.snapshot().locked, true);
+  const retryMessage = new admissionSession(admissionRef.conversationId, admin, () => true, rotationStore, 'message-journal', () => { throw Error('no new key during rotation'); });
+  const retryClosing = new lifecycle(admin, () => true, rotationStore, 'close-journal', () => { throw Error('no new closure during rotation'); }, true);
+  await retryClosing.reconcile(); failedRemoval = 'message-journal';
+  await assert.rejects(retryClosing.completeClosure((proof, acknowledge) => retryMessage.rotate(admin, proof.operationKey, proof, acknowledge)), /interrupted removal: message-journal/);
+  assert.equal(journal.has('close-journal'), false); assert.equal(journal.has('message-journal'), true);
+  assert.equal(retryMessage.snapshot().locked, true); assert.equal(retryMessage.snapshot().rotationPending, true);
+  const resumedRotation = new admissionSession(admissionRef.conversationId, admin, () => true, rotationStore, 'message-journal', () => { throw Error('no new key during rotation'); });
+  assert.equal(resumedRotation.snapshot().rotationPending, true);
+  await resumedRotation.resumeRotation(admin, () => !journal.has('close-journal'));
+  assert.equal(resumedRotation.snapshot().locked, false); assert.equal(retryClosing.snapshot().locked, false);
+  assert.equal(journal.has('message-journal'), false); assert.equal(journal.has('close-journal'), false);
+  const idle = (await admin.detail({ ...admissionRef, limit: 20 }, 'order_explanation', new AbortController().signal)).conversation;
+  assert.equal(idle.currentTurn, null); assert.equal(idle.revision, occupied.revision + 1);
+  const nextMessage = new admissionSession(admissionRef.conversationId, admin, () => true, storage, 'message-journal', () => 'message-next');
+  await nextMessage.prepare(idle, 'order-a', 'status'); await nextMessage.send();
+  assert.equal((await admin.admission({ ...admissionRef, admissionKey: 'message-next' }, new AbortController().signal)).result.task, null);
+  assert.equal(h.state.aiTaskOriginalRequest.filter(row => row.sceneCode === 'order_explanation').length, 3);
+  assert.equal(h.state.aiTask.length, 0, 'history reads never create or restart a task');
+  const Creation = loadAdmin('features/ai-native/conversation-task-creation-session.ts', {}).ConversationTaskCreationSession;
+  const creationTurn = (await admin.admission({ ...admissionRef, admissionKey: 'message-next' }, new AbortController().signal)).result;
+  let taskCreates = 0;
+  const creationPorts = { ...admin, createTask: async (...args) => { taskCreates++; const value = await admin.createTask(...args);
+    const row = h.state.aiTask.find(row => row.id === value.taskId);
+    h.state.aiTaskActionPolicy.push({ scopeId: row.scopeId, taskId: row.id, operation: 'read_metadata', revision: 1,
+      requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01T00:00:00Z') });
+    throw Error('lost task creation acknowledgement'); } };
+  const taskCreation = new Creation(admissionRef.conversationId, creationPorts, () => true, storage, 'task-creation-journal');
+  await assert.rejects(taskCreation.create(creationTurn), /lost task creation acknowledgement/);
+  assert.equal(h.state.aiTask.length, 1); assert.equal(taskCreates, 1);
+  await assert.rejects(taskCreation.create(creationTurn), /AI_RESULT_UNKNOWN/); assert.equal(taskCreates, 1);
+  const taskReopened = new Creation(admissionRef.conversationId, admin, () => true, storage, 'task-creation-journal');
+  const recoveredTask = await taskReopened.reconcile();
+  assert.equal(recoveredTask.task.state, 'observed'); assert.equal(recoveredTask.automaticExecution, false);
+  assert.equal(recoveredTask.task.plan, 'not_observed'); assert.equal(recoveredTask.steps.length, 0);
+  assert.equal(shared.validateAiSceneRequestRecoveryDraft(recoveredTask), true);
+  assert.equal(h.state.aiTask.length, 1); assert.equal(taskCreates, 1);
+  assert.equal(h.state.aiTaskOriginalRequest.find(row => row.id === creationTurn.original.inputRef).id, creationTurn.original.inputRef);
+  await http.archive(request, { draftVersion, conversationId: page.items[0].conversationId, expectedRevision: 1, operationKey: 'archive-capability' });
+  const archived = await http.list(request, { ...query, status: 'archived', limit: 20 });
+  assert.equal(archived.items.length, 1); assert.equal(archived.items[0].conversationId, page.items[0].conversationId);
+  await assert.rejects(http.list(request, { ...query, capabilityCode: 'unregistered' }), e => e.getStatus() === 400);
+  await assert.rejects(http.list(request, { ...query, actor: 'forged' }), e => e.getStatus() === 400);
+  const inactive = new AiConversationController(composeAiConversationRequests({ ...dependencies,
+    creationRules: dependencies.creationRules.filter(rule => rule.sceneCode !== 'opening_diagnosis') }, true));
+  await assert.rejects(inactive.list(request, { ...query, capabilityCode: 'opening_diagnosis' }), e => e.getStatus() === 404);
+  const legacyInactive = await inactive.list(request, { draftVersion, status: 'active', limit: 20 });
+  assert.ok(legacyInactive.items.every(row => row.capabilityCode !== 'opening_diagnosis'));
+  const list = AiConversationRepository.prototype.list;
+  const damaged = t.mock.method(AiConversationRepository.prototype, 'list', async function(...args) {
+    const result = await list.apply(this, args);
+    return { ...result, items: result.items.map(row => ({ ...row, capabilityCode: 'opening_diagnosis' })) };
+  });
+  await assert.rejects(http.list(request, query), e => e.getStatus() === 503);
+  damaged.mock.restore();
+  const owner = h.b.h.identity.user.id; h.b.h.identity.user.id = 'other-operator';
+  await assert.rejects(http.list(request, query), e => e.getStatus() === 403, 'the original HTTP token cannot impersonate another operator');
+  h.b.h.identity.user.id = owner;
+  h.state.aiConversation.push({ ...h.state.aiConversation.find(row => row.capabilityCode === query.capabilityCode),
+    id: 'foreign-owner-conversation', ownerId: 'other-operator' });
+  assert.ok((await http.list(request, { ...query, limit: 20 })).items.every(row => row.conversationId !== 'foreign-owner-conversation'));
+  h.b.h.identity.session = false;
+  await assert.rejects(http.list(request, query), e => e.getStatus() === 403);
 });
 
 test('conversation standard provider and Controller preserve explicit admission and original unknown receipts', { timeout: 60000 }, async t => {
@@ -1195,7 +1638,7 @@ test('persisted scene model result is bound to its original input and current au
   h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation: 'read_step_terminal', revision: 1,
     requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
   h.state.aiStep.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, id: 'model-step', actionId: 'model-action',
-    inputRef: 'model-input', requestFingerprint: fingerprint, status: 'SUCCEEDED', resultRef: 'model-result',
+    inputRef: 'model-input', requestFingerprint: fingerprint, status: 'SUCCEEDED', resultRef: 'model-result', sequence: 1, revision: 1,
     toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION });
   h.state.aiTaskActionInput.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, id: 'model-input',
     registrationRef: `scene-model:${ref.inputRef}`, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint, payload: input });
@@ -1280,6 +1723,86 @@ test('persisted scene model result is bound to its original input and current au
     h.b.facts.findOrder = findOrder;
   }
   assert.equal(modelPacket.execution, 'read_only_no_start_no_dispatch'); assert.equal(modelPacket.turn.task.taskId, task.id);
+  h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation: 'read_metadata', revision: 1,
+    requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
+  const { composeRequestBoundTaskCenter, AiTaskCenterController } = require('../apps/api/src/modules/ai-native/task-center.application');
+  const taskHttp = new AiTaskCenterController(composeRequestBoundTaskCenter({ db: h.db, auth: readDependencies.auth,
+    clock: readDependencies.clock, originalDb: h.db, originalResults: { readModelResult: (_request, value) => reader.read(value) } }));
+  const ts = require('typescript'), vm = require('node:vm'), fs = require('node:fs');
+  const loadAdmin = (file, imports) => {
+    const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src', file), 'utf8'),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, exports = {};
+    vm.runInNewContext(output, { exports, AbortSignal, structuredClone, require: name => {
+      if (name === '@rental-os/shared') return shared;
+      if (Object.hasOwn(imports, name)) return imports[name];
+      throw Error(name);
+    } }); return exports;
+  };
+  const snapshotReader = loadAdmin('features/ai-native/task-center-reader.ts', {});
+  const historyReader = loadAdmin('features/ai-native/conversation-history-reader.ts', { './task-center-reader': snapshotReader });
+  let wireCalls = 0, epoch = 1;
+  const signal = new AbortController();
+  const wire = { post: async (url, command, options) => {
+    assert.equal(options.signal.aborted, false); wireCalls++;
+    const route = /^\/ai-native\/(conversations|task-center)\/(admission|snapshot|result)$/u.exec(url); assert.ok(route);
+    const value = await (route[1] === 'conversations' ? conversationHttp : taskHttp)[route[2]](httpRequest, command);
+    return { data: { data: value } };
+  } };
+  const clock = { currentSessionEpoch: () => epoch, currentSessionSignal: () => signal.signal };
+  const taskApi = loadAdmin('api/aiTaskCenter.ts', { './http': { http: wire }, '@/app/queryClient': clock,
+    './aiRequestTiming': { AI_EXECUTION_RESPONSE_TIMEOUT_MS: 15000 } }).aiTaskCenterApi;
+  const adminApi = loadAdmin('api/aiConversations.ts', { './http': { http: wire }, './aiTaskCenter': { aiTaskCenterApi: taskApi },
+    '@/app/queryClient': clock, '@/features/ai-native/conversation-history-reader': historyReader }).aiConversationsApi;
+  const turn = modelPacket.turn, frozenState = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
+  const textResult = await adminApi.result(conversationReference, turn, signal.signal);
+  assert.equal(textResult.status, 'observed'); assert.equal(textResult.result.status, 'available');
+  assert.equal(textResult.result.text.value, result.text.value); assert.equal(wireCalls, 5);
+  assert.equal(shared.validateAiConversationTaskModelDraft(textResult.result, turn), true);
+  assert.deepEqual(h.state, frozenState, 'history result consumer does not create calls, artifacts, tasks or budget writes');
+  const snapshot = await taskHttp.snapshot(httpRequest, { taskId: task.id });
+  const baseReads = { admission: async () => ({ ...conversationReference, result: turn, absence: 'not_proof_of_no_commit', retryable: false }),
+    snapshot: async () => snapshot, result: async () => textResult.result };
+  for (const change of [value => { value.credential = 'secret'; }, value => { value.runId = 'another-run'; },
+    value => { value.sources.push({ kind: 'knowledge', index: 4, referenceHash: 'a'.repeat(64) }); },
+    value => { value.text.value = '汉'.repeat(50000); }, value => { value.status = 'unknown'; },
+    value => { value.sources.push({ ...value.sources[0] }); }]) {
+    const invalid = structuredClone(textResult.result); change(invalid);
+    assert.equal(shared.validateAiConversationTaskModelDraft(invalid, turn), false);
+    await assert.rejects(historyReader.readConversationTaskResult({ ...baseReads, result: async () => invalid },
+      conversationReference, turn, signal.signal, () => true), /AI_RESOURCE_UNAVAILABLE/);
+  }
+  let snapshots = 0;
+  await assert.rejects(historyReader.readConversationTaskResult({ ...baseReads, snapshot: async () => ({ ...snapshot,
+    revision: snapshot.revision + (snapshots++ ? 1 : 0) }) }, conversationReference, turn, signal.signal, () => true), /AI_REVISION_CONFLICT/);
+  let admissions = 0;
+  await assert.rejects(historyReader.readConversationTaskResult({ ...baseReads, admission: async () => ({ ...await baseReads.admission(),
+    result: { ...turn, material: admissions++ ? 'erased' : 'retained' } }) }, conversationReference, turn, signal.signal, () => true), /AI_REVISION_CONFLICT/);
+  const unavailable = await historyReader.readConversationTaskResult({ ...baseReads, snapshot: async () => ({ ...snapshot,
+    steps: snapshot.steps.map(step => ({ ...step, runId: 'another-run' })) }), result: async () => { throw Error('must not read another run'); } },
+    conversationReference, turn, signal.signal, () => true);
+  assert.equal(unavailable.status, 'no_unique_result');
+  const multiple = await historyReader.readConversationTaskResult({ ...baseReads, snapshot: async () => ({ ...snapshot,
+    steps: [...snapshot.steps, { ...snapshot.steps[0], stepId: 'model-step-2', resultId: 'model-result-2' }] }),
+    result: async () => { throw Error('must not guess among multiple results'); } }, conversationReference, turn, signal.signal, () => true);
+  assert.equal(multiple.status, 'no_unique_result');
+  for (const status of ['stale', 'unknown', 'failed']) {
+    const missing = { ...textResult.result, status, text: null, sources: [] };
+    assert.equal(shared.validateAiConversationTaskModelDraft(missing, turn), true);
+    assert.equal((await historyReader.readConversationTaskResult({ ...baseReads, result: async () => missing },
+      conversationReference, turn, signal.signal, () => true)).result.status, status);
+  }
+  const erased = { ...turn, material: 'erased' };
+  const erasedResult = await historyReader.readConversationTaskResult({ ...baseReads,
+    admission: async () => ({ ...await baseReads.admission(), result: erased }), snapshot: async () => { throw Error('must not restore erased body'); } },
+    conversationReference, erased, signal.signal, () => true);
+  assert.equal(erasedResult.status, 'material_erased');
+  const currentSignal = new AbortController();
+  await assert.rejects(historyReader.readConversationTaskResult({ ...baseReads, result: async () => { currentSignal.abort(); return textResult.result; } },
+    conversationReference, turn, currentSignal.signal, () => true), /AI_SCOPE_CHANGED/);
+  const savedAdmission = wire.post;
+  wire.post = async (...args) => { const value = await savedAdmission(...args); epoch++; return value; };
+  await assert.rejects(adminApi.result(conversationReference, turn, signal.signal), /AI_SCOPE_CHANGED/);
+  wire.post = savedAdmission;
   const { conversationResponse } = require('../apps/api/src/modules/ai-native/conversation-contract');
   for (const corrupt of [value => { value.result.taskId = 'another-task'; }, value => { value.result.original.inputRef = '00000000-0000-4000-8000-000000000002'; },
     value => { value.result.resultId = 'another-result'; }, value => { value.result.credential = 'internal'; }, value => { value.turn.material = 'erased'; }]) {

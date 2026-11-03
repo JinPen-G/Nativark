@@ -26,6 +26,7 @@ function matches(value, where) {
     }
     if (key === 'not') return !matches(value, rule);
     if (key === 'gt') return value !== null && value !== undefined && value > rule;
+    if (key === 'lt') return value !== null && value !== undefined && value < rule;
     if (key === 'lte') return value !== null && value !== undefined && value <= rule;
     if (key === 'some') return Array.isArray(value) && value.some(r => matches(r, rule));
     return matches(value?.[key], rule);
