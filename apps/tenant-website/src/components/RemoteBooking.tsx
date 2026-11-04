@@ -8,7 +8,7 @@ import { sessionApi } from '../data/authClient';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
-import type { AiBookingHandoff } from '../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingHandoff } from '@rental-os/shared';
 import { readOriginalBookingQuote, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
 
 interface QuoteView {

@@ -4,7 +4,7 @@
 import { API_BASE } from './apiClient';
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
-  from '../../../../packages/shared/src/ai-booking-draft';
+  from '@rental-os/shared';
 import type { AiClientHostCapabilities } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
