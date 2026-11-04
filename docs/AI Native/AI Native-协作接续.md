@@ -4,9 +4,9 @@
 
 ## 当前目标与权威入口
 
-负责人要求停止零散切片，集中最接近100%的整项，验证完成的归属批次及时本地提交。当前优先原AIN-02：本轮负责人明确授权四个网站文件的类型导入修改，五处已改用`@rental-os/shared`正式主出口；实际四端选定入口消费同一个新私有shared包，admin含平台/网站/客户小程序/员工均零诊断、源码回退0，整体退出0，原交接1/1及四文件运行时转译不变已验。此前全族出版、Task事件/取消/部分完成语义、原材料/模型/C09/公共消费者证据及产物哈希核对保留，不新增逐schema夹具门槛、不将历史日志算当前全量回归。网站写入归属及包消费阻塞已消除；剩余同一冻结基线完整生产者/消费者/版本与证据复核、跨AI整体冻结确认。此前停滞核查已停止，未取得有效结论，不再称“正在等待”；原AIN-02仍75%，不将AIN-12完整聊天/沙箱执行倒作合同前置。实现、原失败、实际命令和验证边界统一见[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)。
+负责人已将已删除会话的AIN-02职责交给新fork“AI Native主线-服务端 (A)”，继续集中完整任务收口，不恢复旧loop。网站正式出口修复`21d6af2e`保留；网站/微信各17条已装配方法的34条出版缺口、客户独立schema及四种取消响应的精确uint64上界已补并定向复验。当前校验输入、提交状态、固定SHA及范围从[本片交付清单](../../output/takeover-20261102-ed5rs4ug/ain02-A-20261104-ttlbxqsq/delivery.json)核对；完整阶段证据统一在[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)，不在接续重复测试流水。原AIN-02仍75%，剩余同一冻结基线的完整生产者/消费者/版本与证据复核及跨AI全文确认；此前停止的核查没有结论，不将AIN-12完整聊天/沙箱执行倒作合同前置。
 
-源“AI Native主线-服务端”已停写，本会话“any干活用”在foundation继续原专项；其他客户端文件归属仍按具体文件核验，不凭idle/无diff/未送达消息接管。原63/Codex28与独立押金触发已收口，不恢复旧队列。对话历史/生命周期/原受理日志、关闭及轮换、订单首次模型执行与原结果均保留；局部开业只到Task元数据，未接开业执行/事实/采用；订单仍缺其他能力/旧历史接手/完整恢复消费。unknown始终按原键读取，日志不授权限；清理、隐藏、取消请求和TTL均不证明未消耗。需求v1.14/任务v1.18及G1～G4不变，本轮未启浏览器/真实服务、迁移、外联、推送/合main或生产启用。
+源“AI Native主线-服务端”继续独立AIN-08只读可用性片；新A独占AIN-02客户出版、原两份验证及记录/接续，任务表仅跨原门槛后更新百分比，需求正文不改。源会话AIN-08成果仍须按其固定交付核验，不能夹入A的提交。其他客户端文件归属仍按具体文件核验，不凭idle/无diff/未送达消息接管。原63/Codex28与独立押金触发已收口，不恢复旧队列。对话历史/生命周期/原受理日志、关闭及轮换、订单首次模型执行与原结果均保留；局部开业只到Task元数据，未接开业执行/事实/采用；订单仍缺其他能力/旧历史接手/完整恢复消费。unknown始终按原键读取，日志不授权限；清理、隐藏、取消请求和TTL均不证明未消耗。需求v1.14/任务v1.18及G1～G4不变，本轮未启浏览器/真实服务、迁移、外联、推送/合main或生产启用。
 
 - 正式范围、依赖和唯一百分比表：[需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。本修复阶段未调整任务正文或百分比。
 - 已做/剩余及证据：[原28项实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)、[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)及同页完整阶段；AIN-02最近入口为[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)。
@@ -19,7 +19,7 @@
 | 项目 | 当前定位与限制 |
 | --- | --- |
 | 唯一施工树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`，分支`ai/ai-native-contracts-s01-20261002`，已固定合同批次`fae3d20a`/`8375ebf9`/`cb7971eb`/`6614b4eb`；当前HEAD及未提交归属以Git核验为准 |
-| 服务端本片 | “any干活用”接手原服务端/API/shared/后台消费者/既有验证及原记录接续；源“AI Native主线-服务端”已停止写入，提交只限核对过的完整切片 |
+| 服务端本片 | 新fork“AI Native主线-服务端 (A)”接替已删除旧会话，独占AIN-02：客户HTTP schema、entry-management取消边界、shared/index、API leaf/OpenAPI、原publication/scene-host测试及记录/接续。源“AI Native主线-服务端”独占AIN-08 Core/availability/read composition/tools/catalog-runner及相关测试WIP；固定范围见[库存切片](<AI Native-开发记录.md#ain08-bounded-availability-20261104>)。共享index/提交互斥，不夹带对方源码；当前HEAD/提交状态按Git及本片清单核对 |
 | 并行客户端 | 原前端/MCP/Harness后继归原会话，本次整合的固定保全已接入；只协调具体文件冲突，不凭idle或共享文件接管其工作 |
 | 固定整合 | 根目录修复`fd870b3d`、本树独有`69c6c89e`及MCP/Harness保全`08d41945`经本地main同步至`a1013774`。负责人两树停写后又按固定清单同步未提交文档/源码20,676路径；其后本树新业务WIP未再固定同步 |
 | 保全 | 根WIP stash `50553f58`、本树WIP stash `85f8377e`与逐文件原像保留；`output/ain02-20261030/review-origin-20261101`保存原63项/根阶段，当前私有证据在`output/repair-current-20261101-uotDQk`，不清理未知WIP/output/锁 |
@@ -33,7 +33,8 @@
 
 | 原任务 / 域 | 尚需处理或核实 | 入口 / 证据 |
 | --- | --- | --- |
-| AIN-02合同冻结 | 后台/平台/客户v2及员工正式消费已有定向证据，同源native注册表与原合同有效/拒绝样本保留；负责人已授权并完成网站四文件五处正式类型出口整改，四端实际选定入口同一私有包声明零诊断/源码回退0、整体退出0。剩余完整冻结基线的生产者/消费者/版本与证据复核及跨AI整体确认；已停止无结论的核查，不判全文100% | [集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)、[正式出口](../../packages/shared/src/index.ts)、[员工wire](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)；未装host保持unavailable |
+| AIN-02合同冻结 | 网站正式出口已提交；34条客户别名出版、取消uint64上界和原客户/报价wire复验已收片，原知识schema不变，同私有包API/四端选定消费者已核。固定交付后核完整生产者/消费者/版本及跨AI全文确认；已停止的旧核查无结论，不能按局部绿色判100% | [集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)、[正式出口](../../packages/shared/src/index.ts)、[员工wire](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)；未装host保持unavailable |
+| AIN-08业务只读 | 原Core库存只读切片及有界仓储已实现、定向离线复验，源会话独占，尚未提交；独立复核未有结论。原历史/四品类真实对照及其他reader/适用变体仍待核，不升全文100% | [固定库存切片](<AI Native-开发记录.md#ain08-bounded-availability-20261104>)及该阶段清单/原日志；A不接管源码 |
 | AIN-05/11/25 | 管理计数、持久CALLS、recorded生成及AppModule已接；三场景HTTP/多轮变体、真实计数/能力/费率、平台专用audit生产者、平台旧任务善后及SLO仍有缺口 | [模型组合](../../apps/api/src/modules/ai-native/task-model-gateway.composition.ts)，记录“标准计数与原任务计数执行链”“平台探测标准入口与停用后历史” |
 | AIN-06/09/13/15/21/22 | 混合模型/业务完整恢复、多行组合与原范围核对、企业身份和完整报价/预约链；客户上下文澄清不等于业务参数选择，unknown不重派 | [请求场景](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)、原28项/ENTRY摘要及“超限澄清有界连续轮” |
 | AIN-12/14/16 | 后台完整消息/事件及实际场景消费；通知设置以外的获准分区、普通资料写入、变化后重确认、原Core提交与失败恢复 | [正式providers](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)、原28项摘要；只读任务中心不等于完整可执行助手 |
@@ -60,7 +61,7 @@ AI工作中心/Copilot现有前端效果不能代替真实聊天选择→冻结�
 
 原五项141项、Codex业务166项及末次相关定向、AI39项/完整报价选择9项通过，API六入口/后台九入口noEmit零诊断；不同集合不相加，末次改动只引用其定向复验。实际命令、失败和修法见[业务阶段](../管理后台/管理后台-开发记录.md#local-integration-20261101)。这不是全库修后独立审查或真实DB/HTTP/供应商/浏览器证据，任务百分比保持原表。
 
-AIN-02下一步先核当前正式出口及实际消费者，不按旧文件列表重复改动；缺口明确到方法/字段后实现并做有限验证。满足原G4再更新任务百分比，不要求负责人人工签字，也不省略适用实测、独立技术复核或业务/生产批准。其他原任务按原依赖继续，不中途切无关专项。
+AIN-02客户整片固定交付后，源会话按固定SHA独立核原全文；A继续补确切合同缺口，不追活动HEAD、不另开递归审查或恢复旧循环。完整版本/生产者/消费者、成功/拒绝/失效/断线/旧协议及兼容回退证据均按原任务定位，满足原G4才更新百分比，不省略适用实测或独立技术复核。AIN-08由源会话完成本片独立复核及必要修后复验，完整阶段统一登记原记录，不将本片当整项完成。
 
 本轮所有Node仍预加载`tests/fixtures/ai-native/prisma-offline-preload.cjs`，固定`mysql://offline:offline@127.0.0.1:1/rental_os_offline`；当前`output/takeover-20261102-ed5rs4ug/runtime.cjs`设置本树绝对审计、writeRoot、TEMP/TMP/cache并禁compile cache，解析本树shared源码及已保全`output/repair-current-20261101-uotDQk/generated`私有client。未覆盖installed/shared client或dist，不为索引复制或重生成client；旧`ain02-20261030/prisma-current`保留但不能证明新增字段。
 

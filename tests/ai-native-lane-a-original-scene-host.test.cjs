@@ -2708,7 +2708,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const { ClientApiService } = require('../apps/api/src/modules/client/client-api.service');
   const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { composeAiClientScenes, createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
-  let revoked = false, revokeDuringRead = false, authorization, reads = 0, rateAllowed = true;
+  let revoked = false, revokeDuringRead = false, authorization, reads = 0, rateAllowed = true, completeOrderProjection = false;
   const session = { id: 'session-client', expiresAt: new Date('2027-01-01'), tenant: { code: 'tenant', status: 'ACTIVE' },
     customer: { customerType: 'personal', name: 'Synthetic', phone: 'synthetic' },
     workspace: { tenantId: 'tenant-client', status: 'ACTIVE', code: 'camera', name: 'Synthetic', categoryCode: 'camera' } };
@@ -2727,7 +2727,11 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     if (revokeDuringRead) revoked = true;
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
       status: 'reserved', quoteId: 'quote-client', currency: 'CNY', payableAmount: 0, rentalAmount: 12,
-      lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
+      lines: [], chargeLines: [], allocations: [], internalNote: 'never expose',
+      ...(completeOrderProjection ? { orderNo: 'ORDER-OFFLINE', customerName: 'Synthetic', fulfillmentMode: 'store_pickup_return',
+        fulfillmentLocationName: 'Synthetic location', startAt: '2026-12-01T00:00:00Z', endAt: '2026-12-02T00:00:00Z',
+        discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 0, preAuthAmount: 0,
+        adjustmentAmount: 0, finalPayableAmount: 0, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z' } : {}) };
   } }, feeItems: async (context, id) => {
     assert.equal(context.tenantId, 'tenant-client'); assert.equal(id, 'own-order');
     return { apiVersion: 'client-v1', orderId: id, items: [{ inspectionId: 'inspection-client', exceptionIndex: 0,
@@ -2762,7 +2766,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       phoneMasked: '***', identityVerified: false, account: { status: 'active' }, contacts: [], internalReview: 'never expose' }),
     currentWorkspace: async () => workspace,
     context: async () => ({ profile: {}, settings: {} }),
-    business: { getQuote: () => ({ id: 'quote-client' }), calculateCancellationCharge: () => 12 }
+    business: { getQuote: () => ({ id: 'quote-client' }), loadQuote: async (tenantId, _context, quoteId) => {
+      assert.equal(tenantId, 'tenant-client'); return client.business.getQuote(tenantId, _context, quoteId);
+    }, calculateCancellationCharge: () => 12 }
   });
   Object.assign(client.core, { listCategories: () => [{ code: 'camera', name: 'Synthetic' }],
     getBusinessSettings: () => ({ fulfillment: { enabledModes: [] } }) });
@@ -3300,8 +3306,28 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const createDraft = { operationKey: 'create-draft-1', action: draftAction };
   const draftCreated = await bookingHttp.createBookingDraft(request, createDraft);
   assert.equal(draftCreated.draft.state, 'draft_created'); assert.equal(draftCreated.draft.action, null);
-  const publication = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
-    require('../packages/shared/src/ai-entry-management-draft-schemas').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, {});
+  const customerSchemas = { ...require('@rental-os/shared').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS,
+    ...require('@rental-os/shared').AI_CLIENT_ENTRY_HTTP_SCHEMAS };
+  const allComponents = require('../apps/api/src/contracts/openapi-document').OPENAPI_DOCUMENT.components.schemas;
+  // Load only these contracts' dependencies, not unrelated OpenAPI-only shapes
+  // whose exclusive bounds are spelled differently from JSON Schema.
+  const customerSchemaDependencies = {};
+  const loadRefs = value => {
+    if (!value || typeof value !== 'object') return;
+    if (value.$ref) {
+      const name = value.$ref.split('/').pop();
+      if (!Object.hasOwn(customerSchemas, name) && !Object.hasOwn(customerSchemaDependencies, name)) {
+        assert.ok(allComponents[name], name); customerSchemaDependencies[name] = allComponents[name]; loadRefs(customerSchemaDependencies[name]);
+      }
+    }
+    Object.values(value).forEach(loadRefs);
+  };
+  Object.values(customerSchemas).forEach(loadRefs);
+  const publication = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(customerSchemas, customerSchemaDependencies);
+  const publishedResponse = (name, value) => assert.equal(publication[name](value), true, `${name}: ${JSON.stringify(publication[name].errors)}`);
+  publishedResponse('AiBookingCreateResponse', draftCreated);
+  assert.equal(publication.AiBookingActionRequest(createDraft), true);
+  assert.equal(publication.AiBookingActionRequest({ ...createDraft, scope: { tenantId: 'foreign' } }), false);
   assert.equal(publication.AiBookingDraft(draftCreated.draft), true, JSON.stringify(publication.AiBookingDraft.errors));
   assert.equal(draftCreated.draft.material.quote.depositAmount, 0);
   assert.equal(draftCreated.draft.material.sources.returnLocationId, 'core_normalized');
@@ -3312,11 +3338,16 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     inputFingerprint: draftCreated.draft.inputFingerprint, operationKey: 'select-draft-1', decision: 'continue_booking' };
   await assert.rejects(bookingApp.chooseBookingDraft(request, { ...selectDraft, expectedRevision: 2 }), e => e.code === 'AI_REVISION_CONFLICT');
   const selected = await bookingHttp.chooseBookingDraft(request, selectDraft);
+  publishedResponse('AiBookingChoiceResponse', selected);
+  assert.equal(publication.AiBookingChoiceRequest(selectDraft), true);
   assert.equal(selected.draft.state, 'user_selected'); assert.equal(selected.draft.selectionRevision, 1);
   assert.equal(selected.draft.action.actionCode, 'OPEN_BOOKING');
   assert.equal((await bookingApp.chooseBookingDraft(request, selectDraft)).replayed, true);
   const handoffCommand = { operationKey: 'handoff-draft-1', action: selected.draft.action };
   const handed = await bookingHttp.handoffBookingDraft(request, handoffCommand);
+  publishedResponse('AiBookingHandoffResponse', handed);
+  publishedResponse('AiBookingOperationReadResponse', await bookingHttp.readBookingOperation(request, { operationKey: handoffCommand.operationKey }));
+  publishedResponse('AiBookingOperationReadResponse', await bookingHttp.readBookingOperation(request, { operationKey: 'not-observed' }));
   assert.equal(handed.handoff.fields.quoteId, bookingSelection.quoteId);
   assert.equal(handed.handoff.submission, 'original_booking_page_required');
   assert.equal(handed.handoff.inventory, 'not_reserved');
@@ -3526,9 +3557,22 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(clientScene.taskOutcome, 'not_inferred_from_order_facts');
   assert.equal(clientScene.execution, 'read_only_no_task_start');
   const taskReaderController = new AiClientEntryController(taskRestart);
-  assert.equal((await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'status' })).facts.orderId, 'own-order');
+  const publishedExplanation = await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'status' });
+  publishedResponse('AiClientOrderExplanationReadResponse', publishedExplanation);
+  assert.equal(publishedExplanation.facts.orderId, 'own-order');
+  publishedResponse('AiClientOrderExplanationReadResponse', await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }));
+  assert.equal(publication.AiClientOrderExplanationReadResponse({ ...publishedExplanation, approved: true }), false);
   await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'other-order', question: 'status' }), e => e.getStatus?.() === 403);
-  assert.equal((await taskReaderController.readSource(request, { materialRef: own.materialRef })).materialRef, own.materialRef);
+  const sourcePacket = await taskReaderController.readSource(request, { materialRef: own.materialRef });
+  assert.equal(sourcePacket.materialRef, own.materialRef);
+  // Earlier missing-amount fixtures remain missing, never patched into zero.
+  // A separate complete original client projection exercises wire publication.
+  completeOrderProjection = true;
+  const completeMaterial = await prepare(request, { kind: 'order', orderId: 'own-order' });
+  const completeSource = await taskReaderController.readSource(request, { materialRef: completeMaterial.materialRef });
+  publishedResponse('AiClientSourceReadResponse', completeSource);
+  assert.equal(publication.AiClientSourceReadResponse({ ...completeSource, bindingHash: 'private' }), false);
+  completeOrderProjection = false;
   const snapshot = await taskReaderController.readTaskSnapshot(request, taskCommand);
   assert.equal(snapshot.taskId, created.task.taskId);
   assert.equal(snapshot.cursor, '0'); assert.deepEqual(snapshot.steps, []);
@@ -3665,6 +3709,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(cancelReceipt.cancellation, 'requested_not_rollback'); assert.equal(cancelReceipt.retryable, false);
   const { aiClientTaskCancelReceiptSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
   assert.equal(aiClientTaskCancelReceiptSchema.safeParse(cancelReceipt).success, true);
+  publishedResponse('AiClientTaskCancelReceipt', cancelReceipt);
+  assert.equal(publication.AiClientTaskCancelReceipt({ ...cancelReceipt, cancellation: 'rolled_back' }), false);
   assert.equal(cancelReceipt.status, 'cancel_requested'); assert.equal(cancelReceipt.taskId, created.task.taskId);
   assert.equal('receipt' in cancelReceipt, false); assert.equal('runRevision' in cancelReceipt, false);
   assert.equal(taskStore.state.aiTask.find(row => row.id === created.task.taskId).status, 'CANCEL_REQUESTED');
@@ -3724,4 +3770,55 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef, taskId: 'foreign-history' }), /AI_CLIENT_INVALID_INPUT/);
   for (const feature of ['tasks', 'models', 'events', 'downloads', 'historyMigration']) assert.equal(requests.capabilities[feature], 'unavailable');
   assert.equal(requests.start, undefined); assert.equal(requests.cancelOrder, undefined);
+});
+
+test('client quote HTTP publication preserves original facts, missing values and post-write unknown semantics', async () => {
+  // This exercises the real Controller's wire projection. Application methods
+  // are controlled doubles, not proof of current Auth, Core or MySQL execution.
+  const shared = require('@rental-os/shared');
+  const { AiClientEntryController } = require('../apps/api/src/modules/ai-native/scenes/client-entry.controller');
+  const names = ['AiClientQuotePreparationRequest', 'AiClientQuoteConfirmationRequest', 'AiClientQuotePreparationResponse',
+    'AiClientQuotePreparationReadResponse', 'AiClientQuoteFacts', 'AiClientQuoteResultReadResponse'];
+  const schemas = Object.fromEntries(names.map(name => [name, shared.AI_CLIENT_ENTRY_HTTP_SCHEMAS[name]]));
+  const components = require('../apps/api/src/contracts/openapi-document').OPENAPI_DOCUMENT.components.schemas;
+  const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, { ClientQuoteRequest: components.ClientQuoteRequest });
+  const accepted = (name, value) => assert.equal(validators[name](value), true, `${name}: ${JSON.stringify(validators[name].errors)}`);
+  const materialRef = '11111111-1111-4111-8111-111111111111', materialHash = '1'.repeat(64);
+  const request = { headers: {} }, command = { operationKey: 'quote-operation', input: { fulfillmentMode: 'self_pickup',
+    fulfillmentLocationId: 'location-a', startAt: '2026-11-05T00:00:00Z', endAt: '2026-11-06T00:00:00Z', lines: [{ itemGroupId: 'item-a', quantity: 1 }] } };
+  const confirmation = { materialRef, expectedMaterialHash: materialHash };
+  let preparation = { materialRef, materialHash, inputHash: '2'.repeat(64), revision: 1, expiresAt: '2026-11-05T00:00:00Z',
+    preparation: 'normalized_parameters', eligibility: 'not_attested', quotePersistence: 'not_attempted', inventoryReservation: 'not_attempted',
+    humanAction: 'explicit_confirmation_required', freshness: 'recheck_at_confirmation', replayed: false };
+  let originalQuote = { id: 'quote-a', payableAmount: 0, internalNote: 'not-public', customerId: 'not-public' };
+  const calls = [], observed = () => ({ state: originalQuote ? 'observed' : 'unknown', quote: originalQuote, source: { materialRef, materialHash } });
+  const controller = new AiClientEntryController({
+    prepareQuoteParameters: async (_request, input) => { calls.push('prepare'); assert.deepEqual(input, command); return structuredClone(preparation); },
+    readQuotePreparationOperation: async (_request, input) => { calls.push('read-preparation');
+      if (input.operationKey === 'not-observed') return { state: 'unknown', operationKey: input.operationKey, retryable: false, execution: 'read_only' };
+      const { replayed, ...value } = preparation; return { ...value, state: 'observed', retryable: false, execution: 'read_only' }; },
+    confirmQuoteParameters: async (_request, input) => { calls.push('confirm'); assert.deepEqual(input, confirmation); return observed(); },
+    readPreparedQuoteOriginal: async (_request, input) => { calls.push('read-original'); assert.deepEqual(input, confirmation); return observed(); }
+  });
+  accepted('AiClientQuotePreparationRequest', command); accepted('AiClientQuoteConfirmationRequest', confirmation);
+  accepted('AiClientQuotePreparationResponse', await controller.prepareQuoteParameters(request, command));
+  accepted('AiClientQuotePreparationReadResponse', await controller.readQuotePreparationOperation(request, command));
+  accepted('AiClientQuotePreparationReadResponse', await controller.readQuotePreparationOperation(request, { ...command, operationKey: 'not-observed' }));
+  const confirmed = await controller.confirmQuoteParameters(request, confirmation);
+  accepted('AiClientQuoteResultReadResponse', confirmed);
+  assert.equal(confirmed.quote.payableAmount, 0); assert.equal(confirmed.quote.depositAmount, null);
+  assert.equal(confirmed.quote.currency, null); assert.equal(confirmed.quote.chargeLines, null);
+  assert.equal(confirmed.quote.internalNote, undefined); assert.equal(confirmed.quote.customerId, undefined);
+  assert.equal(confirmed.orderExecution, 'not_attempted'); assert.equal(confirmed.confirmation, 'parameters_only_not_order_approval');
+  originalQuote = null;
+  accepted('AiClientQuoteResultReadResponse', await controller.readPreparedQuoteOriginal(request, confirmation));
+  assert.equal(calls.filter(value => value === 'confirm').length, 1, 'observation must not invoke confirmation again');
+  assert.equal(validators.AiClientQuoteResultReadResponse({ ...confirmed, state: 'unknown' }), false);
+  assert.equal(validators.AiClientQuotePreparationResponse({ ...preparation, contractVersion: shared.AI_CLIENT_QUOTE_PREPARATION_VERSION, approved: true }), false);
+  const beforeInvalid = calls.length;
+  await assert.rejects(controller.confirmQuoteParameters(request, { ...confirmation, approved: true }), error => error.getStatus?.() === 400);
+  assert.equal(calls.length, beforeInvalid);
+  preparation = { ...preparation, materialHash: 'invalid' };
+  await assert.rejects(controller.prepareQuoteParameters(request, command), error => error.getStatus?.() === 409
+    && error.getResponse().code === 'AI_RESULT_UNKNOWN' && error.getResponse().retryable === false);
 });

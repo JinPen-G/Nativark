@@ -16,7 +16,13 @@ const literal = (value: string | boolean | number) => ({ const: value });
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) =>
   ({ type: 'object', properties, required, additionalProperties: false });
 const taskRevision = { type: 'integer', minimum: 1, maximum: 4294967295 };
-const cancelTransition = { taskRevision, cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' }, observedAt: date };
+// Decimal-string cursors cannot use numeric JSON Schema bounds. Each branch
+// stays below the original uint64 maximum without coercing it to a Number.
+const uint64Max = '18446744073709551615';
+const uint64Prefixes = [...uint64Max].slice(1).flatMap((digit, offset) => Number(digit) === 0 ? []
+  : [`${uint64Max.slice(0, offset + 1)}[0-${Number(digit) - 1}][0-9]{${18 - offset}}`]);
+const positiveCursor = { type: 'string', pattern: `^(?:[1-9][0-9]{0,18}|${uint64Prefixes.join('|')}|${uint64Max})$` };
+const cancelTransition = { taskRevision, cursor: positiveCursor, observedAt: date };
 const cancelObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
   expectedRevision: { ...taskRevision, maximum: 4294967294 }, execution: literal('not_authorized_by_observation'),
   externalRollback: literal('not_claimed'), retryable: literal(false), nextAction: literal('read_original_task') };
