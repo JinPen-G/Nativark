@@ -63,21 +63,33 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
   availability: literal('available_at_observation_not_reserved') },
   ['selection', 'sources', 'quote', 'catalogVersion', 'availabilityVersion', 'identityVersion', 'availability']);
 
+const materialReceipt = { contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION), operationKey: { ...id, maxLength: 128 },
+  execution: literal('not_attested'), freshness: literal('revalidate_before_execution'),
+  retryable: literal(false), nextAction: literal('read_original_material_receipt') };
+const createdTask = object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
+  status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } });
+const creationReceipt = { contractVersion: literal(AI_TASK_DRAFT_VERSION), creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
+  execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') };
+const accountingObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
+  meaning: literal('ai_invocation_not_business_payment'), observedAt: date, execution: literal('not_authorized_by_accounting'),
+  retryable: literal(false), nextAction: literal('read_original_accounting') };
+const recordedAccount = { oneOf: [
+  object({ status: literal('settled'), usageRecorded: literal(true), dispatched: { type: 'boolean' } }),
+  object({ status: { enum: ['reserved', 'released', 'pending_reconciliation'] }, usageRecorded: literal(false), dispatched: { type: 'boolean' } })] };
+
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
   AiClientOrderMaterialRequest: object({ operationKey: { ...id, maxLength: 128 }, orderId: id }),
-  AiClientOrderMaterialReceipt: object({ contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
-    operationKey: { ...id, maxLength: 128 }, state: { enum: ['observed', 'unknown'] },
-    materialRef: { anyOf: [uuid, { type: 'null' }] }, materialHash: { anyOf: [hash, { type: 'null' }] },
-    expiresAt: { anyOf: [date, { type: 'null' }] }, execution: literal('not_attested'),
-    freshness: literal('revalidate_before_execution'), retryable: literal(false), nextAction: literal('read_original_material_receipt') }),
-  AiClientTaskCreationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
-    creationKey: { ...id, maxLength: 128 }, materialRef: uuid, state: { enum: ['observed', 'unknown'] },
-    inputRef: { anyOf: [uuid, { type: 'null' }] }, inputHash: { anyOf: [hash, { type: 'null' }] },
-    task: { anyOf: [object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
-      status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
-    execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
+  // A claimed observation must carry its original evidence. Unknown input
+  // claims may already be persisted, but they never manufacture a created Task.
+  AiClientOrderMaterialReceipt: { oneOf: [
+    object({ ...materialReceipt, state: literal('observed'), materialRef: uuid, materialHash: hash, expiresAt: date }),
+    object({ ...materialReceipt, state: literal('unknown'), materialRef: { type: 'null' }, materialHash: { type: 'null' }, expiresAt: { type: 'null' } })] },
+  AiClientTaskCreationReceipt: { oneOf: [
+    object({ ...creationReceipt, state: literal('observed'), inputRef: uuid, inputHash: hash, task: createdTask }),
+    object({ ...creationReceipt, state: literal('unknown'), inputRef: { anyOf: [uuid, { type: 'null' }] },
+      inputHash: { anyOf: [hash, { type: 'null' }] }, task: { type: 'null' } })] },
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
   AiClientTaskInputSubmissionRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
   AiClientTaskInputReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('pending'),
@@ -116,11 +128,9 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
   AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
   AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),
   AiTaskAccountingObservation: { $ref: '#/components/schemas/AiClientTaskAccountingResponse' },
-  AiClientTaskAccountingResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
-    state: { enum: ['observed', 'unknown'] }, account: { anyOf: [object({ status: { enum: ['reserved', 'settled', 'released', 'pending_reconciliation'] },
-      usageRecorded: { type: 'boolean' }, dispatched: { type: 'boolean' } }), { type: 'null' }] },
-    meaning: literal('ai_invocation_not_business_payment'), observedAt: date, execution: literal('not_authorized_by_accounting'),
-    retryable: literal(false), nextAction: literal('read_original_accounting') }),
+  AiClientTaskAccountingResponse: { oneOf: [
+    object({ ...accountingObservation, state: literal('observed'), account: recordedAccount }),
+    object({ ...accountingObservation, state: literal('unknown'), account: { type: 'null' } })] },
   AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
   AiClientOrderExplanationReadRequest: object({ orderId: id, question: { enum: ['status', 'fees'], description: 'Omitted question uses status.' } }, ['orderId']),

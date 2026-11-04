@@ -207,6 +207,41 @@ test('all customer cancellation publications retain the original positive uint64
   }
 });
 
+test('receipt state and nullable evidence stay consistent with the original runtime validators', () => {
+  const uuid = '11111111-1111-4111-8111-111111111111', hash = '1'.repeat(64), observedAt = '2026-11-04T00:00:00Z';
+  const check = (name, runtime, value) => {
+    const expected = runtime.safeParse(value).success;
+    assert.equal(rawValidators[name](value), expected, `shared ${name}: ${JSON.stringify(value)}`);
+    assert.equal(publishedValidators[name](value), expected, `OpenAPI ${name}: ${JSON.stringify(value)}`);
+  };
+  for (const state of ['observed', 'unknown']) for (const materialRef of [uuid, null])
+    for (const materialHash of [hash, null]) for (const expiresAt of [observedAt, null]) {
+      check('AiClientOrderMaterialReceipt', shared.aiClientOrderMaterialReceiptSchema, {
+        contractVersion: shared.AI_CLIENT_MATERIAL_RECEIPT_VERSION, operationKey: 'material-key', state,
+        materialRef, materialHash, expiresAt, execution: 'not_attested', freshness: 'revalidate_before_execution',
+        retryable: false, nextAction: 'read_original_material_receipt'
+      });
+    }
+  const taskValue = { taskId: 'task-a', runId: 'run-a', status: 'queued', revision: 1, replayed: false };
+  for (const state of ['observed', 'unknown']) for (const inputRef of [uuid, null])
+    for (const inputHash of [hash, null]) for (const task of [taskValue, null]) {
+      check('AiClientTaskCreationReceipt', shared.aiClientTaskCreationReceiptSchema, {
+        contractVersion: shared.AI_TASK_DRAFT_VERSION, creationKey: 'creation-key', materialRef: uuid, state,
+        inputRef, inputHash, task, execution: 'not_attested', retryable: false, nextAction: 'read_original_task_creation'
+      });
+    }
+  const accounts = [null];
+  for (const status of ['reserved', 'settled', 'released', 'pending_reconciliation'])
+    for (const usageRecorded of [false, true]) for (const dispatched of [false, true]) accounts.push({ status, usageRecorded, dispatched });
+  for (const state of ['observed', 'unknown']) for (const account of accounts) {
+    const value = { contractVersion: shared.AI_TASK_DRAFT_VERSION, callId: 'call-a', state, account,
+      meaning: 'ai_invocation_not_business_payment', observedAt, execution: 'not_authorized_by_accounting',
+      retryable: false, nextAction: 'read_original_accounting' };
+    check('AiClientTaskAccountingResponse', shared.aiClientTaskAccountingResponseSchema, value);
+    check('AiTaskAccountingObservation', shared.aiTaskAccountingObservationSchema, value);
+  }
+});
+
 test("OpenAPI conversion changes keywords without dropping nested constraints or mutating sources", () => {
   const before = JSON.stringify(original);
   for (const [name, schema] of Object.entries(original)) assert.deepEqual(convert(schema), published[name]);

@@ -3557,6 +3557,13 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(clientScene.taskOutcome, 'not_inferred_from_order_facts');
   assert.equal(clientScene.execution, 'read_only_no_task_start');
   const taskReaderController = new AiClientEntryController(taskRestart);
+  await assert.rejects(taskReaderController.readOrderMaterialReceipt(request,
+    { operationKey: own.operationKey, orderId: 'own-order' }), error => error.getStatus?.() === 503);
+  publishedResponse('AiClientOrderMaterialReceipt', await bookingHttp.readOrderMaterialReceipt(request,
+    { operationKey: entryMaterial.operationKey, orderId: 'own-order' }));
+  publishedResponse('AiClientOrderMaterialReceipt', await bookingHttp.readOrderMaterialReceipt(request,
+    { operationKey: 'material-not-observed', orderId: 'own-order' }));
+  publishedResponse('AiClientTaskCreationReceipt', await taskReaderController.readTaskCreation(request, taskCommand));
   const publishedExplanation = await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'status' });
   publishedResponse('AiClientOrderExplanationReadResponse', publishedExplanation);
   assert.equal(publishedExplanation.facts.orderId, 'own-order');
@@ -3688,6 +3695,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   lostInputReply = false;
   assert.equal((await taskRestart.createTask(request, inputLost)).state, 'unknown');
   assert.equal((await taskRestart.readTaskCreation(request, inputLost)).task, null);
+  const unknownCreation = await taskReaderController.readTaskCreation(request, inputLost);
+  publishedResponse('AiClientTaskCreationReceipt', unknownCreation);
+  assert.equal(unknownCreation.state, 'unknown'); assert.equal(unknownCreation.task, null);
   assert.equal(countCreates(), afterTaskLost);
   const preDispatchRevoked = { ...taskCommand, creationKey: 'policy-revoked-after-claim' };
   revokeAfterClaim = true;
