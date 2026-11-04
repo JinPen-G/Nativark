@@ -1,9 +1,9 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-10-29。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。治理整理不改变需求v1.14/任务v1.18的范围或验收，也不新增功能进度。
+> 归纳日期：2026-11-04。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。治理整理不改变需求v1.14/任务v1.18的范围或验收，也不新增功能进度。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近阶段门槛复核：2026-10-28，按§3.1纠正已接消费者却漏记G3的AIN-22/25及ENTRY-06，三项由50%补记75%；不是新增G4或生产验收。原28项为1项100%、23项75%、1项50%、3项0%，等权67.0%，正式验收3.6%（1/28）；ENTRY为54.2%。AIN-02/05/06/10/11/19/20仍有全文缺口，保持75%。
+> 最近完整阶段门槛复核：2026-11-04，原AIN-02在固定`1bca2603`完成合同全文及跨AI确认，按原G1～G4收至100%，见[冻结确认](<#ain02-contract-freeze-confirmed-20261104>)。仅此项跨档；此前AIN-22/25及ENTRY-06的G3纠偏不重估。原28项为2项100%、22项75%、1项50%、3项0%，等权67.9%，正式验收7.1%（2/28）；ENTRY仍54.2%。AIN-08及其余未跨全文门槛任务保持原表，不以合同冻结代替真实业务、宿主或生产验收。
 > 下表以旧任务门槛证据、近期固定代码与交付记录归纳；没有在此次文档整理中重新执行全量功能验收。未逐项复验的历史结论不冒称本轮验证。
 
 ## 原28项当前实施摘要
@@ -11,7 +11,7 @@
 | 任务 | 已有实现/消费依据 | 仍需完成或验证 |
 | --- | --- | --- |
 | AIN-01 基线盘点 | 15项工具/权限/副作用盘点、四品类参考流程；38/38基线测试、16组参考断言、已复核八条真实API/重启/A27-A28及迁移证据；测试验收已归档 | 100%；不要求真人样本/签字。原Core缺口及旧B02完整升级仍归原实现任务，不代表目录中全部能力上线 |
-| AIN-02 公共契约 | shared版本化叶子及OpenAPI；原请求/报价/设置/automation、材料/模型/复合观察、固定订单17动作、知识政策目标4路、员工任务/政策16路、客户政策/计划5路、员工草稿/识别/提交21路、品类草稿5路及完整Core续租预览已接命名合同与出口校验；展示协议纯校验、独立对话metadata/原请求受理/轮次CAS、清理后Task定位及固定原模型结果11路合同已接 | 新context v1已补能力/提示词来源、字段材料/宿主草稿及控制失效合同；原政策/隐私8路收稳。AIN-02剩余四端正式出口整改、消费者编译/兼容证据及跨AI整体冻结，保持75%；长对话/实际提示词记录生产和真实隔离运行归原后继任务，不把pure协议称为执行通过 |
+| AIN-02 公共契约 | 原身份/工具/Task/Step/提案批准/材料模型/用量知识事件、展示字段桥及各域命名叶子经shared/OpenAPI正式出口发布；固定`1bca2603`含客户完整39方法×2、取消上界及收据状态证据一致性；同一真实本地包运行/声明消费者、四端合同矩阵和跨AI全文确认见[冻结阶段](<#ain02-contract-freeze-confirmed-20261104>) | G1～G4已满足，Completed/100%。原28版本/46schema族冻结，不授当前权限或业务执行；完整聊天/隔离运行、MySQL/浏览器/微信/供应商与部署验收仍属原后继任务，不因本项完成判其通过 |
 | AIN-03 持久化 | 原task/run/input/phase/proposal/approval、预算、知识/记忆仓储；标准消费者；此前227迁移全链及局部非空对齐演练保留；新增对话/轮次/操作三表与原请求同事务关联，隔离schema/diff及SQL逐项一致 | 保持原G3/75%；新增对话迁移未执行，私有generate不等于真库迁移；此前真实结果不等于全部历史兼容、回退、索引/并发/崩溃恢复，旧B02与全量G4仍缺 |
 | AIN-04 当前授权 | Auth/Guard/ALS、持久动作政策和原请求组合；原结果复验当前权限与事实，身份适配新增Auth返回后的凭据关闭/token/audience核对 | 全身份/地点/撤权真实等价仍待验；执行动作仍须有效原输入，未知动作拒绝，关联requestId不是授权修订 |
 | AIN-05 Gateway | 原平台/BYOK、唯一invocation/dispatch及原账；管理计数标准加密请求、任务内部recorded计数/上界与生成消费已接，平台探测Controller/provider亦已接，默认关闭 | 平台正式audit生产、已实现协议真实连接/必需能力/用量、完整场景变体仍缺；Embedding/Reasoning缺客观能力生产，不以默认关闭或模拟能力报100% |
@@ -181,7 +181,20 @@
 | 员工 / 客户 | inspection `ain-c09-draft-1`、Booking `ain-booking-draft-1`、acceptance `ain-booking-acceptance-read-1`、client host `ain-client-host-capabilities-2`；原[员工Controller](../../apps/api/src/modules/ai-native/inspection-assist/staff-inspection-assist.controller.ts)/[客户Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts) → 原native transport、两客户factory | 员工native registry由正式shared自动生成；无版本operation按封闭shape拒旧/未知字段，不新增伪版本。客户v1 host拒绝、v2 interactive/receipt_only分开；网站授权的五处类型导入已使用正式出口，四端选定入口包边界检查通过，仍非整项冻结确认 |
 
 - **兼容与回退固定口径：** 沿此前已批准的兼容规则，不新增两版并行执行期：原C01/C02/C04/scene/input/approval/Booking持久记录版本与含义不原地升级；context v1是可选加法，未装host只走原受权结构化/人工出口。客户host当前仅v2，v1拒绝而非缺`bookingReceiptRead`时补默认；无版本HTTP只能匹配现有封闭合同，不附加`draftVersion`自称新授权。发布需要server/shared及各实际消费者编译相同产物、验证DTO/OpenAPI后显式启用；回退停新入口/展示消费、保留原材料/Task/审批/财务/Core及操作收据，当前有权者仅读原unknown关联，不能换键、换Provider/Runtime重做或用TTL退额。旧版本坏数据保持unavailable，不将缺证据补成功。该规则是当前兼容设计及测试边界，不是已执行发布或回退演练。
-- **整项结论：** 当前AIN-02仍75%，没有新任务已跨100%。平台代表消费者兼容及既有专项有效样本交叉核对已补；本轮负责人明确授权后，网站四个文件五处类型导入已改为正式出口，四端实际选定入口消费同一新私有包的检查整体退出0，网站写入归属/包消费不再作为余项。剩余是同一冻结基线完整生产者/消费者/版本与证据复核，以及跨AI整体冻结确认；此前无结论核查已停止，不能把停止或空结果算独立批准。出版矩阵未命中不自动列为新的逐schema夹具前置，历史日志/局部编译/候选哈希不代替全文G4。本次新A已补客户34条出版缺口、取消上界、报价wire用例及新私有包复验；提交及固定范围按上列交付清单核对，未取得整项独立冻结确认。没有安装/读.env/启服务/真实HTTP/DB/DNS/模型/支付/存储/迁移/推送/合main/发布；AIN-08源码及其他WIP不夹带。
+<a id="ain02-contract-freeze-confirmed-20261104"></a>
+- **AIN-02 正式合同冻结确认（2026-11-04）：** 独立核对方“AI Native主线-服务端”（会话`local_fe6f7128-004a-466c-b40a-2f18a7ef98a2`）明确完成原AIN-02全文核对，最终纳入固定`1bca2603b3f84c2c52f3dcccc0d2cea3085ddcf2`，认可该提交为当前版本的正式合同冻结基线。核对从`aca77d69`九文件完整源码/测试差异及实际Controller/运行schema追踪开始，再核`1bca2603`三个源码/验证文件的修复增量；排除源会话16份AIN-08和其他WIP。原公开收据状态/证据约束问题已修并复验，源会话原生Review UI已更新fixed；原运行版本、Auth/Core及知识不变，不宣称全库审查通过。
+
+| 原门槛 | 本项核对结果与依据 |
+| --- | --- |
+| G1 | 身份/scope判别联合、工具schema、未知字段/版本拒绝、Task/Step状态、提案批准、材料模型/事实来源、Gateway/用量/知识/事件契约已形成；固定shared主出口及原OpenAPI assembler是唯一正式出版接点 |
+| G2 | 原服务Controller/Guard/仓储及公开assembler实际实现对应合同生产/读取；取消、unknown、部分完成与原task/run/input/批准/Core收据分开。模型内容、观察或准入占用均不授执行；底层存储/transport替身范围明确 |
+| G3 | 真实本地私有shared包的28版本/46schema族、621个leaf/446操作及运行出口同源；14个选定API/后台平台/员工/客户入口消费同一`dist/index.d.ts`，零诊断/源码回退0。独立核对方再次逐85个编译输入核到固定Git，归一LF/CRLF后无差异 |
+| G4 | 原全文覆盖身份工具/状态/取消unknown部分完成、提案批准与材料模型、用量知识事件、展示/字段/消息桥纯合同及限额；后台/平台/员工/客户成功/拒绝/失效/断线/旧协议矩阵、固定兼容/升级/回退均已核，充分测试、问题修复及复验和跨AI确认归档齐备 |
+
+- **复核证据与分层：** 核对方本人读取本后继[出版10/10](../../output/takeover-20261102-ed5rs4ug/receipt-state-A-drsrpprf/publication-final.log)、[原客户Controller/Guard/仓储收据链1/1](../../output/takeover-20261102-ed5rs4ug/receipt-state-A-drsrpprf/producer-repaired.log)、[14入口同包日志](../../output/takeover-20261102-ed5rs4ug/receipt-state-A-drsrpprf/package-final.log)及85个编译输入与固定Git的逐项对照；实际执行均退出0。另复读原17合同、6状态、3取消/部分完成、两客户交接、员工原wire和平台实际消费者等本阶段既有证据，未累加成新回归。632个出版组件的全族盘点与专项有效样本证据共同核对，不新增逐组件制造新fixture的门槛。早期失败、停写时无结论及旧候选均原样保留，不能用新结论覆盖历史失败。
+- **冻结与未验边界：** 正式冻结以本节跨AI确认及固定`1bca2603`为准，[同一私有包候选内容/哈希](../../output/takeover-20261102-ed5rs4ug/receipt-state-A-drsrpprf/shared-package-IKdgWJ/candidate.json)、原`candidate_not_approved_freeze`文件保留其生成时状态，不覆盖或改称已发布。AIN-02本项适用实证为真实本地包运行/声明消费者、协议校验及原生产代码配明确存储/transport替身；未将其冒充MySQL/浏览器/微信/供应商实测。完整聊天/沙箱执行仍属AIN-12，真实业务、宿主、供应商和部署验收留原后继任务，不新增循环依赖，也不因此放宽后继真环境门槛。本轮未安装/读.env/启服务、真实HTTP/DB/DNS/模型/支付/存储、迁移、推送/合main或生产启用。
+- **落表结果：** 原AIN-02的G1～G4均满足，Completed/100%。唯一原任务表仅此项由75%跨100%，总分1875→1900、28项等权67.0%→67.9%，Completed 1→2、正式验收7.1%（2/28）；ENTRY不动，AIN-08仍75%，其他任务不变。任务正文/依赖/需求未改，文档固定交付范围见[归档清单](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/delivery.json)；只提交原任务表、记录和接续，不夹带源码WIP。
+- **文档验证：** 原任务文件逐字对照保全前像，只变AIN-02状态/百分比及两个汇总单元格；同目录offline runtime直接调用原`checkTasks`，[算术检查](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/task-arithmetic.log)退出0，ENTRY及其他27项未变。[本片新增链接与冻结锚点](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/links.json)退出0，三册限定`git diff --check`退出0。`node -r ./output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/runtime.cjs scripts/validate-docs.cjs`的[白名单检查](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/docs-check.log)退出1，仍仅原导航三份历史附件缺失，任务算术无错；不伪造附件、删除追溯引用或把白名单检查当业务验收，本片未改脚本。
 
 ## AIN-02 后台正式出口及包声明消费者（2026-11-02）
 

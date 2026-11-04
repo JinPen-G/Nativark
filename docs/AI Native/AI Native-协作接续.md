@@ -4,11 +4,11 @@
 
 ## 当前目标与权威入口
 
-负责人已将已删除会话的AIN-02职责交给新fork“AI Native主线-服务端 (A)”，继续集中完整任务收口，不恢复旧loop。网站正式出口修复`21d6af2e`保留；网站/微信各17条已装配方法的34条出版缺口、客户独立schema及四种取消响应的精确uint64上界已固定`aca77d69`；后继仅补原材料/Task创建/用量观察的state与证据一致性，定向复验已收片。当前提交状态、固定SHA及范围从[后继交付清单](../../output/takeover-20261102-ed5rs4ug/receipt-state-A-drsrpprf/delivery.json)核对；完整阶段证据统一在[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)，不在接续重复测试流水。原AIN-02仍75%，剩余同一冻结基线的完整生产者/消费者/版本与证据复核及跨AI全文确认；此前停止的核查没有结论，不将AIN-12完整聊天/沙箱执行倒作合同前置。
+新fork“AI Native主线-服务端 (A)”已完成原AIN-02合同冻结职责：固定基线`1bca2603b3f84c2c52f3dcccc0d2cea3085ddcf2`经源“AI Native主线-服务端”全文独立核对，原G1～G4已满足，Completed/100%。正式版本、生产者/消费者、各端成功/拒绝/失效/断线/旧协议、兼容回退及证据边界统一见[冻结确认](<AI Native-开发记录.md#ain02-contract-freeze-confirmed-20261104>)；旧候选/暂停/失败记录保留历史，不再作为当前未完队列。此100%仅为当前版本合同冻结，不代表AIN-12完整聊天/沙箱、真实业务/宿主/供应商或生产发布通过。不恢复旧loop、不接管源会话AIN-08；本次三册归档提交按[清单](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/delivery.json)核对。
 
 源“AI Native主线-服务端”继续独立AIN-08只读可用性片；新A独占AIN-02客户出版、原两份验证及记录/接续，任务表仅跨原门槛后更新百分比，需求正文不改。源会话AIN-08成果仍须按其固定交付核验，不能夹入A的提交。其他客户端文件归属仍按具体文件核验，不凭idle/无diff/未送达消息接管。原63/Codex28与独立押金触发已收口，不恢复旧队列。对话历史/生命周期/原受理日志、关闭及轮换、订单首次模型执行与原结果均保留；局部开业只到Task元数据，未接开业执行/事实/采用；订单仍缺其他能力/旧历史接手/完整恢复消费。unknown始终按原键读取，日志不授权限；清理、隐藏、取消请求和TTL均不证明未消耗。需求v1.14/任务v1.18及G1～G4不变，本轮未启浏览器/真实服务、迁移、外联、推送/合main或生产启用。
 
-- 正式范围、依赖和唯一百分比表：[需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。本修复阶段未调整任务正文或百分比。
+- 正式范围、依赖和唯一百分比表：[需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。本次仅据全文冻结证据更新AIN-02状态/百分比及原汇总；任务正文/依赖和其他任务进度不变。
 - 已做/剩余及证据：[原28项实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)、[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)及同页完整阶段；AIN-02最近入口为[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)。
 - 原63项与Codex28项/押金修复的完整阶段、实际命令和未验边界统一在[原业务记录](../管理后台/管理后台-开发记录.md#local-integration-20261101)，[后台现行接续](../管理后台/管理后台-协作接续.md)定位业务余项。原63及后继29项已在对话原生Code Review UI标fixed，不新增MD问题表；这不是全库修后独立审查或正式专项验收。
 - 项目组成与阅读路线：[README](../../README.md)、[开发指南](../公共技术资料/开发指南/项目-开发指南.md#25-跨模块阅读路线)、[AGENTS](../../AGENTS.md)。
@@ -33,7 +33,6 @@
 
 | 原任务 / 域 | 尚需处理或核实 | 入口 / 证据 |
 | --- | --- | --- |
-| AIN-02合同冻结 | 网站正式出口已提交；34条客户别名出版、取消uint64上界和原客户/报价wire复验已收片，原知识schema不变，同私有包API/四端选定消费者已核。固定交付后核完整生产者/消费者/版本及跨AI全文确认；已停止的旧核查无结论，不能按局部绿色判100% | [集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)、[正式出口](../../packages/shared/src/index.ts)、[员工wire](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire.ts)；未装host保持unavailable |
 | AIN-08业务只读 | 源会话库存片一次独立反例已修并复验，当前16文件固定WIP尚未提交。开业源membership plans/activeMembers/roleAssignments仍缺底层有界读取，原历史/四品类真实对照和适用实测未齐，不升全文100% | [固定库存切片](<AI Native-开发记录.md#ain08-bounded-availability-20261104>)及该阶段清单/原日志；A不接管源码 |
 | AIN-05/11/25 | 管理计数、持久CALLS、recorded生成及AppModule已接；三场景HTTP/多轮变体、真实计数/能力/费率、平台专用audit生产者、平台旧任务善后及SLO仍有缺口 | [模型组合](../../apps/api/src/modules/ai-native/task-model-gateway.composition.ts)，记录“标准计数与原任务计数执行链”“平台探测标准入口与停用后历史” |
 | AIN-06/09/13/15/21/22 | 混合模型/业务完整恢复、多行组合与原范围核对、企业身份和完整报价/预约链；客户上下文澄清不等于业务参数选择，unknown不重派 | [请求场景](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)、原28项/ENTRY摘要及“超限澄清有界连续轮” |
@@ -61,7 +60,7 @@ AI工作中心/Copilot现有前端效果不能代替真实聊天选择→冻结�
 
 原五项141项、Codex业务166项及末次相关定向、AI39项/完整报价选择9项通过，API六入口/后台九入口noEmit零诊断；不同集合不相加，末次改动只引用其定向复验。实际命令、失败和修法见[业务阶段](../管理后台/管理后台-开发记录.md#local-integration-20261101)。这不是全库修后独立审查或真实DB/HTTP/供应商/浏览器证据，任务百分比保持原表。
 
-AIN-02客户整片固定交付后，源会话按固定SHA独立核原全文；A继续补确切合同缺口，不追活动HEAD、不另开递归审查或恢复旧循环。完整版本/生产者/消费者、成功/拒绝/失效/断线/旧协议及兼容回退证据均按原任务定位，满足原G4才更新百分比，不省略适用实测或独立技术复核。AIN-08库存片独立反例与修后复验已登记，源会话保留未提交源码；底层开业源有界读取及原全文实测仍按其归属处理，不将本片当整项完成。
+AIN-02本次合同冻结已完成，不再等待旧核查或恢复旧修复队列；任何后继接口变更仍须核正式版本、生产者/消费者及兼容回退，当前冻结不是永久执行许可或后继任务自动验收。A完成本次三册归档后不自动扩大到其他专项。AIN-08库存片独立反例与修后复验已登记，源会话保留未提交源码；底层开业源有界读取及原全文实测仍按其归属处理，不将本片当整项完成。
 
 本轮所有Node仍预加载`tests/fixtures/ai-native/prisma-offline-preload.cjs`，固定`mysql://offline:offline@127.0.0.1:1/rental_os_offline`；当前`output/takeover-20261102-ed5rs4ug/runtime.cjs`设置本树绝对审计、writeRoot、TEMP/TMP/cache并禁compile cache，解析本树shared源码及已保全`output/repair-current-20261101-uotDQk/generated`私有client。未覆盖installed/shared client或dist，不为索引复制或重生成client；旧`ain02-20261030/prisma-current`保留但不能证明新增字段。
 
