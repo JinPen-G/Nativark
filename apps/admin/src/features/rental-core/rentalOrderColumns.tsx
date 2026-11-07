@@ -92,7 +92,7 @@ function CustomerSummary({ order, t }: { order: RentalOrder; t: OrderColumnConte
   const corporate = !snapshot && order.customerType === "corporate";
   return <div className={styles.identityRow}>
     <div className={styles.identityCopy}>
-      <DataTableLeading><span className={styles.customerName}><CustomerPreview customerId={snapshot?.personalCustomerId ?? order.customerId} name={name} type={corporate ? "corporate" : "personal"} companyName={snapshot?.corporateCustomerName} snapshot /></span></DataTableLeading>
+      <DataTableLeading><span className={styles.customerName}><CustomerPreview presentation="list" customerId={snapshot?.personalCustomerId ?? order.customerId} name={name} type={corporate ? "corporate" : "personal"} companyName={snapshot?.corporateCustomerName} snapshot /></span></DataTableLeading>
       {snapshot?.corporateCustomerName ? <span className={styles.identityDetail}>
         <span><CustomerPreview customerId={snapshot.corporateCustomerId} name={snapshot.corporateCustomerName} type="corporate" snapshot /> · {t(snapshot.enterpriseContractAndPayer ? "企业签约付款" : "企业权益")}</span>
       </span> : !snapshot ? <span className={styles.secondary}>{t("旧客户记录")}</span> : null}

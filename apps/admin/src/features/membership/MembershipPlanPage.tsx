@@ -1,5 +1,5 @@
 import { membershipPlanCards } from "./membershipPlanCards";
-import { ListFilters, useListFilter } from "@/components/ui";
+import { DataTableText, ListFilters, useListFilter } from "@/components/ui";
 import type {
   CustomerMembershipBenefit,
   CustomerMembershipPlan,
@@ -149,7 +149,7 @@ export function MembershipPlanPage() {
         exportConfig={{ filename: t("会员方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("方案"), value: row => row.name }, { label: t("适用会员"), value: row => t(row.targetType === "corporate" ? "企业会员" : "个人会员") }, { label: t("版本"), value: row => row.currentVersion?.version }, { label: t("状态"), value: row => t(row.status === "active" ? "已启用" : row.status === "disabled" ? "已停用" : "草稿") }] }}
         batchActions={planBatchActions(refresh)}
         cardView={membershipPlanCards({ t, options: scopeOptions.data, canManage, canPublish, publishing: publish.isPending, edit: open, history: setHistoryPlan, publish: row => { if (row.currentVersion?.status === "draft" && canPublish) publish.mutate({ planId: row.id, versionId: row.currentVersion.id }); } })} columns={[
-        { title: t("方案"), render: (_, row) => <Space orientation="vertical" size={0}><b>{row.name}</b><span>{row.code}</span></Space> },
+        { title: t("方案"), render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
         { title: t("适用会员"), dataIndex: "targetType", render: (value) => value === "corporate" ? t("企业会员") : t("个人会员") },
         { title: t("当前版本"), render: (_, row) => row.currentVersion ? `v${row.currentVersion.version}` : t("未建版本") },
         { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "active" ? "success" : value === "disabled" ? "error" : "default"}>{value === "active" ? t("已启用") : value === "disabled" ? t("已停用") : t("草稿")}</Tag> },

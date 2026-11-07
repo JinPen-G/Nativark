@@ -19,6 +19,7 @@ import {
   type CorrectRentalInspectionUsageRequest,
   type RentalOrder,
   type RentalOrderListQuery,
+  type RentalOrderListSummary,
   type RentalOrderChange,
   type RentalOrderExtension,
   type RentalOrderLine,
@@ -213,7 +214,7 @@ export interface RentalCoreFactStore {
    * ORDER-LIST-01：按筛选条件在数据库里分页查订单。`take` 缺省表示不分页（只筛选）。
    * 租户与空间范围与 `listOrders` 完全一致。
    */
-  queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }>;
+  queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number; summary?: RentalOrderListSummary }>;
   /** 找出当前空间中仍处于待确认、且至少一条软预占已过期的订单候选。 */
   listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take?: number): Promise<string[]>;
   findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined>;
@@ -541,7 +542,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 而在内存里过滤整张表正是这条改动要去掉的东西。
    * 分配进度的判据必须与共享契约的 `rentalAllocationProgress` 逐字对应，改一处必须改另一处。
    */
-  async queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }> {
+  async queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number; summary?: RentalOrderListSummary }> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const conditions: Prisma.Sql[] = [Prisma.sql`o.\`tenantId\` = ${tenantId}`, Prisma.sql`o.\`workspaceId\` = ${workspaceId}`];
     const locationIds = getRequestLocationIds();
@@ -615,20 +616,24 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const where = Prisma.join(conditions, " AND ");
     const paging = query.take !== undefined ? Prisma.sql`LIMIT ${query.take} OFFSET ${query.skip ?? 0}` : Prisma.empty;
     const orderBy = rentalOrderListSort(query);
-    const [countRows, idRows] = await Promise.all([
+    const [countRows, idRows, groups] = await Promise.all([
       this.prisma.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`SELECT COUNT(*) AS total FROM \`rental_orders\` o ${joins} WHERE ${where}`),
-      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT o.\`id\` FROM \`rental_orders\` o ${joins} WHERE ${where} ORDER BY ${orderBy} ${paging}`)
+      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT o.\`id\` FROM \`rental_orders\` o ${joins} WHERE ${where} ORDER BY ${orderBy} ${paging}`),
+      this.prisma.$queryRaw<Array<{ status: string; count: bigint | number; pendingFeeCount: bigint | number }>>(Prisma.sql`SELECT o.\`status\` AS status, COUNT(*) AS count,
+        SUM(CASE WHEN JSON_CONTAINS(o.\`feeReviews\`, '[{"status":"pending"}]') = 1 THEN 1 ELSE 0 END) AS pendingFeeCount
+        FROM \`rental_orders\` o ${joins} WHERE ${where} GROUP BY o.\`status\``)
     ]);
     const total = Number(countRows[0]?.total ?? 0);
+    const summary = { statusBreakdown: groups.map(row => ({ status: row.status as RentalCoreOrderStatus, count: Number(row.count) })), pendingFeeCount: groups.reduce((sum, row) => sum + Number(row.pendingFeeCount), 0) };
     const ids = idRows.map((row) => row.id);
-    if (!ids.length) return { items: [], total };
+    if (!ids.length) return { items: [], total, summary };
     const rows = await this.prisma.rentalOrder.findMany({
       where: { id: { in: ids }, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
       include: this.orderInclude
     });
     const position = new Map(ids.map((id, index) => [id, index]));
     rows.sort((left, right) => (position.get(left.id) ?? 0) - (position.get(right.id) ?? 0));
-    return { items: rows.map((row) => this.toDomainOrder(row)), total };
+    return { items: rows.map((row) => this.toDomainOrder(row)), total, summary };
   }
 
   async listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take = 50): Promise<string[]> {

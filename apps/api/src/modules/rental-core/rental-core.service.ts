@@ -1674,7 +1674,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       items: result.items.map((order) => this.publicOrder(order)),
       page: paged ? page : 1,
       pageSize: paged ? pageSize : Math.max(result.total, 1),
-      total: result.total
+      total: result.total,
+      summary: result.summary
     };
   }
 

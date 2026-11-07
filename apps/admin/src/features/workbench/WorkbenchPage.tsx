@@ -1,7 +1,8 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@/components/ui/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Card, Space, Statistic, Tag, Typography } from "antd";
+import { Card, Space, Tag, Typography } from "antd";
+import { AnimatedNumber, Statistic } from "@/components/ui";
 import { ListSection, App } from "@/components/ui";
 import { Alert, Progress, Table } from "@/components/ui";
 import { ActionButton, Button, Segmented } from "@/components/ui";
@@ -12,6 +13,7 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.Draft]: "草稿",
@@ -81,10 +83,11 @@ export function WorkbenchPage() {
   // 指标来自经营报表接口，它要求报表查看权限；订单/资产权限只决定是否展示各自的板块与入口。
   const canViewReport = hasPermission("rental-os:report:view");
   const showMetrics = canViewReport && (canViewOrders || canViewAssets);
+  const scope = useListQueryIdentity();
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile, enabled: canViewOrders || canViewAssets });
   // 区间按订单起租时间归入（报表口径）。查询键与报表页同构，命中同一份缓存。
   const filter: RentalWorkspaceReportFilter = { from: periodStart(period).toISOString() };
-  const report = useQuery({ queryKey: ["rental-core", "operation-report", filter], queryFn: () => rentalCoreApi.operationReport(filter), enabled: showMetrics });
+  const report = useQuery({ queryKey: ["rental-core", "operation-report", scope, filter], queryFn: () => rentalCoreApi.operationReport(filter), enabled: showMetrics, placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined });
   const todos = useQuery({ queryKey: ["rental-core", "workbench-todos"], queryFn: rentalCoreApi.workbenchTodos });
   const reconcilePayments = useMutation({
     mutationFn: () => rentalCoreApi.reconcilePayments(),
@@ -127,12 +130,12 @@ export function WorkbenchPage() {
         {canViewOrders && <>
           <Card className="metric-card" data-copilot-record="metric:期间订单" data-copilot-label={t("期间订单")}><Statistic data-copilot-field="amount" data-copilot-label={t("期间订单")} title={t("期间订单")} value={orderCount} /><div className="metric-foot"><span>{t(period)}{t("起租")}</span><span>{t("非草稿")}</span></div></Card>
           <Card className="metric-card" data-copilot-record="metric:履约中" data-copilot-label={t("履约中")}><Statistic data-copilot-field="amount" data-copilot-label={t("履约中")} title={t("履约中")} value={activeCount} /><div className="metric-foot"><span>{t("已预订至待结算")}</span><span className="metric-trend">{t("实时")}</span></div></Card>
-          <Card className="metric-card" data-copilot-record="metric:应收金额" data-copilot-label={t("应收金额")}><Statistic data-copilot-field="amount" data-copilot-label={t("应收金额")} title={t("应收金额")} value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} {t("单已关闭")}</span><span>{t("调账后应收")}</span></div></Card>
+          <Card className="metric-card" data-copilot-record="metric:应收金额" data-copilot-label={t("应收金额")}><Statistic data-copilot-field="amount" data-copilot-label={t("应收金额")} title={t("应收金额")} value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span><AnimatedNumber value={completedCount} /> {t("单已关闭")}</span><span>{t("调账后应收")}</span></div></Card>
           <Card className="metric-card" data-copilot-record="metric:租赁收入" data-copilot-label={t("租赁收入")}><Statistic data-copilot-field="amount" data-copilot-label={t("租赁收入")} title={t("租赁收入")} value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{t("只含租金")}</span><span>{t("不含服务与押金")}</span></div></Card>
         </>}
         {canViewAssets && <Card className="metric-card" data-copilot-record="metric:可租库存" data-copilot-label={t("可租库存")}><Statistic data-copilot-field="amount" data-copilot-label={t("可租库存")} title={t("可租库存")} value={availableUnits} /><div className="metric-foot"><span>{t("独立资产 + 数量库存")}</span><span className="metric-trend">{t("当前快照")}</span></div></Card>}
       </div> : <Alert type="info" showIcon title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} style={{ marginBottom: 16 }} />}
-      <ListSection title={<span className="panel-title">{t("运营待办")} <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>} style={{ marginBottom: "var(--space-4)" }}>
+      <ListSection title={<span className="panel-title">{t("运营待办")} <span className="panel-count"><AnimatedNumber value={todos.data?.items.length ?? 0} /></span></span>} style={{ marginBottom: "var(--space-4)" }}>
         <Table<RentalWorkbenchTodo>
           size="small"
           rowKey="id"
@@ -149,10 +152,10 @@ export function WorkbenchPage() {
         {(todos.data?.items.length ?? 0) > 8 && <Typography.Text type="secondary">{t("还有")} {(todos.data?.items.length ?? 0) - 8}{t("项，请从订单或工单页面继续处理。")}</Typography.Text>}
       </ListSection>
       {showMetrics && <div className="workspace-grid">
-        {canViewOrders && <ListSection title={<span className="panel-title">{t("订单状态")} <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
+        {canViewOrders && <ListSection title={<span className="panel-title">{t("订单状态")} <span className="panel-count"><AnimatedNumber value={orderCount} /></span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
           <Table pagination={false} rowKey="status" onRefresh={() => report.refetch()} loading={report.isLoading} refreshing={report.isFetching} dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
             { title: t("阶段"), dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
-            { title: t("订单数"), dataIndex: "count", align: "right" },
+            { title: t("订单数"), dataIndex: "count", align: "right", render: (value: number) => <AnimatedNumber value={value} /> },
             { title: t("占比"), align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
           ]} />
         </ListSection>}
@@ -160,7 +163,7 @@ export function WorkbenchPage() {
           {/* Keep the decision boundary visible, without rendering database diagnostics as UI help. */}
           {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title={t("这一节是读取瞬间的快照，不是区间利用率")} description={t("缺少历史可用时长，暂不计算区间利用率。")} style={{ marginBottom: "var(--space-3)" }} />}
           <Space orientation="vertical" size={0} style={{ width: "100%" }}>
-            {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{t(assetStatusLabels[row.status] ?? row.status)}</Typography.Text><Typography.Text type="secondary">{t("独立资产")}</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}>{row.count} {t("项")}</Tag></div>)}
+            {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{t(assetStatusLabels[row.status] ?? row.status)}</Typography.Text><Typography.Text type="secondary">{t("独立资产")}</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}><AnimatedNumber value={row.count} /> {t("项")}</Tag></div>)}
             {stock && stock.onHandTotal > 0 && <div className="status-row"><div><Typography.Text strong>{t("数量库存")}</Typography.Text><Typography.Text type="secondary">{t("可租 / 在库（已占用")} {stock.reservedTotal}，{t("维修")} {stock.maintenanceTotal}）</Typography.Text></div><Tag color={stock.availableTotal > 0 ? "green" : "orange"}>{stock.availableTotal} / {stock.onHandTotal}</Tag></div>}
             {!(assets?.statusBreakdown.length) && !(stock && stock.onHandTotal > 0) && <Typography.Text type="secondary">{t("尚未建立资产或数量库存。")}</Typography.Text>}
           </Space>

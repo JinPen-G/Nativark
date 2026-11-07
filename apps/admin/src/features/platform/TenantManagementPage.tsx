@@ -191,7 +191,7 @@ export function TenantManagementPage() {
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t("新增 SaaS 租户")}</Button>}
       />
       <QueryState loading={tenants.isLoading || categories.isLoading} error={tenants.error ?? categories.error}>
-        <ListSection controls={<><ListFilters filter={tenantFilter} placeholder="租户名称或编码" /><ListFilterItem label={t("租户状态")} priority active={filter !== "all"}><Select aria-label={t("租户状态")}
+        <ListSection controls={<><ListFilters filter={tenantFilter} placeholder="租户名称或编码" hasFilters={filter !== "all"} onClear={() => { tenantFilter.clear(); setFilter("all"); }} /><ListFilterItem label={t("租户状态")} priority active={filter !== "all"}><Select aria-label={t("租户状态")}
             value={filter}
             onChange={(value) => { setFilter(String(value)); tenantFilter.pagination.onChange(1, tenantFilter.pagination.pageSize); }}
             options={[

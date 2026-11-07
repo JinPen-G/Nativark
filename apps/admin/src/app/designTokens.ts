@@ -10,6 +10,22 @@ export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
 
 export const ADMIN_DEFAULT_PRIMARY_COLOR = "#353535";
+/** Neutral hierarchy follows UIArc in both themes. Status and tenant accent remain separate roles. */
+export const ADMIN_CONTENT_TONES = {
+  primary: "var(--foreground)",
+  secondary: "var(--text-secondary)",
+  quiet: "var(--text-muted)",
+  divider: "var(--border-subtle)",
+  hover: "var(--surface-muted)",
+} as const;
+/** Operating lists use compact text, not dashboard metric typography. */
+export const ADMIN_LIST_TYPOGRAPHY = {
+  primary: { size: 13, lineHeight: 18, weight: 500 },
+  secondary: { size: 12, lineHeight: 17, weight: 400 },
+  header: { size: 12, lineHeight: 18, weight: 400 },
+  summary: { size: 13, lineHeight: 20, weight: 400 },
+  summaryValue: { size: 13, lineHeight: 20, weight: 500 },
+} as const;
 export const ARC_DEFAULT_RADII = { container: 26, button: 18, input: 18 } as const;
 /** Idle text/search fields share the same theme-aware edge as date/select controls. */
 export const ADMIN_INPUT_COLORS = { borderDefault: "var(--border)" } as const;
@@ -29,7 +45,7 @@ export const ADMIN_SEGMENTED_METRICS = { frameInset: 8 } as const;
 /** Original TabsList has 4px padding and a 1px frame on each side. */
 export const ADMIN_TABS_METRICS = { frameInset: 10 } as const;
 /** Reusable list geometry. Pages consume roles, never private field/column sizes. */
-export const ADMIN_LIST_METRICS = { queryMinWidth: 760, searchWidth: ADMIN_LIST_CONTROL_WIDTH.search, searchMinWidth: ADMIN_LIST_CONTROL_WIDTH.searchMin, statusWidth: ADMIN_LIST_CONTROL_WIDTH.select, statusMinWidth: ADMIN_LIST_CONTROL_WIDTH.select, categoryInlineMinWidth: 400, compactTriggerMaxWidth: 360, moreSearchWidth: 144, moreSearchCompactWidth: 64, filterPopoverWidth: 320 } as const;
+export const ADMIN_LIST_METRICS = { queryMinWidth: 760, searchWidth: ADMIN_LIST_CONTROL_WIDTH.search, searchMinWidth: ADMIN_LIST_CONTROL_WIDTH.searchMin, statusWidth: ADMIN_LIST_CONTROL_WIDTH.select, statusMinWidth: ADMIN_LIST_CONTROL_WIDTH.select, categoryInlineMinWidth: 400, compactTriggerMaxWidth: 360, moreSearchWidth: 144, moreSearchCompactWidth: 64, filterPopoverWidth: 320, adaptiveSelectMin: 76, adaptiveSelectMax: 280, adaptiveSelectInset: 56 } as const;
 export const ADMIN_TABLE_COLUMN_WIDTH = {
   select: 52, identifier: 180, identity: 176, summary: 216, dateTime: 176, dateTimeWithNote: 184,
   money: 120, status: 155, actions: 208, resources: 240, location: 210, security: 190, snapshot: 210,
@@ -50,10 +66,10 @@ export const ADMIN_LAYOUT_SPACING = {
 export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */
 export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, accountLabelWidth: ADMIN_CONTROL_WIDTH.select } as const;
-/** One leading slot for table badges, financial values and row actions; not whole-row centering. */
-export const ADMIN_TABLE_METRICS = { leadingHeight: 32, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, contentMinWidth: 112, expandWidth: 52 } as const;
+/** 52px ordinary rows; text stacks use compact lines while interactive targets retain 32px. */
+export const ADMIN_TABLE_METRICS = { leadingHeight: 32, rowMinHeight: 52, cellPaddingBlock: 8, textGap: 1, listAvatarSize: 28, compactHeaderHeight: 36, statusHeight: 24, statusRadiusMax: 6, identitySize: 32, identityIconSize: 16, identityRadiusMax: 8, columnWidth: 180, actionsWidth: ADMIN_TABLE_COLUMN_WIDTH.actions, columnMinWidth: 56, contentMinWidth: 112, expandWidth: 52 } as const;
 /** Structural loading geometry; controls/type/colors continue to use their existing roles. */
-export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: 80, textRadius: 4 } as const;
+export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: ADMIN_TABLE_METRICS.rowMinHeight, textRadius: 4 } as const;
 export const ADMIN_EMPTY_METRICS = { artWidth: 240, artCompactWidth: 144 } as const;
 export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 240, bulkMaxWidth: 760, previewMaxHeight: 320 } as const;
 export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
@@ -62,6 +78,8 @@ export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(
 /** Small live-content changes use Animate UI's fade timing; never remount forms. */
 export const ADMIN_CONTENT_MOTION = { changedOpacity: .76, selectionOffset: 8 } as const;
 export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75, titleSize: 22 } as const;
+/** UIArc sign-in reference roles; the operating pages keep their own density. */
+export const ADMIN_LOGIN_METRICS = { titleSize: 40, titleLineHeight: 44, titleWeight: 400, compactTitleSize: 32, compactTitleLineHeight: 35.2, brandHeight: 24, providerIconSize: 17 } as const;
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
 export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
@@ -105,14 +123,14 @@ export function resolveAdminCornerRadius(value?: number | null) {
 }
 
 export const ADMIN_TYPOGRAPHY = {
-  body: { size: 14, lineHeight: 22, weight: 400 },
-  pageTitle: { size: 20, lineHeight: 28, weight: 600 },
+  body: { size: 14, lineHeight: 20, weight: 400 },
+  pageTitle: { size: 18, lineHeight: 26, weight: 500 },
   pageSubtitle: { size: 13, lineHeight: 20, weight: 400 },
-  sectionTitle: { size: 16, lineHeight: 24, weight: 600 },
-  panelTitle: { size: 14, lineHeight: 22, weight: 600 },
+  sectionTitle: { size: 14, lineHeight: 20, weight: 500 },
+  panelTitle: { size: 14, lineHeight: 20, weight: 500 },
   label: { size: 14, lineHeight: 22, weight: 400 },
   meta: { size: 12, lineHeight: 20, weight: 400 },
-  tableMoney: { size: 16, lineHeight: 22, weight: 600 },
+  tableMoney: { size: 13, lineHeight: 18, weight: 500 },
   metric: { size: 24, lineHeight: 32, weight: 600 },
   loginTitle: { size: 24, lineHeight: 32, weight: 600 }
 } as const;
@@ -259,6 +277,15 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-list-bulk-max-width": px(ADMIN_LIST_CAPABILITY_METRICS.bulkMaxWidth),
     "--rental-list-preview-max-height": px(ADMIN_LIST_CAPABILITY_METRICS.previewMaxHeight),
     "--rental-table-compact-header-height": px(ADMIN_TABLE_METRICS.compactHeaderHeight),
+    ...Object.fromEntries(Object.entries(ADMIN_CONTENT_TONES).map(([role, value]) => [`--rental-content-${role}`, value])),
+    ...Object.fromEntries(Object.entries(ADMIN_LIST_TYPOGRAPHY).flatMap(([role, values]) =>
+      Object.entries(values).map(([property, value]) => [`--rental-list-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}-${property.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, property === "weight" ? String(value) : px(value)]))),
+    "--rental-table-row-min-height": px(ADMIN_TABLE_METRICS.rowMinHeight),
+    "--rental-table-cell-padding-block": px(ADMIN_TABLE_METRICS.cellPaddingBlock),
+    "--rental-table-text-line-height": px(ADMIN_LIST_TYPOGRAPHY.primary.lineHeight),
+    "--rental-table-meta-line-height": px(ADMIN_LIST_TYPOGRAPHY.secondary.lineHeight),
+    "--rental-table-text-gap": px(ADMIN_TABLE_METRICS.textGap),
+    "--rental-table-list-avatar-size": px(ADMIN_TABLE_METRICS.listAvatarSize),
     "--rental-table-status-height": px(ADMIN_TABLE_METRICS.statusHeight),
     "--rental-table-status-radius-max": px(ADMIN_TABLE_METRICS.statusRadiusMax),
     "--rental-table-identity-size": px(ADMIN_TABLE_METRICS.identitySize),
@@ -300,7 +327,14 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-typography-metric-weight": String(ADMIN_TYPOGRAPHY.metric.weight),
     "--rental-typography-login-title-size": px(ADMIN_TYPOGRAPHY.loginTitle.size),
     "--rental-typography-login-title-line-height": px(ADMIN_TYPOGRAPHY.loginTitle.lineHeight),
-    "--rental-typography-login-title-weight": String(ADMIN_TYPOGRAPHY.loginTitle.weight)
+    "--rental-typography-login-title-weight": String(ADMIN_TYPOGRAPHY.loginTitle.weight),
+    "--rental-login-title-size": px(ADMIN_LOGIN_METRICS.titleSize),
+    "--rental-login-title-line-height": px(ADMIN_LOGIN_METRICS.titleLineHeight),
+    "--rental-login-title-weight": String(ADMIN_LOGIN_METRICS.titleWeight),
+    "--rental-login-compact-title-size": px(ADMIN_LOGIN_METRICS.compactTitleSize),
+    "--rental-login-compact-title-line-height": px(ADMIN_LOGIN_METRICS.compactTitleLineHeight),
+    "--rental-login-brand-height": px(ADMIN_LOGIN_METRICS.brandHeight),
+    "--rental-login-provider-icon-size": px(ADMIN_LOGIN_METRICS.providerIconSize)
   };
 
   for (const [name, value] of Object.entries(values)) root.style.setProperty(name, value);

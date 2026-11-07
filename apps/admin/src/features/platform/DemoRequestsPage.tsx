@@ -9,6 +9,7 @@ import type { DemoContactType, DemoRequestRow } from "@rental-os/shared";
 import { PageHeader } from "@/components/PageHeader";
 import { useLocale } from "@/app/locale";
 import { demoRequestsApi } from "@/api/demoRequests";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 export function DemoRequestsPage() {
   const { t, locale } = useLocale();
@@ -16,8 +17,10 @@ export function DemoRequestsPage() {
   const [pageSize, setPageSize] = useState(20);
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
+  const scope = useListQueryIdentity();
   const query = useQuery({
-    queryKey: ["platform-demo-requests", page, pageSize, keyword],
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope ? previous : undefined,
+    queryKey: ["platform-demo-requests", scope, page, pageSize, keyword],
     queryFn: () => demoRequestsApi.list({ page, pageSize, keyword: keyword || undefined })
   });
   const contactLabels: Record<DemoContactType, string> = { phone: "手机", email: "邮箱", wechat: "微信" };
@@ -40,7 +43,7 @@ export function DemoRequestsPage() {
               value={keywordInput} onValueChange={value => { setKeywordInput(value); if (!value.trim()) { setKeyword(""); setPage(1); } }}
               onSearch={value => { setKeyword(value.trim().slice(0, 120)); setPage(1); }} />}>
               <Table<DemoRequestRow>
-                rowKey="id" columns={columns} onRefresh={() => query.refetch()} dataSource={query.data?.items ?? []} loading={query.isLoading} refreshing={query.isFetching}
+                rowKey="id" columns={columns} onRefresh={() => query.refetch()} dataSource={query.data?.items ?? []} loading={query.isLoading || query.isPlaceholderData} refreshing={query.isFetching}
                 scroll={{ x: 1160 }} locale={{ emptyText: t(keyword ? "没有匹配的记录" : "暂无演示预约，官网提交后会显示在这里。") }}
                 pagination={{ current: page, pageSize, total: query.data?.total ?? 0, showSizeChanger: true,
                   onChange: (nextPage, nextSize) => { setPage(nextSize === pageSize ? nextPage : 1); setPageSize(nextSize); } }}

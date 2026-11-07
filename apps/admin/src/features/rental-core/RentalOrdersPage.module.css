@@ -20,13 +20,14 @@
 .feedback,
 .error { margin-bottom: var(--space-3); }
 
-.cellStack { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; }
+.cellStack { display: flex; flex-direction: column; align-items: flex-start; gap: var(--rental-table-text-gap); min-width: 0; }
+.cellStack > [data-table-leading], .statusStack > [data-table-leading] { min-height: var(--rental-table-text-line-height); }
 .statusStack { display: flex; flex-direction: column; align-items: flex-start; gap: 0; min-width: 0; }
 .statusStack > :not(:first-child) { font-weight: 400; color: var(--text-secondary); }
-.secondary { color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.secondary { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); }
 .orderLink { padding: 0 !important; text-align: start; white-space: normal; height: auto; min-height: 0 !important; overflow-wrap: anywhere; justify-content: flex-start; font-weight: var(--rental-typography-body-weight); font-variant-numeric: tabular-nums; }
 .identityRow { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
-.identityCopy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1; }
+.identityCopy { display: flex; flex-direction: column; gap: var(--rental-table-text-gap); min-width: 0; flex: 1; }
 .customerName { font-weight: var(--rental-typography-panel-title-weight); overflow-wrap: anywhere; }
 .identityDetail svg, .timingNotice svg, .moreItemsTrigger svg { width: var(--rental-table-identity-icon-size); height: var(--rental-table-identity-icon-size); flex-shrink: 0; }
 .identityDetail { display: flex; align-items: baseline; gap: var(--space-1); color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
@@ -43,9 +44,9 @@
 .itemList { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; min-width: 0; }
 .itemList[hidden] { display: none; }
 .itemLine { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); width: 100%; min-width: 0; }
-.itemName { color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); overflow-wrap: anywhere; }
+.itemName { color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); font-weight: var(--rental-list-primary-weight); overflow-wrap: anywhere; }
 .itemMeta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
-.itemQuantity { color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.itemQuantity { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-table-meta-line-height); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .moreItemsTrigger { height: auto; min-height: 0 !important; padding: 0 !important; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); white-space: nowrap; }
 
 

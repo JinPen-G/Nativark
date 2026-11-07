@@ -5,13 +5,15 @@ import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Tag } from "antd";
 import { ListSection, App, Modal, Radio } from "@/components/ui";
-import { Alert, Button, Drawer, Form, Input, Select, Table } from "@/components/ui";
+import { Alert, Button, DataTableText, Drawer, Form, Input, Select, Table } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { LiveRefresh, useLiveRefresh } from "@/components/ui";
+import { InsightMetrics } from "@/components/BusinessInsights";
 
 const statusMeta: Record<CustomerMembershipReviewStatus, { text: string; color: string }> = {
   pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" },
@@ -22,7 +24,7 @@ type ReviewForm = { status: "approved" | "rejected" | "supplement_required" | "c
 
 export function MembershipReviewPage() {
   const { message } = App.useApp();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const queryClient = useQueryClient();
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const canRegistrationReview = hasTenantMembershipPermission("rental-os:member:review");
@@ -32,7 +34,8 @@ export function MembershipReviewPage() {
   const [selected, setSelected] = useState<CustomerMembershipReview>();
   const [detailTarget, setDetailTarget] = useState<CustomerMembershipReview>();
   const [form] = Form.useForm<ReviewForm>();
-  const reviews = useQuery({ queryKey: ["membership-reviews", filter], queryFn: () => membershipApi.reviews(filter), enabled: canView });
+  const live = useLiveRefresh("membership-reviews", Boolean(selected));
+  const reviews = useQuery({ queryKey: ["membership-reviews", live.scope, filter], queryFn: () => membershipApi.reviews(filter), enabled: canView, placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === live.scope ? previous : undefined, ...live.queryOptions });
   const reviewSearch = useListFilter(reviews.data, { fields: row => [row.customerName] });
   const scopeOptions = useQuery({ queryKey: ["membership-benefit-scope-options"], queryFn: membershipApi.benefitScopeOptions, enabled: canView });
   const decide = useMutation({
@@ -55,7 +58,8 @@ export function MembershipReviewPage() {
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员审核")} description={t("需要租户级会员查看、注册审核或资质审核权限，且数据范围为全部。")} />;
 
   return <QueryState loading={reviews.isLoading} error={reviews.error} onRetry={() => reviews.refetch({ throwOnError: true })}>
-    <PageHeader title={t("会员审核")} description={t("审核结果在租户内共享；证件要求按经营空间设置。")}  />
+    <PageHeader title={t("会员审核")} description={t("审核结果在租户内共享；证件要求按经营空间设置。")}
+      summary={<InsightMetrics items={[{ label: t("申请"), value: reviewSearch.rows.length }, { label: t("待审核"), value: reviewSearch.rows.filter(row => row.status === "pending").length }, { label: t("待补件"), value: reviewSearch.rows.filter(row => row.status === "supplement_required").length }]} />} />
 
     {scopeOptions.error && <Alert type="warning" showIcon title={t("来源空间名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
     <ListSection controls={<>
@@ -66,15 +70,16 @@ export function MembershipReviewPage() {
       <ListFilterItem label={t("审核类型")} collapsed active={Boolean(filter.type)}>
         <Select aria-label={t("审核类型")} allowClear placeholder={t("全部类型")} value={filter.type} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => { setFilter((value) => ({ ...value, type: type || undefined })); reviewSearch.pagination.onChange(1, reviewSearch.pagination.pageSize); }} />
       </ListFilterItem>
+      {(reviewSearch.keyword || filter.status || filter.type) && <Button data-list-filter-reset type="text" onClick={() => { setFilter({}); reviewSearch.clear(); }}>{t("清除筛选")}</Button>}
+      <ListFilterItem kind="action"><LiveRefresh enabled={live.enabled} onChange={live.setEnabled} busy={reviews.isFetching} updatedAt={reviews.dataUpdatedAt} paused={Boolean(selected)} /></ListFilterItem>
     </>}>
-      <Table<CustomerMembershipReview> rowKey="id" onRefresh={() => reviews.refetch()} loading={reviews.isLoading} refreshing={reviews.isFetching} dataSource={reviewSearch.rows} pagination={reviewSearch.pagination} columns={[
-        { title: t("会员"), dataIndex: "customerName", render: (_, row) => <CustomerPreview customerId={row.customerId} name={row.customerName ?? "—"} type={row.reviewType === "corporate_registration" ? "corporate" : undefined} /> },
-        { title: t("审核类型"), render: (_, row) => t(typeText[row.reviewType] ?? row.reviewType) },
-        { title: t("证件类型"), dataIndex: "qualificationType", render: (value) => value ?? "—" },
+      <Table<CustomerMembershipReview> toolbarNote={false} rowKey="id" onRefresh={() => reviews.refetch()} loading={reviews.isLoading || reviews.isPlaceholderData} refreshing={reviews.isFetching} dataSource={reviewSearch.rows} pagination={reviewSearch.pagination} columns={[
+        { title: t("会员"), dataIndex: "customerName", render: (_, row) => <CustomerPreview presentation="list" customerId={row.customerId} name={row.customerName ?? "—"} type={row.reviewType === "corporate_registration" ? "corporate" : undefined} /> },
+        { title: t("审核类型"), render: (_, row) => <DataTableText primary={t(typeText[row.reviewType] ?? row.reviewType)} secondary={row.qualificationType} /> },
         { title: t("渠道"), dataIndex: "channel", render: (value) => value === "app" ? t("APP 提交") : t("后台") },
         { title: t("来源空间"), render: (_, row) => workspaceName(row.sourceWorkspaceId) },
         { title: t("状态"), render: (_, row) => <Tag color={statusMeta[row.status].color}>{t(statusMeta[row.status].text)}</Tag> },
-        { title: t("提交时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleString() },
+        { title: t("提交时间"), dataIndex: "createdAt", render: (value) => <DataTableText primary={new Date(value).toLocaleDateString(locale)} secondary={new Date(value).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })} /> },
         { title: t("操作"), render: (_, row) => <Space>
           <Button type="link" disabled={!canView} onClick={() => setDetailTarget(row)}>{t("查看")}</Button>
           {row.status === "pending" || row.status === "supplement_required"

@@ -17,6 +17,7 @@ import { APP_ROUTES } from "@/app/navigation";
 import { subscriptionApi } from "@/api/subscription";
 import { api } from "@/api/platform";
 import { PLAN_LABEL, SERVICE_STATUS_LABEL, formatSubscriptionDate } from "./subscriptionLabels";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 export function PlatformSubscriptionsPage() {
   const { t } = useLocale();
@@ -25,11 +26,14 @@ export function PlatformSubscriptionsPage() {
   const [serviceStatus, setServiceStatus] = useState<string | undefined>();
   const [dueWithin, setDueWithin] = useState<string | undefined>();
   const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState("");
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20 });
   const [selecting, setSelecting] = useState(false);
   const [tenantId, setTenantId] = useState<string>();
+  const scope = useListQueryIdentity();
   const query = useQuery({
-    queryKey: ["subscription", "platform-list", plan, serviceStatus, dueWithin, keyword, pagination],
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined,
+    queryKey: ["subscription", "platform-list", scope, plan, serviceStatus, dueWithin, keyword, pagination],
     queryFn: () => subscriptionApi.platformList({ plan: plan === "all" ? undefined : plan, serviceStatus: dueWithin === "expired" ? SubscriptionServiceStatus.Expired : serviceStatus, dueWithin: dueWithin === "expired" ? undefined : dueWithin, keyword: keyword || undefined, ...pagination })
   });
   // The tenant registry includes tenants with no subscription; do not offer only the filtered subscription page.
@@ -48,11 +52,10 @@ export function PlatformSubscriptionsPage() {
     <PageHeader title="租户订阅"
       extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { setTenantId(undefined); setSelecting(true); }}>{t("直接为租户开通")}</Button>}
       view={<Space orientation="vertical" size={16} style={{ width: "100%" }}>
-
         <QueryState loading={query.isLoading}>
           {query.error ? <Alert type="error" showIcon message={t("租户订阅列表加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
             : <ListSection controls={<>
-              <SearchField label={t("搜索租户订阅")} placeholder={t("搜索租户名称 / 编码")} onSearch={(value) => { setKeyword(value); resetPage(); }} />
+              <SearchField label={t("搜索租户订阅")} placeholder={t("搜索租户名称 / 编码")} value={keywordInput} onValueChange={value => { setKeywordInput(value); if (!value.trim()) { setKeyword(""); resetPage(); } }} onSearch={(value) => { setKeyword(value); resetPage(); }} />
               <ListFilterItem label={t("服务状态")} priority active={Boolean(serviceStatus)}>
                 <Select aria-label={t("服务状态")} placeholder={t("服务状态")} allowClear value={serviceStatus} onChange={(value) => { setServiceStatus(value); resetPage(); }} options={Object.values(SubscriptionServiceStatus).map((value) => ({ value, label: t(SERVICE_STATUS_LABEL[value]) }))} />
               </ListFilterItem>
@@ -62,6 +65,7 @@ export function PlatformSubscriptionsPage() {
               <ListFilterItem label={t("版本")} collapsed active={plan !== "all"}>
                 <Select aria-label={t("版本")} value={plan} onChange={(value) => { setPlan(String(value)); resetPage(); }} options={[{ value: "all", label: t("全部版本") }, { value: "standard", label: t("基础版") }, { value: "pro", label: "PRO" }]} />
               </ListFilterItem>
+              {(keywordInput || keyword || plan !== "all" || serviceStatus || dueWithin) && <Button type="text" data-list-filter-reset onClick={() => { setKeyword(""); setKeywordInput(""); setPlan("all"); setServiceStatus(undefined); setDueWithin(undefined); resetPage(); }}>{t("清除筛选")}</Button>}
             </>}><Table<TenantSubscriptionOverview> rowKey="tenantId" columns={columns} onRefresh={() => query.refetch()} dataSource={query.data?.items ?? []} loading={query.isLoading} refreshing={query.isFetching} scroll={{ x: 900 }} pagination={{ current: query.data?.page ?? pagination.page, pageSize: query.data?.pageSize ?? pagination.pageSize, total: query.data?.total ?? 0, showSizeChanger: true, onChange: (page, pageSize) => setPagination({ page: pageSize === pagination.pageSize ? page : 1, pageSize }) }} /></ListSection>}
         </QueryState>
       </Space>} />

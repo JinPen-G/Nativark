@@ -3,6 +3,10 @@ import { ListFilters, useListFilter } from "@/components/ui";
 import { ListSection, SaveButton } from "@/components/ui";
 import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateContract, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerCorporateInvoiceProfile, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerContractRequest, type SaveCustomerInvoiceProfileRequest, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LiveRefresh, useLiveRefresh } from "@/components/ui";
+import { InsightMetrics } from "@/components/BusinessInsights";
+import { MemberListInsights } from "./MemberListInsights";
+import { CustomerAnalysisReader } from "./CustomerAnalysis";
 import { Card, Descriptions, InputNumber, Space, Tag } from "antd";
 import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
@@ -66,9 +70,9 @@ export function CorporateMembershipPage() {
   const navigate = useNavigate();
   const { customerId } = useParams<{ customerId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const allowedTabs = ["profile", "employees", "invoice", "contracts", "credit"];
-  const corporateTab = allowedTabs.includes(searchParams.get("tab") ?? "") ? searchParams.get("tab")! : "profile";
-  const setCorporateTab = (key: string) => setSearchParams(key === "profile" ? {} : { tab: key });
+  const allowedTabs = ["analysis", "profile", "employees", "invoice", "contracts", "credit"];
+  const corporateTab = allowedTabs.includes(searchParams.get("tab") ?? "") ? searchParams.get("tab")! : "analysis";
+  const setCorporateTab = (key: string) => setSearchParams(key === "analysis" ? {} : { tab: key });
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const canManage = hasTenantMembershipPermission("rental-os:corporate:manage");
   const canEmployeeManage = hasTenantMembershipPermission("rental-os:corporate:employee-manage");
@@ -108,7 +112,8 @@ export function CorporateMembershipPage() {
   const scopeOptions = useQuery({ queryKey: ["membership-benefit-scope-options"], queryFn: membershipApi.benefitScopeOptions, enabled: canGrant && drawer === "grant" });
   const selectedPlanVersion = plans.data?.flatMap((plan) => plan.targetType === "corporate" ? plan.versions ?? [] : []).find((version) => version.id === selectedPlanVersionId);
   const personal = useQuery({ queryKey: ["membership-personal-options"], queryFn: membershipApi.personalOptions, enabled: canEmployeeManage && panel === "employees" });
-  const employees = useQuery({ queryKey: ["membership-corporate-employees", selected?.customerId], queryFn: () => membershipApi.corporateEmployees(selected!.customerId), enabled: canView && Boolean(selected) && panel === "employees" });
+  const employeeLive = useLiveRefresh(`corporate-employees:${selected?.customerId ?? ""}`, Boolean(drawer || employeeEditorOpen));
+  const employees = useQuery({ queryKey: ["membership-corporate-employees", selected?.customerId], queryFn: () => membershipApi.corporateEmployees(selected!.customerId), enabled: canView && Boolean(selected) && panel === "employees", ...employeeLive.queryOptions });
   const assignments = useQuery({ queryKey: ["membership-plan-assignments", selected?.customerId], queryFn: () => membershipApi.planAssignments(selected!.customerId), enabled: canGrant && Boolean(selected) && drawer === "grant" });
   // An absent configuration is valid; React Query rejects undefined query data.
   const creditConfig = useQuery({ queryKey: ["customer-credit", selected?.customerId], queryFn: async () => await customerApi.credit(selected!.customerId) ?? null, enabled: canViewCredit && Boolean(selected) && panel === "credit" });
@@ -380,7 +385,7 @@ export function CorporateMembershipPage() {
           <Form.Item name="reason" label={t("说明")}><Input.TextArea rows={2} /></Form.Item>
           <SaveButton disabled={!canEmployeeManage} label={t("添加/更新成员")} form={employeeForm} pending={saveEmployee.isPending} onSave={async values => { const operation = canEmployeeManage && saveEmployee.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form></Card>}
-        <ListSection title={t("管理员与员工")} extra={canEmployeeManage && <Button type="primary" disabled={selected?.membershipStatus !== "active"} onClick={() => { employeeForm.resetFields(); setEmployeeEditorOpen(true); }}>{t("添加/更新成员")}</Button>}><Table<CustomerCorporateMembership> rowKey="id" size="small" loading={employees.isLoading} refreshing={employees.isFetching} onRefresh={() => employees.refetch()} dataSource={employees.data ?? []} pagination={false} columns={[
+        <ListSection title={t("管理员与员工")} extra={<Space><LiveRefresh enabled={employeeLive.enabled} onChange={employeeLive.setEnabled} busy={employees.isFetching} updatedAt={employees.dataUpdatedAt} paused={Boolean(drawer || employeeEditorOpen)} />{canEmployeeManage && <Button type="primary" disabled={selected?.membershipStatus !== "active"} onClick={() => { employeeForm.resetFields(); setEmployeeEditorOpen(true); }}>{t("添加/更新成员")}</Button>}</Space>}><Table<CustomerCorporateMembership> rowKey="id" size="small" loading={employees.isLoading} refreshing={employees.isFetching} onRefresh={() => employees.refetch()} dataSource={employees.data ?? []} pagination={false} columns={[
           { title: t("个人会员"), dataIndex: "personalCustomerName", render: (_, row) => <CustomerPreview customerId={row.personalCustomerId} name={row.personalCustomerName ?? "—"} type="personal" /> },
           { title: t("角色"), dataIndex: "role", render: (value) => value === "admin" ? t("企业管理员") : t("企业员工") },
           { title: t("部门"), dataIndex: "department", render: (value) => value ?? "—" },
@@ -442,13 +447,14 @@ export function CorporateMembershipPage() {
 
   return <QueryState loading={corporates.isLoading} error={corporates.error}>
     {!customerId && <>
-    <PageHeader title={t("企业会员管理")} description={t("企业资料在租户内共享；会员状态变更影响全部空间。")} extra={<Button type="primary" disabled={!canManage} onClick={() => openCorporate()}>{t("新增企业会员")}</Button>} />
-
+    <PageHeader title={t("企业会员管理")} description={t("企业资料在租户内共享；会员状态变更影响全部空间。")}
+      summary={<InsightMetrics items={[{ label: t("企业"), value: corporateFilter.rows.length }, { label: t("关联员工"), value: corporateFilter.rows.reduce((sum, row) => sum + row.employeeCount, 0) }, { label: t("管理员"), value: corporateFilter.rows.reduce((sum, row) => sum + row.adminCount, 0) }]} />}
+      extra={<Button type="primary" disabled={!canManage} onClick={() => openCorporate()}>{t("新增企业会员")}</Button>} />
     <ListSection controls={<ListFilters filter={corporateFilter} placeholder="企业、联系人或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}>
-      <Table<CorporateMembershipMember> emptyScene={corporateFilter.keyword || corporateFilter.status ? "search" : "empty"}
+      <Table<CorporateMembershipMember> toolbarNote={false} emptyScene={corporateFilter.keyword || corporateFilter.status ? "search" : "empty"}
         importConfig={corporateImport(t, () => corporates.refetch({ throwOnError: true }))}
         exportConfig={{ filename: t("企业会员"), fields: [{ label: t("企业"), value: row => row.corporateName }, { label: t("联系人"), value: row => row.name }, { label: t("联系电话"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => corporates.refetch()} loading={corporates.isLoading} refreshing={corporates.isFetching} dataSource={corporateFilter.rows} pagination={corporateFilter.pagination} columns={[
-        { title: t("企业"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.corporateName ?? row.name} type="corporate" phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> },
+        { title: t("企业"), render: (_, row) => <CustomerPreview presentation="list" secondary={row.phoneMasked} customerId={row.customerId} name={row.corporateName ?? row.name} type="corporate" phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /> },
         { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus] ?? row.membershipStatus)}</Tag> },
         { title: t("企业管理员"), dataIndex: "adminCount" },
         { title: t("员工数"), dataIndex: "employeeCount" },
@@ -460,6 +466,7 @@ export function CorporateMembershipPage() {
         ]} /> },
       ]} />
     </ListSection>
+    <MemberListInsights rows={corporateFilter.rows} />
     </>}
     {customerId && <RecordDetailLayout title={selected?.corporateName ?? selected?.name ?? t("企业资料")} onBack={() => navigate("/membership/corporate")}
       actions={selected && <><Button type="primary" disabled={!canManage} onClick={() => openCorporate(selected)}>{t("编辑企业资料")}</Button><Button disabled={!canGrant || selected.membershipStatus !== "active"} onClick={() => { grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button></>}
@@ -471,6 +478,7 @@ export function CorporateMembershipPage() {
         { key: "employees", label: "员工数", value: selected.employeeCount }
       ] : undefined}>
       {!selected ? <Alert type="warning" showIcon title={t("未找到企业资料")} /> : <Tabs activeKey={corporateTab} onChange={setCorporateTab} items={[
+        { key: "analysis", label: t("客户分析"), children: <CustomerAnalysisReader customerId={selected.customerId} /> },
         { key: "profile", label: t("企业资料"), children: <RecordFacts items={[
           { key: "legal", label: "企业法定名称", value: selected.corporateProfile?.legalName ?? selected.corporateName ?? selected.name },
           { key: "tax", label: "统一社会信用代码", value: selected.corporateProfile?.unifiedSocialCreditCodeMasked || "—" },

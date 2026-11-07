@@ -32,6 +32,8 @@ import { useNavigate } from "react-router-dom";
 import { customerApi } from "@/api/customer";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
+import { CustomerAnalysis } from "./CustomerAnalysis";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 type AddressForm = {
   recipient: string;
@@ -273,6 +275,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [orderPage, setOrderPage] = useState(1);
+  const scope = useListQueryIdentity();
   const [orderPageSize, setOrderPageSize] = useState(20);
   const [addressTarget, setAddressTarget] = useState<CustomerProfileAddress>();
   const [addressOpen, setAddressOpen] = useState(false);
@@ -281,9 +284,10 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   const [identityFiles, setIdentityFiles] = useState<UploadFile<{ id: string; mimeType: string }>[]>([]);
   useEffect(() => { setOrderPage(1); setOrderPageSize(20); setAddressOpen(false); setAddressTarget(undefined); setIdentityFiles([]); identityForm.resetFields(); }, [customerId, identityForm]);
   const overview = useQuery({
-    queryKey: ["customer-profile-overview", customerId, orderPage, orderPageSize],
+    queryKey: ["customer-profile-overview", customerId, scope, orderPage, orderPageSize],
     queryFn: () => customerApi.profileOverview(customerId!, { page: orderPage, pageSize: orderPageSize }),
-    enabled: canView && Boolean(customerId)
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === customerId && previousQuery?.queryKey[2] === scope ? previous : undefined,
+    enabled: canView && Boolean(customerId), meta: { liveRefresh: false }
   });
   const canViewIdentity = canView && canReveal;
   const identityVerifications = useQuery({
@@ -361,6 +365,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   };
   const current = overview.data;
   const profileTabs = [
+    { key: "analysis", label: t("客户分析"), children: current && <CustomerAnalysis key={customerId} overview={current} /> },
     { key: "basic", label: t("基础资料"), children: current && <ProfileSummary overview={current} /> },
     { key: "account", label: t("账号与会员"), children: current && <AccountTab overview={current} /> },
     { key: "address", label: current && current.addresses.length > 0 ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutateAsync(address)} /> },

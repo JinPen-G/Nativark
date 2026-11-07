@@ -1,0 +1,99 @@
+{
+  "origin": "User-authorized local website-next demonstration source",
+  "files": [
+    {
+      "source": "apps/website-next/components/demos/BusinessPreview.jsx",
+      "sourceSha256": "74b775976b840e721253fbb0430fcfba793e21e02820dd11fba2239484f3d623",
+      "copiedSha256": "d8adb2a1483753653f6d79c040f1c397d555c6700ad44e0f072a4086c506f9d4"
+    },
+    {
+      "source": "apps/website-next/components/demos/ReturnReminderDemo.jsx",
+      "sourceSha256": "af84faced7227f78eb68c5f3b4578908a90ca1f6d5674eadc529007ce3dbe41a",
+      "copiedSha256": "de18b8ec2573a4c6d4083376480f78d5884fc5d0c9ceebb4639f80f75671e638"
+    },
+    {
+      "source": "apps/website-next/components/demos/DeliverablesDemo.jsx",
+      "sourceSha256": "9fb1e71cf49428acb2aa5ee66874b872c0d03dfb0ea7e173546e476dcdd545e4",
+      "copiedSha256": "dadc7007098d1f253d98ab201f8e69cdca276ace507d7007de681555e03853d0"
+    },
+    {
+      "source": "apps/website-next/components/demos/ScheduledOperationsDemo.jsx",
+      "sourceSha256": "ad0af220fbf0e4960b7db14dab50a7a92651d73c3a36a28484ec6a01668cdb90",
+      "copiedSha256": "1bb864122068405288f58dbdb6bfa7aa6c2f961aa8a67582d96dc2da6aae7d95"
+    },
+    {
+      "source": "apps/website-next/components/demos/ExecutionTraceDemo.jsx",
+      "sourceSha256": "29934ff36d0071614b5944fb8d7379a8154131fec58328ad2a2e202830407830",
+      "copiedSha256": "e22b9a051c11d0662de092949e2a8690e346af58450a34b105d2e5fc79413431"
+    },
+    {
+      "source": "apps/website-next/components/shared/CapabilityIcons.jsx",
+      "sourceSha256": "bc1e7a677ac625b91d77c3d3f9ab49a520935f567cf88c0555db57df296981f7",
+      "copiedSha256": "bc1e7a677ac625b91d77c3d3f9ab49a520935f567cf88c0555db57df296981f7"
+    },
+    {
+      "source": "apps/website-next/components/shared/styleNames.js",
+      "sourceSha256": "2be972f90f63018f4358dc27555f9691f969c2f9230be00fdd294a05a4a609a2",
+      "copiedSha256": "2be972f90f63018f4358dc27555f9691f969c2f9230be00fdd294a05a4a609a2"
+    },
+    {
+      "source": "apps/website-next/components/shared/demoData.jsx",
+      "sourceSha256": "dd35f0889d8c276197d735c51c21ee5b61d570f9343bf5cf1970a1982b9397c7",
+      "copiedSha256": "61555f1e7cb5e3b3fc0138a885143135f5f29d3ee6b75d270bf7cb47671852aa"
+    },
+    {
+      "source": "apps/website-next/messages/zh.json",
+      "sourceSha256": "0ee0f26ab8f170c2210283208d67fa9ab0989ae8bd992acf4993ac93c4213de0"
+    },
+    {
+      "source": "apps/website-next/messages/en.json",
+      "sourceSha256": "e9fbcc3c3a3f89b66821e83de0d47447eba4f2a129e770be6b970dab3c565147"
+    },
+    {
+      "source": "apps/website-next/styles/demos.css",
+      "sourceSha256": "a81de40e32d9ec8bc466d3ecbef1bbea9f9e06bae7cb77df8334c34f222a6581"
+    },
+    {
+      "source": "apps/website-next/styles/rentalos.css",
+      "sourceSha256": "2866cb6508deabd4b7db810ba9d92e3400de0fa8fdc2df58d88d3c24d0d9b098"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/rentalos-logo.svg",
+      "sourceSha256": "4a86a63fe9f284a79dcaf0d91a275312fc3b3d864a9ade0c1562917365a9bc69"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/excel.svg",
+      "sourceSha256": "2f3f144010d254b1545ed821759a7c807606a64efca8bd90b18776bcbf15b1ff"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/html.svg",
+      "sourceSha256": "72f25759a044b1aea488a054e204691e0cc70721c1e56c20559de61a87379a9a"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/markdown.svg",
+      "sourceSha256": "0c6126931a57540050771620a440aba5ccc4d26e4511530ad3a24f123897637f"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/pdf.svg",
+      "sourceSha256": "b0ab99cc812ef34d8eaa77c06b6832cc0e1f0246088b78875423b438d10f16a4"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/python.svg",
+      "sourceSha256": "473b1f8f8812cb063c7db2f5d7359302e922c4b5f6b7e7e5d68bda69c3475c1f"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/typescript.svg",
+      "sourceSha256": "f1102e986864f0edb50c0b2addcbc3e8dadee7db1fbd208bf45dc51e2ea7de65"
+    },
+    {
+      "source": "apps/website-next/public/harness/icons/file-types/word.svg",
+      "sourceSha256": "1a083627487b74922f95c4fc4dae054d73510834e0ab2f72289d2dedf5808503"
+    }
+  ],
+  "adaptations": [
+    "Admin locale and local assets",
+    "Agent typed request, staged workspace, automatic local confirmation and receipt within 7 seconds",
+    "Source animation duration/delay proportional scaling to 6.4 seconds",
+    "UIArc 7-second CSS carousel, hover/focus pause with preserved progress and directional transitions"
+  ]
+}

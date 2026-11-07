@@ -1,0 +1,18 @@
+.metrics { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); margin: 0; padding: 0; color: var(--rental-content-secondary); font-size: var(--rental-list-summary-size); line-height: var(--rental-list-summary-line-height); }
+.metrics > div { display: inline-flex; align-items: baseline; gap: var(--space-1); }
+.metrics > div + div::before { content: "·"; margin-inline-end: var(--space-1); color: var(--text-muted); }
+.metrics dt { margin: 0; font-weight: var(--rental-list-summary-weight); }
+.metrics dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-summary-value-size); line-height: var(--rental-list-summary-value-line-height); font-weight: var(--rental-list-summary-value-weight); font-variant-numeric: tabular-nums; }
+.columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-6); margin-block: var(--space-6); }
+.section { min-width: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); color: var(--foreground); }
+.section > header { margin-bottom: var(--space-4); }
+.section h2 { margin: 0; color: var(--foreground); font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); font-weight: var(--rental-typography-section-title-weight); }
+.section header p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { position: relative; display: flex; justify-content: space-between; gap: var(--space-3); padding: 0 0 var(--space-4) var(--space-4); border-inline-start: 1px solid var(--border); font-size: var(--rental-typography-body-size); }
+.timeline li::before { content: ""; position: absolute; top: .5em; inset-inline-start: -3px; width: 5px; height: 5px; border-radius: 50%; background: var(--text-secondary); }
+.timeline li:last-child { padding-bottom: 0; }
+.timeline p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.timeline time { flex-shrink: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.empty { color: var(--text-secondary); margin: 0; }
+@media (max-width: 960px) { .columns { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); } }

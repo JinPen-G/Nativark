@@ -74,8 +74,13 @@
 .arc-form-field > div { gap: 0; }
 .arc-form-field > div > label:empty { display: none; }
 .arc-form-field input, .arc-form-field textarea { font-size: var(--rental-typography-body-size); }
-/* Keep keyboard focus visible despite the upstream foundation's no-outline policy. */
-:root [data-rental-arc-button]:focus-visible, :root .arc-form-field:not(.arc-password-field):not(.arc-password-strength):not(.arc-phone-field) :is(input,textarea):focus-visible,
+/* Fields retain UIArc's thin focus border. The host accent ring must not
+   stack a solid halo onto it; error feedback still comes from the source. */
+:is(.arc-form-field, .arc-search-field, input.arc-input-control) { --focus-ring: transparent; }
+/* Clear/reveal actions remain independently identifiable to keyboard users. */
+:is(.arc-form-field, .arc-search-field) button { --focus-ring: var(--accent); }
+/* Keep the host keyboard outline for actions and navigation, not text fields. */
+:root [data-rental-arc-button]:focus-visible,
 :root :is([role="tab"],[role="menuitem"],[role="switch"]):focus-visible {
   outline: 2px solid var(--accent) !important; outline-offset: 3px;
 }

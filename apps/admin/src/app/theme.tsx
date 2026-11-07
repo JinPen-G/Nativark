@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
 import { getArcPalette } from "./arcTokens";
-import { ADMIN_STATUS_COLORS, ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
+import { ADMIN_STATUS_COLORS, ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, ADMIN_LIST_TYPOGRAPHY, ADMIN_TABLE_METRICS, ADMIN_CONTROL_HEIGHT, ADMIN_CONTROL_PADDING, applyAdminTypographyTokens, resolveAdminRadii, resolveAdminInputRadii, type AdminRadiusGroups } from "@/app/designTokens";
 import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
 import { isMotionReduced } from "./motionPreferences";
 
@@ -328,15 +328,17 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
       // Same scale as UIArc, including explicit small/large and fallback links.
       Button: { paddingInline: ADMIN_CONTROL_PADDING.default, paddingInlineSM: ADMIN_CONTROL_PADDING.small, paddingInlineLG: ADMIN_CONTROL_PADDING.large, borderRadius: button, borderRadiusLG: button, borderRadiusSM: Math.max(4, Math.round(button * 0.75)) },
       Table: {
-        cellPaddingBlock: 12,
+        cellPaddingBlock: ADMIN_TABLE_METRICS.cellPaddingBlock,
         cellPaddingInline: 8,
-        headerBg: light ? "#fafafa" : undefined,
+        cellFontSize: ADMIN_LIST_TYPOGRAPHY.primary.size,
+        headerColor: palette.secondary,
+        headerBg: palette.surface,
         // antd 用 headerBorderRadius 同时决定表头首尾圆角与整表外圆角(tableRadius)。
         // 容器组取 999 极致档时 borderRadiusLG≈999 会把表头背景挤成帐篷形；表格是数据密集面，
         // 表头圆角收敛到 ≤24：正常档取 radiusSm(按钮派生的小圆角)，只压掉极致档的畸形。
         headerBorderRadius: Math.min(radiusSm, 24),
         // 表格悬停是交互反馈，不应永远显示系统默认蓝灰色。
-        rowHoverBg: "var(--rental-color-primary-bg)"
+        rowHoverBg: palette.muted
       },
       Tabs: { horizontalItemGutter: 24 },
       Progress: {

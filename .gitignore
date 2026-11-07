@@ -47,8 +47,11 @@ temp/
 .claude/
 .worktrees/
 
-# Local design originals and downloaded references (keep runtime assets in apps).
-/Rental-OS_Brand-Assets/
+# Local design originals and references; retain the default mark imported by admin.
+/assets/*
+!/assets/01_Logo/
+/assets/01_Logo/*
+!/assets/01_Logo/rentalOS-icon.svg
 /参考资料/
 /apps/设计图/
 /apps/*设计图.png

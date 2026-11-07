@@ -1,5 +1,5 @@
 import { Card, Descriptions, Space, Tag } from "antd";
-import { ListSection, App, Empty, Modal } from "@/components/ui";
+import { DataTableText, ListSection, App, Empty, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -59,7 +59,7 @@ function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId
     } }
   ];
   const requestColumns: ColumnsType<SubscriptionRequestRecord> = [
-    { title: t("申请编号 / 类型"), key: "type", render: (_, row) => <Space orientation="vertical" size={0}><span>{row.id}</span><span>{t(REQUEST_TYPE_LABEL[row.type])}</span></Space> },
+    { title: t("申请编号 / 类型"), key: "type", render: (_, row) => <DataTableText primary={row.id} secondary={t(REQUEST_TYPE_LABEL[row.type])} /> },
     { title: t("状态"), key: "status", render: (_, row) => <Tag color={REQUEST_STATUS_TONE[row.status]}>{t(REQUEST_STATUS_LABEL[row.status])}</Tag> },
     { title: t("提交时间"), key: "submitted", render: (_, row) => formatSubscriptionDate(row.submittedAt, overview.timeZone, t) },
     { title: t("办理金额 / 期间"), key: "handled", render: (_, row) => `${t(formatMoney(row.handledAmount))} · ${row.periodText || t("尚未登记")}` },

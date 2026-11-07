@@ -1,0 +1,72 @@
+.login-showcase {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: calc(100dvh - 24px);
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  background: radial-gradient(ellipse at 25% 28%, #eeebf7 0%, transparent 55%), radial-gradient(ellipse at 86% 82%, #f9efe6 0%, transparent 50%), #fafafa;
+  color: #252529;
+}
+:root[data-theme="dark"] .login-showcase { background: radial-gradient(ellipse at 25% 28%, #272431 0%, transparent 55%), radial-gradient(ellipse at 86% 82%, #2b2521 0%, transparent 50%), #171719; color: #f1f1f3; }
+.login-showcase-background { position: absolute; z-index: -1; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
+.login-showcase-stage { display: grid; place-items: center; position: relative; flex: 1; min-height: 0; margin: clamp(12px, 3dvh, 32px) clamp(12px, 2vw, 24px) 0; }
+.login-showcase-slide { position: absolute; inset: 0; display: grid; place-items: center; }
+.login-showcase-demo { position: absolute; flex: none; transform-origin: center; --ds-radius-panel: 20px; --ds-radius-media: 16px; --ds-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace; color: #f9fafb; }
+/* The original translucent sidebar expects the website's dark backdrop.
+   Keep that backdrop inside the demo so the pale login panel cannot wash it out. */
+.login-showcase-demo--agent { border-radius: 20px; background: #172331; }
+:where(.login-showcase-demo) :where(h1, h2, h3, h4, p, dl, dd, figure) { margin: 0; }
+:where(.login-showcase-demo) :where(button, input) { font: inherit; color: inherit; }
+:where(.login-showcase-demo) :where(button) { border: 0; cursor: pointer; background: transparent; padding: 0; }
+:where(.login-showcase-demo) :where(svg, img) { vertical-align: middle; }
+:where(.login-showcase-demo) :where(button, a):focus-visible { outline: 2px solid #9dbaff; outline-offset: 3px; }
+.login-showcase-demo:not(.login-showcase-demo--agent) { overflow: hidden; border-radius: 24px; background: #101012; padding: 12px; box-shadow: 0 16px 48px rgb(0 0 0 / .13); }
+.login-showcase-demo > figure { margin-top: 12px; }
+.login-showcase[data-running="false"] .login-showcase-demo *,
+.login-showcase[data-running="false"] .login-showcase-demo *::before,
+.login-showcase[data-running="false"] .login-showcase-demo *::after { animation-play-state: paused !important; }
+.login-showcase[data-reduced-motion="true"] .login-showcase-demo *,
+.login-showcase[data-reduced-motion="true"] .login-showcase-demo *::before,
+.login-showcase[data-reduced-motion="true"] .login-showcase-demo *::after { animation: none !important; transition: none !important; }
+.login-showcase-footer { display: grid; flex: none; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(8px, 2dvh, 16px) 20px; padding: clamp(12px, 3dvh, 24px) clamp(16px, 2.5vw, 32px) clamp(12px, 2dvh, 20px); }
+.login-showcase-caption { min-width: 0; }
+.login-showcase-caption h2 { margin: 0; color: inherit; font-size: 16px; font-weight: 500; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.login-showcase-caption p { margin: 6px 0 0; color: color-mix(in srgb, currentColor 72%, transparent); font-size: 12px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
+.login-showcase-controls { display: flex; align-items: center; gap: 2px; color: inherit; }
+.login-showcase-controls button { width: 32px; height: 32px; min-width: 32px; padding: 0; color: inherit; }
+.login-showcase-count { margin-right: 6px; font-size: 11px; opacity: .7; font-variant-numeric: tabular-nums; }
+.login-showcase-progress { grid-column: 1 / -1; height: 1px; background: color-mix(in srgb, currentColor 12%, transparent); overflow: hidden; }
+.login-showcase-progress span { display: block; height: 100%; background: currentColor; transform-origin: left; opacity: .6; animation: login-showcase-progress linear both; }
+.login-showcase-toggle-icon { display: inline-flex; align-items: center; justify-content: center; }
+@keyframes login-showcase-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+/* Agent demonstrates the whole request-to-receipt sequence within one slide. */
+.login-showcase-demo [data-demo-stage="0"] .rentalos-demo-request,
+.login-showcase-demo [data-demo-stage="0"] .rentalos-demo-working,
+.login-showcase-demo [data-demo-stage="0"] .rentalos-demo-response,
+.login-showcase-demo [data-demo-stage="1"] .rentalos-demo-working,
+.login-showcase-demo [data-demo-stage="1"] .rentalos-demo-response { display: none; }
+.login-showcase-demo [data-demo-stage] .rentalos-demo-output-placeholder { display: none; }
+.login-showcase-demo :is([data-demo-stage="0"], [data-demo-stage="1"], [data-demo-stage="2"]) .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { display: none; }
+.login-showcase-demo :is([data-demo-stage="0"], [data-demo-stage="1"], [data-demo-stage="2"]) .rentalos-demo-output-placeholder { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-block: 40px; color: #b9bdc6; }
+.rentalos-demo-output-placeholder > svg { width: 28px; height: 28px; }
+.login-showcase-demo [data-demo-stage="3"] .rentalos-agent-output > .rentalos-agent-section,
+.login-showcase-demo [data-demo-stage="4"] .rentalos-agent-output > .rentalos-agent-section:last-child { display: none; }
+.login-showcase-demo [data-demo-stage] .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { opacity: 1; transform: none; transition: opacity .24s ease-out, transform .24s ease-out; }
+@starting-style { .login-showcase-demo [data-demo-stage] .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { opacity: 0; transform: translateY(8px); } }
+.login-showcase-demo [data-demo-stage="7"] .rentalos-demo-auto-confirm { transform: scale(.96); box-shadow: 0 0 0 3px rgb(255 255 255 / .22); }
+.login-showcase-demo .rentalos-demo-typing { color: #f4f4f5; min-height: 44px; }
+.rentalos-demo-caret { animation: login-agent-caret .5s step-end infinite; }
+@keyframes login-agent-caret { 50% { opacity: 0; } }
+.login-showcase-note { grid-column: 1 / -1; margin: 0; font-size: 11px; line-height: 1.5; color: color-mix(in srgb, currentColor 70%, transparent); }
+.login-showcase-highlights { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.login-showcase-highlights dt { font-weight: 500; }
+.login-showcase-highlights dd { margin: 4px 0 0; opacity: .75; }
+@media (max-width: 1100px) { .login-showcase-footer { padding-inline: 24px; } .login-showcase-caption { grid-column: 1 / -1; } .login-showcase-controls { justify-self: end; grid-column: 2; } }
+@media (max-width: 879px) { .login-showcase { display: none; } }

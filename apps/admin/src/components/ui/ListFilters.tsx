@@ -9,15 +9,17 @@ export type ListFiltersProps = {
   placeholder: string;
   options?: { value: string; label: string }[];
   statusLabel?: string;
+  hasFilters?: boolean;
+  onClear?: () => void;
 };
 
 /** The toolbar expands this group into slots without mounting a second set of controls. */
-export function listFilterElements({ filter, placeholder, options, statusLabel = "全部状态" }: ListFiltersProps, t: (value: string) => string) {
+export function listFilterElements({ filter, placeholder, options, statusLabel = "全部状态", hasFilters, onClear }: ListFiltersProps, t: (value: string) => string) {
   return [
     <SearchField key="keyword" label={t(placeholder)} placeholder={t(placeholder)} value={filter.keyword} onValueChange={filter.setKeyword} />,
     options ? <Select key="status" allowClear aria-label={t(statusLabel)} value={filter.status} onChange={value => filter.setStatus(value ?? "")}
       options={[{ value: "", label: t(statusLabel) }, ...options.map(option => ({ ...option, label: t(option.label) }))]} /> : null,
-    (filter.keyword || filter.status) ? <Button key="clear" data-list-filter-reset type="text" onClick={filter.clear}>{t("清除筛选")}</Button> : null,
+    (filter.keyword || filter.status || hasFilters) ? <Button key="clear" data-list-filter-reset type="text" onClick={onClear ?? filter.clear}>{t("清除筛选")}</Button> : null,
   ];
 }
 

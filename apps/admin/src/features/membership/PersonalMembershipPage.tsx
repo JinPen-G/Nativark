@@ -24,6 +24,8 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { CustomerProfileDetails } from "./CustomerProfileDetails";
 import { QualificationTypesEditor } from "./QualificationTypesPage";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
+import { MemberListInsights } from "./MemberListInsights";
+import { InsightMetrics } from "@/components/BusinessInsights";
 
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
 const qualificationStatus: Record<string, { text: string; color: string }> = { pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" }, rejected: { text: "已拒绝", color: "error" }, expired: { text: "已过期", color: "warning" }, revoked: { text: "已撤销", color: "default" }, not_submitted: { text: "未提交", color: "default" } };
@@ -115,12 +117,13 @@ export function PersonalMembershipPage() {
 
   return <QueryState loading={members.isLoading || settings.isLoading} error={members.error ?? settings.error}>
     {!customerId && <>
-    <PageHeader title={t("个人会员管理")} description={t("会员资料在租户内共享；状态变更影响全部空间。")} extra={<Space wrap><Tooltip title={t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}><Radio.Group size="small" value={settings.data?.registrationMode} disabled={!canManage} onChange={(event) => saveMode.mutate(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} /></Tooltip><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
-
-    <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember> emptyScene={memberFilter.keyword || memberFilter.status ? "search" : "empty"}
+    <PageHeader title={t("个人会员管理")} description={t("会员资料在租户内共享；状态变更影响全部空间。")}
+      summary={<InsightMetrics items={[{ label: t("会员"), value: memberFilter.rows.length }, { label: t("待审核"), value: memberFilter.rows.filter(row => row.membershipStatus === "pending_activation").length }, { label: t("风险受限"), value: memberFilter.rows.filter(row => row.membershipStatus === "risk_restricted").length }]} />}
+      extra={<Space wrap><Tooltip title={t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}><Radio.Group size="small" value={settings.data?.registrationMode} disabled={!canManage} onChange={(event) => saveMode.mutate(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} /></Tooltip><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
+    <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember> toolbarNote={false} emptyScene={memberFilter.keyword || memberFilter.status ? "search" : "empty"}
       importConfig={personalImport(t, refresh, settings.data?.supportsOnlyNewImport === true)}
       exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isLoading} refreshing={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
-      { title: t("会员"), render: (_, row) => <Space orientation="vertical" size={0}><b><CustomerPreview customerId={row.customerId} name={row.name} type="personal" levelName={row.levelName} phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /></b><span>{row.phoneMasked}</span></Space> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
+      { title: t("会员"), render: (_, row) => <CustomerPreview presentation="list" secondary={row.phoneMasked} customerId={row.customerId} name={row.name} type="personal" levelName={row.levelName} phoneMasked={row.phoneMasked} membershipStatus={row.membershipStatus} /> }, { title: t("账号"), render: (_, row) => row.account.provisioned ? <Tag color={row.account.status === "active" ? "success" : "warning"}>{row.account.status === "active" ? t("已开通") : row.account.status === "closed" ? t("已注销") : t("已停用")}</Tag> : <Tag>{t("未开通")}</Tag> },
       { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus])}</Tag> }, { title: t("证件"), render: (_, row) => row.qualifications.length ? row.qualifications.map((item) => <Tag key={item.id} color={qualificationStatus[item.status]?.color}>{item.qualificationType} · {t(qualificationStatus[item.status]?.text ?? item.status)}</Tag>) : "—" },
       { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() },
       { title: t("操作"), render: (_, row) => <DataTableRowActions details={() => navigate(`/membership/personal/${encodeURIComponent(row.customerId)}`)} detailsDisabled={!canView} detailLabel={t("查看资料")} detailAccessibleLabel={`${row.name} · ${t("查看资料")}`} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
@@ -132,6 +135,7 @@ export function PersonalMembershipPage() {
         { id: "grant", label: t("授予方案"), icon: BadgeCheck, disabled: !canGrant, onSelect: () => { setSelected(row); grantForm.resetFields(); setDrawer("grant"); } }
       ]} /> }
     ]} /></ListSection>
+    <MemberListInsights rows={memberFilter.rows} />
     </>}
     {customerId && <CustomerProfileDetails key={customerId}
       customerId={customerId} canManage={canManage && Boolean(detailMember)} canView={canView} canReveal={canReveal}

@@ -8,7 +8,8 @@ import type {
 } from "@rental-os/shared";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
-import { Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
+import { Card, Col, Descriptions, Row, Space, Tag } from "antd";
+import { AnimatedNumber, Statistic } from "@/components/ui";
 import { ListFilterBar, ListFilterItem, ListSection, App } from "@/components/ui";
 import { Alert, DatePicker, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -19,6 +20,7 @@ import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useLocale } from "@/app/locale";
 import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 
@@ -62,6 +64,7 @@ const percent = (value: number) => `${(Number(value) * 100).toFixed(2)}%`;
 export function WorkspaceOperationReportPage() {
   const { message } = App.useApp();
   const { t } = useLocale();
+  const scope = useListQueryIdentity();
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [locationId, setLocationId] = useState<string>();
   const [customerId, setCustomerId] = useState<string>();
@@ -79,8 +82,8 @@ export function WorkspaceOperationReportPage() {
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
   const report = useQuery({
     // 查询键必须包含全部筛选项，否则换了地点却命中上一次的缓存。
-    queryKey: ["rental-core", "operation-report", filter],
-    queryFn: () => rentalCoreApi.operationReport(filter)
+    queryKey: ["rental-core", "operation-report", scope, filter],
+    queryFn: () => rentalCoreApi.operationReport(filter), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined
   });
 
   const data = report.data;
@@ -154,6 +157,7 @@ export function WorkspaceOperationReportPage() {
               onChange={(event) => setCustomerId(event.target.value)}
             />
             </ListFilterItem>
+            {(range?.some(Boolean) || locationId || customerType || customerId) && <Button data-list-filter-reset type="text" onClick={() => { setRange(null); setLocationId(undefined); setCustomerType(undefined); setCustomerId(undefined); }}>{t("清除筛选")}</Button>}
           </ListFilterBar>
         }
         note={{
@@ -215,7 +219,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           <Space wrap>
             {data.statusBreakdown.map((row) => (
               <Tag key={row.status} color={orderStatusTagColor(row.status)}>
-                {t(statusLabels[row.status] ?? row.status)}：{row.count}
+                {t(statusLabels[row.status] ?? row.status)}：<AnimatedNumber value={row.count} />
               </Tag>
             ))}
           </Space>
@@ -234,7 +238,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           columns={[
             { title: t("类型"), render: (_: unknown, row) => t(exceptionLabels[row.type] ?? row.type) },
             { title: t("金额"), align: "right", render: (_: unknown, row) => money(row.amount) },
-            { title: t("涉及订单"), align: "right", dataIndex: "orderCount" }
+            { title: t("涉及订单"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> }
           ]}
         />
         <div className="muted" >
@@ -266,7 +270,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             <Space wrap style={{ marginTop: 8 }}>
               {assets.statusBreakdown.length
                 ? assets.statusBreakdown.map((row) => (
-                    <Tag key={row.status} color={row.status === "available" ? "success" : ["inspection", "maintenance"].includes(row.status) ? "warning" : row.status === "disabled" ? "default" : "processing"}>{t(assetStatusLabels[row.status] ?? row.status)}：{row.count}</Tag>
+                    <Tag key={row.status} color={row.status === "available" ? "success" : ["inspection", "maintenance"].includes(row.status) ? "warning" : row.status === "disabled" ? "default" : "processing"}>{t(assetStatusLabels[row.status] ?? row.status)}：<AnimatedNumber value={row.count} /></Tag>
                   ))
                 : <span className="muted">{t("当前经营空间尚无序列化资产")}</span>}
             </Space>
@@ -308,7 +312,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           locale={{ emptyText: t("当前筛选下没有订单") }}
           columns={[
             { title: t("履约地点"), render: (_: unknown, row) => <><b>{row.locationName}</b><br /><span className="muted">{row.locationId}</span></> },
-            { title: t("订单量"), align: "right", dataIndex: "orderCount" },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
             { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
             { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
             { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
@@ -330,7 +334,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           columns={[
             { title: t("客户"), render: (_: unknown, row) => <><b><CustomerPreview customerId={row.customerId} name={row.customerName} type={row.customerType === "corporate" ? "corporate" : row.customerType === "personal" ? "personal" : undefined} snapshot /></b><br /><span className="muted">{row.customerId ?? t("无主档 id")}</span></> },
             { title: t("类型"), render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{t(row.customerType === "corporate" ? "企业" : "个人")}</Tag> },
-            { title: t("订单量"), align: "right", dataIndex: "orderCount" },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
             { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
             { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
             { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },

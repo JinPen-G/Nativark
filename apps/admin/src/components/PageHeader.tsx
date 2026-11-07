@@ -17,9 +17,11 @@ import { routeIconName } from "@/app/navigation-icons";
  * 只有 `type="info"` 的口径说明适合放进来——系统限制类的 warning（例如"电子合同尚未
  * 接入"）必须常显，藏起来会让人误以为功能已经完整。
  */
-export function PageHeader({ title, description, view, extra, note }: {
+export function PageHeader({ title, description, summary, view, extra, note }: {
   title: string;
   description?: string;
+  /** Current filtered facts: one compact line under the title, without a separate metric panel. */
+  summary?: ReactNode;
   view?: ReactNode;
   extra?: ReactNode;
   note?: { title: string; description: ReactNode };
@@ -42,7 +44,7 @@ export function PageHeader({ title, description, view, extra, note }: {
   return (
     <div className="page-header">
       <div className="page-toolbar" aria-label={locale === "en-US" ? `${translatedTitle} · ${t("页面操作")}` : `${title}页面操作`}>
-        <div className="page-heading">
+        <div className="page-heading" data-has-summary={summary ? "" : undefined}>
           <div className="page-title-row" data-icon-hover="">
             {/* 图标取自路由注册表，和侧栏菜单同一个符号；页面不各自传图标，避免两处长歪。 */}
             {icon && <span className="page-title-icon"><AnimatedIcon name={routeIconName(location.pathname)} /></span>}
@@ -57,6 +59,7 @@ export function PageHeader({ title, description, view, extra, note }: {
             )}
           </div>
           {translatedDescription && <p className="page-context" role="note">{translatedDescription}</p>}
+          {summary && <div className="page-summary">{summary}</div>}
         </div>
         {extra && <Space className="page-toolbar-actions" wrap>{extra}</Space>}
       </div>

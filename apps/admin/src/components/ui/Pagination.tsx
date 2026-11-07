@@ -6,6 +6,7 @@ import { useLocale } from "@/app/locale";
 import { ArcLocale } from "./ArcLocale";
 import { Input } from "./Input";
 import { Button } from "./Button";
+import { AnimatedCountText } from "./AnimatedNumber";
 
 export function Pagination(props: PaginationProps) {
   const { t } = useLocale();
@@ -41,8 +42,9 @@ export function Pagination(props: PaginationProps) {
   const changePage = (next: number) => { if (props.disabled || count === 0) return; setPage(next); setSize(pageSize); props.onChange?.(next, pageSize); };
   const go = () => { const next = Number(jump); if (Number.isInteger(next) && next >= 1 && next <= count) { changePage(next); setJump(""); } };
   const range: [number, number] = [total ? (current - 1) * pageSize + 1 : 0, Math.min(total, current * pageSize)];
+  const summary = props.showTotal ? props.showTotal(total, range) : `${range[0]}–${range[1]} / ${total}`;
   return <div className={`arc-pagination ${props.className ?? ""}`} style={{ justifyContent: props.align === "start" ? "flex-start" : props.align === "center" ? "center" : "flex-end", ...props.style }} inert={props.disabled || undefined} aria-disabled={props.disabled}>
-    <div className="arc-pagination-main"><div className="arc-pagination-summary">{props.showTotal ? props.showTotal(total, range) : `${range[0]}–${range[1]} / ${total}`}</div>
+    <div className="arc-pagination-main"><div className="arc-pagination-summary">{typeof summary === "string" ? <AnimatedCountText text={summary} /> : summary}</div>
       <ArcLocale><ArcPagination page={current} pageCount={count} label={t("分页")} onPageChange={changePage} /></ArcLocale>
     </div>
     {(props.showSizeChanger ?? total > (props.totalBoundaryShowSizeChanger ?? 50)) && <div className="arc-select-field arc-pagination-size"><ArcSelect ref={sizeTrigger} onOpenChange={setSizeMenuOpen} label={t("每页条数")} value={String(pageSize)} disabled={props.disabled}

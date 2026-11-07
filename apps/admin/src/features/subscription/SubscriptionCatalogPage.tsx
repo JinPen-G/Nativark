@@ -1,4 +1,4 @@
-import { ListFilters, useListFilter } from "@/components/ui";
+import { DataTableText, ListFilters, useListFilter } from "@/components/ui";
 import { PlusOutlined } from "@/components/ui/icons";
 import { Descriptions, Space, Tag } from "antd";
 import { ListSection, Alert, Table, Tabs } from "@/components/ui";
@@ -32,7 +32,7 @@ export function SubscriptionCatalogPage() {
   const priceOf = (plan: SubscriptionPlan) => prices.data?.find((row) => row.plan === plan) ?? null;
 
   const columns: ColumnsType<SubscriptionFeatureCatalogEntry> = [
-    { title: t("功能"), key: "name", render: (_, row) => <Space orientation="vertical" size={0}><span>{row.name}</span><span className="text-meta">{row.code}</span></Space> },
+    { title: t("功能"), key: "name", render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
     { title: t("模块"), dataIndex: "module", key: "module" },
     { title: t("适用品类"), key: "categories", render: (_, row) => row.categories.join("、") || t("—") },
     { title: t("默认归属"), dataIndex: "defaultOwnership", key: "default", render: (value: FeatureOwnership) => ownershipLabel(value, t) },

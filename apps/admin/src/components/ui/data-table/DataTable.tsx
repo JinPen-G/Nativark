@@ -97,7 +97,7 @@ function pinningStyle<T>(column: Column<T>, contentLayout: ContentLayout | false
 
 /** Internal leading slot; whole-cell alignment is separately controlled by column metadata. */
 export function DataTableLeading({ children }: { children: ReactNode }) {
-  return <span className={styles.leading}>{children}</span>;
+  return <span className={styles.leading} data-table-leading="">{children}</span>;
 }
 
 function cellAlignment<T>(cell: Cell<T, unknown>) {
@@ -215,7 +215,7 @@ export function DataTable<T>({ table, caption, busy, loading, refreshing, empty,
         {showHeader && <thead ref={headerRef}>{table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => <th key={header.id} scope="col" colSpan={header.colSpan} style={columnStyle(header.column)} data-column-id={header.column.id} data-pinned={header.column.getIsPinned() || undefined} aria-sort={header.column.getCanSort() ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
           {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
         </th>)}</tr>)}</thead>}
-        <LayoutGroup><tbody key={motionScope} inert={busy || loading || undefined} aria-hidden={busy || loading || undefined} className={busy && !loading ? styles.refreshingBody : undefined}>
+        <LayoutGroup><tbody inert={busy || loading || undefined} aria-hidden={busy || loading || undefined} className={busy && !loading ? styles.refreshingBody : undefined}>
           {loading ? skeletonRows(ADMIN_LOADING_METRICS.rows) : <AnimatePresence initial={false} mode="popLayout">
             {rows.length ? rows.flatMap(row => [<motion.tr key={row.id} {...rowProps?.(row) as HTMLMotionProps<"tr">} layout={suppress ? false : "position"}
               initial={suppress ? false : MOTIQ_TABLE_MOTION.initial} animate={MOTIQ_TABLE_MOTION.animate}

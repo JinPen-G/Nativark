@@ -4,6 +4,8 @@
 
 首页文字已调整为 Rental OS 的业务定位与能力介绍，并提供简体中文和英文。品牌素材保留 Rental OS 文件名，并放在模板对应的目录：页头及页脚小 Logo 共用 `assets/icons/rentalos-logo.svg`，页底大字使用 `assets/images/rentalos-wordmark.svg`，均复制自 `Rental-OS_Brand-Assets/01_Logo/新版/` 中用户提供的纯黑 SVG；浏览器标签页和首屏“Rental OS 平台”轮播选项共用 `assets/images/rentalos-icon-color.svg`，使用用户提供的渐变色图标。品牌原文件未改动。页头在深色首屏通过 CSS 反色显示为白色，滚动后及移动端浅色菜单显示黑色。原模板其余图片、Lottie 和整体排版、动效仍保留；旧官网在上一级 `index.html`，没有覆盖。
 
+共享品牌原稿目录现统一为仓库根目录 `assets/01_Logo/`，上文旧目录仅保留最初复制来源的说明；官网内部的素材路径继续以本应用目录为准。
+
 模板中的客户评价、业绩数字与 GDPR/德国托管声明没有作为 Rental OS 的真实案例使用。故事区改为明确标注的租赁业务场景示例，数字区改为平台能力文案。其余图片和动画素材内的原模板英文尚未替换。
 
 ## 预览

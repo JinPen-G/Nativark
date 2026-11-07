@@ -19,6 +19,7 @@ export { InfoPopover } from "./InfoPopover";
 export { Input } from "./Input";
 export { SearchField } from "./SearchField";
 export { DataTableLeading } from "./data-table/DataTable";
+export { DataTableText } from "./data-table/DataTableText";
 export { DataTableMoney } from "./data-table/DataTableMoney";
 export { dataTableSelectionColumn, DataTableSelectionSummary, useDataTableSelection } from "./data-table/DataTableSelection";
 export { DataTableStatus, DataTableNote, type DataTableStatusTone } from "./data-table/DataTableStatus";
@@ -60,3 +61,6 @@ export { DataTableRowActions, type DataTableRowAction } from "./data-table/DataT
 export { TimePicker, TimeInput } from "./TimePicker";
 export { FileUpload } from "./FileUpload";
 export type { FileUploadItem, FileUploadProps } from "./FileUpload";
+export { AnimatedNumber } from "./AnimatedNumber";
+export { LiveRefresh, useLiveRefresh } from "./LiveRefresh";
+export { Statistic } from "./Statistic";

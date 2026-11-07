@@ -1,4 +1,4 @@
-import { AppleOutlined, GoogleOutlined, WechatOutlined } from "@ant-design/icons";
+import { AppleFilled, WechatOutlined } from "@ant-design/icons";
 import { ConfigProvider, Typography } from "antd";
 import { Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -7,12 +7,14 @@ import { Input } from "@/components/ui";
 import { Button, PasswordField, SaveButton, Segmented, useFeedback } from "@/components/ui";
 import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
 import { AuthCodePreview } from "./AuthCodePreview";
+import { GoogleBrandIcon } from "./LoginProviderIcons";
+import { LoginShowcase } from "./login-showcase/LoginShowcase";
 import { isAxiosError } from "axios";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { clientChannelApi } from "@/api/clientChannel";
-import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_LOGIN_DEFAULTS, applyAdminFavicon } from "@/app/branding";
+import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon } from "@/app/branding";
 import { apiAssetOrigin } from "@/api/http";
 import { useLocale } from "@/app/locale";
 import { createThemeConfig, useAppearance } from "@/app/theme";
@@ -32,19 +34,6 @@ const LOCAL_DEMO_ACCOUNTS = [
 ] as const;
 
 const TENANT_CODE_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/u;
-
-// Product names are indivisible text, not HTML supplied by a tenant.
-function LoginBrandText({ text }: { text: string }) {
-  return <>{text.split(/(Rental Agent|Copilot)/g).map((part, index) =>
-    /^(Rental Agent|Copilot)$/.test(part) ? <span className="login-brand-product" key={index}>{part}</span> : part
-  )}</>;
-}
-
-function LoginBackground({ src }: { src: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <div className="login-brand-background login-brand-background--generated" aria-hidden="true" />;
-  return <div className="login-brand-background" aria-hidden="true"><img src={src} alt="" onError={() => setFailed(true)} /></div>;
-}
 
 export function LoginPage() {
   const [form] = Form.useForm<LoginValues>();
@@ -82,9 +71,7 @@ export function LoginPage() {
   const loginBranding = publicBootstrap.data?.adminLogin;
   const showBrandTitle = loginBranding?.showTitle !== false;
   const showBrandDescription = loginBranding?.showDescription !== false;
-  const showBrandHighlights = loginBranding?.showHighlights !== false;
   const showBrandFooter = loginBranding?.showFooter !== false;
-  const brandDescription = loginBranding?.description?.trim() || t(ADMIN_LOGIN_DEFAULTS.description);
   const backgroundPath = loginBranding?.backgroundImageUrl;
   const backgroundSrc = backgroundPath?.startsWith("/") ? `${apiAssetOrigin}${backgroundPath}` : backgroundPath;
   // Only the current public tenant response can color the login surface.
@@ -157,38 +144,22 @@ export function LoginPage() {
   return (
     <ConfigProvider theme={{ ...loginTheme, cssVar: { key: "rental-login", prefix: "rental" } }}>
     <div className="login-stage" ref={stageRef}>
-      {/* 外层：原有的带留白/圆角/描边的视口容器，保持不变。 */}
+      {/* A single page scroller carries the showcase and the unframed login form. */}
       <div className="login-frame">
         <div className="login-appearance"><LanguageSwitcher /><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
-          {/* 内层：更大圆角的登录卡片，左品牌、右表单；窄屏左栏隐藏，卡片退化为单栏。 */}
+          {/* The showcase is illustrative; authentication remains in the original form. */}
           <div className="login-card">
-            <aside className="login-card-brand" aria-labelledby={showBrandTitle ? "login-brand-heading" : undefined} aria-label={showBrandTitle ? undefined : loginBrandName}>
-              {backgroundSrc ? <LoginBackground key={`${effectiveTenantCode}:${backgroundSrc}`} src={backgroundSrc} /> : <div className="login-brand-background login-brand-background--generated" aria-hidden="true" />}
-              <div className={`login-brand login-brand--hero${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}>
-                <img src={loginBrandLogo} alt={loginBrandName} />
-              </div>
-              {(showBrandTitle || showBrandDescription) && <div className="login-card-brand-copy">
-                {showBrandTitle && <h1 id="login-brand-heading" className="login-card-brand-title"><LoginBrandText text={loginBranding?.title?.trim() || t(ADMIN_LOGIN_DEFAULTS.title)} /></h1>}
-                {showBrandDescription && <div className="login-brand-description">{brandDescription.split(/\r?\n\s*\r?\n/).map((paragraph, index) => <p className="login-card-brand-tagline" key={index}><LoginBrandText text={paragraph} /></p>)}</div>}
-              </div>}
-              {(showBrandHighlights || showBrandFooter) && <div className="login-card-brand-footer">
-                {showBrandHighlights && <dl className="login-brand-capabilities">
-                  {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
-                    <div key={item.title}>
-                      <dt><LoginBrandText text={loginBranding?.highlights?.[index]?.title?.trim() || t(item.title)} /></dt>
-                      <dd>{loginBranding?.highlights?.[index]?.description?.trim() || t(item.description)}</dd>
-                    </div>
-                  ))}
-                </dl>}
-                {showBrandFooter && <p className="login-brand-note">{loginBranding?.footerText?.trim() || t(ADMIN_LOGIN_DEFAULTS.footerText)}</p>}
-              </div>}
-            </aside>
+            <LoginShowcase title={loginBranding?.title} description={loginBranding?.description}
+              footer={loginBranding?.footerText} background={backgroundSrc}
+              showTitle={showBrandTitle} showDescription={showBrandDescription} showFooter={showBrandFooter}
+              highlights={loginBranding?.highlights} showHighlights={loginBranding?.showHighlights !== false} />
             <div className="login-card-form">
-              {/* 窄屏才显示：左栏隐藏后，品牌标识挪到表单顶部。 */}
+              {/* One brand mark remains visible above the form at every width. */}
               <div className={`login-brand login-brand--compact${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}><img src={loginBrandLogo} alt={loginBrandName} /></div>
+              <div className="login-form-content">
               <div className="login-panel-heading">
-                <Typography.Title level={2}>{locale === "en-US" ? loginBrandName === ADMIN_BRAND_NAME ? "Admin Console" : `${loginBrandName} Admin Console` : loginBrandName === ADMIN_BRAND_NAME ? "登录运营台" : `登录${loginBrandName}运营台`}</Typography.Title>
+                <Typography.Title level={2}>{locale === "en-US" ? `Sign in to ${loginBrandName}` : `登录 ${loginBrandName}`}</Typography.Title>
                 <Typography.Paragraph type="secondary">{t(loginMode === "reset" ? "通过手机号或邮箱验证找回密码（前端预览）。" : "使用租户账号进入对应品类的租赁工作区。")}</Typography.Paragraph>
               </div>
               {loginMode !== "reset" && <div className="login-methods"><Segmented value={loginMode} disabled={loggingIn} onChange={value => switchLoginMode(value as typeof loginMode)} options={[
@@ -218,14 +189,17 @@ export function LoginPage() {
                   {/* 租户专属链接：租户已由 URL 锁定，字段仍在表单里（隐藏）参与校验/提交，但不展示给用户改。 */}
                   <Form.Item name="tenantCode" hidden={isTenantLocked} label={t("租户编码")} rules={[{ required: true, message: t("请输入租户编码") }]}><Input autoComplete="organization" /></Form.Item>
                   <Form.Item label={t("账号")} name="account" rules={[{ required: true, message: t("请输入账号") }]}><Input autoComplete="username" /></Form.Item>
-                  <Form.Item label={t("密码")} name="password" rules={[{ required: true, message: t("请输入密码") }]}><PasswordField autoComplete="current-password" /></Form.Item>
+                  <div className="login-password-field">
+                    <Form.Item label={t("密码")} name="password" rules={[{ required: true, message: t("请输入密码") }]}><PasswordField autoComplete="current-password" /></Form.Item>
+                    <Button type="text" size="small" className="login-forgot-password" disabled={loggingIn} onClick={() => switchLoginMode("reset")}>{t("忘记密码？")}</Button>
+                  </div>
                   <SaveButton className="login-submit" label={t("进入工作台")} pendingLabel={t("登录中")} successLabel={t("登录成功")} form={form} onSave={submitPasswordLogin} />
                 </Form>
-                {loginMode === "password" ? <div className="login-preview-links"><Button type="text" size="small" disabled={loggingIn} onClick={() => switchLoginMode("reset")}>{t("忘记密码？")}</Button></div> : <AuthCodePreview key={loginMode} mode={loginMode} tenantCode={effectiveTenantCode} tenantLocked={isTenantLocked} onTenantChange={value => form.setFieldValue("tenantCode", value)} onBack={() => switchLoginMode("password")} />}
+                {loginMode !== "password" && <AuthCodePreview key={loginMode} mode={loginMode} tenantCode={effectiveTenantCode} tenantLocked={isTenantLocked} onTenantChange={value => form.setFieldValue("tenantCode", value)} onBack={() => switchLoginMode("password")} />}
                 {loginMode !== "reset" && <div className="login-provider-preview">
                   <div className={loginStyles.divider}>{t("其他登录方式（预览）")}</div>
                   <div className={loginStyles.sso}>
-                    {[{ name: "Google", icon: <GoogleOutlined /> }, { name: "Apple", icon: <AppleOutlined /> }, { name: t("微信"), icon: <WechatOutlined /> }].map(provider => <Button key={provider.name} aria-label={provider.name} className={loginStyles.ssoButton} disabled={loggingIn} icon={provider.icon} onClick={() => setProviderPreview(provider.name)}>{provider.name}</Button>)}
+                    {[{ name: "Google", icon: <GoogleBrandIcon /> }, { name: "Apple", icon: <AppleFilled className="login-provider-apple" /> }, { name: t("微信"), icon: <WechatOutlined className="login-provider-wechat" /> }].map(provider => <Button key={provider.name} aria-label={provider.name} className={loginStyles.ssoButton} disabled={loggingIn} icon={provider.icon} onClick={() => setProviderPreview(provider.name)}>{provider.name}</Button>)}
                   </div>
                   {providerPreview && <Alert type="info" title={`${providerPreview} · ${t("登录方式预览")}`} description={t("暂未接入第三方授权，不会打开授权页面或建立登录会话。")} />}
                 </div>}
@@ -267,6 +241,7 @@ export function LoginPage() {
                   </div>
                 ) : null}
               <Typography.Text className="login-support" type="secondary">{t("登录即表示你正在访问获授权的租户数据范围。")}</Typography.Text>
+              </div>
             </div>
           </div>
         </main>

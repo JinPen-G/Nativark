@@ -9,6 +9,7 @@ import { Button } from "./Button";
 import { SearchField } from "./SearchField";
 import { Segmented } from "./Segmented";
 import { Tabs } from "./Tabs";
+import { Select } from "./Select";
 import { ListFilters, listFilterElements, type ListFiltersProps } from "./ListFilters";
 import { planListFilters } from "./listFilterLayout";
 import styles from "./data-table/DataTable.module.css";
@@ -16,6 +17,22 @@ import styles from "./data-table/DataTable.module.css";
 type Kind = "category" | "search" | "filter" | "reset" | "action";
 type ItemProps = { children: ReactNode; kind?: Kind; label?: string; active?: boolean; width?: keyof typeof LIST_WIDTH; priority?: boolean; collapsed?: boolean };
 type Entry = ItemProps & { key: string; kind: Kind };
+
+function simpleSelect(entry: Entry) {
+  return isValidElement<{ value?: unknown; placeholder?: string; options?: { value: unknown; label: string }[]; onChange?: (value: unknown) => void; mode?: string }>(entry.children)
+    && entry.children.type === Select && !entry.children.props.mode && Array.isArray(entry.children.props.options) ? entry.children : undefined;
+}
+
+function clearEntry(entry: Entry): (() => void) | undefined {
+  const select = simpleSelect(entry);
+  if (select?.props.onChange) return () => select.props.onChange!(select.props.options?.find(option => option.value === "" || option.value === "all")?.value);
+  const child = entry.children;
+  if (isValidElement<{ options?: { value: string | number }[]; onChange?: (value: string | number) => void }>(child) && child.type === Segmented && child.props.options?.length && child.props.onChange)
+    return () => child.props.onChange!(child.props.options![0].value);
+  if (isValidElement<{ onValueChange?: (value: string) => void }>(child) && child.type === SearchField && child.props.onValueChange)
+    return () => child.props.onValueChange!("");
+  return undefined;
+}
 
 /** Explicitly describe a wrapped/custom business filter; ordinary shared fields are inferred. */
 export function ListFilterItem({ children }: ItemProps) { return <>{children}</>; }
@@ -46,7 +63,7 @@ function entriesFrom(children: ReactNode, t: (value: string) => string, prefix =
       : props["data-list-filter-reset"] != null || props.children === t("清除筛选") ? "reset" : node.type === Button ? "action" : "filter";
     const label = props["aria-label"] ?? props.placeholder ?? props.label ?? (kind === "action" ? props.children : undefined);
     const value = props.value ?? props.activeKey ?? props.checked;
-    const firstTab = (props.items as { key: string }[] | undefined)?.[0]?.key;
+    const firstTab = (props.items as { key: string }[] | undefined)?.[0]?.key ?? (kind === "category" ? (props.options as { value: string | number }[] | undefined)?.[0]?.value : undefined);
     return [{ key, kind, children: node, label: typeof label === "string" ? label : undefined,
       active: Array.isArray(value) ? value.some(Boolean) : value != null && value !== "" && value !== "all" && value !== false && value !== firstTab }];
   });
@@ -59,8 +76,10 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
   const moreTrigger = useRef<HTMLButtonElement>(null);
   const slots = useRef(new Map<string, HTMLDivElement>());
   const measured = useRef(new Map<string, number>());
+  const labels = useRef(new Map<string, HTMLSpanElement>());
   const [available, setAvailable] = useState(0);
   const [layout, setLayout] = useState<ReturnType<typeof planListFilters>>();
+  const [selectWidths, setSelectWidths] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
   useLayoutEffect(() => {
     const node = root.current;
@@ -75,7 +94,10 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
   const searches = entries.filter(item => item.kind === "search");
   const fields = entries.filter(item => item.kind === "filter" && !item.collapsed);
   const secondaryFields = entries.filter(item => item.kind === "filter" && item.collapsed);
-  const resets = entries.filter(item => item.kind === "reset");
+  const explicitResets = entries.filter(item => item.kind === "reset" && !(isValidElement<{ disabled?: boolean }>(item.children) && item.children.props.disabled));
+  const activeEntries = entries.filter(item => item.active && (item.kind === "filter" || item.kind === "search" || item.kind === "category"));
+  const canClearAll = activeEntries.length > 0 && activeEntries.every(item => clearEntry(item));
+  const resets: Entry[] = explicitResets.length ? explicitResets : canClearAll ? [{ key: "clear-all", kind: "reset", children: <Button type="text" onClick={() => activeEntries.forEach(item => clearEntry(item)?.())}>{t("清除筛选")}</Button> }] : [];
   const actions = entries.filter(item => item.kind === "action");
   const compact = available > 0 && available < ADMIN_LIST_METRICS.categoryInlineMinWidth;
   useLayoutEffect(() => {
@@ -85,10 +107,14 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
       const node = slots.current.get(entry.key);
       if (node && !node.closest('[role="dialog"]')) measured.current.set(entry.key,
         entry.kind === "category" ? Math.max(node.scrollWidth, ...[...node.querySelectorAll("*")].map(child => child.scrollWidth))
-          : entry.kind === "filter" ? LIST_WIDTH[entry.width ?? "select"] : node.getBoundingClientRect().width);
+          : entry.kind === "filter" ? !entry.width && simpleSelect(entry)
+            ? Math.min(ADMIN_LIST_METRICS.adaptiveSelectMax, Math.max(ADMIN_LIST_METRICS.adaptiveSelectMin, (labels.current.get(entry.key)?.getBoundingClientRect().width ?? 0) + ADMIN_LIST_METRICS.adaptiveSelectInset))
+            : LIST_WIDTH[entry.width ?? "select"] : node.getBoundingClientRect().width);
     }
     const category = compact ? 0 : Math.min(categories.reduce((sum, entry) => sum + (measured.current.get(entry.key) ?? LIST_WIDTH.wide), 0), width * .6);
     const sizeOf = (entry: Entry) => measured.current.get(entry.key) ?? LIST_WIDTH[entry.width ?? "select"];
+    const nextWidths = Object.fromEntries(fields.filter(entry => !entry.width && simpleSelect(entry)).map(entry => [entry.key, sizeOf(entry)]));
+    setSelectWidths(previous => JSON.stringify(previous) === JSON.stringify(nextWidths) ? previous : nextWidths);
     const gap = parseFloat(getComputedStyle(root.current!).columnGap) || 0;
     const moreWidth = moreTrigger.current?.getBoundingClientRect().width ??
       (width <= ADMIN_LIST_METRICS.compactTriggerMaxWidth ? ADMIN_LIST_METRICS.moreSearchCompactWidth : ADMIN_LIST_METRICS.moreSearchWidth);
@@ -97,7 +123,7 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
       categoryMin,
       search: searches.length ? LIST_WIDTH.search : 0,
       searchMin: searches.length ? (width >= categoryMin + LIST_WIDTH.searchMin + moreWidth + gap * 2 ? LIST_WIDTH.searchMin : LIST_WIDTH.compact) : 0,
-      fieldWidths: fields.map(sizeOf), preferFirst: Boolean(fields[0]?.priority), actions: actions.map(sizeOf), resets: resets.map(sizeOf),
+      fieldWidths: fields.map(sizeOf), preferFirst: Boolean(fields[0]?.priority), actions: [...actions, ...resets].map(sizeOf), resets: [],
       gap, moreWidth,
       collapsedCategory: compact && categories.length > 0, forcedMore: secondaryFields.length > 0 });
     setLayout(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
@@ -111,9 +137,14 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
   const ownsPopupTarget = (target: EventTarget | null) => target instanceof Node &&
     [...(panel.current?.querySelectorAll("[aria-controls]") ?? [])].some(control =>
       control.getAttribute("aria-controls")?.split(/\s+/u).some(id => document.getElementById(id)?.contains(target)));
-  const item = (entry: Entry, inPanel = false) => <div key={entry.key} data-filter-kind={entry.kind}
+  const displayLabel = (entry: Entry) => {
+    const select = simpleSelect(entry);
+    if (!select) return entry.label ?? "";
+    return select.props.options?.find(option => Object.is(option.value, select.props.value))?.label ?? entry.label ?? select.props.placeholder ?? "";
+  };
+  const item = (entry: Entry, inPanel = false) => <div key={entry.key} data-filter-kind={entry.kind} data-adaptive-select={!entry.width && simpleSelect(entry) ? "" : undefined} data-filter-active={entry.active || undefined}
     ref={node => { if (node) slots.current.set(entry.key, node); else slots.current.delete(entry.key); }}
-    style={!inPanel ? { width: entry.kind === "category" && layout ? layout.category / categories.length : entry.kind === "search" && layout ? layout.search : entry.width ? LIST_WIDTH[entry.width] : undefined } : undefined}
+    style={!inPanel ? { width: entry.kind === "category" && layout ? layout.category / categories.length : entry.kind === "search" && layout ? layout.search : entry.width ? LIST_WIDTH[entry.width] : simpleSelect(entry) ? selectWidths[entry.key] ?? ADMIN_LIST_METRICS.adaptiveSelectMin : undefined } : undefined}
     className={inPanel ? styles.filterPanelField : styles.filterSlot} role={inPanel ? "group" : undefined} aria-label={inPanel ? entry.label : undefined}>
     {inPanel && entry.label && <span className={styles.filterLabel} aria-hidden="true">{entry.label}</span>}
     {!inPanel && compact && entry.kind === "action" && isValidElement<{ icon?: ReactNode; children?: ReactNode; "aria-label"?: string; title?: string }>(entry.children) && entry.children.props.icon
@@ -129,9 +160,10 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
       <PopoverContent ref={panel} side="bottom" align="start" className={styles.filterPopover} aria-label={t("更多搜索")}
         onInteractOutside={event => { if (ownsPopupTarget(event.target)) event.preventDefault(); }}>
         <div className={styles.filterPanelFields}>{collapsed.map(entry => item(entry, true))}</div>
-        {resets.length > 0 && <div className={styles.filterPanelFooter}>{resets.map(entry => item(entry))}</div>}
       </PopoverContent>
-    </Popover> : resets.map(entry => item(entry))}
+    </Popover> : null}
+    {resets.map(entry => item(entry))}
     {actions.map(entry => item(entry))}
+    <div className={styles.filterMeasure} aria-hidden="true">{fields.map(entry => <span key={entry.key} ref={node => { if (node) labels.current.set(entry.key, node); else labels.current.delete(entry.key); }}>{displayLabel(entry)}</span>)}</div>
   </div>;
 }

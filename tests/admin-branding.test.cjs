@@ -11,9 +11,9 @@ function load(file, overrides = {}) {
   new Function('require', 'module', 'exports', code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), module, module.exports);
   return module.exports;
 }
-const canonical = read('Rental-OS_Brand-Assets/01_Logo/rentalOS-icon.svg');
+const canonical = read('assets/01_Logo/rentalOS-icon.svg');
 const icons = load('apps/admin/src/app/brandIcon.ts', {
-  '../../../../Rental-OS_Brand-Assets/01_Logo/rentalOS-icon.svg?raw': canonical,
+  '../../../../assets/01_Logo/rentalOS-icon.svg?raw': canonical,
 });
 const brand = load('apps/admin/src/app/branding.ts');
 const tenant = { brandLogoUrl: '/uploads/tenant.svg', faviconUrl: '/uploads/not-the-logo.png' };
@@ -79,7 +79,10 @@ assert.match(provider, /user\?\.id, user\?\.isSaasAdmin, tenant\?\.tenantId, sou
 assert.match(provider, /if \(!controller.signal.aborted\) setInspection\(\{ scope, svg \}\)/);
 assert.match(provider, /inspection\?\.scope === scope/);
 assert.match(provider, /failedScope === scope \? fallback/);
-assert.match(provider, /applyAdminFavicon\(icon.src, icon.onError\)/);
+assert.match(provider, /window\.matchMedia\("\(prefers-color-scheme: dark\)"\)/);
+assert.match(provider, /faviconFailedScope === scope \? defaultAdminBrandIcon\(browserDark\) : source/);
+assert.match(provider, /applyAdminFavicon\(favicon, \(\) => \{\s*if \(source !== ADMIN_DEFAULT_MARK\) setFaviconFailedScope\(scope\);/);
+assert.doesNotMatch(provider, /applyAdminFavicon\(icon\.src, icon\.onError\)/, 'favicon failure must remain independent of the sidebar icon');
 assert.match(read('apps/admin/src/components/WorkspaceSwitcher.tsx'), /src=\{brandIcon.src\}[^>]*onError=\{brandIcon.onError\}/);
 assert.doesNotMatch(provider, /innerHTML|rentalCoreApi|Authorization/);
 assert.match(read('apps/admin/src/app/App.tsx'), /<BrandIconProvider><RouterProvider router=\{router\} \/><\/BrandIconProvider>/);

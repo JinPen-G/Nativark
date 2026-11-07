@@ -1,7 +1,7 @@
 /** Shared image-only branding. Never inject uploaded SVG into the document DOM.
  * Simple neutral artwork can be recolored; complex/multicolor SVG stays original.
  * This is a conservative paint classifier, not a general-purpose SVG sanitizer. */
-import defaultIcon from "../../../../Rental-OS_Brand-Assets/01_Logo/rentalOS-icon.svg?raw";
+import defaultIcon from "../../../../assets/01_Logo/rentalOS-icon.svg?raw";
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
 const ink = (dark: boolean) => dark ? "#ffffff" : "#000000";

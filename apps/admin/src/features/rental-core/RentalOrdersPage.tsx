@@ -1,7 +1,7 @@
 import { InfoCircleOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { RentalCoreOrderStatus, RentalOrder, RentalOrderAssignmentFilter, RentalOrderListQuery } from "@rental-os/shared";
 import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE } from "@rental-os/shared";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Tag } from "antd";
 import { getCoreRowModel, useReactTable, type SortingState, type VisibilityState } from "@tanstack/react-table";
 import { Checkbox, EmptyScene } from "@/components/ui";
@@ -9,9 +9,11 @@ import { Alert, DataTable, ListTransferTools, ListSelectionBar, type ListExport,
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { AnimatedNumber, LiveRefresh, useLiveRefresh } from "@/components/ui";
+import { InsightMetrics } from "@/components/BusinessInsights";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
-import { currentSessionEpoch } from "@/app/queryClient";
+import { currentSessionEpoch, isTransientRefreshError } from "@/app/queryClient";
 import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { PageHeader } from "@/components/PageHeader";
 import { LoadingState } from "@/components/LoadingState";
@@ -79,14 +81,15 @@ export function RentalOrdersPage() {
     pendingFeeOnly: pendingFeeOnly || undefined,
     sort: sorting.length ? sorting.map(sort => `${sort.id}.${sort.desc ? "desc" : "asc"}`).join(",") : undefined
   };
-  const orders = useQuery({ queryKey: ["rental-core", "orders", query], queryFn: () => rentalCoreApi.orderPage(query), placeholderData: keepPreviousData });
-  // 「待裁定」计数是当前空间的总数，不随列表筛选变化；只取 total，不取行。
-  const pendingFeeCount = useQuery({ queryKey: ["rental-core", "orders", { pendingFeeOnly: true, pageSize: 1 }], queryFn: () => rentalCoreApi.orderPage({ pendingFeeOnly: true, pageSize: 1 }) });
+  const live = useLiveRefresh("rental-orders");
+  const orders = useQuery({ queryKey: ["rental-core", "orders", live.scope, query], queryFn: () => rentalCoreApi.orderPage(query), placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === live.scope ? previous : undefined, ...live.queryOptions });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const rows = orders.data?.items ?? EMPTY_ORDERS;
+  const readable = !orders.isError || isTransientRefreshError(orders.error);
+  const rows = readable ? orders.data?.items ?? EMPTY_ORDERS : EMPTY_ORDERS;
+  const summary = readable ? orders.data?.summary : undefined;
   // Only a first load or another page's placeholder blocks existing controls.
   const waitingForRows = orders.isLoading || orders.isPlaceholderData;
-  const total = orders.data?.total ?? 0;
+  const total = readable ? orders.data?.total ?? 0 : 0;
   const exportConfig: ListExport<RentalOrder> = { filename: t("租赁订单"), scope: "filtered", fields: [
     { label: t("订单号"), value: row => row.orderNo }, { label: t("使用人"), value: row => row.membershipSnapshot?.personalCustomerName ?? row.customerName },
     { label: t("企业"), value: row => row.membershipSnapshot?.corporateCustomerName }, { label: t("计划取机"), value: row => row.startAt },
@@ -140,7 +143,9 @@ export function RentalOrdersPage() {
   };
   if (orders.isLoading) return <div className="route-loader"><LoadingState /></div>;
   return <PageEnter className={styles.page}>
-    <PageHeader title="租赁订单" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>{t("新建订单")}</Button>} />
+    <PageHeader title="租赁订单"
+      summary={<InsightMetrics items={[{ label: t("订单"), value: readable && orders.data ? total : undefined }, ...(summary ? [{ label: t("履约中"), value: summary.statusBreakdown.filter(row => ["reserved", "pickup_overdue", "ready_for_pickup", "renting", "return_inspection", "settling"].includes(row.status)).reduce((sum, row) => sum + row.count, 0) }, { label: t("待裁定费用"), value: summary.pendingFeeCount }] : [])]} />}
+      extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>{t("新建订单")}</Button>} />
       <div className={styles.filters} role="region" aria-label={t("订单筛选")}>
         <DataTableToolbar extra={<ListTransferTools config={exportConfig} rows={rows} loadExportRows={loadExportRows} busy={waitingForRows || orders.isError} />} table={table} label={id => columnLabels[id] ?? id} onRefresh={() => orders.refetch()} busy={waitingForRows} keyboardShortcut controls={<>
             <SearchField label={t("搜索订单")} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onValueChange={(value) => { setKeywordInput(value); if (!value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} />
@@ -164,16 +169,15 @@ export function RentalOrdersPage() {
           <div className={styles.feeCondition}>
             <div className={styles.feeToggle}>
             <Checkbox checked={pendingFeeOnly} onChange={(event) => applyFilter(setPendingFeeOnly)(event.target.checked)}>{t("只看有待审费用的订单")}</Checkbox>
-            {pendingFeeCount.isFetching ? <span className={styles.feeNote}>{t("正在统计待裁定费用")}</span>
-              : pendingFeeCount.isError ? <span className={styles.feeNote}>{t("待裁定数量暂不可用")} <Button type="link" size="small" onClick={() => void pendingFeeCount.refetch()}>{t("重试")}</Button></span>
-                : pendingFeeCount.data && <Tag color="orange">{t("{count} 张待裁定", { count: pendingFeeCount.data.total })}</Tag>}
+            {summary ? <Tag color="orange"><AnimatedNumber value={summary.pendingFeeCount} /> {t("张待裁定")}</Tag> : <span className={styles.feeNote}>{t("待裁定数量暂不可用")}</span>}
             </div>
-            <Tooltip title={t("数量为当前空间总数，不随列表筛选变化。") }>
+            <Tooltip title={t("数量为当前筛选范围内的订单总数，不受分页影响。") }>
               <Button type="text" size="small" aria-label={t("数量统计口径")} icon={<InfoCircleOutlined />} />
             </Tooltip>
           </div>
           </ListFilterItem>
-          <Button data-list-filter-reset size="small" type="text" disabled={!hasFilters} onClick={clearFilters}>{t("清除筛选")}</Button>
+          {hasFilters && <Button data-list-filter-reset size="small" type="text" onClick={clearFilters}>{t("清除筛选")}</Button>}
+          <ListFilterItem kind="action"><LiveRefresh enabled={live.enabled} onChange={live.setEnabled} busy={orders.isFetching} updatedAt={orders.dataUpdatedAt} /></ListFilterItem>
         </>} />
       </div>
       {searchNotApplied && <div className={styles.feedback}>

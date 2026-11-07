@@ -25,6 +25,8 @@ import type { ListExport, ListImport } from "./data-table/listTransfer";
 import capabilityStyles from "./data-table/ListCapabilities.module.css";
 import { ContentTransition } from "../workspace/ContentTransition";
 import type { EmptySceneKind } from './EmptyScene';
+import { AnimatedNumber } from "./AnimatedNumber";
+import { ListFilterBar } from "./ListFilterBar";
 
 export type BusinessTableProps<T extends object> = TableProps<T> & {
   /** Same-query revalidation keeps rows and local drafts mounted and visible. */
@@ -114,7 +116,10 @@ export function Table<T extends object>(props: BusinessTableProps<T>) {
     props.columns?.some(column => "children" in column || column.filters || column.filterDropdown) ||
     props.dataSource?.some(row => Array.isArray((row as Record<string, unknown>).children));
   const { refreshing: _refreshing, ...fallbackProps } = props;
-  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}><div className={styles.legacyContent}><AntTable<T> {...fallbackProps} tableLayout={props.tableLayout ?? "auto"} columns={props.tableLayout === "fixed" ? columns : naturalColumns(columns)} scroll={props.scroll ? { ...props.scroll, x: props.tableLayout === "fixed" ? props.scroll.x : "100%" } : undefined} /></div></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
+  const fallbackTotal = props.pagination && props.pagination.total != null ? props.pagination.total : props.dataSource?.length ?? 0;
+  return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}>
+    <div className={styles.toolbar}>{resolved.toolbar && <div className={styles.toolbarFilters}><ListFilterBar>{resolved.toolbar}</ListFilterBar></div>}<span className={styles.toolbarNote}><AnimatedNumber value={fallbackTotal} /> {t("条记录")}</span></div>
+    <div className={styles.legacyContent}><AntTable<T> {...fallbackProps} tableLayout={props.tableLayout ?? "auto"} columns={props.tableLayout === "fixed" ? columns : naturalColumns(columns)} scroll={props.scroll ? { ...props.scroll, x: props.tableLayout === "fixed" ? props.scroll.x : "100%" } : undefined} /></div></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
 }
 Table.listToolbarHost = true;
 
@@ -259,7 +264,7 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
     {props.title?.(pageRows)}
     <DataTableToolbar table={table} label={id => labels[id] ?? id} onRefresh={props.onRefresh ?? undefined} busy={loading} controls={props.toolbar} heading={props.toolbarHeading}
       sortDisabled={!table.getAllLeafColumns().some(column => column.getCanSort())}
-      sortHint={remote && !props.onChange ? t("排序沿用服务端默认顺序") : undefined} note={props.toolbarNote}
+      sortHint={remote && !props.onChange ? t("排序沿用服务端默认顺序") : undefined} note={props.toolbarNote ?? <span><AnimatedNumber value={total} /> {t("条记录")}</span>}
       hideColumns={Boolean(props.cardView && view === "cards")} extra={<>
         <ListTransferTools config={exportConfig} rows={remote ? pageRows : table.getPrePaginationRowModel().rows.map(row => row.original)} busy={loading} importConfig={props.importConfig} />
       </>} trailingExtra={props.cardView && <ListViewSwitch value={view} onChange={setView} />} />

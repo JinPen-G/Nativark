@@ -1618,6 +1618,19 @@ export interface CustomerProfileOverview {
     pageSize: number;
     total: number;
   };
+  insights?: CustomerProfileInsights;
+}
+
+export interface CustomerProfileInsights {
+  asOf: string;
+  timeZone: "UTC";
+  totalOrders: number;
+  completedOrders: number;
+  activeOrders: number;
+  lastOrderAt?: string;
+  statusBreakdown: { status: string; count: number }[];
+  months: { month: string; orders: number; amounts: { currency: string; payableAmount: number }[] }[];
+  amounts: { currency: string; payableAmount: number; orders: number }[];
 }
 
 export interface CustomerProfileOrderQuery {
@@ -6014,6 +6027,12 @@ export interface RentalOrderPage {
   page: number;
   pageSize: number;
   total: number;
+  summary?: RentalOrderListSummary;
+}
+
+export interface RentalOrderListSummary {
+  statusBreakdown: { status: RentalCoreOrderStatus; count: number }[];
+  pendingFeeCount: number;
 }
 
 /**

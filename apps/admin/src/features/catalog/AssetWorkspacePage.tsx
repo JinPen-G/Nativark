@@ -1,4 +1,4 @@
-import { ListSection, SaveButton } from "@/components/ui";
+import { DataTableText, ListSection, SaveButton } from "@/components/ui";
 import { PlusOutlined } from "@/components/ui/icons";
 import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,8 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
 import { assetCards, stockCards } from "./assetCards";
 import { StockOperationsPanel } from "./StockOperationsPanel";
+import { AnimatedNumber } from "@/components/ui";
+import type { ReactNode } from "react";
 
 const statusMap: Record<string, { label: string; color: string }> = {
   available: { label: "可用", color: "success" }, reserved: { label: "已预占", color: "processing" }, rented: { label: "租赁中", color: "blue" },
@@ -85,14 +87,14 @@ export function AssetWorkspacePage() {
     .filter(field => (assets.data ?? []).some(asset => asset.attributes[field.code] != null && asset.attributes[field.code] !== ""));
   const supportsAssets = category?.supportedInventoryModes.includes(RentalInventoryMode.Serialized) ?? true;
   const supportsStock = category?.supportedInventoryModes.some((mode) => [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(mode)) ?? true;
-  const countLabel = (label: string, count: number) => locale === "en-US" ? `${label} (${count})` : `${label}（${count}）`;
-  const visibleTabs = [
-    supportsAssets ? { key: "assets", label: countLabel(t("序列化资产"), assets.data?.length ?? 0) } : undefined,
-    supportsStock ? { key: "stock", label: countLabel(t("数量/耗材库存"), stocks.data?.length ?? 0) } : undefined
-  ].filter((item): item is { key: string; label: string } => Boolean(item));
   const saveAsset = useMutation({ mutationFn: rentalCoreApi.saveAsset, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "assets"] }); setAssetDrawerOpen(false); setEditing(undefined); assetForm.resetFields(); message.success(`${t(profile.data?.terminology.assetLabel ?? "资产")}${t("已保存")}`); }, onError: () => message.error(t("资产保存失败，请检查编号、商品和履约地点")) });
   const assetRows = useMemo(() => (assets.data ?? []).filter((asset) => !keyword || `${asset.assetNo}${asset.serialNo}${asset.itemGroupName}${asset.locationName}${Object.values(asset.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [assets.data, keyword]);
   const stockRows = useMemo(() => (stocks.data ?? []).filter((stock) => !keyword || `${stock.itemGroupCode}${stock.itemGroupName}${stock.locationName}`.toLowerCase().includes(keyword.toLowerCase())), [stocks.data, keyword]);
+  const countLabel = (label: string, count: number): ReactNode => <>{label} {locale === "en-US" ? "(" : "（"}<AnimatedNumber value={count} />{locale === "en-US" ? ")" : "）"}</>;
+  const visibleTabs = [
+    supportsAssets ? { key: "assets", label: countLabel(t("序列化资产"), assetRows.length) } : undefined,
+    supportsStock ? { key: "stock", label: countLabel(t("数量/耗材库存"), stockRows.length) } : undefined
+  ].filter((item): item is { key: string; label: ReactNode } => Boolean(item));
   const serializedGroups = (groups.data ?? []).filter((group) => group.inventoryMode === RentalInventoryMode.Serialized && group.status === "enabled");
   const selectedItemGroup = (groups.data ?? []).find((group) => group.id === selectedItemGroupId);
   const selectedItemGroupCover = selectedItemGroup?.images?.find((image) => image.isCover) ?? selectedItemGroup?.images?.[0];
@@ -123,13 +125,13 @@ export function AssetWorkspacePage() {
             } },
             { title: t(profile.data?.terminology.identifierLabel ?? "资产编号"), dataIndex: "assetNo", fixed: "left", render: (value) => <b>{value}</b> },
             ...(serialNoField ? [{ title: t(serialNoField.label), dataIndex: "serialNo", render: (value: string | undefined) => value || "-" }] : []),
-            { title: t(profile.data?.terminology.itemGroupLabel ?? "产品型号"), render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
+            { title: t(profile.data?.terminology.itemGroupLabel ?? "产品型号"), render: (_, row) => <DataTableText primary={row.itemGroupName} secondary={row.itemGroupCode} /> },
             ...summaryAssetFields.map((field) => ({ title: t(field.label), render: (_: unknown, row: RentalAsset) => String(row.attributes[field.code] ?? "-") })),
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={statusMap[value]?.color}>{t(statusMap[value]?.label ?? value)}</Tag> },
             { title: t("操作"), fixed: "right", render: (_, row) => canView ? <DataTableRowActions primary={canManage ? { id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => openAssetEditor(row) } : undefined} details={() => setStatusHistoryAsset(row)} detailLabel={t("状态历史")} menuLabel={`${row.assetNo} · ${t("更多操作")}`} actions={canManage ? [{ id: "history", label: t("状态历史"), icon: History, onSelect: () => setStatusHistoryAsset(row) }] : []} /> : "-" }
           ]} /> : <Table<RentalStockBalance> cardView={stockCards({ t, groups: groups.data ?? [], dispositions: dispositions.data ?? [] })} exportConfig={{ filename: t("库存"), fields: [{ label: t("商品"), value: row => row.itemGroupName }, { label: t("地点"), value: row => row.locationName }, { label: t("在手"), value: row => row.onHandQuantity }, { label: t("已预占"), value: row => row.reservedQuantity }, { label: t("维护/清洁"), value: row => row.maintenanceQuantity }] }} rowKey="id" onRefresh={() => stocks.refetch()} loading={stocks.isLoading} refreshing={stocks.isFetching} dataSource={stockRows} columns={[
-            { title: t("商品"), render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
+            { title: t("商品"), render: (_, row) => <DataTableText primary={row.itemGroupName} secondary={row.itemGroupCode} /> },
             { title: t(profile.data?.terminology.fulfillmentLabel ?? "履约地点"), dataIndex: "locationName" },
             { title: t("在手"), dataIndex: "onHandQuantity", align: "right" },
             { title: t("已预占"), dataIndex: "reservedQuantity", align: "right" },

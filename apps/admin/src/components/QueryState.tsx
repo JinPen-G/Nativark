@@ -21,14 +21,15 @@ export function QueryState({ loading, error, onRetry, children, transitionKey = 
   if (!loading && !error) loaded.current.ready = true;
   const transient = Boolean(error && loaded.current.ready && isTransientRefreshError(error));
   const disconnected = !online && isTransientRefreshError(error) && !(error as { response?: { status?: number } } | undefined)?.response?.status;
-  const phase = loading ? "loading" : error && !transient ? "error" : "ready";
+  const blocking = loading && !loaded.current.ready;
+  const phase = blocking ? "loading" : error && !transient ? "error" : "ready";
   const retryAction = retry && <ActionButton variant="secondary" label={t("重试")} pending={reader.busy} onAction={async () => {
     const result = await retry();
     // Query.refetch may resolve to an error result; that is not a successful retry.
     const failed = (value: unknown): boolean => Array.isArray(value) ? value.some(failed) : Boolean(value && typeof value === "object" && "isError" in value && value.isError);
     if (failed(result)) throw new Error(t("数据暂不可用，请稍后重试"));
   }} />;
-  return <ContentTransition value={`${transitionKey}:${phase}`}>{loading
+  return <ContentTransition value={`${transitionKey}:${phase}`}>{blocking
     ? <div className="query-state-loading"><LoadingState /></div>
     : error && !transient
       ? disconnected ? <EmptyScene scene="offline" title={t("网络连接已断开")} action={retryAction} />

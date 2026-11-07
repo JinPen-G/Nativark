@@ -1,7 +1,7 @@
 "use strict";
 /**
  * 生成小程序的品牌与 Tab 图标资源（纯 Node，不依赖图像库）：
- *   - src/assets/logo.png        品牌横版 Logo（来自 Rental-OS_Brand-Assets，裁边后缩放到 480px 宽）
+ *   - src/assets/logo.png        品牌横版 Logo（来自根目录 assets，裁边后缩放到 480px 宽）
  *   - src/assets/logo-mark.png   品牌圆环符号 128px（头像占位、空态）
  *   - src/assets/tab/*.png       4 个 Tab × 2 态，81×81，线性图标由 SDF 光栅化生成
  *
@@ -249,7 +249,7 @@ function rasterIcon(name, color, size = 81, stroke = 1.7) {
 }
 
 /* ---------------- 生成 ---------------- */
-const brand = path.join(repo, "Rental-OS_Brand-Assets", "01_Logo");
+const brand = path.join(repo, "assets", "01_Logo");
 const logo = cropAndScale(decodePng(path.join(brand, "02_logo-horizontal_后台与官网页头.png")), 480, 0);
 fs.writeFileSync(path.join(assets, "logo.png"), encodePng(logo.width, logo.height, logo.data));
 const mark = cropAndScale(decodePng(path.join(brand, "04_logo-mark-gradient_折叠菜单与品牌符号.png")), 128, 6);

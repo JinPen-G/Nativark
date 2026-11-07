@@ -1,0 +1,240 @@
+{
+  "Harness": {
+    "Capabilities": {
+      "plugins": {
+        "title": "Connect the capabilities you need",
+        "description": "Configure reminders and notifications through conversation, using capabilities enabled by the platform and permitted for your role.",
+        "imageAlt": "Rental OS return reminder configuration demo"
+      },
+      "trace": {
+        "title": "Every action, traceable",
+        "description": "From understanding a request to confirming a booking, review the business evidence, actions and receipts behind every step.",
+        "imageAlt": "Rental OS booking execution trace demo"
+      },
+      "deliverables": {
+        "title": "Beyond answers. Real work products.",
+        "description": "Prepare quotes, handover checklists and business reports. Preview the results and refine them through conversation."
+      },
+      "workflow": {
+        "title": "Keep recurring work moving",
+        "description": "Schedule operations briefs, return follow-ups and weekly reviews. Stay informed, with confirmation when a decision is yours."
+      },
+      "pauseAnimation": "Pause demo",
+      "playAnimation": "Resume demo"
+    },
+    "PluginsPreview": {
+      "accessibleLabel": "Return reminder demo: check tenant capabilities and permissions, prepare the time and channel, then confirm a sample configuration. No category is created or notification sent.",
+      "prompt": "Enable return reminders for location owners every day at 4 pm.",
+      "creatorMode": "Business configuration",
+      "workspaceWrite": "Workspace write",
+      "working": "Connecting business capabilities",
+      "finished": "Configuration ready",
+      "completion": "The time and channel are ready. Review and confirm to enable.",
+      "tools": {
+        "skill": "Capabilities",
+        "providers": "Channels",
+        "query": "Settings",
+        "read": "Permissions",
+        "think": "Plan",
+        "write": "Prepare",
+        "edit": "Rules",
+        "toolCall": "Draft",
+        "verify": "Review"
+      },
+      "toolSummaries": {
+        "providers": "Available channel: in-app",
+        "verify": "Configuration only; no notifications sent",
+        "capability": "Return reminders · Platform-enabled",
+        "permission": "Current location · Tenant-configurable",
+        "plan": "Existing rules only; no new categories",
+        "settings": "Read existing reminder settings",
+        "time": "Daily at 16:00",
+        "channel": "In-app notification",
+        "draft": "Prepare a reminder configuration for review",
+        "recipient": "Location owners"
+      },
+      "plugins": "Business capabilities",
+      "addPlugin": "Add plugin",
+      "official": "Platform-enabled",
+      "installed": "Configuration for review",
+      "enabled": "Enabled",
+      "experimental": "Configurable",
+      "focus": "Focus",
+      "shortBreak": "Short break",
+      "startFocus": "Start focus",
+      "team": {
+        "name": "Location coordination",
+        "description": "Collaborate with a shared task board."
+      },
+      "review": {
+        "name": "Action confirmation",
+        "description": "Review permissions before tool calls."
+      },
+      "schedule": {
+        "name": "Scheduled reminders",
+        "description": "Run tasks on a schedule."
+      },
+      "voice": {
+        "name": "Voice input",
+        "description": "Transcribe audio on your device."
+      },
+      "terminal": {
+        "name": "Order lookup",
+        "description": "Set command time and output limits."
+      },
+      "loop": {
+        "name": "Inventory follow-up",
+        "description": "Control how the agent calls tools."
+      },
+      "subagent": {
+        "name": "Task assignment",
+        "description": "Delegate work to other agents."
+      },
+      "pomodoro": {
+        "name": "Return reminders",
+        "compactName": "Timer",
+        "description": "Stay focused. Take a break."
+      },
+      "reminderTime": "Daily at 16:00",
+      "channel": "In-app notification",
+      "recipient": "Location owners",
+      "confirm": "Confirm & enable",
+      "enabledDemo": "Enabled · Demo",
+      "demoNote": "Demo only. No notifications sent.",
+      "reset": "Configure again"
+    },
+    "DeliverablesPreview": {
+      "accessibleLabel": "Business output demo: quote, handover checklist and report cards rotate. Select a file to preview its sample content.",
+      "pauseAnimation": "Pause file carousel",
+      "playAnimation": "Resume file carousel",
+      "htmlName": "Booking details.html",
+      "htmlType": "Booking details",
+      "typescriptName": "Inspection checklist.pdf",
+      "typescriptType": "Inspection record",
+      "pythonName": "Location tasks.xlsx",
+      "pythonType": "Team task list",
+      "wordName": "Handover checklist.docx",
+      "wordType": "Handover document",
+      "excelName": "Operations report.xlsx",
+      "excelType": "Business report",
+      "pdfName": "Rental quote.pdf",
+      "pdfType": "Rental quote",
+      "markdownName": "Weekly review.md",
+      "markdownType": "Business review",
+      "reviewTab": "Business output preview",
+      "sample": "Sample data · Not a business document",
+      "preview": "Preview",
+      "returnList": "Back to files",
+      "customer": "Customer",
+      "customerValue": "Alex",
+      "period": "Period",
+      "periodValue": "Saturday–Sunday · 2 days",
+      "item": "Camera kit × 2",
+      "rental": "Rental",
+      "deposit": "Refundable deposit",
+      "total": "Total",
+      "checklist": "Handover checks",
+      "check1": "Bodies, lenses and accessories",
+      "check2": "Condition and handover photos",
+      "check3": "Recipient and return arrangements",
+      "reportTitle": "Weekly operations overview",
+      "report1": "Booking and handover records prepared",
+      "report2": "Asset utilization ready for review",
+      "report3": "Exceptions linked to original orders",
+      "detailsTitle": "Business details",
+      "detail1": "Customer, dates and resources linked",
+      "detail2": "Owners and work history available",
+      "detail3": "Confirm before business submission"
+    },
+    "WorkflowPreview": {
+      "accessibleLabel": "Automation demo: weekly reviews, morning briefs and return follow-ups are prepared as plans for confirmation. No real task is scheduled or executed.",
+      "pauseAnimation": "Pause workflow demo",
+      "playAnimation": "Resume workflow demo",
+      "working": "Preparing an automation plan",
+      "finished": "Plan ready for review",
+      "toolTitle": "Prepare schedule",
+      "input": "IN",
+      "scheduledFor": "Scheduled for",
+      "repeat": "Repeat",
+      "status": "Status",
+      "scheduled": "Awaiting confirmation",
+      "open": "Review plan",
+      "scenarios": {
+        "report": {
+          "title": "Weekly business review",
+          "prompt": "Review this week’s bookings, handovers and settlements.",
+          "request": "Every Friday at 17:00, review the business and list decisions that need me.",
+          "confirmation": "Weekly business review is prepared. Confirm to enable the weekly schedule.",
+          "repeat": "Weekly on Fri at 17:00 (Asia/Shanghai)",
+          "frequency": "Weekly on Fri at 17:00 (UTC+08:00 · China Standard Time)"
+        },
+        "sales": {
+          "title": "Morning operations brief",
+          "prompt": "Summarize today’s handovers, returns and location tasks.",
+          "request": "Every day at 09:00, show me today’s handovers, returns and priorities.",
+          "confirmation": "Morning operations brief is prepared. Confirm to enable the daily schedule.",
+          "repeat": "Every day at 09:00 (Asia/Shanghai)",
+          "frequency": "Daily at 09:00 (UTC+08:00 · China Standard Time)"
+        },
+        "tests": {
+          "title": "Return & inspection follow-up",
+          "prompt": "Review this week’s due returns and outstanding inspections.",
+          "request": "Every Monday at 10:00, list upcoming returns and help plan inspections.",
+          "confirmation": "Return follow-up is prepared. Confirm to enable the weekly schedule.",
+          "repeat": "Weekly on Mon at 10:00 (Asia/Shanghai)",
+          "frequency": "Weekly on Mon at 10:00 (UTC+08:00 · China Standard Time)"
+        }
+      },
+      "planHeading": "Automation plan · Sample",
+      "confirm": "Confirm schedule",
+      "enabledDemo": "Schedule enabled · Demo",
+      "demoNote": "No real schedule or notification is created.",
+      "close": "Back to demo"
+    },
+    "TracePreview": {
+      "accessibleLabel": "Booking trace demo: review scope, stock, quote, user confirmation, booking submission and a sample receipt. Select steps to inspect evidence. No real calls are made.",
+      "duration": "Duration",
+      "turns": "Turns",
+      "calls": "Calls",
+      "search": "Search",
+      "lane": {
+        "input": "Input",
+        "model": "Model",
+        "tools": "Tools"
+      },
+      "kind": {
+        "system": "Scope",
+        "user": "User",
+        "context": "Context",
+        "assistant": "AI",
+        "tool": "Action"
+      },
+      "turnLabel": "Turn {turn}",
+      "stepLabel": "Step {step}",
+      "systemPrompt": "Business scope: current tenant / Central location; existing permissions apply.",
+      "userTask": "Prepare a weekend booking and quote for Alex: two camera kits.",
+      "runtimeContext": "Customer, dates and location linked. Sensitive actions require confirmation.",
+      "assistantPlan": "Check availability and pricing evidence, then prepare a booking draft.",
+      "firstDone": "Booking and quote ready for user confirmation.",
+      "userFollowUp": "Confirm this plan and submit the booking.",
+      "assistantSummary": "User confirmation received. Submit through the business workflow.",
+      "assistantWrapUp": "Sample booking receipt returned. The execution remains traceable.",
+      "tab": {
+        "summary": "Evidence",
+        "payload": "Input",
+        "result": "Receipt",
+        "schema": "Permissions",
+        "timing": "Timing"
+      },
+      "started": "Started",
+      "source": "Timing source",
+      "sessionTimestamps": "Execution log",
+      "hierarchy": "Hierarchy",
+      "assistantMessage": "Business execution",
+      "unitMilliseconds": "{value} ms",
+      "sample": "Illustrative flow · No real calls",
+      "reviewStep": "Review step evidence",
+      "resume": "Resume animation"
+    }
+  }
+}

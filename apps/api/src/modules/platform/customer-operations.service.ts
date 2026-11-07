@@ -25,6 +25,7 @@ import { CustomerOperationsRepository, type CustomerTx } from "./customer-operat
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerMergeService } from "./customer-merge.service";
 import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
+import { readCustomerInsights } from "./customer-insights";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
 export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
@@ -977,7 +978,8 @@ export class CustomerOperationsService {
       coupons,
       assignments,
       corporateRelations,
-      sensitiveAccess
+      sensitiveAccess,
+      insights
     ] = await Promise.all([
       this.prisma.customerDeliveryAddress.findMany({
         where: { tenantId, customerId, status: "active" },
@@ -1046,7 +1048,8 @@ export class CustomerOperationsService {
       }),
       this.canReveal(user) && locationIds === undefined
         ? this.operations.listSensitiveAccess(tenantId, customerId, workspaceId)
-        : Promise.resolve(undefined)
+        : Promise.resolve(undefined),
+      readCustomerInsights(this.prisma, orderWhere)
     ]);
 
     return {
@@ -1164,6 +1167,7 @@ export class CustomerOperationsService {
           createdAt: row.claimedAt.toISOString()
         }))
       },
+      insights,
       orders: {
         items: orders.map((row) => {
           const snapshot = row.membershipSnapshot as { personalCustomerId?: unknown } | null;
