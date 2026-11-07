@@ -1,0 +1,35 @@
+.matrix { width: 100%; max-width: none; margin: 0; border-radius: var(--rental-ui-radius-container); font-family: var(--rental-typography-font-family); }
+.matrix :global(.roles-permissions_header__hD7Om) { align-items: center; }
+.matrix :global(.roles-permissions_frame__ooZdc) { --label: 248px; --col: 140px; }
+.matrix :global(.roles-permissions_roleText__P4K0H) { white-space: normal; overflow-wrap: anywhere; }
+.matrix :global(.roles-permissions_roleTrigger__ctNt4):disabled { cursor: default; opacity: 1; }
+.permissionFact { display: grid; place-items: center; width: 22px; height: 22px; color: var(--rental-content-quiet); border-radius: 6px; }
+.permissionFact[data-granted] { background: var(--surface-muted); color: var(--rental-content-primary); }
+.permissionEditor { border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); overflow: clip; }
+.permissionSearch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border-bottom: 1px solid var(--border); }
+.permissionSearch > span { flex-shrink: 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
+.permissionLayout { display: grid; grid-template-columns: 170px minmax(0, 1fr); min-height: 320px; max-height: 55vh; }
+.moduleNav { padding: var(--space-2); overflow-y: auto; border-inline-end: 1px solid var(--border); background: var(--surface-muted); }
+.moduleNav button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 36px; padding: var(--space-2); border: 0; border-radius: var(--rental-ui-radius-button); color: var(--rental-content-secondary); background: transparent; text-align: start; font: inherit; font-size: var(--rental-list-primary-size); cursor: pointer; }
+.moduleNav button[aria-current] { background: var(--surface); color: var(--rental-content-primary); }
+.moduleNav button > :last-child { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); }
+.moduleNav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.permissionList { min-width: 0; overflow-y: auto; padding: var(--space-4); }
+.permissionList header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.permissionList h3 { margin: 0; font-size: var(--rental-typography-section-title-size); color: var(--rental-content-primary); font-weight: 500; }
+.permissionOption { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3) 0; cursor: pointer; border-bottom: 1px solid var(--rental-content-divider); }
+.permissionOption > span:last-child { min-width: 0; padding-top: 3px; }
+.permissionOption strong { display: block; font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); font-weight: 500; color: var(--rental-content-primary); }
+.permissionOption small { display: block; margin-top: var(--space-1); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); color: var(--rental-content-secondary); }
+.roleTools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.roleTools > :first-child { flex: 1; min-width: 200px; }
+.directory { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: var(--space-4); }
+.person { min-width: 0; }
+.personHeader { display: flex; align-items: center; gap: var(--space-3); }
+.personAvatar { display: grid; place-items: center; width: 40px; height: 40px; background: var(--surface-muted); color: var(--rental-content-primary); border: 1px solid var(--border); border-radius: 50%; font-weight: 500; }
+.personFacts { display: grid; gap: var(--space-3); margin: var(--space-4) 0 0; font-size: var(--rental-list-primary-size); }
+.personFacts > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.personFacts dt { color: var(--rental-content-secondary); }
+.personFacts dd { text-align: end; margin: 0; color: var(--rental-content-primary); }
+.permissionSummary { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); }
+@media (max-width: 600px) { .permissionLayout { grid-template-columns: 1fr; max-height: none; } .moduleNav { display: flex; gap: var(--space-1); overflow-x: auto; border-inline-end: 0; border-bottom: 1px solid var(--border); } .moduleNav button { flex: 0 0 auto; width: auto; } .permissionList { max-height: 50vh; } }

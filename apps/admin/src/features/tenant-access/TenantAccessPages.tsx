@@ -1,4 +1,9 @@
-import { ListFilters, useListFilter } from "@/components/ui";
+import { PermissionEditor, PermissionMatrix } from "./PermissionMatrix";
+import { Card as ArcCard } from "@/registry/components/card/card";
+import { Button as ArcButton } from "@/registry/components/button/button";
+import { InsightMetrics } from "@/components/BusinessInsights";
+import accessStyles from "./TenantAccess.module.css";
+import { AnimatedNumber, DataTableText, Empty, Pagination, Segmented, ListFilterBar, ListFilters, useListFilter } from "@/components/ui";
 import { EditOutlined, PlusOutlined } from "@/components/ui/icons";
 import type {
   BusinessWorkspace,
@@ -96,6 +101,7 @@ export function TenantOperationsAccountPage() {
   const accountFilter = useListFilter(users.data, { fields: row => [row.account, row.displayName, row.phone, row.organizationName], status: row => row.isActive ? "active" : "disabled" });
   const [form] = Form.useForm<TenantOperationsAccountForm>();
   const [editing, setEditing] = useState<SystemUserRow>();
+  const [accountView, setAccountView] = useState("directory");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [accessRows, setAccessRows] = useState<WorkspaceAccessRow[]>([]);
 
@@ -195,12 +201,23 @@ export function TenantOperationsAccountPage() {
   const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error ?? fulfillmentLocations.error;
 
   return <>
-    <PageHeader title={t("运营账号管理")} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button>} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
+    <PageHeader title={t("运营账号管理")} summary={<InsightMetrics items={[{label:t("账号"),value:accountFilter.rows.length},{label:t("已启用"),value:accountFilter.rows.filter(row=>row.isActive).length}]} />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增运营账号")}</Button>} note={{ title: t("权限分为两层"), description: t("角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。") }} />
     <QueryState loading={loading} error={error}>
-      <ListSection>
+      <div className={accessStyles.roleTools}><ListFilterBar><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/></ListFilterBar><Segmented value={accountView} onChange={value=>setAccountView(String(value))} options={[{value:"directory",label:t("人员目录")},{value:"table",label:t("列表")}]}/></div>
+      {accountView === "directory" ? <><div className={accessStyles.directory}>{accountFilter.rows.slice((accountFilter.pagination.current-1)*accountFilter.pagination.pageSize,accountFilter.pagination.current*accountFilter.pagination.pageSize).map(record => {
+        const accessible=memberRows.filter(member=>member.userId===record.id&&member.isActive);
+        return <ArcCard key={record.id} className={accessStyles.person} title={record.displayName} description={record.account}
+          avatar={<span className={accessStyles.personAvatar}>{record.displayName.trim().slice(0,1)}</span>}
+          meta={record.organizationName||t("未分配")} status={t(record.isActive?"已启用":"已停用")}
+          action={<ArcButton variant="secondary" size="sm" onClick={()=>openEditor(record)}>{t("编辑授权")}</ArcButton>}>
+          <dl className={accessStyles.personFacts}><div><dt>{t("租户基础角色")}</dt><dd>{record.roleNames.join("、")||t("未分配")}</dd></div><div><dt>{t("可访问空间")}</dt><dd><AnimatedNumber value={accessible.length}/></dd></div></dl>
+          <p className={accessStyles.permissionSummary}>{accessible.map(member=>workspaceMap.get(member.workspaceId)?.name).filter(Boolean).join(" · ")||t("未授权")}</p>
+        </ArcCard>;
+      })}</div>{!accountFilter.rows.length && <Empty description={t("没有匹配的账号")}/>}<Pagination {...accountFilter.pagination} total={accountFilter.rows.length} showSizeChanger hideOnSinglePage/></> : <ListSection>
 
-        <Table<SystemUserRow> toolbar={<><ListFilters filter={accountFilter} placeholder="账号、姓名或手机号" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /></>} rowKey="id" onRefresh={() => users.refetch()} loading={users.isLoading} refreshing={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
-          { title: t("账号"), width: 190, render: (_, record) => <><b>{record.displayName}</b><br /><Typography.Text type="secondary">{record.account}</Typography.Text></> },
+
+        <Table<SystemUserRow> toolbarNote={false} rowKey="id" onRefresh={() => users.refetch()} loading={users.isLoading} refreshing={users.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination} scroll={{ x: 1120 }} columns={[
+          { title: t("账号"), width: 190, render: (_, record) => <DataTableText primary={record.displayName} secondary={record.account}/> },
           { title: t("手机"), dataIndex: "phone", width: 140, render: (value) => value || "-" },
           { title: t("归属组织"), dataIndex: "organizationName", width: 160, render: (value) => value || t("未分配") },
           { title: t("租户基础角色"), dataIndex: "roleNames", width: 180, render: (values: string[]) => values.join("、") || t("未分配") },
@@ -211,7 +228,7 @@ export function TenantOperationsAccountPage() {
           { title: t("状态"), width: 100, render: (_, record) => <Switch checked={record.isActive} disabled={record.id === currentUserId} loading={toggleStatus.isPending} onChange={(isActive) => toggleStatus.mutate({ id: record.id, isActive })} /> },
           { title: t("操作"), fixed: "right", render: (_, record) => <DataTableRowActions primary={{ id: "edit", label: t("编辑授权"), icon: Pencil, onSelect: () => openEditor(record) }} details={() => openEditor(record)} detailLabel={t("编辑授权")} menuLabel={`${record.account} · ${t("更多操作")}`} actions={[{ id: "reset", label: t("重置密码"), icon: KeyRound, onSelect: () => modal.confirm({ title: `${t("重置")} ${record.account} ${t("的密码？")}`, content: t("重置后原登录会话失效，并生成一次性临时密码。"), onOk: () => resetPassword.mutateAsync(record.id) }) }]} /> }
         ]} />
-      </ListSection>
+      </ListSection>}
     </QueryState>
 
     <Drawer title={editing ? t("编辑运营账号") : t("新增运营账号")} open={drawerOpen} size="large" destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存账号与空间权限")} form={form} pending={save.isPending} onSave={(values) => { const { roleId, ...rest } = values; return save.mutateAsync({ ...rest, roleIds: roleId ? [roleId] : [] }); }} />}>
@@ -263,6 +280,7 @@ export function TenantRolePermissionPage() {
   const [form] = Form.useForm<SaveSystemRoleRequest>();
   const [editing, setEditing] = useState<SystemRoleRow>();
   const [open, setOpen] = useState(false);
+  const [roleView, setRoleView] = useState("matrix");
 
   const save = useMutation({
     mutationFn: api.saveRole,
@@ -292,20 +310,22 @@ export function TenantRolePermissionPage() {
   }
 
   return <>
-    <PageHeader title={t("角色权限管理")} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>} />
+    <PageHeader title={t("角色权限管理")} summary={<InsightMetrics items={[{label:t("角色"),value:roleFilter.rows.length},{label:t("权限模块"),value:permissions.data?.length}]} />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>} />
     <QueryState loading={roles.isLoading || permissions.isLoading} error={roles.error ?? permissions.error}>
       <Alert type="warning" showIcon title={t("数据权限")} description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")} style={{ marginBottom: "var(--space-4)" }} />
-      <ListSection>
+      <div className={accessStyles.roleTools}><ListFilterBar><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/></ListFilterBar><Segmented value={roleView} onChange={value=>setRoleView(String(value))} options={[{value:"matrix",label:t("权限对照")},{value:"list",label:t("角色列表")}]}/></div>
+      {roleView === "matrix" ? <PermissionMatrix roles={roleFilter.rows} modules={permissions.data??[]} onEdit={openEditor}/> : <ListSection>
 
-        <Table<SystemRoleRow> toolbar={<><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }]} /></>} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isLoading} refreshing={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
-          { title: t("角色"), width: 220, render: (_, record) => <><b>{record.name}</b><br /><Typography.Text type="secondary">{record.code}</Typography.Text></> },
+
+        <Table<SystemRoleRow> toolbarNote={false} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isLoading} refreshing={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
+          { title: t("角色"), width: 220, render: (_, record) => <DataTableText primary={record.name} secondary={record.code}/> },
           { title: t("适用层级"), dataIndex: "scope", width: 130, render: (value) => <Tag>{t(SCOPE_LABELS[value] ?? value)}</Tag> },
           { title: t("默认数据范围"), dataIndex: "dataScope", width: 200, render: (value: SystemDataScope) => dataScopeTag(value, t) },
           { title: t("操作权限"), width: 130, render: (_, record) => record.fixedAllPermissions ? <Tag color="purple">{t("全部权限")}</Tag> : `${new Set([...record.permissions, ...record.buttonPermissions]).size} ${t("项")}` },
           { title: t("状态"), dataIndex: "isActive", width: 100, render: (value) => <Tag color={value ? "success" : "default"}>{t(value ? "启用" : "停用")}</Tag> },
           { title: t("操作"), fixed: "right", width: 170, render: (_, record) => record.fixedAllPermissions ? <Tag>{t("系统预设")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑")}</Button><ConfirmAction label={t("删除")} prompt={<>{`${t("删除角色")} ${record.name}？`} {t("已分配给账号或空间的角色不能删除。")}</>} onConfirm={() => remove.mutateAsync(record.id)} /></Space> }
         ]} />
-      </ListSection>
+      </ListSection>}
     </QueryState>
 
     <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>
@@ -320,15 +340,7 @@ export function TenantRolePermissionPage() {
         </Row>
         <Typography.Title level={5}>{t("操作权限")}</Typography.Title>
         <Typography.Paragraph type="secondary">{t("按模块勾选页面访问和具体操作。未勾选即拒绝，前端隐藏不替代后端鉴权。")}</Typography.Paragraph>
-        <Form.Item name="permissions">
-          <Checkbox.Group style={{ width: "100%" }}>
-            <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-              {(permissions.data ?? []).map((module: PermissionModule) => <Card key={module.code} size="small" title={t(module.name)}>
-                <Row gutter={[12, 10]}>{module.children.map((permission) => <Col key={permission.code} xs={24} md={12}><Checkbox value={permission.code}>{t(permission.name)}</Checkbox>{permission.description && <Typography.Text type="secondary" style={{ display: "block", paddingLeft: 24 }}>{t(permission.description)}</Typography.Text>}</Col>)}</Row>
-              </Card>)}
-            </Space>
-          </Checkbox.Group>
-        </Form.Item>
+        <Form.Item name="permissions"><PermissionEditor modules={permissions.data ?? []} disabled={save.isPending} /></Form.Item>
         <Form.Item name="enabledBusinessScopes" hidden><Select mode="multiple" /></Form.Item>
       </Form>
     </Drawer>
