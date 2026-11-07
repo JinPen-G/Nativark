@@ -1,3 +1,5 @@
+import { ClientBrandPreview } from "./ClientBrandPreview";
+import { SettingsGroups, revealSettingsValidation } from "@/components/settings/SettingsWorkspace";
 import { CheckCircleOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
 import { Card, Col, Divider, Row, Space, Tag, Typography } from "antd";
@@ -151,7 +153,8 @@ function ProfileCard() {
         description={data.readiness.ready
           ? t("小程序与后续 APP 都会读取这份品牌、协议、客服、帮助与发布服务配置。")
           : <span>{t("还需完成：")}{data.readiness.missing.join("、")}{t("。未完成前小程序对客户显示租户名与“商户未提供”，不会用占位品牌或协议。")}</span>} />
-      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+      <Form id="client-profile" form={form} layout="vertical" onFinish={(values) => save.mutate(values)} onFinishFailed={()=>revealSettingsValidation("client-profile")}>
+        <SettingsGroups>
         <Card size="small" title={t("品牌与客服")}>
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="brandName" label={t("商户展示名")} extra={t("登录页标题、启动配置与分享使用；缺省用租户名")}><Input maxLength={191} placeholder={t("如：光影摄影器材租赁")} /></Form.Item></Col>
@@ -267,6 +270,8 @@ function ProfileCard() {
           </Form.Item>
         </Card>
 
+        <Card size="small" title={t("客户端样式预览")}><ClientBrandPreview form={form}/></Card>
+        </SettingsGroups>
         <Space style={{ marginTop: 16 }}>
           <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{data.updatedAt}</Typography.Text> : null}
@@ -401,7 +406,8 @@ function WebsiteProfileCard() {
         description={data.readiness.ready
           ? t("官网将读取这份官网特有配置；商户名、Logo、协议、客服等通用项仍来自“通用客户端配置”。")
           : <span>{t("还需完成：")}{data.readiness.missing.join("、")}{t("。未启用或缺 Hero 标题前，官网会回退到通用品牌文案。")}</span>} />
-      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+      <Form id="website-profile" form={form} layout="vertical" onFinish={(values) => save.mutate(values)} onFinishFailed={()=>revealSettingsValidation("website-profile")}>
+        <SettingsGroups>
         <Card size="small" title={t("官网开关")}>
           <Space size="large">
             <Form.Item name="enabled" label={t("启用官网渠道")} valuePropName="checked" noStyle><Switch /></Form.Item>
@@ -511,6 +517,8 @@ function WebsiteProfileCard() {
           </Space>}</Form.List>
         </Card>
 
+        <Card size="small" title={t("客户端样式预览")}><ClientBrandPreview form={form} website/></Card>
+        </SettingsGroups>
         <Space style={{ marginTop: 16 }}>
           <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{data.updatedAt}</Typography.Text> : null}

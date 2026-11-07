@@ -65,6 +65,7 @@ export const ADMIN_LAYOUT_SPACING = {
 /** Dense operational metrics fit the available width rather than leave an orphaned row. */
 export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
 export const ADMIN_INSIGHT_METRICS = { gap: 20, panelPadding: 20, donutSize: 176, donutThickness: 18 } as const;
+export const ADMIN_SETTINGS_METRICS = { navWidth: 192 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */
 export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, accountLabelWidth: ADMIN_CONTROL_WIDTH.select } as const;
 /** 52px ordinary rows; text stacks use compact lines while interactive targets retain 32px. */
@@ -230,6 +231,7 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-dashboard-card-min-width": px(ADMIN_DASHBOARD_METRICS.cardMinWidth),
     "--rental-insight-gap": px(ADMIN_INSIGHT_METRICS.gap),
     "--rental-insight-panel-padding": px(ADMIN_INSIGHT_METRICS.panelPadding),
+    "--rental-settings-nav-width": px(ADMIN_SETTINGS_METRICS.navWidth),
     "--rental-detail-summary-width": px(ADMIN_DETAIL_LAYOUT.summaryWidth),
     "--rental-detail-account-label-width": px(ADMIN_DETAIL_LAYOUT.accountLabelWidth),
     "--rental-segmented-frame-inset": px(ADMIN_SEGMENTED_METRICS.frameInset),

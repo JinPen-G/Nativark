@@ -1,3 +1,10 @@
+import { motion } from "motion/react";
+import { CreditCard, MessageSquare, HardDrive } from "lucide-react";
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
+import { InsightMetrics } from "@/components/BusinessInsights";
+import directory from "./integrations-source/classes.json";
+import "./integrations-source/original.css";
+import directoryStyles from "./IntegrationDirectory.module.css";
 import { CheckCircleOutlined, CloudServerOutlined, SettingOutlined } from "@/components/ui/icons";
 import type {
   SaveTenantIntegrationRequest,
@@ -10,7 +17,7 @@ import { App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
-import { ActionButton, Button, SaveButton, Tabs } from "@/components/ui";
+import { ActionButton, AnimatedNumber, Button, Drawer, SearchField, Segmented, SaveButton, Tabs } from "@/components/ui";
 import type { FormInstance } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -163,6 +170,11 @@ function ProviderCard({
 
 export function TenantIntegrationsPage() {
   const { t } = useLocale();
+  const reduced = usePrefersReducedMotion();
+  const [filter,setFilter] = useState("all");
+  const [keyword,setKeyword] = useState("");
+  const [layout,setLayout] = useState("cards");
+  const [selectedKey,setSelectedKey] = useState<string>();
   const catalog = useQuery({ queryKey: ["tenant-integrations"], queryFn: tenantIntegrationsApi.catalog });
   const providerForms = useRef(new Map<string, FormInstance<SaveTenantIntegrationRequest>>());
   const registerProviderForm = useCallback((key: string, form?: FormInstance<SaveTenantIntegrationRequest>) => {
@@ -179,52 +191,39 @@ export function TenantIntegrationsPage() {
   if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
   if (!catalog.data || catalog.error && !isTransientRefreshError(catalog.error)) return <PageHeader title={t("第三方服务")} view={<Alert type="error" showIcon title={t("暂时无法读取租户第三方服务配置，请刷新重试。")} action={<Button onClick={() => catalog.refetch()}>{t("重试")}</Button>} />} />;
   const configByProvider = new Map(catalog.data.configs.map((config) => [`${config.capability}:${config.provider}`, config]));
-  return (
-    <PageHeader
-      title={t("第三方服务")}
-      note={{ title: t("密钥只在服务端加密保存"), description: t("页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、云存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。") }}
-      view={<Space orientation="vertical" size={20} style={{ width: "100%" }}>
-
-        <Tabs
-          tabBarGutter={32}
-          items={(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {
-            const providers = catalog.data.providers.filter((item) => item.capability === capability);
-            const configs = catalog.data.configs.filter((item) => item.capability === capability);
-            const enabledWithoutDefault = configs.filter((item) => item.enabled && !item.isDefault);
-            return {
-              key: capability,
-              label: t(CAPABILITY_TAB_LABELS[capability]),
-              children: (
-                <>
-                  {enabledWithoutDefault.length > 0 ? (
-                    <Alert
-                      showIcon
-                      type="warning"
-                      style={{ marginBottom: 16 }}
-                      title={`${enabledWithoutDefault.map((item) => t(catalog.data.providers.find((provider) => provider.provider === item.provider)?.name ?? item.provider)).join(", ")} ${t("已启用但未设为默认")}`}
-                      description={t("业务运行只会使用默认平台，请为该能力指定一个默认平台。")}
-                    />
-                  ) : null}
-                  <Row gutter={[20, 20]}>
-                    {providers.map((definition) => (
-                      <Col xs={24} xl={12} key={definition.provider}>
-                        <ProviderCard
-                          definition={definition}
-                          config={configByProvider.get(`${definition.capability}:${definition.provider}`)}
-                          providerKey={`${definition.capability}:${definition.provider}`}
-                          registerForm={registerProviderForm}
-                          onDefaultChange={handleDefaultChange}
-                        />
-                      </Col>
-                    ))}
-                  </Row>
-                  {providers.length === 0 ? <Empty description={t("暂无可用平台")} /> : null}
-                </>
-              )
-            };
-          })}
-        />
-      </Space>}
-    />
-  );
+  const selected = catalog.data.providers.find(item => selectedKey === item.capability + ":" + item.provider);
+  const searched = catalog.data.providers.filter(item => (t(item.name)+" "+t(item.description)).toLocaleLowerCase().includes(keyword.toLocaleLowerCase()));
+  const visible = searched.filter(item => filter === "all" || filter === "enabled" && configByProvider.get(item.capability+":"+item.provider)?.enabled || item.capability === filter);
+  const icons = {payment:CreditCard,sms:MessageSquare,file:HardDrive};
+  return <>
+    <PageHeader title={t("第三方服务")} summary={<InsightMetrics items={[{label:t("服务平台"),value:visible.length},{label:t("已启用"),value:visible.filter(item=>configByProvider.get(item.capability+":"+item.provider)?.enabled).length},{label:t("已验证"),value:visible.filter(item=>{const config=configByProvider.get(item.capability+":"+item.provider);return config?.enabled&&config.lastTestStatus==="passed"&&config.lastTestMode==="live";}).length}]}/>}
+      note={{title:t("密钥只在服务端加密保存"),description:t("页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、云存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。")}}/>
+    {catalog.data.configs.some(config=>config.enabled&&!config.isDefault)&&<Alert type="warning" showIcon title={t("已启用但未设为默认")} description={t("业务运行只会使用默认平台，请为该能力指定一个默认平台。")} style={{marginBottom:"var(--space-4)"}}/>}
+    <section className={directory.root+" "+directoryStyles.root}>
+      <div className={directoryStyles.tools}><SearchField label={t("查找服务平台")} placeholder={t("查找服务平台")} value={keyword} onValueChange={setKeyword}/><Segmented value={layout} onChange={value=>setLayout(String(value))} options={[{value:"cards",label:t("卡片")},{value:"list",label:t("目录")}]}/></div>
+      <div className={directoryStyles.tabs}><Segmented value={filter} onChange={value=>setFilter(String(value))} options={[
+        {value:"all",label:<>{t("全部")} <AnimatedNumber value={searched.length}/></>},
+        {value:"enabled",label:<>{t("已启用")} <AnimatedNumber value={searched.filter(item=>configByProvider.get(item.capability+":"+item.provider)?.enabled).length}/></>},
+        ...(["payment","sms","file"] as TenantIntegrationCapability[]).map(cap=>({value:cap,label:<>{t(CAPABILITY_LABELS[cap])} <AnimatedNumber value={searched.filter(item=>item.capability===cap).length}/></>}))
+      ]}/></div>
+      {(keyword||filter!=="all")&&<Button type="text" onClick={()=>{setKeyword("");setFilter("all");}}>{t("清除筛选")}</Button>}
+      <ul className={layout==="cards"?directoryStyles.grid:directory.list}>{visible.map(definition=>{
+        const key=definition.capability+":"+definition.provider, config=configByProvider.get(key), Icon=icons[definition.capability];
+        const ready=config?.enabled&&config.lastTestMode==="live"&&config.lastTestStatus==="passed";
+        return <motion.li layout={reduced?false:"position"} transition={{duration:.2}} key={key} className={directory.card}>
+          <span className={directoryStyles.icon}><Icon size={18}/></span><div className={directory.cardBody}>
+            <div className={directory.cardTitle}><h2 className={directory.cardName}><button className={directory.cardOpen} onClick={()=>setSelectedKey(key)}>{t(definition.name)}</button></h2><span className={directory.cardCategory}>{t(CAPABILITY_LABELS[definition.capability])}</span></div>
+            <p className={directory.cardText}>{t(definition.description)}</p>
+          </div><div className={directory.cardActions}>
+            <span className={directoryStyles.status} data-ready={ready||undefined}>{t(ready?"已验证":config?.enabled?"待验证":"未启用")}{config?.isDefault?" · "+t("默认"):""}</span>
+            <Button size="small" onClick={()=>setSelectedKey(key)}>{t(config?"配置":"设置连接")}</Button>
+          </div>
+        </motion.li>;
+      })}</ul>
+      {!visible.length&&<Empty description={t("没有匹配的服务平台")}/>}
+    </section>
+    <Drawer title={selected?t(selected.name):t("服务配置")} open={Boolean(selected)} onClose={()=>setSelectedKey(undefined)} size={720} destroyOnHidden>
+      {selected&&<div className={directoryStyles.cardEditor}><ProviderCard key={selectedKey} definition={selected} config={configByProvider.get(selectedKey!)} providerKey={selectedKey!} registerForm={registerProviderForm} onDefaultChange={handleDefaultChange}/></div>}
+    </Drawer>
+  </>;
 }

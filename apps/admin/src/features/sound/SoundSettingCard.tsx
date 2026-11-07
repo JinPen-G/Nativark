@@ -10,6 +10,8 @@ import { useLocale } from "@/app/locale";
 import { INTERACTION_SOUNDS, NOTIFICATION_SOUNDS, SOUND_LABELS, SOUND_PACKS, type SoundName } from "./soundPacks";
 import { soundPreferences } from "./soundPreferences";
 import { previewSound } from "./soundService";
+import { Play } from "lucide-react";
+import styles from "@/features/appearance/PreferencePreview.module.css";
 
 /** 浏览器本地设置，与品牌/圆角后端表单独立；整卡静音自动点击，试听不叠音。 */
 export function SoundSettingCard() {
@@ -21,7 +23,7 @@ export function SoundSettingCard() {
     if (!await previewSound(name)) message.warning(t("无法播放音效，请检查浏览器音频权限与输出设备后重试。"));
   };
   const samples = (names: readonly SoundName[]) => (
-    <Space wrap>{names.map(name => <Button key={name} size="small" data-sound-preview={name} onClick={() => void preview(name)}>{t(SOUND_LABELS[name])}</Button>)}</Space>
+    <div className={styles.samples}>{names.map(name => <Button key={name} size="small" icon={<Play size={15}/>} data-sound-preview={name} onClick={() => void preview(name)}>{t(SOUND_LABELS[name])}</Button>)}</div>
   );
 
   return (
@@ -33,16 +35,13 @@ export function SoundSettingCard() {
             options={SOUND_PACKS.map(pack => ({ value: pack.id, label: t(pack.label) }))}
             onChange={pack => soundPreferences.update({ pack })} />
         </Space>
-        <Space wrap>
+        <div className={styles.soundRows}><div>
+          <div><strong>{t("交互音效")}</strong><p>{t("按钮、勾选、开关与页面跳转的轻微反馈。")}</p></div>
           <Switch aria-label={t("交互音效")} checked={preferences.interactionEnabled} onChange={interactionEnabled => soundPreferences.update({ interactionEnabled })} />
-          <Typography.Text>{t("交互音效")}</Typography.Text>
-          <Typography.Text type="secondary">{t("按钮、勾选、开关与页面跳转的轻微反馈。")}</Typography.Text>
-        </Space>
-        <Space wrap>
+        </div><div>
+          <div><strong>{t("通知与结果音")}</strong><p>{t("仅在已接入的真实操作结果或通知事件到达时播放。")}</p></div>
           <Switch aria-label={t("通知与结果音")} checked={preferences.notificationEnabled} onChange={notificationEnabled => soundPreferences.update({ notificationEnabled })} />
-          <Typography.Text>{t("通知与结果音")}</Typography.Text>
-          <Typography.Text type="secondary">{t("仅在已接入的真实操作结果或通知事件到达时播放。")}</Typography.Text>
-        </Space>
+        </div></div>
         <div style={{ width: "100%", maxWidth: 360 }}>
           <Slider label={t("音量")} min={0} max={100} value={Math.round(preferences.volume * 100)} format={value => `${value}%`}
             onValueChange={value => soundPreferences.update({ volume: value / 100 })} />

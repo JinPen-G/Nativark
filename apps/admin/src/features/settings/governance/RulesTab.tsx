@@ -1,3 +1,4 @@
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Typography } from "antd";
@@ -422,21 +423,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           layout="vertical"
           onFinish={(values) => saveRule.mutate(values)}
         >
-          {/* 分区清单抽到 ruleSections.tsx 的 RULE_SECTIONS，后续「新建规则向导」复用同一份。
-              这里只负责套 Card 外壳（标题 + 一句话「何时生效」说明），字段与语义都在那份清单里。 */}
-          {RULE_SECTIONS.map((section, index) => (
-            <Card
-              key={section.key}
-              size="small"
-              title={t(section.title)}
-              style={index === 0 ? undefined : { marginTop: 12 }}
-            >
-              <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-                {t(section.description)}
-              </Typography.Text>
-              {section.render({ form: ruleForm, category, t })}
-            </Card>
-          ))}
+          <SettingsWorkspace sections={RULE_SECTIONS.map(section => ({key:section.key,label:t(section.title),content:<Card size="small" title={t(section.title)}><Typography.Paragraph type="secondary">{t(section.description)}</Typography.Paragraph>{section.render({form:ruleForm,category,t})}</Card>}))}/>
           <Form.Item
             name="changeReason"
             label={t("变更原因")}

@@ -1,0 +1,18 @@
+.root { width: 100%; max-width: none; border-radius: var(--rental-ui-radius-container); font-family: var(--rental-typography-font-family); }
+.tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.tools > :first-child { min-width: min(100%, 240px); max-width: 320px; }
+.tabs { padding: 0 var(--space-5) var(--space-4); overflow-x: auto; }
+.root :global(.integrations_cardName__T6_bV) { color: var(--rental-content-primary); }
+.root :global(.integrations_cardOpen__Om2hx):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.root :global(.integrations_cardOpen__Om2hx):after { display: none; }
+.root :global(.integrations_cardText__uE881) { white-space: normal; overflow-wrap: anywhere; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 285px), 1fr)); gap: var(--space-4); padding: var(--space-5); margin: 0; list-style: none; border-top: 1px solid var(--border); }
+.grid :global(.integrations_card__guLza) { border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); padding: var(--space-5); grid-template-columns: 32px minmax(0,1fr); align-items: start; gap: var(--space-3); }
+.grid :global(.integrations_cardActions__MY4J5) { grid-column: 1 / -1; justify-content: space-between; padding-top: var(--space-3); margin-top: var(--space-2); border-top: 1px solid var(--rental-content-divider); }
+.grid :global(.integrations_cardText__uE881) { margin-top: var(--space-2); min-height: 3em; }
+.icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-muted); color: var(--rental-content-primary); }
+.cardEditor > :global(.ant-card) { border: 0; box-shadow: none; background: transparent; }
+.cardEditor > :global(.ant-card) > :global(.ant-card-head) { padding-inline: 0; }
+.cardEditor > :global(.ant-card) > :global(.ant-card-body) { padding-inline: 0; }
+.status { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
+.status[data-ready] { color: var(--rental-status-success-ink); }

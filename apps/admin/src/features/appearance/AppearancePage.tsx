@@ -1,3 +1,7 @@
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { RadioCards } from "@/registry/components/radio-cards/radio-cards";
+import { useAppearance } from "@/app/theme";
+import { Monitor, Moon, Sun } from "lucide-react";
 import { Card, Col, Row, Space, Typography } from "antd";
 import { Slider } from "@/components/ui";
 import { App } from "@/components/ui";
@@ -130,9 +134,9 @@ export function AppearancePage() {
   return (
     <>
       <PageHeader title="外观与音效" />
-      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <AccountThemeColorCard />
-        {profile.isLoading ? <LoadingState /> : !profile.data || profile.error && !isTransientRefreshError(profile.error) ? (
+      <SettingsWorkspace sections={[
+        {key:"theme",label:t("主题与配色"),description:t("当前账号"),content:<><ThemeModeChoices/><AccountThemeColorCard/></>},
+        {key:"radius",label:t("组件圆角"),description:t("租户共用"),content:(profile.isLoading ? <LoadingState /> : !profile.data || profile.error && !isTransientRefreshError(profile.error) ? (
           <Alert showIcon type="error" title={t("无法读取圆角设置")} description={<Button onClick={() => profile.refetch()}>{t("重试")}</Button>} />
         ) : (
           <Form<AppearanceForm> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
@@ -159,10 +163,20 @@ export function AppearancePage() {
               <SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 16 }} />
             </Card></CopilotSection>
           </Form>
-        )}
-        <div data-copilot-anchor="motion"><MotionSettingCard /></div>
-        <div data-copilot-anchor="sound"><SoundSettingCard /></div>
-      </Space>
+        ))},
+        {key:"motion",label:t("界面动效"),description:t("当前浏览器"),content:<MotionSettingCard/>},
+        {key:"sound",label:t("界面音效"),description:t("当前浏览器"),content:<SoundSettingCard/>},
+      ]}/>
+
     </>
   );
+}
+
+function ThemeModeChoices() {
+  const {t}=useLocale();const {preference,setMode}=useAppearance();
+  return <Card size="small" title={t("显示模式")} style={{marginBottom:"var(--space-4)"}}><RadioCards aria-label={t("显示模式")} value={preference} onValueChange={value=>setMode(value as "default"|"dark"|"system")} options={[
+    {value:"default",label:t("浅色"),description:t("清晰明亮的工作界面"),icon:<Sun size={20}/>},
+    {value:"dark",label:t("深色"),description:t("适合低光环境"),icon:<Moon size={20}/>},
+    {value:"system",label:t("跟随系统"),description:t("自动跟随设备外观"),icon:<Monitor size={20}/>},
+  ]}/></Card>;
 }
