@@ -1,3 +1,4 @@
+import { DistributionChart, InsightPanel, MetricBand, RankedFacts, ViewChoice, insightStyles } from "@/components/insights/OperationalCharts";
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import { DownloadOutlined, ReloadOutlined } from "@/components/ui/icons";
 import type {
@@ -181,6 +182,7 @@ export function WorkspaceOperationReportPage() {
 }
 function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
   const { t } = useLocale();
+  const [view, setView] = useState("visual");
   // 币种取报表自带的快照，而不是再去读一次业务设置：金额是按这个币种算出来的，
   // 两处各读一次就有机会显示成不一致的单位。
   const money = (value: number) => formatRentalMoney(Number(value), data.currency);
@@ -204,15 +206,41 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
 
   return (
     <>
-      <div className="report-metrics">
-        {cards.map((card) => (
-            <Card className="data-panel" key={card.label} data-copilot-record={`metric:${card.label}`} data-copilot-label={card.label}>
-              <div data-copilot-field="amount" data-copilot-label={card.label}>
-              <Statistic title={card.label} value={card.value} prefix={card.prefix} precision={card.precision} />
-              </div>
-            </Card>
-        ))}
+      <div className={insightStyles.page}>
+        <MetricBand items={cards.slice(0,4).map(card => ({ label: card.label, value: card.precision ? money(card.value) : card.value, detail: card.label === t("应收金额") ? t("调账后应收") : t("当前筛选范围") }))} />
+        <div><ViewChoice value={view} onChange={setView} options={[{ value: "visual", label: t("分析视图") }, { value: "details", label: t("明细视图") }]} /></div>
+        {view === "visual" && <>
+          <div className={insightStyles.equal}>
+            <InsightPanel title={t("订单状态分布")} description={t("当前筛选范围的全部订单，不受分页影响")}>
+              <DistributionChart title={t("订单状态")} unit={t("单")} rows={data.statusBreakdown.map(row => ({key:row.status,label:t(statusLabels[row.status]??row.status),value:row.count}))} />
+            </InsightPanel>
+            <InsightPanel title={t("应收构成")} description={t("税额已包含在应收金额中")}>
+              <RankedFacts rows={[{id:"net",label:t("不含税应收"),value:data.netOfTaxTotal},{id:"tax",label:t("其中税额"),value:data.taxTotal}]} format={money} empty={t("暂无数据")} />
+              <dl className={insightStyles.facts}><div><dt>{t("优惠金额")}</dt><dd>{money(data.discountTotal)}</dd></div><div><dt>{t("异常费用")}</dt><dd>{money(data.exceptionFeeTotal)}</dd></div><div><dt>{t("异常订单")}</dt><dd><AnimatedNumber value={data.exceptionOrderCount}/></dd></div></dl>
+            </InsightPanel>
+          </div>
+          <div className={insightStyles.equal}>
+            <InsightPanel title={t("客户贡献")} description={t("按当前筛选应收金额排序")}>
+              <RankedFacts rows={[...data.customerBreakdown].sort((a,b)=>b.receivableTotal-a.receivableTotal).slice(0,8).map((row,index)=>({id:row.customerId??String(index),label:row.customerName,value:row.receivableTotal,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前筛选下没有订单")} />
+            </InsightPanel>
+            <InsightPanel title={t("地点贡献")} description={t("按当前筛选应收金额排序")}>
+              <RankedFacts rows={[...data.locationBreakdown].sort((a,b)=>b.receivableTotal-a.receivableTotal).slice(0,8).map(row=>({id:row.locationId,label:row.locationName,value:row.receivableTotal,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前筛选下没有订单")} />
+            </InsightPanel>
+          </div>
+          <div className={insightStyles.equal}>
+            <InsightPanel title={t("库存与资产（当前快照）")} description={t("这一节是读取瞬间的快照，不是区间利用率")}>
+              <DistributionChart title={t("序列化资产")} rows={assets.statusBreakdown.map(row=>({key:row.status,label:t(assetStatusLabels[row.status]??row.status),value:row.count}))} />
+              <dl className={insightStyles.facts}><div><dt>{t("数量库存")}</dt><dd><AnimatedNumber value={stock.onHandTotal}/></dd></div><div><dt>{t("可租余量")}</dt><dd><AnimatedNumber value={stock.availableTotal}/></dd></div></dl>
+            </InsightPanel>
+            <InsightPanel title={t("异常费用构成")} description={t("同一订单可能包含多种异常费用")}>
+              <RankedFacts rows={data.exceptionFeeBreakdown.map(row=>({id:row.type,label:t(exceptionLabels[row.type]??row.type),value:row.amount,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前经营空间没有异常费用")} />
+              <dl className={insightStyles.facts}><div><dt>{t("平均租期")}</dt><dd>{occupancy.averageHours} {t("小时")}</dd></div><div><dt>{t("占用时长合计")}</dt><dd>{occupancy.totalHours} {t("小时")}</dd></div></dl>
+            </InsightPanel>
+          </div>
+        </>}
       </div>
+      <div hidden={view !== "details"}>
+      <div className="report-metrics">{cards.slice(4).map(card=><Card key={card.label}><Statistic title={card.label} value={card.value} prefix={card.prefix} precision={card.precision}/></Card>)}</div>
 
       <ListSection title={t("订单量按状态")}>
         {data.statusBreakdown.length ? (
@@ -345,6 +373,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           {t("只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。")}
         </div>
       </ListSection>
+      </div>
     </>
   );
 }
