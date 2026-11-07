@@ -127,7 +127,17 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   const { t } = useLocale();
   const identity = useAuthStore(state => JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id]));
   const [selection, setSelection] = useDataTableSelection(`${identity}:${window.location.pathname}`);
-  const [view, setView] = useState<"list" | "cards">(props.cardView?.defaultView ?? "list");
+  const viewKey = `rental-list-view:${identity}:${window.location.pathname}:${props.cardView?.kind ?? props.caption ?? "table"}`;
+  const [savedView, setSavedView] = useState<{key:string; value:"list"|"cards"}>(() => {
+    let value: string | null = null;
+    try { value = sessionStorage.getItem(viewKey); } catch { /* Restricted storage keeps the component usable. */ }
+    return {key:viewKey,value:value==="cards"||value==="list"?value:props.cardView?.defaultView??"list"};
+  });
+  const view = savedView.key === viewKey ? savedView.value : props.cardView?.defaultView ?? "list";
+  const setView = (value:"list"|"cards") => {
+    setSavedView({key:viewKey,value});
+    try { sessionStorage.setItem(viewKey,value); } catch { /* View preferences are optional. */ }
+  };
   const config: TablePaginationConfig = props.pagination && typeof props.pagination === "object" ? props.pagination : {};
   const remote = isRemoteTablePage(props.pagination), paged = props.pagination !== false;
   const [page, setPage] = useState(config.defaultCurrent ?? 1);

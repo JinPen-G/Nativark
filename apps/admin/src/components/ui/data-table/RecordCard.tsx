@@ -8,6 +8,8 @@ import { Checkbox } from "@/registry/components/checkbox/checkbox";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import styles from "./RecordCard.module.css";
+import { motion } from "motion/react";
+import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
 export type CardKind = "membership" | "catalog" | "pricing" | "discount" | "service" | "asset" | "stock" | "location";
 export type CardAfterClose = (operation: () => void) => void;
@@ -32,6 +34,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
   row: T; config: RecordCardConfig<T>; rowKey: string; selected?: boolean; onSelect?: (checked: boolean) => void; disabled?: boolean;
 }) {
   const { t } = useLocale();
+  const reduced = usePrefersReducedMotion();
   const narrow = useSyncExternalStore(subscribe, narrowSnapshot, () => false);
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -73,7 +76,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     {config.status && <div className={styles.context}>{config.status(row)}</div>}
     {config.body(row)}
   </div>;
-  return <div ref={wrapper} className={styles.item} data-copilot-record={rowKey} data-copilot-label={title} data-copilot-disabled={disabled ? "true" : undefined} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
+  return <motion.div layout={reduced || open ? false : "position"} transition={{duration:.2}} ref={wrapper} className={styles.item} data-copilot-record={rowKey} data-copilot-label={title} data-copilot-disabled={disabled ? "true" : undefined} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
     {onSelect && selectionHost && createPortal(<div className={styles.selection}><Checkbox aria-label={`${t("选择")} ${title}`} checked={Boolean(selected)} disabled={disabled} onCheckedChange={value => onSelect(value === true)} /></div>, selectionHost)}
     <Card title={title} meta={subtitle ? <span className={styles.secondary}>{subtitle}</span> : undefined} className={styles.card} media={media}
       details={narrow ? undefined : details} open={!narrow && open} onOpenChange={changeOpen}
@@ -84,7 +87,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     {narrow && <BottomSheet open={open} onOpenChange={next => { changeOpen(next); if (!next && !pending.current) requestAnimationFrame(() => trigger.current?.focus()); }} title={title} description={subtitle} closeLabel={t("关闭详情")} detents={[.6, .92]} initialDetent={1}>
       {media && <div className={styles.sheetMedia}>{media}</div>}{summary}{details}
     </BottomSheet>}
-  </div>;
+  </motion.div>;
 }
 
 function PreviewContent({ owner, kind, hasMedia, children }: { owner: string; kind?: CardKind; hasMedia: boolean; children: ReactNode }) {

@@ -7,7 +7,7 @@
 .label { position: relative; display: block; }
 .label small { display: block; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); margin-top: var(--space-1); }
 .content { min-width: 0; max-width: 100%; }
-.panel { min-width: 0; }
+.panel { min-width: 0; container: settings-panel / inline-size; }
 .panel[hidden] { display: none; }
 .panel > :global(.ant-card) { margin-top: 0 !important; border-color: var(--border); background: var(--surface); }
 .panel > :global(.ant-card) > :global(.ant-card-head) { min-height: 52px; border-color: var(--rental-content-divider); }
@@ -17,3 +17,9 @@
 .preview h3 { font-size: var(--rental-typography-section-title-size); font-weight: 500; color: var(--foreground); }
 .preview p { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
 @media (max-width: 760px) { .workspace { grid-template-columns: 1fr; gap: var(--space-3); } .nav { position: static; flex-direction: row; overflow-x: auto; padding: 2px; } .nav button { width: auto; flex: 0 0 auto; white-space: nowrap; } .label small { display: none; } }
+@container settings-panel (max-width: 600px) {
+  .panel :global(.ant-row) > :is(:global(.ant-col-8), :global(.ant-col-md-8), :global(.ant-col-md-6), :global(.ant-col-6)) { flex: 0 0 50%; max-width: 50%; }
+}
+@container settings-panel (max-width: 420px) {
+  .panel :global(.ant-row) > :global(.ant-col) { flex: 0 0 100%; max-width: 100%; }
+}

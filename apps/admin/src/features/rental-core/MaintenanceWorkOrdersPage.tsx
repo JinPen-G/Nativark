@@ -1,3 +1,5 @@
+import { WorkOrderBoard } from "./WorkOrderBoard";
+import { AnimatedNumber, Segmented } from "@/components/ui";
 import { ListFilterItem } from "@/components/ui";
 import { RecordDisclosure } from "@/components/RecordDisclosure";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -86,6 +88,8 @@ export function MaintenanceWorkOrdersPage() {
   const [typeFilter, setTypeFilter] = useState<RentalWorkOrderType>();
   const [assigneeFilter, setAssigneeFilter] = useState<string>();
   const [resourceFilter, setResourceFilter] = useState("");
+  const [workView,setWorkView] = useState("board");
+  const [mainView,setMainView] = useState("work");
 
   const dispositions = useQuery({ queryKey: ["rental-core", "stock-dispositions"], queryFn: () => rentalCoreApi.stockDispositions() });
   const workOrders = useQuery({ queryKey: ["rental-core", "work-orders"], queryFn: () => rentalCoreApi.workOrders() });
@@ -197,7 +201,8 @@ export function MaintenanceWorkOrdersPage() {
     />
     <QueryState loading={loading} error={error}>
 
-      <ListSection title={t("归还处置")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
+      <Tabs activeKey={mainView} onChange={setMainView} items={[{key:"work",label:<>{t("养护工单")} <AnimatedNumber value={workOrders.data?.length??0}/></>},{key:"dispositions",label:<>{t("归还处置")} <AnimatedNumber value={dispositions.data?.length??0}/></>}]}/>
+      <div hidden={mainView!=="dispositions"}><ListSection title={t("归还处置")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
         <Table<RentalStockDisposition> rowKey="id" onRefresh={() => dispositions.refetch()} loading={dispositions.isLoading} refreshing={dispositions.isFetching} dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty scene="empty" compact description={t("暂无归还处置记录")} /> }} columns={[
           { title: t("状态"), width: 110, render: (_, row) => { const status = DISPOSITION_STATUS_LABELS[row.status] ?? { label: row.status, color: "default" }; return <Tag color={status.color}>{t(status.label)}</Tag>; } },
           { title: t("商品/资产"), render: (_, row) => <><b>{row.itemGroupId}</b>{row.assetId && <><br /><Typography.Text type="secondary">{t("资产")}：{row.assetId}</Typography.Text></>}</> },
@@ -213,7 +218,7 @@ export function MaintenanceWorkOrdersPage() {
           </Space> }
         ]} />
       </ListSection>
-      <ListSection title={t("养护工单")} controls={<>
+      </div><div hidden={mainView!=="work"}><ListSection title={t("养护工单")} extra={<Segmented value={workView} onChange={value=>setWorkView(String(value))} options={[{value:"board",label:t("任务看板")},{value:"list",label:t("列表")}]}/>} controls={<>
         <SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("工单号、原因或负责人")} />
         <ListFilterItem label={t("工单状态")} priority active={Boolean(statusFilter)}>
           <Select aria-label={t("工单状态")} allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} />
@@ -224,10 +229,10 @@ export function MaintenanceWorkOrdersPage() {
         <ListFilterItem label={t("负责人")} collapsed active={Boolean(assigneeFilter)}>
           <Select aria-label={t("负责人")} allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} />
         </ListFilterItem>
-        <Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>
+        {(resourceFilter||statusFilter||typeFilter||assigneeFilter)&&<Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>}
       </>}>
 
-        <Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isLoading} refreshing={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty scene={resourceFilter.trim() || statusFilter || typeFilter || assigneeFilter ? "search" : "empty"} compact description={t("暂无匹配的养护工单")} /> }} columns={[
+        {workView==="board"?<WorkOrderBoard rows={filteredWorkOrders} statusLabel={value=>t(WORK_ORDER_STATUS_LABELS[value]?.label??value)} typeLabel={value=>t(WORK_ORDER_TYPE_LABELS[value as RentalWorkOrderType]??value)} actions={rowActions} onOpen={row=>openDialog("detail",row)} onShowList={()=>setWorkView("list")}/>:<Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isLoading} refreshing={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty scene={resourceFilter.trim() || statusFilter || typeFilter || assigneeFilter ? "search" : "empty"} compact description={t("暂无匹配的养护工单")} /> }} columns={[
           { title: t("工单号"), dataIndex: "workNo", width: 190 },
           {
             title: t("来源订单"),
@@ -250,8 +255,8 @@ export function MaintenanceWorkOrdersPage() {
           { title: t("处理人"), render: (_, row) => row.assigneeName || row.assigneeId || t("未派工") },
           { title: t("更新时间"), dataIndex: "updatedAt", width: 180, render: (value: string) => dateTime(value, locale) },
           { title: t("操作"), fixed: "right", render: (_, row) => rowActions(row) }
-        ]} />
-      </ListSection>
+        ]} />}
+      </ListSection></div>
     </QueryState>
 
     </>}

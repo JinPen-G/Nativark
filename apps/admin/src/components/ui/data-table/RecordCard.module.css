@@ -1,6 +1,7 @@
 .item { position: relative; min-width: 0; display: flex; --radius-panel: var(--rental-ui-radius-container); --font-body: var(--rental-typography-font-family); }
 .card { width: 100%; height: 100%; display: flex; flex-direction: column; border-radius: var(--rental-ui-radius-container); }
 .card > div:has(> h3) { display: flex; flex-direction: column; flex: 1; }
+.card h3 { font-size: var(--rental-record-card-title-size); line-height: var(--rental-record-card-title-line-height); font-weight: 500; }
 .item[data-selectable] .card h3 { max-width: calc(100% - var(--space-8)); }
 .item[data-featured] > .card { border-color: color-mix(in oklab, var(--warning) 40%, var(--border)); background: color-mix(in oklab, var(--warning) 3%, var(--surface)); }
 .item[data-selected] > article { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -9,11 +10,10 @@
 .selection { position: absolute; top: calc(var(--record-media-offset) + var(--space-5) + var(--text-lg) * .65 - var(--control-height-md) / 2); right: var(--space-2); z-index: 3; display: flex; align-items: center; }
 .mobileHit { position: absolute; inset: 0; z-index: 1; border: 0; background: transparent; border-radius: inherit; cursor: pointer; }
 .mobileHit:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
-.summary { display: flex; flex: 1; flex-direction: column; gap: var(--space-3); padding-block-start: var(--space-3); min-width: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); }
+.summary { display: flex; flex: 1; flex-direction: column; gap: var(--space-3); padding-block-start: var(--space-3); min-width: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
 .context { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .metric { display: grid; gap: var(--space-1); }
-.metricValue { display: flex; align-items: baseline; gap: var(--space-1); font-size: var(--text-2xl); font-weight: var(--rental-typography-page-title-weight); line-height: 1.3; font-variant-numeric: tabular-nums; color: var(--foreground); flex-wrap: wrap; overflow-wrap: anywhere; }
-.summary[data-kind="membership"] .metricValue { color: var(--accent); }
+.metricValue { display: flex; align-items: baseline; gap: var(--space-1); font-size: var(--rental-record-card-metric-size); font-weight: 500; line-height: 1.3; font-variant-numeric: tabular-nums; color: var(--rental-content-primary); flex-wrap: wrap; overflow-wrap: anywhere; }
 .highlights { display: grid; gap: var(--space-2); margin: 0; padding-block: var(--space-3); border-block: 1px solid var(--border-subtle); }
 .highlights > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); min-width: 0; }
 .highlights dt { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); min-width: 0; }
@@ -23,8 +23,8 @@
 .metricSuffix, .secondary { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); font-weight: var(--rental-typography-meta-weight); line-height: var(--rental-typography-meta-line-height); }
 .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3) var(--space-4); margin: 0; }
 .facts > div { min-width: 0; }
-.facts dt { font-size: var(--rental-typography-meta-size); color: var(--text-muted); margin-block-end: var(--space-1); }
-.facts dd { margin: 0; color: var(--foreground); font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); overflow-wrap: anywhere; }
+.facts dt { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); margin-block-end: var(--space-1); }
+.facts dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
 .card .facts dd { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .list { display: grid; gap: var(--space-3); list-style: none; margin: 0; padding: 0; }
 .list li { display: flex; align-items: start; gap: var(--space-2); min-width: 0; }

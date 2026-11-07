@@ -1,3 +1,4 @@
+import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@/components/ui/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
@@ -98,10 +99,7 @@ export function CategoryTab({
         title={t(category.name)}
         description={t("经营品类创建后固定；租户只能在品类支持的计价、履约、库存、预授权和资质能力内配置。")}
       />
-      <Row gutter={[16, 16]}>
-        <Col xs={24} xl={12}>
-          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Card title={t("计价方式")} data-copilot-anchor="pricing-method">
+      <SettingsGroups><Card title={t("计价方式")} data-copilot-anchor="pricing-method">
               {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
                   允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
               <Form.Item
@@ -153,7 +151,7 @@ export function CategoryTab({
                 <Switch />
               </Form.Item>
             </Card>
-            <Card title={t("收款方式")}>
+<Card title={t("收款方式")}>
               {/* 支付时点、押金、预授权、异地归还与逾期计费都随报价进订单快照，事实源在「业务规则」页；
                   这里只保留不进快照的运行开关——空间实际开通哪些收款渠道。 */}
               <Form.Item
@@ -175,10 +173,7 @@ export function CategoryTab({
                 title={t("支付时点、押金与预授权、异地归还、逾期计费在「业务规则」页配置，发布后随订单快照冻结。")}
               />
             </Card>
-          </Space>
-        </Col>
-        <Col xs={24} xl={12}>
-          <Card title={t("租赁与履约方式")} data-copilot-anchor="fulfillment-method">
+<Card title={t("租赁与履约方式")} data-copilot-anchor="fulfillment-method">
             <Form.Item name={["allocation", "autoPreassign"]} label={t("自动预分配资源")} valuePropName="checked"><Switch /></Form.Item>
             <Form.Item name={["allocation", "preassignDays"]} label={t("提前预分配（天）")}><InputNumber min={0} max={365} precision={0} /></Form.Item>
             <Form.Item name={["allocation", "autoLock"]} label={t("到时自动锁定分配")} valuePropName="checked"><Switch /></Form.Item>
@@ -282,9 +277,7 @@ export function CategoryTab({
                 <Tag key={value}>{t(locationTypeLabels[value] ?? value)}</Tag>
               ))}
             </Space>
-          </Card>
-        </Col>
-      </Row>
+          </Card></SettingsGroups>
       </Space>
     </Form>
   );

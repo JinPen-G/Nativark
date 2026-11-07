@@ -73,8 +73,8 @@ export const ADMIN_TABLE_METRICS = { leadingHeight: 32, rowMinHeight: 52, cellPa
 /** Structural loading geometry; controls/type/colors continue to use their existing roles. */
 export const ADMIN_LOADING_METRICS = { rows: 6, rowHeight: ADMIN_TABLE_METRICS.rowMinHeight, textRadius: 4 } as const;
 export const ADMIN_EMPTY_METRICS = { artWidth: 240, artCompactWidth: 144 } as const;
-export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 240, bulkMaxWidth: 760, previewMaxHeight: 320 } as const;
-export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 120 } as const;
+export const ADMIN_LIST_CAPABILITY_METRICS = { cardMinWidth: 280, bulkMaxWidth: 760, previewMaxHeight: 320 } as const;
+export const ADMIN_RECORD_CARD_METRICS = { mediaHeight: 190, titleSize: 15, titleLineHeight: 21, metricSize: 22 } as const;
 /** Animate UI PageTransition stack, adapted to the current router/runtime. */
 export const ADMIN_NAVIGATION_MOTION = { durationMs: 500, easing: "cubic-bezier(.4, 0, .1, 1)", retreatScale: .94, retreatOpacity: .6 } as const;
 /** Small live-content changes use Animate UI's fade timing; never remount forms. */
@@ -265,6 +265,9 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-list-filter-popover-width": px(ADMIN_LIST_METRICS.filterPopoverWidth),
     "--rental-table-leading-height": px(ADMIN_TABLE_METRICS.leadingHeight),
     "--rental-list-card-min-width": px(ADMIN_LIST_CAPABILITY_METRICS.cardMinWidth),
+    "--rental-record-card-title-size": px(ADMIN_RECORD_CARD_METRICS.titleSize),
+    "--rental-record-card-title-line-height": px(ADMIN_RECORD_CARD_METRICS.titleLineHeight),
+    "--rental-record-card-metric-size": px(ADMIN_RECORD_CARD_METRICS.metricSize),
     "--rental-hover-card-native-radius": px(ARC_DEFAULT_RADII.container),
     "--rental-record-card-media-height": px(ADMIN_RECORD_CARD_METRICS.mediaHeight),
     ...Object.fromEntries(Object.entries(ADMIN_SIDEBAR_METRICS).map(([role, value]) => [
