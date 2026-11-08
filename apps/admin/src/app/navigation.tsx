@@ -53,7 +53,7 @@ export const APP_ROUTES = {
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   coupons: { path: "/rental/coupons", label: "优惠券", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   services: { path: "/rental/services", label: "增值服务", permission: "rental-os:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history", "rental-os:rules:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
+  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history", "rental-os:rules:manage", "rental-os:rules:publish", "system:integration:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
   // CORE-EXT-02C：能力治理入口。刻意**不**给 capability 门禁——它是治理能力本身的页面，
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
   rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },

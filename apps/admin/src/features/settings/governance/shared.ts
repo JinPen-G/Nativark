@@ -20,6 +20,8 @@ import { useAuthStore } from "@/features/auth/authStore";
 export interface GovernancePermissions {
   canManagePrice: boolean;
   canManageParams: boolean;
+  /** 人工通知配置和投递沿用原集成权限，不由价格或规则权限代授。 */
+  canManageNotifications: boolean;
   /** 需求 4.6.14：编辑草稿与对客户生效是两个责任，按钮分别判权。 */
   canEditRules: boolean;
   canPublishRules: boolean;
@@ -37,6 +39,7 @@ export function useGovernancePermissions(): GovernancePermissions {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManagePrice = hasPermission("rental-os:price:manage");
   const canManageParams = hasPermission("system:params:manage");
+  const canManageNotifications = hasPermission("system:integration:manage");
   const canEditRules = hasPermission("rental-os:rules:manage");
   const canPublishRules = hasPermission("rental-os:rules:publish");
   const canEditCalendar = canManagePrice || hasPermission("rental-os:calendar:edit");
@@ -47,6 +50,7 @@ export function useGovernancePermissions(): GovernancePermissions {
     () => ({
       canManagePrice,
       canManageParams,
+      canManageNotifications,
       canEditRules,
       canPublishRules,
       canSeeRules: canEditRules || canPublishRules || canManagePrice,
@@ -56,7 +60,7 @@ export function useGovernancePermissions(): GovernancePermissions {
       canSeeCalendar: canViewCalendarHistory,
       canSeeSettings: canManagePrice || canEditRules,
     }),
-    [canManagePrice, canManageParams, canEditRules, canPublishRules, canEditCalendar, canPublishCalendar, canViewCalendarHistory],
+    [canManagePrice, canManageParams, canManageNotifications, canEditRules, canPublishRules, canEditCalendar, canPublishCalendar, canViewCalendarHistory],
   );
 }
 

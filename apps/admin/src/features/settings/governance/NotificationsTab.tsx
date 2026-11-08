@@ -2,9 +2,9 @@
 import type { RentalNotificationSendLogV1, RentalNotificationTemplateV1, SaveRentalNotificationTemplateRequest, SendRentalNotificationRequest, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Col, Row, Space, Tag } from "antd";
-import { FileText, Pencil, Plus, Send } from "lucide-react";
+import { FileText, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { ActionButton, Alert, App, Button, DataTableRowActions, DataTableText, Form, FormSection, Input, ListFilters, ListSection, Modal, SaveButton, Select, Table, Tabs, useListFilter } from "@/components/ui";
+import { ActionButton, Alert, App, Button, Checkbox, DataTableRowActions, DataTableText, Form, FormSection, Input, ListFilters, ListSection, Modal, SaveButton, Select, Table, Tabs, useListFilter } from "@/components/ui";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RecordFacts } from "@/components/RecordDetailLayout";
 import { QueryState } from "@/components/QueryState";
@@ -13,10 +13,10 @@ import { useLocale } from "@/app/locale";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { notificationChannelLabels, notificationEventLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
+import { notificationVariableRows, notificationVariableSchema, type NotificationVariableRow } from "./notificationTemplateForm";
 import styles from "./GovernanceForms.module.css";
 
-type TemplateForm = Omit<SaveRentalNotificationTemplateRequest, "variableSchema"> & { variableSchemaText: string };
-type SendForm = Omit<SendRentalNotificationRequest, "variables"> & { variablesText: string };
+type TemplateForm = Omit<SaveRentalNotificationTemplateRequest, "variableSchema"> & { variableDefinitions: NotificationVariableRow[] };
 const deliveryLabels: Record<RentalNotificationSendLogV1["status"], string> = {
   sent: "服务商已受理", delivered: "已送达", delivery_pending: "等待回执", delivery_failed: "投递失败",
   delivery_uncertain: "结果未知", queued: "待发送", failed: "发送失败", simulated: "模拟", simulation_failed: "模拟失败",
@@ -29,13 +29,15 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
   const { message } = App.useApp();
   const { t, locale } = useLocale();
   const queryClient = useQueryClient();
-  const canManage = permissions.canEditRules || permissions.canManagePrice || permissions.canManageParams;
+  const canManage = permissions.canManageNotifications;
   const [templateEditor, setTemplateEditor] = useState<RentalNotificationTemplateV1 | null>();
   const [sendTemplate, setSendTemplate] = useState<RentalNotificationTemplateV1>();
   const [deliveryTarget, setDeliveryTarget] = useState<RentalNotificationSendLogV1>();
   const deliveryDialog = useModalDismissal(Boolean(deliveryTarget), () => setDeliveryTarget(undefined));
   const [templateForm] = Form.useForm<TemplateForm>();
-  const [sendForm] = Form.useForm<SendForm>();
+  const [sendForm] = Form.useForm<SendRentalNotificationRequest>();
+  const templateDialog = useModalDismissal(Boolean(templateEditor), () => { setTemplateEditor(undefined); templateForm.resetFields(); });
+  const sendDialog = useModalDismissal(Boolean(sendTemplate), () => { setSendTemplate(undefined); sendForm.resetFields(); });
   const templateChannel = Form.useWatch("channel", templateForm);
   const eventLabel = (code: string) => t(notificationEventLabels[code] ?? code);
   const channelLabel = (code: string) => t(notificationChannelLabels[code] ?? code);
@@ -46,18 +48,15 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
   const refreshLogs = () => queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-logs"] });
   const saveTemplate = useMutation({
     mutationFn: (values: TemplateForm) => {
-      const { variableSchemaText, ...rest } = values;
-      return rentalCoreApi.saveNotificationTemplate({ ...rest, variableSchema: JSON.parse(variableSchemaText) });
+      const { variableDefinitions, ...rest } = values;
+      return rentalCoreApi.saveNotificationTemplate({ ...rest, variableSchema: notificationVariableSchema(variableDefinitions) });
     },
-    onSuccess: async () => { setTemplateEditor(null); await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-templates"] }); message.success(t("通知模板新版本已保存")); },
-    onError: () => message.error(t("模板保存失败，请检查事件、渠道、变量 schema 和占位符")),
+    onSuccess: async () => { templateDialog.dismiss(); await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-templates"] }); message.success(t("通知模板新版本已保存")); },
+    onError: () => message.error(t("模板保存失败，请检查事件、渠道、模板变量和占位符")),
   });
   const sendNotification = useMutation({
-    mutationFn: (values: SendForm) => {
-      const { variablesText, ...rest } = values;
-      return rentalCoreApi.sendNotification({ ...rest, variables: JSON.parse(variablesText) });
-    },
-    onSuccess: async () => { setSendTemplate(undefined); await refreshLogs(); message.success(t("通知已处理并记录投递结果")); },
+    mutationFn: (values: SendRentalNotificationRequest) => rentalCoreApi.sendNotification({ ...values, variables: values.variables ?? {} }),
+    onSuccess: async () => { sendDialog.dismiss(); await refreshLogs(); message.success(t("通知已处理并记录投递结果")); },
     onError: () => message.error(t("发送失败，请检查必填变量和接收人")),
   });
   const retryNotification = useMutation({ mutationFn: rentalCoreApi.retryNotification, onSuccess: async result => {
@@ -69,22 +68,18 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
   const retryDueNotifications = useMutation({ mutationFn: () => rentalCoreApi.retryDueNotifications(), onSuccess: async result => {
     await refreshLogs(); message.success(t("已处理 {attempted} 条到期短信，成功 {sent} 条", { attempted: result.attempted, sent: result.sent }));
   }, onError: () => message.error(t("批量重试失败，请稍后再试")) });
-  const jsonRules = [{ validator: async (_rule: unknown, value: string) => {
-    try { const parsed = JSON.parse(value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(); }
-    catch { throw new Error(t("请输入有效的 JSON 对象")); }
-  } }];
-
   function openTemplate(row?: RentalNotificationTemplateV1) {
     templateForm.resetFields();
-    templateForm.setFieldsValue(row ? { ...row, variableSchemaText: JSON.stringify(row.variableSchema, null, 2) } : {
+    const { variableSchema, ...existing } = row ?? { variableSchema: {} };
+    templateForm.setFieldsValue(row ? { ...existing, variableDefinitions: notificationVariableRows(variableSchema) } : {
       eventCode: settings.notifications.enabledEvents[0] ?? "order.created", channel: settings.notifications.editableChannels[0] ?? "app_push",
-      name: "", title: "", body: "", status: "enabled", variableSchemaText: JSON.stringify({ customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } }, null, 2),
+      name: "", title: "", body: "", status: "enabled", variableDefinitions: notificationVariableRows({ customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } }),
     });
     setTemplateEditor(row ?? ({} as RentalNotificationTemplateV1));
   }
   function openSend(row: RentalNotificationTemplateV1) {
     sendForm.resetFields();
-    sendForm.setFieldsValue({ templateId: row.id, recipient: "", variablesText: JSON.stringify(Object.fromEntries(Object.keys(row.variableSchema).map(key => [key, ""])), null, 2) });
+    sendForm.setFieldsValue({ templateId: row.id, recipient: "", variables: Object.fromEntries(Object.keys(row.variableSchema).map(key => [key, ""])) });
     setSendTemplate(row);
   }
   if (!canManage) return <Alert type="warning" showIcon title={t("当前没有通知配置权限")} />;
@@ -97,7 +92,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
             dataSource={templateFilter.rows} pagination={templateFilter.pagination} emptyScene={templateFilter.keyword || templateFilter.status ? "search" : "empty"} columns={[
               { title: t("模板"), render: (_, row) => <DataTableText primary={row.name} secondary={`${eventLabel(row.eventCode)} · v${row.version}`} /> },
               { title: t("渠道"), dataIndex: "channel", render: channelLabel }, { title: t("标题"), dataIndex: "title" },
-              { title: t("变量"), render: (_, row) => Object.keys(row.variableSchema).join("、") || "—" },
+              { title: t("变量"), render: (_, row) => Object.entries(row.variableSchema).map(([name, definition]) => definition.label || name).join("、") || "—" },
               { title: t("状态"), dataIndex: "status", render: value => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "已启用" : "已停用")}</Tag> },
               { title: t("操作"), render: (_, row) => <DataTableRowActions details={() => openTemplate(row)} detailLabel={t("编辑模板")} detailAccessibleLabel={`${row.name} · ${t("编辑模板")}`}
                 menuLabel={`${row.name} · ${t("更多操作")}`} primary={{ id: "edit", label: t("编辑模板"), icon: Pencil, onSelect: () => openTemplate(row) }}
@@ -124,33 +119,53 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         </ListSection>
       </QueryState> },
     ]} />
-    <Modal presentation="side" title={templateEditor?.id ? t("编辑通知模板") : t("新增通知模板")} width={720} open={Boolean(templateEditor)} onCancel={() => setTemplateEditor(null)} destroyOnHidden
+    <Modal presentation="side" title={templateEditor?.id ? t("编辑通知模板") : t("新增通知模板")} width={720} open={templateDialog.visible} onCancel={templateDialog.dismiss} afterClose={templateDialog.afterClose} destroyOnHidden
       closable={!saveTemplate.isPending} keyboard={!saveTemplate.isPending} maskClosable={!saveTemplate.isPending}
-      footer={<><Button disabled={saveTemplate.isPending} onClick={() => setTemplateEditor(null)}>{t("取消")}</Button><SaveButton label={t("保存新版本")} form={templateForm} pending={saveTemplate.isPending} onSave={values => saveTemplate.mutateAsync(values)} /></>}>
+      footer={<><Button disabled={saveTemplate.isPending} onClick={templateDialog.dismiss}>{t("取消")}</Button><SaveButton label={t("保存新版本")} form={templateForm} pending={saveTemplate.isPending} onSave={values => saveTemplate.mutateAsync(values)} /></>}>
       {templateEditor?.id && <p className={styles.context}>{templateEditor.name} · v{templateEditor.version}</p>}
-      <Form form={templateForm} layout="vertical" disabled={saveTemplate.isPending} onFinish={values => saveTemplate.mutate(values)}>
+      <Form form={templateForm} className={styles.templateFields} layout="vertical" disabled={saveTemplate.isPending} onFinish={values => saveTemplate.mutate(values)}
+        onValuesChange={changed => {
+          // Nested fields do not automatically revalidate Form.List's own rules.
+          if (changed.variableDefinitions) void templateForm.validateFields([["variableDefinitions"]]).catch(() => undefined);
+        }}>
         <Form.Item name="id" hidden><Input /></Form.Item>
         <SettingsWorkspace sections={[
           { key: "profile", label: t("模板资料"), content: <FormSection title={t("模板资料")}>
-            <Form.Item name="name" label={t("模板名称")}><Input /></Form.Item>
+            <Form.Item name="name" label={t("模板名称")} rules={[{ required: true }]}><Input /></Form.Item>
             <Row gutter={16}>
-              <Col span={12}><Form.Item name="eventCode" label={t("事件")} rules={[{ required: true }]}><Select options={settings.notifications.enabledEvents.map(value => ({ value, label: eventLabel(value) }))} /></Form.Item></Col>
-              <Col span={12}><Form.Item name="channel" label={t("渠道")} rules={[{ required: true }]}><Select options={settings.notifications.editableChannels.map(value => ({ value, label: channelLabel(value) }))} /></Form.Item></Col>
-              <Col span={12}><Form.Item name="status" label={t("状态")}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+              <Col xs={24} sm={12}><Form.Item name="eventCode" label={t("事件")} rules={[{ required: true }]}><Select options={settings.notifications.enabledEvents.map(value => ({ value, label: eventLabel(value) }))} /></Form.Item></Col>
+              <Col xs={24} sm={12}><Form.Item name="channel" label={t("渠道")} rules={[{ required: true }]}><Select options={settings.notifications.editableChannels.map(value => ({ value, label: channelLabel(value) }))} /></Form.Item></Col>
+              <Col xs={24} sm={12}><Form.Item name="status" label={t("状态")}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
             </Row>
           </FormSection> },
           { key: "content", label: t("通知内容"), content: <FormSection title={t("通知内容")} description={t("标题和正文中的变量须在“模板变量”中登记。保存会生成新版本，历史投递仍保留原版本。")}>
-            <Form.Item name="title" label={t("标题")}><Input /></Form.Item>
-            <Form.Item name="body" label={t("正文")}><Input.TextArea rows={6} /></Form.Item>
+            <Form.Item name="title" label={t("标题")} rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="body" label={t("正文")} rules={[{ required: true }]}><Input.TextArea rows={6} /></Form.Item>
             <Form.Item name="providerTemplateCode" label={t("短信服务商模板编码")} extra={t("仅短信渠道使用；填写阿里云模板编码或腾讯云模板 ID。其他渠道留空。")} hidden={templateChannel !== "sms"}><Input placeholder="SMS_123456789" /></Form.Item>
           </FormSection> },
           { key: "variables", label: t("模板变量"), content: <FormSection title={t("模板变量")} description={t("保留变量名称、显示名称和必填设置；标题与正文通过 {{变量名}} 引用。")}>
-            <Form.Item name="variableSchemaText" label={t("变量定义（JSON）")} rules={jsonRules}><Input.TextArea rows={10} spellCheck={false} /></Form.Item>
+            <Form.List name="variableDefinitions" rules={[{ validator: async (_rule, rows: NotificationVariableRow[] = []) => {
+              try { notificationVariableSchema(rows); } catch (error) { throw new Error(t((error as Error).message)); }
+            } }]}>
+              {(fields, { add, remove }, { errors }) => <div className={styles.stack}>
+                {fields.map(({ key, name }) => <div key={key} className={styles.variableRow}>
+                  <Form.Item className={styles.variableField} name={[name, "name"]} label={t("变量名")} rules={[{ required: true, whitespace: true, message: t("请填写变量名") }]}><Input placeholder="orderNo" spellCheck={false} /></Form.Item>
+                  <Form.Item className={styles.variableField} name={[name, "definition", "label"]} label={t("显示名称")}><Input /></Form.Item>
+                  <div className={styles.variableActions}>
+                    <Form.Item name={[name, "definition", "required"]} valuePropName="checked" noStyle><Checkbox>{t("必填")}</Checkbox></Form.Item>
+                    <Button type="text" icon={<Trash2 size={16} />} title={t("移除变量")} aria-label={`${t("移除变量")} ${name + 1}`} disabled={saveTemplate.isPending} onClick={() => remove(name)} />
+                  </div>
+                </div>)}
+                {!fields.length && <p className={styles.context}>{t("尚未登记模板变量")}</p>}
+                <Form.ErrorList errors={errors} />
+                <Button type="text" icon={<Plus size={16} />} disabled={saveTemplate.isPending} onClick={() => add({ name: "", definition: { label: "", required: false } })}>{t("添加变量")}</Button>
+              </div>}
+            </Form.List>
           </FormSection> },
         ]} />
       </Form>
     </Modal>
-    <Modal title={t("测试发送")} open={Boolean(sendTemplate)} onCancel={() => setSendTemplate(undefined)} okText={t("发送测试通知")} confirmLoading={sendNotification.isPending}
+    <Modal title={t("测试发送")} open={sendDialog.visible} onCancel={sendDialog.dismiss} afterClose={sendDialog.afterClose} okText={t("发送测试通知")} confirmLoading={sendNotification.isPending}
       closable={!sendNotification.isPending} keyboard={!sendNotification.isPending} maskClosable={!sendNotification.isPending} cancelButtonProps={{ disabled: sendNotification.isPending }}
       onConfirm={() => sendForm.validateFields().then(values => sendNotification.mutateAsync(values))} destroyOnHidden>
       <div className={styles.stack}>
@@ -161,7 +176,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         <Form form={sendForm} layout="vertical" disabled={sendNotification.isPending} onFinish={values => sendNotification.mutate(values)}>
           <Form.Item name="templateId" hidden><Input /></Form.Item>
           <Form.Item name="recipient" label={t("接收人")} rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="variablesText" label={t("变量 JSON")} rules={[{ required: true }, ...jsonRules]}><Input.TextArea rows={7} spellCheck={false} /></Form.Item>
+          {sendTemplate && Object.entries(sendTemplate.variableSchema).map(([name, definition]) => <Form.Item key={name} name={["variables", name]} label={definition.label || name} extra={`{{${name}}}`} rules={[{ required: definition.required }]}><Input /></Form.Item>)}
         </Form>
       </div>
     </Modal>

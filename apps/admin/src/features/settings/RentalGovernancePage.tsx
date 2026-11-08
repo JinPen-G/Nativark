@@ -33,8 +33,7 @@ interface GovernanceTabDefinition {
 
 /**
  * 页签的**唯一**清单：可进入的页签与实际渲染的页签都从这一份派生。
- * 此前两处各写一遍判定，通知页签在「可进入」里认 system:params:manage、在「渲染」里不认，
- * 只有平台参数权限的账号会选中一个空白页签。
+ * 页签与内部查询共用同一权限口径，避免选中空白页或请求注定被原 Guard 拒绝的数据。
  */
 const TABS: GovernanceTabDefinition[] = [
   {
@@ -84,8 +83,7 @@ const TABS: GovernanceTabDefinition[] = [
         通知模板
       </span>
     ),
-    // 通知模板走 rules:manage，单有发布权限不覆盖它。
-    permitted: (permissions) => permissions.canEditRules || permissions.canManagePrice || permissions.canManageParams,
+    permitted: (permissions) => permissions.canManageNotifications,
     render: ({ permissions, settings }) => <NotificationsTab permissions={permissions} settings={settings} />,
   },
 ];

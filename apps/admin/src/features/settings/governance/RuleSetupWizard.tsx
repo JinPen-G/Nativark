@@ -1,7 +1,7 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Typography } from "antd";
-import { App } from "@/components/ui";
+import { Space, Typography } from "antd";
+import { ActionButton, App, FormSection, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Steps } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -11,6 +11,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import { errorText, type GovernancePermissions } from "./shared";
+import styles from "./GovernanceForms.module.css";
 
 /**
  * 「新建规则向导」：把 RulesTab 的整表编辑器按 RULE_SECTIONS 的业务顺序拆成 7 步，
@@ -25,17 +26,21 @@ import { errorText, type GovernancePermissions } from "./shared";
  * 服务端拒绝则原样透出错误，用户据此改正。
  */
 export function RuleSetupWizard({
+  open,
   category,
   permissions,
   seed,
   onClose,
+  afterClose,
 }: {
+  open: boolean;
   category: RentalCategoryDefinition;
   permissions: GovernancePermissions;
   /** 已有的当前草稿或已生效版本；用于回填。首次开业无版本时为 undefined，表单留空。 */
   seed?: RentalRuleVersion;
   /** 发布成功后关闭向导并回到「品类与业务规则」。 */
   onClose: () => void;
+  afterClose: () => void;
 }) {
   const { message } = App.useApp();
   const { t } = useLocale();
@@ -44,6 +49,9 @@ export function RuleSetupWizard({
   const [form] = Form.useForm<RuleForm>();
   const [current, setCurrent] = useState(0);
   const [maxVisited, setMaxVisited] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const sectionHeading = useRef<HTMLSpanElement>(null);
+  const previousStep = useRef(current);
   /** 已存到服务端的草稿。存在则后续保存与发布都针对同一版本，不再新开草稿。 */
   const [draft, setDraft] = useState<RentalRuleVersion | undefined>(
     seed?.status === "draft" ? seed : undefined,
@@ -57,6 +65,12 @@ export function RuleSetupWizard({
     seedFormFromRule(form, seed, category);
     seeded.current = true;
   }, [seed, category, form]);
+  useEffect(() => {
+    if (previousStep.current === current) return;
+    previousStep.current = current;
+    sectionHeading.current?.focus({ preventScroll: true });
+    sectionHeading.current?.scrollIntoView({ block: "nearest" });
+  }, [current]);
 
   async function invalidate() {
     await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
@@ -84,12 +98,18 @@ export function RuleSetupWizard({
   });
 
   async function handleSaveDraft() {
+    if (pending) throw new Error(t("处理中"));
+    setSubmitting(true);
     try {
       const row = await saveDraft.mutateAsync();
       await invalidate();
       message.success(`${t("草稿已保存")}（v${row.version}），${t("仍需具备发布权限的人发布后才对客户生效")}`);
+      return row;
     } catch (error) {
       message.error(errorText(error, t("草稿保存失败，请检查品类能力和租户设置")));
+      throw error;
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -106,11 +126,9 @@ export function RuleSetupWizard({
   }
 
   async function handlePublish() {
-    try {
-      await form.validateFields();
-    } catch {
-      return;
-    }
+    if (pending) throw new Error(t("处理中"));
+    await form.validateFields();
+    setSubmitting(true);
     try {
       // 先存草稿拿到版本，再对该版本发布：保证发布的正是当前表单内容，
       // 且首次开业时由服务端补齐默认值后才发布。
@@ -121,14 +139,28 @@ export function RuleSetupWizard({
       onClose();
     } catch (error) {
       message.error(errorText(error, t("发布失败")));
+      throw error;
+    } finally {
+      setSubmitting(false);
     }
   }
 
   const section = RULE_SECTIONS[current];
-  const pending = saveDraft.isPending || publish.isPending;
+  const pending = submitting || saveDraft.isPending || publish.isPending;
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Modal presentation="side" title={t("新建规则向导")} width={760} open={open} onCancel={onClose} afterClose={afterClose} destroyOnHidden
+      closable={!pending} keyboard={!pending} maskClosable={!pending}
+      footer={<div className={styles.wizardActions}>
+        <Button disabled={current === 0 || pending} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>{t("上一步")}</Button>
+        <Space wrap>
+          {/* 向导允许中途存草稿，沿用原未完成字段语义；发布仍先校验并保存同一份表单。 */}
+          <ActionButton variant="secondary" intent="save" label={t("保存草稿")} disabled={!canEditRules} pending={pending} onAction={handleSaveDraft} />
+          {current < lastStep ? <Button type="primary" disabled={pending} onClick={handleNext}>{t("下一步")}</Button>
+            : <ActionButton label={t("发布")} disabled={!canPublishRules || !canEditRules} pending={pending} onAction={handlePublish} />}
+        </Space>
+      </div>}>
+    <div className={styles.stack}>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
         {t("按业务顺序逐段配置这套租赁规则，每步只需关注当前一组。可随时「保存草稿」中途退出，最后一步发布后立即对客户生效。")}
       </Typography.Paragraph>
@@ -137,14 +169,13 @@ export function RuleSetupWizard({
         current={current}
         reachable={maxVisited}
         items={RULE_SECTIONS.map((item) => ({ title: t(item.title) }))}
-        onChange={(value) => {
+        onChange={pending ? undefined : (value) => {
           // 只允许回到已经过的步骤；向前必须走「下一步」以逐段校验。
           if (value <= maxVisited) setCurrent(value);
         }}
       />
-      <Card size="small" title={`${t("步骤")} ${current + 1} / ${RULE_SECTIONS.length} · ${t(section.title)}`}>
-        <Alert type="info" showIcon title={t(section.title)} description={t(section.description)} style={{ marginBottom: 16 }} />
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" className={styles.ruleFields} disabled={pending}>
+          <FormSection title={<span ref={sectionHeading} tabIndex={-1}>{t(section.title)}</span>} description={t(section.description)}>
           {section.render({ form, category, t })}
           {current === lastStep && (
             <Form.Item
@@ -156,8 +187,8 @@ export function RuleSetupWizard({
               <Input.TextArea rows={3} maxLength={500} showCount />
             </Form.Item>
           )}
+          </FormSection>
         </Form>
-      </Card>
       {current === lastStep && !canPublishRules && (
         <Alert
           type="warning"
@@ -166,30 +197,7 @@ export function RuleSetupWizard({
           description={t("可保存草稿，但需要具备 rules:publish 权限的人发布后才对客户生效。")}
         />
       )}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Button disabled={current === 0 || pending} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>
-          {t("上一步")}
-        </Button>
-        <Space>
-          <Button disabled={!canEditRules} loading={saveDraft.isPending} onClick={handleSaveDraft}>
-            {t("保存草稿")}
-          </Button>
-          {current < lastStep ? (
-            <Button type="primary" disabled={pending} onClick={handleNext}>
-              {t("下一步")}
-            </Button>
-          ) : (
-            <Button
-              type="primary"
-              disabled={!canPublishRules}
-              loading={pending}
-              onClick={handlePublish}
-            >
-              {t("发布")}
-            </Button>
-          )}
-        </Space>
-      </div>
-    </Space>
+    </div>
+    </Modal>
   );
 }

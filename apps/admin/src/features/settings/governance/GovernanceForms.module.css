@@ -2,3 +2,17 @@
 .context { margin: 0 0 var(--space-4); color: var(--text-secondary); overflow-wrap: anywhere; }
 .messageBody { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fieldChoices { margin-bottom: var(--space-4); }
+.ruleSummary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); min-width: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.ruleFields { container: rule-fields / inline-size; }
+.wizardActions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); width: 100%; }
+.templateFields { container: template-fields / inline-size; }
+.variableRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: var(--space-2); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+.variableRow .variableField { margin-bottom: 0; min-width: 0; }
+.variableActions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); min-height: var(--rental-control-height-default); }
+@container template-fields (max-width: 480px) {
+  .variableRow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .variableActions { grid-column: 1 / -1; }
+}
+@container rule-fields (max-width: 560px) {
+  .ruleFields :global(.ant-row > .ant-col) { flex: 0 0 100%; max-width: 100%; }
+}
