@@ -100,6 +100,11 @@
 .arc-date-field > div:first-child { flex: 1; min-width: 150px; }
 .arc-date-field > div:first-child > label:empty { display: none; }
 .arc-date-field .arc-date-control { flex: 1; min-width: 0; gap: 0; }
+/* A datetime field wraps as date + time, rather than shrinking its date behind
+   the clock/seconds controls in a narrow form column. Arc motion stays native. */
+.arc-date-field[data-time] .arc-date-control { flex-basis: var(--rental-control-width-date); min-width: min(100%, var(--rental-control-width-date)); }
+.arc-time-fields .arc-time-control { gap: 0; }
+.arc-time-fields .arc-time-control > span:first-child { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .arc-date-popup { --radius-panel: var(--radius-field); z-index: 1200; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .arc-date-range { position: relative; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 .arc-date-range > :first-child { flex: 1 1 auto; min-width: 0; }

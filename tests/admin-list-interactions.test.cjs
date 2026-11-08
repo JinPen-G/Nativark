@@ -58,7 +58,8 @@ test('membership screens discard local task snapshots at identity or review-gran
   const Review = boundary('apps/admin/src/features/membership/MembershipReviewPage.tsx', 'MembershipReviewPage', 'MembershipReviewWorkspace');
   const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');
   const Personal = boundary('apps/admin/src/features/membership/PersonalMembershipPage.tsx', 'PersonalMembershipPage', 'PersonalMembershipWorkspace');
-  for (const Screen of [Review, Rewards, Personal]) {
+  const Corporate = boundary('apps/admin/src/features/membership/CorporateMembershipPage.tsx', 'CorporateMembershipPage', 'CorporateMembershipWorkspace');
+  for (const Screen of [Review, Rewards, Personal, Corporate]) {
     identity = 'tenant-a:workspace-a:operator';
     const original = Screen();
     assert.equal(Screen().key, original.key, 'Ordinary rerenders retain the form.');
@@ -70,9 +71,11 @@ test('membership screens discard local task snapshots at identity or review-gran
   }
   const allowed = Review().key;
   const personalAllowed = Personal().key;
+  const corporateAllowed = Corporate().key;
   grants = new Set(['rental-os:member:view']);
   assert.notEqual(Review().key, allowed, 'Revoking review rights closes its old task even if the list identity stays stable.');
   assert.notEqual(Personal().key, personalAllowed, 'Personal profile drafts cannot survive a changed tenant membership grant.');
+  assert.notEqual(Corporate().key, corporateAllowed, 'Company and employee drafts cannot survive a changed tenant membership grant.');
 });
 
 test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {

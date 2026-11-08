@@ -23,12 +23,12 @@ function SingleDatePicker(props: DatePickerProps<Dayjs, false>) {
   // These Ant contracts need a dedicated adapter, not an approximation of dates.
   if (props.multiple || (props.picker && props.picker !== "date") || props.disabledTime || props.needConfirm || props.cellRender || props.panelRender || props.onOk || props.open !== undefined || Array.isArray(props.format) || typeof props.format === "function") return <AntDatePicker {...props} />;
   const seconds = Boolean(props.showTime) && !(typeof props.format === "string" && !props.format.includes("ss"));
-  return <div className={`arc-date-field ${props.className ?? ""}`} style={props.style} data-size={props.size ?? componentSize} aria-disabled={disabled}><ArcLocale>
+  return <div className={`arc-date-field ${props.className ?? ""}`} style={props.style} data-time={Boolean(props.showTime) || undefined} data-size={props.size ?? componentSize} aria-disabled={disabled}><ArcLocale>
     <ArcDatePicker className="arc-date-control" id={props.id} label={typeof props["aria-label"] === "string" ? props["aria-label"] : typeof props.placeholder === "string" ? props.placeholder : t("选择日期")} value={value?.isValid() ? value.toDate() : undefined} placeholder={typeof props.placeholder === "string" ? props.placeholder : t("选择日期")}
       locale={locale} disabled={disabled} allowClear={props.allowClear !== false} minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()} defaultMonth={props.defaultPickerValue?.toDate()} showToday={props.showToday !== false}
       disabledDates={props.disabledDate ? date => props.disabledDate!(dayjs(date), { type: "date" }) : undefined}
       onChange={date => { if (!date) emit(null); else { const base = value ?? dayjs().startOf("day"); emit(dayjs(date).hour(base.hour()).minute(base.minute()).second(base.second()).millisecond(0)); } }} />
-    {props.showTime && value?.isValid() && <div className="arc-time-fields"><ArcTimePicker label={t("时间")} value={value.format("HH:mm")} minuteStep={1} format="24h" disabled={disabled}
+    {props.showTime && value?.isValid() && <div className="arc-time-fields"><ArcTimePicker className="arc-time-control" label={t("时间")} value={value.format("HH:mm")} minuteStep={1} format="24h" disabled={disabled}
       onChange={time => { const [hour, minute] = time.split(":").map(Number); emit(value.hour(hour).minute(minute)); }} />
       {seconds && <label className="arc-seconds">{t("秒")}<input type="number" min={0} max={59} value={value.second()} disabled={disabled} onChange={event => { const number = Number(event.target.value); if (Number.isInteger(number) && number >= 0 && number <= 59) emit(value.second(number)); }} /></label>}</div>}
     {props.allowClear !== false && value && <Button size="small" disabled={disabled} onClick={() => emit(null)} aria-label={t("清空日期")}>{t("清空")}</Button>}
