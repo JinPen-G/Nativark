@@ -1,4 +1,5 @@
 import { PermissionEditor, PermissionMatrix } from "./PermissionMatrix";
+import { isFixedRole, permissionDraftChanges, rolePermissionBaseline, type PermissionDraft, type RoleEditorTarget } from "./permission-matrix-model";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { Card as ArcCard } from "@/registry/components/card/card";
 import { Button as ArcButton } from "@/registry/components/button/button";
@@ -27,7 +28,7 @@ import { Alert, Table } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, ConfirmAction, CopyButton, DataTableRowActions, Drawer, SaveButton } from "@/components/ui";
-import { KeyRound, Pencil } from "lucide-react";
+import { Info, KeyRound, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { useLocale } from "@/app/locale";
@@ -181,6 +182,7 @@ export function TenantOperationsAccountPage() {
     });
     setEditing(user);
     setAccessRows(assignments);
+    form.resetFields();
     form.setFieldsValue(user ? {
       id: user.id,
       account: user.account,
@@ -304,10 +306,23 @@ export function TenantRolePermissionPage() {
   const [editing, setEditing] = useState<SystemRoleRow>();
   const [open, setOpen] = useState(false);
   const [roleView, setRoleView] = useState("matrix");
+  const [permissionDraft, setPermissionDraft] = useState<PermissionDraft | null>(null);
+  const [editorSection, setEditorSection] = useState("profile");
+  const [editorQuery, setEditorQuery] = useState("");
+  const readOnlyRole = Boolean(editing && isFixedRole(editing));
+  const reviewChanges = editing && permissionDraft?.roleId === editing.id ? permissionDraftChanges(editing, permissionDraft) : undefined;
+  const permissionNames = new Map((permissions.data ?? []).flatMap(module => module.children.map(permission => [permission.code, t(permission.name)])));
 
   const save = useMutation({
-    mutationFn: api.saveRole,
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["tenant-access", "roles"] }); setOpen(false); message.success(t("角色权限已保存")); },
+    mutationFn: (values: SaveSystemRoleRequest) => {
+      const current = roles.data?.find(role => role.id === values.id);
+      if (values.id && !current || current && permissionDraft?.roleId === current.id && permissionDraft.baseline !== rolePermissionBaseline(current)) {
+        throw new Error(t("角色资料已更新，请放弃旧草稿后重新核对。"));
+      }
+      if (current && isFixedRole(current)) throw new Error(t("系统预设角色的权限不可修改。"));
+      return api.saveRole(values);
+    },
+    onSuccess: async saved => { await queryClient.invalidateQueries({ queryKey: ["tenant-access", "roles"] }); setPermissionDraft(current => current?.roleId === saved.id ? null : current); setOpen(false); message.success(t("角色权限已保存")); },
     onError: () => message.error(t("角色保存失败，请检查编码和权限"))
   });
   const remove = useMutation({
@@ -316,8 +331,14 @@ export function TenantRolePermissionPage() {
     onError: () => message.error(t("角色仍被账号或空间使用，不能删除"))
   });
 
-  function openEditor(role?: SystemRoleRow) {
+  function openEditor(role?: SystemRoleRow, target: RoleEditorTarget = {}) {
+    if (target.draft && (!role || target.draft.roleId !== role.id || target.draft.baseline !== rolePermissionBaseline(role))) {
+      message.warning(t("角色资料已更新，请放弃旧草稿后重新核对。")); return;
+    }
     setEditing(role);
+    setEditorSection(target.section ?? "profile");
+    setEditorQuery(target.query ?? "");
+    form.resetFields();
     form.setFieldsValue(role ? {
       id: role.id,
       code: role.code,
@@ -325,7 +346,8 @@ export function TenantRolePermissionPage() {
       description: role.description,
       scope: role.scope,
       enabledBusinessScopes: role.enabledBusinessScopes,
-      permissions: [...new Set([...role.permissions.filter((item) => item !== "*"), ...role.buttonPermissions.filter((item) => item !== "*")])],
+      permissions: isFixedRole(role) ? (permissions.data ?? []).flatMap(module => module.children.map(permission => permission.code))
+        : target.draft?.permissions ?? [...new Set([...role.permissions.filter((item) => item !== "*"), ...role.buttonPermissions.filter((item) => item !== "*")])],
       dataScope: role.dataScope,
       isActive: role.isActive
     } : { code: "", name: "", scope: RoleScope.Store, enabledBusinessScopes: ["rental"], permissions: [], dataScope: "store", isActive: true });
@@ -333,11 +355,15 @@ export function TenantRolePermissionPage() {
   }
 
   return <>
-    <PageHeader title={t("角色权限管理")} summary={<InsightMetrics items={[{label:t("角色"),value:roleFilter.rows.length},{label:t("权限模块"),value:permissions.data?.length}]} />} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>} />
+    <PageHeader title={t("角色权限管理")} summary={<InsightMetrics items={[{label:t("角色"),value:roleView === "matrix" ? roles.data?.length : roleFilter.rows.length},{label:t("权限模块"),value:permissions.data?.length}]} />} extra={<Space wrap>
+      <Segmented aria-label={t("角色视图")} value={roleView} onChange={value=>setRoleView(String(value))} options={[{value:"matrix",label:t("权限对照")},{value:"list",label:t("角色列表")}]}/>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增角色")}</Button>
+    </Space>} />
     <QueryState loading={roles.isLoading || permissions.isLoading} error={roles.error ?? permissions.error}>
-      <Alert type="warning" showIcon title={t("数据权限")} description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")} style={{ marginBottom: "var(--space-4)" }} />
-      <div className={accessStyles.roleTools}><ListFilterBar><ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/></ListFilterBar><Segmented value={roleView} onChange={value=>setRoleView(String(value))} options={[{value:"matrix",label:t("权限对照")},{value:"list",label:t("角色列表")}]}/></div>
-      {roleView === "matrix" ? <PermissionMatrix roles={roleFilter.rows} modules={permissions.data??[]} onEdit={openEditor}/> : <ListSection>
+      <p className={accessStyles.scopeNotice}><Info size={14} aria-hidden="true" />{t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")}</p>
+      <div hidden={roleView !== "matrix"}><PermissionMatrix roles={roles.data ?? []} modules={permissions.data??[]} onEdit={openEditor} draft={permissionDraft} onDraftChange={setPermissionDraft}
+        busy={roles.isFetching || permissions.isFetching || save.isPending} onRefresh={() => Promise.all([roles.refetch({ throwOnError: true }), permissions.refetch({ throwOnError: true })])} /></div>
+      {roleView === "list" && <ListSection controls={<ListFilters filter={roleFilter} placeholder="角色名称或编码" options={[{value:"active",label:"已启用"},{value:"disabled",label:"已停用"}]}/>}>
 
 
         <Table<SystemRoleRow> toolbarNote={false} rowKey="id" onRefresh={() => roles.refetch()} loading={roles.isLoading} refreshing={roles.isFetching} dataSource={roleFilter.rows} pagination={roleFilter.pagination} scroll={{ x: 980 }} columns={[
@@ -351,9 +377,15 @@ export function TenantRolePermissionPage() {
       </ListSection>}
     </QueryState>
 
-    <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>
-      <Form<SaveSystemRoleRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id, buttonPermissions: [] })}>
-        <SettingsWorkspace sections={[
+    <Drawer title={readOnlyRole ? t("查看角色") : editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={readOnlyRole ? undefined : <SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>
+      {editing && <div className={accessStyles.reviewChanges}><strong>{editing.name}</strong>{readOnlyRole && <p>{t("系统预设角色的权限不可修改。")}</p>}
+        {reviewChanges && <><p>{t("核对本次权限修改后保存；取消关闭会保留矩阵中的草稿。")}</p>
+          <p>{t("新增")} {reviewChanges.added.length} · {reviewChanges.added.map(code => permissionNames.get(code) ?? code).join("、") || t("无")}</p>
+          <p>{t("移除")} {reviewChanges.removed.length} · {reviewChanges.removed.map(code => permissionNames.get(code) ?? code).join("、") || t("无")}</p>
+        </>}
+      </div>}
+      <Form<SaveSystemRoleRequest> form={form} layout="vertical" disabled={readOnlyRole || save.isPending} onFinish={(values) => !readOnlyRole && save.mutate({ ...values, id: editing?.id, buttonPermissions: [] })}>
+        <SettingsWorkspace value={editorSection} onChange={setEditorSection} sections={[
           { key: "profile", label: t("基本资料"), content: <FormSection title={t("基本资料")}>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="name" label={t("角色名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
@@ -365,7 +397,7 @@ export function TenantRolePermissionPage() {
           </FormSection> },
           { key: "permissions", label: t("操作权限"), content: <FormSection title={t("操作权限")}
             description={t("按模块勾选页面访问和具体操作。未勾选即拒绝，前端隐藏不替代后端鉴权。")}>
-        <Form.Item name="permissions"><PermissionEditor modules={permissions.data ?? []} disabled={save.isPending} /></Form.Item>
+        <Form.Item name="permissions"><PermissionEditor key={`${editing?.id ?? "new"}:${editorQuery}`} initialQuery={editorQuery} modules={permissions.data ?? []} disabled={readOnlyRole || save.isPending} /></Form.Item>
           </FormSection> },
           { key: "scope", label: t("数据范围"), content: <FormSection title={t("数据范围")}
             description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")}>

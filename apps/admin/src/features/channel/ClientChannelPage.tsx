@@ -327,10 +327,10 @@ function WechatCredentialsCard() {
           <Col xs={24} md={12}><Form.Item name="appSecret" label="AppSecret" extra={data?.secretConfigured ? t("已配置；留空保持原密钥不变") : t("首次配置必填")}><Input.Password placeholder={data?.secretConfigured ? t("已配置（留空不修改）") : "AppSecret"} /></Form.Item></Col>
         </Row>
         <Form.Item name="enabled" label={t("启用渠道")} valuePropName="checked" extra={t("启用前须已填写 AppSecret")}><Switch /></Form.Item>
-        <Space>
+        <Space wrap>
           <SaveButton label={t("保存凭证")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           <ActionButton variant="secondary" label={t("测试连接")} pendingLabel={t("检测中")} successLabel={t("检测通过")} pending={test.isPending} disabled={!data?.secretConfigured && !enabled} onAction={async () => { const result = await test.mutateAsync(); if (!result.ok) throw new Error(result.message); }} />
-          {data?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}：{data.lastTestAt}</Typography.Text> : null}
+          {data?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}：{new Date(data.lastTestAt).toLocaleString()}</Typography.Text> : null}
         </Space>
         {data?.lastTestStatus === "failed" && data.lastTestError ? <Alert style={{ marginTop: 12 }} showIcon type="error" title={t("上次测试失败")} description={data.lastTestError} /> : null}
       </Form>

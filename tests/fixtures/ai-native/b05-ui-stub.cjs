@@ -7,6 +7,8 @@ exports.Checkbox = props => React.createElement('input', { ...clean(props), type
 // The offline task fixture keeps semantic empty copy/actions; artwork is browser-verified.
 exports.EmptyScene = props => React.createElement('section', { 'data-empty-scene': props.scene },
   React.createElement('h3', null, props.title), props.description && React.createElement('p', null, props.description), props.action);
+exports.Alert = props => React.createElement('section', { role: props.type === 'error' ? 'alert' : 'status' },
+  React.createElement('strong', null, props.title ?? props.message), props.description && React.createElement('p', null, props.description), props.action);
 exports.Input = props => React.createElement('input', clean(props));
 exports.Select = props => React.createElement('select', clean(props), (props.options ?? []).map(option => React.createElement('option', { key: option.value, value: option.value }, option.label)));
 // Render the same supplied records/columns; no invented proposal rows or actions.

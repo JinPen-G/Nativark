@@ -1,5 +1,5 @@
 import { toDisplayTask, type DisplayTask } from "./display-models";
-import { Button, EmptyScene } from "@/components/ui";
+import { Alert, Button, EmptyScene } from "@/components/ui";
 import styles from './AiManagement.module.css';
 export interface TaskListProps {
   tasks?: readonly unknown[];
@@ -50,21 +50,20 @@ export function TaskList({
         首次加载中…
       </p>
     );
-  if (forbidden) return <p className={styles.empty} role="status">{t("无权限查看 AI 任务")}</p>;
+  if (forbidden) return <Alert type="warning" showIcon title={t("无权限查看 AI 任务")} />;
   if (error && (!tasks || tasks.length === 0)) {
     return (
-      <div>
-        <p role="alert">任务列表加载失败：{error}</p>
-        {onRetry && <Button onClick={onRetry}>重试</Button>}
-      </div>
+      <Alert type="error" showIcon title={t("任务列表加载失败")} description={error}
+        action={onRetry && <Button onClick={onRetry}>{t("重试")}</Button>} />
     );
   }
   const rows: DisplayTask[] = (tasks ?? []).map(toDisplayTask);
   if (!rows.length) return <EmptyScene compact scene="empty" title={t("暂无 AI 任务")} />;
   return (
     <section aria-label={t("AI 任务列表")} aria-busy={paging}>
-      {loading && <p role="status" aria-live="polite">正在刷新任务…</p>}
-      {error && <p role="alert">任务列表刷新失败：{error}{onRetry && <Button onClick={onRetry}>重试</Button>}</p>}
+      {loading && <p role="status" aria-live="polite">{t("正在刷新任务…")}</p>}
+      {error && <Alert type="error" showIcon title={t("任务列表刷新失败")} description={error}
+        action={onRetry && <Button onClick={onRetry}>{t("重试")}</Button>} />}
       <ul className={styles.taskList}>
         {rows.map((task) => (
           <li key={task.id} data-selected={selectedTaskId === task.id || undefined}>
