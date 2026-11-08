@@ -1,0 +1,7 @@
+.rates { display: grid; gap: var(--space-4); }
+.rate { display: grid; gap: var(--space-4); width: 100%; min-width: 0; }
+.rate + .rate { border-top: 1px solid var(--border); padding-top: var(--space-4); }
+.rate > :global(.arc-form-section) { margin-block: 0; }
+.rateFields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; }
+.rateFields > * { min-width: 0; }
+.rateFields > :global(.ant-form-item) { margin-bottom: 0; }

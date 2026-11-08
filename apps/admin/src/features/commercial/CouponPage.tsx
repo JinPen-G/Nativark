@@ -1,6 +1,6 @@
 import { ListFilters, useListFilter } from "@/components/ui";
 import { couponCards } from "./couponCards";
-import { DataTableText, ListSection, SaveButton, Tabs } from "@/components/ui";
+import { DataTableText, DatePicker, FormSection, ListSection, SaveButton, Tabs } from "@/components/ui";
 import { EditOutlined, PlusOutlined } from "@/components/ui/icons";
 import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@rental-os/shared";
 import { formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
@@ -17,6 +17,12 @@ import { rentalCoreApi, useSettlementCurrency } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+
+const dateFieldBinding = {
+  getValueProps: (value?: string) => ({ value: value ? dayjs(value) : null }),
+  getValueFromEvent: (value: dayjs.Dayjs | null) => value?.toISOString(),
+};
 
 export function CouponPage() {
   const { message } = App.useApp();
@@ -28,6 +34,7 @@ export function CouponPage() {
   const [voiding, setVoiding] = useState<RentalCustomerCoupon>();
   const [view, setView] = useState("templates");
   const [form] = Form.useForm<SaveRentalCouponTemplateRequest>();
+  const discountType = Form.useWatch("discountType", form);
   const [claimForm] = Form.useForm<{ templateId: string; customerId: string }>();
   const [voidForm] = Form.useForm<{ reason: string }>();
   const templates = useQuery({ queryKey: ["rental-core", "coupon-templates"], queryFn: rentalCoreApi.couponTemplates });
@@ -43,6 +50,7 @@ export function CouponPage() {
 
   function openEditor(record?: RentalCouponTemplate) {
     setEditing(record);
+    form.resetFields();
     form.setFieldsValue(record ?? {
       code: "", name: "", discountType: "fixed_amount", discountValue: 10, minimumSpend: 100,
       appliesTo: "rental", stackableWithDiscountPlans: true, totalQuota: 1000, perCustomerLimit: 1, perCustomerUseLimit: 1,
@@ -64,7 +72,7 @@ export function CouponPage() {
         <QueryState loading={templates.isLoading || groups.isLoading} error={templates.error || groups.error}>
           <Table<RentalCouponTemplate> cardView={{ ...couponCards({ t, money, groups: groups.data ?? [], edit: openEditor }), defaultView: "cards" }} exportConfig={{ filename: t("优惠券"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("版本"), value: row => row.version }, { label: t("状态"), value: row => row.status }, { label: t("优惠"), value: row => row.discountValue }] }} rowKey="id" onRefresh={() => templates.refetch()} loading={templates.isLoading} refreshing={templates.isFetching} dataSource={couponFilter.rows} pagination={couponFilter.pagination} scroll={{ x: 1100 }} columns={[
             { title: t("优惠券"), fixed: "left", render: (_, row) => <DataTableText primary={row.name} secondary={`${row.code} · v${row.version}`} /> },
-            { title: t("优惠"), render: (_, row) => row.discountType === "fixed_amount" ? (locale === "en-US" ? `${t("减免")} ${money(row.discountValue)}` : `减 ${money(row.discountValue)}`) : `${row.discountValue}% ${t("折扣")}${row.maximumDiscount ? (locale === "en-US" ? `, ${t("最高减免")} ${money(row.maximumDiscount)}` : `，封顶 ${money(row.maximumDiscount)}`) : ""}` },
+            { title: t("优惠"), render: (_, row) => row.discountType === "fixed_amount" ? (locale === "en-US" ? `${t("减免")} ${money(row.discountValue)}` : `减 ${money(row.discountValue)}`) : `${t("减免 {value}%", { value: row.discountValue })}${row.maximumDiscount !== undefined ? (locale === "en-US" ? `, ${t("最高减免")} ${money(row.maximumDiscount)}` : `，封顶 ${money(row.maximumDiscount)}`) : ""}` },
             { title: t("使用门槛"), dataIndex: "minimumSpend", render: (value) => value > 0 ? (locale === "en-US" ? `${t("满")} ${money(value)}` : `满 ${money(value)}`) : t("无门槛") },
             { title: t("发行 / 已领"), render: (_, row) => `${row.totalQuota} / ${row.claimedQuantity}` },
             { title: t("每客限领 / 使用"), render: (_, row) => `${row.perCustomerLimit} / ${row.perCustomerUseLimit}` },
@@ -95,28 +103,44 @@ export function CouponPage() {
 
       <Drawer title={t(editing ? "编辑优惠券模板" : "新增优惠券模板")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalCouponTemplateRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
-          <Row gutter={12}>
+          <SettingsWorkspace sections={[
+          { key: "profile", label: t("基本资料"), content: <FormSection title={t("模板资料")}>
+          <Row gutter={16}>
+            <Col span={24}><Form.Item name="name" label={t("模板名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="code" label={t("模板编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="name" label={t("模板名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="discountType" label={t("优惠类型")} rules={[{ required: true }]}><Select options={[{ value: "fixed_amount", label: t("固定减免") }, { value: "percentage", label: t("百分比折扣") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="discountValue" label={t("优惠值")} rules={[{ required: true }]}><InputNumber min={0.01} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "draft", label: t("草稿") }, { value: "scheduled", label: t("待开始") }, { value: "active", label: t("进行中") }, { value: "paused", label: t("已暂停") }, { value: "ended", label: t("已结束") }, { value: "void", label: t("已作废") }]} /></Form.Item></Col>
+          </Row>
+          </FormSection> },
+          { key: "discount", label: t("优惠设置"), content: <FormSection title={t("优惠设置")}>
+          <Row gutter={16}>
+            <Col span={12}><Form.Item name="discountType" label={t("优惠类型")} rules={[{ required: true }]}><Select options={[{ value: "fixed_amount", label: t("固定减免") }, { value: "percentage", label: t("百分比减免") }]} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="discountValue" label={t(discountType === "percentage" ? "减免比例（%）" : "减免金额")} rules={[{ required: true }]}><InputNumber min={0.01} max={discountType === "percentage" ? 100 : undefined} precision={2} prefix={discountType === "percentage" ? undefined : rentalCurrencySymbol(currency)} suffix={discountType === "percentage" ? "%" : undefined} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="minimumSpend" label={t("最低消费")}><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="maximumDiscount" label={t("最高减免")}><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="appliesTo" label={t("作用费用")} rules={[{ required: true }]}><Select options={[{ value: "rental", label: t("商品租金与使用量") }, { value: "fulfillment", label: t("履约费") }, { value: "service", label: t("增值服务费") }]} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="stackableWithDiscountPlans" label={t("与自动优惠叠加")} rules={[{ required: true }]}><Select options={[{ value: true, label: t("允许") }, { value: false, label: t("不允许") }]} /></Form.Item></Col>
+          </Row>
+          <Form.Item name="applicableItemGroupIds" label={t("适用商品（留空为全部）")}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={(groups.data ?? []).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item>
+          </FormSection> },
+          { key: "schedule", label: t("领取与使用"), content: <FormSection title={t("领取与使用时间")}>
+          <Row gutter={16}>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="claimFrom" label={t("开始领取时间")} rules={[{ required: true }]}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="claimTo" label={t("停止领取时间")} rules={[{ required: true }]}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="effectiveFrom" label={t("开始使用时间")} rules={[{ required: true }]}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="effectiveTo" label={t("停止使用时间")} rules={[{ required: true }]}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="applicableRentalFrom" label={t("适用租期开始（可选）")}><DatePicker showTime needConfirm allowClear style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item {...dateFieldBinding} name="applicableRentalTo" label={t("适用租期结束（可选）")}><DatePicker showTime needConfirm allowClear style={{ width: "100%" }} /></Form.Item></Col>
+          </Row>
+          </FormSection> },
+          { key: "quota", label: t("发行与预算"), content: <FormSection title={t("发行与预算")}>
+          <Row gutter={16}>
             <Col span={12}><Form.Item name="totalQuota" label={t("发行总量")} rules={[{ required: true }]}><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="perCustomerLimit" label={t("每客限领")} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="perCustomerUseLimit" label={t("每客限用")} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="totalBudget" label={t("优惠总预算（留空不限）")}><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="appliesTo" label={t("作用费用")} rules={[{ required: true }]}><Select options={[{ value: "rental", label: t("商品租金与使用量") }, { value: "fulfillment", label: t("履约费") }, { value: "service", label: t("增值服务费") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="stackableWithDiscountPlans" label={t("与自动优惠叠加")} rules={[{ required: true }]}><Select options={[{ value: true, label: t("允许") }, { value: false, label: t("不允许") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="claimFrom" label={t("开始领取时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="claimTo" label={t("停止领取时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="effectiveFrom" label={t("开始使用时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="effectiveTo" label={t("停止使用时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="applicableRentalFrom" label={t("适用租期开始（可选）")}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="applicableRentalTo" label={t("适用租期结束（可选）")}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
           </Row>
-          <Form.Item name="applicableItemGroupIds" label={t("适用商品（留空为全部）")}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={(groups.data ?? []).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item>
-          <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "draft", label: t("草稿") }, { value: "scheduled", label: t("待开始") }, { value: "active", label: t("进行中") }, { value: "paused", label: t("已暂停") }, { value: "ended", label: t("已结束") }, { value: "void", label: t("已作废") }]} /></Form.Item>
+          </FormSection> }
+          ]} />
         </Form>
       </Drawer>
       <Modal title={t("向客户发放优惠券")} open={claimOpen} onCancel={() => setClaimOpen(false)} onConfirm={() => claimForm.validateFields().then((values) => claim.mutateAsync(values))} confirmLoading={claim.isPending} destroyOnHidden>

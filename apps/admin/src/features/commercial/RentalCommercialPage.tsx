@@ -1,11 +1,11 @@
 import { discountCards, serviceCards } from "./commercialCards";
 import { ListFilters, useListFilter } from "@/components/ui";
-import { ListSection, SaveButton } from "@/components/ui";
+import { DataTableRowActions, DataTableText, ListSection, SaveButton } from "@/components/ui";
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@/components/ui/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingGroup, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Popconfirm, Row, Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Popconfirm, Row, Space, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form, FormSection } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, Drawer, Select } from "@/components/ui";
 import dayjs from "dayjs";
+import { FileDiff, RotateCcw } from "lucide-react";
 import { useMatch, useNavigate, useParams } from "react-router-dom";
 import { RecordDetailLayout } from "@/components/RecordDetailLayout";
 import { useState } from "react";
@@ -23,6 +24,7 @@ import { QueryState } from "@/components/QueryState";
 import { usePriceVersions } from "./usePriceVersions";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { fulfillmentModeLabels } from "@/features/fulfillment/fulfillmentLabels";
+import editorStyles from "./CommercialEditor.module.css";
 
 export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
@@ -267,7 +269,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     setAdjustmentPlan(record);
   }
 
-  function submitAdjustment(values: CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }) {
+  async function submitAdjustment(values: CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }) {
     const currentByKey = new Map((currentPriceVersionDetail.data?.rates ?? []).map((rate) => [pricingRateKey(rate), rate.baseAmount]));
     const changes = values.changes.filter((change) => {
       const key = `${change.pricingGroupId ?? change.itemGroupId}:${change.unit}`;
@@ -275,9 +277,9 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     });
     if (!changes.length) {
       message.warning(t("价格没有变化，请先填写至少一个新的价格"));
-      return;
+      throw new Error(t("价格没有变化，请先填写至少一个新的价格"));
     }
-    createAdjustment.mutate({ ...values, changes });
+    return createAdjustment.mutateAsync({ ...values, changes });
   }
 
   function editDiscount(record?: RentalDiscountPlan) {
@@ -417,7 +419,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               { title: t("调整范围"), render: (_, row) => locale === "en-US" ? `${row.changes.length} price items` : `${row.changes.length} 个价格项` },
               { title: t("状态"), dataIndex: "status", render: (value) => <Tag>{t(adjustmentStatusLabels[value] ?? value)}</Tag> },
               { title: t("原因"), dataIndex: "changeReason" },
-              { title: t("操作"), render: (_, row) => row.status === "draft" ? <Space size={0}><Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutate(row.id)}><Button type="link">{t("确认")}</Button></Popconfirm><Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button></Space> : row.status === "pending" ? <Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button> : <Typography.Text type="secondary">—</Typography.Text> },
+              { title: t("操作"), render: (_, row) => row.status === "draft" ? <Space size={0}><Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutateAsync(row.id)}><Button type="link">{t("确认")}</Button></Popconfirm><Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button></Space> : row.status === "pending" ? <Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>{t("取消")}</Button> : <Typography.Text type="secondary">—</Typography.Text> },
             ]} />
           </ListSection>
         </Space>
@@ -445,7 +447,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 {
                   title: t("优惠规则"),
                   render: (_, row) => row.discountType === "percentage"
-                    ? `${row.discountValue}% ${t("折扣")}${row.maximumDiscount ? (locale === "en-US" ? `, ${t("最高减免")} ${money(row.maximumDiscount)}` : `，最高减 ${money(row.maximumDiscount)}`) : ""}`
+                    ? `${t("减免 {value}%", { value: row.discountValue })}${row.maximumDiscount !== undefined ? (locale === "en-US" ? `, ${t("最高减免")} ${money(row.maximumDiscount)}` : `，最高减 ${money(row.maximumDiscount)}`) : ""}`
                     : row.discountType === "threshold_amount"
                       ? `${t("满")} ${money(row.thresholdAmount)} ${t("减")} ${money(row.discountValue)}`
                       : `${t("减")} ${money(row.discountValue)}`,
@@ -549,11 +551,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       )}
 
       <Drawer
-        title={t("新增统一调价计划")}
+        title={t("新增调价计划")}
         size={900}
         open={Boolean(adjustmentPlan)}
         destroyOnHidden
         onClose={() => { setAdjustmentPlan(null); setAdjustmentPreview([]); setCreatedAdjustmentId(undefined); adjustmentForm.resetFields(); }}
+        extra={<SaveButton label={t("创建草稿并预览")} form={adjustmentForm} pending={createAdjustment.isPending} onSave={submitAdjustment} />}
       >
         <Alert
           type="info"
@@ -561,36 +564,35 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           title={t("只调整需要变更的价格；确认后才会生效或进入待生效。")}
           style={{ marginBottom: 16 }}
         />
-        <Form form={adjustmentForm} layout="vertical" onFinish={submitAdjustment}>
+        <Form form={adjustmentForm} layout="vertical" onFinish={values => { void submitAdjustment(values).catch(() => undefined); }}>
           <Form.Item name="code" hidden><Input /></Form.Item>
-          <Row gutter={12}>
-            <Col span={14}><Form.Item name="name" label={t("计划名称")} rules={[{ required: true, message: t("请填写计划名称") }]}><Input placeholder={t("例如：国庆档统一调价")} /></Form.Item></Col>
-            <Col span={10}><Form.Item name="scheduledAtValue" label={t("生效时间（留空则确认后立即生效）")}><DatePicker showTime style={{ width: "100%" }} /></Form.Item></Col>
+          <Row gutter={16}>
+            <Col xs={24} md={14}><Form.Item name="name" label={t("计划名称")} rules={[{ required: true, message: t("请填写计划名称") }]}><Input placeholder={t("例如：国庆档统一调价")} /></Form.Item></Col>
+            <Col xs={24} md={10}><Form.Item name="scheduledAtValue" label={t("生效时间")} extra={t("留空则在确认后立即生效")}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
           </Row>
           <Form.List name="changes">
             {(fields) => (
-              <Space orientation="vertical" style={{ width: "100%" }}>
+              <div>
                 {fields.map((field) => (
-                  <Card size="small" key={field.key}>
-                    <Row gutter={12} align="middle">
+                  <div key={field.key} className={editorStyles.adjustmentRow}>
+                    <Row gutter={[16, 12]} align="middle">
                       <Form.Item name={[field.name, "pricingGroupId"]} hidden><Input /></Form.Item>
                       <Form.Item name={[field.name, "itemGroupId"]} hidden><Input /></Form.Item>
                       <Form.Item name={[field.name, "unit"]} hidden><Input /></Form.Item>
                       <Form.Item name={[field.name, "op"]} hidden><Input /></Form.Item>
-                      <Col span={10}><b>{currentPriceVersionDetail.data?.rates[field.name]?.pricingGroupName ?? currentPriceVersionDetail.data?.rates[field.name]?.itemGroupName}</b><br/><Typography.Text type="secondary">{t(unitLabels[currentPriceVersionDetail.data?.rates[field.name]?.unit ?? "calendar_day"])}</Typography.Text></Col>
-                      <Col span={6}><Typography.Text type="secondary">{t("当前价")}</Typography.Text><br/><b>{money(currentPriceVersionDetail.data?.rates[field.name]?.baseAmount)}</b></Col>
-                      <Col span={8}><Form.Item name={[field.name, "value"]} label={t("调后价格")} rules={[{ required: true, message: t("请填写调后价格") }]} style={{ marginBottom: 0 }}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
+                      <Col xs={24} md={10}><DataTableText primary={currentPriceVersionDetail.data?.rates[field.name]?.pricingGroupName ?? currentPriceVersionDetail.data?.rates[field.name]?.itemGroupName} secondary={t(unitLabels[currentPriceVersionDetail.data?.rates[field.name]?.unit ?? "calendar_day"])} /></Col>
+                      <Col xs={12} md={6}><Typography.Text type="secondary">{t("当前价")}</Typography.Text><br/><Typography.Text>{money(currentPriceVersionDetail.data?.rates[field.name]?.baseAmount)}</Typography.Text></Col>
+                      <Col xs={12} md={8}><Form.Item name={[field.name, "value"]} label={t("调后价格")} rules={[{ required: true, message: t("请填写调后价格") }]} style={{ marginBottom: 0 }}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
                     </Row>
-                  </Card>
+                  </div>
                 ))}
-              </Space>
+              </div>
             )}
           </Form.List>
           <Form.Item name="changeReason" label={t("调价原因")} rules={[{ required: true }]} style={{ marginTop: 12 }}><Input.TextArea rows={2} /></Form.Item>
-          <Button type="primary" htmlType="submit" loading={createAdjustment.isPending}>{t("创建草稿并预览")}</Button>
         </Form>
         {adjustmentPreview.length > 0 && (
-          <ListSection title={t("本次最终价预览")} style={{ marginTop: "var(--rental-layout-section-gap)" }} extra={createdAdjustmentId && <Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutate(createdAdjustmentId)}><Button type="primary" loading={confirmAdjustment.isPending}>{t("确认计划")}</Button></Popconfirm>}>
+          <ListSection title={t("本次最终价预览")} style={{ marginTop: "var(--rental-layout-section-gap)" }} extra={createdAdjustmentId && <Popconfirm title={t("确认后将立即生效或进入待生效，是否继续？")} onConfirm={() => confirmAdjustment.mutateAsync(createdAdjustmentId)}><Button type="primary" loading={confirmAdjustment.isPending}>{t("确认计划")}</Button></Popconfirm>}>
             <Table rowKey={(row) => `${row.itemGroupId}:${row.unit}`} pagination={false} dataSource={adjustmentPreview} columns={[
               { title: t("定价分组"), dataIndex: "itemGroupCode" },
               { title: t("计价单位"), dataIndex: "unit", render: (value) => t(unitLabels[value as keyof typeof unitLabels] ?? value) },
@@ -621,14 +623,14 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           { title: t("价格条目"), dataIndex: "rateCount", render: (value) => locale === "en-US" ? `${value} items` : `${value} 条` },
           { title: t("变更原因"), dataIndex: "changeReason" },
           { title: t("创建人"), dataIndex: "createdBy" },
-          { title: t("操作"), render: (_, row) => <Space size={0}><Button type="link" onClick={() => setVersionSequence(row.sequence)}>{t("查看 / 对比")}</Button><Button type="link" onClick={() => setRestoreSequence(row.sequence)}>{t("恢复")}</Button></Space> },
+          { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "compare", label: t("查看详情"), icon: FileDiff, onSelect: () => setVersionSequence(row.sequence) }} details={() => setVersionSequence(row.sequence)} detailLabel={t("查看详情")} menuLabel={`${row.version} · ${t("更多操作")}`} actions={[{ id: "restore", label: t("恢复"), icon: RotateCcw, onSelect: () => setRestoreSequence(row.sequence) }]} /> },
         ]} />
       </ListSection></QueryState></RecordDetailLayout>}
 
       {versionPage && <RecordDetailLayout title={t("价格版本详情") + (versionSequence ? " · v" + versionSequence : "")} onBack={() => navigate("/rental/pricing/versions")} facts={versionDetail.data ? [
         { key: "effective", label: "生效时间", value: dayjs(versionDetail.data.effectiveFrom).format("YYYY-MM-DD HH:mm") },
         { key: "created", label: "创建人", value: versionDetail.data.createdBy || "—" },
-        { key: "reason", label: "变更原因", value: versionDetail.data.changeReason || "—" }
+        { key: "reason", label: "变更原因", value: versionDetail.data.changeReason || "—", wide: true }
       ] : undefined}>
       {!versionSequence ? <Alert type="error" showIcon title={t("价格版本无效")} /> : <QueryState loading={versionDetail.isLoading || previousVersion.isLoading} error={versionDetail.error ?? previousVersion.error}><ListSection title={t("价格对比")}>
         <Table
@@ -637,7 +639,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           loading={versionDetail.isLoading || previousVersion.isLoading} refreshing={versionDetail.isFetching || previousVersion.isFetching}
           onRefresh={() => Promise.all([versionDetail.refetch({ throwOnError: true }), ...(versionSequence && versionSequence > 1 ? [previousVersion.refetch({ throwOnError: true })] : [])])} dataSource={versionDetail.data?.rates ?? []}
           columns={[
-            { title: t("定价分组"), render: (_, row) => `${row.pricingGroupCode ?? row.itemGroupCode} · ${row.pricingGroupName ?? row.itemGroupName}` },
+            { title: t("定价分组"), render: (_, row) => <DataTableText primary={row.pricingGroupName ?? row.itemGroupName} secondary={row.pricingGroupCode ?? row.itemGroupCode} /> },
             { title: t("计价单位"), dataIndex: "unit", render: (value) => t(unitLabels[value as keyof typeof unitLabels] ?? value) },
             { title: t("上一版基础价"), render: (_, row) => { const before = previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount; return before === undefined ? "—" : money(before); } },
             { title: t("本版基础价"), dataIndex: "baseAmount", render: money },

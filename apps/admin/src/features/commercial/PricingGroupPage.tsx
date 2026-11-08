@@ -2,8 +2,8 @@ import { pricingGroupCards } from "./commercialCards";
 import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, InputNumber, Space, Tag, Typography } from "antd";
-import { DataTableMoney, DataTableText, ListSection, App } from "@/components/ui";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { DataTableMoney, DataTableText, FormSection, ListSection, App } from "@/components/ui";
 import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { toPricingGroupRequest, type PricingGroupFormValues } from "./pricing-group-initial-rate";
 import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
+import styles from "./PricingGroupPage.module.css";
 
 export function PricingGroupPage() {
   const { message } = App.useApp();
@@ -99,6 +100,7 @@ export function PricingGroupPage() {
       return;
     }
     setEditing(record);
+    form.resetFields();
     form.setFieldsValue(record ? {
       id: record.id,
       code: record.code,
@@ -130,6 +132,7 @@ export function PricingGroupPage() {
       return;
     }
     setSecurityEditing(record);
+    securityForm.resetFields();
     securityForm.setFieldsValue({ rates: currentRates });
     setSecurityOpen(true);
   }
@@ -164,8 +167,12 @@ export function PricingGroupPage() {
     </ListSection>
     <Drawer title={t(editing ? "编辑定价分组" : "新增定价分组")} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(toPricingGroupRequest(values, editing?.id))} />}>
       <Form<PricingGroupFormValues> form={form} layout="vertical" onFinish={(values) => save.mutate(toPricingGroupRequest(values, editing?.id))}>
-        <Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
+        <FormSection title={t("基本资料")}>
         <Form.Item name="name" label={t("分组名称")} rules={[{ required: true }]}><Input placeholder={locale === "en-US" ? `e.g. Standard ${itemLabel} group` : `如：标准${itemLabel}分组`} /></Form.Item>
+        <Row gutter={16}>
+          <Col xs={24} sm={12}><Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="STANDARD_GROUP" /></Form.Item></Col>
+          <Col xs={24} sm={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+        </Row>
         <Form.Item name="memberItemGroupIds" label={`${t("包含的")}${itemGroupLabel}`} rules={[{ required: true, type: "array", min: 1 }]} extra={t("同一型号可以加入多个定价分组；库存不会因此复制。")}>
           <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} optionRender={(option) => {
             const model = (models.data ?? []).find((item) => item.id === option.value);
@@ -173,7 +180,9 @@ export function PricingGroupPage() {
             return <Space orientation="vertical" size={0}><span>{option.label}</span>{specification && <span className="muted">{specification}</span>}</Space>;
           }} options={(models.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} />
         </Form.Item>
-        {!editing && <Card size="small" title={t("基本价")} style={{ marginBottom: 16 }}>
+        {editing && <Form.Item name="defaultPricingUnit" label={t("默认计价单位")}><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} /></Form.Item>}
+        </FormSection>
+        {!editing && <FormSection title={t("基本价")}>
           <Typography.Paragraph type="secondary">{t("第一行是默认计价单位。")}</Typography.Paragraph>
           <Form.List
             name="initialRates"
@@ -182,18 +191,18 @@ export function PricingGroupPage() {
               if (new Set(value.map((row: { unit?: string }) => row.unit)).size !== value.length) throw new Error(t("同一个计价单位不能重复"));
             } }]}
           >
-            {(fields, { add, remove }, { errors }) => <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-              {fields.map((field, index) => <Space key={field.key} orientation="vertical" size={4} style={{ width: "100%" }}>
-                <Space align="start" wrap style={{ width: "100%" }}>
+            {(fields, { add, remove }, { errors }) => <div className={styles.rates}>
+              {fields.map((field, index) => <div key={field.key} className={styles.rate}>
+                <div className={styles.rateFields}>
                   <Form.Item name={[field.name, "unit"]} label={index === 0 ? t("计价单位（默认）") : t("计价单位")} rules={[{ required: true, message: t("请选择计价单位") }]}>
-                    <Select style={{ width: "var(--rental-control-width-select)" }} options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} />
+                    <Select style={{ width: "100%" }} options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} />
                   </Form.Item>
                   <Form.Item name={[field.name, "baseAmount"]} label={t("价格")} rules={[{ required: true, message: t("请填写价格") }]}>
-                    <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "var(--rental-control-width-number)" }} />
+                    <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} />
                   </Form.Item>
                   <Button danger type="text" aria-label={t("删除基本价")} icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
-                </Space>
-                {securityRateFields.length > 0 && <Card size="small" title={t("押金与预授权")} style={{ marginTop: 8 }}>
+                </div>
+                {securityRateFields.length > 0 && <FormSection title={t("押金与预授权")}>
                   <Typography.Paragraph type="secondary">{t("按当前已生效的业务规则填写本计价单位需要的资金金额；押金是实收，预授权是冻结额度，两者分别计算。")}</Typography.Paragraph>
                   <Space align="start" wrap>
                     {securityRateFields.map((fieldConfig) => <Form.Item
@@ -206,12 +215,12 @@ export function PricingGroupPage() {
                       <InputNumber min={0.01} precision={2} style={{ width: "var(--rental-control-width-number)" }} />
                     </Form.Item>)}
                   </Space>
-                </Card>}
+                </FormSection>}
                 <Form.Item noStyle shouldUpdate={(previous, current) =>
                   previous.initialRates?.[field.name]?.unit !== current.initialRates?.[field.name]?.unit ||
                   previous.initialRates?.[field.name]?.usageMode !== current.initialRates?.[field.name]?.usageMode
                 }>
-                  {({ getFieldValue }) => getFieldValue(["initialRates", field.name, "unit"]) === "usage" && <Card size="small" title={t("用量计费规则")} style={{ marginTop: 8 }}>
+                  {({ getFieldValue }) => getFieldValue(["initialRates", field.name, "unit"]) === "usage" && <FormSection title={t("用量计费规则")}>
                     <Typography.Paragraph type="secondary">{locale === "en-US" ? "Charge the base amount, include the configured quantity, then bill excess usage by the selected rule. Each started precision step is rounded up." : `基础价包含设定用量；超出部分按统一单价或分段累进计费。计量精度按“开始即计”向上进位（${t(profile.data?.terminology.usageMetricLabel ?? "使用量")}）。`}</Typography.Paragraph>
                     <Space align="start" wrap>
                       <Form.Item name={[field.name, "includedUsage"]} label={t("基础价包含用量")} extra={t("留空按 0 处理")}>
@@ -265,17 +274,19 @@ export function PricingGroupPage() {
                     <Form.Item name={[field.name, "maxAmount"]} label={t("单件本次租期封顶（可选）")} extra={t("留空表示不封顶；填 0 表示免租")}>
                       <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "var(--rental-control-width-number)" }} />
                     </Form.Item>
-                  </Card>}
+                  </FormSection>}
                 </Form.Item>
-              </Space>)}
+              </div>)}
               <Form.ErrorList errors={errors} />
-              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: settings.data?.pricing.defaultUnit, baseAmount: 0, usagePrecision: 0, usageMode: "flat" })}>{t("增加计价单位")}</Button>
-            </Space>}
+              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => {
+                const existingRates = form.getFieldValue("initialRates") as PricingGroupFormValues["initialRates"];
+                const nextUnit = settings.data?.pricing.enabledUnits.find(unit => !existingRates?.some(rate => rate.unit === unit));
+                if (nextUnit) add({ unit: nextUnit, baseAmount: 0, usagePrecision: 0, usageMode: "flat" });
+              }}>{t("增加计价单位")}</Button>
+            </div>}
           </Form.List>
-        </Card>}
-        {editing && <Form.Item name="defaultPricingUnit" label={t("默认计价单位")}><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} /></Form.Item>}
+        </FormSection>}
         <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
       </Form>
     </Drawer>
     <Drawer presentation="dialog"
@@ -294,7 +305,7 @@ export function PricingGroupPage() {
           {(fields) => <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             {fields.map((field) => {
               const unit = securityForm.getFieldValue(["rates", field.name, "unit"]) as keyof typeof RENTAL_PRICING_UNIT_LABELS | undefined;
-              return <Card size="small" key={field.key} title={t(unit ? RENTAL_PRICING_UNIT_LABELS[unit] : "计价单位")}>
+              return <FormSection key={field.key} title={t(unit ? RENTAL_PRICING_UNIT_LABELS[unit] : "计价单位")}>
                 <Form.Item name={[field.name, "unit"]} hidden><Input /></Form.Item>
                 <Space align="start" wrap>
                   {securityRateFields.map((fieldConfig) => <Form.Item
@@ -307,7 +318,7 @@ export function PricingGroupPage() {
                     <InputNumber min={0.01} precision={2} style={{ width: "var(--rental-control-width-number)" }} />
                   </Form.Item>)}
                 </Space>
-              </Card>;
+              </FormSection>;
             })}
           </Space>}
         </Form.List>

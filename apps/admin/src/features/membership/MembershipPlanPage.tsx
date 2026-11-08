@@ -8,7 +8,7 @@ import type {
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
-import { ListSection, App } from "@/components/ui";
+import { FormSection, ListSection, App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -22,6 +22,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { planBatchActions } from "@/features/listCapabilities";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 
 const benefitOptions = [
   { value: "rental_discount", label: "租金优惠" },
@@ -160,10 +161,13 @@ export function MembershipPlanPage() {
         ] : []} /> },
       ]} />
     </ListSection>
-    <Drawer title={selected ? `${t("编辑方案")}: ${selected.name}` : t("新增会员方案")} size={640} open={editorOpen} onClose={() => { setSelected(undefined); setEditorOpen(false); form.resetFields(); }} destroyOnHidden>
+    <Drawer title={t(selected ? "编辑方案" : "新增会员方案")} size={640} open={editorOpen} onClose={() => setEditorOpen(false)} destroyOnHidden extra={<SaveButton label={t("保存草稿")} form={form} disabled={!canManage || scopeOptions.isError} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />}>
       <Form form={form} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && save.mutate(values)}>
-        <Form.Item name="code" label={t("方案编码")} rules={[{ required: true, whitespace: true, message: t("请输入方案编码") }]}><Input /></Form.Item>
+        {selected && <p className="muted" style={{ margin: "0 0 var(--space-3)" }}>{selected.name}</p>}
+        <SettingsWorkspace sections={[
+        { key: "profile", label: t("基本资料"), content: <FormSection title={t("方案资料")}>
         <Form.Item name="name" label={t("方案名称")} rules={[{ required: true, whitespace: true, message: t("请输入方案名称") }]}><Input /></Form.Item>
+        <Form.Item name="code" label={t("方案编码")} rules={[{ required: true, whitespace: true, message: t("请输入方案编码") }]}><Input /></Form.Item>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="targetType" label={t("目标会员")} rules={[{ required: true }]}><Select disabled={Boolean(selected)} options={[{ value: "personal", label: t("个人会员") }, { value: "corporate", label: t("企业会员") }]} /></Form.Item></Col>
           <Col span={12}><Form.Item name="levelRank" label={t("等级排序")} rules={[{ required: true }]}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col>
@@ -173,7 +177,9 @@ export function MembershipPlanPage() {
           <Form.Item name="isRecommended" valuePropName="checked"><Checkbox>{t("推荐")}</Checkbox></Form.Item>
           <Form.Item name="appVisible" valuePropName="checked"><Checkbox>{t("APP 可见（仅预留）")}</Checkbox></Form.Item>
         </Space>
-        <Alert type="info" showIcon title={t("权益配置说明")} description={t("新权益默认适用于租户全部空间。优先预订、报价有效期延长等非金额权益仅保存配置，目前尚未生效；本次不改变既有权益计算规则。")} style={{ marginBottom: 16 }} />
+        </FormSection> },
+        { key: "benefits", label: t("权益配置"), content: <>
+        <Alert type="info" showIcon title={t("权益配置说明")} description={t("新权益默认适用于租户全部空间。优先预订、报价有效期延长等非金额权益仅保存配置，暂不生效。")} style={{ marginBottom: 16 }} />
         <Form.List name="benefits">
           {(fields, { add, remove }) => <>
             {fields.map((field, index) => <Card key={field.key} size="small" title={`${t("权益")} ${index + 1}`} style={{ marginBottom: 16 }} extra={<Button type="link" danger disabled={!canManage} onClick={() => remove(field.name)}>{t("移除")}</Button>}>
@@ -218,7 +224,8 @@ export function MembershipPlanPage() {
             <Button disabled={!canManage} onClick={() => add({ type: "rental_discount", calculation: "percentage", value: 0, scope: { type: "tenant" } })}>{t("添加权益")}</Button>
           </>}
         </Form.List>
-        <SaveButton label={t("保存草稿")} form={form} disabled={!canManage || scopeOptions.isError} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 20 }} />
+        </> }
+        ]} />
       </Form>
     </Drawer>
     <Drawer title={`${historyPlan?.name ?? t("会员方案")} · ${t("版本历史")} `} size={900} open={Boolean(historyPlan)} onClose={() => setHistoryPlan(undefined)} destroyOnHidden>

@@ -2,7 +2,7 @@
 .nav { display: flex; flex-direction: column; gap: var(--space-1); position: sticky; top: var(--space-2); min-width: 0; }
 .nav button { position: relative; display: flex; width: 100%; min-height: 38px; align-items: center; padding: var(--space-3); color: var(--rental-content-secondary); border: 0; border-radius: var(--rental-ui-radius-button); background: none; cursor: pointer; font: inherit; font-size: var(--rental-list-primary-size); text-align: start; }
 .nav button:hover, .nav button[aria-selected="true"] { color: var(--rental-content-primary); }
-.nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .active { position: absolute; inset: 0; border-radius: inherit; background: var(--surface-muted); }
 .label { position: relative; display: block; }
 .label small { display: block; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); margin-top: var(--space-1); }
@@ -17,7 +17,7 @@
 .preview h3 { font-size: var(--rental-typography-section-title-size); font-weight: 500; color: var(--foreground); }
 .preview p { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
 .workspace[data-compact] { grid-template-columns: 1fr; gap: var(--space-3); }
-.workspace[data-compact] .nav { position: static; flex-direction: row; overflow-x: auto; padding: 2px; }
+.workspace[data-compact] .nav { position: static; flex-direction: row; overflow-x: auto; padding: var(--space-1); }
 .workspace[data-compact] .nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }
 .workspace[data-compact] .label small { display: none; }
 @container settings-panel (max-width: 600px) {

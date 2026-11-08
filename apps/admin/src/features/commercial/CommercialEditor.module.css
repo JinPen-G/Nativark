@@ -1,0 +1,2 @@
+.adjustmentRow { padding-block: var(--space-4); border-bottom: 1px solid var(--rental-content-divider); }
+.adjustmentRow:first-child { padding-top: 0; }

@@ -3,9 +3,12 @@ import { DataTableMoney, ListFilters, ListSection, SaveButton, useListFilter } f
 import { formatRentalMoney } from "@rental-os/shared";
 import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Tag } from "antd";
+import { Tag } from "antd";
 import { App } from "@/components/ui";
-import { Alert, Button, Form, Input, Select, Table } from "@/components/ui";
+import { Alert, Button, Form, Input, Modal, Select, Table, Tabs } from "@/components/ui";
+import { Plus } from "lucide-react";
+import { useState } from "react";
+import dayjs from "dayjs";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -32,6 +35,8 @@ export function MembershipRewardsPage() {
   const canEditRules = hasPermission("rental-os:rules:manage");
   const canManageParams = hasPermission("system:params:manage");
   const canSeeRewards = canManagePrice || canEditRules || canManageParams;
+  const [view, setView] = useState("accounts");
+  const [rewardOpen, setRewardOpen] = useState(false);
   const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
   const rewards = useQuery({
     queryKey: ["rental-core", "rewards"],
@@ -56,12 +61,12 @@ export function MembershipRewardsPage() {
   const grantReward = useMutation({
     mutationFn: rentalCoreApi.grantReward,
     onSuccess: async () => {
-      rewardForm.resetFields();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rental-core", "rewards"] }),
         queryClient.invalidateQueries({ queryKey: ["rental-core", "benefit-accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }),
       ]);
+      setRewardOpen(false);
       message.success(t("奖励流水已按幂等键生成"));
     },
     onError: () =>
@@ -85,48 +90,12 @@ export function MembershipRewardsPage() {
       <PageHeader
         title={t("会员激励")}
         description={t("人工补发仅用于补偿；营销余额不是支付资金。")}
+        extra={<Button type="primary" icon={<Plus />} disabled={!canSeeRewards} onClick={() => setRewardOpen(true)}>{t("补发奖励")}</Button>}
       />
       <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error} onRetry={() => Promise.all([rewards.refetch({ throwOnError: true }), benefitAccounts.refetch({ throwOnError: true })])}>
-        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Card title={t("人工补发奖励流水")}>
-            <Form
-              form={rewardForm}
-              layout="inline"
-              onFinish={(values) => grantReward.mutate(values)}
-            >
-              <Form.Item
-                name="customerId"
-                label={t("客户")}
-                rules={[{ required: true }]}
-              >
-                <Input />
-              </Form.Item>
-              <Form.Item name="triggerType" label={t("触发")}>
-                <Select
-                  placeholder={t("触发")}
-                  style={{ width: "var(--rental-control-width-select)" }}
-                  options={[
-                    { value: "registration", label: t("注册赠礼") },
-                    { value: "identity_verified", label: t("实名通过") },
-                    { value: "first_order_completed", label: t("首单完成") },
-                    { value: "referral", label: t("直接邀请补发") },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item name="relatedCustomerId" label={t("关联客户")}>
-                <Input />
-              </Form.Item>
-              <Form.Item
-                name="idempotencyKey"
-                label={t("业务幂等键")}
-                rules={[{ required: true }]}
-              >
-                <Input />
-              </Form.Item>
-              <SaveButton  label={t("生成并入账")} form={rewardForm} pending={grantReward.isPending} onSave={async values => { const operation = grantReward.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
-            </Form>
-          </Card>
-          <ListSection title={t("客户权益账户")} controls={<ListFilters filter={accountFilter} placeholder="客户编号" />}>
+        <Tabs activeKey={view} onChange={setView} aria-label={t("会员激励")} items={[
+        { key: "accounts", label: t("客户权益账户"), children:
+          <ListSection controls={<ListFilters filter={accountFilter} placeholder="客户编号" />}>
             <Table
               rowKey="customerId"
               onRefresh={() => benefitAccounts.refetch()} loading={benefitAccounts.isLoading} refreshing={benefitAccounts.isFetching} dataSource={accountFilter.rows} pagination={accountFilter.pagination}
@@ -136,11 +105,12 @@ export function MembershipRewardsPage() {
                 { title: t("积分"), dataIndex: "pointsBalance", align: "right" },
                 { title: t("营销余额"), dataIndex: "marketingBalance", align: "right", render: (value) => <DataTableMoney formatted={formatRentalMoney(Number(value), currency)} /> },
                 { title: t("可用奖励券"), dataIndex: "availableRewardCouponCount", align: "right" },
-                { title: t("更新时间"), dataIndex: "updatedAt" },
+                { title: t("更新时间"), dataIndex: "updatedAt", render: value => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
               ]}
             />
-          </ListSection>
-          <ListSection title={t("奖励流水")} controls={<ListFilters filter={rewardFilter} placeholder="客户编号、原因或幂等键" options={[{ value: "granted", label: "已发放" }, { value: "reversed", label: "已撤销" }]} />}>
+          </ListSection> },
+        { key: "rewards", label: t("奖励流水"), children:
+          <ListSection controls={<ListFilters filter={rewardFilter} placeholder="客户编号、原因或业务事件编号" options={[{ value: "granted", label: "已发放" }, { value: "reversed", label: "已撤销" }]} />}>
             <Table
               rowKey="id"
               onRefresh={() => rewards.refetch()} loading={rewards.isLoading} refreshing={rewards.isFetching} dataSource={rewardFilter.rows} pagination={rewardFilter.pagination}
@@ -152,7 +122,7 @@ export function MembershipRewardsPage() {
                   render: (_, row) => <><span>{t(rewardLabels[row.rewardType] ?? row.rewardType)}</span>{" · "}{row.rewardType === "balance" ? <DataTableMoney formatted={formatRentalMoney(row.amount, currency)} /> : row.amount}</>,
                 },
                 { title: t("触发"), dataIndex: "triggerType", render: value => t(triggerLabels[value] ?? value) },
-                { title: t("幂等键"), dataIndex: "idempotencyKey" },
+                { title: t("业务事件编号"), dataIndex: "idempotencyKey" },
                 {
                   title: t("状态"),
                   dataIndex: "status",
@@ -171,7 +141,7 @@ export function MembershipRewardsPage() {
                             title: t("撤销奖励"),
                             content: t("撤销会保留原流水与撤销时间。"),
                             onOk: () =>
-                              reverseReward.mutate({
+                              reverseReward.mutateAsync({
                                 id: row.id,
                                 reason: t("运营人工撤销"),
                               }),
@@ -186,9 +156,21 @@ export function MembershipRewardsPage() {
                 },
               ]}
             />
-          </ListSection>
-        </Space>
+          </ListSection> }
+        ]} />
       </QueryState>
+      <Modal title={t("人工补发奖励流水")} open={rewardOpen} onCancel={() => setRewardOpen(false)} destroyOnHidden
+        closable={!grantReward.isPending} keyboard={!grantReward.isPending} maskClosable={!grantReward.isPending}
+        afterClose={() => { if (grantReward.isSuccess) rewardForm.resetFields(); }}
+        footer={<><Button disabled={grantReward.isPending} onClick={() => setRewardOpen(false)}>{t("取消")}</Button><SaveButton label={t("生成并入账")} form={rewardForm} disabled={!canSeeRewards} pending={grantReward.isPending} onSave={values => grantReward.mutateAsync(values)} /></>}>
+        <Alert type="info" showIcon title={t("人工补发仅用于补偿；营销余额不是支付资金。")} style={{ marginBottom: "var(--space-4)" }} />
+        <Form form={rewardForm} layout="vertical" disabled={!canSeeRewards} onFinish={values => grantReward.mutate(values)}>
+          <Form.Item name="customerId" label={t("客户编号")} rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="triggerType" label={t("触发")}><Select options={Object.entries(triggerLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+          <Form.Item name="relatedCustomerId" label={t("关联客户编号")}><Input /></Form.Item>
+          <Form.Item name="idempotencyKey" label={t("业务事件编号")} rules={[{ required: true }]} extra={t("同一补发事件使用同一编号，避免重复入账。")}><Input /></Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }
