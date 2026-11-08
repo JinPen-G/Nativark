@@ -47,6 +47,86 @@ test('filtered personal ordering retains hidden cards and appends newly seen rec
   assert.deepEqual(previous, ['first', 'hidden', 'second']);
 });
 
+test('work-order forms keep their target through exit, discard cancelled drafts, and lock while submitting', () => {
+  const React = require('react');
+  const slots = [], forms = [], effects = [];
+  let cursor = 0, formCursor = 0, changed = false, pending = false;
+  const hooks = {
+    useState(initial) {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+      return [slots[index], next => { const value = typeof next === 'function' ? next(slots[index]) : next; if (!Object.is(value, slots[index])) { slots[index] = value; changed = true; } }];
+    },
+    useEffect(effect, dependencies) {
+      const index = cursor++, previous = slots[index];
+      if (!previous || dependencies.some((value, at) => !Object.is(value, previous[at]))) effects.push(effect);
+      slots[index] = dependencies;
+    },
+  };
+  const Form = Object.assign(() => null, {
+    useForm() {
+      const index = formCursor++;
+      forms[index] ??= { values: {}, resetFields() { this.values = {}; }, setFieldsValue(next) { this.values = { ...this.values, ...next }; } };
+      return [forms[index]];
+    },
+    useWatch: (name, form) => form.values[name], Item: 'field',
+  });
+  const rows = ['first', 'second'].map(id => ({ id, workNo: `WO-${id}`, status: 'pending', reason: id, updatedAt: '2026-11-09', type: 'repair', attachments: [] }));
+  const dismissal = loadSource('apps/admin/src/components/ui/useModalDismissal.ts', { react: hooks });
+  const ui = Object.fromEntries(['ActionButton', 'AnimatedNumber', 'Segmented', 'ListFilterItem', 'ListSection', 'Empty', 'Modal', 'Alert', 'Table', 'Input', 'Button', 'DataTableRowActions', 'DataTableStatus', 'DataTableText', 'SearchField', 'Select', 'Tabs'].map(name => [name, name]));
+  const auth = { tenant: { tenantId: 'tenant' }, user: { id: 'operator', permissions: ['*'] }, currentWorkspaceId: 'workspace', hasPermission: () => true };
+  const { MaintenanceWorkOrdersPage } = loadSource('apps/admin/src/features/rental-core/MaintenanceWorkOrdersPage.tsx', {
+    'react/jsx-runtime': require('react/jsx-runtime'), react: hooks,
+    './WorkOrderBoard': { WorkOrderBoard: 'Board' }, './workOrderBoardPolicy': policy,
+    '@/components/ui': { ...ui, Form, App: { useApp: () => ({ message: { success() {}, warning() {}, error() {} } }) } },
+    '@/components/RecordDisclosure': { RecordDisclosure: 'Disclosure' },
+    'react-router-dom': { useNavigate: () => () => {}, useParams: () => ({}), useSearchParams: () => [new URLSearchParams(), () => {}] },
+    '@/components/ui/icons': { PlusOutlined: 'plus' },
+    '@tanstack/react-query': {
+      useQuery: ({ queryKey }) => ({ data: queryKey[1] === 'work-orders' ? rows : [], isLoading: false, isFetching: false, isError: false }),
+      useQueryClient: () => ({ invalidateQueries: async () => {} }),
+      useMutation: () => ({ isPending: pending, mutate() { throw Error('Unexpected business write'); }, mutateAsync() { throw Error('Unexpected business write'); } }),
+    },
+    antd: { Descriptions: 'Descriptions', Space: 'Space', Tag: 'Tag', Typography: { Text: 'Text' } },
+    '@/components/RecordDetailLayout': { RecordDetailLayout: 'Detail', RecordFacts: 'Facts' },
+    '@/components/RecordDetailLayout.module.css': { default: {} },
+    'lucide-react': Object.fromEntries(['ClipboardCheck', 'Columns3', 'FileText', 'History', 'List', 'Play', 'UserRoundPen', 'X'].map(name => [name, name])),
+    '@/app/useServerFormSync': { useServerFormSync() {} }, '@/api/rentalCore': { rentalCoreApi: {} },
+    '@/app/locale': { useLocale: () => ({ locale: 'zh-CN', t: text => text }) },
+    '@/components/PageHeader': { PageHeader: 'PageHeader' }, '@/components/QueryState': { QueryState: 'QueryState' },
+    '@/components/workspace/ContentTransition': { ContentTransition: 'Transition' },
+    '@/components/ui/useModalDismissal': dismissal,
+    '@/features/auth/authStore': { useAuthStore: Object.assign(select => select(auth), { getState: () => auth }) },
+    './WorkOrderBoard.module.css': { default: {} },
+  });
+  const elements = node => !React.isValidElement(node) ? [] : [node, ...React.Children.toArray(node.props.children).flatMap(elements)];
+  const render = () => {
+    let tree, attempts = 0;
+    do { assert.ok(attempts++ < 10, 'Rendering must settle'); cursor = 0; formCursor = 0; changed = false; tree = MaintenanceWorkOrdersPage(); while (effects.length) effects.shift()(); } while (changed);
+    return elements(tree);
+  };
+  const openCancel = row => render().find(node => node.type === 'Board').props.actions(row).props.actions.find(action => action.id === 'cancel').onSelect();
+  const cancelModal = () => render().find(node => node.type === 'Modal' && node.props.title.startsWith('取消工单'));
+  openCancel(rows[0]);
+  assert.equal(cancelModal().props.open, true);
+  forms[4].setFieldsValue({ reason: 'previous work order draft' });
+  cancelModal().props.onCancel();
+  const closing = cancelModal();
+  assert.equal(closing.props.open, false);
+  assert.match(closing.props.title, /WO-first/);
+  assert.equal(forms[4].values.reason, 'previous work order draft', 'The exit animation retains the original form.');
+  closing.props.afterClose();
+  openCancel(rows[1]);
+  assert.equal(cancelModal().props.open, true);
+  assert.match(cancelModal().props.title, /WO-second/);
+  assert.deepEqual(forms[4].values, {}, 'A cancelled reason cannot carry into a different work order.');
+  pending = true;
+  const saving = cancelModal();
+  for (const name of ['closable', 'keyboard', 'maskClosable']) assert.equal(saving.props[name], false, name);
+  assert.equal(saving.props.cancelButtonProps.disabled, true);
+  assert.equal(elements(saving).find(node => node.props.form === forms[4]).props.disabled, true);
+});
+
 test('archived native keyboard drag commits once on drop and never on preview or Escape', () => {
   const archive = 'apps/admin/src/components/kanban-board/archive/';
   const original = fs.readFileSync(path.join(root, archive, 'reference-runtime.js'));

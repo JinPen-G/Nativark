@@ -2,7 +2,7 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Clock3, UserRound } from "lucide-react";
 import type { RentalWorkOrder, RentalWorkOrderAssignee } from "@rental-os/shared";
-import { App, Button, DataTableStatus, ListFilterBar, Modal } from "@/components/ui";
+import { App, Button, DataTableStatus, Empty, ListFilterBar, Modal } from "@/components/ui";
 import { RecordFacts } from "@/components/RecordDetailLayout";
 import { useListControls } from "@/components/ui/ListSection";
 import { KanbanBoard, type KanbanCard, type KanbanPerson } from "@/components/kanban-board/KanbanBoard";
@@ -14,8 +14,8 @@ import styles from "./WorkOrderBoard.module.css";
 const lanes = [{ id: "pending", name: "待处理" }, { id: "in_progress", name: "处理中" }, { id: "pending_review", name: "待验收" }, { id: "closed", name: "已结束" }];
 type WorkOrderCard = KanbanCard & { revision: string };
 
-export function WorkOrderBoard({ rows, people, scope, pending, canManage, canReview, statusLabel, typeLabel, actions, onAction, onOpen, onCreate }: {
-  rows: RentalWorkOrder[]; people: RentalWorkOrderAssignee[]; scope: string; pending: boolean; canManage: boolean; canReview: boolean;
+export function WorkOrderBoard({ rows, people, scope, pending, disabled = false, hasFilters = false, onClearFilters, canManage, canReview, statusLabel, typeLabel, actions, onAction, onOpen, onCreate }: {
+  rows: RentalWorkOrder[]; people: RentalWorkOrderAssignee[]; scope: string; pending: boolean; disabled?: boolean; hasFilters?: boolean; onClearFilters?: () => void; canManage: boolean; canReview: boolean;
   statusLabel: (status: string) => string; typeLabel: (type: string) => string;
   actions: (row: RentalWorkOrder) => ReactNode;
   onAction: (row: RentalWorkOrder, action: WorkOrderBoardAction) => Promise<unknown>;
@@ -46,7 +46,7 @@ export function WorkOrderBoard({ rows, people, scope, pending, canManage, canRev
       .sort((left, right) => (positions.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(right.id) ?? Number.MAX_SAFE_INTEGER));
   }, [rows, order, typeLabel]);
   const changeCards = useCallback(async (next: KanbanCard[]) => {
-    if (pending || committing.current) return;
+    if (pending || disabled || committing.current) return;
     if (next.length !== rows.length || new Set(next.map(card => card.id)).size !== rows.length || next.some(card => !rows.some(row => row.id === card.id))) return;
     const moved = next.filter(card => { const row = rows.find(item => item.id === card.id)!; return card.column !== workOrderColumn(row.status) || card.assignee !== (row.assigneeId ?? UNASSIGNED_WORK_ORDER); });
     if (moved.length > 1) { message.warning(t("一次只能调整一张工单")); return; }
@@ -64,22 +64,25 @@ export function WorkOrderBoard({ rows, people, scope, pending, canManage, canRev
     const nextOrder = mergeWorkOrderDisplayOrder(order, next.map(card => card.id));
     setOrder(nextOrder);
     try { sessionStorage.setItem(storageKey, JSON.stringify(nextOrder)); } catch { /* Layout remains usable when browser storage is unavailable. */ }
-  }, [pending, rows, message, t, canManage, canReview, onAction, order, storageKey]);
+  }, [pending, disabled, rows, message, t, canManage, canReview, onAction, order, storageKey]);
   const afterClose = (action: () => void) => { afterPreview.current = action; setPreviewOpen(false); };
   const trigger = (row: RentalWorkOrder, action: WorkOrderBoardAction) => afterClose(() => { void onAction(row, action).catch(() => {}); });
   return <><ListFilterBar>{controls}</ListFilterBar>
+    {hasFilters && rows.length === 0 ? <Empty scene="search" description={t("暂无匹配的养护工单")}>
+      <Button onClick={onClearFilters}>{t("清除筛选")}</Button>
+    </Empty> :
     <KanbanBoard columns={columns} people={assignees} cards={cards} defaultCards={[]} title={t("工单进度")} currentUser={UNASSIGNED_WORK_ORDER} onCardsChange={next => { void changeCards(next); }} bridge={{
-      disabled: pending || previewOpen,
+      disabled: pending || disabled || previewOpen,
       t,
       cardLabel: card => rows.find(row => row.id === card.id)?.workNo ?? card.id,
       onOpen: id => { setPreviewId(id); setPreviewOpen(true); },
-      canCreate: column => canManage && !pending && column === "pending",
+      canCreate: column => canManage && !pending && !disabled && column === "pending",
       onCreate: (_column, assignee) => onCreate(assignee === UNASSIGNED_WORK_ORDER ? undefined : assignee),
       renderCard: (card, person, lifted) => {
         const row = rows.find(item => item.id === card.id);
         if (!row) return null;
         return <div className={classes.cardInner} data-lifted={lifted || undefined}>
-          <div className={classes.cardTop}><span className={classes.cardId}>{row.workNo}</span><span className={classes.label}>{typeLabel(row.type)}</span></div>
+          <div className={`${classes.cardTop} ${styles.cardHeader}`}><span className={classes.cardId}>{row.workNo}</span><span className={classes.label}>{typeLabel(row.type)}</span></div>
           <p className={classes.cardTitle}>{row.reason || row.workNo}</p>
           <div className={classes.cardMeta}><span className={classes.metaItem}><UserRound size={13} aria-hidden />{person?.name}</span><span className={classes.metaItem}><Clock3 size={13} aria-hidden />{new Date(row.updatedAt).toLocaleDateString(locale)}</span></div>
           <div className={styles.cardActions} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
@@ -87,7 +90,7 @@ export function WorkOrderBoard({ rows, people, scope, pending, canManage, canRev
           </div>
         </div>;
       }
-    }} />
+    }} />}
     <Modal presentation="side" width={640} title={preview?.workNo ?? t("养护工单详情")} open={previewOpen && Boolean(preview)} destroyOnHidden
       onCancel={() => setPreviewOpen(false)} afterClose={() => { const action = afterPreview.current; afterPreview.current = undefined; setPreviewId(undefined); action?.(); }}
       footer={preview ? <div className={styles.detailActions}>
@@ -112,6 +115,6 @@ export function WorkOrderBoard({ rows, people, scope, pending, canManage, canRev
         {!!preview.attachments.length && <section><h4>{t("证据引用")}</h4><p>{preview.attachments.join(" · ")}</p></section>}
       </div>}
     </Modal>
-    <p className={styles.hint}>{pending ? t("正在更新工单…") : t("拖动工单调整状态或负责人；同列排序仅影响当前浏览器视图。")}</p>
+    {rows.length > 0 && <p className={styles.hint}>{pending ? t("正在更新工单…") : t("拖动工单调整状态或负责人；同列排序仅影响当前浏览器视图。")}</p>}
   </>;
 }
