@@ -2,8 +2,8 @@
 
 /** UIArc date-picker host derivative; upstream CSS, render tree and motion are retained.
  * Source: packages/ui-arc/vendor/registry/components/date-picker/date-picker.tsx (UIArc MIT).
- * Adaptation: bounded opening month and a Radix positioning portal for scrollable forms;
- * neither changes the selected date or the upstream value/panel animation. */
+ * Adaptation: bounded opening month, a positioned portal in the parent focus boundary,
+ * and form clear/disabled policies. Pointer/Tab exits preserve the next field's focus. */
 import { useEffect, useId, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, FocusEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -25,6 +25,7 @@ export interface DatePickerProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   minDate?: Date;
   maxDate?: Date;
   defaultMonth?: Date;
+  allowClear?: boolean;
   disabledDates?: CalendarDateMatcher;
   locale?: string;
   format?: Intl.DateTimeFormatOptions;
@@ -49,7 +50,7 @@ const statusRise: Variants = {
   exit: { opacity: 0, y: "-0.3em", filter: `blur(${blur.subtle}px)`, transition: { duration: 0.14, ease: ease.standard } },
 };
 
-export function DatePicker({ label, value, onChange, description, placeholder = "Select a date", minDate, maxDate, defaultMonth, disabledDates, locale = "en-US", format = { month: "short", day: "numeric", year: "numeric" }, showToday, id, className, disabled, ...buttonProps }: DatePickerProps) {
+export function DatePicker({ label, value, onChange, description, placeholder = "Select a date", minDate, maxDate, defaultMonth, allowClear = true, disabledDates, locale = "en-US", format = { month: "short", day: "numeric", year: "numeric" }, showToday, id, className, disabled, ...buttonProps }: DatePickerProps) {
   const generatedId = useId();
   const controlId = id ?? generatedId;
   const popupId = `${controlId}-calendar`;
@@ -60,6 +61,7 @@ export function DatePicker({ label, value, onChange, description, placeholder = 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | undefined>(undefined);
+  const returnFocus = useRef(true);
   const formatter = new Intl.DateTimeFormat(locale, format);
   const reduce = useReducedMotion() ?? false;
   const time = value?.getTime() ?? null;
@@ -72,25 +74,30 @@ export function DatePicker({ label, value, onChange, description, placeholder = 
   const partMotion = reduce ? { duration: 0 } : { duration: duration.standard, ease: ease.enter };
 
   useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node) && !popoverRef.current?.contains(event.target as Node)) { window.clearTimeout(closeTimer.current); setOpen(false); } };
+    const onPointerDown = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node) && !popoverRef.current?.contains(event.target as Node)) { returnFocus.current = false; window.clearTimeout(closeTimer.current); setOpen(false); } };
     document.addEventListener("pointerdown", onPointerDown);
     return () => { document.removeEventListener("pointerdown", onPointerDown); window.clearTimeout(closeTimer.current); };
   }, []);
+  useEffect(() => {
+    if (disabled) { returnFocus.current = false; window.clearTimeout(closeTimer.current); setOpen(false); }
+  }, [disabled]);
 
   /** Closing hands focus back to the trigger when it was inside the calendar, so keyboard users never land on the page body. */
-  const close = () => {
+  const close = (restoreFocus = true) => {
+    returnFocus.current = restoreFocus;
     window.clearTimeout(closeTimer.current);
-    if (popoverRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
+    if (restoreFocus && popoverRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
     setOpen(false);
   };
   /** Limit only the initial viewport; value stays empty until a real date is picked. */
-  const show = () => { window.clearTimeout(closeTimer.current); setMonth(openingCalendarMonth(value, defaultMonth, minDate, maxDate)); setOpen(true); };
+  const show = () => { if (disabled) return; returnFocus.current = true; window.clearTimeout(closeTimer.current); setMonth(openingCalendarMonth(value, defaultMonth, minDate, maxDate)); setOpen(true); };
   /** A picked day lets the highlight glide onto it and the footer confirm it, then the calendar returns to the field. */
   const selectDate = (date: Date | undefined) => {
+    if (disabled || !date && !allowClear) return;
     onChange?.(date);
     window.clearTimeout(closeTimer.current);
     if (reduce || !date) close();
-    else closeTimer.current = window.setTimeout(close, 240);
+    else closeTimer.current = window.setTimeout(() => close(), 240);
   };
   const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if ((event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") && !open) { event.preventDefault(); show(); }
@@ -99,14 +106,35 @@ export function DatePicker({ label, value, onChange, description, placeholder = 
   /** Tabbing past the popover closes it; focus moving within the field keeps it open. */
   const onBlur = (event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null;
-    if (open && next && !rootRef.current?.contains(next) && !popoverRef.current?.contains(next)) { window.clearTimeout(closeTimer.current); setOpen(false); }
+    if (open && next && !rootRef.current?.contains(next) && !popoverRef.current?.contains(next)) close(false);
+  };
+  const onPopoverKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") { event.stopPropagation(); close(); return; }
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const tabbable = (scope: ParentNode) => Array.from(scope.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href], [tabindex]"))
+      .filter(node => node.tabIndex >= 0 && !node.matches(":disabled") && !node.closest("[hidden], [inert]")
+        && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden");
+    const panel = popoverRef.current, trigger = triggerRef.current;
+    if (!panel || !trigger) return;
+    const panelStops = tabbable(panel);
+    const boundary = event.shiftKey ? panelStops[0] : panelStops.at(-1);
+    if (document.activeElement !== boundary) return;
+    // Radix Popover loops its focus scope by default. A date field needs the
+    // original form order at either edge, even when its calendar is portaled.
+    event.preventDefault(); event.stopPropagation();
+    if (event.shiftKey) { close(); return; }
+    const formScope = trigger.closest('[role="dialog"]') ?? document;
+    const formStops = tabbable(formScope).filter(node => !panel.contains(node));
+    const index = formStops.indexOf(trigger);
+    const next = formStops[index + 1] ?? formStops[0];
+    close(false); (next ?? trigger).focus();
   };
   const overlay = triggerRef.current?.closest<HTMLElement>("[data-rental-arc-modal], [data-rental-arc-drawer]");
   // Keep the popup in its parent dialog's DOM focus boundary. The installed
   // Popover and Dialog have independent focus scopes, so a body portal steals focus.
   const popupHost = overlay?.querySelector<HTMLElement>(".arc-modal-mount") ?? overlay;
 
-  return <PopoverPrimitive.Root open={open} onOpenChange={next => { if (!next) close(); }}><div className={[styles.field, className].filter(Boolean).join(" ")} ref={rootRef} onBlur={onBlur}>
+  return <PopoverPrimitive.Root open={open} onOpenChange={next => { if (!next) close(returnFocus.current); }}><div className={[styles.field, className].filter(Boolean).join(" ")} ref={rootRef} onBlur={onBlur}>
     <label className={styles.label} htmlFor={controlId}>{label}</label>
     <div className={styles.anchor}>
       <PopoverPrimitive.Anchor asChild><button {...buttonProps} ref={triggerRef} id={controlId} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? popupId : undefined} aria-describedby={hintId} className={styles.trigger} onClick={() => (open ? close() : show())} onKeyDown={onTriggerKeyDown}>
@@ -130,15 +158,19 @@ export function DatePicker({ label, value, onChange, description, placeholder = 
             // The portal mounts after the field. Focus the original roving day
             // here so arrow keys work as soon as its focus scope is installed.
             popoverRef.current?.querySelector<HTMLButtonElement>("[data-present] [data-date][tabindex=\"0\"]")?.focus({ preventScroll: true });
-          }} onCloseAutoFocus={event => { event.preventDefault(); triggerRef.current?.focus(); }}
+          }} onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current && !disabled) triggerRef.current?.focus(); }}
+          onInteractOutside={event => {
+            if (rootRef.current?.contains(event.target as Node)) event.preventDefault();
+            else returnFocus.current = false;
+          }}
           onEscapeKeyDown={event => { event.preventDefault(); event.stopPropagation(); close(); }}>
-        <motion.div ref={popoverRef} id={popupId} className={`${styles.popover} arc-date-popup`} role="dialog" aria-label={`${label} calendar`} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}
+        <motion.div ref={popoverRef} id={popupId} className={`${styles.popover} arc-date-popup`} role="dialog" aria-label={`${label} calendar`} onKeyDown={onPopoverKeyDown}
           style={{ position: "relative", top: "auto", left: "auto", right: "auto", maxHeight: "var(--radix-popover-content-available-height)", overflowY: "auto" }}
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8, scale: .95 }}
           animate={{ opacity: 1, y: 0, scale: 1, transition: reduce ? instant : { ...spring.snappy, opacity: { duration: duration.fast, ease: ease.enter } } }}
           exit={{ opacity: 0, ...(reduce ? {} : { y: -6, scale: .97 }), transition: { duration: 0.14, ease: ease.standard } }}>
           <Calendar value={value} onChange={selectDate} month={month} onMonthChange={setMonth} minDate={minDate} maxDate={maxDate} disabledDates={disabledDates} locale={locale} showToday={showToday} />
-          <div className={styles.footer}><button type="button" onClick={() => selectDate(undefined)} disabled={!value}>Clear</button><span className={styles.status}><AnimatePresence initial={false}><motion.span key={time ?? "none"} variants={reduce ? valueFade : statusRise} initial="enter" animate="center" exit="exit">{value ? `Selected ${formatter.format(value)}` : "Choose a day"}</motion.span></AnimatePresence></span></div>
+          <div className={styles.footer}>{allowClear && <button type="button" onClick={() => selectDate(undefined)} disabled={!value || disabled}>Clear</button>}<span className={styles.status}><AnimatePresence initial={false}><motion.span key={time ?? "none"} variants={reduce ? valueFade : statusRise} initial="enter" animate="center" exit="exit">{value ? `Selected ${formatter.format(value)}` : "Choose a day"}</motion.span></AnimatePresence></span></div>
         </motion.div></PopoverPrimitive.Content></ArcLocale></PopoverPrimitive.Portal>}
       </AnimatePresence>
     </div>

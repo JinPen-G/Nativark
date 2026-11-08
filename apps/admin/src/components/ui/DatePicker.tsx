@@ -19,13 +19,13 @@ function SingleDatePicker(props: DatePickerProps<Dayjs, false>) {
   const [internal, setInternal] = useState<Dayjs | null>(props.defaultValue ?? null);
   const value = "value" in props ? props.value : internal;
   const disabled = props.disabled ?? formDisabled;
-  const emit = (next: Dayjs | null) => { if (disabled) return; setInternal(next); props.onChange?.(next, next ? next.format(typeof props.format === "string" ? props.format : props.showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD") : ""); };
+  const emit = (next: Dayjs | null) => { if (disabled || !next && props.allowClear === false) return; setInternal(next); props.onChange?.(next, next ? next.format(typeof props.format === "string" ? props.format : props.showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD") : ""); };
   // These Ant contracts need a dedicated adapter, not an approximation of dates.
   if (props.multiple || (props.picker && props.picker !== "date") || props.disabledTime || props.needConfirm || props.cellRender || props.panelRender || props.onOk || props.open !== undefined || Array.isArray(props.format) || typeof props.format === "function") return <AntDatePicker {...props} />;
   const seconds = Boolean(props.showTime) && !(typeof props.format === "string" && !props.format.includes("ss"));
   return <div className={`arc-date-field ${props.className ?? ""}`} style={props.style} data-size={props.size ?? componentSize} aria-disabled={disabled}><ArcLocale>
     <ArcDatePicker className="arc-date-control" id={props.id} label={typeof props["aria-label"] === "string" ? props["aria-label"] : typeof props.placeholder === "string" ? props.placeholder : t("选择日期")} value={value?.isValid() ? value.toDate() : undefined} placeholder={typeof props.placeholder === "string" ? props.placeholder : t("选择日期")}
-      locale={locale} disabled={disabled} minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()} defaultMonth={props.defaultPickerValue?.toDate()} showToday={props.showToday !== false}
+      locale={locale} disabled={disabled} allowClear={props.allowClear !== false} minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()} defaultMonth={props.defaultPickerValue?.toDate()} showToday={props.showToday !== false}
       disabledDates={props.disabledDate ? date => props.disabledDate!(dayjs(date), { type: "date" }) : undefined}
       onChange={date => { if (!date) emit(null); else { const base = value ?? dayjs().startOf("day"); emit(dayjs(date).hour(base.hour()).minute(base.minute()).second(base.second()).millisecond(0)); } }} />
     {props.showTime && value?.isValid() && <div className="arc-time-fields"><ArcTimePicker label={t("时间")} value={value.format("HH:mm")} minuteStep={1} format="24h" disabled={disabled}
@@ -62,10 +62,11 @@ function RangePicker(props: RangePickerProps) {
   const [draft, setDraft] = useState<Pair>([props.value?.[0] ?? props.defaultValue?.[0] ?? null, props.value?.[1] ?? props.defaultValue?.[1] ?? null]);
   useEffect(() => { if ("value" in props) setDraft([props.value?.[0] ?? null, props.value?.[1] ?? null]); }, [props.value]);
   const disabled = props.disabled ?? formDisabled;
-  const emit = (pair: Pair) => {
+  const emit = (pair: Pair, changed: "start" | "end" = pair[1] ? "end" : "start") => {
+    if (Array.isArray(disabled) ? disabled.every(Boolean) : disabled) return;
     setDraft(pair);
     const strings: [string, string] = [pair[0]?.format(typeof props.format === "string" ? props.format : props.showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD") ?? "", pair[1]?.format(typeof props.format === "string" ? props.format : props.showTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD") ?? ""];
-    props.onCalendarChange?.(pair, strings, { range: pair[1] ? "end" : "start" });
+    props.onCalendarChange?.(pair, strings, { range: changed });
     const allowEmpty = Array.isArray(props.allowEmpty) ? props.allowEmpty : [Boolean(props.allowEmpty), Boolean(props.allowEmpty)];
     if (pair.every(item => !item) || pair.every((item, index) => item || allowEmpty[index])) props.onChange?.(pair.every(item => !item) ? null : pair as [Dayjs, Dayjs], strings);
   };
@@ -93,8 +94,20 @@ function RangePicker(props: RangePickerProps) {
       }}>
       <div className="arc-range-endpoints">{([0, 1] as const).map(index => <SingleDatePicker key={index} value={draft[index]} showTime={Boolean(props.showTime)} format={props.format} minDate={props.minDate} maxDate={props.maxDate}
         disabled={Array.isArray(disabled) ? disabled[index] : disabled} placeholder={props.placeholder?.[index] ?? t(index === 0 ? "开始日期" : "结束日期")}
-        allowClear={props.allowClear} disabledDate={date => Boolean(props.disabledDate?.(date, { type: "date", from: draft[0] ?? undefined })) || (index === 1 && Boolean(draft[0] && date.isBefore(draft[0], "day")))}
-        onChange={next => { const pair: Pair = [...draft]; pair[index] = next; if (pair[0] && pair[1] && pair[1].isBefore(pair[0])) pair[index === 0 ? 1 : 0] = null; emit(pair); }} />)}</div>
+        allowClear={props.allowClear} disabledDate={date => Boolean(props.disabledDate?.(date, { type: "date", from: draft[0] ?? undefined }))
+          || (index === 1 && Boolean(draft[0] && date.isBefore(draft[0], "day")))
+          || (index === 0 && Array.isArray(disabled) && disabled[1] && Boolean(draft[1] && date.isAfter(draft[1], "day")))}
+        onChange={next => {
+          if ((Array.isArray(disabled) ? disabled[index] : disabled) || !next && props.allowClear === false) return;
+          const pair: Pair = [...draft]; pair[index] = next;
+          if (pair[0] && pair[1] && pair[1].isBefore(pair[0])) {
+            const other = index === 0 ? 1 : 0;
+            // A pinned endpoint is a contract, not an editable draft to clear.
+            if (Array.isArray(disabled) && disabled[other]) return;
+            pair[other] = null;
+          }
+          emit(pair, index === 0 ? "start" : "end");
+        }} />)}</div>
       {props.presets && <div className="arc-range-presets">{props.presets.map((preset, index) => <Button key={index} size="small" disabled={Boolean(clearDisabled)} onClick={() => { const pair = typeof preset.value === "function" ? preset.value() : preset.value; emit([pair[0] ?? null, pair[1] ?? null]); setOpen(false); }}>{preset.label}</Button>)}</div>}
       </PopoverContent></Popover></div>}
     {inlineClear && <RangeClearButton root={root} label={t("清空日期")} onClear={() => { emit([null, null]); setOpen(false); }} />}

@@ -41,6 +41,14 @@ assert.equal(dayjs(emptyBounded.props.defaultMonth).format('YYYY-MM-DD'), '2027-
 assert.equal(selectedDate, undefined, 'Choosing a viewport does not emit a form change');
 emptyBounded.props.onChange(new Date(2027, 4, 3));
 assert.equal(selectedDate.format('YYYY-MM-DD HH:mm:ss'), '2027-05-03 00:00:00');
+const selectionBeforeClear = selectedDate;
+const lockedClear = loaded.exports.DatePicker({ value: selectedDate, allowClear: false, onChange: date => { selectedDate = date; } }).props.children.props.children[0];
+assert.equal(lockedClear.props.allowClear, false, 'Clear policy reaches the source calendar, including its footer');
+lockedClear.props.onChange(undefined);
+assert.equal(selectedDate, selectionBeforeClear, 'A disallowed clear must not reach the form');
+const disabledField = loaded.exports.DatePicker({ value: selectedDate, disabled: true, onChange: date => { selectedDate = date; } }).props.children.props.children[0];
+disabledField.props.onChange(new Date(2027, 4, 4));
+assert.equal(selectedDate, selectionBeforeClear, 'Disabled controls do not emit date edits');
 for (const showTime of [true, { format: 'HH:mm:ss', minuteStep: 5 }]) {
   const value = [dayjs('2026-10-06T09:00:13'), dayjs('2026-10-07T18:00:13')];
   let received;
@@ -58,6 +66,26 @@ const bounded = RangePicker({ minDate: dayjs('2026-01-01'), maxDate: dayjs('2026
 assert.equal(bounded.type, arcRange, 'Year-bounded whole-day selection uses the original range picker');
 assert.equal(dayjs(bounded.props.minDate).format('YYYY-MM-DD'), '2026-01-01');
 assert.equal(dayjs(bounded.props.maxDate).format('YYYY-MM-DD'), '2026-12-31');
+
+function nodes(element) {
+  if (Array.isArray(element)) return element.flatMap(nodes);
+  return element?.props ? [element, ...nodes(element.props.children)] : [];
+}
+const originalPair = [dayjs('2027-01-01'), dayjs('2027-01-10')];
+let pairChange, changedEnd;
+const endpoints = nodes(RangePicker({ value: originalPair, allowEmpty: [true, true], disabled: [false, true],
+  onChange: value => { pairChange = value; }, onCalendarChange: (_value, _text, info) => { changedEnd = info.range; } }))
+  .filter(node => node.type === loaded.exports.DatePicker);
+assert.equal(endpoints.length, 2);
+assert.equal(endpoints[0].props.disabledDate(dayjs('2027-01-11')), true, 'A locked end date bounds the editable start');
+endpoints[0].props.onChange(dayjs('2027-01-11'));
+assert.equal(pairChange, undefined, 'Moving the start cannot clear a locked end date');
+endpoints[1].props.onChange(dayjs('2027-01-15'));
+assert.equal(pairChange, undefined, 'Locked endpoint callbacks cannot emit edits');
+endpoints[0].props.onChange(dayjs('2027-01-02'));
+assert.equal(pairChange[1], originalPair[1]);
+assert.equal(changedEnd, 'start', 'Changing a start date is not an end-date edit merely because both are filled');
+assert.deepEqual(originalPair.map(date => date.format('YYYY-MM-DD')), ['2027-01-01', '2027-01-10']);
 const order = fs.readFileSync(path.join(root, 'apps/admin/src/features/rental-core/RentalOrderCreatePage.tsx'), 'utf8');
 assert.match(order, /<DatePicker\.RangePicker showTime/);
-console.log('admin-datetime-range: integrated datetime, prop forwarding, seconds, clearing and date-only Arc contracts passed (no browser verification)');
+console.log('admin-datetime-range: integrated datetime, opening month, clear/disabled guards, pinned endpoints and change ownership passed (no browser verification)');
