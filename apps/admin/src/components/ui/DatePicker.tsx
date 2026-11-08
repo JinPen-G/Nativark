@@ -88,7 +88,7 @@ function RangePicker(props: RangePickerProps) {
       presets={(props.presets ?? []).filter(preset => typeof preset.value === "function" || (preset.value[0] && preset.value[1])).map(preset => ({ label: String(preset.label), range: () => { const pair = typeof preset.value === "function" ? preset.value() : preset.value; return { start: (pair[0] ?? dayjs()).toDate(), end: (pair[1] ?? dayjs()).toDate() }; } }))}
       onChange={range => emit([dayjs(range.start), dayjs(range.end)])} /> : <div className="arc-range-advanced"><Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild><Button className="arc-range-advanced-trigger" disabled={Boolean(fullyDisabled)} aria-label={`${t("日期范围")} · ${rangeLabel}`}><CalendarDays size={16} aria-hidden="true" /><span>{rangeLabel}</span><ChevronDown size={16} aria-hidden="true" /></Button></PopoverTrigger>
-      <PopoverContent ref={panel} align="start" side="bottom" className="arc-range-advanced-popup" onInteractOutside={event => {
+      <PopoverContent ref={panel} align="start" side="bottom" className="arc-range-advanced-popup" aria-label={t("日期范围")} onInteractOutside={event => {
         const target = event.target;
         if (target instanceof Node && [...(panel.current?.querySelectorAll("[aria-controls]") ?? [])].some(control => control.getAttribute("aria-controls")?.split(/\s+/u).some(id => document.getElementById(id)?.contains(target)))) event.preventDefault();
       }}>

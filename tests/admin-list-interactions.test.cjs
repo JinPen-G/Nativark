@@ -12,6 +12,19 @@ function load(file, dependencies) {
   return exported.exports;
 }
 
+test('locale consumers keep their provider when the translation module is refreshed', () => {
+  const context = load('apps/admin/src/app/localeContext.ts', {});
+  const previous = load('apps/admin/src/app/locale.tsx', { './localeContext': context });
+  const refreshed = load('apps/admin/src/app/locale.tsx', { './localeContext': context });
+  const originalWindow = global.window;
+  global.window = { localStorage: { getItem: () => 'en-US' } };
+  try {
+    const ExistingConsumer = () => React.createElement('span', null, previous.useLocale().t('无权访问'));
+    const markup = require('react-dom/server').renderToStaticMarkup(React.createElement(refreshed.LocaleProvider, null, React.createElement(ExistingConsumer)));
+    assert.match(markup, /Access denied/, 'A retained page must consume the refreshed provider without becoming blank.');
+  } finally { if (originalWindow === undefined) delete global.window; else global.window = originalWindow; }
+});
+
 test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {
   const { planListFilters } = load('apps/admin/src/components/ui/listFilterLayout.ts', {});
   const geometry = { available: 342, category: 0, categoryMin: 0, search: 280, searchMin: 200, searchCompactMin: 96,

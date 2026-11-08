@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { LocaleContext } from "./localeContext";
 
 export type AdminLocale = "zh-CN" | "en-US";
 
@@ -1468,6 +1469,8 @@ const ENGLISH: Record<string, string> = {
   "无权访问": "Access denied",
   "已授权": "Authorized",
   "账号与权限": "Accounts & access",
+  "当前空间全部数据": "All data in this workspace",
+  "本地演示": "Local demo",
   "服务与渠道": "Services & channels",
   "页面暂时无法显示": "This page could not be displayed",
   "请重新加载页面。若刚提交过操作，请先核对结果。": "Reload the page to continue. If you just submitted an action, check its result first.",
@@ -5048,14 +5051,6 @@ function readInitialLocale(): AdminLocale {
   const stored = window.localStorage.getItem(STORAGE_KEY);
   return stored === "en-US" ? "en-US" : "zh-CN";
 }
-
-interface LocaleContextValue {
-  locale: AdminLocale;
-  setLocale: (locale: AdminLocale) => void;
-  t: AdminTranslate;
-}
-
-const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<AdminLocale>(readInitialLocale);

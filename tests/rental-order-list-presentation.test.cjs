@@ -458,7 +458,7 @@ assert.doesNotMatch(noticeSource, /\.click\(|mutate|rentalCoreApi|fetch\(/, "loc
 assert.match(noticeSource, /button\?\.disabled \? container/);
 assert.match(noticeSource, /prefers-reduced-motion/);
 const pageCss = fs.readFileSync(path.resolve(__dirname, "../apps/admin/src/features/rental-core/RentalOrdersPage.module.css"), "utf8");
-const { translateAdminText } = load("apps/admin/src/app/locale.tsx");
+const { translateAdminText } = load("apps/admin/src/app/locale.tsx", { "./localeContext": load("apps/admin/src/app/localeContext.ts") });
 const zhCopy = (text, values) => translateAdminText(text, "zh-CN", values);
 const enCopy = (text, values) => translateAdminText(text, "en-US", values);
 // A page needs a name, not a mandatory explanatory sentence or duplicate list title.

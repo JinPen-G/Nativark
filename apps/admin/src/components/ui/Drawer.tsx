@@ -21,7 +21,7 @@ function HeaderActions({ children, closeLabel }: { children: ReactNode; closeLab
     }
     setHeader(content?.querySelector(':scope > div') ?? null);
   }, [closeLabel]);
-  return <><span ref={anchor} hidden />{header && createPortal(<div className="arc-drawer-actions">{children}</div>, header)}</>;
+  return <><span ref={anchor} hidden />{header && children != null && children !== false && createPortal(<div className="arc-drawer-actions">{children}</div>, header)}</>;
 }
 
 /** Arc owns entrance/exit/drag, backdrop, focus trap and Escape. The adapter preserves business headers and form popups. */

@@ -5,7 +5,7 @@ import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { ListFilters, Modal, useListFilter } from "@/components/ui";
+import { DataTableStatus, ListFilterItem, ListFilters, Modal, useListFilter } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
@@ -16,7 +16,7 @@ import { Button, InfoPopover } from "@/components/ui";
 import { InfoCircleOutlined, PlusOutlined } from "@/components/ui/icons";
 import { useAuthStore } from "@/features/auth/authStore";
 
-export function QualificationTypesEditor() {
+export function QualificationTypesEditor({ standalone = false }: { standalone?: boolean } = {}) {
   const { message } = App.useApp();
   const { t } = useLocale();
   const queryClient = useQueryClient();
@@ -37,16 +37,21 @@ export function QualificationTypesEditor() {
     setEditorOpen(false);
     message.success(t("证件类型已保存"));
   } });
-  if (!canView) return <Alert type="warning" title={t("需要当前空间的证件配置权限")} />;
-  return <QueryState loading={types.isLoading} error={types.error} onRetry={() => types.refetch({ throwOnError: true })}>
+  const createAction = <Button type="primary" disabled={!canManage || types.isLoading || Boolean(types.error)} icon={<PlusOutlined />} onClick={() => { form.resetFields(); setEditorOpen(true); }}>{t("新增证件类型")}</Button>;
+  const scopeTitle = t("仅配置当前经营空间");
+  const scopeDescription = t("这里维护本空间使用的证件类型；不授予租户会员资料维护权，也不改变已提交的证件与审核历史。");
+  const header = standalone ? <PageHeader title={t("空间证件类型")} extra={canView ? createAction : undefined}
+    note={{ title: scopeTitle, description: scopeDescription }} /> : null;
+  if (!canView) return <>{header}<Alert type="warning" title={t("需要当前空间的证件配置权限")} /></>;
+  return <>{header}<QueryState loading={types.isLoading} error={types.error} onRetry={() => types.refetch({ throwOnError: true })}>
     <Table toolbar={<>
       <ListFilters filter={filter} placeholder="证件名称或编码" options={[{ value: "enabled", label: "已启用" }, { value: "disabled", label: "已停用" }]} />
-      <Button type="primary" disabled={!canManage} icon={<PlusOutlined />} onClick={() => { form.resetFields(); setEditorOpen(true); }}>{t("新增证件类型")}</Button>
-      <InfoPopover title={t("仅配置当前经营空间")} content={t("这里维护本空间使用的证件类型；不授予租户会员资料维护权，也不改变已提交的证件与审核历史。")}><Button type="text" size="small" aria-label={t("配置范围")} icon={<InfoCircleOutlined />} /></InfoPopover>
+      {!standalone && <ListFilterItem kind="action">{createAction}</ListFilterItem>}
+      {!standalone && <ListFilterItem kind="action"><InfoPopover title={scopeTitle} content={scopeDescription}><Button type="text" size="small" aria-label={t("配置范围")} icon={<InfoCircleOutlined />} /></InfoPopover></ListFilterItem>}
     </>} emptyScene={filter.keyword || filter.status ? "search" : "empty"} exportConfig={{ filename: t("证件类型"), fields: [{ label: t("名称"), value: row => row.name }, { label: t("编码"), value: row => row.code }, { label: t("下单要求"), value: row => t(row.requiredForBooking ? "必需" : "可选") }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }] }} rowKey="id" size="small" onRefresh={() => types.refetch()} loading={types.isLoading} refreshing={types.isFetching} dataSource={filter.rows} pagination={filter.pagination} columns={[
       { title: t("名称"), dataIndex: "name" }, { title: t("编码"), dataIndex: "code" },
       { title: t("下单要求"), render: (_, row) => row.requiredForBooking ? t("必需") : t("可选") },
-      { title: t("状态"), dataIndex: "status", render: value => value === "enabled" ? t("已启用") : t("已停用") }
+      { title: t("状态"), dataIndex: "status", render: value => <DataTableStatus variant="soft" tone={value === "enabled" ? "success" : "neutral"}>{t(value === "enabled" ? "已启用" : "已停用")}</DataTableStatus> }
     ]} />
     <Modal title={t("新增证件类型")} open={editorOpen} onCancel={() => setEditorOpen(false)} okText={t("新增证件类型")}
       confirmLoading={save.isPending} okButtonProps={{ disabled: !canManage }} cancelButtonProps={{ disabled: save.isPending }}
@@ -61,10 +66,9 @@ export function QualificationTypesEditor() {
         <Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>{t("下单必需")}</Checkbox></Form.Item>
       </Form>
     </Modal>
-  </QueryState>;
+  </QueryState></>;
 }
 
 export function QualificationTypesPage() {
-  const { t } = useLocale();
-  return <><PageHeader title={t("空间证件类型")} /><QualificationTypesEditor /></>;
+  return <QualificationTypesEditor standalone />;
 }

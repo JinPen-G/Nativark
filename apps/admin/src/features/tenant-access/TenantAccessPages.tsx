@@ -271,7 +271,7 @@ export function TenantOperationsAccountPage() {
                   </Form.Item>
                   <Form.Item label={t("数据范围")} htmlFor={`workspace-scope-${row.workspaceId}`}>
                     <Select id={`workspace-scope-${row.workspaceId}`} disabled={disabled} value={row.dataScope}
-                      options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(label) }))}
+                      options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(value === "all" ? "当前空间全部数据" : label) }))}
                       onChange={dataScope => updateAccess(row.workspaceId, { dataScope })} />
                   </Form.Item>
                   <Form.Item label={t("员工履约地点范围")} htmlFor={`workspace-locations-${row.workspaceId}`}>
