@@ -11,7 +11,7 @@ import type {
   CustomerIdentityVerificationSummary,
   CustomerQualificationRevision
 } from "@rental-os/shared";
-import { RENTAL_CATEGORY_DEFINITIONS, formatRentalMoney } from "@rental-os/shared";
+import { CUSTOMER_SOURCE_CHANNEL_LABELS, RENTAL_CATEGORY_DEFINITIONS, formatRentalMoney } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, Descriptions, Row, Space, Tag } from "antd";
 import { App, Empty } from "@/components/ui";
@@ -20,7 +20,7 @@ import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, ConfirmAction, DataTableStatus, Drawer, Tabs } from "@/components/ui";
+import { Button, ConfirmAction, DataTableStatus, Modal, Tabs } from "@/components/ui";
 import { detailStatusLabels } from "@/features/rental-core/orderDetailPresentation";
 import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 import type { UploadFile, UploadProps } from "antd";
@@ -31,9 +31,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { customerApi } from "@/api/customer";
 import { useLocale } from "@/app/locale";
+import { isTransientRefreshError } from "@/app/queryClient";
 import { QueryState } from "@/components/QueryState";
 import { CustomerAnalysis } from "./CustomerAnalysis";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 
 type AddressForm = {
   recipient: string;
@@ -65,8 +67,13 @@ type Props = {
   onQualification: () => void;
 };
 
-const dateTime = (value?: string) => value ? new Date(value).toLocaleString() : "—";
-const dateOnly = (value?: string) => value ? new Date(value).toLocaleDateString() : "—";
+function useProfileDates() {
+  const { locale } = useLocale();
+  return {
+    dateTime: (value?: string) => value ? new Date(value).toLocaleString(locale) : "—",
+    dateOnly: (value?: string) => value ? new Date(value).toLocaleDateString(locale) : "—",
+  };
+}
 const money = (value: number, currency = "CNY") => Number.isFinite(value) ? formatRentalMoney(value, currency) : "—";
 const categoryLabel = (value: string) => RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === value)?.name ?? value;
 const statusLabel: Record<string, string> = {
@@ -83,15 +90,16 @@ const relationLabel: Record<string, string> = { customer: "订单客户", contra
 
 function ProfileSummary({ overview }: { overview: CustomerProfileOverview }) {
   const { t } = useLocale();
+  const { dateTime, dateOnly } = useProfileDates();
   const profile = overview.profile;
   return <>
     <RecordFacts items={[
-      { key: "email", label: "邮箱", value: profile.email || "—" },
+      { key: "email", label: "邮箱", value: profile.email || "—", wide: true },
       { key: "identity", label: "证件号", value: profile.identityNoMasked || "—" },
       { key: "gender", label: "性别", value: profile.gender ? t(({ male: "男", female: "女", other: "其他", unknown: "未填写" } as Record<string, string>)[profile.gender] ?? profile.gender) : "—" },
       { key: "birthday", label: "生日", value: profile.birthday || "—" },
       { key: "region", label: "常住地区", value: profile.region || "—" },
-      { key: "source", label: "来源渠道", value: profile.sourceChannel ? t(({ referral: "转介绍", app: "APP", web: "官网", admin: "后台", miniprogram: "小程序" } as Record<string, string>)[profile.sourceChannel] ?? profile.sourceChannel) : "—" }
+      { key: "source", label: "来源渠道", value: profile.sourceChannel ? t(({ ...CUSTOMER_SOURCE_CHANNEL_LABELS, app: "APP", web: "官网", admin: "后台", miniprogram: "小程序" } as Record<string, string>)[profile.sourceChannel] ?? profile.sourceChannel) : "—" }
     ]} />
     <RecordDisclosure key={profile.id} title={t("建档信息")}><RecordFacts items={[
       { key: "created", label: "建档时间", value: dateTime(profile.createdAt) },
@@ -129,6 +137,7 @@ function AddressTab({ addresses, canManage, onAdd, onEdit, onRemove }: {
   onRemove: (address: CustomerProfileAddress) => Promise<unknown>;
 }) {
   const { t } = useLocale();
+  const { dateTime } = useProfileDates();
   return <>
     <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={onAdd} disabled={!canManage}>{t("新增地址")}</Button><span style={{ color: "var(--text-secondary)" }}>{t("历史订单使用的是下单时地址快照，不会随这里修改。")}</span></Space>
     {addresses.length ? <Table<CustomerProfileAddress> size="small" rowKey="id" dataSource={addresses} pagination={false} scroll={{ x: 760 }} columns={[
@@ -145,6 +154,7 @@ function AddressTab({ addresses, canManage, onAdd, onEdit, onRemove }: {
 
 function AccountTab({ overview }: { overview: CustomerProfileOverview }) {
   const { t } = useLocale();
+  const { dateTime } = useProfileDates();
   const account = overview.profile.accountSummary;
   const membership = overview.profile.membership;
   return <>
@@ -177,6 +187,7 @@ function AccountTab({ overview }: { overview: CustomerProfileOverview }) {
 
 function QualificationTab({ revisions, canManage, onQualification }: { revisions: CustomerQualificationRevision[]; canManage: boolean; onQualification: () => void }) {
   const { t } = useLocale();
+  const { dateTime, dateOnly } = useProfileDates();
   return <>
     <Space style={{ marginBottom: 12 }}><Button type="primary" disabled={!canManage} onClick={onQualification}>{t("提交/补充资质")}</Button><span style={{ color: "var(--text-secondary)" }}>{t("证件适用范围按提交时经营空间固化，历史审核记录只追加不覆盖。")}</span></Space>
     {revisions.length ? <Table<CustomerQualificationRevision> size="small" rowKey="id" dataSource={revisions} pagination={{ defaultPageSize: 20 }} scroll={{ x: 980 }} columns={[
@@ -195,6 +206,7 @@ function QualificationTab({ revisions, canManage, onQualification }: { revisions
 
 function BenefitsTab({ overview }: { overview: CustomerProfileOverview }) {
   const { t } = useLocale();
+  const { dateTime, dateOnly } = useProfileDates();
   if (!overview.benefits.accounts.length && !overview.benefits.rewards.length && !overview.benefits.coupons.length) return <Empty description={t("暂无积分与权益记录")} />;
   return <>
     {overview.benefits.accounts.map((account: CustomerProfileBenefitAccount) => <section key={account.workspaceId}>
@@ -230,6 +242,7 @@ function BenefitsTab({ overview }: { overview: CustomerProfileOverview }) {
 
 function OrdersTab({ overview, canViewOrders, onPageChange, onOpenOrder }: { overview: CustomerProfileOverview; canViewOrders: boolean; onPageChange: (page: number, pageSize: number) => void; onOpenOrder: (orderId: string) => void }) {
   const { t } = useLocale();
+  const { dateTime } = useProfileDates();
   return <Table<CustomerProfileOrder> size="small" rowKey="id" dataSource={overview.orders.items} scroll={{ x: 980 }} pagination={{ current: overview.orders.page, pageSize: overview.orders.pageSize, total: overview.orders.total, showSizeChanger: true, onChange: onPageChange }} columns={[
     { title: t("订单号"), dataIndex: "orderNo" },
     { title: t("经营空间"), dataIndex: "workspaceName" },
@@ -245,6 +258,7 @@ function OrdersTab({ overview, canViewOrders, onPageChange, onOpenOrder }: { ove
 
 function AuditTab({ overview, canReveal }: { overview: CustomerProfileOverview; canReveal: boolean }) {
   const { t } = useLocale();
+  const { dateTime } = useProfileDates();
   if (canReveal && !overview.statusHistory.length && !overview.sensitiveAccess?.length) return <Empty description={t("暂无状态或访问记录")} />;
   return <>
     {Boolean(overview.statusHistory.length) && <ListSection title={t("状态历史")} style={{ marginTop: "var(--rental-layout-section-gap)" }}><Table size="small" rowKey="id" dataSource={overview.statusHistory} pagination={{ defaultPageSize: 20 }} columns={[
@@ -272,28 +286,37 @@ function AuditTab({ overview, canReveal }: { overview: CustomerProfileOverview; 
 export function CustomerProfileDetails({ customerId, canManage, canView, canReveal, canViewOrders, onClose, onEdit, onQualification, actions }: Props) {
   const { message } = App.useApp();
   const { t } = useLocale();
+  const { dateTime } = useProfileDates();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [orderPage, setOrderPage] = useState(1);
   const scope = useListQueryIdentity();
   const [orderPageSize, setOrderPageSize] = useState(20);
+  const [profileTab, setProfileTab] = useState<string>();
   const [addressTarget, setAddressTarget] = useState<CustomerProfileAddress>();
   const [addressOpen, setAddressOpen] = useState(false);
   const [addressForm] = Form.useForm<AddressForm>();
   const [identityForm] = Form.useForm<IdentityForm>();
+  const addressDialog = useModalDismissal(addressOpen, () => { setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); });
   const [identityFiles, setIdentityFiles] = useState<UploadFile<{ id: string; mimeType: string }>[]>([]);
-  useEffect(() => { setOrderPage(1); setOrderPageSize(20); setAddressOpen(false); setAddressTarget(undefined); setIdentityFiles([]); identityForm.resetFields(); }, [customerId, identityForm]);
+  useEffect(() => { setOrderPage(1); setOrderPageSize(20); setProfileTab(undefined); setAddressOpen(false); setAddressTarget(undefined); setIdentityFiles([]); }, [customerId]);
   const overview = useQuery({
     queryKey: ["customer-profile-overview", customerId, scope, orderPage, orderPageSize],
     queryFn: () => customerApi.profileOverview(customerId!, { page: orderPage, pageSize: orderPageSize }),
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === customerId && previousQuery?.queryKey[2] === scope ? previous : undefined,
     enabled: canView && Boolean(customerId), meta: { liveRefresh: false }
   });
+  const activeTab = profileTab ?? (overview.data?.insights ? "analysis" : "basic");
+  const editable = canManage && !overview.isPlaceholderData && !overview.isError;
+  const denied = overview.isError && !isTransientRefreshError(overview.error);
+  useEffect(() => {
+    if (denied) { setAddressOpen(false); setAddressTarget(undefined); }
+  }, [denied]);
   const canViewIdentity = canView && canReveal;
   const identityVerifications = useQuery({
-    queryKey: ["customer-identity-verifications", customerId],
+    queryKey: ["customer-identity-verifications", customerId, scope],
     queryFn: () => customerApi.identityVerifications(customerId!),
-    enabled: canView && Boolean(customerId) && canViewIdentity
+    enabled: canView && Boolean(customerId) && canViewIdentity && activeTab === "identity"
   });
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["customer-profile-overview", customerId] });
@@ -301,7 +324,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   };
   const saveAddress = useMutation({
     mutationFn: (values: AddressForm) => customerApi.saveAddress(customerId!, { ...values, id: addressTarget?.id, revision: addressTarget?.revision }),
-    onSuccess: async () => { await refresh(); setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); message.success(t("地址已保存")); },
+    onSuccess: async () => { await refresh(); addressDialog.dismiss(); message.success(t("地址已保存")); },
     onError: (error: Error) => message.error(error.message || t("地址保存失败"))
   });
   const removeAddress = useMutation({
@@ -365,11 +388,11 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   };
   const current = overview.data;
   const profileTabs = [
-    { key: "analysis", label: t("客户分析"), children: current && <CustomerAnalysis key={customerId} overview={current} /> },
+    { key: "analysis", label: t("客户分析"), children: current && <CustomerAnalysis key={customerId} overview={current} onRefresh={() => overview.refetch({ throwOnError: true })} /> },
     { key: "basic", label: t("基础资料"), children: current && <ProfileSummary overview={current} /> },
     { key: "account", label: t("账号与会员"), children: current && <AccountTab overview={current} /> },
-    { key: "address", label: current && current.addresses.length > 0 ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutateAsync(address)} /> },
-    { key: "qualification", label: current && current.qualificationRevisions.length > 0 ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && <QualificationTab revisions={current.qualificationRevisions} canManage={canManage} onQualification={onQualification} /> },
+    { key: "address", label: current && current.addresses.length > 0 ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={editable} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutateAsync(address)} /> },
+    { key: "qualification", label: current && current.qualificationRevisions.length > 0 ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && <QualificationTab revisions={current.qualificationRevisions} canManage={editable} onQualification={onQualification} /> },
     ...(canViewIdentity ? [{
       key: "identity",
       label: t("实名认证"),
@@ -377,31 +400,31 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
         <Alert type="warning" showIcon title={t("实名核验仅记录审核事实，不代替空间业务规则")}
           description={t("通过必须上传归属此客户的证据文件；每次核验只追加记录，普通建档不能直接把状态改成已认证。")} />
         {canManage && <Card size="small" title={t("新增核验记录")}>
-          <Form form={identityForm} layout="vertical" onFinish={(values) => saveIdentityVerification.mutate(values)}>
+          <Form form={identityForm} layout="vertical" disabled={!editable || saveIdentityVerification.isPending} onFinish={(values) => saveIdentityVerification.mutate(values)}>
             <Row gutter={12}>
-              <Col span={12}><Form.Item name="credentialType" label={t("证件类型")} rules={[{ required: true }]}><Select options={[
+              <Col xs={24} sm={12}><Form.Item name="credentialType" label={t("证件类型")} rules={[{ required: true }]}><Select options={[
                 { value: "identity_card", label: t("身份证") },
                 { value: "passport", label: t("护照") },
                 { value: "national_id", label: t("其他法定身份证件") }
               ]} /></Form.Item></Col>
-              <Col span={12}><Form.Item name="result" label={t("核验结论")} rules={[{ required: true }]}><Select options={[
+              <Col xs={24} sm={12}><Form.Item name="result" label={t("核验结论")} rules={[{ required: true }]}><Select options={[
                 { value: "verified", label: t("核验通过") },
                 { value: "rejected", label: t("核验未通过") },
                 { value: "revoked", label: t("撤销既有核验") }
               ]} /></Form.Item></Col>
             </Row>
             <Form.Item label={t("证件影像或核验凭证")}>
-              <Upload accept="image/jpeg,image/png,image/webp,application/pdf" multiple maxCount={5} fileList={identityFiles} customRequest={identityUploadRequest}
+              <Upload accept="image/jpeg,image/png,image/webp,application/pdf" multiple maxCount={5} disabled={!editable || saveIdentityVerification.isPending} fileList={identityFiles} customRequest={identityUploadRequest}
                 onChange={({ fileList }) => setIdentityFiles(fileList as UploadFile<{ id: string; mimeType: string }>[])}>
                 <Button disabled={!canManage || saveIdentityVerification.isPending}>{t("上传证据")}</Button>
               </Upload>
             </Form.Item>
             <Form.Item name="reason" label={t("核验说明/原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={3} maxLength={500} showCount /></Form.Item>
-            <SaveButton disabled={!canManage || identityFiles.some((file) => file.status === "uploading")} label={t("保存核验记录")} form={identityForm} pending={saveIdentityVerification.isPending} onSave={(values) => saveIdentityVerification.mutateAsync(values)} />
+            <SaveButton disabled={!editable || identityFiles.some((file) => file.status === "uploading")} label={t("保存核验记录")} form={identityForm} pending={saveIdentityVerification.isPending} onSave={(values) => saveIdentityVerification.mutateAsync(values)} />
           </Form>
         </Card>}
         <ListSection title={t("核验历史")}>
-          <QueryState loading={identityVerifications.isLoading} error={identityVerifications.error}>
+          <QueryState loading={identityVerifications.isLoading} error={identityVerifications.error} onRetry={() => identityVerifications.refetch({ throwOnError: true })}>
             {identityVerifications.data?.length ? <Table<CustomerIdentityVerificationSummary> size="small" rowKey="id" onRefresh={() => identityVerifications.refetch()} loading={identityVerifications.isLoading} refreshing={identityVerifications.isFetching} dataSource={identityVerifications.data} pagination={{ defaultPageSize: 20 }} scroll={{ x: 800 }} columns={[
               { title: t("证件类型"), dataIndex: "credentialType" },
               { title: t("结论"), dataIndex: "result", render: (value) => <Tag color={value === "verified" ? "success" : value === "revoked" ? "default" : "error"}>{t(value === "verified" ? "已认证" : value === "revoked" ? "已撤销" : "未通过")}</Tag> },
@@ -419,6 +442,8 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
     { key: "audit", label: t("状态与审计"), children: current && <AuditTab overview={current} canReveal={canReveal} /> }
   ];
   function openAddressEditor(address?: CustomerProfileAddress) {
+    if (!editable || saveAddress.isPending) return;
+    addressForm.resetFields();
     setAddressTarget(address);
     addressForm.setFieldsValue(address ? { recipient: address.recipient, countryCode: address.countryCode, province: address.province, city: address.city, district: address.district, detail: address.detail, postalCode: address.postalCode, isDefault: address.isDefault } : { countryCode: "CN", isDefault: false });
     setAddressOpen(true);
@@ -426,7 +451,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
   return <>
     <QueryState loading={overview.isLoading} error={overview.error} onRetry={canView ? () => overview.refetch({ throwOnError: true }) : undefined}>
       {current && current.profile.customerType !== "personal" ? <Alert type="warning" showIcon title={t("未找到个人会员资料")} /> : current && <RecordDetailLayout title={current.profile.name || t("个人会员资料")} onBack={onClose}
-        actions={<><Button type="primary" disabled={!canManage} onClick={onEdit}>{t("编辑基础资料")}</Button>{actions}</>}
+        actions={<><Button type="primary" disabled={!editable} onClick={onEdit}>{t("编辑基础资料")}</Button>{actions}</>}
         status={<><DataTableStatus variant="soft" tone={(current.profile.membership?.status ?? current.profile.status) === "active" ? "success" : "neutral"}>{t(statusLabel[current.profile.membership?.status ?? current.profile.status] ?? current.profile.status)}</DataTableStatus><span>{t("个人会员")}</span>{current.profile.mergedIntoCustomerId && <Tag color="warning">{t("已合并")}</Tag>}</>}
         facts={[
           { key: "phone", label: "手机号", value: current.profile.phoneMasked || current.profile.phone || "—" },
@@ -434,20 +459,22 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
           { key: "identity", label: "实名认证", value: t(current.profile.identityVerified ? "已认证" : "未认证") },
           { key: "account", label: "登录账号", value: t(current.profile.accountSummary?.provisioned ? statusLabel[current.profile.accountSummary.status ?? "active"] ?? current.profile.accountSummary.status ?? "正常" : "未开通") }
         ]}>
-        <TableRefreshProvider onRefresh={() => overview.refetch()} busy={overview.isFetching}><Tabs destroyOnHidden items={profileTabs} /></TableRefreshProvider>
+        <TableRefreshProvider onRefresh={() => overview.refetch({ throwOnError: true })} busy={overview.isFetching}><Tabs aria-label={t("个人会员资料")} destroyOnHidden={false} activeKey={activeTab} onChange={setProfileTab} items={profileTabs} /></TableRefreshProvider>
       </RecordDetailLayout>}
     </QueryState>
-    <Drawer title={addressTarget ? t("编辑配送地址") : t("新增配送地址")} size={520} open={addressOpen} destroyOnHidden onClose={() => { setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); }} extra={<SaveButton  label={t("保存")} form={addressForm} pending={saveAddress.isPending} onSave={(values) => saveAddress.mutateAsync(values)} />}>
-      <Form form={addressForm} layout="vertical" onFinish={(values) => saveAddress.mutate(values)}>
+    <Modal presentation="side" title={addressTarget ? t("编辑配送地址") : t("新增配送地址")} width={520} open={addressDialog.visible && !denied} destroyOnHidden onCancel={addressDialog.dismiss} afterClose={addressDialog.afterClose}
+      closable={!saveAddress.isPending} keyboard={!saveAddress.isPending} maskClosable={!saveAddress.isPending}
+      footer={<><Button disabled={saveAddress.isPending} onClick={addressDialog.dismiss}>{t("取消")}</Button><SaveButton disabled={!editable} label={t("保存")} form={addressForm} pending={saveAddress.isPending} onSave={(values) => saveAddress.mutateAsync(values)} /></>}>
+      <Form form={addressForm} layout="vertical" disabled={!editable || saveAddress.isPending} onFinish={(values) => saveAddress.mutate(values)}>
         <Form.Item name="recipient" label={t("收件人")} rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="phone" label={t("联系电话")} extra={addressTarget ? t("留空表示保留现有电话；不能填写脱敏号码。") : undefined} rules={addressTarget ? [] : [{ required: true }]}><Input /></Form.Item>
         <Form.Item name="countryCode" label={t("国家/地区编码")}><Input /></Form.Item>
-        <Row gutter={12}><Col span={12}><Form.Item name="province" label={t("省/直辖市")} rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="city" label={t("城市")} rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
+        <Row gutter={12}><Col xs={24} sm={12}><Form.Item name="province" label={t("省/直辖市")} rules={[{ required: true }]}><Input /></Form.Item></Col><Col xs={24} sm={12}><Form.Item name="city" label={t("城市")} rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
         <Form.Item name="district" label={t("区/县")}><Input /></Form.Item>
         <Form.Item name="detail" label={t("详细地址")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="postalCode" label={t("邮编")}><Input /></Form.Item>
         <Form.Item name="isDefault" valuePropName="checked"><Checkbox>{t("设为默认地址")}</Checkbox></Form.Item>
       </Form>
-    </Drawer>
+    </Modal>
   </>;
 }

@@ -52,12 +52,13 @@ test('membership screens discard local task snapshots at identity or review-gran
     }).outputText;
     const exports = {};
     new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', child, code)(exports, require,
-      () => identity, select => select({ hasTenantMembershipPermission: permission => grants.has(permission) }), child);
+      () => identity, select => select({ user: { tenantMembership: { grants: [...grants] } }, hasTenantMembershipPermission: permission => grants.has(permission) }), child);
     return exports[name];
   };
   const Review = boundary('apps/admin/src/features/membership/MembershipReviewPage.tsx', 'MembershipReviewPage', 'MembershipReviewWorkspace');
   const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');
-  for (const Screen of [Review, Rewards]) {
+  const Personal = boundary('apps/admin/src/features/membership/PersonalMembershipPage.tsx', 'PersonalMembershipPage', 'PersonalMembershipWorkspace');
+  for (const Screen of [Review, Rewards, Personal]) {
     identity = 'tenant-a:workspace-a:operator';
     const original = Screen();
     assert.equal(Screen().key, original.key, 'Ordinary rerenders retain the form.');
@@ -68,8 +69,10 @@ test('membership screens discard local task snapshots at identity or review-gran
     assert.notEqual(Screen().key, otherWorkspace.key, 'Private snapshots cannot survive a tenant change.');
   }
   const allowed = Review().key;
+  const personalAllowed = Personal().key;
   grants = new Set(['rental-os:member:view']);
   assert.notEqual(Review().key, allowed, 'Revoking review rights closes its old task even if the list identity stays stable.');
+  assert.notEqual(Personal().key, personalAllowed, 'Personal profile drafts cannot survive a changed tenant membership grant.');
 });
 
 test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {

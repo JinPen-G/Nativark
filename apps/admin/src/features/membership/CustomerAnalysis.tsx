@@ -2,7 +2,7 @@ import type { CustomerProfileOverview, RentalCoreOrderStatus } from "@rental-os/
 import { formatRentalMoney } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
 import { useState } from "react";
-import { AnimatedNumber, Segmented, Table } from "@/components/ui";
+import { ActionButton, AnimatedNumber, Empty, Segmented, Table } from "@/components/ui";
 import { BusinessTimeline, BusinessTrend, InsightColumns, InsightMetrics, InsightSection } from "@/components/BusinessInsights";
 import { detailStatusLabels } from "@/features/rental-core/orderDetailPresentation";
 import { useQuery } from "@tanstack/react-query";
@@ -13,14 +13,14 @@ import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 export function CustomerAnalysisReader({ customerId }: { customerId: string }) {
   const scope = useListQueryIdentity();
   const overview = useQuery({ queryKey: ["customer-profile-overview", customerId, scope, "analysis"], queryFn: () => customerApi.profileOverview(customerId, { pageSize: 1 }), meta: { liveRefresh: false } });
-  return <QueryState transitionKey={customerId} loading={overview.isLoading} error={overview.error} onRetry={() => overview.refetch()}>{overview.data && <CustomerAnalysis key={customerId} overview={overview.data} />}</QueryState>;
+  return <QueryState transitionKey={`${customerId}:${scope}`} loading={overview.isLoading} error={overview.error} onRetry={() => overview.refetch({ throwOnError: true })}>{overview.data && <CustomerAnalysis key={customerId} overview={overview.data} onRefresh={() => overview.refetch({ throwOnError: true })} />}</QueryState>;
 }
 
-export function CustomerAnalysis({ overview }: { overview: CustomerProfileOverview }) {
+export function CustomerAnalysis({ overview, onRefresh }: { overview: CustomerProfileOverview; onRefresh?: () => Promise<unknown> }) {
   const { t } = useLocale();
   const [period, setPeriod] = useState("6");
   const data = overview.insights;
-  if (!data) return <p>{t("客户分析暂不可用，请刷新后重试。")}</p>;
+  if (!data) return <Empty compact description={t("客户分析暂不可用，请刷新后重试。")}>{onRefresh && <ActionButton variant="secondary" label={t("刷新")} onAction={onRefresh} />}</Empty>;
   const current = data.months.at(-1)?.orders ?? 0;
   const prior = data.months.at(-2)?.orders ?? 0;
   const rows = data.months.slice(-Number(period));
