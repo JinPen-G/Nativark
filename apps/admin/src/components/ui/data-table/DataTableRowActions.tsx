@@ -30,7 +30,7 @@ export function DataTableRowActions({ primary, actions, details, detailLabel, de
     </Button> : <Button size="small" type="text" className={styles.rowPrimary} disabled={detailsDisabled} onClick={details} title={detailAccessibleLabel} aria-label={detailAccessibleLabel}>
       <FileText size={14} aria-hidden="true" />{detailLabel}
     </Button>}
-    <Menu.Root>
+    {menuActions.length > 0 && <Menu.Root>
       <Menu.Trigger type="button" data-slot="dropdown-menu-trigger" className={styles.rowMenuTrigger} aria-label={menuLabel} title={menuLabel} disabled={menuActions.length === 0 || menuActions.every(action => action.disabled)}>
         <Ellipsis size={16} aria-hidden="true" />
       </Menu.Trigger>
@@ -43,6 +43,6 @@ export function DataTableRowActions({ primary, actions, details, detailLabel, de
           </Menu.Item>
         </Fragment>)}
       </Menu.Content></Menu.Portal>
-    </Menu.Root>
+    </Menu.Root>}
   </span>;
 }

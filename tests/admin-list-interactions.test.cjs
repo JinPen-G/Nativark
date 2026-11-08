@@ -41,6 +41,37 @@ test('modal feedback remains available between retained providers and refreshed 
   }
 });
 
+test('membership screens discard local task snapshots at identity or review-grant changes', () => {
+  let identity = 'tenant-a:workspace-a:operator', grants = new Set(['rental-os:member:view', 'rental-os:member:review']);
+  const boundary = (file, name, child) => {
+    const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(declaration, name);
+    const code = ts.transpileModule(declaration.getText(source), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const exports = {};
+    new Function('exports', 'require', 'useListQueryIdentity', 'useAuthStore', child, code)(exports, require,
+      () => identity, select => select({ hasTenantMembershipPermission: permission => grants.has(permission) }), child);
+    return exports[name];
+  };
+  const Review = boundary('apps/admin/src/features/membership/MembershipReviewPage.tsx', 'MembershipReviewPage', 'MembershipReviewWorkspace');
+  const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');
+  for (const Screen of [Review, Rewards]) {
+    identity = 'tenant-a:workspace-a:operator';
+    const original = Screen();
+    assert.equal(Screen().key, original.key, 'Ordinary rerenders retain the form.');
+    identity = 'tenant-a:workspace-b:operator';
+    const otherWorkspace = Screen();
+    assert.notEqual(otherWorkspace.key, original.key, 'A workspace change must not retain another scope’s draft.');
+    identity = 'tenant-b:workspace-b:operator';
+    assert.notEqual(Screen().key, otherWorkspace.key, 'Private snapshots cannot survive a tenant change.');
+  }
+  const allowed = Review().key;
+  grants = new Set(['rental-os:member:view']);
+  assert.notEqual(Review().key, allowed, 'Revoking review rights closes its old task even if the list identity stays stable.');
+});
+
 test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {
   const { planListFilters } = load('apps/admin/src/components/ui/listFilterLayout.ts', {});
   const geometry = { available: 342, category: 0, categoryMin: 0, search: 280, searchMin: 200, searchCompactMin: 96,
