@@ -4,6 +4,7 @@ const labels: Record<string, string> = {
   full_frame:"全画幅", aps_c:"APS-C", m43:"M4/3", medium_format:"中画幅", one_inch:"一英寸",
   body:"机身", power:"供电", storage:"存储", accessory:"配件", battery:"电池", charger:"充电器", monitor:"监视器",
   stabilizer:"稳定器", flash:"闪光灯", cage:"兔笼", clean:"已清洁", needs_cleaning:"待清洁", damaged:"已损坏",
+  sd:"SD", sdxc:"SDXC", cfexpress_a:"CFexpress Type A", cfexpress_b:"CFexpress Type B", cfast:"CFast", xqd:"XQD", microsd:"microSD", other:"其他",
 };
 export function catalogAttributeText(value: unknown, t: (value:string)=>string): string {
   if (value == null || value === "") return "—";

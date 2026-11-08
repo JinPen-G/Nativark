@@ -1,0 +1,13 @@
+.assetContext { margin-bottom: var(--rental-form-field-gap); }
+.assetIdentity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-4); }
+.assetIdentity strong { color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); font-weight: 500; }
+.assetIdentity p { margin: var(--space-1) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--leading-body); }
+.bundleList { display: grid; gap: var(--space-4); min-width: 0; }
+.bundleItem + .bundleItem { padding-top: var(--space-4); border-top: 1px solid var(--rental-content-divider); }
+.bundleMain { display: grid; grid-template-columns: minmax(0, 1fr) var(--rental-control-width-number) auto; gap: var(--space-3); align-items: start; }
+.bundleRemove { align-self: end; margin-bottom: var(--rental-form-field-gap); }
+.bundleOptions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4); }
+@container settings-panel (max-width: 420px) {
+  .bundleMain { grid-template-columns: minmax(0, 1fr) auto; }
+  .bundleProduct { grid-column: 1 / -1; }
+}

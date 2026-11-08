@@ -2,9 +2,9 @@ import { catalogCards } from "./catalogCards";
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@/components/ui/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
 import { ListSection, App, Empty } from "@/components/ui";
-import { Form } from "@/components/ui";
+import { Form, FormSection } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -19,6 +19,9 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
 import { catalogCapabilities } from "@/features/listCapabilities";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { catalogAttributeText } from "./catalogAttributeText";
+import styles from "./CatalogEditors.module.css";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
 const cameraEquipmentTypeLabels: Record<string, [string, string]> = {
@@ -62,7 +65,7 @@ function AttributeInput({
   onChange?: (...args: never[]) => void;
   id?: string;
 }) {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   if (field.type === "number") {
     return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
   }
@@ -71,7 +74,7 @@ function AttributeInput({
       ? cameraEquipmentTypeLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option
       : field.code === "securityRiskLevel"
         ? securityRiskLevelLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option
-        : option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+        : catalogAttributeText(option, t) }))} value={value as string} onChange={onChange as (value: string) => void} />;
   }
   if (field.type === "boolean") {
     // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。
@@ -177,7 +180,43 @@ export function CatalogPage() {
 
       <Drawer title={editing ? `${t("编辑")}${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })} />}>
         <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
-          <Card size="small" title={`${itemGroupLabel}${t("照片")}`} style={{ marginBottom: 16 }}>
+          <SettingsWorkspace sections={[
+            { key: "profile", label: t("基本资料"), content: <>
+          <FormSection title={t("型号基本资料")}>
+          <Row gutter={16}>
+            <Col span={24}><Form.Item name="name" label={t(presentation?.itemGroupNameLabel ?? `${itemGroupLabel}${t("名称")}`)} extra={t("这是型号的显示名称，不是面向客户的定价组名称。")} rules={[{ required: true }]}><Input placeholder={t(presentation?.itemGroupNamePlaceholder ?? "")} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="code" label={t(presentation?.itemGroupCodeLabel ?? `${itemGroupLabel}${t("编码")}`)} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder={t("用于内部检索和接口引用")} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+            {presentation?.fixedInventoryMode ? <Form.Item name="inventoryMode" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="inventoryMode" label={t("库存方式")} rules={[{ required: true }]}><Select disabled={Boolean(editing)} options={category?.supportedInventoryModes.map((value) => ({ value, label: t(inventoryLabels[value] ?? value) }))} /></Form.Item></Col>}
+            {presentation?.fixedUnit ? <Form.Item name="unit" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="unit" label={t("计量单位")} rules={[{ required: true }]}><Input placeholder={t("台、套、顶、辆")} /></Form.Item></Col>}
+          </Row>
+          {presentation?.fixedInventoryMode && <Typography.Text type="secondary">{locale === "en-US" ? `${t("固定按“")}${t(inventoryLabels[presentation.fixedInventoryMode])}${t(" / ")}${presentation.fixedUnit}${t("”管理，具体")}${t(profile.data?.terminology.assetLabel ?? "资产")}${t("在“")}${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? t("资产管理")}${t("”中登记。")}` : `该品类固定按“${inventoryLabels[presentation.fixedInventoryMode]} / ${presentation.fixedUnit}”管理，具体${profile.data?.terminology.assetLabel ?? "资产"}在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中登记。`}</Typography.Text>}
+          <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
+          </FormSection>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
+            <FormSection title={t("套装组成")}>
+              <Form.List name="bundleComponents">{(fields, { add, remove }) => <div className={styles.bundleList}>
+                {fields.map(({ key: fieldKey, ...field }) => <div className={styles.bundleItem} key={fieldKey}>
+                  <div className={styles.bundleMain}>
+                    <Form.Item {...field} className={styles.bundleProduct} name={[field.name, "itemGroupId"]} label={t("组成商品")} rules={[{ required: true }]}><Select placeholder={t("选择组成商品")} options={(groups.data ?? []).filter((item) => item.id !== editing?.id && item.inventoryMode !== RentalInventoryMode.Bundle).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item>
+                    <Form.Item {...field} name={[field.name, "quantity"]} label={t("数量")} rules={[{ required: true }]}><InputNumber min={1} precision={0} placeholder={t("数量")} style={{ width: "100%" }} /></Form.Item>
+                    <Button className={styles.bundleRemove} danger type="text" aria-label={t("移除组成项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} />
+                  </div>
+                  <div className={styles.bundleOptions}>
+                    <Form.Item {...field} name={[field.name, "substitutionGroup"]} label={t("替代组编码")}><Input placeholder={t("替代组编码")} /></Form.Item>
+                    <Form.Item {...field} name={[field.name, "optional"]} label={t("候选")} valuePropName="checked"><Switch checkedChildren={t("候选")} unCheckedChildren={t("默认")} /></Form.Item>
+                  </div>
+                </div>)}
+                <Alert type="info" showIcon title={t("替代组规则")} description={t("同一替代组必须配置一个默认组成和至少一个替代候选；订单确认后、配货前可以在组内替换。")} />
+                <Button block type="dashed" onClick={() => add({ quantity: 1, optional: false })} icon={<PlusOutlined />}>{t("增加组成项")}</Button>
+              </div>}</Form.List>
+            </FormSection>
+          )}</Form.Item>
+            </> },
+            { key: "specifications", label: t("型号规格"), content: <FormSection title={`${t(category?.name ?? "品类")}${t("厂商与型号规格")}`}>
+              <Row gutter={16}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.code === "securityRiskLevel" ? t("未分级商品按未获风控许可处理；会员押金或预授权减免只对空间规则明确允许的等级生效。") : field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
+            </FormSection> },
+            { key: "photos", label: t("展示照片"), content: <FormSection title={`${itemGroupLabel}${t("照片")}`}>
             <Typography.Paragraph type="secondary">{t("上传型号的标准展示图，第一张作为列表封面；具体资产的实拍、状态和损伤照片在资产管理中维护。")}</Typography.Paragraph>
             {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="processing" style={{ position: "absolute", left: 6, top: 6 }}>{t("封面")}</Tag>}<Button danger size="small" shape="circle" aria-label={t("删除图片")} icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
             <Upload
@@ -196,26 +235,8 @@ export function CatalogPage() {
               {(editing?.images?.length ?? 0) + pendingFiles.length < 6 && <Button icon={<UploadOutlined />}>{t("选择照片")}</Button>}
             </Upload>
             {pendingFiles.length > 0 && <Typography.Text type="secondary">{t("所选照片将在点击右上角“保存”后上传。")}</Typography.Text>}
-          </Card>
-          <Card size="small" title={t("型号基本资料")} style={{ marginBottom: 16 }}>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="code" label={t(presentation?.itemGroupCodeLabel ?? `${itemGroupLabel}${t("编码")}`)} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder={t("用于内部检索和接口引用")} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="name" label={t(presentation?.itemGroupNameLabel ?? `${itemGroupLabel}${t("名称")}`)} extra={t("这是型号的显示名称，不是面向客户的定价组名称。")} rules={[{ required: true }]}><Input placeholder={t(presentation?.itemGroupNamePlaceholder ?? "")} /></Form.Item></Col>
-            {presentation?.fixedInventoryMode ? <Form.Item name="inventoryMode" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="inventoryMode" label={t("库存方式")} rules={[{ required: true }]}><Select disabled={Boolean(editing)} options={category?.supportedInventoryModes.map((value) => ({ value, label: t(inventoryLabels[value] ?? value) }))} /></Form.Item></Col>}
-            {presentation?.fixedUnit ? <Form.Item name="unit" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="unit" label={t("计量单位")} rules={[{ required: true }]}><Input placeholder={t("台、套、顶、辆")} /></Form.Item></Col>}
-          </Row>
-          {presentation?.fixedInventoryMode && <Typography.Text type="secondary">{locale === "en-US" ? `${t("固定按“")}${t(inventoryLabels[presentation.fixedInventoryMode])}${t(" / ")}${presentation.fixedUnit}${t("”管理，具体")}${t(profile.data?.terminology.assetLabel ?? "资产")}${t("在“")}${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? t("资产管理")}${t("”中登记。")}` : `该品类固定按“${inventoryLabels[presentation.fixedInventoryMode]} / ${presentation.fixedUnit}”管理，具体${profile.data?.terminology.assetLabel ?? "资产"}在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中登记。`}</Typography.Text>}
-          </Card>
-          <Card size="small" title={`${t(category?.name ?? "品类")}${t("厂商与型号规格")}`} style={{ marginBottom: 16 }}>
-            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.code === "securityRiskLevel" ? t("未分级商品按未获风控许可处理；会员押金或预授权减免只对空间规则明确允许的等级生效。") : field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
-          </Card>
-          <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
-            <Card size="small" title={t("套装组成")} style={{ marginBottom: 16 }}>
-              <Form.List name="bundleComponents">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Row gutter={8} key={field.key}><Col span={9}><Form.Item {...field} name={[field.name, "itemGroupId"]} rules={[{ required: true }]}><Select placeholder={t("选择组成商品")} options={(groups.data ?? []).filter((item) => item.id !== editing?.id && item.inventoryMode !== RentalInventoryMode.Bundle).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} placeholder={t("数量")} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item {...field} name={[field.name, "substitutionGroup"]}><Input placeholder={t("替代组编码")} /></Form.Item></Col><Col span={4}><Form.Item {...field} name={[field.name, "optional"]} valuePropName="checked"><Switch checkedChildren={t("候选")} unCheckedChildren={t("默认")} /></Form.Item></Col><Col span={2}><Button danger type="text" aria-label={t("移除组成项")} icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Col></Row>)}<Alert type="info" showIcon title={t("替代组规则")} description={t("同一替代组必须配置一个默认组成和至少一个替代候选；订单确认后、配货前可以在组内替换。")} /><Button block type="dashed" onClick={() => add({ quantity: 1, optional: false })} icon={<PlusOutlined />}>{t("增加组成项")}</Button></Space>}</Form.List>
-            </Card>
-          )}</Form.Item>
-          <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
+            </FormSection> }
+          ]} />
         </Form>
       </Drawer>
     </>

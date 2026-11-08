@@ -2,9 +2,9 @@ import { DataTableText, ListSection, SaveButton } from "@/components/ui";
 import { PlusOutlined } from "@/components/ui/icons";
 import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Col, InputNumber, Row, Space, Tag } from "antd";
 import { App } from "@/components/ui";
-import { Form } from "@/components/ui";
+import { Form, FormSection } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -22,6 +22,9 @@ import { assetCards, stockCards } from "./assetCards";
 import { StockOperationsPanel } from "./StockOperationsPanel";
 import { AnimatedNumber } from "@/components/ui";
 import type { ReactNode } from "react";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import styles from "./CatalogEditors.module.css";
+import { catalogAttributeText } from "./catalogAttributeText";
 
 const statusMap: Record<string, { label: string; color: string }> = {
   available: { label: "可用", color: "success" }, reserved: { label: "已预占", color: "processing" }, rented: { label: "租赁中", color: "blue" },
@@ -43,11 +46,12 @@ function AttributeInput({
   onChange?: (...args: never[]) => void;
   id?: string;
 }) {
+  const { t } = useLocale();
   if (field.type === "number") {
     return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
   }
   if (field.type === "select") {
-    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: catalogAttributeText(option, t) }))} value={value as string} onChange={onChange as (value: string) => void} />;
   }
   if (field.type === "boolean") {
     return <Switch id={id} checked={checked ?? Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
@@ -162,19 +166,21 @@ export function AssetWorkspacePage() {
       {activeTab === "stock" && <StockOperationsPanel groups={groups.data ?? []} locations={locations.data ?? []} terminology={profile.data?.terminology} canManage={canManage} />}
       <Drawer title={editing ? (locale === "en-US" ? `${t("编辑")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("编辑")}${t(profile.data?.terminology.assetLabel ?? "资产")}`) : (locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`)} size={640} open={assetDrawerOpen} destroyOnHidden onClose={() => setAssetDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={assetForm} pending={saveAsset.isPending} onSave={(values) => saveAsset.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
-          {selectedItemGroup && <Card size="small" title={locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`} style={{ marginBottom: 16 }}>
-            {selectedItemGroupCover ? <Space align="start"><ItemGroupPhoto groupId={selectedItemGroup.id} image={selectedItemGroupCover} size={128} /><span className="muted">{selectedItemGroup.name}<br />{locale === "en-US" ? `${t("照片来自")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。")}` : `照片来自${profile.data?.terminology.itemGroupLabel ?? "产品型号"}主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。`}</span></Space> : <Alert type="info" showIcon title={`${t("该")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("尚未上传照片")}`} description={`${t("请先到")}“${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "产品型号管理")}”${t("上传标准展示图。")}`} />}
-          </Card>}
-          <Card size="small" title={`${t(profile.data?.terminology.assetLabel ?? "资产")}${t("基本资料")}`} style={{ marginBottom: 16 }}>
-            <Row gutter={12}>
-            <Col span={12}><Form.Item name="itemGroupId" label={t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} extra={t("厂商、品牌和型号从所选主档带入。")} rules={[{ required: true }]}><Select disabled={Boolean(editing)} showSearch={{ optionFilterProp: "label" }} options={serializedGroups.map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} /></Form.Item></Col>
+          <SettingsWorkspace sections={[
+            { key: "profile", label: t("基本资料"), content: <FormSection title={`${t(profile.data?.terminology.assetLabel ?? "资产")}${t("基本资料")}`}>
+          {selectedItemGroup && <div className={styles.assetContext}>
+            {selectedItemGroupCover ? <div className={styles.assetIdentity}><ItemGroupPhoto groupId={selectedItemGroup.id} image={selectedItemGroupCover} /><div><strong>{selectedItemGroup.name}</strong><p>{locale === "en-US" ? `${t("照片来自")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。")}` : `照片来自${profile.data?.terminology.itemGroupLabel ?? "产品型号"}主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。`}</p></div></div> : <Alert type="info" showIcon title={`${t("该")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("尚未上传照片")}`} description={`${t("请先到")}“${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "产品型号管理")}”${t("上传标准展示图。")}`} />}
+          </div>}
+            <Row gutter={16}>
+            <Col span={24}><Form.Item name="itemGroupId" label={t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} extra={t("厂商、品牌和型号从所选主档带入。")} rules={[{ required: true }]}><Select disabled={Boolean(editing)} showSearch={{ optionFilterProp: "label" }} options={serializedGroups.map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="assetNo" label={t(profile.data?.terminology.identifierLabel ?? "资产编号")} rules={[{ required: true }]}><Input placeholder={t("内部管理编号")} /></Form.Item></Col>
             {serialNoField && <Col span={12}><Form.Item name="serialNo" label={t(serialNoField.label)} extra={serialNoField.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: serialNoField.required }]}><AttributeInput field={serialNoField} /></Form.Item></Col>}
             <Col span={12}><Form.Item name="locationId" label={t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")} rules={[{ required: true }]}><Select options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={Object.entries(statusMap).map(([value, item]) => ({ value, label: t(item.label) }))} /></Form.Item></Col>
             </Row>
-          </Card>
-          {assetFields.length > 0 && <Card size="small" title={locale === "en-US" ? `${t(profile.data?.terminology.assetLabel ?? "资产")} ${t("识别信息")}` : `${t(profile.data?.terminology.assetLabel ?? "资产")}${t("识别信息")}`}><Row gutter={12}>{assetFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row></Card>}
+            </FormSection> },
+            ...(assetFields.length > 0 ? [{ key: "identification", label: t("识别信息"), content: <FormSection title={locale === "en-US" ? `${t(profile.data?.terminology.assetLabel ?? "资产")} ${t("识别信息")}` : `${t(profile.data?.terminology.assetLabel ?? "资产")}${t("识别信息")}`}><Row gutter={16}>{assetFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row></FormSection> }] : [])
+          ]} />
         </Form>
       </Drawer>
       <Drawer title={`${statusHistoryAsset?.assetNo ?? t("资产")}${t("状态历史")}`} size={720} open={Boolean(statusHistoryAsset)} onClose={() => setStatusHistoryAsset(undefined)}>

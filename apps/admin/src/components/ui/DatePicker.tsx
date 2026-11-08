@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { CalendarDays, ChevronDown, X } from "lucide-react";
 import dayjs, { type Dayjs } from "dayjs";
+import "dayjs/locale/zh-cn";
 import { ConfigProvider, DatePicker as AntDatePicker, type DatePickerProps } from "antd";
 import type { RangePickerProps } from "antd/es/date-picker";
 import { DatePicker as ArcDatePicker } from "@/registry/components/date-picker/date-picker";
@@ -71,7 +72,7 @@ function RangePicker(props: RangePickerProps) {
   // Arc's range picker selects whole days only. A datetime range must stay one
   // integrated control, with time/seconds/clear inside its picker, not endpoints.
   // Forward showTime unchanged so precision, time limits and confirmation survive.
-  if (props.showTime || props.disabledTime || props.onOk || props.needConfirm || props.open !== undefined || (props.picker && props.picker !== "date") || props.cellRender || props.panelRender || Array.isArray(props.format) || typeof props.format === "function" || (props.presets && (props.disabledDate || props.minDate || props.maxDate))) return <AntDatePicker.RangePicker {...props} />;
+  if (props.showTime || props.disabledTime || props.onOk || props.needConfirm || props.open !== undefined || (props.picker && props.picker !== "date") || props.cellRender || props.panelRender || Array.isArray(props.format) || typeof props.format === "function" || (props.presets && (props.disabledDate || props.minDate || props.maxDate))) return <AntDatePicker.RangePicker {...props} className={[props.className, props.showTime && !props.prefix ? "rental-datetime-range" : undefined].filter(Boolean).join(" ") || undefined} />;
   const partial = Array.isArray(props.allowEmpty) ? props.allowEmpty.some(Boolean) : props.allowEmpty;
   const simple = !props.showTime && !props.disabledDate && !partial && !disabled && !props.minDate && !props.maxDate;
   const fullyDisabled = Array.isArray(disabled) ? disabled.every(Boolean) : disabled;

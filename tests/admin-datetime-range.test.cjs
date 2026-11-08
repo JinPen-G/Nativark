@@ -10,13 +10,16 @@ const integratedRange = () => {};
 const arcRange = () => {};
 const jsx = (type, props) => ({ type, props });
 const modules = {
-  react: { useState: value => [value, () => {}], useEffect: () => {} },
+  react: { useState: value => [value, () => {}], useEffect: () => {}, useLayoutEffect: () => {}, useRef: value => ({ current: value }) },
   'react/jsx-runtime': { jsx, jsxs: jsx },
+  'lucide-react': { CalendarDays: () => {}, ChevronDown: () => {}, X: () => {} },
   dayjs,
+  'dayjs/locale/zh-cn': require('dayjs/locale/zh-cn'),
   antd: { ConfigProvider: { useConfig: () => ({}) }, DatePicker: Object.assign(() => {}, { RangePicker: integratedRange }) },
   '@/registry/components/date-picker/date-picker': { DatePicker: () => {} },
   '@/registry/components/time-picker/time-picker': { TimePicker: () => {} },
   '@/registry/components/date-range-picker/date-range-picker': { DateRangePicker: arcRange },
+  '@/registry/components/popover/popover': { Popover: () => {}, PopoverContent: () => {}, PopoverTrigger: () => {} },
   '@/app/locale': { useLocale: () => ({ locale: 'zh-CN', t: value => value }) },
   './Button': { Button: () => {} },
   './ArcLocale': { ArcLocale: () => {} },

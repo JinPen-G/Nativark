@@ -23,6 +23,7 @@ import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
+import styles from "./RentalOrderCreatePage.module.css";
 
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
   period: [Dayjs, Dayjs];
@@ -222,11 +223,10 @@ export function RentalOrderCreatePage() {
       extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
     />
     <Form<FormValues> form={form} layout="vertical" onValuesChange={() => setQuote(undefined)}>
-      <Row gutter={[16, 16]} align="top">
+      <Row gutter={[16, 16]} align="stretch">
         <Col xs={24} xl={17}>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Row gutter={[16, 16]}>
-              <Col xs={24} lg={12}>
+            <div className={styles.bookingContext}>
                 <Card className="data-panel" title={<Space><UserOutlined />{t("会员与预约身份")}</Space>} style={{ height: "100%" }}>
                   <Form.Item name="customerId" label={t("预约会员")} rules={[{ required: true, message: t("请选择个人会员") }]}>
                     <Select
@@ -280,8 +280,6 @@ export function RentalOrderCreatePage() {
                     ? <Alert showIcon type="info" title={`${selectedMember.name} · ${selectedMember.phoneMasked}`} description={t("租户统一会员。下单仅显示必要信息，会员状态、资质及本空间适用权益由服务端在报价时复核。")} />
                     : <Alert showIcon type="info" title={t("先选择会员，再选择个人或企业预约身份")} />}
                 </Card>
-              </Col>
-              <Col xs={24} lg={12}>
                 <Card className="data-panel" title={<Space><CalendarOutlined />{t("租赁时间与履约")}</Space>} style={{ height: "100%" }}>
                   {/* 先选履约方式，再按方式驱动目的地：取还类选地点，配送到客户类选发货地点 + 收货地址。 */}
                   <Form.Item name="fulfillmentMode" label={t("履约方式")} rules={[{ required: true }]}>
@@ -366,8 +364,7 @@ export function RentalOrderCreatePage() {
                     }}
                   </Form.Item>
                 </Card>
-              </Col>
-            </Row>
+            </div>
 
             <Card
               className="data-panel"

@@ -1,0 +1,10 @@
+.bookingContext {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--rental-control-width-wide) + var(--space-12) + var(--space-12))), 1fr));
+  gap: var(--space-4);
+  min-width: 0;
+}
+.bookingContext > :global(.ant-card) { min-width: 0; container: booking-context / inline-size; }
+@container booking-context (max-width: 420px) {
+  .bookingContext :global(.ant-row) > :global(.ant-col-12) { flex: 0 0 100%; max-width: 100%; }
+}
