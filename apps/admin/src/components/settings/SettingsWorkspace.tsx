@@ -1,8 +1,10 @@
 /** Section navigation keeps draft forms mounted. It changes presentation only; each section owns its save contract. */
-import { Children, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Children, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { useLocale } from "@/app/locale";
+import { ADMIN_SETTINGS_METRICS } from "@/app/designTokens";
+import { useContentTransition } from "@/components/workspace/ContentTransition";
 import styles from "./SettingsWorkspace.module.css";
 
 export interface SettingsSection {
@@ -15,10 +17,31 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
   const uid = useId();
   const { t } = useLocale();
   const root = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
   const reduced = usePrefersReducedMotion();
   const [internal, setInternal] = useState(sections[0]?.key);
   const active = sections.some(s => s.key === (value ?? internal)) ? value ?? internal : sections[0]?.key;
+  const previousActive = useRef(active);
+  const transition = useContentTransition();
   const select = (key: string) => { setInternal(key); onChange?.(key); };
+  useEffect(() => {
+    if (previousActive.current === active) return;
+    previousActive.current = active;
+    const panel = [...(root.current?.querySelectorAll<HTMLElement>('[data-settings-panel]') ?? [])]
+      .find(node => node.dataset.settingsPanel === active);
+    transition(panel ?? null);
+  }, [active, transition]);
+  useLayoutEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    // A desktop drawer can be narrower than a phone breakpoint. Measure the
+    // workspace itself so its navigation never steals the form's usable width.
+    const measure = () => setCompact(host.clientWidth <= ADMIN_SETTINGS_METRICS.compactAt);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     const host = root.current;
     if (!host) return;
@@ -33,8 +56,8 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
     observer.observe(host, {subtree:true,childList:true,attributes:true,attributeFilter:["class"]});
     return () => observer.disconnect();
   }, [onChange]);
-  return <div ref={root} className={styles.workspace}>
-    <nav className={styles.nav} role="tablist" aria-label={t("设置分区")} aria-orientation="vertical">
+  return <div ref={root} className={styles.workspace} data-compact={compact || undefined}>
+    <nav className={styles.nav} role="tablist" aria-label={t("设置分区")} aria-orientation={compact ? "horizontal" : "vertical"}>
       {sections.map((section, index) => <button key={section.key} type="button" role="tab" id={`${uid}-tab-${section.key}`} aria-controls={`${uid}-panel-${section.key}`} aria-selected={active === section.key} tabIndex={active === section.key ? 0 : -1}
         onClick={() => select(section.key)} onKeyDown={event => {
           const next = event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 : ["ArrowDown", "ArrowRight"].includes(event.key) ? (index + 1) % sections.length : ["ArrowUp", "ArrowLeft"].includes(event.key) ? (index - 1 + sections.length) % sections.length : undefined;

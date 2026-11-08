@@ -10,3 +10,10 @@ export function orderStatusTagColor(status: string) {
   const tone = orderStatusTone(status);
   return tone === "active" || tone === "info" ? "processing" : tone === "neutral" ? "default" : tone;
 }
+
+/** Charts use the same meaning as status badges, independent of account accent. */
+export function orderStatusChartColor(status: string) {
+  const tone = orderStatusTone(status);
+  const semantic = tone === "active" ? "info" : tone;
+  return `var(--rental-status-${semantic}-ink)`;
+}

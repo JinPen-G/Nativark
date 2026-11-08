@@ -67,7 +67,7 @@ export function NativeNavigation({ sections, selectedKey, query, onNavigate }: {
             <HighlightItem value={`group:${section.key}`} asChild><div className="rental-sidebar-route-target">
               <CollapsibleTrigger data-sound="press" render={<SidebarMenuButton tooltip={label} isActive={active && !expanded} />}>
                 <AnimatedIcon name={groupIcons[section.key] ?? "rules"} />
-                <span>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
+                <span className="rental-sidebar-label" title={label}>{t(MENU_GROUP_LABELS[section.key] ?? section.label)}</span>
                 <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="ml-auto transition-transform duration-350 ease-[cubic-bezier(0.215,0.61,0.355,1)] group-data-open/collapsible:rotate-90" />
               </CollapsibleTrigger>
             </div></HighlightItem>

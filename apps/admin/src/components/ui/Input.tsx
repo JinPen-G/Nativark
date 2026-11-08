@@ -1,6 +1,6 @@
-import { ConfigProvider, Form as AntForm, Input as AntInput, type InputProps, type InputRef } from "antd";
+import { ConfigProvider, Input as AntInput, type InputProps, type InputRef } from "antd";
 import { forwardRef, useContext, useImperativeHandle, useRef, useState, type ComponentProps, type InputHTMLAttributes } from "react";
-import { NativeFieldFeedbackContext } from "./Form";
+import { NativeFieldFeedbackContext, useFormFeedback } from "./Form";
 import { Input as ArcInput } from "@/registry/components/input/input";
 import { Textarea as ArcTextarea } from "@/registry/components/textarea/textarea";
 import { PasswordField as ArcPasswordField } from "@/registry/components/password-field/password-field";
@@ -9,7 +9,7 @@ import type { TextAreaRef } from "antd/es/input/TextArea";
 
 const BaseInput = forwardRef<InputRef, InputProps>(function Input(props, ref) {
   const { componentDisabled, componentSize } = ConfigProvider.useConfig();
-  const feedback = AntForm.Item.useStatus();
+  const feedback = useFormFeedback();
   const nativeFeedback = useContext(NativeFieldFeedbackContext);
   const error = nativeFeedback && feedback.errors.length && feedback.errors.every(item => typeof item === "string") && !feedback.warnings.length
     ? feedback.errors.join(" · ") : undefined;
@@ -46,7 +46,7 @@ const BaseInput = forwardRef<InputRef, InputProps>(function Input(props, ref) {
 type TextareaProps = ComponentProps<typeof AntInput.TextArea>;
 const TextArea = forwardRef<TextAreaRef, TextareaProps>(function TextArea(props, ref) {
   const { componentDisabled } = ConfigProvider.useConfig();
-  const feedback = AntForm.Item.useStatus();
+  const feedback = useFormFeedback();
   const nativeFeedback = useContext(NativeFieldFeedbackContext);
   const error = nativeFeedback && feedback.errors.length && feedback.errors.every(item => typeof item === "string") && !feedback.warnings.length
     ? feedback.errors.join(" · ") : undefined;
@@ -80,7 +80,7 @@ const TextArea = forwardRef<TextAreaRef, TextareaProps>(function TextArea(props,
 type PasswordProps = ComponentProps<typeof AntInput.Password>;
 const Password = forwardRef<InputRef, PasswordProps>(function Password(props, ref) {
   const { componentDisabled, componentSize } = ConfigProvider.useConfig();
-  const feedback = AntForm.Item.useStatus();
+  const feedback = useFormFeedback();
   const [internal, setInternal] = useState(props.defaultValue == null ? "" : String(props.defaultValue));
   const node = useRef<HTMLInputElement>(null);
   const fallback = useRef<InputRef>(null);

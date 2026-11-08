@@ -285,8 +285,8 @@
 .arc-form-section { min-width: 0; margin-block: var(--rental-form-section-gap); }
 .arc-form-section:first-child { margin-top: 0; }
 .arc-form-section-heading { margin-bottom: var(--rental-form-field-gap); }
-.arc-form-section-heading h3 { margin: 0; font-size: var(--rental-typography-section-title-size, 16px); font-weight: 600; line-height: var(--leading-heading); }
-.arc-form-section-heading p { margin: var(--rental-form-label-gap) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.arc-form-section-heading h3 { margin: 0; font-size: var(--rental-typography-section-title-size); font-weight: var(--rental-typography-section-title-weight); line-height: var(--rental-typography-section-title-line-height); }
+.arc-form-section-heading p { margin: var(--rental-form-label-gap) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); }
 .arc-form-section-fields { min-width: 0; }
 [data-rental-dialog-overlay] { z-index: 1099; }
 .rental-arc-modal[data-closable="false"] > [class*="header"] > button { display: none; }
@@ -300,4 +300,6 @@
   .arc-modal-footer > button { flex: 1; }
 }
 .rental-loading-skeleton { width: min(100%, 28rem); }
+.arc-collapse-header { display: flex; align-items: center; }
+.arc-collapse-header > button { flex: 1; min-width: 0; }
 .arc-collapse-extra { flex: 0 0 auto; margin-inline-start: var(--space-3); }

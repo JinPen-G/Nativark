@@ -23,7 +23,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useLocale } from "@/app/locale";
-import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
+import { orderStatusChartColor, orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 
 /**
  * REPORT-01A/01B：当前经营空间经营报表。
@@ -212,7 +212,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         {view === "visual" && <>
           <div className={insightStyles.equal}>
             <InsightPanel title={t("订单状态分布")} description={t("当前筛选范围的全部订单，不受分页影响")}>
-              <DistributionChart title={t("订单状态")} unit={t("单")} rows={data.statusBreakdown.map(row => ({key:row.status,label:t(statusLabels[row.status]??row.status),value:row.count}))} />
+              <DistributionChart title={t("订单状态")} unit={t("单")} rows={data.statusBreakdown.map(row => ({key:row.status,label:t(statusLabels[row.status]??row.status),value:row.count,color:orderStatusChartColor(row.status)}))} />
             </InsightPanel>
             <InsightPanel title={t("应收构成")} description={t("税额已包含在应收金额中")}>
               <RankedFacts rows={[{id:"net",label:t("不含税应收"),value:data.netOfTaxTotal},{id:"tax",label:t("其中税额"),value:data.taxTotal}]} format={money} empty={t("暂无数据")} />

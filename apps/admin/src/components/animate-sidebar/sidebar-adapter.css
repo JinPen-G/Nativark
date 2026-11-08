@@ -53,6 +53,7 @@
 .rental-sidebar-colors [data-sidebar="menu-sub"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="menu-button"] > svg:first-child { width: var(--rental-sidebar-icon-size); height: var(--rental-sidebar-icon-size); }
 .rental-sidebar-colors [data-sidebar="menu-button"] > .rental-animated-icon { font-size: var(--rental-sidebar-icon-size); }
+.rental-sidebar-navigation .rental-sidebar-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* One native controlled surface glides on selection; pointer/focus only gets neutral feedback. */
 .rental-sidebar-route-highlight {
   background: var(--rental-sidebar-selected-bg);

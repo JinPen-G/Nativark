@@ -26,9 +26,10 @@ export function MetricBand({ items }: { items: { label: string; value: number | 
 
 export function DistributionChart({ title, rows, unit, format }: { title: string; rows: DonutChartDatum[]; unit?: string; format?: (value: number) => string }) {
   const { t, locale } = useLocale();
-  return <DonutChart data={rows} label={title} totalLabel={t("合计")} unit={unit} size={ADMIN_INSIGHT_METRICS.donutSize}
+  return <div className={styles.distribution}><DonutChart data={rows} label={title} totalLabel={t("合计")} unit={unit} size={ADMIN_INSIGHT_METRICS.donutSize}
     thickness={ADMIN_INSIGHT_METRICS.donutThickness} legendAction="select" otherLabel={t("其他")}
-    emptyLabel={t("暂无数据")} formatValue={format ?? (value => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value))} />;
+    groupBelow={0} maxSegments={rows.length + 1}
+    emptyLabel={t("暂无数据")} formatValue={format ?? (value => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value))} /></div>;
 }
 
 export function RankedFacts({ rows, empty, format = String }: { rows: { id: string; label: ReactNode; value: number; note?: ReactNode; onOpen?: () => void }[]; empty: string; format?: (value: number) => string }) {

@@ -6,6 +6,7 @@
 .heading h2 { margin: 0; font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); font-weight: var(--rental-typography-section-title-weight); color: var(--rental-content-primary); }
 .heading p { margin: var(--space-1) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); }
 .body { padding: 0 var(--rental-insight-panel-padding) var(--rental-insight-panel-padding); min-width: 0; }
+.distribution { container-type: inline-size; min-width: 0; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); margin: 0; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); overflow: hidden; }
 .metrics > div { min-width: 0; padding: var(--rental-insight-panel-padding); }
 .metrics > div + div { border-inline-start: 1px solid var(--rental-content-divider); }

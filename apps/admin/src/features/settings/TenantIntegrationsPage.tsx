@@ -12,9 +12,9 @@ import type {
   TenantIntegrationConfigSummary,
   TenantIntegrationProviderDefinition
 } from "@rental-os/shared";
-import { Card, Col, Row, Space, Tag, Typography } from "antd";
+import { Col, Row, Space, Tag, Typography } from "antd";
 import { App, Empty } from "@/components/ui";
-import { Form } from "@/components/ui";
+import { Form, FormSection } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
 import { ActionButton, AnimatedNumber, Button, Drawer, SearchField, Segmented, SaveButton, Tabs } from "@/components/ui";
@@ -44,7 +44,7 @@ function ProviderCard({
   registerForm: (key: string, form?: FormInstance<SaveTenantIntegrationRequest>) => void;
   onDefaultChange: (key: string, checked: boolean) => void;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [form] = Form.useForm<SaveTenantIntegrationRequest>();
   const enabled = Form.useWatch("enabled", form);
   const liveVerified = config?.lastTestStatus === "passed" && config.lastTestMode === "live";
@@ -81,10 +81,11 @@ function ProviderCard({
   }, [form, providerKey, registerForm]);
 
   return (
-    <Card
-      size="small"
-      title={<Space><CloudServerOutlined /><span>{t(definition.name)}</span>{config?.enabled ? <Tag color="success">{t("已启用")}</Tag> : <Tag>{t("未启用")}</Tag>}{config?.isDefault ? <Tag color="processing">{t("默认")}</Tag> : null}</Space>}
-      extra={config?.lastTestStatus === "passed" && config.lastTestMode === "live"
+    <section>
+      <div className={directoryStyles.providerStatus}>
+        {config?.enabled ? <Tag color="success">{t("已启用")}</Tag> : <Tag>{t("未启用")}</Tag>}
+        {config?.isDefault ? <Tag color="processing">{t("默认")}</Tag> : null}
+        {config?.lastTestStatus === "passed" && config.lastTestMode === "live"
         ? <Tag icon={<CheckCircleOutlined />} color="success">{t("已验证")}</Tag>
         : config?.lastTestStatus === "passed"
           ? <Tag color="processing">{t("配置完整（未联网）")}</Tag>
@@ -93,7 +94,7 @@ function ProviderCard({
             : config?.lastTestStatus === "failed"
               ? <Tag color="error">{t("配置不完整")}</Tag>
               : null}
-    >
+      </div>
       <Typography.Paragraph type="secondary">{t(definition.description)}</Typography.Paragraph>
       {config?.enabled && !liveVerified ? (
         <Alert
@@ -104,8 +105,8 @@ function ProviderCard({
           description={t("配置可以先保存，但支付下单、短信发送和文件上传等新业务调用会被服务端拒绝。请先补齐配置并点击“测试连接”，测试通过后才会进入真实运行链。")}
         />
       ) : null}
-      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
-        <Space size="large" align="start" style={{ marginBottom: 12 }}>
+      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)} className={directoryStyles.providerForm}>
+        <div className={directoryStyles.providerToggles}>
           <Form.Item
             name="enabled"
             label={t("启用此平台")}
@@ -131,9 +132,13 @@ function ProviderCard({
           >
             <Switch disabled={!enabled} onChange={(checked) => onDefaultChange(providerKey, checked)} />
           </Form.Item>
-        </Space>
+        </div>
+        {[
+          { key: "settings", title: t("连接参数"), fields: definition.fields.filter(field => !field.secret) },
+          { key: "credentials", title: t("访问凭据"), fields: definition.fields.filter(field => field.secret) },
+        ].filter(group => group.fields.length).map(group => <FormSection key={group.key} title={group.title}>
         <Row gutter={[12, 0]}>
-          {definition.fields.map((field) => (
+          {group.fields.map((field) => (
             <Col xs={24} md={12} key={field.key}>
               <Form.Item
                 name={[field.secret ? "credentials" : "settings", field.key]}
@@ -151,6 +156,8 @@ function ProviderCard({
             </Col>
           ))}
         </Row>
+        </FormSection>)}
+        <div className={directoryStyles.providerFooter}>
         <Space wrap>
           <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           <ActionButton variant="secondary" className="arc-action-connect" label={testFeedback === "failed" ? t("连接失败，重试") : t("测试连接")}
@@ -161,10 +168,11 @@ function ProviderCard({
             if (!result.ok) throw new Error(result.message);
             setTestFeedback(result.mode === "live" ? "live" : "config");
           }} />
-          {config?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}: {config.lastTestAt}</Typography.Text> : null}
         </Space>
+        {config?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}: {new Date(config.lastTestAt).toLocaleString(locale)}</Typography.Text> : null}
+        </div>
       </Form>
-    </Card>
+    </section>
   );
 }
 

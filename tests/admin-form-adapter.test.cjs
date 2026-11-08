@@ -19,7 +19,10 @@ assert.match(form, /ErrorList: AntForm\.ErrorList/);
 assert.match(form, /useForm: AntForm\.useForm/);
 assert.match(form, /NativeFieldFeedbackContext/);
 assert.match(form, /export function FormSection/);
-assert.match(input, /AntForm\.Item\.useStatus\(\)/);
+assert.match(form, /useContext\(FormItemInputContext\)/);
+assert.match(form, /errors = \[\], warnings = \[\]/);
+assert.match(input, /useFormFeedback\(\)/);
+assert.match(select, /useFormFeedback\(\)/);
 assert.match(input, /arc-native-feedback/);
 assert.match(search, /registry\/components\/search-field\/search-field/);
 assert.match(search, /onSearch\?\.\(currentValue\)/);
@@ -87,6 +90,7 @@ assert.equal(inputColorTokens.get('--rental-color-input-border-default'), 'var(-
 const palette = load('apps/admin/src/app/arcTokens.ts', { './designTokens': tokens });
 const { createThemeConfig } = load('apps/admin/src/app/theme.tsx', {
   '@/app/designTokens': tokens, './arcTokens': palette,
+  './motionPreferences': load('apps/admin/src/app/motionPreferences.ts'),
   antd: { theme: { defaultAlgorithm: 'default', darkAlgorithm: 'dark', compactAlgorithm: 'compact' } },
 });
 for (const inputRadius of [8, 18, 40]) for (const button of [18, 999]) for (const mode of ['default', 'dark', 'compact']) {

@@ -65,7 +65,7 @@ export const ADMIN_LAYOUT_SPACING = {
 /** Dense operational metrics fit the available width rather than leave an orphaned row. */
 export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
 export const ADMIN_INSIGHT_METRICS = { gap: 20, panelPadding: 20, donutSize: 176, donutThickness: 18 } as const;
-export const ADMIN_SETTINGS_METRICS = { navWidth: 192 } as const;
+export const ADMIN_SETTINGS_METRICS = { navWidth: 192, compactAt: 720 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */
 export const ADMIN_DETAIL_LAYOUT = { summaryWidth: ADMIN_CONTROL_WIDTH.wide, accountLabelWidth: ADMIN_CONTROL_WIDTH.select } as const;
 /** 52px ordinary rows; text stacks use compact lines while interactive targets retain 32px. */

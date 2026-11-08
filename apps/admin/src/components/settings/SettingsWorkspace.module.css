@@ -16,7 +16,10 @@
 .preview { min-width: 0; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); padding: var(--space-5); background: var(--surface-muted); }
 .preview h3 { font-size: var(--rental-typography-section-title-size); font-weight: 500; color: var(--foreground); }
 .preview p { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
-@media (max-width: 760px) { .workspace { grid-template-columns: 1fr; gap: var(--space-3); } .nav { position: static; flex-direction: row; overflow-x: auto; padding: 2px; } .nav button { width: auto; flex: 0 0 auto; white-space: nowrap; } .label small { display: none; } }
+.workspace[data-compact] { grid-template-columns: 1fr; gap: var(--space-3); }
+.workspace[data-compact] .nav { position: static; flex-direction: row; overflow-x: auto; padding: 2px; }
+.workspace[data-compact] .nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }
+.workspace[data-compact] .label small { display: none; }
 @container settings-panel (max-width: 600px) {
   .panel :global(.ant-row) > :is(:global(.ant-col-8), :global(.ant-col-md-8), :global(.ant-col-md-6), :global(.ant-col-6)) { flex: 0 0 50%; max-width: 50%; }
 }

@@ -46,7 +46,7 @@ export function SoundSettingCard() {
           <Slider label={t("音量")} min={0} max={100} value={Math.round(preferences.volume * 100)} format={value => `${value}%`}
             onValueChange={value => soundPreferences.update({ volume: value / 100 })} />
         </div>
-        <Space orientation="vertical" size={8}>
+        <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           <Typography.Text>{t("交互音试听")}</Typography.Text>
           {samples(INTERACTION_SOUNDS)}
           <Typography.Text>{t("通知音试听")}</Typography.Text>
@@ -54,8 +54,6 @@ export function SoundSettingCard() {
         </Space>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
           {t("设置仅保存在当前浏览器，无需点击保存。试听不改变开关；音量为 0 时静音。")}
-          <br />
-          {t("当前已接入圆角和客户端配置的保存结果；通知中心尚未接入，新通知与关注音暂供试听和事件接口调用。")}
         </Typography.Paragraph>
       </Space>
     </Card>

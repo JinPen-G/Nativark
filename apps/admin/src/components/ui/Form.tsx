@@ -1,7 +1,15 @@
 import { Form as AntForm, type FormItemProps } from "antd";
-import { createContext, forwardRef, useId, type HTMLAttributes, type ReactNode } from "react";
+import { FormItemInputContext } from "antd/es/form/context";
+import { createContext, forwardRef, useContext, useId, type HTMLAttributes, type ReactNode } from "react";
 
 export const NativeFieldFeedbackContext = createContext(false);
+
+/** Controls also appear outside forms (filters/search). Read the same Ant field
+ * context without useStatus's form-only warning; real errors and warnings stay intact. */
+export function useFormFeedback() {
+  const { status, errors = [], warnings = [] } = useContext(FormItemInputContext);
+  return { status, errors, warnings };
+}
 
 /** Keep the complete Ant form store, ref and static APIs. Only presentation changes. */
 const BaseForm = forwardRef(function ArcForm(props: Parameters<typeof AntForm>[0], ref: Parameters<typeof AntForm>[0]["ref"]) {

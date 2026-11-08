@@ -1,4 +1,4 @@
-import { ConfigProvider, Form as AntForm, Select as AntSelect, type SelectProps as AntSelectProps } from "antd";
+import { ConfigProvider, Select as AntSelect, type SelectProps as AntSelectProps } from "antd";
 import type { BaseOptionType, DefaultOptionType } from "antd/es/select";
 import { useState } from "react";
 import { X } from "lucide-react";
@@ -7,6 +7,7 @@ import { MultiSelect as ArcMultiSelect } from "@/registry/components/multi-selec
 import { ArcLocale } from "./ArcLocale";
 import { Combobox as ArcCombobox } from "@/registry/components/combobox/combobox";
 import { useLocale } from "@/app/locale";
+import { useFormFeedback } from "./Form";
 
 type ArcValue = string | number | boolean;
 type BasicOption = { value: ArcValue; label: string; disabled?: boolean };
@@ -31,7 +32,7 @@ const isBasicOption = (value: unknown): value is BasicOption => {
 export function Select<ValueType = any, OptionType extends BaseOptionType | DefaultOptionType = DefaultOptionType>(props: AntSelectProps<ValueType, OptionType>) {
   const { componentDisabled } = ConfigProvider.useConfig();
   const { t } = useLocale();
-  const feedback = AntForm.Item.useStatus();
+  const feedback = useFormFeedback();
   const status = props.status ?? feedback.status;
   // Keep hooks unconditional: a field can legitimately gain an advanced prop
   // after first render and then fall back to Ant without violating hook order.

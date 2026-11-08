@@ -15,6 +15,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { CircleAlert } from "lucide-react";
+import { orderStatusChartColor } from "@/features/rental-core/orderStatusSemantics";
 import { DistributionChart, InsightPanel, MetricBand, RankedFacts, ViewChoice, insightStyles as viewStyles } from "@/components/insights/OperationalCharts";
 
 const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
@@ -147,7 +148,7 @@ export function WorkbenchPage() {
           </InsightPanel>
           {showMetrics && canViewOrders && <InsightPanel title={t("订单状态")} description={t(period) + " · " + t("非草稿")}
             actions={<ViewChoice value={statusView} onChange={setStatusView} options={[{ value: "chart", label: t("分布") }, { value: "list", label: t("明细") }]} />}>
-            {statusView === "chart" ? <DistributionChart title={t("订单状态")} unit={t("单")} rows={statusRows.map(row => ({ key: row.status, label: row.name, value: row.count }))} />
+            {statusView === "chart" ? <DistributionChart title={t("订单状态")} unit={t("单")} rows={statusRows.map(row => ({ key: row.status, label: row.name, value: row.count, color: orderStatusChartColor(row.status) }))} />
               : <RankedFacts rows={statusRows.map(row => ({ id: row.status, label: row.name, value: row.count }))} empty={t("暂无订单")} />}
             <dl className={viewStyles.facts}><div><dt>{t("履约中")}</dt><dd><AnimatedNumber value={activeCount} /></dd></div><div><dt>{t("已关闭")}</dt><dd><AnimatedNumber value={completedCount} /></dd></div></dl>
           </InsightPanel>}

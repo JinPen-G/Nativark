@@ -17,7 +17,7 @@
 .permissionList { min-width: 0; overflow-y: auto; padding: var(--space-4); }
 .permissionList header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 .permissionList h3 { margin: 0; font-size: var(--rental-typography-section-title-size); color: var(--rental-content-primary); font-weight: 500; }
-.permissionOption { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3) 0; cursor: pointer; border-bottom: 1px solid var(--rental-content-divider); }
+.permissionOption { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-1) 0; cursor: pointer; border-bottom: 1px solid var(--rental-content-divider); }
 .permissionOption > span:last-child { min-width: 0; padding-top: 3px; }
 .permissionOption strong { display: block; font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); font-weight: 500; color: var(--rental-content-primary); }
 .permissionOption small { display: block; margin-top: var(--space-1); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); color: var(--rental-content-secondary); }
@@ -32,4 +32,6 @@
 .personFacts dt { color: var(--rental-content-secondary); }
 .personFacts dd { text-align: end; margin: 0; color: var(--rental-content-primary); }
 .permissionSummary { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); }
+.workspaceFields { display: grid; gap: var(--space-3); padding-block: var(--space-3); }
+.workspaceFields > :global(.ant-form-item) { margin-bottom: 0; }
 @media (max-width: 600px) { .permissionLayout { grid-template-columns: 1fr; max-height: none; } .moduleNav { display: flex; gap: var(--space-1); overflow-x: auto; border-inline-end: 0; border-bottom: 1px solid var(--border); } .moduleNav button { flex: 0 0 auto; width: auto; } .permissionList { max-height: 50vh; } }

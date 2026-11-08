@@ -1,4 +1,5 @@
 import { PermissionEditor, PermissionMatrix } from "./PermissionMatrix";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { Card as ArcCard } from "@/registry/components/card/card";
 import { Button as ArcButton } from "@/registry/components/button/button";
 import { InsightMetrics } from "@/components/BusinessInsights";
@@ -19,7 +20,7 @@ import type {
 import { RoleScope } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, Row, Space, Tag, Typography } from "antd";
-import { ListSection, App } from "@/components/ui";
+import { Accordion, FormSection, ListSection, App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -236,7 +237,8 @@ export function TenantOperationsAccountPage() {
         const { roleId, ...rest } = values;
         save.mutate({ ...rest, roleIds: roleId ? [roleId] : [] });
       }}>
-        <Typography.Title level={5}>{t("账号资料")}</Typography.Title>
+        <SettingsWorkspace sections={[
+          { key: "profile", label: t("账号资料"), content: <FormSection title={t("账号资料")}>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="displayName" label={t("姓名")} rules={[{ required: true, message: t("请输入姓名") }]}><Input /></Form.Item></Col>
           <Col span={12}><Form.Item name="account" label={t("登录账号")} rules={[{ required: true, message: t("请输入登录账号") }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
@@ -246,24 +248,45 @@ export function TenantOperationsAccountPage() {
           <Col span={6}><Form.Item name="isActive" label={t("账号启用")} valuePropName="checked"><Switch /></Form.Item></Col>
           <Col span={6}><Form.Item name="isPlatformAdmin" label={t("租户管理员")} valuePropName="checked"><Switch disabled={editing?.id === currentUserId} /></Form.Item></Col>
         </Row>
-        <Typography.Title level={5} style={{ marginTop: 12 }}>{t("经营空间授权")}</Typography.Title>
-        <Typography.Paragraph type="secondary">{t("启用空间后必须指定该空间的角色；数据范围可覆盖角色默认值。关闭空间会使该账号无法进入该空间。")}</Typography.Paragraph>
-        <Table<WorkspaceAccessRow> rowKey="workspaceId" pagination={false} onRefresh={() => members.refetch()} loading={members.isLoading} refreshing={members.isFetching} dataSource={accessRows} scroll={{ x: 1420 }} columns={[
-          { title: t("允许访问"), width: 95, render: (_, row) => <Switch checked={row.enabled} disabled={editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} onChange={(enabled) => updateAccess(row.workspaceId, { enabled })} /> },
-          { title: t("经营空间"), width: 200, render: (_, row) => { const workspace = workspaceMap.get(row.workspaceId); return <><b>{workspace?.name}</b><br /><Typography.Text type="secondary">{workspace?.code}</Typography.Text></>; } },
-          { title: t("空间角色（操作权限）"), render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.roleId} options={activeRoles.map((role) => ({ value: role.id, label: `${role.name} · ${t(SCOPE_LABELS[role.scope] ?? role.scope)}` }))} onChange={(roleId) => updateAccess(row.workspaceId, { roleId, dataScope: roleMap.get(roleId)?.dataScope ?? row.dataScope })} /> },
-          { title: t("数据范围"), width: 210, render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.dataScope} options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(label) }))} onChange={(dataScope) => updateAccess(row.workspaceId, { dataScope })} /> },
-          { title: t("员工履约地点范围"), width: 330, render: (_, row) => {
-            const disabled = !row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active";
-            const locations = (locationsByWorkspace.get(row.workspaceId) ?? []).filter((location) => location.status === "enabled");
-            return <Space orientation="vertical" size={6} style={{ width: "100%" }}>
-              <Select style={{ width: "100%" }} disabled={disabled} value={row.locationScope.mode} options={[
-                { value: "all", label: t("全部履约地点") },
-                { value: "selected", label: t("仅指定地点") }
-              ]} onChange={(mode: "all" | "selected") => updateAccess(row.workspaceId, { locationScope: { mode, locationIds: mode === "all" ? [] : row.locationScope.locationIds } })} />
-              {row.locationScope.mode === "selected" && <Select mode="multiple" style={{ width: "100%" }} disabled={disabled} placeholder={t("选择至少一个地点")} value={row.locationScope.locationIds} options={locations.map((location) => ({ value: location.id, label: `${location.name} · ${location.code}` }))} onChange={(locationIds) => updateAccess(row.workspaceId, { locationScope: { mode: "selected", locationIds } })} />}
-            </Space>;
-          } }
+          </FormSection> },
+          { key: "access", label: t("经营空间授权"), content: <FormSection title={t("经营空间授权")}
+            description={t("启用空间后必须指定该空间的角色；数据范围可覆盖角色默认值。关闭空间会使该账号无法进入该空间。")}>
+            {editing?.id === currentUserId && <p className={accessStyles.permissionSummary}>{t("当前登录账号的空间授权不可在此修改。")}</p>}
+            <Accordion defaultOpen={0} items={accessRows.map(row => {
+              const workspace = workspaceMap.get(row.workspaceId);
+              const locked = editing?.id === currentUserId || workspace?.status !== "active";
+              const disabled = !row.enabled || locked;
+              const locations = (locationsByWorkspace.get(row.workspaceId) ?? []).filter(location => location.status === "enabled");
+              return {
+                key: row.workspaceId,
+                title: <DataTableText primary={workspace?.name ?? row.workspaceId} secondary={workspace?.code} />,
+                extra: <Space size={8}><span className={accessStyles.permissionSummary}>{t("允许访问")}</span><Switch aria-label={`${workspace?.name ?? row.workspaceId} · ${t("允许访问")}`} checked={row.enabled} disabled={locked} onChange={enabled => updateAccess(row.workspaceId, { enabled })} /></Space>,
+                content: <div className={accessStyles.workspaceFields}>
+                  <Form.Item label={t("空间角色（操作权限）")} htmlFor={`workspace-role-${row.workspaceId}`}>
+                    <Select id={`workspace-role-${row.workspaceId}`} disabled={disabled} value={row.roleId}
+                      options={activeRoles.map(role => ({ value: role.id, label: `${role.name} · ${t(SCOPE_LABELS[role.scope] ?? role.scope)}` }))}
+                      onChange={roleId => updateAccess(row.workspaceId, { roleId, dataScope: roleMap.get(roleId)?.dataScope ?? row.dataScope })} />
+                  </Form.Item>
+                  <Form.Item label={t("数据范围")} htmlFor={`workspace-scope-${row.workspaceId}`}>
+                    <Select id={`workspace-scope-${row.workspaceId}`} disabled={disabled} value={row.dataScope}
+                      options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(label) }))}
+                      onChange={dataScope => updateAccess(row.workspaceId, { dataScope })} />
+                  </Form.Item>
+                  <Form.Item label={t("员工履约地点范围")} htmlFor={`workspace-locations-${row.workspaceId}`}>
+                    <Select id={`workspace-locations-${row.workspaceId}`} disabled={disabled} value={row.locationScope.mode}
+                      options={[{ value: "all", label: t("全部履约地点") }, { value: "selected", label: t("仅指定地点") }]}
+                      onChange={(mode: "all" | "selected") => updateAccess(row.workspaceId, { locationScope: { mode, locationIds: mode === "all" ? [] : row.locationScope.locationIds } })} />
+                  </Form.Item>
+                  {row.locationScope.mode === "selected" && <Form.Item label={t("选择至少一个地点")} htmlFor={`workspace-location-ids-${row.workspaceId}`}>
+                    <Select id={`workspace-location-ids-${row.workspaceId}`} mode="multiple" disabled={disabled} value={row.locationScope.locationIds}
+                      options={locations.map(location => ({ value: location.id, label: `${location.name} · ${location.code}` }))}
+                      onChange={locationIds => updateAccess(row.workspaceId, { locationScope: { mode: "selected", locationIds } })} />
+                  </Form.Item>}
+                </div>,
+              };
+            })} />
+            {!accessRows.length && <Empty description={t("暂无经营空间")} />}
+          </FormSection> },
         ]} />
       </Form>
     </Drawer>
@@ -330,17 +353,25 @@ export function TenantRolePermissionPage() {
 
     <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>
       <Form<SaveSystemRoleRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id, buttonPermissions: [] })}>
+        <SettingsWorkspace sections={[
+          { key: "profile", label: t("基本资料"), content: <FormSection title={t("基本资料")}>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="name" label={t("角色名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
           <Col span={12}><Form.Item name="code" label={t("角色编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
           <Col span={12}><Form.Item name="scope" label={t("适用层级")} rules={[{ required: true }]}><Select options={Object.entries(SCOPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item></Col>
-          <Col span={12}><Form.Item name="dataScope" label={t("默认数据范围")} rules={[{ required: true }]}><Select options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(label) }))} /></Form.Item></Col>
           <Col span={24}><Form.Item name="description" label={t("角色说明")}><Input.TextArea rows={2} /></Form.Item></Col>
           <Col span={24}><Form.Item name="isActive" label={t("启用角色")} valuePropName="checked"><Switch /></Form.Item></Col>
         </Row>
-        <Typography.Title level={5}>{t("操作权限")}</Typography.Title>
-        <Typography.Paragraph type="secondary">{t("按模块勾选页面访问和具体操作。未勾选即拒绝，前端隐藏不替代后端鉴权。")}</Typography.Paragraph>
+          </FormSection> },
+          { key: "permissions", label: t("操作权限"), content: <FormSection title={t("操作权限")}
+            description={t("按模块勾选页面访问和具体操作。未勾选即拒绝，前端隐藏不替代后端鉴权。")}>
         <Form.Item name="permissions"><PermissionEditor modules={permissions.data ?? []} disabled={save.isPending} /></Form.Item>
+          </FormSection> },
+          { key: "scope", label: t("数据范围"), content: <FormSection title={t("数据范围")}
+            description={t("决定操作获准后可访问的数据边界。当前空间隔离已强制生效；组织/本人范围仍需各业务模块逐项接入。")}>
+            <Form.Item name="dataScope" label={t("默认数据范围")} rules={[{ required: true }]}><Select options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label: t(label) }))} /></Form.Item>
+          </FormSection> },
+        ]} />
         <Form.Item name="enabledBusinessScopes" hidden><Select mode="multiple" /></Form.Item>
       </Form>
     </Drawer>

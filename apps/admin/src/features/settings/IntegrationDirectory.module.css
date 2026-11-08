@@ -11,8 +11,15 @@
 .grid :global(.integrations_cardActions__MY4J5) { grid-column: 1 / -1; justify-content: space-between; padding-top: var(--space-3); margin-top: var(--space-2); border-top: 1px solid var(--rental-content-divider); }
 .grid :global(.integrations_cardText__uE881) { margin-top: var(--space-2); min-height: 3em; }
 .icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-muted); color: var(--rental-content-primary); }
-.cardEditor > :global(.ant-card) { border: 0; box-shadow: none; background: transparent; }
-.cardEditor > :global(.ant-card) > :global(.ant-card-head) { padding-inline: 0; }
-.cardEditor > :global(.ant-card) > :global(.ant-card-body) { padding-inline: 0; }
+.cardEditor { container-type: inline-size; min-width: 0; }
+.providerStatus { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.providerForm { display: grid; gap: var(--space-5); }
+.providerForm > :global(.arc-form-section) { margin: 0; }
+.providerToggles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.providerFooter { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding-block: var(--space-3); background: var(--surface); border-top: 1px solid var(--border); z-index: 1; }
+@container (max-width: 520px) {
+  .providerToggles { grid-template-columns: 1fr; }
+  .providerForm :global(.ant-row) > :global(.ant-col) { flex: 0 0 100%; max-width: 100%; }
+}
 .status { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
 .status[data-ready] { color: var(--rental-status-success-ink); }

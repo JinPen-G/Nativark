@@ -44,7 +44,7 @@ export function Accordion({ items, defaultOpen = -1, size = "md", value, onValue
   const reduced = useReducedMotion();
   return <AccordionPrimitive.Root className={[styles.accordion, size === "lg" ? styles.lg : ""].filter(Boolean).join(" ")} type="multiple" value={value ?? openValue} onValueChange={next => { setOpenValue(next); onValueChange?.(next); }}>
     {items.map((item, index) => { const open = (value ?? openValue).includes(item.key); return <AccordionPrimitive.Item className={styles.item} value={item.key} key={item.key}>
-      <AccordionPrimitive.Header className={styles.header}>
+      <AccordionPrimitive.Header className={`${styles.header} arc-collapse-header`}>
         <AccordionPrimitive.Trigger className={styles.trigger}>
           <span>{item.title}</span><motion.span className={styles.icon} initial={false} animate={{ rotate: open ? 180 : 0 }} transition={reduced ? { duration: 0 } : motionTokens.spring.snappy}><ChevronDown width={17} height={17} aria-hidden="true" /></motion.span>
         </AccordionPrimitive.Trigger>{item.extra && <span className="arc-collapse-extra">{item.extra}</span>}
