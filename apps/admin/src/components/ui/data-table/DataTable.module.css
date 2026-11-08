@@ -24,7 +24,7 @@
 .toolbarFilters > :global(.arc-select-field), .toolbarFilters > :global(.ant-select) { width: var(--rental-control-width-select); }
 .toolbarControls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-inline-start: auto; min-height: var(--rental-control-height-filter); }
 .toolbarControls svg { width: var(--rental-icon-control-size); height: var(--rental-icon-control-size); stroke-width: var(--rental-icon-control-stroke); }
-.toolbarNote { order: 3; flex-basis: 100%; color: var(--text-muted); font-size: var(--rental-typography-meta-size); }
+.toolbarNote { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); min-height: var(--rental-control-height-filter); color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); white-space: nowrap; }
 .refreshError { order: 3; flex-basis: 100%; color: var(--danger); font-size: var(--rental-typography-meta-size); }
 .refreshControl { width: var(--rental-control-height-toolbar); height: var(--rental-control-height-toolbar); min-height: var(--rental-control-height-toolbar); padding: 0; }
 .filterBar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); width: 100%; min-width: 0; min-height: var(--rental-control-height-filter); container: list-filters / inline-size; }

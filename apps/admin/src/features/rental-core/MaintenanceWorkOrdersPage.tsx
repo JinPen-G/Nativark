@@ -1,4 +1,5 @@
 import { WorkOrderBoard } from "./WorkOrderBoard";
+import type { WorkOrderBoardAction } from "./workOrderBoardPolicy";
 import { AnimatedNumber, Segmented } from "@/components/ui";
 import { ListFilterItem } from "@/components/ui";
 import { RecordDisclosure } from "@/components/RecordDisclosure";
@@ -73,6 +74,8 @@ export function MaintenanceWorkOrdersPage() {
   const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage"));
   const [dialog, setDialog] = useState<DialogKind>();
   const [actionWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
+  const [boardAssignment, setBoardAssignment] = useState<{ workOrderId: string; assigneeId?: string }>();
+  const boardScope = useAuthStore(state => JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id, state.user?.permissions, state.user?.dataScope, state.user?.locationScope]));
   const { workOrderId } = useParams<{ workOrderId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const detailTab = searchParams.get("tab") === "history" ? "history" : "detail";
@@ -148,7 +151,26 @@ export function MaintenanceWorkOrdersPage() {
       return;
     }
     setActiveWorkOrder(workOrder);
+    setBoardAssignment(undefined);
     setDialog(kind);
+  }
+
+  async function handleBoardAction(row: RentalWorkOrder, action: WorkOrderBoardAction) {
+    const session = useAuthStore.getState();
+    if (JSON.stringify([session.tenant?.tenantId, session.currentWorkspaceId, session.user?.id, session.user?.permissions, session.user?.dataScope, session.user?.locationScope]) !== boardScope) return;
+    const current = workOrders.data?.find(item => item.id === row.id);
+    if (run.isPending || !current || current.updatedAt !== row.updatedAt) {
+      message.warning(t("工单已更新，请重新拖动"));
+      return;
+    }
+    if (action.kind === "review" ? !canReview : !canManage) {
+      message.warning(t("当前账号无权执行此操作"));
+      return;
+    }
+    if (action.kind === "start") return run.mutateAsync({ kind: "start", id: row.id });
+    openDialog(action.kind, row);
+    if (action.kind === "assign") setBoardAssignment({ workOrderId: row.id, assigneeId: action.assigneeId });
+    if (action.kind === "review") reviewForm.setFieldsValue({ decision: action.decision });
   }
 
   const workOrderDispositions = (dispositions.data ?? []).filter((row) => row.status === "buffered" || row.status === "blocked");
@@ -165,7 +187,7 @@ export function MaintenanceWorkOrdersPage() {
   }, [createForm, dialog, workOrderDispositions[0]?.id]);
   useServerFormSync(assignForm, dialog === "assign" ? activeWorkOrder : undefined, () => {
     if (activeWorkOrder) {
-      assignForm.setFieldsValue({ assigneeId: activeWorkOrder?.assigneeId });
+      assignForm.setFieldsValue({ assigneeId: boardAssignment?.workOrderId === activeWorkOrder.id ? boardAssignment.assigneeId : activeWorkOrder.assigneeId });
     }
   }, `${dialog}:${activeWorkOrder?.id}`);
   const filteredWorkOrders = (workOrders.data ?? []).filter((row) => {
@@ -176,7 +198,7 @@ export function MaintenanceWorkOrdersPage() {
     if (keyword && ![row.workNo, row.reason, row.assigneeName, row.itemGroupId, row.locationId, row.assetId, row.orderId].some((value) => value?.toLowerCase().includes(keyword))) return false;
     return true;
   });
-  useEffect(() => { setDialog(undefined); setActiveWorkOrder(undefined); setWriteOffTarget(undefined); }, [workOrderId]);
+  useEffect(() => { setDialog(undefined); setActiveWorkOrder(undefined); setWriteOffTarget(undefined); setBoardAssignment(undefined); }, [workOrderId, boardScope]);
   const loading = dispositions.isLoading || workOrders.isLoading || assignees.isLoading;
   const error = dispositions.error || workOrders.error || assignees.error;
   function rowActions(row: RentalWorkOrder) {
@@ -189,6 +211,7 @@ export function MaintenanceWorkOrdersPage() {
     if (primary) actions.push({ id: "detail", label: t("详情"), icon: FileText, onSelect: () => openDialog("detail", row) });
     actions.push({ id: "history", label: t("历史"), icon: History, onSelect: () => openDialog("history", row) });
     if (canManage && ["pending", "in_progress", "pending_review"].includes(row.status)) actions.push({ id: "cancel", label: t("取消"), icon: X, danger: true, onSelect: () => openDialog("cancel", row) });
+    actions.forEach(action => { action.disabled = run.isPending || Boolean(dialog); });
     return <DataTableRowActions primary={primary} actions={actions} details={() => openDialog("detail", row)} detailLabel={t("详情")} detailAccessibleLabel={`${row.workNo} · ${t("详情")}`} menuLabel={`${row.workNo} · ${t("更多操作")}`} />;
   }
 
@@ -232,7 +255,7 @@ export function MaintenanceWorkOrdersPage() {
         {(resourceFilter||statusFilter||typeFilter||assigneeFilter)&&<Button data-list-filter-reset onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>}
       </>}>
 
-        {workView==="board"?<WorkOrderBoard rows={filteredWorkOrders} statusLabel={value=>t(WORK_ORDER_STATUS_LABELS[value]?.label??value)} typeLabel={value=>t(WORK_ORDER_TYPE_LABELS[value as RentalWorkOrderType]??value)} actions={rowActions} onOpen={row=>openDialog("detail",row)} onShowList={()=>setWorkView("list")}/>:<Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isLoading} refreshing={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty scene={resourceFilter.trim() || statusFilter || typeFilter || assigneeFilter ? "search" : "empty"} compact description={t("暂无匹配的养护工单")} /> }} columns={[
+        {workView==="board"?<WorkOrderBoard key={boardScope} scope={boardScope} rows={filteredWorkOrders} people={assignees.data ?? []} pending={run.isPending || Boolean(dialog)} canManage={canManage} canReview={canReview} statusLabel={value=>t(WORK_ORDER_STATUS_LABELS[value]?.label??value)} typeLabel={value=>t(WORK_ORDER_TYPE_LABELS[value as RentalWorkOrderType]??value)} actions={rowActions} onAction={handleBoardAction} onOpen={row=>openDialog("detail",row)} onCreate={assigneeId => { openDialog("create"); createForm.setFieldsValue({ assigneeId }); }}/>:<Table<RentalWorkOrder> exportConfig={{ filename: t("养护工单"), fields: [{ label: t("工单号"), value: row => row.workNo }, { label: t("类型"), value: row => t(WORK_ORDER_TYPE_LABELS[row.type] ?? row.type) }, { label: t("状态"), value: row => t(WORK_ORDER_STATUS_LABELS[row.status]?.label ?? row.status) }, { label: t("数量"), value: row => row.quantity }, { label: t("更新时间"), value: row => row.updatedAt }] }} rowKey="id" onRefresh={() => workOrders.refetch()} loading={workOrders.isLoading} refreshing={workOrders.isFetching} dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty scene={resourceFilter.trim() || statusFilter || typeFilter || assigneeFilter ? "search" : "empty"} compact description={t("暂无匹配的养护工单")} /> }} columns={[
           { title: t("工单号"), dataIndex: "workNo", width: 190 },
           {
             title: t("来源订单"),

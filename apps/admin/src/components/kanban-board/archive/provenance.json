@@ -1,0 +1,52 @@
+{
+  "source": "https://uiarc.dev/components/blocks/kanban-board",
+  "captured": "2026-11-08",
+  "tier": "pro",
+  "runtime": [
+    {
+      "url": "https://uiarc.dev/_next/static/chunks/7430.340e3fd875089375.js",
+      "sha256": "e881c9923f04ba0ccf6a5e907c4b799c5e715bc2e88e1882569e6341e813e17d"
+    },
+    {
+      "url": "https://uiarc.dev/_next/static/chunks/51539.e93246251eaeb391.js",
+      "sha256": "ad69a6fdb31539768f0254aae54897c1ef0964de8bd34b756ffea81f26f482f9"
+    }
+  ],
+  "reused": "Public KanbanBoard implementation: source cards/columns/people, hit testing, pointer offset and velocity tilt, live placeholder, spring-to-slot drop simulation, two-axis edge scrolling, touch hold, keyboard reordering, swimlanes, WIP counts, quick add, detail drawer, counter and dropdown. Local React/Motion/Radix replace Webpack imports.",
+  "adaptations": "Tracked requestAnimationFrame and touch timeout cleanup on unmount. Drawer makes the board controls inert. Checklist Add returns focus to its input. Composer preserves IME Enter composition. Radio groups have one tab stop with local keyboard navigation. Drag temporarily disables scroll snapping so both-axis edge scrolling works on phones. Props/callback data validated and cloned in the typed adapter; custom currentUser defaults to the first supplied person. Original local portrait assets and existing Geist font.",
+  "css": {
+    "url": "https://uiarc.dev/_next/static/css/068056e3da7ff3d7.css",
+    "archive": "blocks/projects/kanban-board-pro/css/068056e3da7ff3d7.css",
+    "sha256": "bedb067add36675666cb19151e4e3f610bbc7f38f541b47b7d4a4f9f592a365c",
+    "preservation": "Main CSS byte-for-byte matches existing archive and public source; original dropdown rules preserved."
+  },
+  "portraits": [
+    {
+      "url": "https://uiarc.dev/media/people/emma-collins.svg",
+      "name": "emma-collins",
+      "sha256": "90cd3269e6d30d0df4bde14f1ecabdde6fd2c30fe471b572b70eaa530674e9af"
+    },
+    {
+      "url": "https://uiarc.dev/media/people/marcus-johnson.svg",
+      "name": "marcus-johnson",
+      "sha256": "ae475ae4ee792bc8b9ed0ac93dbebbd4ca928f723d536c31d190182b710c5d90"
+    },
+    {
+      "url": "https://uiarc.dev/media/people/chloe-nguyen.svg",
+      "name": "chloe-nguyen",
+      "sha256": "2eb3b974cdfc71ed8fa7e6ef4aebdd9866a261bb0d00b61e36d93608d3db6790"
+    },
+    {
+      "url": "https://uiarc.dev/media/people/daniel-kim.svg",
+      "name": "daniel-kim",
+      "sha256": "871867a50d9684535fc426bb74a8ffab15f8f22926a53e5834090b18b339fa92"
+    }
+  ],
+  "boundary": "Public compiled preview implementation, not protected Pro TSX. Demo edits live in memory; persistence must be connected through onCardsChange. WIP limits are warnings and do not block a move.",
+  "motionAudit": {
+    "date": "2026-11-08",
+    "fixes": [
+      "Memoized cloned controlled/default cards keep animation model identity stable across parent renders."
+    ]
+  }
+}

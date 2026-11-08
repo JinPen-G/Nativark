@@ -6,6 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { nativeSidebarStyles } from "./config/nativeSidebarStyles.js";
 import { actionButtonIconAdapter } from "./config/actionButtonIconAdapter.js";
 import { copilotArchiveStyles } from "./config/copilotArchiveStyles.js";
+import { kanbanBoardAdapter } from "./config/kanbanBoardAdapter.js";
 
 export default defineConfig(({ mode }) => {
   const offline = mode === "ai-offline";
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => {
     // Explicit verification mode: never load deployment secrets or replace release artifacts.
     envDir: offline ? false : undefined,
     build: offline ? { outDir: "dist-ai-offline" } : undefined,
-    plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), tailwindcss(), react()],
+    plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), kanbanBoardAdapter(), tailwindcss(), react()],
     css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles(), copilotArchiveStyles()] } },
     resolve: {
       // Prefer source contracts over stray CommonJS build artifacts in shared/src.

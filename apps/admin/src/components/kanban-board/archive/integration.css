@@ -1,0 +1,29 @@
+@font-face {
+  font-family: KanbanGeist;
+  src: url('../eval-suite/geist.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+.kanban-board-local {
+  --font-body: var(--font-inter, Inter, sans-serif);
+  --font-display: KanbanGeist, Inter, sans-serif;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: -.01em;
+  min-width: 0;
+  width: 100%;
+}
+.kanban-board-local.dropdown-menu_menu__N7a5H { width: auto; }
+.kanban-board-local button { letter-spacing: inherit; }
+.kanban-board_frame__TaJd9[data-dragging] .kanban-board_scroller__c6FXF {
+  scroll-snap-type: none;
+}
+.kanban-board-preview .kanban-board_frame__TaJd9 {
+  width: 100%;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  height: max(640px, calc(100dvh - 140px));
+}
