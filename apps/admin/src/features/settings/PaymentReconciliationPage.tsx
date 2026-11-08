@@ -6,7 +6,7 @@ import { CheckCheck, Download, FileSpreadsheet, Info, SearchCheck, UploadCloud }
 import type { UploadFile } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { RecordDetailLayout } from "@/components/RecordDetailLayout";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -47,6 +47,7 @@ export function PaymentReconciliationPage() {
   const setSelectedBatchId = (id?: string) => navigate(id ? `/rental/payment-reconciliation/${encodeURIComponent(id)}` : "/rental/payment-reconciliation");
   const [reviewTarget, setReviewTarget] = useState<{ line: PaymentStatementLineSummary; decision: "acknowledge" | "query_provider" }>();
   const [reviewForm] = Form.useForm<{ reason: string }>();
+  useEffect(() => { setReviewTarget(undefined); }, [selectedBatchId]);
   const batches = useQuery({ queryKey: ["rental-core", "payment-statement-batches"], queryFn: () => rentalCoreApi.paymentStatementBatches() });
   const detail = useQuery({
     queryKey: ["rental-core", "payment-statement-batch", selectedBatchId],
@@ -87,6 +88,7 @@ export function PaymentReconciliationPage() {
 
   const openReview = (line: PaymentStatementLineSummary, decision: "acknowledge" | "query_provider") => {
     reviewLine.reset();
+    reviewForm.resetFields();
     setReviewTarget({ line, decision });
     reviewForm.setFieldsValue({ reason: decision === "query_provider" ? t("已登记，待向支付平台核对") : "" });
   };
@@ -155,7 +157,7 @@ export function PaymentReconciliationPage() {
       </QueryState>
     </RecordDetailLayout>}
     <Drawer presentation="bottom" destroyOnHidden title={t("导入对账文件")} size={520} open={importOpen}
-      onClose={() => { if (!importStatement.isPending) setImportOpen(false); }} keyboard={!importStatement.isPending} maskClosable={!importStatement.isPending}
+      onClose={() => { if (!importStatement.isPending) setImportOpen(false); }} closable={!importStatement.isPending} keyboard={!importStatement.isPending} maskClosable={!importStatement.isPending}
       extra={<ActionButton label={t("导入并核对")} pendingLabel={t("导入中")} disabled={!fileList.length} pending={importStatement.isPending} onAction={() => importStatement.mutateAsync()} />}>
       <Form layout="vertical" className={styles.importForm}>
         <Form.Item label={t("支付平台")} style={{ marginBottom: 0 }}><Select aria-label={t("支付平台")} value={provider} disabled={importStatement.isPending} onChange={setProvider} options={Object.entries(providerLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
@@ -171,8 +173,8 @@ export function PaymentReconciliationPage() {
         <p className={styles.detailNote}><Info size={14} aria-hidden="true" />{t("导入仅生成核对记录，不修改支付或退款事实。")}</p>
       </Form>
     </Drawer>
-    <Drawer presentation="dialog" destroyOnHidden title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} keyboard={!reviewLine.isPending} maskClosable={!reviewLine.isPending} onClose={() => { if (!reviewLine.isPending) setReviewTarget(undefined); }} extra={<SaveButton label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
-      <Form form={reviewForm} layout="vertical" onFinish={(values) => reviewLine.mutate(values)}>
+    <Drawer presentation="dialog" destroyOnHidden title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} closable={!reviewLine.isPending} keyboard={!reviewLine.isPending} maskClosable={!reviewLine.isPending} onClose={() => { if (!reviewLine.isPending) setReviewTarget(undefined); }} extra={<SaveButton label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
+      <Form form={reviewForm} layout="vertical" disabled={reviewLine.isPending} onFinish={(values) => reviewLine.mutate(values)}>
         <div className={styles.reviewContext}>
           <strong>{t("第")} {reviewTarget?.line.rowNumber} {t("行")} · {reviewTarget?.line.merchantOrderNo}</strong>
           <span className={styles.money}><small>{reviewTarget?.line.currency}</small>{reviewTarget?.line.amount.toFixed(2)}</span>

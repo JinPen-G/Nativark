@@ -1,5 +1,5 @@
-import { Popconfirm, Space } from "antd";
-import { App, Empty, ListSection } from "@/components/ui";
+import { Space } from "antd";
+import { App, ConfirmAction, Empty, ListSection } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -47,9 +47,9 @@ export function SubscriptionRequestDetailPage() {
         : <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert type="info" showIcon message={t("申请不等于开通；实际以平台核实到账并保存版本与期限为准，办理结果会显示真实生效时间。")} />
           <ListSection title={t("申请与处理过程")}><SubscriptionRequestDetails request={request} timeZone={query.data?.overview.timeZone} /></ListSection>
-          {canCancelRequest(request, canManage) && <Popconfirm title={t("确认撤销此待处理申请？")} description={t("已有线下资金请另联系平台处理，本操作不代表退款。")} onConfirm={() => cancelMutation.mutateAsync()}>
-            <Button danger loading={cancelMutation.isPending}>{t("撤销申请")}</Button>
-          </Popconfirm>}
+          {canCancelRequest(request, canManage) && <div><p className="text-meta">{t("已有线下资金请另联系平台处理，本操作不代表退款。")}</p>
+            <ConfirmAction label={t("撤销申请")} prompt={t("确认撤销此待处理申请？")} tone="danger" onConfirm={() => cancelMutation.mutateAsync()} />
+          </div>}
         </Space>}
     </QueryState>} />;
 }

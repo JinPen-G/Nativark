@@ -40,7 +40,7 @@ export function Drawer(props: DrawerProps & { presentation?: ModalPresentation }
       keyboard={props.keyboard} maskClosable={props.maskClosable} closable={props.closable}
       afterOpenChange={props.afterOpenChange} zIndex={props.zIndex}
       className={className} style={props.style} styles={typeof styles === "object" ? { body: styles.body, footer: styles.footer } : undefined}
-      footer={extra || footer ? <><Button onClick={close}>{t("取消")}</Button>{footer}{extra}</> : null}>{children}</Modal>;
+      footer={extra || footer ? <><Button disabled={props.closable === false} onClick={close}>{t("取消")}</Button>{footer}{extra}</> : null}>{children}</Modal>;
   }
   // Preserve keep-alive drawers and special shell/loading/custom-container behavior rather than silently changing it.
   if (!props.destroyOnHidden || props.closable === false || props.mask === false || props.forceRender || props.loading || props.getContainer !== undefined || props.afterOpenChange || props.closeIcon || props.zIndex || props.rootStyle || props.classNames || typeof styles === "function" || styles?.header || styles?.mask || styles?.wrapper || styles?.root || typeof title !== "string") {

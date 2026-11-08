@@ -1,9 +1,8 @@
 import { Alert } from "@/components/ui";
-import { Button } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
-import { LoadingState } from "@/components/LoadingState";
+import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { subscriptionApi } from "@/api/subscription";
@@ -14,7 +13,7 @@ import { TableRefreshProvider } from "@/components/ui";
  * SUB-02 租户后台「版本与订阅」页（需求 §5）。
  *
  * 数据走 SUB-01 只读聚合视图 TenantSubscriptionView（加载/错误/空态已接）；
- * 写动作（升级/续费/降级/申请）待 SUB-03 写契约，当前按 :manage 门禁禁用。
+ * 租户只提交申请；实际套餐与期限仍由平台办理，沿原权限和申请接口。
  */
 export function TenantSubscriptionPage() {
   const { t } = useLocale();
@@ -24,23 +23,15 @@ export function TenantSubscriptionPage() {
   const userId = useAuthStore((state) => state.user?.id);
   const query = useQuery({ queryKey: ["subscription", "tenant-view", tenantId, userId], queryFn: subscriptionApi.tenantView, enabled: Boolean(tenantId && userId) });
 
-  if (query.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
-  if (query.error || !query.data) {
-    return (
-      <PageHeader
-        title="版本与订阅"
-        description={t("所有经营空间共用同一订阅。")}
-        extra={<Button onClick={() => query.refetch()}>{t("重试")}</Button>}
-        view={<Alert type="error" showIcon message={t("订阅信息加载失败")} description={t("请稍后重试；订阅数据服务未就绪时也会出现此提示。")} />}
-      />
-    );
-  }
   return (
     <PageHeader
       title="版本与订阅"
       description={t("所有经营空间共用同一订阅。")}
       note={{ title: "关于版本与订阅", description: "统一到期时间与权益由平台办理；金额与到期限制以平台确认为准，价格未发布显示「价格待公布」。" }}
-      view={<TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><TenantSubscriptionBody data={query.data} canManage={canManage} navigate={navigate} /></TableRefreshProvider>}
+      view={<QueryState loading={query.isLoading} error={query.error} onRetry={() => query.refetch({ throwOnError: true })}>
+        {query.data ? <TableRefreshProvider onRefresh={() => query.refetch()} busy={query.isFetching}><TenantSubscriptionBody data={query.data} canManage={canManage} navigate={navigate} /></TableRefreshProvider>
+          : <Alert type="error" showIcon title={t("订阅信息加载失败")} />}
+      </QueryState>}
     />
   );
 }
