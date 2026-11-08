@@ -13,6 +13,10 @@ groups and field definitions. Panels stay mounted while hidden so validation and
 survive navigation. A new validation error reveals the owning panel, including validation
 started by SaveButton. Each existing form/API owns saving and revision checks.
 
+In the compact horizontal navigation, resizing the viewport, drawer or selected label
+keeps the active section in view. Only the navigation scrolls; the form and its draft
+are not remounted or scrolled as a side effect.
+
 `ADMIN_SETTINGS_METRICS` and the shared typography/neutral tone tokens own geometry and theme.
 It is used by appearance, client channels and business-rule draft editing. It never enables
 providers, uploads files, publishes configuration or executes business actions automatically.

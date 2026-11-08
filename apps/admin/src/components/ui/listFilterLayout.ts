@@ -1,13 +1,16 @@
 /** Fit a prefix of criteria in one row. Keyword width may shrink to its token
  * minimum; only a preferred first field may also compress the category rail. */
 export function planListFilters(input: {
-  available: number; category: number; categoryMin: number; search: number; searchMin: number;
+  available: number; category: number; categoryMin: number; search: number; searchMin: number; searchCompactMin?: number;
   fieldWidths: number[]; preferFirst: boolean; actions: number[]; resets: number[];
   gap: number; moreWidth: number; collapsedCategory: boolean; forcedMore?: boolean;
 }) {
   let category = input.category, search = input.search;
   const primaryCount = Number(category > 0) + Number(search > 0) + input.actions.length;
   const fixed = input.actions.reduce((sum, width) => sum + width, 0);
+  // Narrow rows must reserve their real actions before choosing a keyword floor.
+  const searchMin = Math.max(input.searchCompactMin ?? input.searchMin, Math.min(input.searchMin,
+    input.available - input.categoryMin - fixed - input.moreWidth - primaryCount * input.gap));
   const total = (count: number, more: boolean, resets: boolean) => category + search + fixed +
     input.fieldWidths.slice(0, count).reduce((sum, width) => sum + width, 0) +
     (more ? input.moreWidth : 0) + (resets ? input.resets.reduce((sum, width) => sum + width, 0) : 0) +
@@ -15,7 +18,7 @@ export function planListFilters(input: {
   if (!input.collapsedCategory && !input.forcedMore && total(input.fieldWidths.length, false, true) <= input.available)
     return { count: input.fieldWidths.length, category, search, more: false };
   const compress = (deficit: number, allowCategory = true) => {
-    const fromSearch = Math.min(deficit, Math.max(0, search - input.searchMin));
+    const fromSearch = Math.min(deficit, Math.max(0, search - searchMin));
     search -= fromSearch; deficit -= fromSearch;
     if (allowCategory) category -= Math.min(deficit, Math.max(0, category - input.categoryMin));
   };

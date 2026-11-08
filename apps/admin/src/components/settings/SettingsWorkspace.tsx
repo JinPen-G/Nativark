@@ -17,6 +17,7 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
   const uid = useId();
   const { t } = useLocale();
   const root = useRef<HTMLDivElement>(null);
+  const navigation = useRef<HTMLElement>(null);
   const [compact, setCompact] = useState(false);
   const reduced = usePrefersReducedMotion();
   const [internal, setInternal] = useState(sections[0]?.key);
@@ -42,6 +43,25 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
     observer.observe(host);
     return () => observer.disconnect();
   }, []);
+  useLayoutEffect(() => {
+    const nav = navigation.current;
+    const selected = nav?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!compact || !nav || !selected) return;
+    // Keep the current section visible after a drawer/viewport or label resize.
+    // Scroll only the navigation: scrollIntoView would also move the draft form.
+    const reveal = () => {
+      if (!nav.clientWidth) return;
+      const frame = nav.getBoundingClientRect(), item = selected.getBoundingClientRect();
+      const inset = parseFloat(getComputedStyle(nav).paddingInlineStart) || 0;
+      const delta = item.left < frame.left + inset ? item.left - frame.left - inset
+        : item.right > frame.right - inset ? item.right - frame.right + inset : 0;
+      if (Math.abs(delta) > 1) nav.scrollBy({ left: delta, behavior: "instant" });
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(nav); observer.observe(selected);
+    return () => observer.disconnect();
+  }, [active, compact]);
   useEffect(() => {
     const host = root.current;
     if (!host) return;
@@ -57,7 +77,7 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
     return () => observer.disconnect();
   }, [onChange]);
   return <div ref={root} className={styles.workspace} data-compact={compact || undefined}>
-    <nav className={styles.nav} role="tablist" aria-label={t("设置分区")} aria-orientation={compact ? "horizontal" : "vertical"}>
+    <nav ref={navigation} className={styles.nav} role="tablist" aria-label={t("设置分区")} aria-orientation={compact ? "horizontal" : "vertical"}>
       {sections.map((section, index) => <button key={section.key} type="button" role="tab" id={`${uid}-tab-${section.key}`} aria-controls={`${uid}-panel-${section.key}`} aria-selected={active === section.key} tabIndex={active === section.key ? 0 : -1}
         onClick={() => select(section.key)} onKeyDown={event => {
           const next = event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1 : ["ArrowDown", "ArrowRight"].includes(event.key) ? (index + 1) % sections.length : ["ArrowUp", "ArrowLeft"].includes(event.key) ? (index - 1 + sections.length) % sections.length : undefined;

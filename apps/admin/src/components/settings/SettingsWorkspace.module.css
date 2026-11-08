@@ -17,7 +17,7 @@
 .preview h3 { font-size: var(--rental-typography-section-title-size); font-weight: 500; color: var(--foreground); }
 .preview p { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
 .workspace[data-compact] { grid-template-columns: 1fr; gap: var(--space-3); }
-.workspace[data-compact] .nav { position: static; flex-direction: row; overflow-x: auto; padding: var(--space-1); }
+.workspace[data-compact] .nav { position: static; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding: var(--space-1); }
 .workspace[data-compact] .nav button { width: auto; flex: 0 0 auto; white-space: nowrap; }
 .workspace[data-compact] .label small { display: none; }
 @container settings-panel (max-width: 600px) {

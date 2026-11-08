@@ -11,6 +11,8 @@
 .matrix :global(.roles-permissions_cell__a0RxO)[data-highlighted] { background: var(--surface-muted); }
 .matrix[data-single-role] :global(.roles-permissions_cell__a0RxO)[data-highlighted] { background: var(--row-bg); }
 .matrix :global(.roles-permissions_toggle__FxTpt):focus-visible, .matrix :global(.roles-permissions_disclosure__0b83f):focus-visible, .matrix :global(.roles-permissions_roleTrigger__ctNt4):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.matrix :global(.roles-permissions_toggle__FxTpt)[data-disabled] { opacity: .5; cursor: not-allowed; }
+.matrix :global(.roles-permissions_toggle__FxTpt)[data-disabled] :global(.roles-permissions_box__RtoZL) { scale: 1; }
 .matrixScroller { max-height: var(--matrix-viewport-height, 62dvh); overflow: auto; border-top: 0; scrollbar-color: var(--border) transparent; scroll-padding-top: 100px; }
 .matrixHead { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 var(--border); }
 .matrixCorner { justify-content: space-between; }
@@ -35,6 +37,10 @@
 @container permission-matrix (max-width: 600px) {
   .matrix { --matrix-label: var(--matrix-label-compact); --matrix-role: var(--matrix-role-compact); }
   .matrix :global(.roles-permissions_groupCount__0e_Ai) { display: inline; }
+  .roleChooserText { display: none; }
+  .matrixRefresh { min-width: var(--rental-control-height-filter); padding-inline: var(--space-2); }
+  .matrixRefresh > span[aria-hidden="true"] { gap: 0; }
+  .matrixRefresh > span[aria-hidden="true"] > span:first-child { display: none; }
 }
 .permissionEditor { container: permission-editor / inline-size; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); overflow: clip; }
 .permissionSearch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border-bottom: 1px solid var(--border); }

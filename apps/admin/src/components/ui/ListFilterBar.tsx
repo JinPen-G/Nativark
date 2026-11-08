@@ -105,11 +105,13 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
     if (!width) return;
     for (const entry of entries) {
       const node = slots.current.get(entry.key);
+      // Round intrinsic action widths up: offsetWidth can round down and make a
+      // supposedly fitted row wrap by a fraction of a pixel after localization.
       if (node && !node.closest('[role="dialog"]')) measured.current.set(entry.key,
         entry.kind === "category" ? Math.max(node.scrollWidth, ...[...node.querySelectorAll("*")].map(child => child.scrollWidth))
           : entry.kind === "filter" ? !entry.width && simpleSelect(entry)
             ? Math.min(ADMIN_LIST_METRICS.adaptiveSelectMax, Math.max(ADMIN_LIST_METRICS.adaptiveSelectMin, (labels.current.get(entry.key)?.scrollWidth ?? 0) + ADMIN_LIST_METRICS.adaptiveSelectInset))
-            : LIST_WIDTH[entry.width ?? "select"] : node.offsetWidth);
+            : LIST_WIDTH[entry.width ?? "select"] : Math.ceil(node.getBoundingClientRect().width));
     }
     const category = compact ? 0 : Math.min(categories.reduce((sum, entry) => sum + (measured.current.get(entry.key) ?? LIST_WIDTH.wide), 0), width * .6);
     const sizeOf = (entry: Entry) => measured.current.get(entry.key) ?? LIST_WIDTH[entry.width ?? "select"];
@@ -122,8 +124,9 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
     const next = planListFilters({ available: width, category,
       categoryMin,
       search: searches.length ? LIST_WIDTH.search : 0,
-      searchMin: searches.length ? (width >= categoryMin + LIST_WIDTH.searchMin + moreWidth + gap * 2 ? LIST_WIDTH.searchMin : LIST_WIDTH.compact) : 0,
-      fieldWidths: fields.map(sizeOf), preferFirst: Boolean(fields[0]?.priority), actions: [...actions, ...resets].map(sizeOf), resets: [],
+      searchMin: searches.length ? LIST_WIDTH.searchMin : 0,
+      searchCompactMin: searches.length ? LIST_WIDTH.compact : 0,
+      fieldWidths: fields.map(sizeOf), preferFirst: Boolean(fields[0]?.priority), actions: actions.map(sizeOf), resets: resets.map(sizeOf),
       gap, moreWidth,
       collapsedCategory: compact && categories.length > 0, forcedMore: secondaryFields.length > 0 });
     setLayout(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
@@ -160,9 +163,10 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
       <PopoverContent ref={panel} side="bottom" align="start" className={styles.filterPopover} aria-label={t("更多搜索")}
         onInteractOutside={event => { if (ownsPopupTarget(event.target)) event.preventDefault(); }}>
         <div className={styles.filterPanelFields}>{collapsed.map(entry => item(entry, true))}</div>
+        {resets.length > 0 && <div className={styles.filterPanelFooter}>{resets.map(entry => item(entry, true))}</div>}
       </PopoverContent>
     </Popover> : null}
-    {resets.map(entry => item(entry))}
+    {!layout?.more && resets.map(entry => item(entry))}
     {actions.map(entry => item(entry))}
     <div className={styles.filterMeasure} aria-hidden="true">{fields.map(entry => <span key={entry.key} ref={node => { if (node) labels.current.set(entry.key, node); else labels.current.delete(entry.key); }}>{displayLabel(entry)}</span>)}</div>
   </div>;

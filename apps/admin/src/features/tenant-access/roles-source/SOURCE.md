@@ -29,3 +29,7 @@ in the shared admin tokens. It keeps permission labels and headers visible while
 scrolling and shows explicit grant text for a single role. The preserved stylesheet
 remains unchanged. This integration is adapted from the public compiled preview,
 not protected authored Pro TSX, and does not claim complete original-screen parity.
+
+Fixed owner cells retain the source locked style. Temporarily disabled peer roles
+keep their actual checked, unchecked or mixed state, with a separate disabled marker;
+the original click guard still prevents a second role from changing an active draft.

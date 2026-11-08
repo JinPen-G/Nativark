@@ -561,6 +561,8 @@ main.app-workspace { background: var(--surface); }
 .workspace-context .ant-breadcrumb-overlay-link:hover { background: var(--rental-color-fill-tertiary); }
 .breadcrumb-home { cursor: pointer; }
 .app-content { min-height: 0; padding: var(--rental-layout-page-top-gap) var(--space-6) var(--space-6); overflow: auto; background: transparent; }
+/* A scrollbar must not repeatedly change the width used to fit list controls. */
+.app-content:not(.ai-operator-host) { scrollbar-gutter: stable; }
 .content-canvas { width: 100%; container: admin-content / inline-size; }
 
 .page-header { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--rental-layout-header-content-gap); min-width: 0; margin-block-end: var(--rental-layout-header-content-gap); }
@@ -977,6 +979,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .order-timeline .ant-timeline-item-content { min-height: 48px; }
 .query-state-loading { min-height: 280px; display: grid; place-items: center; }
 .route-loader { min-height: 360px; display: grid; place-items: center; }
+.route-error-page { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-6); }
 .auth-loader { min-height: 100vh; display: grid; place-items: center; }
 
 /* Original page loading: staggered 3×3 pixel grid with the label on its right. */

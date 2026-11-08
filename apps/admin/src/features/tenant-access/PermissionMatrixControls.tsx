@@ -15,8 +15,11 @@ export function PermissionToggle({ state, label, locked, disabled, dirty, delay 
     pathLength: { duration: motionTokens.duration.fast, ease: motionTokens.ease.enter, delay: wait },
     opacity: { duration: motionTokens.duration.instant, delay: wait },
   };
+  // The source's locked-owner style implies a grant. A temporarily disabled
+  // peer role must keep its actual checked, unchecked or mixed appearance.
   return <button {...navigation} type="button" role={navigation.role ?? "switch"} aria-checked={state === "mixed" ? "mixed" : state === "on"}
-    aria-label={label} aria-disabled={locked || disabled || undefined} className={classes.toggle} data-state={state} data-locked={locked || disabled || undefined}
+    aria-label={label} aria-disabled={locked || disabled || undefined} className={classes.toggle} data-state={state}
+    data-locked={locked || undefined} data-disabled={!locked && disabled || undefined}
     style={{ "--delay": `${wait}s` } as CSSProperties} onClick={() => {
       if (locked || disabled) {
         if (locked && !reduced && box.current) void animate(box.current, { x: [0, 3, -2, 1, 0] }, { duration: .34, ease: "easeOut" });

@@ -112,7 +112,7 @@ export function PermissionMatrix({ roles, modules, onEdit, draft, onDraftChange,
     <ListFilterBar>
       <SearchField label={t("查找权限")} placeholder={t("权限名称、编码或说明")} value={query} onValueChange={value => { setQuery(value); setCollapsed(new Set()); }} />
       <ListFilterItem label={t("权限模块")} active={Boolean(moduleCode)}><Select allowClear aria-label={t("权限模块")} placeholder={t("全部模块")} value={moduleCode} onChange={value => setModuleCode(value)} options={modules.map(module => ({ value: module.code, label: t(module.name) }))} /></ListFilterItem>
-      <ListFilterItem kind="action"><Popover><PopoverTrigger asChild><Button icon={<Columns3 size={16} />}>{t("对照角色")} {compared.length}<ChevronDown size={14} /></Button></PopoverTrigger>
+      <ListFilterItem kind="action"><Popover><PopoverTrigger asChild><Button icon={<Columns3 size={16} />} aria-label={`${t("对照角色")} ${compared.length}`} title={t("对照角色")}><span className={styles.roleChooserText}>{t("对照角色")}</span>{compared.length}<ChevronDown className={styles.roleChooserText} size={14} /></Button></PopoverTrigger>
         <PopoverContent align="end" className={styles.roleChooser}>
           <SearchField label={t("查找角色")} placeholder={t("角色名称或编码")} value={roleQuery} onValueChange={setRoleQuery} />
           <div className={styles.roleChoices}>{roles.filter(role => `${role.name} ${role.code}`.toLocaleLowerCase().includes(roleQuery.trim().toLocaleLowerCase())).map(role => <Checkbox key={role.id}
@@ -122,8 +122,8 @@ export function PermissionMatrix({ roles, modules, onEdit, draft, onDraftChange,
           {!roles.some(role => `${role.name} ${role.code}`.toLocaleLowerCase().includes(roleQuery.trim().toLocaleLowerCase())) && <p>{t("没有匹配的角色")}</p>}
           <Button type="text" onClick={() => setSelectedRoles(null)}>{t("显示全部角色")}</Button>
         </PopoverContent></Popover></ListFilterItem>
-      <ListFilterItem label={t("只看差异")} active={differencesOnly && compared.length > 1}><Tooltip title={compared.length < 2 ? t("选择至少两个角色后可比较差异") : undefined}><span className={styles.differenceControl}><Checkbox label={t("只看差异")} checked={differencesOnly && compared.length > 1} disabled={compared.length < 2} onCheckedChange={checked => setDifferencesOnly(checked === true)} /></span></Tooltip></ListFilterItem>
-      <ListFilterItem kind="action"><ActionButton variant="secondary" label={t("刷新权限")} disabled={busy || Boolean(draft)} onAction={onRefresh} /></ListFilterItem>
+      <ListFilterItem active={differencesOnly && compared.length > 1}><Tooltip title={compared.length < 2 ? t("选择至少两个角色后可比较差异") : undefined}><span className={styles.differenceControl}><Checkbox label={t("只看差异")} checked={differencesOnly && compared.length > 1} disabled={compared.length < 2} onCheckedChange={checked => setDifferencesOnly(checked === true)} /></span></Tooltip></ListFilterItem>
+      <ListFilterItem kind="action"><ActionButton className={styles.matrixRefresh} title={t("刷新权限")} variant="secondary" label={t("刷新权限")} disabled={busy || Boolean(draft)} onAction={onRefresh} /></ListFilterItem>
       {(query || moduleCode || differencesOnly) && <Button data-list-filter-reset type="text" onClick={() => { setQuery(""); setModuleCode(undefined); setDifferencesOnly(false); }}>{t("清除筛选")}</Button>}
     </ListFilterBar>
     {stale && <Alert type="warning" showIcon title={t("角色资料已更新，请放弃旧草稿后重新核对。")}

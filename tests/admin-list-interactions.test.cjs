@@ -12,6 +12,21 @@ function load(file, dependencies) {
   return exported.exports;
 }
 
+test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {
+  const { planListFilters } = load('apps/admin/src/components/ui/listFilterLayout.ts', {});
+  const geometry = { available: 342, category: 0, categoryMin: 0, search: 280, searchMin: 200, searchCompactMin: 96,
+    fieldWidths: [170, 160], preferFirst: false, actions: [60, 36], resets: [106], gap: 8, moreWidth: 64, collapsedCategory: false };
+  const plan = planListFilters(geometry);
+  assert.equal(plan.more, true, 'Secondary criteria and reset remain available from More filters.');
+  assert.equal(plan.count, 0);
+  assert.ok(plan.search >= geometry.searchCompactMin);
+  assert.ok(plan.search + 60 + 36 + geometry.moreWidth + 3 * geometry.gap <= geometry.available,
+    'The search, More trigger and both actions must fit one 342px row.');
+  const wide = planListFilters({ ...geometry, available: 1200 });
+  assert.equal(wide.more, false);
+  assert.equal(wide.count, 2, 'A wide row exposes the criteria and reset without a needless overflow panel.');
+});
+
 test('live refresh is opt-in, pauses while editing, stops on denial and resets across identities', () => {
   let identity = { tenant: { tenantId: 't' }, currentWorkspaceId: 'w', user: { id: 'u' } };
   let state;

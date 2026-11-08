@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from "react";
 import { AppRouter } from "./AppRouter";
+import { RouteErrorPage } from "./RouteErrorPage";
 import { LocaleProvider, useLocale } from "./locale";
 import { queryClient } from "./queryClient";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
@@ -19,7 +20,7 @@ import { MotionPreferenceProvider } from "./MotionPreferenceProvider";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
 // Keep existing descendant routes; data router supplies supported SPA blockers.
-const router = createBrowserRouter([{ path: "*", element: <AppRouter /> }]);
+const router = createBrowserRouter([{ path: "*", element: <AppRouter />, errorElement: <RouteErrorPage /> }]);
 
 function ThemedApp() {
   const { mode } = useAppearance();
