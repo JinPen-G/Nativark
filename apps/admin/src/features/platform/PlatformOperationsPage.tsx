@@ -17,6 +17,7 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { PlatformSecurityOverview } from "./PlatformSecuritySettings";
 
 const capabilityLabels: Record<string, string> = { payment: "支付", pre_auth: "预授权", sms: "短信", email: "邮件", app_push: "应用推送", e_contract: "电子合同", tbox: "TBox", ai_dispatch: "智能调度", export: "数据导出", print: "打印", file: "文件" };
 
@@ -24,6 +25,14 @@ type AdapterFormValues = Omit<InvokeMockAdapterRequest, "payload" | "operator"> 
 type ConfirmationFormValues = { action: string; confirmationCode?: string };
 
 export function PlatformOperationsPage() {
+  const { t } = useLocale();
+  const isSaas = useAuthStore(state => Boolean(state.user?.isSaasAdmin));
+  // The API's SaaS whitelist permits the security baseline, not the tenant dashboard or test subroutes.
+  if (isSaas) return <><PageHeader title={t("平台运维中心")} /><PlatformSecurityOverview /></>;
+  return <TenantOperationsWorkspace />;
+}
+
+function TenantOperationsWorkspace() {
   const { message, modal } = App.useApp();
   const { t } = useLocale();
   const queryClient = useQueryClient();

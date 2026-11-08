@@ -31,6 +31,20 @@ test('platform parameter navigation follows explicit server grants without givin
   }
 });
 
+test('SaaS parameter access permits the baseline but never opens tenant utilities or the legacy AI test', async () => {
+  for (const permissions of [['system:params:manage'], ['*']]) {
+    const user = { ...actor(permissions), isSaasAdmin: true };
+    assert.equal(await guardCall(user, 'GET', '/platform/security-baseline'), true);
+    for (const [method, path] of [
+      ['GET', '/platform/system-rules'], ['PUT', '/platform/system-rules/memberRegister'],
+      ['POST', '/platform/system-rules/ai-test'], ['POST', '/platform/security-baseline/second-confirmation/check'],
+      ['GET', '/platform/users'], ['GET', '/platform/dictionaries'], ['GET', '/platform/number-rules'],
+      ['GET', '/platform/filter-presets'], ['GET', '/integrations/dashboard'], ['GET', '/files'],
+      ['GET', '/notifications/logs'], ['POST', '/jobs/run-due'],
+    ]) await assert.rejects(guardCall(user, method, path), forbidden, `${method} ${path}`);
+  }
+});
+
 const tenantId = 'tenant-a';
 const actor = (permissions = ['system:user:manage']) => ({
   id: 'actor', tenantId, account: 'actor', displayName: 'Operator', isActive: true,

@@ -34,6 +34,7 @@ const CorporateMembershipPage = lazy(() => import("@/features/membership/Corpora
 const MembershipPlanPage = lazy(() => import("@/features/membership/MembershipPlanPage").then((module) => ({ default: module.MembershipPlanPage })));
 const MembershipRewardsPage = lazy(() => import("@/features/membership/MembershipRewardsPage").then((module) => ({ default: module.MembershipRewardsPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
+const PlatformSystemPage = lazy(() => import("@/features/platform/PlatformSystemPage").then((module) => ({ default: module.PlatformSystemPage })));
 const CategoryGovernancePage = lazy(() => import("@/features/platform/CategoryGovernancePage").then((module) => ({ default: module.CategoryGovernancePage })));
 const CategoryCapabilityCatalogPage = lazy(() => import("@/features/platform/CategoryGovernancePage").then((module) => ({ default: module.CategoryCapabilityCatalogPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
@@ -166,7 +167,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.platformSubscriptionDetail.path} element={guard(APP_ROUTES.platformSubscriptionDetail, <PlatformSubscriptionDetailPage />)} />
             <Route path={APP_ROUTES.subscriptionCatalog.path} element={guard(APP_ROUTES.subscriptionCatalog, <SubscriptionCatalogPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
-            <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
+            <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformSystemPage />)} />
             <Route path={APP_ROUTES.platformAi.path} element={guard(APP_ROUTES.platformAi, <PlatformModelSettingsPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />
             <Route path={APP_ROUTES.platformTools.path} element={guard(APP_ROUTES.platformTools, <PlatformToolsPage />)} />

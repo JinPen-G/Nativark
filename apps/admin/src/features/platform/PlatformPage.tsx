@@ -1,34 +1,31 @@
 import { ListFilters, useListFilter } from "@/components/ui";
 import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@/components/ui/icons";
-import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@rental-os/shared";
-import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemUserRow } from "@rental-os/shared";
+import { Col, Row, Space, Tag, Typography } from "antd";
 import { ListSection, App } from "@/components/ui";
 import { Form } from "@/components/ui";
-import { Alert, Table } from "@/components/ui";
+import { Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, ConfirmAction, CopyButton, Drawer, SaveButton, Tabs } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
-import { useServerFormSync } from "@/app/useServerFormSync";
 
 type EditorKind = "organization" | "user" | "role" | undefined;
 
 export function PlatformPage() {
   const { message, modal } = App.useApp();
   const { t } = useLocale();
-  const location = useLocation();
   const queryClient = useQueryClient();
   const tenant = useAuthStore((state) => state.tenant);
   const operator = useAuthStore((state) => state.user?.displayName ?? t("租户管理员"));
-  const [activeKey, setActiveKey] = useState(location.pathname.endsWith("/system") ? "parameters" : "users");
+  const [activeKey, setActiveKey] = useState("users");
   const [editor, setEditor] = useState<EditorKind>();
   const [editingOrganization, setEditingOrganization] = useState<OrganizationSummary>();
   const [editingUser, setEditingUser] = useState<SystemUserRow>();
@@ -36,7 +33,6 @@ export function PlatformPage() {
   const [organizationForm] = Form.useForm<SaveOrganizationRequest>();
   const [userForm] = Form.useForm<SaveSystemUserRequest>();
   const [roleForm] = Form.useForm<SaveSystemRoleRequest>();
-  const [rulesForm] = Form.useForm<SystemRulesConfig>();
 
   const organizations = useQuery({ queryKey: ["platform-organizations"], queryFn: api.organizations });
   const users = useQuery({ queryKey: ["platform-users"], queryFn: api.users });
@@ -46,10 +42,6 @@ export function PlatformPage() {
   const roleFilter = useListFilter(roles.data, { fields: row => [row.name, row.code] });
   const permissions = useQuery({ queryKey: ["platform-permissions"], queryFn: api.permissionTree });
   const audit = useQuery({ queryKey: ["platform-audit"], queryFn: api.auditLogs });
-  const rules = useQuery({ queryKey: ["system-rules"], queryFn: api.systemRules });
-
-  useEffect(() => setActiveKey(location.pathname.endsWith("/system") ? "parameters" : "users"), [location.pathname]);
-  const rulesCurrent = useServerFormSync(rulesForm, rules.data, () => { if (rules.data) rulesForm.setFieldsValue(rules.data); });
 
   const refreshPlatform = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ["platform-organizations"] }),
@@ -65,15 +57,6 @@ export function PlatformPage() {
   const resetPassword = useMutation({ mutationFn: api.resetUserPassword, onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code>{result.temporaryPassword}</Typography.Text><CopyButton value={result.temporaryPassword} /></> }), onError: () => message.error(t("密码重置失败")) });
   const saveRole = useMutation({ mutationFn: api.saveRole, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("角色已保存")); }, onError: () => message.error(t("角色保存失败，请检查角色编码和权限")) });
   const deleteRole = useMutation({ mutationFn: api.deleteRole, onSuccess: async () => { await refreshPlatform(); message.success(t("角色已删除")); }, onError: () => message.error(t("角色无法删除，可能是预设角色或仍被账号使用")) });
-  const saveRules = useMutation({
-    mutationFn: async (config: SystemRulesConfig) => {
-      if (!rulesCurrent()) throw new Error(t("服务端配置已变更，请重新打开本页核对后再保存"));
-      return api.saveSystemRuleSection("memberRegister", { ...config, updatedBy: operator }, operator);
-    },
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["system-rules"] }); message.success(t("系统参数已保存")); },
-    onError: (error: Error) => message.error(error.message || t("系统参数保存失败，请检查字段约束"))
-  });
-  const testAi = useMutation({ mutationFn: () => api.testAiConnection(operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["system-rules"] }); message.success(t("AI 连接测试已完成，结果已写入日志")); }, onError: () => message.error(t("AI 连接测试失败")) });
 
   const permissionOptions = useMemo(() => (permissions.data ?? []).flatMap((module) => module.children.map((item) => ({ value: item.code, label: `${module.name} · ${item.name}` }))), [permissions.data]);
   const roleOptions = (roles.data ?? []).filter((role) => role.isActive).map((role) => ({ value: role.id, label: role.name }));
@@ -171,19 +154,6 @@ export function PlatformPage() {
                 { title: t("对象"), render: (_, record) => `${record.targetType}${record.targetId ? ` / ${record.targetId}` : ""}` },
                 { title: t("说明"), dataIndex: "detail" }
               ]} />
-            },
-            {
-              key: "parameters",
-              label: t("系统参数"),
-              children: <QueryState loading={rules.isLoading} error={rules.error}>{rules.data && <Form<SystemRulesConfig> form={rulesForm} layout="vertical" onFinish={(values) => saveRules.mutate({ ...rules.data, ...values })}>
-                <Alert type="warning" showIcon title={t("这里仍是车辆兼容参数")} description={t("维保里程、清洁次数等字段尚未迁移为通用品类运维规则；非车辆租户启用前必须完成后端模型改造。")} style={{ marginBottom: 16 }} />
-                <Row gutter={[16, 16]}>
-                  <Col xs={24} xl={12}><Card size="small" title={t("会员注册")}><Form.Item name={["member", "accountType"]} label={t("账号类型")}><Select options={[{ value: "MOBILE", label: t("手机号") }, { value: "ID_CARD", label: t("证件号") }]} /></Form.Item><Form.Item name={["member", "auditRequired"]} label={t("注册后需要审核")} valuePropName="checked"><Switch /></Form.Item></Card></Col>
-                  <Col xs={24} xl={12}><Card size="small" title={t("资产维护")}><Row gutter={12}><Col span={12}><Form.Item name={["fleet", "maintenance", "thresholdMileage"]} label={t("维护阈值（公里）")}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "maintenance", "thresholdMonths"]} label={t("维护周期（月）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "cleaning", "thresholdCount"]} label={t("清洁阈值（次）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "cleaning", "thresholdDays"]} label={t("清洁周期（天）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col></Row></Card></Col>
-                  <Col span={24}><Card size="small" title={t("AI 接入")}><Row gutter={12}><Col xs={24} md={6}><Form.Item name={["aiModel", "enabled"]} label={t("启用")} valuePropName="checked"><Switch /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "provider"]} label={t("提供方")}><Select options={[{ value: "OPENAI", label: "OpenAI" }, { value: "GEMINI", label: "Gemini" }, { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible" }]} /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "modelName"]} label={t("模型名称")}><Input /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "baseUrl"]} label="Base URL"><Input /></Form.Item></Col></Row><Space><Button loading={testAi.isPending} onClick={() => testAi.mutate()}>{t("测试连接")}</Button><Tag color={rules.data.aiModel.lastTestStatus === "成功" ? "success" : "default"}>{rules.data.aiModel.lastTestStatus ? t(rules.data.aiModel.lastTestStatus) : t("未测试")}</Tag><Typography.Text type="secondary">{rules.data.aiModel.lastTestTime}</Typography.Text></Space></Card></Col>
-                </Row>
-                <div className="form-actions"><SaveButton label={t("保存系统参数")} form={rulesForm} pending={saveRules.isPending} onSave={(values) => saveRules.mutateAsync({ ...rules.data!, ...values })} /></div>
-              </Form>}</QueryState>
             }
           ]} />
         </ListSection>

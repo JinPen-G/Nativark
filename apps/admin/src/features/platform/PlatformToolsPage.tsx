@@ -18,7 +18,7 @@ import { Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, Drawer, SaveButton, Tabs } from "@/components/ui";
+import { Alert, Button, Drawer, SaveButton, Tabs } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { platformOpsApi } from "@/api/platformOps";
@@ -29,6 +29,17 @@ import { useAuthStore } from "@/features/auth/authStore";
 type Editor = "dictionary" | "number" | "preset" | "file" | "print" | "job" | undefined;
 
 export function PlatformToolsPage() {
+  const { t } = useLocale();
+  const isSaas = useAuthStore(state => Boolean(state.user?.isSaasAdmin));
+  // Do not start tenant queries before checking the audience. Parameter permission does not grant these APIs.
+  if (isSaas) return <>
+    <PageHeader title={t("平台工具与治理")} />
+    <Alert type="info" showIcon title={t("这些工具暂不向平台账号开放")} description={t("字典、编号规则、筛选预设、文件与任务仍属于租户工具。当前平台入口不会读取租户资料或执行工具操作。")}/>
+  </>;
+  return <TenantToolsWorkspace />;
+}
+
+function TenantToolsWorkspace() {
   const { message, modal } = App.useApp();
   const { t } = useLocale();
   const operator = useAuthStore((state) => state.user?.displayName) ?? t("租户管理员");
