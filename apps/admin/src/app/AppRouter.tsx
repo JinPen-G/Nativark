@@ -69,12 +69,12 @@ function PageLoader() {
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const hasPermission = useAuthStore((state) => state.hasPermission);
-  const hasCapability = useAuthStore((state) => state.hasCapability);
-  const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
-  const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
-  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission)) {
+  // Subscribe to the decision, not stable store methods: grants and capabilities
+  // can change while the account, workspace and URL stay the same.
+  const allowed = useAuthStore(state => canAccessRoute(route, state.hasPermission, state.hasCapability,
+    state.tenant?.categoryCode, Boolean(state.user?.isSaasAdmin), state.hasTenantMembershipPermission));
+  if (!allowed) {
     return <Result status="403" title={t("无权访问")}
       subTitle={t(isSaasAdmin ? "当前账号没有访问此页面的权限，请联系平台管理员核对授权。" : "当前账号无访问权限，或经营品类暂不支持此功能。")}
       extra={<Button type="primary" onClick={() => navigate("/", { replace: true })}>{t("返回可访问页面")}</Button>} />;
@@ -162,7 +162,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.corporateMemberDetail.path} element={guard(APP_ROUTES.corporateMemberDetail, <CorporateMembershipPage />)} />
             <Route path={APP_ROUTES.membershipPlans.path} element={guard(APP_ROUTES.membershipPlans, <MembershipPlanPage />)} />
             <Route path={APP_ROUTES.membershipRewards.path} element={guard(APP_ROUTES.membershipRewards, <MembershipRewardsPage />)} />
-            <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
+            <Route path="/platform" element={<DefaultRoute />} />
             <Route path={APP_ROUTES.platformDemoRequests.path} element={guard(APP_ROUTES.platformDemoRequests, <DemoRequestsPage />)} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             {CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path={APP_ROUTES.platformCategories.path} element={guard(APP_ROUTES.platformCategories, <CategoryGovernancePage />)} />}

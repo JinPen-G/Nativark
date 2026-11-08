@@ -45,6 +45,50 @@ test('SaaS parameter access permits the baseline but never opens tenant utilitie
   }
 });
 
+test('the route view observes permission and capability changes without changing account or workspace', () => {
+  const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
+  const declaration = (file, name) => {
+    const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const node = source.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === name);
+    assert.ok(node, name);
+    return ts.transpileModule(node.getText(source), { compilerOptions: { module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  };
+  const access = {};
+  new Function('exports', 'APP_ROUTES', declaration('apps/admin/src/app/navigation.tsx', 'canAccessRoute'))(access, { aiOperator: { path: '/ai-operator' } });
+  const source = declaration('apps/admin/src/app/AppRouter.tsx', 'RouteAccess');
+  const cases = [
+    { route: { path: '/platform/system', audience: 'saas', permission: 'system:params:manage' }, saas: true, change: 'permission' },
+    { route: { path: '/rental/items', audience: 'tenant', permission: 'rental-core:catalog:view' }, change: 'permission' },
+    { route: { path: '/rental/items', audience: 'tenant', permission: 'rental-core:catalog:view', capability: 'catalog' }, change: 'capability' },
+    { route: { path: '/rental/members', audience: 'tenant', permission: 'rental-os:member:manage', scope: 'tenant-membership' }, change: 'membership' },
+  ];
+  for (const scenario of cases) {
+    let state = { user: { id: 'same-user', isSaasAdmin: Boolean(scenario.saas), permissions: [scenario.route.permission],
+      tenantMembership: { permissions: [scenario.route.permission] } }, tenant: { categoryCode: 'camera', capabilities: ['catalog'] } };
+    const methods = {
+      hasPermission: permission => !permission || state.user.permissions.includes(permission),
+      hasCapability: capability => !capability || state.tenant.capabilities.includes(capability),
+      hasTenantMembershipPermission: permission => !permission || state.user.tenantMembership.permissions.includes(permission),
+    };
+    let observed = [];
+    const render = new Function('exports', 'require', 'useAuthStore', 'useLocale', 'useNavigate', 'canAccessRoute', 'Result', 'Button', `${source};return RouteAccess;`)(
+      {}, require, selector => { const value = selector({ ...state, ...methods }); observed.push({ selector, value }); return value; },
+      () => ({ t: text => text }), () => () => {}, access.canAccessRoute, 'access-result', 'return-button');
+    assert.equal(render({ route: scenario.route, children: 'protected-content' }).props.children, 'protected-content');
+    const initial = state;
+    if (scenario.change === 'capability') state = { ...state, tenant: { ...state.tenant, capabilities: [] } };
+    else if (scenario.change === 'membership') state = { ...state, user: { ...state.user, tenantMembership: { permissions: [] } } };
+    else state = { ...state, user: { ...state.user, permissions: [] } };
+    assert.ok(observed.some(({ selector, value }) => !Object.is(selector({ ...state, ...methods }), value)), `${scenario.change}: the real store subscriptions must notify the route after revocation`);
+    observed = [];
+    assert.equal(render({ route: scenario.route, children: 'protected-content' }).type, 'access-result');
+    state = initial;
+    assert.ok(observed.some(({ selector, value }) => !Object.is(selector({ ...state, ...methods }), value)), `${scenario.change}: restored permission must also notify the route`);
+    assert.equal(render({ route: scenario.route, children: 'protected-content' }).props.children, 'protected-content');
+  }
+});
+
 const tenantId = 'tenant-a';
 const actor = (permissions = ['system:user:manage']) => ({
   id: 'actor', tenantId, account: 'actor', displayName: 'Operator', isActive: true,

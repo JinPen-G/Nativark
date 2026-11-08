@@ -74,7 +74,7 @@ function ShellContents({ children }: { children: ReactNode }) {
   const sections = useMemo(() => buildNavigationSections(terminology).map((section) => ({
     ...section,
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission))
-  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, hasTenantMembershipPermission, tenant?.categoryCode, terminology, user]);
+  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, hasTenantMembershipPermission, tenant?.categoryCode, tenant?.capabilities, terminology, user]);
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
     const route = routes.find((entry) => entry.path === location.pathname)
@@ -86,13 +86,17 @@ function ShellContents({ children }: { children: ReactNode }) {
   }, [location.pathname, routes, sections]);
   // Detail routes inherit the longest permitted menu parent, including future record pages.
   const selectedKey = current.route?.path ?? location.pathname;
-  const detailRoute = Object.values(APP_ROUTES).find(route => matchPath(route.path, location.pathname)
-    && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
+  const registeredRoute = Object.values(APP_ROUTES).find(route => matchPath(route.path, location.pathname));
+  const detailRoute = registeredRoute && canAccessRoute(registeredRoute, hasPermission, hasCapability,
+    tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission) ? registeredRoute : undefined;
+  // Registered route labels can identify a denied location without adding a menu
+  // item or a link to protected content. Tenant terminology still owns permitted routes.
+  const deniedLabel = registeredRoute && !detailRoute ? registeredRoute.label : undefined;
   const breadcrumbItems = [
     ...(current.section ? [{ title: <span className="breadcrumb-section">{t(current.section.label)}</span> }] : []),
     { title: detailRoute && detailRoute.path !== current.route?.path && current.route
       ? <button type="button" className="breadcrumb-link" onClick={() => navigate(current.route!.path)}>{t(current.route.label)}</button>
-      : t(current.route?.label ?? detailRoute?.label ?? "工作台") },
+      : t(deniedLabel ?? current.route?.label ?? detailRoute?.label ?? "工作台") },
     ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: t(detailRoute.label) }] : []),
   ];
 
