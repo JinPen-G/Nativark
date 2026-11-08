@@ -60,6 +60,7 @@ export function TenantFeatureGrantModal({
       okText={t(isRevoke ? "确认撤销" : "确认授权")}
       okButtonProps={{ danger: isRevoke, disabled: !feature }}
       confirmLoading={mutation.isPending}
+      closable={!mutation.isPending} keyboard={!mutation.isPending} maskClosable={!mutation.isPending} cancelButtonProps={{ disabled: mutation.isPending }}
       onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))}
       onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }}
       destroyOnHidden
@@ -72,7 +73,7 @@ export function TenantFeatureGrantModal({
           ? "撤销后该租户将失去此项额外授权；若功能已公共下放或属当前套餐权益则不受影响。请填写撤销原因备查。"
           : "仅为该租户额外授权此功能，不要求整体升级为 PRO；保存后即时生效。若需对所有基础版开放，请在功能目录页改为公共下放。")}
       />
-      <Form<FormValues> form={form} layout="vertical" onFinish={(values) => mutation.mutate(values)}>
+      <Form<FormValues> form={form} layout="vertical" disabled={mutation.isPending} onFinish={(values) => mutation.mutate(values)}>
         <Form.Item name="reason" label={t(isRevoke ? "撤销原因（必填）" : "授权原因")} rules={[{ required: true, whitespace: true }]}>
           <Input.TextArea rows={3} maxLength={200} placeholder={t(isRevoke ? "如：试点结束 / 误授权更正" : "如：签约赠送 / 试点开放")} />
         </Form.Item>

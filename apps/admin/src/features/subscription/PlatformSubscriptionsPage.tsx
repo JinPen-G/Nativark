@@ -1,6 +1,6 @@
 import { PlusOutlined } from "@/components/ui/icons";
 import { Space, Tag } from "antd";
-import { ListSection, ListFilterItem, Modal } from "@/components/ui";
+import { DataTableText, ListSection, ListFilterItem, Modal } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { SearchField, Select } from "@/components/ui";
@@ -41,12 +41,12 @@ export function PlatformSubscriptionsPage() {
   const resetPage = () => setPagination((value) => ({ ...value, page: 1 }));
   const openDetail = (id: string) => navigate(`${APP_ROUTES.platformSubscriptions.path}/${encodeURIComponent(id)}`);
   const columns: ColumnsType<TenantSubscriptionOverview> = [
-    { title: t("租户"), key: "tenant", render: (_, row) => `${row.tenantName}（${row.tenantCode}）` },
+    { title: t("租户"), key: "tenant", render: (_, row) => <DataTableText primary={row.tenantName} secondary={row.tenantCode} /> },
     { title: t("当前套餐"), dataIndex: "plan", key: "plan", render: (value: SubscriptionPlan) => <Tag color={value === SubscriptionPlan.Pro ? "gold" : "default"}>{t(PLAN_LABEL[value])}</Tag> },
     { title: t("服务状态"), dataIndex: "serviceStatus", key: "status", render: (value: SubscriptionServiceStatus) => t(SERVICE_STATUS_LABEL[value]) },
     { title: t("统一截止"), key: "endAt", render: (_, row) => formatSubscriptionDate(row.endAt, row.timeZone, t) },
     { title: t("待生效"), key: "next", render: (_, row) => row.next ? `${t(PLAN_LABEL[row.next.plan])} · ${formatSubscriptionDate(row.next.effectiveAt, row.timeZone, t)}` : t("—") },
-    { title: t("操作"), key: "action", render: (_, row) => <Button type="link" onClick={() => openDetail(row.tenantId)}>{t("详情 / 办理")}</Button> }
+    { title: t("操作"), key: "action", render: (_, row) => <Button type="text" size="small" onClick={() => openDetail(row.tenantId)}>{t("查看详情")}</Button> }
   ];
   return <>
     <PageHeader title="租户订阅"
@@ -72,7 +72,7 @@ export function PlatformSubscriptionsPage() {
     <Modal open={selecting} title={t("选择要办理的租户")} okText={t("进入详情 / 办理")} okButtonProps={{ disabled: !tenantId || tenants.isError }} onCancel={() => setSelecting(false)} onOk={() => tenantId && openDetail(tenantId)}>
       <QueryState loading={tenants.isLoading}>
         {tenants.error ? <Alert type="error" message={t("租户加载失败")} action={<Button onClick={() => tenants.refetch()}>{t("重试")}</Button>} />
-          : <Select showSearch optionFilterProp="label" style={{ width: "100%" }} placeholder={t("搜索租户名称 / 编码（含尚未配置订阅的租户）")} value={tenantId} onChange={setTenantId} options={(tenants.data ?? []).map((tenant) => ({ value: tenant.tenantId, label: `${tenant.tenantName}（${tenant.tenantCode}）` }))} />}
+          : <Select showSearch={{ optionFilterProp: "label" }} style={{ width: "100%" }} placeholder={t("搜索租户名称 / 编码（含尚未配置订阅的租户）")} value={tenantId} onChange={setTenantId} options={(tenants.data ?? []).map((tenant) => ({ value: tenant.tenantId, label: `${tenant.tenantName}（${tenant.tenantCode}）` }))} />}
       </QueryState>
     </Modal>
   </>;

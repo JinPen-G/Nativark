@@ -9,6 +9,28 @@ const { PlatformController } = require('../apps/api/src/modules/platform/platfor
 const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
 const { Prisma } = require('@prisma/client');
 
+test('platform parameter navigation follows explicit server grants without giving other tenant capabilities', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ts = require('typescript');
+  const source = ts.createSourceFile('authStore.ts', fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/auth/authStore.ts'), 'utf8'), ts.ScriptTarget.Latest, true);
+  let body;
+  function visit(node) {
+    if (ts.isMethodDeclaration(node) && node.name.getText(source) === 'hasPermission') body = node.body.getText(source);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(body);
+  const check = new Function('get', 'permission', body.slice(1, -1));
+  for (const permissions of [[], ['system:params:manage'], ['*']]) {
+    const user = { ...actor(permissions), isSaasAdmin: true };
+    assert.equal(check(() => ({ user }), 'system:params:manage'), permissions.length > 0);
+    assert.equal(check(() => ({ user }), 'system:user:manage'), false);
+    if (permissions.length) assert.equal(await guardCall(user, 'GET', '/platform/security-baseline'), true);
+    else await assert.rejects(guardCall(user, 'GET', '/platform/security-baseline'), forbidden);
+  }
+});
+
 const tenantId = 'tenant-a';
 const actor = (permissions = ['system:user:manage']) => ({
   id: 'actor', tenantId, account: 'actor', displayName: 'Operator', isActive: true,

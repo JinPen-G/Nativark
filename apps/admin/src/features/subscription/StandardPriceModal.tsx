@@ -1,6 +1,6 @@
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
-import { InputNumber } from "antd";
-import { App, Modal } from "@/components/ui";
+import { Col, InputNumber, Row } from "antd";
+import { App, FormSection, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
@@ -60,17 +60,21 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
 
   return (
     <Modal open={dismissal.visible} afterClose={dismissal.afterClose} title={`${t("设置标准年费")}：${plan ? t(PLAN_LABEL[plan]) : ""}`} okText={t("保存")} confirmLoading={mutation.isPending}
-      okButtonProps={{ disabled: !plan }} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden>
+      okButtonProps={{ disabled: !plan }} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden
+      closable={!mutation.isPending} keyboard={!mutation.isPending} maskClosable={!mutation.isPending} cancelButtonProps={{ disabled: mutation.isPending }}>
       <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t("未发布时不展示金额（显示「价格待公布」），不落 0 或虚构价；发布后才对租户显示标准年费。")} />
-      <Form<FormValues> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>
+      <Form<FormValues> form={form} layout="vertical" initialValues={initialValues} disabled={mutation.isPending} onFinish={(values) => mutation.mutate(values)}>
+        <FormSection title={t("标准价格")}>
         <Form.Item name="published" label={t("已发布正式价格")} valuePropName="checked"><Switch /></Form.Item>
-        <Form.Item name="annualFee" label={t("标准年费（不填=待公布，不落 0）")} rules={published ? [{ required: true, type: "number", min: 0.01, max: 9999999999.99 }] : []}><InputNumber min={0.01} max={9999999999.99} precision={2} style={{ width: "100%" }} /></Form.Item>
-        <Form.Item name="currency" label={t("币种")} rules={published ? [{ required: true, pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} /></Form.Item>
-        <Form.Item name="taxInclusive" label={t("税口径")} rules={published ? [{ required: true }] : []}>
+        <div hidden={!published}><Row gutter={16}>
+        <Col span={12}><Form.Item name="annualFee" label={t("标准年费")} rules={published ? [{ required: true, type: "number", min: 0.01, max: 9999999999.99 }] : []}><InputNumber min={0.01} max={9999999999.99} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
+        <Col span={12}><Form.Item name="currency" label={t("币种")} rules={published ? [{ required: true, pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} /></Form.Item></Col>
+        </Row><Form.Item name="taxInclusive" label={t("税口径")} rules={published ? [{ required: true }] : []}>
           <Select allowClear options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} />
-        </Form.Item>
+        </Form.Item></div>
         <Form.Item name="priceVersion" label={t("新的价格方案版本")}><Input maxLength={64} placeholder={t("留空自动生成新版本")} /></Form.Item>
         <Form.Item name="note" label={t("说明")}><Input maxLength={200} /></Form.Item>
+        </FormSection>
       </Form>
     </Modal>
   );

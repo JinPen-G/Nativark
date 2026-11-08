@@ -1,6 +1,8 @@
-import { SaveButton } from "@/components/ui";
-import { useState } from "react";
-import { InputNumber, Space, Typography } from "antd";
+import { DatePicker, FormSection, SaveButton } from "@/components/ui";
+import { serviceDateField } from "./subscriptionDateField";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { useEffect, useState } from "react";
+import { Col, InputNumber, Row, Space, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
@@ -15,12 +17,13 @@ import { formatSubscriptionDate, PLAN_LABEL, REQUEST_TYPE_LABEL } from "./subscr
 import { buildSubscriptionAction, initialSubscriptionAction, operationForRequest, subscriptionError, subscriptionTermPreview, type SubscriptionActionValues, type SubscriptionOperation } from "./subscriptionOperations";
 
 /** Each editor owns an immutable authorization/price snapshot until explicit reload or successful save. */
-export function PlatformSubscriptionActionForm({ tenantId, overview, standardPricing, request, onSaved }: {
+export function PlatformSubscriptionActionForm({ tenantId, overview, standardPricing, request, onSaved, onPendingChange }: {
   tenantId: string;
   overview: TenantSubscriptionOverview;
   standardPricing: StandardPlanPricing[];
   request?: SubscriptionRequestRecord;
   onSaved?: () => void;
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const { t } = useLocale();
   const { message } = App.useApp();
@@ -80,6 +83,7 @@ export function PlatformSubscriptionActionForm({ tenantId, overview, standardPri
     },
     onError: (error) => message.error(subscriptionError(error))
   });
+  useEffect(() => { onPendingChange?.(mutation.isPending || reloading); }, [mutation.isPending, reloading, onPendingChange]);
 
   function changeOperation(next: SubscriptionOperation) {
     form.resetFields();
@@ -93,57 +97,65 @@ export function PlatformSubscriptionActionForm({ tenantId, overview, standardPri
     {stale && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={t("授权已被其他操作更新，本表单仍保留原修订。请重新载入并核对，不能覆盖最新授权。")} />}
     {mutation.error && <Alert type="error" showIcon style={{ marginBottom: 12 }} message={subscriptionError(mutation.error)} description={t("本次未完成开通；已核实的线下收款仍须保留，刷新复核后再办理。")} />}
     <Form<SubscriptionActionValues> form={form} layout="vertical" initialValues={initial} onFinish={(data) => mutation.mutate(data)} disabled={mutation.isPending || reloading}>
-      <Space wrap align="start" size={16}>
-        <Form.Item name="operationType" label={t("办理类型")} style={{ minWidth: 200 }} rules={[{ required: true }]}>
+      <SettingsWorkspace sections={[
+        { key: "service", label: t("办理类型与版本"), content: <FormSection title={t("办理类型与版本")}>
+      <Row gutter={16}>
+        <Col span={12}><Form.Item name="operationType" label={t("办理类型")} rules={[{ required: true }]}>
           <Select disabled={Boolean(request) || mutation.isPending || reloading} onChange={changeOperation} options={[
             { value: "activate", label: t("直接开通") }, { value: "upgrade", label: t("升级 PRO") }, { value: "renew", label: t("续期") },
             { value: "extend", label: t("临时延长") }, { value: "next_standard", label: t("下期降级为基础版") }
           ]} />
-        </Form.Item>
-        {!isUpgrade && !isExtend && operationType !== "next_standard" && <Form.Item name="plan" label={t("版本")} style={{ minWidth: 160 }}>
+        </Form.Item></Col>
+        {!isUpgrade && !isExtend && operationType !== "next_standard" && <Col span={12}><Form.Item name="plan" label={t("版本")}>
           <Select disabled={Boolean(request) || mutation.isPending || reloading} onChange={() => form.setFieldValue("priceVersion", undefined)} options={[{ value: SubscriptionPlan.Standard, label: t("基础版") }, { value: SubscriptionPlan.Pro, label: "PRO" }]} />
-        </Form.Item>}
-        {!isExtend && <Form.Item name="source" label={t("办理来源")} style={{ minWidth: 180 }} rules={[{ required: true }]}>
+        </Form.Item></Col>}
+        {!isExtend && <Col span={12}><Form.Item name="source" label={t("办理来源")} rules={[{ required: true }]}>
           <Select options={[
             { value: SubscriptionSource.Sale, label: t("正常售卖"), disabled: targetPlan === SubscriptionPlan.Pro },
             { value: SubscriptionSource.Pilot, label: t("受控试点") }, { value: SubscriptionSource.HistoricalRegister, label: t("历史登记") }
           ]} />
-        </Form.Item>}
-        <Form.Item name="timeZone" label={t("服务时区（IANA）")} style={{ minWidth: 210 }} rules={[{ required: true, whitespace: true }]}>
+        </Form.Item></Col>}
+        <Col span={12}><Form.Item name="timeZone" label={t("服务时区（IANA）")} rules={[{ required: true, whitespace: true }]}>
           <Input readOnly={operationType !== "activate"} placeholder="Asia/Shanghai" />
-        </Form.Item>
-      </Space>
-      {!isUpgrade && <Space wrap align="start" size={16}>
+        </Form.Item></Col>
+      </Row>
+      </FormSection> },
+      { key: "term", label: t("服务期限"), content: <FormSection title={t("服务期限")}>
+      {!isUpgrade && <Row gutter={16}>
         {!isExtend && <>
-          <Form.Item name="startAt" label={t(operationType === "next_standard" ? "下一段开始（含）" : "服务开始（含）")} rules={[{ required: true }]}>
-            <Input type="datetime-local" step={0.001} />
-          </Form.Item>
-          <Form.Item name="termMode" label={t("期限方式")}>
-            <Select style={{ width: "var(--rental-control-width-select)" }} onChange={(mode) => form.setFieldsValue(mode === "years" ? { endAt: undefined, serviceYears: 1 } : { serviceYears: undefined, endAt: undefined })}
+          <Col span={24}><Form.Item name="startAt" label={t(operationType === "next_standard" ? "下一段开始（含）" : "服务开始（含）")} rules={[{ required: true }]} {...serviceDateField}>
+            <DatePicker showTime needConfirm format="YYYY-MM-DD HH:mm:ss.SSS" style={{ width: "100%" }} />
+          </Form.Item></Col>
+          <Col span={12}><Form.Item name="termMode" label={t("期限方式")}>
+            <Select onChange={(mode) => form.setFieldsValue(mode === "years" ? { endAt: undefined, serviceYears: 1 } : { serviceYears: undefined, endAt: undefined })}
               options={[{ value: "years", label: t("服务年数") }, { value: "custom", label: t("明确截止时点") }]} />
-          </Form.Item>
+          </Form.Item></Col>
         </>}
-        {!isExtend && values.termMode === "years" && <Form.Item name="serviceYears" label={t("服务年数（按日历周年）")} rules={[{ required: true }, { type: "integer", min: 1, max: 100 }]}><InputNumber min={1} max={100} /></Form.Item>}
-        {(isExtend || values.termMode === "custom") && <Form.Item name="endAt" label={t(isExtend ? "新截止时点（不含）" : "服务截止时点（不含）")} rules={[{ required: true }]}><Input type="datetime-local" step={0.001} /></Form.Item>}
-      </Space>}
+        {!isExtend && values.termMode === "years" && <Col span={12}><Form.Item name="serviceYears" label={t("服务年数（按日历周年）")} rules={[{ required: true }, { type: "integer", min: 1, max: 100 }]}><InputNumber min={1} max={100} style={{ width: "100%" }} /></Form.Item></Col>}
+        {(isExtend || values.termMode === "custom") && <Col span={24}><Form.Item name="endAt" label={t(isExtend ? "新截止时点（不含）" : "服务截止时点（不含）")} rules={[{ required: true }]} {...serviceDateField}><DatePicker showTime needConfirm format="YYYY-MM-DD HH:mm:ss.SSS" style={{ width: "100%" }} /></Form.Item></Col>}
+      </Row>}
       <Typography.Paragraph type={previewError ? "secondary" : undefined}>
         {previewError ? t(previewError) : `${t(isUpgrade ? "升级保持当前统一截止" : "保存前核对最终期间")}：[${formatSubscriptionDate(preview?.startAt, values.timeZone, t)}, ${formatSubscriptionDate(preview?.endAt, values.timeZone, t)})`}
       </Typography.Paragraph>
-      {!isExtend && <Space wrap align="start" size={16}>
-        <Form.Item name="amount" label={t("实际收费金额")} rules={moneyRequired ? [{ required: true }, { type: "number", min: 0.01 }] : []}><InputNumber min={0.01} precision={2} /></Form.Item>
-        <Form.Item name="currency" label={t("币种")} rules={moneyRequired ? [{ required: true }, { pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} style={{ width: "var(--rental-control-width-compact)" }} /></Form.Item>
-        <Form.Item name="taxInclusive" label={t("税口径")} rules={moneyRequired ? [{ required: true }] : []}><Select style={{ width: "var(--rental-control-width-select)" }} options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} /></Form.Item>
-        <Form.Item name="priceVersion" label={t("采用的已发布价格方案")} rules={values.source === SubscriptionSource.Sale ? [{ required: true, message: t("收费办理须核对价格版本") }] : []}>
-          <Select allowClear style={{ minWidth: "min(100%, var(--rental-control-width-select))" }} placeholder={t("未选择价格版本")} options={selectedPrice?.priceVersion ? [{ value: selectedPrice.priceVersion, label: `${t(PLAN_LABEL[targetPlan])} · ${selectedPrice.priceVersion}` }] : []} />
-        </Form.Item>
-      </Space>}
+      </FormSection> },
+      ...(!isExtend ? [{ key: "payment", label: t("收款与价格依据"), content: <FormSection title={t("收款与价格依据")}>
+      <Row gutter={16}>
+        <Col span={12}><Form.Item name="amount" label={t("实际收费金额")} rules={moneyRequired ? [{ required: true }, { type: "number", min: 0.01 }] : []}><InputNumber min={0.01} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
+        <Col span={12}><Form.Item name="currency" label={t("币种")} rules={moneyRequired ? [{ required: true }, { pattern: /^[A-Za-z]{3}$/, message: t("请填写三位币种代码") }] : []}><Input placeholder="CNY" maxLength={3} /></Form.Item></Col>
+        <Col span={12}><Form.Item name="taxInclusive" label={t("税口径")} rules={moneyRequired ? [{ required: true }] : []}><Select options={[{ value: true, label: t("含税") }, { value: false, label: t("未税") }]} /></Form.Item></Col>
+        <Col span={12}><Form.Item name="priceVersion" label={t("采用的已发布价格方案")} rules={values.source === SubscriptionSource.Sale ? [{ required: true, message: t("收费办理须核对价格版本") }] : []}>
+          <Select allowClear placeholder={t("未选择价格版本")} options={selectedPrice?.priceVersion ? [{ value: selectedPrice.priceVersion, label: `${t(PLAN_LABEL[targetPlan])} · ${selectedPrice.priceVersion}` }] : []} />
+        </Form.Item></Col>
+      </Row></FormSection> }] : []),
+      { key: "reason", label: t("办理依据"), content: <FormSection title={t("办理依据")}>
       <Form.Item name="reason" label={t(isExtend ? "临时延长原因（租户可见，不记录收款）" : "办理依据 / 调整原因（租户可见）")} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={500} rows={2} /></Form.Item>
       {!isExtend && <Form.Item name="note" label={t("转账核实 / 平台内部备注（不向租户展示）")}><Input.TextArea maxLength={2000} rows={2} /></Form.Item>}
-      <Space wrap>
+      </FormSection> },
+      ]} footer={<Space wrap>
         <SaveButton disabled={stale || reloading || (!isExtend && values.source === SubscriptionSource.Sale && targetPlan === SubscriptionPlan.Pro)} label={t("保存办理")} form={form} pending={mutation.isPending} onSave={(data) => mutation.mutateAsync(data)} />
         <Button loading={reloading} disabled={mutation.isPending} onClick={() => void reload()}>{t("重新载入最新授权（清空表单）")}</Button>
         <Typography.Text type="secondary">{t("编辑基于授权修订")} {snapshot.revision}</Typography.Text>
-      </Space>
+      </Space>} />
     </Form>
   </>;
 }

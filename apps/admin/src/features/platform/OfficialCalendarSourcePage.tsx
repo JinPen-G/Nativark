@@ -1,16 +1,19 @@
 import { ListFilters, useListFilter } from "@/components/ui";
-import { ListSection, SaveButton } from "@/components/ui";
+import { DataTableRowActions, DataTableText, DatePicker, FormSection, ListSection, SaveButton } from "@/components/ui";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
+import { CalendarPlus, Pencil } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Row, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer } from "@/components/ui";
-import dayjs from "dayjs";
+import { Button } from "@/components/ui";
+import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
-import type { OfficialCalendarSource } from "@rental-os/shared";
+import type { OfficialCalendarSource, RegisterOfficialCalendarSourceVersionRequest } from "@rental-os/shared";
 import { officialCalendarApi } from "@/api/officialCalendar";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -31,7 +34,9 @@ export function OfficialCalendarSourcePage() {
   const [versionTarget, setVersionTarget] = useState<OfficialCalendarSource>();
   const [expanded, setExpanded] = useState<string>();
   const [sourceForm] = Form.useForm<{ name: string; url: string; notes?: string; isActive: boolean }>();
-  const [versionForm] = Form.useForm<{ year: number; publishedAt: string; daysText: string }>();
+  const [versionForm] = Form.useForm<{ year: number; publishedAt: Dayjs; daysText: string }>();
+  const sourceDialog = useModalDismissal(sourceEditor !== undefined, () => setSourceEditor(undefined));
+  const versionDialog = useModalDismissal(Boolean(versionTarget), () => { setVersionTarget(undefined); versionForm.resetFields(); });
 
   const sources = useQuery({ queryKey: ["official-calendars"], queryFn: officialCalendarApi.sources });
   const sourceFilter = useListFilter(sources.data, { fields: row => [row.name, row.url] });
@@ -52,7 +57,7 @@ export function OfficialCalendarSourcePage() {
         isActive: values.isActive
       }),
     onSuccess: async () => {
-      setSourceEditor(undefined);
+      sourceDialog.dismiss();
       await queryClient.invalidateQueries({ queryKey: ["official-calendars"] });
       message.success(t("官方来源已保存"));
     },
@@ -63,15 +68,14 @@ export function OfficialCalendarSourcePage() {
   });
 
   const registerVersion = useMutation({
-    mutationFn: (values: { year: number; publishedAt: string; daysText: string }) =>
+    mutationFn: (values: { year: number; publishedAt: Dayjs; daysText: string }) =>
       officialCalendarApi.registerVersion(versionTarget!.id, {
         year: Number(values.year),
-        publishedAt: new Date(values.publishedAt).toISOString(),
+        publishedAt: new Date(values.publishedAt.format("YYYY-MM-DD")).toISOString(),
         days: JSON.parse(values.daysText)
       }),
     onSuccess: async (created) => {
-      setVersionTarget(undefined);
-      versionForm.resetFields();
+      versionDialog.dismiss();
       await queryClient.invalidateQueries({ queryKey: ["official-calendar-versions"] });
       message.success(`${t("已登记来源版本")} v${created.version}，${t("租户空间可以引用它生成草稿")}`);
     },
@@ -81,6 +85,18 @@ export function OfficialCalendarSourcePage() {
           t("登记失败：请检查年度、发布日期与日期数组")
       )
   });
+  const dateArrayRule = { validator: async (_rule: unknown, text: string) => {
+    let dates: RegisterOfficialCalendarSourceVersionRequest["days"];
+    try { dates = JSON.parse(text); } catch { throw new Error(t("请输入有效的日期 JSON 数组")); }
+    if (!Array.isArray(dates) || !dates.length) throw new Error(t("请至少填写一条官方日期"));
+    const year = versionForm.getFieldValue("year");
+    const seen = new Set<string>();
+    for (const date of dates) {
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date.date) || !dayjs(date.date).isValid() || dayjs(date.date).format("YYYY-MM-DD") !== date.date || !date.date.startsWith(`${year}-`)
+        || !["statutory_holiday", "makeup_workday"].includes(date.dayType) || typeof date.name !== "string" || !date.name.trim() || seen.has(date.date)) throw new Error(t("日期须在所选年度内且不能重复，填写法定节假日或调休工作日及名称"));
+      seen.add(date.date);
+    }
+  } };
 
   return (
     <>
@@ -95,7 +111,8 @@ export function OfficialCalendarSourcePage() {
           <Button
             type="primary"
             onClick={() => {
-              sourceForm.setFieldsValue({ name: "", url: "https://www.gov.cn/", notes: "", isActive: true });
+              sourceForm.resetFields();
+              sourceForm.setFieldsValue({ name: "", url: "", notes: "", isActive: true });
               setSourceEditor(null);
             }}
           >
@@ -103,18 +120,18 @@ export function OfficialCalendarSourcePage() {
           </Button>
         }
       />
-      <QueryState loading={sources.isLoading} error={sources.error}>
+      <QueryState loading={sources.isLoading} error={sources.error} onRetry={() => sources.refetch({ throwOnError: true })}>
         <ListSection controls={<ListFilters filter={sourceFilter} placeholder="来源名称或网址" />}>
           <Table<OfficialCalendarSource>
             rowKey="id"
             size="small"
             onRefresh={() => sources.refetch()} loading={sources.isLoading} refreshing={sources.isFetching} dataSource={sourceFilter.rows}
-            pagination={false}
+            pagination={sourceFilter.pagination}
             expandable={{
               expandedRowKeys: expanded ? [expanded] : [],
               onExpand: (open, row) => setExpanded(open ? row.id : undefined),
               expandedRowRender: () => (
-                <QueryState loading={versions.isLoading} error={versions.error}>
+                <QueryState loading={versions.isLoading} error={versions.error} onRetry={() => versions.refetch({ throwOnError: true })}>
                   <Table
                     rowKey="id"
                     size="small"
@@ -143,8 +160,7 @@ export function OfficialCalendarSourcePage() {
               )
             }}
             columns={[
-              { title: t("地区"), dataIndex: "region", width: 80 },
-              { title: t("来源名称"), dataIndex: "name" },
+              { title: t("来源名称"), render: (_, row) => <DataTableText primary={row.name} secondary={row.region === "CN" ? t("中国大陆") : row.region} /> },
               {
                 title: t("公告地址"),
                 dataIndex: "url",
@@ -162,12 +178,9 @@ export function OfficialCalendarSourcePage() {
               },
               {
                 title: t("操作"),
-                width: 180,
-                render: (_, row) => (
-                  <Space size={0}>
-                    <Button
-                      type="link"
-                      onClick={() => {
+                render: (_, row) => {
+                  const edit = () => {
+                        sourceForm.resetFields();
                         sourceForm.setFieldsValue({
                           name: row.name,
                           url: row.url,
@@ -175,48 +188,41 @@ export function OfficialCalendarSourcePage() {
                           isActive: row.isActive
                         });
                         setSourceEditor(row);
-                      }}
-                    >
-                      {t("编辑")}
-                    </Button>
-                    <Button
-                      type="link"
-                      onClick={() => {
+                  };
+                  const register = () => {
+                        versionForm.resetFields();
                         versionForm.setFieldsValue({
                           year: new Date().getFullYear() + 1,
-                          publishedAt: dayjs().format("YYYY-MM-DD"),
-                          daysText: '[{"date":"2027-10-01","dayType":"statutory_holiday","name":"国庆节"}]'
+                          daysText: "[]",
                         });
                         setVersionTarget(row);
-                      }}
-                    >
-                      {t("登记年度版本")}
-                    </Button>
-                  </Space>
-                )
+                  };
+                  return <DataTableRowActions details={edit} detailLabel={t("编辑来源")} menuLabel={`${row.name} · ${t("更多操作")}`}
+                    primary={{ id: "version", label: t("登记年度版本"), icon: CalendarPlus, onSelect: register }} actions={[{ id: "edit", label: t("编辑来源"), icon: Pencil, onSelect: edit }]} />;
+                }
               }
             ]}
           />
         </ListSection>
       </QueryState>
-      <Drawer presentation="dialog"
+      <Modal
         title={sourceEditor ? `${t("编辑来源")}：${sourceEditor.name}` : t("登记官方来源")}
-        open={sourceEditor !== undefined}
-        onClose={() => setSourceEditor(undefined)}
-        size={520}
+        open={sourceDialog.visible}
+        onCancel={sourceDialog.dismiss}
+        afterClose={sourceDialog.afterClose}
+        width={520}
+        closable={!saveSource.isPending} keyboard={!saveSource.isPending} maskClosable={!saveSource.isPending}
         destroyOnHidden
-        extra={
-          <SaveButton  label={t("保存")} form={sourceForm} pending={saveSource.isPending} onSave={async values => { const operation = saveSource.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
-        }
+        footer={<><Button disabled={saveSource.isPending} onClick={sourceDialog.dismiss}>{t("取消")}</Button><SaveButton label={t("保存")} form={sourceForm} pending={saveSource.isPending} onSave={values => saveSource.mutateAsync(values)} /></>}
       >
-        <Form form={sourceForm} layout="vertical" onFinish={(values) => saveSource.mutate(values)}>
+        <Form form={sourceForm} layout="vertical" disabled={saveSource.isPending} onFinish={(values) => saveSource.mutate(values)}>
           <Form.Item name="name" label={t("来源名称")} rules={[{ required: true, whitespace: true }]}>
             <Input placeholder={t("例如：国务院办公厅年度放假通知")} />
           </Form.Item>
           <Form.Item
             name="url"
             label={t("公告地址")}
-            rules={[{ required: true, whitespace: true }]}
+            rules={[{ required: true, whitespace: true }, { validator: async (_, value: string) => { try { if (new URL(value).protocol !== "https:") throw new Error(); } catch { throw new Error(t("请输入 HTTPS 公告地址")); } } }]}
             tooltip={t("必须是 HTTPS 地址：这份数据会被所有租户引用，来源不可验证时出错面是全平台。")}
           >
             <Input placeholder="https://www.gov.cn/..." />
@@ -228,18 +234,20 @@ export function OfficialCalendarSourcePage() {
             <Switch />
           </Form.Item>
         </Form>
-      </Drawer>
-      <Modal
+      </Modal>
+      <Modal presentation="side"
         title={versionTarget ? `${t("登记年度版本")}：${versionTarget.name}` : t("登记年度版本")}
-        open={Boolean(versionTarget)}
-        onCancel={() => setVersionTarget(undefined)}
+        open={versionDialog.visible}
+        onCancel={versionDialog.dismiss}
+        afterClose={versionDialog.afterClose}
         onConfirm={() => versionForm.validateFields().then((values) => registerVersion.mutateAsync(values))}
         confirmLoading={registerVersion.isPending}
+        closable={!registerVersion.isPending} keyboard={!registerVersion.isPending} maskClosable={!registerVersion.isPending} cancelButtonProps={{ disabled: registerVersion.isPending }}
         okText={t("登记")}
         width={680}
         destroyOnHidden
       >
-        <Form form={versionForm} layout="vertical" onFinish={(values) => registerVersion.mutate(values)}>
+        <Form form={versionForm} layout="vertical" disabled={registerVersion.isPending} onFinish={(values) => registerVersion.mutate(values)}>
           <Alert
             type="warning"
             showIcon
@@ -247,20 +255,27 @@ export function OfficialCalendarSourcePage() {
             description={t("官方再次调整时请再登记一版，不要修改历史版本——已引用旧版的空间日历、报价与订单必须继续指向原版本。")}
             style={{ marginBottom: 16 }}
           />
-          <Form.Item name="year" label={t("年度")} rules={[{ required: true }]}>
-            <Input placeholder="2027" />
-          </Form.Item>
+          <SettingsWorkspace sections={[
+            { key: "publication", label: t("公告资料"), content: <FormSection title={t("公告资料")}>
+          <Row gutter={16}><Col span={12}><Form.Item name="year" label={t("年度")} rules={[{ required: true }]}>
+            <InputNumber min={2000} max={2999} precision={0} style={{ width: "100%" }} />
+          </Form.Item></Col><Col span={12}>
           <Form.Item name="publishedAt" label={t("官方公告发布日期")} rules={[{ required: true }]}>
-            <Input placeholder="2026-11-01" />
-          </Form.Item>
+            <DatePicker format="YYYY-MM-DD" />
+          </Form.Item></Col></Row>
+            </FormSection> },
+            { key: "dates", label: t("日期内容"), content: <FormSection title={t("日期内容")}>
           <Form.Item
             name="daysText"
             label={t("官方日期（JSON 数组）")}
-            rules={[{ required: true }]}
+            dependencies={["year"]}
+            rules={[{ required: true }, dateArrayRule]}
             tooltip={t("只接受法定节假日与调休工作日，日期必须是该年度的 YYYY-MM-DD。整年替换语义：空间应用该版本时，本版未包含的日期会回落到每周模板。")}
           >
-            <Input.TextArea rows={12} />
+            <Input.TextArea rows={12} spellCheck={false} />
           </Form.Item>
+            </FormSection> },
+          ]} />
         </Form>
       </Modal>
     </>

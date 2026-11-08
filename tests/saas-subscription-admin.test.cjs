@@ -4,6 +4,7 @@ require("ts-node").register({ transpileOnly: true, moduleTypes: { "apps/admin/sr
 const operations = require("../apps/admin/src/features/subscription/subscriptionOperations");
 const reminders = require("../apps/admin/src/features/subscription/subscriptionReminder");
 const { SubscriptionService } = require("../apps/api/src/modules/subscription/subscription.service");
+const { serviceDateField } = require("../apps/admin/src/features/subscription/subscriptionDateField");
 const overview = { tenantId: "t1", tenantName: "租户", tenantCode: "one", plan: "standard", serviceStatus: "active", revision: 4, timeZone: "Asia/Shanghai", startAt: "2024-02-28T16:30:00.000Z", endAt: "2027-02-27T16:30:00.000Z", anniversaryAnchor: "2024-02-28T16:30:00.000Z" };
 const base = { operationType: "renew", plan: "standard", source: "historical_register", timeZone: "Asia/Shanghai", startAt: "2027-02-28T00:30:00", termMode: "years", serviceYears: 1, reason: "既有合同" };
 
@@ -14,6 +15,18 @@ test("默认接续保留毫秒和DST重复时刻的原始时点", () => {
     const preview = operations.subscriptionTermPreview(defaults, snapshot);
     assert.equal(preview.startAt, endAt);
   }
+});
+
+test("日期控件往返保留服务本地时间、毫秒及DST原始接续，不采用浏览器时区", () => {
+  for (const [endAt, timeZone] of [["2027-01-01T00:00:00.123Z", "Asia/Shanghai"], ["2026-11-01T06:30:00.000Z", "America/New_York"]]) {
+    const snapshot = { ...overview, endAt, timeZone };
+    const defaults = operations.initialSubscriptionAction(snapshot, "renew", Date.parse("2026-01-01"));
+    const roundTrip = serviceDateField.getValueFromEvent(serviceDateField.getValueProps(defaults.startAt).value);
+    assert.equal(roundTrip, defaults.startAt);
+    assert.equal(operations.subscriptionTermPreview({ ...defaults, startAt: roundTrip }, snapshot).startAt, endAt);
+  }
+  assert.equal(serviceDateField.getValueProps(undefined).value, null);
+  assert.equal(serviceDateField.getValueFromEvent(null), undefined);
 });
 
 test("长期锚点、DST非周年自定义期限与首次开通申请可办理", () => {

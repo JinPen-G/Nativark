@@ -1,6 +1,6 @@
 import { DataTableText, ListFilters, useListFilter } from "@/components/ui";
 import { PlusOutlined } from "@/components/ui/icons";
-import { Descriptions, Space, Tag } from "antd";
+import { Space, Tag } from "antd";
 import { ListSection, Alert, Table, Tabs } from "@/components/ui";
 import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
@@ -30,11 +30,12 @@ export function SubscriptionCatalogPage() {
   const [catalogModal, setCatalogModal] = useState<{ open: boolean; entry: SubscriptionFeatureCatalogEntry | null }>({ open: false, entry: null });
 
   const priceOf = (plan: SubscriptionPlan) => prices.data?.find((row) => row.plan === plan) ?? null;
+  const categoryLabels: Record<string, string> = { camera: "摄影设备", camping: "露营装备", vehicle: "车辆载具", construction: "工程设备" };
 
   const columns: ColumnsType<SubscriptionFeatureCatalogEntry> = [
     { title: t("功能"), key: "name", render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
     { title: t("模块"), dataIndex: "module", key: "module" },
-    { title: t("适用品类"), key: "categories", render: (_, row) => row.categories.join("、") || t("—") },
+    { title: t("适用品类"), key: "categories", render: (_, row) => row.categories.map(code => t(categoryLabels[code] ?? code)).join("、") || t("—") },
     { title: t("默认归属"), dataIndex: "defaultOwnership", key: "default", render: (value: FeatureOwnership) => ownershipLabel(value, t) },
     { title: t("当前归属"), dataIndex: "currentOwnership", key: "current", render: (value: FeatureOwnership, row) => <Tag color={value === FeatureOwnership.Standard ? "green" : "gold"}>{ownershipLabel(value, t)}{value === FeatureOwnership.Standard && row.defaultOwnership !== FeatureOwnership.Standard ? t("（已下放）") : ""}</Tag> },
     { title: t("上线状态"), dataIndex: "releaseStatus", key: "release", render: (value: keyof typeof RELEASE_STATUS_LABEL) => t(RELEASE_STATUS_LABEL[value]) },
@@ -53,14 +54,13 @@ export function SubscriptionCatalogPage() {
             { key: "prices", label: t("标准年费"), children: <ListSection>
             {prices.isLoading ? <LoadingState />
               : prices.error ? <Alert type="error" showIcon message={t("标准价加载失败")} description={<Button size="small" onClick={() => prices.refetch()}>{t("重试")}</Button>} />
-              : <Descriptions column={{ xs: 1, md: 2 }} size="small" colon={false} items={[SubscriptionPlan.Standard, SubscriptionPlan.Pro].map((plan) => {
-                  const price = priceOf(plan);
-                  return {
-                    key: plan,
-                    label: t(PLAN_LABEL[plan]),
-                    children: <Space>{price?.published ? t(formatMoney(price.annualFee, "价格待公布")) : t("价格待公布")}<Button type="link" size="small" style={{ paddingInline: 0 }} onClick={() => setPriceModal({ open: true, plan, current: price })}>{t("编辑")}</Button></Space>
-                  };
-                })} />}
+              : <Table rowKey="plan" pagination={false} onRefresh={() => prices.refetch()} dataSource={[SubscriptionPlan.Standard, SubscriptionPlan.Pro].map(plan => ({ plan, price: priceOf(plan) }))} columns={[
+                { title: t("版本"), render: (_, row) => t(PLAN_LABEL[row.plan]) },
+                { title: t("标准年费"), render: (_, row) => row.price?.published ? t(formatMoney(row.price.annualFee, "价格待公布")) : t("价格待公布") },
+                { title: t("价格版本"), render: (_, row) => row.price?.priceVersion || "—" },
+                { title: t("状态"), render: (_, row) => <Tag color={row.price?.published ? "success" : "default"}>{t(row.price?.published ? "已发布" : "未发布")}</Tag> },
+                { title: t("操作"), render: (_, row) => <Button type="text" size="small" onClick={() => setPriceModal({ open: true, plan: row.plan, current: row.price })}>{t("编辑")}</Button> },
+              ]} />}
           </ListSection> },
           { key: "catalog", label: t("功能目录"), children: <>
 

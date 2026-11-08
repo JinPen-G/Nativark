@@ -1,5 +1,7 @@
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
-import { App, Modal } from "@/components/ui";
+import { App, FormSection, Modal } from "@/components/ui";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { Col, Row } from "antd";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -46,12 +48,15 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
 
   return (
     <Modal presentation="side" open={dismissal.visible} afterClose={dismissal.afterClose} title={editing ? t("编辑功能目录项") : t("新增功能目录项")} okText={t("保存")} confirmLoading={mutation.isPending}
-      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden width={560}>
+      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden width={720}
+      closable={!mutation.isPending} keyboard={!mutation.isPending} maskClosable={!mutation.isPending} cancelButtonProps={{ disabled: mutation.isPending }}>
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
         message={t("当前归属选「基础版」即把该 PRO 功能公共下放给基础版；修改归属不会把未交付功能改成已上线，也不得静默停用基础版既有承诺。")} />
-      <Form<UpsertFeatureCatalogRequest> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>
-        <Form.Item name="code" label={t("功能标识")} rules={[{ required: true }]}><Input disabled={editing} placeholder="camera.high_value_handover" /></Form.Item>
+      <Form<UpsertFeatureCatalogRequest> form={form} layout="vertical" initialValues={initialValues} disabled={mutation.isPending} onFinish={(values) => mutation.mutate(values)}>
+        <SettingsWorkspace sections={[
+          { key: "identity", label: t("功能资料"), content: <FormSection title={t("功能资料")}>
         <Form.Item name="name" label={t("名称")} rules={[{ required: true }]}><Input maxLength={64} /></Form.Item>
+        <Form.Item name="code" label={t("功能标识")} rules={[{ required: true }]}><Input disabled={editing} placeholder="camera.high_value_handover" /></Form.Item>
         <Form.Item name="module" label={t("模块")} rules={[{ required: true }]}><Input maxLength={64} /></Form.Item>
         <Form.Item name="categories" label={t("适用品类")}>
           <Select mode="multiple" allowClear options={[
@@ -59,16 +64,22 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
             { value: "vehicle", label: t("车辆载具") }, { value: "construction", label: t("工程设备") }
           ]} />
         </Form.Item>
-        <Form.Item name="defaultOwnership" label={t("默认归属")} rules={[{ required: true }]}><Select options={OWNERSHIP_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} /></Form.Item>
-        <Form.Item name="currentOwnership" label={t("当前归属（选基础版=公共下放）")} rules={[{ required: true }]}><Select options={OWNERSHIP_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} /></Form.Item>
+          </FormSection> },
+          { key: "availability", label: t("版本归属"), content: <FormSection title={t("版本归属")}>
+        <Row gutter={16}><Col span={12}><Form.Item name="defaultOwnership" label={t("默认归属")} rules={[{ required: true }]}><Select options={OWNERSHIP_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} /></Form.Item></Col>
+        <Col span={12}><Form.Item name="currentOwnership" label={t("当前归属（选基础版=公共下放）")} rules={[{ required: true }]}><Select options={OWNERSHIP_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))} /></Form.Item></Col></Row>
         <Form.Item name="releaseStatus" label={t("上线状态")} rules={[{ required: true }]}>
           <Select options={Object.values(FeatureReleaseStatus).map((value) => ({ value, label: t(RELEASE_STATUS_LABEL[value]) }))} />
         </Form.Item>
+        <Form.Item name="reason" label={t("变更原因")}><Input maxLength={200} /></Form.Item>
+          </FormSection> },
+          { key: "description", label: t("说明与条件"), content: <FormSection title={t("说明与条件")}>
         <Form.Item name="valueText" label={t("权益说明")}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
         <Form.Item name="prerequisiteText" label={t("前提条件")}><Input maxLength={200} /></Form.Item>
         <Form.Item name="externalFeeNote" label={t("外部费用说明")}><Input maxLength={200} /></Form.Item>
         <Form.Item name="contentVersion" label={t("介绍内容版本")}><Input maxLength={64} /></Form.Item>
-        <Form.Item name="reason" label={t("变更原因")}><Input maxLength={200} /></Form.Item>
+          </FormSection> },
+        ]} />
       </Form>
     </Modal>
   );
