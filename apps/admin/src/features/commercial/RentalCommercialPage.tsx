@@ -7,7 +7,7 @@ import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPric
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, InputNumber, Popconfirm, Row, Space, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
-import { Form } from "@/components/ui";
+import { Form, FormSection } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -21,6 +21,8 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { usePriceVersions } from "./usePriceVersions";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { fulfillmentModeLabels } from "@/features/fulfillment/fulfillmentLabels";
 
 export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
@@ -279,6 +281,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   }
 
   function editDiscount(record?: RentalDiscountPlan) {
+    discountForm.resetFields();
     discountForm.setFieldsValue(
       record
         ? { ...record, changeReason: "调整优惠方案" }
@@ -305,6 +308,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   }
 
   function editService(record?: RentalValueAddedService) {
+    serviceForm.resetFields();
     serviceForm.setFieldsValue(
       record ?? {
         code: "",
@@ -329,6 +333,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   }
 
   function editCapacity(record?: RentalServiceCapacity) {
+    capacityForm.resetFields();
     capacityForm.setFieldsValue(record
       ? { ...record, window: [dayjs(record.windowStart), dayjs(record.windowEnd)] }
       : {
@@ -671,19 +676,20 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
 
           <Form.Item name="id" hidden><Input /></Form.Item>
           <Form.Item name="applicableItemGroupIds" hidden><Select mode="multiple" /></Form.Item>
-          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Card size="small" title={t("1. 基本信息")}>
-              <Row gutter={12}>
-                <Col span={8}><Form.Item name="code" label={t("方案编码")} rules={[{ required: true }]}><Input disabled={Boolean(discountForm.getFieldValue("id"))} /></Form.Item></Col>
-                <Col span={10}><Form.Item name="name" label={t("方案名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
-                <Col span={6}><Form.Item name="status" label={t("状态")}><Select options={[{ value: "draft", label: t("草稿") }, { value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
-                <Col span={12}><Form.Item name="effectiveFrom" label={t("生效时间")}><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="effectiveTo" label={t("失效时间")}><Input placeholder={t("留空表示长期有效")} /></Form.Item></Col>
+          <SettingsWorkspace sections={[
+            { key: "profile", label: t("基本资料"), content: <FormSection title={t("方案资料")}>
+              <Row gutter={16}>
+                <Col span={24}><Form.Item name="name" label={t("方案名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
+                <Col span={12}><Form.Item name="code" label={t("方案编码")} rules={[{ required: true }]}><Input disabled={Boolean(discountForm.getFieldValue("id"))} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="status" label={t("状态")}><Select options={[{ value: "draft", label: t("草稿") }, { value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="effectiveFrom" label={t("生效时间")} getValueProps={(value?: string) => ({ value: value ? dayjs(value) : null })} getValueFromEvent={(value: dayjs.Dayjs | null) => value?.toISOString()}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="effectiveTo" label={t("失效时间")} getValueProps={(value?: string) => ({ value: value ? dayjs(value) : null })} getValueFromEvent={(value: dayjs.Dayjs | null) => value?.toISOString()}><DatePicker showTime needConfirm allowClear placeholder={t("留空表示长期有效")} style={{ width: "100%" }} /></Form.Item></Col>
               </Row>
-            </Card>
+              <Form.Item name="changeReason" label={t("本次变更原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+            </FormSection> },
 
-            <Card size="small" title={t("2. 适用条件")}>
-              <Row gutter={12}>
+            { key: "conditions", label: t("适用条件"), content: <FormSection title={t("适用条件")}>
+              <Row gutter={16}>
                 <Col span={12}><Form.Item name="customerScope" label={t("客户范围")}><Select options={[{ value: "all", label: t("全部客户") }, { value: "personal", label: t("个人客户") }, { value: "corporate", label: t("企业客户") }, { value: "member", label: t("会员") }]} /></Form.Item></Col>
                 <Col span={12}><Form.Item name="minimumSpend" label={t("最低消费")}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
                 <Col span={24}>
@@ -693,29 +699,27 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 </Col>
                 <Col span={24}><Form.Item name="applicableDayTypes" label={t("适用日期类型")} tooltip={t("留空表示全部日期类型。")}><Select mode="multiple" allowClear placeholder={t("全部日期类型")} options={[{ value: "workday", label: t("工作日") }, { value: "weekend", label: t("周末") }, { value: "statutory_holiday", label: t("法定节假日") }, { value: "makeup_workday", label: t("调休工作日") }, { value: "tenant_special", label: t("租户特殊日") }]} /></Form.Item></Col>
               </Row>
-            </Card>
+            </FormSection> },
 
-            <Card size="small" title={t("3. 优惠动作")}>
-              <Row gutter={12}>
+            { key: "discount", label: t("优惠设置"), content: <FormSection title={t("优惠设置")}>
+              <Row gutter={16}>
                 <Col span={8}><Form.Item name="discountType" label={t("优惠类型")}><Select options={[{ value: "percentage", label: t("百分比减免") }, { value: "fixed_amount", label: t("固定减免") }, { value: "threshold_amount", label: t("满额固定减免") }]} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="appliesTo" label={t("作用费用")} tooltip={t("押金、预授权与异常费用不可被普通优惠减免。")}><Select options={[{ value: "rental", label: t("租金与使用量") }, { value: "fulfillment", label: t("履约费用") }, { value: "service", label: t("增值服务") }]} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="discountValue" label={t(discountType === "percentage" ? "减免比例（%）" : "减免金额")} rules={[{ required: true }]}><InputNumber min={0} max={discountType === "percentage" ? 100 : undefined} precision={2} suffix={discountType === "percentage" ? "%" : undefined} prefix={discountType === "percentage" ? undefined : currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
                 {discountType === "threshold_amount" ? <Col span={12}><Form.Item name="thresholdAmount" label={t("满减门槛")} rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col> : null}
                 {discountType === "percentage" ? <Col span={12}><Form.Item name="maximumDiscount" label={t("最高减免金额")}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col> : null}
               </Row>
-            </Card>
+            </FormSection> },
 
-            <Card size="small" title={t("4. 互斥与叠加")}>
-              <Row gutter={12}>
+            { key: "stacking", label: t("互斥与叠加"), content: <FormSection title={t("互斥与叠加")}>
+              <Row gutter={16}>
                 <Col span={8}><Form.Item name="exclusiveGroup" label={t("互斥组")} tooltip={t("同组仅应用实际减免最大的方案；留空表示独立分组。")}><Input allowClear placeholder={t("例如：会员折扣")} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="priority" label={t("同额优先级")}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="stackableWithOtherPlans" label={t("与其他方案叠加")}><Select options={[{ value: true, label: t("允许") }, { value: false, label: t("不允许") }]} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="stackableWithCoupon" label={t("与优惠券叠加")}><Select options={[{ value: true, label: t("允许") }, { value: false, label: t("不允许") }]} /></Form.Item></Col>
               </Row>
-            </Card>
-
-            <Form.Item name="changeReason" label={t("本次变更原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
-          </Space>
+            </FormSection> }
+          ]} />
         </Form>
       </Drawer>
 
@@ -733,18 +737,20 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <Form.Item name="id" hidden>
             <Input />
           </Form.Item>
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="code" label={t("服务编码")}>
-                <Input disabled={Boolean(serviceForm.getFieldValue("id"))} />
-              </Form.Item>
-            </Col>
-            <Col span={10}>
+          <SettingsWorkspace sections={[
+          { key: "pricing", label: t("服务与计价"), content: <FormSection title={t("服务与计价")}>
+          <Row gutter={16}>
+            <Col span={24}>
               <Form.Item name="name" label={t("服务名称")}>
                 <Input />
               </Form.Item>
             </Col>
-            <Col span={6}>
+            <Col span={12}>
+              <Form.Item name="code" label={t("服务编码")}>
+                <Input disabled={Boolean(serviceForm.getFieldValue("id"))} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
               <Form.Item name="status" label={t("状态")}>
                 <Select
                   options={[
@@ -754,12 +760,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="serviceType" label={t("服务类型")}>
                 <Select options={Object.entries(serviceTypeLabels).map(([value, label]) => ({ value, label: t(label) }))} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="billingUnit" label={t("计费方式")}>
                 <Select
                   options={[
@@ -775,40 +781,34 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             </Col>
             <Col span={8}>
               <Form.Item name="price" label={t("价格")}>
-                <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                <InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={6}>
+            <Col span={8}>
               <Form.Item name="minimumQuantity" label={t("最小数量")}>
                 <InputNumber min={1} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={6}>
+            <Col span={8}>
               <Form.Item name="maximumQuantity" label={t("最大数量")}>
                 <InputNumber min={1} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={6}>
-              <Form.Item name="coverageLimit" label={t("保障限额")}>
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="deductible" label={t("免赔额")}>
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
+          </Row>
+          </FormSection> },
+          { key: "conditions", label: t("适用条件"), content: <FormSection title={t("适用条件")}>
+          <Row gutter={16}>
+            <Col span={12}>
               <Form.Item name="customerScope" label={t("适用客户")}>
                 <Select options={[{ value: "all", label: t("全部") }, { value: "personal", label: t("个人") }, { value: "corporate", label: t("企业") }]} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="selectionMode" label={t("选择方式")}>
                 <Select options={[{ value: "optional", label: t("客户可选") }, { value: "recommended", label: t("系统推荐") }, { value: "mandatory", label: t("条件强制") }]} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="requiresCapacity" label={t("需要容量预留")} valuePropName="checked">
                 <Switch />
               </Form.Item>
@@ -824,26 +824,32 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             />
           </Form.Item>
           <Form.Item name="applicableFulfillmentModes" label={t("适用履约方式（空为全部）")}>
-            <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(value) }))} />
+            <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(value === "delivery" ? profile.data?.terminology.deliveryLabel ?? fulfillmentModeLabels[value] : fulfillmentModeLabels[value] ?? value) }))} />
           </Form.Item>
           <Form.Item name="applicableLocationIds" label={t("适用地点（空为全部）")}>
             <Select mode="multiple" options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
           </Form.Item>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.selectionMode !== current.selectionMode}>
             {({ getFieldValue }) => getFieldValue("selectionMode") === "mandatory" ? (
-              <Card size="small" title={t("条件强制触发规则")}>
+              <FormSection title={t("条件强制触发规则")}>
                 <Form.Item name={["mandatoryRule", "itemGroupIds"]} label={t("命中商品")}>
                   <Select mode="multiple" options={(groups.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
                 </Form.Item>
                 <Form.Item name={["mandatoryRule", "fulfillmentModes"]} label={t("命中履约方式")}>
-                  <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(value) }))} />
+                  <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(value === "delivery" ? profile.data?.terminology.deliveryLabel ?? fulfillmentModeLabels[value] : fulfillmentModeLabels[value] ?? value) }))} />
                 </Form.Item>
                 <Form.Item name={["mandatoryRule", "minRentalAmount"]} label={t("最低租金")}>
                   <InputNumber min={0} precision={2} style={{ width: "100%" }} />
                 </Form.Item>
-              </Card>
+              </FormSection>
             ) : null}
           </Form.Item>
+          </FormSection> },
+          { key: "terms", label: t("保障与条款"), content: <FormSection title={t("保障与条款")}>
+          <Row gutter={16}>
+            <Col span={12}><Form.Item name="coverageLimit" label={t("保障限额")}><InputNumber min={0} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="deductible" label={t("免赔额")}><InputNumber min={0} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
+          </Row>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.serviceType !== current.serviceType}>
             {({ getFieldValue }) => getFieldValue("serviceType") === "insurance" ? (
               <Row gutter={12}>
@@ -866,6 +872,8 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <Form.Item name="terms" label={t("服务/保障条款")} rules={[{ required: true }]}>
             <Input.TextArea rows={6} />
           </Form.Item>
+          </FormSection> }
+          ]} />
         </Form>
       </Drawer>
       <Drawer

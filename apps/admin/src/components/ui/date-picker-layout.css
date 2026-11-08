@@ -1,0 +1,19 @@
+/* Responsive layout for the integrated datetime compatibility picker; values and popup behavior stay native. */
+.arc-form-item:has(.rental-datetime-range) .ant-form-item-control-input-content { container: rental-datetime-field / inline-size; }
+@container rental-datetime-field (max-width: 420px) {
+  .ant-picker-range.rental-datetime-range { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: var(--space-1); height: auto; padding-block: var(--space-2); }
+  .rental-datetime-range > .ant-picker-input { grid-column: 2; min-width: 0; }
+  .rental-datetime-range > .ant-picker-range-separator { grid-column: 1; grid-row: 1 / 3; align-self: center; padding: 0; transform: rotate(90deg); }
+  .rental-datetime-range > .ant-picker-suffix { grid-column: 3; grid-row: 1 / 3; align-self: center; margin-inline-start: 0; }
+  .rental-datetime-range > .ant-picker-active-bar { display: none; }
+}
+@media (max-width: 600px) {
+  .ant-picker-dropdown:has(.ant-picker-datetime-panel) { position: fixed !important; top: var(--space-4) !important; left: var(--space-4) !important; bottom: auto !important; }
+  .ant-picker-dropdown:has(.ant-picker-datetime-panel) .ant-picker-range-arrow { display: none; }
+  .ant-picker-dropdown .ant-picker-datetime-panel-container { width: calc(100vw - var(--space-4) * 2); max-width: calc(100vw - var(--space-4) * 2); max-height: calc(100dvh - var(--space-4) * 2); overflow-y: auto; }
+  .ant-picker-dropdown .ant-picker-datetime-panel { flex-direction: column; }
+  .ant-picker-dropdown .ant-picker-datetime-panel > :is(.ant-picker-date-panel, .ant-picker-time-panel) { width: 100%; }
+  .ant-picker-dropdown .ant-picker-datetime-panel .ant-picker-date-panel .ant-picker-content { width: 100%; }
+  .ant-picker-dropdown .ant-picker-datetime-panel .ant-picker-time-panel .ant-picker-content { height: calc(var(--rental-control-height-default) * 5); }
+  .ant-picker-dropdown .ant-picker-datetime-panel .ant-picker-time-panel-column { flex: 1; }
+}

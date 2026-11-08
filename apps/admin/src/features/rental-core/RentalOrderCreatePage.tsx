@@ -24,6 +24,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./RentalOrderCreatePage.module.css";
+import { fulfillmentModeLabels } from "@/features/fulfillment/fulfillmentLabels";
 
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
   period: [Dayjs, Dayjs];
@@ -33,14 +34,6 @@ type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
 type SelectedService = NonNullable<RentalQuoteRequest["services"]>[number];
 
 const unitLabels = RENTAL_PRICING_UNIT_LABELS;
-const fulfillmentModeLabels: Record<string, string> = {
-  store_pickup_return: "门店取还",
-  partner_pickup_return: "合作点取还",
-  warehouse_pickup_return: "仓库取还",
-  locker_pickup_return: "智能柜取还",
-  delivery: "配送取还",
-  onsite_delivery: "现场交付",
-};
 // 配送/上门类履约：目的地按品类而定（见 category.businessModel.deliveryDestination）。
 const DELIVERY_FULFILLMENT_MODES = new Set(["delivery", "onsite_delivery"]);
 const isDeliveryMode = (mode?: string) => Boolean(mode && DELIVERY_FULFILLMENT_MODES.has(mode));

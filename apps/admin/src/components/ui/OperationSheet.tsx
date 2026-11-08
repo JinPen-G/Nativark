@@ -2,6 +2,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useLocale } from "@/app/locale";
 import { Drawer, DrawerContent } from "./TaskDrawer";
+import { hasOpenFormPopup } from "./overlayPopups";
 import styles from "./OperationSheet.module.css";
 
 interface OperationSheetProps {
@@ -29,7 +30,7 @@ export function OperationSheet({ open, title, side, width, style, backdropStyle,
       data-rental-operation-sheet="" data-rental-arc-modal="" data-closable={closable === false ? "false" : "true"}
       aria-describedby={undefined} className={[styles.popup, "rental-operation-sheet", className].filter(Boolean).join(" ")}
       style={{ width, ...style }} overlayStyle={{ zIndex: 1099, ...backdropStyle }}
-      onEscapeKeyDown={event => { if (keyboard === false) event.preventDefault(); }}
+      onEscapeKeyDown={event => { if (keyboard === false || hasOpenFormPopup(event.target)) event.preventDefault(); }}
       onInteractOutside={event => { if (maskClosable === false) event.preventDefault(); }}
       onCloseAutoFocus={onCloseAutoFocus}
       onEnterComplete={() => onOpenChangeComplete(true)} onExitComplete={() => onOpenChangeComplete(false)}>

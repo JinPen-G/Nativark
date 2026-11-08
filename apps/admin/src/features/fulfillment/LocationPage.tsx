@@ -3,7 +3,8 @@ import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFu
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Col, InputNumber, Row, Space, Tag } from "antd";
 import { ListSection, App } from "@/components/ui";
-import { Button, Drawer, Form, Input, SaveButton, SearchField, Select, Table } from "@/components/ui";
+import { Button, Drawer, Form, FormSection, Input, SaveButton, SearchField, Select, Table, Tabs } from "@/components/ui";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { useMemo, useState } from "react";
 import { api as platformApi } from "@/api/platform";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -14,6 +15,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { locationCapabilities, operatorCapabilities } from "@/features/listCapabilities";
 import { locationCards } from "./locationCards";
+import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 
 const locationTypeLabels: Record<string, string> = { store: "门店", warehouse: "仓库", station: "取还点", locker: "自提柜", delivery_hub: "配送中心", project_site: "项目现场" };
 const capabilityLabels: Record<string, string> = { pickup: "领取", return: "归还", storage: "仓储", delivery: "配送" };
@@ -28,6 +30,7 @@ export function LocationPage() {
   );
   const canViewOrganizations = useAuthStore((state) => state.hasPermission("system:user:manage"));
   const [keyword, setKeyword] = useState("");
+  const [view, setView] = useState("locations");
   const [editing, setEditing] = useState<RentalFulfillmentLocation>();
   const [editingOperator, setEditingOperator] = useState<RentalFulfillmentOperator>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -47,6 +50,7 @@ export function LocationPage() {
 
   function openEditor(record?: RentalFulfillmentLocation) {
     setEditing(record);
+    form.resetFields();
     form.setFieldsValue(record ? { ...record } : {
       code: "", name: "", organizationId: undefined, type: category?.businessModel.locationTypes[0] ?? "store", operatorId: operators.data?.find((item) => item.status === "enabled")?.id,
       capabilities: ["pickup", "return", "storage"], address: "", province: "", city: "", district: "", timezone: "Asia/Shanghai", latitude: undefined, longitude: undefined, contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
@@ -56,13 +60,17 @@ export function LocationPage() {
 
   function openOperatorEditor(record?: RentalFulfillmentOperator) {
     setEditingOperator(record);
+    operatorForm.resetFields();
     operatorForm.setFieldsValue(record ? { ...record } : { code: "", name: "", type: "partner", settlementMode: "monthly", status: "enabled" });
     setOperatorDrawerOpen(true);
   }
 
   return (
     <>
-      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点")} note={{ title: `${t(category?.name ?? "当前品类")}${t("履约网络")}`, description: t("自营机构与合作商是经营主体；门店、仓库、自提柜、取还点和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。") }} extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>{t("新增经营主体")}</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{t("新增履约地点")}</Button></Space> : undefined} />
+      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点")} note={{ title: `${t(category?.name ?? "当前品类")}${t("履约网络")}`, description: t("自营机构与合作商是经营主体；门店、仓库、自提柜、取还点和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。") }} extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => view === "operators" ? openOperatorEditor() : openEditor()}>{t(view === "operators" ? "新增经营主体" : "新增履约地点")}</Button> : undefined} />
+      <Tabs aria-label={t("履约网络")} activeKey={view} onChange={setView} items={[{ key: "locations", label: t("履约地点") }, { key: "operators", label: t("经营主体") }]} />
+      <ContentTransition value={view}>
+      <div hidden={view !== "operators"}>
       <ListSection title={t("经营主体")} style={{ marginBottom: "var(--rental-layout-section-gap)" }}>
         <QueryState loading={operators.isLoading} error={operators.error}>
           <Table<RentalFulfillmentOperator> rowKey="id" onRefresh={() => operators.refetch()} loading={operators.isLoading} refreshing={operators.isFetching} dataSource={operators.data ?? []} pagination={false}
@@ -76,6 +84,8 @@ export function LocationPage() {
           ]} />
         </QueryState>
       </ListSection>
+      </div>
+      <div hidden={view !== "locations"}>
       <ListSection controls={<><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
 
           <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
@@ -93,6 +103,8 @@ export function LocationPage() {
           ]} />
         </QueryState>
       </ListSection>
+      </div>
+      </ContentTransition>
 
       <Drawer title={editing ? t("编辑履约地点") : t("新增履约地点")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => {
         const payload: SaveRentalFulfillmentLocationRequest = { ...values, id: editing?.id };
@@ -106,15 +118,20 @@ export function LocationPage() {
           else delete payload.organizationId;
           save.mutate(payload);
         }}>
-          <Row gutter={12}>
+          <SettingsWorkspace sections={[
+          { key: "profile", label: t("基本资料"), content: <FormSection title={t("地点资料")}>
+          <Row gutter={16}>
+            <Col span={24}><Form.Item name="name" label={t("地点名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="code" label={t("地点编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="name" label={t("地点名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="type" label={t("地点类型")} rules={[{ required: true }]}><Select options={category?.businessModel.locationTypes.map((value) => ({ value, label: t(locationTypeLabels[value] ?? value) }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="parentLocationId" label={t("上级地点")}><Select allowClear options={(locations.data ?? []).filter((item) => item.id !== editing?.id).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
             {canManageOrganizationMapping ? <Col span={24}><Form.Item name="organizationId" label={t("归属组织")} tooltip={t("组织范围账号只能访问当前组织及下级组织明确关联的履约地点；未关联地点不会自动归属。") }><Select allowClear loading={organizations.isLoading} options={(organizations.data ?? []).filter((item) => item.status === "enabled" || item.id === editing?.organizationId).map((item) => ({ value: item.id, label: `${item.name} · ${item.code}${item.status === "enabled" ? "" : ` · ${t("已停用")}`}`, disabled: item.status !== "enabled" }))} /></Form.Item></Col> : null}
             <Col span={24}><Form.Item name="operatorId" label={t("经营主体")} rules={[{ required: true }]}><Select options={(operators.data ?? []).filter((item) => item.status === "enabled" || item.id === editing?.operatorId).map((item) => ({ value: item.id, label: `${item.name} · ${t(item.type === "partner" ? "合作商" : "自营")}` }))} /></Form.Item></Col>
           </Row>
           <Form.Item name="capabilities" label={t("履约能力")} rules={[{ required: true }]}><Select mode="multiple" options={Object.entries(capabilityLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+          <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
+          </FormSection> },
+          { key: "address", label: t("地理位置"), content: <FormSection title={t("地址与定位")}>
           <Form.Item name="address" label={t("地址")}><Input /></Form.Item>
           <Row gutter={12}>
             <Col span={8}><Form.Item name="province" label={t("省/直辖市")}><Input placeholder={t("如 上海市")} /></Form.Item></Col>
@@ -126,25 +143,30 @@ export function LocationPage() {
             <Col span={12}><Form.Item name="latitude" label={t("纬度")} tooltip={t("选填；填写后小程序可按客户位置排序门店并提供地图导航，经纬度需成对填写")} rules={[{ type: "number", min: -90, max: 90, message: t("纬度范围 -90~90") }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 31.2231" /></Form.Item></Col>
             <Col span={12}><Form.Item name="longitude" label={t("经度")} rules={[{ type: "number", min: -180, max: 180, message: t("经度范围 -180~180") }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 121.4737" /></Form.Item></Col>
           </Row>
+          </FormSection> },
+          { key: "contact", label: t("联系与营业"), content: <FormSection title={t("联系与营业")}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="contactName" label={t("联系人")}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="contactPhone" label={t("联系电话")}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="businessHours" label={t("营业时间")}><Input placeholder="09:00-18:00" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
           </Row>
+          </FormSection> }
+          ]} />
         </Form>
       </Drawer>
       <Drawer title={editingOperator ? t("编辑经营主体") : t("新增经营主体")} size={560} open={operatorDrawerOpen} destroyOnHidden onClose={() => setOperatorDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={operatorForm} pending={saveOperator.isPending} onSave={(values) => saveOperator.mutateAsync({ ...values, id: editingOperator?.id })} />}>
         <Form<SaveRentalFulfillmentOperatorRequest> form={operatorForm} layout="vertical" onFinish={(values) => saveOperator.mutate({ ...values, id: editingOperator?.id })}>
-          <Row gutter={12}>
-            <Col span={12}><Form.Item name="code" label={t("主体编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingOperator)} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="name" label={t("主体名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="type" label={t("经营方式")} rules={[{ required: true }]}><Select options={[{ value: "self_operated", label: t("自营") }, { value: "partner", label: t("合作商") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="settlementMode" label={t("结算方式")} rules={[{ required: true }]}><Select options={[{ value: "self", label: t("内部结算") }, { value: "monthly", label: t("月结") }, { value: "per_order", label: t("逐单结算") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="contactName" label={t("联系人")}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="contactPhone" label={t("联系电话")}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+          <FormSection title={t("经营主体")}>
+          <Row gutter={16}>
+            <Col span={24}><Form.Item name="name" label={t("主体名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="code" label={t("主体编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingOperator)} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="type" label={t("经营方式")} rules={[{ required: true }]}><Select options={[{ value: "self_operated", label: t("自营") }, { value: "partner", label: t("合作商") }]} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="settlementMode" label={t("结算方式")} rules={[{ required: true }]}><Select options={[{ value: "self", label: t("内部结算") }, { value: "monthly", label: t("月结") }, { value: "per_order", label: t("逐单结算") }]} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="contactName" label={t("联系人")}><Input /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item name="contactPhone" label={t("联系电话")}><Input /></Form.Item></Col>
           </Row>
+          </FormSection>
         </Form>
       </Drawer>
     </>

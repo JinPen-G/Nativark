@@ -5,6 +5,7 @@ import { Drawer as ArcDrawer, DrawerContent } from "@/registry/components/drawer
 import { useLocale } from "@/app/locale";
 import { Modal, type ModalPresentation } from "./Modal";
 import { Button } from "./Button";
+import { hasOpenFormPopup } from "./overlayPopups";
 
 function HeaderActions({ children, closeLabel }: { children: ReactNode; closeLabel: string }) {
   const anchor = useRef<HTMLSpanElement>(null);
@@ -55,8 +56,7 @@ export function Drawer(props: DrawerProps & { presentation?: ModalPresentation }
         // dismiss the parent drawer; let the modal handle the same key normally.
         const modalOpen = Array.from(document.querySelectorAll<HTMLElement>(".ant-modal-wrap, [data-rental-arc-modal][data-state='open']"))
           .some(modal => modal.getClientRects().length > 0 && getComputedStyle(modal).visibility !== "hidden");
-        const inlinePopupOpen = document.querySelector("[data-rental-arc-drawer] .arc-date-field [aria-expanded='true'], [data-rental-arc-drawer] .arc-date-range [aria-expanded='true'], [data-rental-arc-drawer] .arc-time-fields [aria-expanded='true'], [data-rental-arc-drawer] .arc-color-field [aria-expanded='true']");
-        if (props.keyboard === false || modalOpen || inlinePopupOpen) event.preventDefault();
+        if (props.keyboard === false || modalOpen || hasOpenFormPopup(event.target)) event.preventDefault();
       }}
       onInteractOutside={event => { if (props.maskClosable === false) event.preventDefault(); }}
       onCloseAutoFocus={event => { if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus({ preventScroll: true }); } }}

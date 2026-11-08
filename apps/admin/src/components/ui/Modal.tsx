@@ -7,6 +7,7 @@ import { ActionButton } from "./ActionButton";
 import { useLocale } from "@/app/locale";
 import { ADMIN_OVERLAY_METRICS } from "@/app/designTokens";
 import { OperationSheet } from "./OperationSheet";
+import { hasOpenFormPopup } from "./overlayPopups";
 
 export type ModalPresentation = "dialog" | "side" | "bottom";
 
@@ -60,7 +61,7 @@ export function Modal(props: ModalProps & { onConfirm?: () => Promise<unknown>; 
       overlayStyle={{ zIndex: (props.zIndex ?? 1100) - 1, ...styles?.mask }}
       className={["rental-arc-modal", props.className, props.rootClassName, props.wrapClassName].filter(Boolean).join(" ")}
       style={{ ...styles?.container, ...props.style, width, maxWidth: "calc(100vw - var(--space-8))", zIndex: props.zIndex ?? 1100 }}
-      onEscapeKeyDown={event => { if (props.keyboard === false) event.preventDefault(); }}
+      onEscapeKeyDown={event => { if (props.keyboard === false || hasOpenFormPopup(event.target)) event.preventDefault(); }}
       onPointerDownOutside={event => { if (props.maskClosable === false || typeof props.mask === "object" && props.mask.closable === false) event.preventDefault(); }}
       onCloseAutoFocus={returnFocus}
       onEnterComplete={entered} onExitComplete={exited}>
