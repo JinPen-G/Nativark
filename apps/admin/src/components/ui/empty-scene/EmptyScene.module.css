@@ -2,9 +2,10 @@
 .root { min-width: 0; width: 100%; --empty-illustration-width: var(--rental-empty-art-width); }
 .compact { --empty-illustration-width: var(--rental-empty-art-compact-width); }
 .root > section { padding: var(--space-5) var(--space-4); gap: var(--space-3); }
-.root > section > div:first-child { width: min(100%, var(--empty-illustration-width)); height: auto; padding: 0; border: 0; background: transparent; border-radius: 0; }
-.root > section > div:first-child > span { display: block; width: 100%; }
-.root > section > div:first-child > span > div { width: 100%; }
+.root:not(.symbol) > section > div:first-child { width: min(100%, var(--empty-illustration-width)); height: auto; padding: 0; border: 0; background: transparent; border-radius: 0; }
+.root:not(.symbol) > section > div:first-child > span { display: block; width: 100%; }
+.root:not(.symbol) > section > div:first-child > span > div { width: 100%; }
+.symbol > section > div:first-child svg { width: var(--space-6); height: var(--space-6); }
 .root h3 { margin: 0; font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); }
 .root > section p { margin: var(--space-2) auto 0; text-align: center; }
 .root[data-has-description="false"] > section p { display: none; }

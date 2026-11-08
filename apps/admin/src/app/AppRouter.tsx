@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Result } from "antd";
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Button, Result } from "@/components/ui";
+import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { APP_ROUTES, canAccessRoute, type AppRouteDefinition } from "@/app/navigation";
 import { AppShell } from "@/components/AppShell";
 import { LoadingState } from "@/components/LoadingState";
@@ -68,13 +68,16 @@ function PageLoader() {
 
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
   const { t } = useLocale();
+  const navigate = useNavigate();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
   if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission)) {
-    return <Result status="403" title={t("无权访问")} subTitle={t("当前账号无访问权限，或经营品类暂不支持此功能。")} />;
+    return <Result status="403" title={t("无权访问")}
+      subTitle={t(isSaasAdmin ? "当前账号没有访问此页面的权限，请联系平台管理员核对授权。" : "当前账号无访问权限，或经营品类暂不支持此功能。")}
+      extra={<Button type="primary" onClick={() => navigate("/", { replace: true })}>{t("返回可访问页面")}</Button>} />;
   }
   return <>{children}</>;
 }
@@ -96,7 +99,8 @@ function DefaultRoute() {
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const target = Object.values(APP_ROUTES).find((route) => "menu" in route && route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
-  return target ? <Navigate to={target.path} replace /> : <Result status="403" title={t("暂无可访问页面")} subTitle={t("请联系租户管理员授予业务或会员管理权限。")} />;
+  return target ? <Navigate to={target.path} replace /> : <Result status="403" title={t("暂无可访问页面")}
+    subTitle={t(user?.isSaasAdmin ? "请联系平台管理员核对账号权限。" : "请联系租户管理员授予业务或会员管理权限。")} />;
 }
 
 function ProtectedRoutes() {

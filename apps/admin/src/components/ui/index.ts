@@ -6,6 +6,7 @@ export { Modal } from "./Modal";
 export { App } from "./App";
 export { Empty } from "./Empty";
 export { EmptyScene, type EmptySceneKind, type EmptySceneProps } from "./EmptyScene";
+export { Result, type ResultProps } from "./Result";
 export { Skeleton } from "./Skeleton";
 export { Radio } from "./Radio";
 export { Collapse } from "./Collapse";

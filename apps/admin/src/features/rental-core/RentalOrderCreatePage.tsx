@@ -9,8 +9,8 @@ import {
   type RentalQuoteSnapshotV1,
 } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Card, Col, Descriptions, Divider, InputNumber, Result, Row, Space, Tag, Typography } from "antd";
-import { App, Radio } from "@/components/ui";
+import { Card, Col, Descriptions, Divider, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App, Radio, Result } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker } from "@/components/ui";
