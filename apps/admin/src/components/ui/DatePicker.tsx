@@ -4,7 +4,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import "dayjs/locale/zh-cn";
 import { ConfigProvider, DatePicker as AntDatePicker, type DatePickerProps } from "antd";
 import type { RangePickerProps } from "antd/es/date-picker";
-import { DatePicker as ArcDatePicker } from "@/registry/components/date-picker/date-picker";
+import { DatePicker as ArcDatePicker } from "./SourceDatePicker";
 import { TimePicker as ArcTimePicker } from "@/registry/components/time-picker/time-picker";
 import { DateRangePicker as ArcRangePicker } from "@/registry/components/date-range-picker/date-range-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/registry/components/popover/popover";
@@ -24,8 +24,8 @@ function SingleDatePicker(props: DatePickerProps<Dayjs, false>) {
   if (props.multiple || (props.picker && props.picker !== "date") || props.disabledTime || props.needConfirm || props.cellRender || props.panelRender || props.onOk || props.open !== undefined || Array.isArray(props.format) || typeof props.format === "function") return <AntDatePicker {...props} />;
   const seconds = Boolean(props.showTime) && !(typeof props.format === "string" && !props.format.includes("ss"));
   return <div className={`arc-date-field ${props.className ?? ""}`} style={props.style} data-size={props.size ?? componentSize} aria-disabled={disabled}><ArcLocale>
-    <ArcDatePicker id={props.id} label={typeof props.placeholder === "string" ? props.placeholder : t("选择日期")} value={value?.isValid() ? value.toDate() : undefined} placeholder={typeof props.placeholder === "string" ? props.placeholder : t("选择日期")}
-      locale={locale} disabled={disabled} minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()} showToday={props.showToday !== false}
+    <ArcDatePicker className="arc-date-control" id={props.id} label={typeof props["aria-label"] === "string" ? props["aria-label"] : typeof props.placeholder === "string" ? props.placeholder : t("选择日期")} value={value?.isValid() ? value.toDate() : undefined} placeholder={typeof props.placeholder === "string" ? props.placeholder : t("选择日期")}
+      locale={locale} disabled={disabled} minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()} defaultMonth={props.defaultPickerValue?.toDate()} showToday={props.showToday !== false}
       disabledDates={props.disabledDate ? date => props.disabledDate!(dayjs(date), { type: "date" }) : undefined}
       onChange={date => { if (!date) emit(null); else { const base = value ?? dayjs().startOf("day"); emit(dayjs(date).hour(base.hour()).minute(base.minute()).second(base.second()).millisecond(0)); } }} />
     {props.showTime && value?.isValid() && <div className="arc-time-fields"><ArcTimePicker label={t("时间")} value={value.format("HH:mm")} minuteStep={1} format="24h" disabled={disabled}

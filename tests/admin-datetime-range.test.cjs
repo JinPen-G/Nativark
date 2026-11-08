@@ -8,6 +8,7 @@ const source = fs.readFileSync(path.join(root, 'apps/admin/src/components/ui/Dat
 // Exercise the adapter without a browser, login or separate preview page.
 const integratedRange = () => {};
 const arcRange = () => {};
+const arcDate = () => {};
 const jsx = (type, props) => ({ type, props });
 const modules = {
   react: { useState: value => [value, () => {}], useEffect: () => {}, useLayoutEffect: () => {}, useRef: value => ({ current: value }) },
@@ -16,7 +17,7 @@ const modules = {
   dayjs,
   'dayjs/locale/zh-cn': require('dayjs/locale/zh-cn'),
   antd: { ConfigProvider: { useConfig: () => ({}) }, DatePicker: Object.assign(() => {}, { RangePicker: integratedRange }) },
-  '@/registry/components/date-picker/date-picker': { DatePicker: () => {} },
+  './SourceDatePicker': { DatePicker: arcDate },
   '@/registry/components/time-picker/time-picker': { TimePicker: () => {} },
   '@/registry/components/date-range-picker/date-range-picker': { DateRangePicker: arcRange },
   '@/registry/components/popover/popover': { Popover: () => {}, PopoverContent: () => {}, PopoverTrigger: () => {} },
@@ -31,6 +32,15 @@ new Function('require', 'module', 'exports', compiled)(name => {
   return modules[name];
 }, loaded, loaded.exports);
 const RangePicker = loaded.exports.DatePicker.RangePicker;
+let selectedDate;
+const emptyBounded = loaded.exports.DatePicker({ value: null, defaultPickerValue: dayjs('2027-05-01'),
+  minDate: dayjs('2027-01-01'), maxDate: dayjs('2027-12-31'), onChange: date => { selectedDate = date; } }).props.children.props.children[0];
+assert.equal(emptyBounded.type, arcDate);
+assert.equal(emptyBounded.props.value, undefined, 'Opening at a preferred month must not fabricate a date value');
+assert.equal(dayjs(emptyBounded.props.defaultMonth).format('YYYY-MM-DD'), '2027-05-01');
+assert.equal(selectedDate, undefined, 'Choosing a viewport does not emit a form change');
+emptyBounded.props.onChange(new Date(2027, 4, 3));
+assert.equal(selectedDate.format('YYYY-MM-DD HH:mm:ss'), '2027-05-03 00:00:00');
 for (const showTime of [true, { format: 'HH:mm:ss', minuteStep: 5 }]) {
   const value = [dayjs('2026-10-06T09:00:13'), dayjs('2026-10-07T18:00:13')];
   let received;

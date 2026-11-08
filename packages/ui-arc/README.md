@@ -12,6 +12,8 @@
 
 ## Structure
 
+The admin date picker uses the attributed [SourceDatePicker host](../../apps/admin/src/components/ui/SourceDatePicker.tsx) with the original [date-picker CSS](vendor/registry/components/date-picker/date-picker.module.css) and Calendar. It adds a bounded initial month/default panel date and a Radix positioning portal within the enclosing dialog's focus boundary. The original TSX remains reserved (SHA256 `eaac04247e0e1fefc295b8339c066f53f9b75cb6b645e812390a023385d0bf12`); its 30 motion attributes and four animation definitions are unchanged in the host. The [DatePicker adapter](../../apps/admin/src/components/ui/DatePicker.tsx) keeps Dayjs values, range/time compatibility and business callbacks; opening a panel never fills an empty date. Origin: [UIArc Date picker](https://uiarc.dev/components/date-picker), under the same MIT source license above.
+
 - `vendor/registry/foundation.css`: original light/dark, eight accent palettes, chart colors, dimensions, shadows, CSS timing/easing.
 - `vendor/registry/motion-tokens.ts`: original durations, springs, easing, stagger and blur presets.
 - `vendor/registry/components`, `vendor/registry/blocks`: original React/CSS-module source, including currently unused components.

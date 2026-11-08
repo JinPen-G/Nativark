@@ -77,7 +77,7 @@
 | radio-group | 已引用（可能含兼容分支） | `components/ui/RadioGroup.tsx` |
 | segmented-control | 已引用（可能含兼容分支） | `components/ui/Segmented.tsx` |
 | calendar | 已下载备用 | — |
-| date-picker | 已引用（可能含兼容分支） | `components/ui/DatePicker.tsx` |
+| date-picker | 已适配：原CSS/动效，月份边界与浮层宿主派生 | `components/ui/DatePicker.tsx`, `components/ui/SourceDatePicker.tsx`；来源与边界见[README](README.md) |
 | time-picker | 已引用（可能含兼容分支） | `components/ui/DatePicker.tsx`<br>`components/ui/TimePicker.tsx` |
 | accordion | 已引用（可能含兼容分支） | `components/ui/Accordion.tsx` |
 | dialog | 已引用（可能含兼容分支） | `components/ui/Dialog.tsx` |

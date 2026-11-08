@@ -90,6 +90,8 @@
 .arc-date-field { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
 .arc-date-field > div:first-child { flex: 1; min-width: 150px; }
 .arc-date-field > div:first-child > label:empty { display: none; }
+.arc-date-field .arc-date-control { flex: 1; min-width: 0; gap: 0; }
+.arc-date-popup { --radius-panel: var(--radius-field); z-index: 1200; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .arc-date-range { position: relative; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 .arc-date-range > :first-child { flex: 1 1 auto; min-width: 0; }
 /* Upstream Months drops popLayout's DOM ref. Keep only exiting (inert) panes
@@ -110,9 +112,10 @@
 [data-rental-user-menu="scrim"] { z-index: 1100; }
 [data-rental-user-menu] :is(button,[role="menuitemradio"]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .arc-search-field, .arc-select-field { position: relative; min-width: 0; width: 100%; }
-/* The source fields retain their real label for assistive technology without adding a second visual label to filter bars. */
+/* Source fields keep their accessible label without repeating visible labels in filters or forms. */
 .arc-search-field [class*="field"] > label,
-.arc-select-field [class*="field"] > label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.arc-select-field [class*="field"] > label,
+.arc-date-field .arc-date-control > label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .arc-select-field [class*="field"] { gap: 0; }
 .arc-multi-no-clear [class*="clear"] { display: none; }
 .arc-multi-no-clear [class*="hasClear"] [class*="chevron"] { margin-left: 0; }

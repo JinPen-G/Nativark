@@ -16,6 +16,57 @@ function load(file, dependencies = {}) {
 
 const model = load('apps/admin/src/features/settings/calendar-year-model.ts');
 const labels = load('apps/admin/src/features/settings/governance/ruleOptionLabels.ts');
+const officialDates = load('apps/admin/src/features/platform/official-calendar-dates.ts');
+const datePanel = load('apps/admin/src/components/ui/date-picker-month.ts');
+
+test('an empty date field opens inside its allowed year without inventing a selected date', () => {
+  const today = new Date(2026, 10, 8);
+  const min = new Date(2027, 0, 1), max = new Date(2027, 11, 31);
+  const values = [undefined, new Date(2026, 5, 4), new Date(2028, 0, 5), new Date(2027, 6, 3)];
+  const expected = [[2027, 0], [2027, 0], [2027, 11], [2027, 6]];
+  for (const [index, value] of values.entries()) {
+    const before = value?.getTime();
+    const month = datePanel.openingCalendarMonth(value, undefined, min, max, today);
+    assert.deepEqual([month.getFullYear(), month.getMonth()], expected[index]);
+    assert.equal(value?.getTime(), before, 'Viewport clamping must never alter the stored date.');
+  }
+  const preferred = datePanel.openingCalendarMonth(undefined, new Date(2027, 4, 12), min, max, today);
+  assert.equal(preferred.getMonth(), 4);
+  const normal = datePanel.openingCalendarMonth(undefined, undefined, undefined, undefined, today);
+  assert.deepEqual([normal.getFullYear(), normal.getMonth()], [2026, 10]);
+});
+
+test('official date field edits round-trip the original payload without losing optional source values', () => {
+  const rows = [
+    { date: '2028-02-29', dayType: 'statutory_holiday', name: 'Original announcement', pricingMultiplier: 0, closed: false },
+    { date: '2028-03-01', dayType: 'makeup_workday', name: 'Make-up day' },
+  ];
+  const before = structuredClone(rows);
+  const decoded = officialDates.decodeOfficialCalendarDates(JSON.stringify(rows));
+  const changed = officialDates.updateOfficialCalendarDate(decoded, 0, 'name', 'Reviewed announcement');
+  const submitted = officialDates.readOfficialCalendarDates(JSON.stringify(changed), 2028, text => text);
+  assert.deepEqual(submitted, [{ ...before[0], name: 'Reviewed announcement' }, before[1]]);
+  assert.deepEqual(rows, before);
+  assert.deepEqual(decoded, before, 'Editing must not mutate another mode\'s existing row objects.');
+  assert.equal(submitted[0].pricingMultiplier, 0);
+  assert.equal(submitted[0].closed, false);
+});
+
+test('official source input rejects wrong years, duplicate or impossible dates and preserves malformed input for correction', () => {
+  const translate = (text, values) => text.replace('{row}', values?.row);
+  const day = date => ({ date, dayType: 'statutory_holiday', name: 'Announcement' });
+  const read = (rows, year = 2026) => officialDates.readOfficialCalendarDates(JSON.stringify(rows), year, translate);
+  for (const raw of ['{', 'null', '[null]', '[[]]', '[3]']) assert.equal(officialDates.decodeOfficialCalendarDates(raw), null);
+  assert.throws(() => read([]), /至少填写/);
+  for (const date of ['2026-02-29', '2026-02-30', '2026-04-31', '2026-01-01T00:00:00Z', '2026-1-01']) assert.throws(() => read([day(date)]), /第 1 条.*有效日期/);
+  assert.throws(() => read([day('2100-02-29')], 2100), /有效日期/);
+  assert.equal(read([day('2000-02-29')], 2000)[0].date, '2000-02-29');
+  assert.throws(() => read([day('2027-01-01')]), /所选年度/);
+  assert.throws(() => read([day('2026-01-01'), day('2026-01-01')]), /第 2 条.*重复/);
+  assert.throws(() => read([{ ...day('2026-01-01'), dayType: 'weekend' }]), /法定节假日或调休/);
+  assert.throws(() => read([{ ...day('2026-01-01'), name: '  ' }]), /填写.*名称/);
+  assert.throws(() => read([day('2026-01-01')], 1999), /2000—2999/);
+});
 
 function* elements(node) {
   if (Array.isArray(node)) { for (const child of node) yield* elements(child); return; }

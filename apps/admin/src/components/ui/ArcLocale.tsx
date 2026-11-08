@@ -34,8 +34,8 @@ export function ArcLocale({ children }: { children: ReactNode }) {
         if (Object.hasOwn(dateRangeChrome, value)) return dateRangeChrome[value];
         if (/^Start .+\. Choose an end date\.$/.test(value)) return value.replace(/^Start (.+)\. Choose an end date\.$/, "开始日期 $1，请选择结束日期。");
       }
-      if (locale !== "zh-CN") return Object.entries(chrome).find(([, translated]) => translated === value)?.[0] ?? value.replace(/^第 (\d+) 页$/, "Page $1").replace(/^关闭：/, "Dismiss: ").replace(/^重试：/, "Retry ").replace(/^移除：/, "Remove ").replace(/^今天，/, "Today, ").replace(/ 日历$/, " calendar");
-      return chrome[value] ?? value.replace(/^Sorted by (.*), ascending$/, "已按 $1 升序排列").replace(/^Sorted by (.*), descending$/, "已按 $1 降序排列").replace(/^Sort by /, "排序：").replace(/, currently ascending$/, "，当前升序").replace(/, currently descending$/, "，当前降序").replace(/^Page (\d+)$/, "第 $1 页").replace(/^Dismiss: /, "关闭：").replace(/^Retry /, "重试：").replace(/^Remove /, "移除：").replace(/^Today, /, "今天，").replace(/ calendar$/, " 日历").replace(/, digit (\d+) of (\d+)$/, "，第 $1 位，共 $2 位");
+      if (locale !== "zh-CN") return Object.entries(chrome).find(([, translated]) => translated === value)?.[0] ?? value.replace(/^第 (\d+) 页$/, "Page $1").replace(/^关闭：/, "Dismiss: ").replace(/^重试：/, "Retry ").replace(/^移除：/, "Remove ").replace(/^今天，/, "Today, ").replace(/^已选择 /, "Selected ").replace(/ 日历$/, " calendar");
+      return chrome[value] ?? value.replace(/^Sorted by (.*), ascending$/, "已按 $1 升序排列").replace(/^Sorted by (.*), descending$/, "已按 $1 降序排列").replace(/^Sort by /, "排序：").replace(/, currently ascending$/, "，当前升序").replace(/, currently descending$/, "，当前降序").replace(/^Page (\d+)$/, "第 $1 页").replace(/^Dismiss: /, "关闭：").replace(/^Retry /, "重试：").replace(/^Remove /, "移除：").replace(/^Today, /, "今天，").replace(/^Selected /, "已选择 ").replace(/ calendar$/, " 日历").replace(/, digit (\d+) of (\d+)$/, "，第 $1 位，共 $2 位");
     };
     const translate = () => {
       for (const element of node.querySelectorAll<HTMLElement>("[aria-label], [title], [aria-valuetext], [placeholder]")) {
@@ -48,7 +48,7 @@ export function ArcLocale({ children }: { children: ReactNode }) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const parent = text.parentElement;
-        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-date-range, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel'], .operator-messages [class*='day'], .operator-messages [data-status]")) continue;
+        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-date-popup, .arc-date-range, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel'], .operator-messages [class*='day'], .operator-messages [data-status]")) continue;
         const original = text.textContent ?? "";
         const isDateRange = Boolean(parent.closest(".arc-date-range"));
         const previous = rangeText.current.get(text);
