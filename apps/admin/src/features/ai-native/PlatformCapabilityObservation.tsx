@@ -2,14 +2,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AiPlatformModelCapabilityObservationDraft } from '@rental-os/shared';
 import { platformAiSettingsApi } from '@/api/platformAiSettings';
-import { useLocale } from '@/app/locale';
+import { useAiManagementLocale as useLocale } from './management-locale';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { useAuthStore } from '@/features/auth/authStore';
-import { ActionButton, Alert } from '@/components/ui';
+import { ActionButton, Alert, DataTableStatus, DataTableText, Table } from '@/components/ui';
 import { formatTimestamp } from './formatters';
+import styles from './AiManagement.module.css';
 
 const capabilities = ['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning'] as const;
-const labels = { text: '文本', streaming: '流式', tools: '工具调用', structured_output: '结构化输出',
+export const platformCapabilityLabels = { text: '文本', streaming: '流式', tools: '工具调用', structured_output: '结构化输出',
   vision: '视觉', audio: '音频', embedding: '向量', reasoning: '推理' };
 export function PlatformCapabilityObservation({ profileId, identity }: { profileId: string; identity: string }) {
   const { t } = useLocale();
@@ -57,24 +58,29 @@ export function PlatformCapabilityObservation({ profileId, identity }: { profile
       if (flight.current === controller) { flight.current = null; if (mounted.current) setBusy(false); }
     }
   };
-  return <section aria-label={t('平台能力证据')} aria-busy={busy}>
-    <h4>{t('平台能力证据')}</h4>
-    <p>{t('只读取原证据并复核当前准入，不发起验证或模型调用。白名单、记录宣称支持、当前核验支持分别展示；没有记录不等于不支持。')}</p>
-    <ActionButton label={t('读取平台能力证据')} successLabel={t('能力观察已返回，非执行许可')} disabled={busy} onAction={read} />
+  return <section className={styles.stack} aria-label={t('平台能力证据')} aria-busy={busy}>
+    <h3>{t('平台能力证据')}</h3>
+    <p className={styles.help}>{t('只读取原证据并复核当前准入，不发起验证或模型调用。白名单、记录宣称支持、当前核验支持分别展示；没有记录不等于不支持。')}</p>
+    <div className={styles.toolbar}><ActionButton variant="secondary" label={t('读取平台能力证据')} successLabel={t('能力观察已返回，非执行许可')} disabled={busy} onAction={read} /></div>
     {error && <Alert type="warning" title={t('当前能力证据不可读取，旧结果已清除。请核对当前平台权限与原配置。')} />}
-    {result && <div role="status" aria-live="polite">
-      <p>{t('配置修订')}: {result.configurationRevision}；{t('观察时间')}: {formatTimestamp(result.observedAt).value}。
+    {result && <>
+      <p className={styles.help} role="status">{t('配置修订')}: {result.configurationRevision}；{t('观察时间')}: {formatTimestamp(result.observedAt).value}。
         {t('这是该时点的观察，不保证后续配置、证据或授权不变。')}</p>
-      <dl>{result.items.map(item => <div key={item.capability}>
-        <dt>{t(labels[item.capability])}</dt>
-        <dd>{t('配置白名单')}: {t(item.allowed ? '允许' : '未允许')}；
-          {t('当前核验')}: {t(item.readiness === 'verified_supported' ? '已核验支持' : item.readiness === 'configuration_disabled' ? '配置停用，仅历史观察' : '未验证')}。</dd>
-        <dd>{item.recorded ? <>{t('原记录')}: {t(item.recorded.status === 'supported' ? '记录为支持' : item.recorded.status === 'unsupported' ? '记录为不支持' : '记录未验证')}；
-          {t('模式')}: {item.recorded.mode}；{t('原配置修订')}: {item.recorded.observedRevision}；
-          {t('检测时间')}: {formatTimestamp(item.recorded.checkedAt).value}；
-          {t('失效时间')}: {item.recorded.expiresAt ? formatTimestamp(item.recorded.expiresAt).value : t('未登记')}。</> : t('未观察到原记录，保持未验证。')}</dd>
-      </div>)}</dl>
-    </div>}
-    <p className="muted">{t('平台主体发起付费验证尚未接入本入口；不能借用租户身份探测。Embedding与Reasoning缺客观验证方法时保持未验证，不按模型名称推断。')}</p>
+      <Table rowKey="capability" dataSource={result.items} pagination={false} columns={[
+        { title: t('能力'), dataIndex: 'capability', render: value => t(platformCapabilityLabels[value as keyof typeof platformCapabilityLabels]) },
+        { title: t('当前核验'), render: (_, item) => <DataTableStatus tone={item.readiness === 'verified_supported' ? 'success' : 'neutral'}>
+          {t(item.readiness === 'verified_supported' ? '已核验支持' : item.readiness === 'configuration_disabled' ? '配置停用，仅历史观察' : '未验证')}
+        </DataTableStatus> },
+        { title: t('配置白名单'), dataIndex: 'allowed', render: value => t(value ? '允许' : '未允许') },
+        { title: t('原记录'), render: (_, item) => item.recorded ? <DataTableText
+          primary={t(item.recorded.status === 'supported' ? '记录为支持' : item.recorded.status === 'unsupported' ? '记录为不支持' : '记录未验证')}
+          secondary={`${t({ connection_test: '连接验证', declared: '配置声明', manual: '手工登记' }[item.recorded.source])} · ${t({ mock: '模拟', live: '实际验证', not_attested: '未取得证明' }[item.recorded.mode])}`} /> : t('未观察到原记录，保持未验证。') },
+        { title: t('记录修订'), render: (_, item) => item.recorded ? <DataTableText primary={`${t('修订')} ${item.recorded.observedRevision}`}
+          secondary={t(item.recorded.applicability === 'current_configuration' ? '对应当前配置' : '对应历史配置')} /> : '—' },
+        { title: t('检测时间'), render: (_, item) => item.recorded ? formatTimestamp(item.recorded.checkedAt).value : '—' },
+        { title: t('失效时间'), render: (_, item) => item.recorded?.expiresAt ? formatTimestamp(item.recorded.expiresAt).value : t('未登记') },
+      ]} />
+    </>}
+    <p className={styles.help}>{t('平台主体发起付费验证尚未接入本入口；不能借用租户身份探测。Embedding与Reasoning缺客观验证方法时保持未验证，不按模型名称推断。')}</p>
   </section>;
 }

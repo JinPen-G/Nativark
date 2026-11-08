@@ -70,3 +70,30 @@ test('clear-all handles a separate facet even when the shared keyword and status
   assert.equal(facet, 'all');
   assert.equal(listFilterElements({ filter, placeholder: 'Search', hasFilters: false }, text => text).at(-1), null);
 });
+
+test('persistent settings tabs retain hidden form controls through the real UIArc panel contract', () => {
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const nativeTabs = load('packages/ui-arc/vendor/registry/components/tabs/tabs.tsx', {
+    '@/lib/motion-tokens': load('packages/ui-arc/vendor/registry/motion-tokens.ts', {}),
+    './tabs.module.css': { default: {} },
+  });
+  const { Tabs } = load('apps/admin/src/components/ui/Tabs.tsx', {
+    antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
+    '@/registry/components/tabs/tabs': nativeTabs,
+    '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+  });
+  const render = (activeKey, forceRender, destroyOnHidden = false) => renderToStaticMarkup(React.createElement(Tabs, {
+    activeKey, destroyOnHidden,
+    items: ['connection', 'budget'].map(key => ({ key, label: key, forceRender,
+      children: React.createElement('input', { name: key, defaultValue: `${key}-draft` }) })),
+  }));
+  for (const activeKey of ['connection', 'budget']) {
+    const panels = render(activeKey, true).match(/<div\b[^>]*role="tabpanel"[^>]*>[\s\S]*?<\/div>/gu) ?? [];
+    assert.equal(panels.length, 2, 'Both stateful form trees must remain mounted.');
+    assert.equal(panels.filter(panel => /hidden=""/u.test(panel)).length, 1, 'The inactive form must stay hidden and out of keyboard navigation.');
+    assert.ok(panels.some(panel => panel.includes(`value="${activeKey}-draft"`) && !/hidden=""/u.test(panel)));
+    const inactive = activeKey === 'connection' ? 'budget' : 'connection';
+    assert.ok(!render(activeKey, false).includes(`name="${inactive}"`), 'Ordinary tabs keep their original lazy presence behavior.');
+    assert.ok(!render(activeKey, true, true).includes(`name="${inactive}"`), 'Explicit destruction still takes precedence.');
+  }
+});

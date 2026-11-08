@@ -1,5 +1,6 @@
 /* Feature layout only: controls, overlays and motion retain their shared owners. */
 .stack { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.stack :is(p,code) { overflow-wrap: anywhere; }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
 .toolbar > :global(.arc-select-field), .toolbar > :global(.ant-select) { flex: 0 1 var(--rental-list-control-width-select); width: var(--rental-list-control-width-select); min-width: 0; max-width: 100%; }
 .toolbarEnd { margin-inline-start: auto; }
@@ -14,6 +15,7 @@
 .status[data-tone="danger"] { color: var(--rental-status-error-ink); background: var(--rental-status-error-surface); }
 .status[data-tone="info"] { color: var(--rental-status-info-ink); background: var(--rental-status-info-surface); }
 .formGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); min-width: 0; }
+.formGrid > :global(.ant-form-item) { margin-bottom: 0; }
 .formGrid > .toolbar { align-self: end; }
 .field { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); min-width: 0; }
 .field > :global(.arc-form-field), .field > :global(.arc-select-field), .field > :global(.ant-select) { width: 100%; min-width: 0; max-width: 100%; }
@@ -51,6 +53,9 @@
 .timeline li { display: grid; grid-template-columns: minmax(7rem, auto) minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding-block: var(--space-3); border-bottom: 1px solid var(--border); }
 .timeline span { overflow-wrap: anywhere; color: var(--text-secondary); }
 .timeline time { color: var(--text-muted); font-size: var(--rental-typography-meta-size); }
+@container settings-panel (max-width: 600px) {
+  .formGrid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 767px) {
   .formGrid, .facts { grid-template-columns: minmax(0, 1fr); }
   .taskList li { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }

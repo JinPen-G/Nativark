@@ -1,6 +1,7 @@
 import { Tabs as AntTabs, type TabsProps } from "antd";
 import { useEffect, useState } from "react";
 import { Tabs as ArcTabs, TabsList, TabsTrigger, TabsContent } from "@/registry/components/tabs/tabs";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 
 export function Tabs(props: TabsProps) {
   const { items: originalItems = [], activeKey, defaultActiveKey, onChange, className, style, destroyOnHidden } = props;
@@ -21,11 +22,16 @@ export function Tabs(props: TabsProps) {
       if (item.children == null) return null;
       const destroy = item.destroyOnHidden ?? destroyOnHidden ?? false;
       if (destroy) return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
+      // Stateful settings opt into the native persistent panel. Preserve drafts and
+      // original-operation journals while the shared fade handles the visible change.
+      if (item.forceRender) return <TabsContent key={item.key} value={item.key} forceMount hidden={item.key !== selected}>
+        <ContentTransition value={item.key === selected ? "active" : "inactive"}>{item.children}</ContentTransition>
+      </TabsContent>;
       // Only mount visited panels. Do not forceMount here: the original Arc TabsContent
       // uses its non-forceMount branch for the directional presence animation. Most page
       // state lives in the parent form/query hooks, so switching tabs keeps the business
       // state while allowing the panel to animate in and out.
-      if (item.key !== selected && !visited.has(item.key) && !item.forceRender) return null;
+      if (item.key !== selected && !visited.has(item.key)) return null;
       return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
     })}
   </ArcTabs>;

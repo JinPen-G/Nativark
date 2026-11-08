@@ -6,7 +6,7 @@ import { aiCreditApi } from '@/api/aiCredit';
 import { useAiManagementLocale as useLocale } from './management-locale';
 import styles from './AiManagement.module.css';
 import { currentSessionEpoch } from '@/app/queryClient';
-import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
+import { ActionButton, Alert, ConfirmAction, EmptyScene, FormSection, Input, Select } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 const identityNow = (platform = false) => { const auth = useAuthStore.getState(); return platform
   ? JSON.stringify([auth.user, currentSessionEpoch()]) : JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user]); };
@@ -156,7 +156,7 @@ export function PlatformAiCreditSettings({ identity }: { identity: string }) {
   const [journals, setJournals] = useState<{ requestId: string; operationKey: string }[]>([]);
   const [rows, setRows] = useState<AiCreditRequest[]>([]), [cursor, setCursor] = useState<string | null>(null);
   const [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
-  const load = async (next?: string) => {
+  const load = async (next?: string, reportFailure = false) => {
     setBusy(true);
     try {
       const prefix = `ai_credit_decision:${userId}:`, found: typeof journals = [];
@@ -169,7 +169,10 @@ export function PlatformAiCreditSettings({ identity }: { identity: string }) {
     } catch { /* individual original locators remain untouched */ }
     try { const result = await aiCreditApi.platformRead(next); if (!current()) return;
       setRows(result.requests); setCursor(result.nextCursor); setMessage('');
-    } catch { if (current()) { setRows([]); setMessage(t('额度申请暂不可用，或当前权限不足。')); } }
+    } catch (error) {
+      if (current()) { setRows([]); setMessage(t('额度申请暂不可用，或当前权限不足。')); }
+      if (reportFailure) throw error;
+    }
     finally { if (current()) setBusy(false); }
   };
   useEffect(() => { void load(); }, [identity]);
@@ -182,15 +185,15 @@ export function PlatformAiCreditSettings({ identity }: { identity: string }) {
     await load();
     setMessage(t(result.originalDecision === 'matched' ? '原审批结果已核对，请以实际获批金额为准。' : '该申请已由另一项审批处理，本次原操作不能再次增额。'));
   };
-  return <section aria-label={t('租户 AI 额度申请')}><h3>{t('租户 AI 额度申请')}</h3>
-    <p>{t('审批只增加租户可使用的平台 AI 金额，不自动授权其业务工具或高风险操作。')}</p>
+  return <section className={styles.stack} aria-label={t('租户 AI 额度申请')}><h3>{t('租户 AI 额度申请')}</h3>
+    <p className={styles.help}>{t('审批只增加租户可使用的平台 AI 金额，不自动授权其业务工具或高风险操作。')}</p>
     {message && <Alert type="warning" title={message} />}
-    <ActionButton label={t('刷新待审批申请')} disabled={busy} onAction={() => load()} />
-    {journals.map(journal => <div key={journal.requestId}><p>{t('待核对原审批')}：<code>{journal.requestId}</code></p>
+    <div className={styles.toolbar}><ActionButton variant="secondary" label={t('刷新待审批申请')} disabled={busy} onAction={() => load(undefined, true)} /></div>
+    {journals.map(journal => <div className={styles.requestRow} key={journal.requestId}><p>{t('待核对原审批')}：<code>{journal.requestId}</code></p>
       <ActionButton label={t('核对原审批')} disabled={busy} onAction={() => observe(journal)} /></div>)}
-    {!busy && !rows.length && !message && <p>{t('暂无待审批申请。')}</p>}
+    {!busy && !rows.length && !message && <EmptyScene compact title={t('暂无待审批申请。')} />}
     {rows.map(row => <CreditDecision key={row.id} row={row} identity={identity} onSaved={() => load()} />)}
-    {cursor && <ActionButton label={t('下一页')} disabled={busy} onAction={() => load(cursor)} />}
+    {cursor && <ActionButton label={t('下一页')} disabled={busy} onAction={() => load(cursor, true)} />}
   </section>;
 }
 function CreditDecision({ row, identity, onSaved }: { row: AiCreditRequest; identity: string; onSaved: () => Promise<void> }) {
@@ -217,15 +220,16 @@ function CreditDecision({ row, identity, onSaved }: { row: AiCreditRequest; iden
     if (result.state !== 'recorded' || result.request.state === 'pending') return;
     window.sessionStorage.removeItem(storageKey); setUncertain(false); await onSaved();
   };
-  return <section aria-label={`${t('额度申请')} ${row.tenantName}`}>
-    <h4>{row.tenantName}</h4><p>{t('申请金额')}：{row.currency} {money(row.requestedAmount)}</p>
-    <label htmlFor={field}>{t('批准增加金额')}</label>
-    <Input id={field} inputMode="decimal" maxLength={25} value={amount} disabled={busy || uncertain} onChange={event => setAmount(event.target.value)} />
+  return <FormSection title={row.tenantName} description={`${t('申请金额')}：${row.currency} ${money(row.requestedAmount)}`}>
+    <div className={styles.requestRow}><div className={styles.field}><label htmlFor={field}>{t('批准增加金额')}</label>
+    <Input id={field} inputMode="decimal" maxLength={25} value={amount} disabled={busy || uncertain || !auth.hasPermission('system:ai-provider:manage')} onChange={event => setAmount(event.target.value)} /></div></div>
+    <div className={styles.toolbar}>
     <ConfirmAction label={t('批准额度')} prompt={t('批准后将增加该租户的平台 AI 总额度，金额不可超过本次申请。')}
       disabled={busy || uncertain || !auth.hasPermission('system:ai-provider:manage')} onConfirm={() => decide('approve')} />
     <ConfirmAction label={t('拒绝申请')} prompt={t('拒绝本次额度申请？不会扣减此前批准的额度。')}
       disabled={busy || uncertain || !auth.hasPermission('system:ai-provider:manage')} onConfirm={() => decide('reject')} />
+    </div>
     {uncertain && <><p>{t('原审批尚未确认，请核对原申请，不能重复增额。')}</p>
       <ActionButton label={t('核对原审批')} disabled={busy} onAction={observe} /></>}
-  </section>;
+  </FormSection>;
 }

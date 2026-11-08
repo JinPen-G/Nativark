@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import { useLocale } from '@/app/locale';
+import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
+  ...platformAiEnglish,
   'AI 服务设置': 'AI settings', 'AI 任务中心': 'AI tasks',
   '服务配置': 'Configuration', '平台额度': 'Platform credit', '调用记录': 'Call history',
   'Rental OS AI（推荐）': 'Rental OS AI', '自带 AI 供应商': 'Your AI provider',
