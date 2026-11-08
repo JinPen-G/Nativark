@@ -42,7 +42,7 @@ export function AiModelSettingsPage() {
     && !auth.user.isSaasAdmin && auth.hasPermission("system:params:manage");
   return <>
     <PageHeader title={t("AI 服务设置")} />
-    {allowed ? <Tabs key={identity} items={[
+    {allowed ? <Tabs key={identity} destroyOnHidden={false} items={[
       { key: 'settings', label: t('服务配置'), children: <>
         <TenantSettingsEditor tenantId={auth.tenant!.tenantId} identity={identity} onModeChange={onModeChange} />
       </> },

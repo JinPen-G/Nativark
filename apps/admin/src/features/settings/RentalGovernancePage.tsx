@@ -8,6 +8,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { CalendarTab } from "./governance/CalendarTab";
 import { CategoryTab } from "./governance/CategoryTab";
 import { MembershipRewardRulesTab } from "./governance/MembershipRewardRulesTab";
@@ -96,6 +97,7 @@ const TABS: GovernanceTabDefinition[] = [
 export function RentalGovernancePage() {
   const { message } = App.useApp();
   const { t } = useLocale();
+  const scope = useListQueryIdentity();
   const queryClient = useQueryClient();
   const permissions = useGovernancePermissions();
   const permittedTabs = useMemo(() => TABS.filter((definition) => definition.permitted(permissions)), [permissions]);
@@ -158,7 +160,6 @@ export function RentalGovernancePage() {
     return saveSettings.mutateAsync({ ...current, ...patch });
   };
 
-  const activeTab = permittedTabs.find((definition) => definition.key === tab);
   const localizedTabs = permittedTabs.map((definition) => ({
     ...definition,
     label: definition.key === "category"
@@ -177,28 +178,28 @@ export function RentalGovernancePage() {
       <PageHeader
         title={t("品类与业务规则")}
       />
-      <Tabs
+      <div data-copilot-anchor="governance-view"><Tabs
+        key={scope}
         aria-label={t("品类与业务规则")}
         className="standalone-tabs"
+        destroyOnHidden={false}
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}
-        items={localizedTabs.map(({ key, label, icon }) => ({ key, label, icon }))}
-      />
-      <div data-copilot-anchor="governance-view"><QueryState
-        transitionKey={tab}
-        loading={settings.isLoading || profile.isLoading}
-        error={settings.error || profile.error}
-      >
-        {settings.data && category && (
-          activeTab?.render({
+        items={localizedTabs.map(({ key, label, icon, render }) => ({ key, label, icon, children: <QueryState
+          transitionKey={scope}
+          loading={settings.isLoading || profile.isLoading || categories.isLoading}
+          error={settings.error || profile.error || categories.error}
+          onRetry={() => Promise.all([settings.refetch({ throwOnError: true }), profile.refetch({ throwOnError: true }), categories.refetch({ throwOnError: true })])}
+        >
+        {settings.data && category && render({
             permissions,
             category,
             settings: settings.data,
             saveTab,
             saving: saveSettings.isPending,
-          })
-        )}
-      </QueryState></div>
+          })}
+        </QueryState> }))}
+      /></div>
     </>
   );
 }

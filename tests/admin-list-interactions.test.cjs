@@ -97,3 +97,38 @@ test('persistent settings tabs retain hidden form controls through the real UIAr
     assert.ok(!render(activeKey, true, true).includes(`name="${inactive}"`), 'Explicit destruction still takes precedence.');
   }
 });
+
+test('lazy settings panels stay hidden after visiting and release their content when removed', () => {
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const nativeTabs = load('packages/ui-arc/vendor/registry/components/tabs/tabs.tsx', {
+    '@/lib/motion-tokens': load('packages/ui-arc/vendor/registry/motion-tokens.ts', {}),
+    './tabs.module.css': { default: {} },
+  });
+  const states = [];
+  let cursor = 0;
+  const { Tabs } = load('apps/admin/src/components/ui/Tabs.tsx', {
+    react: { useEffect() {}, useState(initial) {
+      const index = cursor++;
+      if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
+      return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
+    } },
+    antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
+    '@/registry/components/tabs/tabs': nativeTabs,
+    '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+  });
+  const items = ['common', 'website', 'wechat'].map(key => ({ key, label: key, children: React.createElement('input', { name: key, defaultValue: `${key}-draft` }) }));
+  const render = (extra = {}) => { cursor = 0; return Tabs({ items, destroyOnHidden: false, ...extra }); };
+  let tree = render();
+  const initial = renderToStaticMarkup(tree);
+  assert.ok(initial.includes('name="common"'));
+  assert.ok(!initial.includes('name="website"') && !initial.includes('name="wechat"'), 'Unvisited forms must not mount or start their reads.');
+  tree.props.onValueChange('website');
+  tree = render();
+  const after = renderToStaticMarkup(tree);
+  assert.match(after, /data-state="inactive"[^>]*hidden=""[^>]*><input name="common"/u, 'Leaving a settings tab keeps its original form tree under a hidden native panel.');
+  assert.ok(after.includes('name="website"') && !after.includes('name="wechat"'));
+  tree.props.onValueChange('common');
+  assert.match(renderToStaticMarkup(render()), /data-state="inactive"[^>]*hidden=""[^>]*><input name="website"/u);
+  assert.ok(!renderToStaticMarkup(render({ items: items.filter(item => item.key !== 'website') })).includes('name="website"'), 'A removed or revoked view cannot retain its protected subtree.');
+  assert.ok(!renderToStaticMarkup(render({ destroyOnHidden: true })).includes('name="website"'), 'Explicit destruction still takes priority.');
+});

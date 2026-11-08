@@ -47,7 +47,7 @@ export function SubscriptionCatalogPage() {
       title="功能目录与定价"
       view={
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Tabs aria-label={t("功能目录与定价")} items={[
+          <Tabs aria-label={t("功能目录与定价")} destroyOnHidden={false} items={[
             { key: "comparison", label: t("版本对比"), children: <QueryState loading={prices.isLoading || catalog.isLoading} error={prices.error || catalog.error} onRetry={() => Promise.all([prices.refetch(), catalog.refetch()])}>
               {prices.data && catalog.data && <PlanComparison features={catalog.data} prices={prices.data} actionLabel={() => t("设置标准年费")} onAction={plan => setPriceModal({ open: true, plan, current: priceOf(plan) })} />}
             </QueryState> },

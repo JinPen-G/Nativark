@@ -23,6 +23,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 type ProfileForm = SaveClientChannelProfileRequest;
 
@@ -521,11 +522,14 @@ function WebsiteProfileCard() {
 
 export function ClientChannelPage() {
   const { t } = useLocale();
+  const scope = useListQueryIdentity();
   return (
     <PageHeader
       title={t("客户端渠道")}
       note={{ title: t("一份通用配置，多端共用"), description: t("品牌、客服、协议正文/版本、帮助与发布服务由小程序、APP 和官网共用；微信 AppID/AppSecret 是微信渠道专有；站点标语、Hero、辅助色、页脚与 SEO 是官网专有。协议正文在客户端内直接渲染，请填写正文而不仅是外链。") }}
       view={<Tabs
+        key={scope}
+        destroyOnHidden={false}
         tabBarGutter={32}
         items={[
           {
