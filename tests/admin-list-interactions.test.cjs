@@ -25,6 +25,22 @@ test('locale consumers keep their provider when the translation module is refres
   } finally { if (originalWindow === undefined) delete global.window; else global.window = originalWindow; }
 });
 
+test('modal feedback remains available between retained providers and refreshed page consumers', () => {
+  const context = load('apps/admin/src/components/ui/modalFeedbackContext.ts', {});
+  const dependencies = {
+    './modalFeedbackContext': context,
+    './Modal': { Modal: 'modal' }, './ActionButton': { ActionButton: 'action' }, './Button': { Button: 'button' },
+    '@/app/locale': { useLocale: () => ({ t: text => text }) },
+  };
+  const previous = load('apps/admin/src/components/ui/ModalProvider.tsx', dependencies);
+  const refreshed = load('apps/admin/src/components/ui/ModalProvider.tsx', dependencies);
+  const { renderToStaticMarkup } = require('react-dom/server');
+  for (const [provider, consumer] of [[previous, refreshed], [refreshed, previous]]) {
+    const CurrentPage = () => React.createElement('span', null, typeof consumer.useModalFeedback().confirm);
+    assert.equal(renderToStaticMarkup(React.createElement(provider.ModalFeedbackProvider, null, React.createElement(CurrentPage))), '<span>function</span>');
+  }
+});
+
 test('compact filter rows reserve actions and keep reset access in the overflow panel', () => {
   const { planListFilters } = load('apps/admin/src/components/ui/listFilterLayout.ts', {});
   const geometry = { available: 342, category: 0, categoryMin: 0, search: 280, searchMin: 200, searchCompactMin: 96,
@@ -109,6 +125,7 @@ test('persistent settings tabs retain hidden form controls through the real UIAr
     antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
     '@/registry/components/tabs/tabs': nativeTabs,
     '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+    '@/app/locale': { useLocale: () => ({ locale: 'en-US', t: text => text }) },
   });
   const render = (activeKey, forceRender, destroyOnHidden = false) => renderToStaticMarkup(React.createElement(Tabs, {
     activeKey, destroyOnHidden,
@@ -135,7 +152,7 @@ test('lazy settings panels stay hidden after visiting and release their content 
   const states = [];
   let cursor = 0;
   const { Tabs } = load('apps/admin/src/components/ui/Tabs.tsx', {
-    react: { useEffect() {}, useState(initial) {
+    react: { useEffect() {}, useLayoutEffect() {}, useId: () => 'settings-tabs', useState(initial) {
       const index = cursor++;
       if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
       return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
@@ -143,6 +160,7 @@ test('lazy settings panels stay hidden after visiting and release their content 
     antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
     '@/registry/components/tabs/tabs': nativeTabs,
     '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+    '@/app/locale': { useLocale: () => ({ locale: 'en-US', t: text => text }) },
   });
   const items = ['common', 'website', 'wechat'].map(key => ({ key, label: key, children: React.createElement('input', { name: key, defaultValue: `${key}-draft` }) }));
   const render = (extra = {}) => { cursor = 0; return Tabs({ items, destroyOnHidden: false, ...extra }); };

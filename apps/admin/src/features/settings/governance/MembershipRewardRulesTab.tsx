@@ -38,6 +38,11 @@ export function MembershipRewardRulesTab({
   const referralType = Form.useWatch(["membership", "referralRewardType"], form);
   const signupCouponId = Form.useWatch(["membership", "signupRewardCouponTemplateId"], form);
   const referralCouponId = Form.useWatch(["membership", "referralRewardCouponTemplateId"], form);
+  const signupCouponRequired = Form.useWatch((values: MembershipSettingsFormValues) => Boolean(values.membership?.signupRewardEnabled
+    && values.membership.signupRewardType === "coupon" && values.membership.signupRewardAmount > 0), form);
+  const referralCouponRequired = Form.useWatch((values: MembershipSettingsFormValues) => Boolean(values.membership?.referralRewardEnabled
+    && values.membership.referralRewardType === "coupon" && Math.max(values.membership.referrerRewardAmount, values.membership.inviteeRewardAmount) > 0), form);
+  const needsCouponTemplates = signupType === "coupon" || referralType === "coupon";
   const isCurrent = useServerFormSync(form, settings, () => {
     form.setFieldsValue({ membership: settings.membership });
   });
@@ -52,7 +57,7 @@ export function MembershipRewardRulesTab({
   const couponTemplates = useQuery({
     queryKey: ["rental-core", "coupon-templates"],
     queryFn: rentalCoreApi.couponTemplates,
-    enabled: permissions.canSeeSettings,
+    enabled: permissions.canSeeSettings && needsCouponTemplates,
   });
   const activeCouponOptions = (couponTemplates.data ?? [])
     .filter((item) => item.status === "active" || item.id === signupCouponId || item.id === referralCouponId)
@@ -69,7 +74,7 @@ export function MembershipRewardRulesTab({
         title={t("注册、实名审核和首单完成会自动触发奖励判断")}
         description={t("人工补发、客户权益账户与奖励流水在「会员激励」页维护。营销余额属于客户权益，不是支付机构资金账户。")}
       />
-      {couponTemplates.isError && <Alert type="error" showIcon title={t("奖励券模板读取失败，请刷新后重试")} action={<ActionButton variant="secondary" label={t("重试")} onAction={() => couponTemplates.refetch({ throwOnError: true })} />} />}
+      {needsCouponTemplates && couponTemplates.isError && <Alert type="error" showIcon title={t("奖励券模板读取失败，请刷新后重试")} action={<ActionButton variant="secondary" label={t("重试")} onAction={() => couponTemplates.refetch({ throwOnError: true })} />} />}
       <SettingsGroups footer={<SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />}>
           <FormSection title={t("注册赠礼")}>
             <Form.Item
@@ -96,6 +101,7 @@ export function MembershipRewardRulesTab({
                 <Form.Item
                   name={["membership", "signupRewardAmount"]}
                   label={amountLabel(signupType)}
+                  rules={[{ required: true, message: t("请填写奖励数量") }]}
                 >
                   <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
@@ -103,10 +109,14 @@ export function MembershipRewardRulesTab({
             </Row>
             <Form.Item
               name={["membership", "signupRewardCouponTemplateId"]}
-              label={t("赠送券模板（奖励类型为优惠券时必选）")}
+              label={t("奖励券模板")}
+              extra={t("启用优惠券奖励且发放数量大于 0 时，须选择进行中的券模板。")}
               hidden={signupType !== "coupon"}
+              dependencies={[["membership", "signupRewardEnabled"], ["membership", "signupRewardType"], ["membership", "signupRewardAmount"]]}
+              rules={[{ required: signupCouponRequired, message: t("优惠券奖励必须选择进行中的券模板") }]}
             >
-              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError} />
+              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError}
+                notFoundContent={!couponTemplates.isFetching && !activeCouponOptions.length ? t("暂无进行中的奖励券模板") : undefined} />
             </Form.Item>
           </FormSection>
           <FormSection title={t("邀请奖励")}>
@@ -153,6 +163,7 @@ export function MembershipRewardRulesTab({
                 <Form.Item
                   name={["membership", "referrerRewardAmount"]}
                   label={`${t("邀请人")} · ${amountLabel(referralType)}`}
+                  rules={[{ required: true, message: t("请填写奖励数量") }]}
                 >
                   <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
@@ -161,6 +172,7 @@ export function MembershipRewardRulesTab({
                 <Form.Item
                   name={["membership", "inviteeRewardAmount"]}
                   label={`${t("被邀请人")} · ${amountLabel(referralType)}`}
+                  rules={[{ required: true, message: t("请填写奖励数量") }]}
                 >
                   <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
@@ -168,10 +180,14 @@ export function MembershipRewardRulesTab({
             </Row>
             <Form.Item
               name={["membership", "referralRewardCouponTemplateId"]}
-              label={t("邀请奖励券模板（奖励类型为优惠券时必选）")}
+              label={t("奖励券模板")}
+              extra={t("启用优惠券奖励且发放数量大于 0 时，须选择进行中的券模板。")}
               hidden={referralType !== "coupon"}
+              dependencies={[["membership", "referralRewardEnabled"], ["membership", "referralRewardType"], ["membership", "referrerRewardAmount"], ["membership", "inviteeRewardAmount"]]}
+              rules={[{ required: referralCouponRequired, message: t("优惠券奖励必须选择进行中的券模板") }]}
             >
-              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError} />
+              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError}
+                notFoundContent={!couponTemplates.isFetching && !activeCouponOptions.length ? t("暂无进行中的奖励券模板") : undefined} />
             </Form.Item>
           </FormSection>
       </SettingsGroups>

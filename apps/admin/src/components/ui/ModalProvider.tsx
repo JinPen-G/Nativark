@@ -1,14 +1,12 @@
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ModalFuncProps } from "antd";
 import { Modal } from "./Modal";
 import { ActionButton } from "./ActionButton";
 import { Button } from "./Button";
 import { useLocale } from "@/app/locale";
+import { ModalFeedbackContext as Context, type ModalFeedbackApi as Api, type ModalFeedbackHandle as Handle } from "./modalFeedbackContext";
 
-type Handle = { destroy: () => void; update: (patch: Partial<ModalFuncProps> | ((previous: ModalFuncProps) => ModalFuncProps)) => void; then: Promise<boolean>["then"] };
 type Record = { id: number; config: ModalFuncProps; open: boolean; resolve: (result: boolean) => void };
-type Api = { [K in "confirm" | "info" | "success" | "error" | "warning" | "warn"]: (config: ModalFuncProps) => Handle };
-const Context = createContext<Api | null>(null);
 export function useModalFeedback() {
   const api = useContext(Context);
   if (!api) throw new Error("Modal feedback requires FeedbackProvider");
