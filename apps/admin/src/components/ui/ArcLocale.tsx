@@ -21,13 +21,19 @@ const chrome: Record<string, string> = {
   "Bullet list": "无序列表", "Numbered list": "有序列表", "Quote": "引用", "Code": "代码", "Code block": "代码块",
   "Hue": "色相", "Opacity": "透明度", "Color format": "颜色格式", "Save swatch": "保存色板"
 };
+const dateRangeChrome: Record<string, string> = { "No dates": "未选择日期", "No": "未选择", "dates": "日期", "day": "天", "days": "天", "Pick": "请选择", "an": "", "end": "结束", "date": "日期" };
 export function ArcLocale({ children }: { children: ReactNode }) {
   const { locale } = useLocale();
   const root = useRef<HTMLDivElement>(null);
+  const rangeText = useRef(new WeakMap<Node, { source: string; translated: string }>());
   useEffect(() => {
     const node = root.current;
     if (!node) return;
-    const localize = (value: string) => {
+    const localize = (value: string, dateRange = false) => {
+      if (dateRange && locale === "zh-CN") {
+        if (Object.hasOwn(dateRangeChrome, value)) return dateRangeChrome[value];
+        if (/^Start .+\. Choose an end date\.$/.test(value)) return value.replace(/^Start (.+)\. Choose an end date\.$/, "开始日期 $1，请选择结束日期。");
+      }
       if (locale !== "zh-CN") return Object.entries(chrome).find(([, translated]) => translated === value)?.[0] ?? value.replace(/^第 (\d+) 页$/, "Page $1").replace(/^关闭：/, "Dismiss: ").replace(/^重试：/, "Retry ").replace(/^移除：/, "Remove ").replace(/^今天，/, "Today, ").replace(/ 日历$/, " calendar");
       return chrome[value] ?? value.replace(/^Sorted by (.*), ascending$/, "已按 $1 升序排列").replace(/^Sorted by (.*), descending$/, "已按 $1 降序排列").replace(/^Sort by /, "排序：").replace(/, currently ascending$/, "，当前升序").replace(/, currently descending$/, "，当前降序").replace(/^Page (\d+)$/, "第 $1 页").replace(/^Dismiss: /, "关闭：").replace(/^Retry /, "重试：").replace(/^Remove /, "移除：").replace(/^Today, /, "今天，").replace(/ calendar$/, " 日历").replace(/, digit (\d+) of (\d+)$/, "，第 $1 位，共 $2 位");
     };
@@ -36,15 +42,19 @@ export function ArcLocale({ children }: { children: ReactNode }) {
         if (element.closest("[contenteditable]")) continue;
         for (const attribute of ["aria-label", "title", "aria-valuetext", "placeholder"]) {
           const value = element.getAttribute(attribute);
-          if (value) { const next = localize(value); if (next !== value) element.setAttribute(attribute, next); }
+          if (value) { const next = localize(value, Boolean(element.closest(".arc-date-range"))); if (next !== value) element.setAttribute(attribute, next); }
         }
       }
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const parent = text.parentElement;
-        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel'], .operator-messages [class*='day'], .operator-messages [data-status]")) continue;
+        if (!parent || parent.closest("[contenteditable], output, input, textarea") || !parent.closest("button, [class*='srOnly'], [class*='browse'], [class*='statusWord'], .arc-date-field, .arc-date-range, .arc-password-strength [class*='wordText'], .arc-password-strength [class*='remainingText'], .arc-phone-field [class*='groupLabel'], .operator-messages [class*='day'], .operator-messages [data-status]")) continue;
         const original = text.textContent ?? "";
-        const next = localize(original);
+        const isDateRange = Boolean(parent.closest(".arc-date-range"));
+        const previous = rangeText.current.get(text);
+        const source = isDateRange && previous?.translated === original ? previous.source : original;
+        const next = localize(source, isDateRange);
+        if (isDateRange) rangeText.current.set(text, { source, translated: next });
         if (next !== text.textContent) text.textContent = next;
       }
     };

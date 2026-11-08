@@ -1,13 +1,12 @@
-import { SaveButton } from "@/components/ui";
-import { SaveOutlined } from "@/components/ui/icons";
+import { ActionButton, FormSection, SaveButton } from "@/components/ui";
+import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
-import { Card, Col, InputNumber, Row, Space, Typography } from "antd";
+import { Col, InputNumber, Row, Space } from "antd";
 import { App, Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button } from "@/components/ui";
 import { useServerFormSync } from "@/app/useServerFormSync";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -35,6 +34,10 @@ export function MembershipRewardRulesTab({
   const { t } = useLocale();
   const { message } = App.useApp();
   const [form] = Form.useForm<MembershipSettingsFormValues>();
+  const signupType = Form.useWatch(["membership", "signupRewardType"], form);
+  const referralType = Form.useWatch(["membership", "referralRewardType"], form);
+  const signupCouponId = Form.useWatch(["membership", "signupRewardCouponTemplateId"], form);
+  const referralCouponId = Form.useWatch(["membership", "referralRewardCouponTemplateId"], form);
   const isCurrent = useServerFormSync(form, settings, () => {
     form.setFieldsValue({ membership: settings.membership });
   });
@@ -52,27 +55,26 @@ export function MembershipRewardRulesTab({
     enabled: permissions.canSeeSettings,
   });
   const activeCouponOptions = (couponTemplates.data ?? [])
-    .filter((item) => item.status === "active")
-    .map((item) => ({ value: item.id, label: item.name }));
+    .filter((item) => item.status === "active" || item.id === signupCouponId || item.id === referralCouponId)
+    .map((item) => ({ value: item.id, label: item.status === "active" ? item.name : `${item.name} · ${t("已停用")}`, disabled: item.status !== "active" }));
+  const amountLabel = (type?: string) => type === "balance"
+    ? t("奖励金额（{currency}）", { currency: settings.pricing.currency })
+    : t(type === "coupon" ? "奖励券数量" : "奖励积分");
   return (
-    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
-      <div className="table-toolbar">
-        <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />
-      </div>
+    <Form<MembershipSettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type="info"
         showIcon
         title={t("注册、实名审核和首单完成会自动触发奖励判断")}
-        description={t("这里只配置奖励规则；人工补发、客户权益账户与奖励流水在「会员与客户 → 会员激励」页维护。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。")}
+        description={t("人工补发、客户权益账户与奖励流水在「会员激励」页维护。营销余额属于客户权益，不是支付机构资金账户。")}
       />
-      <Row gutter={[16, 16]}>
-        <Col xs={24} xl={12}>
-          <Card title={t("注册赠礼")}>
+      {couponTemplates.isError && <Alert type="error" showIcon title={t("奖励券模板读取失败，请刷新后重试")} action={<ActionButton variant="secondary" label={t("重试")} onAction={() => couponTemplates.refetch({ throwOnError: true })} />} />}
+      <SettingsGroups footer={<SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />}>
+          <FormSection title={t("注册赠礼")}>
             <Form.Item
               name={["membership", "signupRewardEnabled"]}
-              label={t("启用")}
+              label={t("启用注册赠礼")}
               valuePropName="checked"
             >
               <Switch />
@@ -93,25 +95,24 @@ export function MembershipRewardRulesTab({
               <Col span={12}>
                 <Form.Item
                   name={["membership", "signupRewardAmount"]}
-                  label={t("数量")}
+                  label={amountLabel(signupType)}
                 >
-                  <InputNumber min={0} />
+                  <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
             </Row>
             <Form.Item
               name={["membership", "signupRewardCouponTemplateId"]}
               label={t("赠送券模板（奖励类型为优惠券时必选）")}
+              hidden={signupType !== "coupon"}
             >
-              <Select allowClear options={activeCouponOptions} />
+              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError} />
             </Form.Item>
-          </Card>
-        </Col>
-        <Col xs={24} xl={12}>
-          <Card title={t("邀请奖励")}>
+          </FormSection>
+          <FormSection title={t("邀请奖励")}>
             <Form.Item
               name={["membership", "referralRewardEnabled"]}
-              label={t("启用")}
+              label={t("启用邀请奖励")}
               valuePropName="checked"
             >
               <Switch />
@@ -137,11 +138,9 @@ export function MembershipRewardRulesTab({
                 ]}
               />
             </Form.Item>
-            <Row gutter={12}>
-              <Col span={8}>
                 <Form.Item
                   name={["membership", "referralRewardType"]}
-                  label={t("类型")}
+                  label={t("奖励类型")}
                 >
                   <Select
                     options={["points", "balance", "coupon"].map(
@@ -149,33 +148,33 @@ export function MembershipRewardRulesTab({
                     )}
                   />
                 </Form.Item>
-              </Col>
-              <Col span={8}>
+            <Row gutter={16}>
+              <Col span={12}>
                 <Form.Item
                   name={["membership", "referrerRewardAmount"]}
-                  label={t("邀请人")}
+                  label={`${t("邀请人")} · ${amountLabel(referralType)}`}
                 >
-                  <InputNumber min={0} />
+                  <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col span={12}>
                 <Form.Item
                   name={["membership", "inviteeRewardAmount"]}
-                  label={t("被邀请人")}
+                  label={`${t("被邀请人")} · ${amountLabel(referralType)}`}
                 >
-                  <InputNumber min={0} />
+                  <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
             </Row>
             <Form.Item
               name={["membership", "referralRewardCouponTemplateId"]}
               label={t("邀请奖励券模板（奖励类型为优惠券时必选）")}
+              hidden={referralType !== "coupon"}
             >
-              <Select allowClear options={activeCouponOptions} />
+              <Select allowClear options={activeCouponOptions} loading={couponTemplates.isFetching} disabled={couponTemplates.isError} />
             </Form.Item>
-          </Card>
-        </Col>
-      </Row>
+          </FormSection>
+      </SettingsGroups>
       </Space>
     </Form>
   );

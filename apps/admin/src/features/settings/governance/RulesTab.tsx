@@ -3,7 +3,7 @@ import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/sha
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Descriptions, Space, Tag, Typography } from "antd";
 import { ListSection, App, Modal } from "@/components/ui";
-import { Form } from "@/components/ui";
+import { Form, FormSection } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, Drawer, SaveButton } from "@/components/ui";
@@ -172,6 +172,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       rules.data?.find((item) => item.status === "published") ??
       rules.data?.[0];
     if (!source) return;
+    ruleForm.resetFields();
     // seed-in（含押金/预授权派生与可选块默认值）抽到 ruleSections 的 seedFormFromRule，与向导共用。
     seedFormFromRule(ruleForm, source, category);
     setRuleEditor(source);
@@ -403,27 +404,31 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         </ListSection>
       </Space>
 
-      <Drawer
+      <Modal presentation="side"
         title={
           ruleEditor?.status === "draft"
             ? `${t("编辑规则草稿")} v${ruleEditor.version}`
             : `${t("新建规则草稿 · 基于")} v${ruleEditor?.version ?? ""}`
         }
-        size={760}
+        width={760}
         open={Boolean(ruleEditor)}
-        onClose={() => setRuleEditor(undefined)}
+        onCancel={() => setRuleEditor(undefined)}
+        closable={!saveRule.isPending}
+        keyboard={!saveRule.isPending}
+        maskClosable={!saveRule.isPending}
         forceRender
         destroyOnHidden
-        extra={
-          <SaveButton label={t("保存草稿")} form={ruleForm} pending={saveRule.isPending} onSave={(values) => saveRule.mutateAsync(values)} />
+        footer={
+          <><Button disabled={saveRule.isPending} onClick={() => setRuleEditor(undefined)}>{t("取消")}</Button><SaveButton label={t("保存草稿")} form={ruleForm} pending={saveRule.isPending} onSave={(values) => saveRule.mutateAsync(values)} /></>
         }
       >
         <Form
           form={ruleForm}
           layout="vertical"
+          disabled={saveRule.isPending}
           onFinish={(values) => saveRule.mutate(values)}
         >
-          <SettingsWorkspace sections={RULE_SECTIONS.map(section => ({key:section.key,label:t(section.title),content:<Card size="small" title={t(section.title)}><Typography.Paragraph type="secondary">{t(section.description)}</Typography.Paragraph>{section.render({form:ruleForm,category,t})}</Card>}))}/>
+          <SettingsWorkspace sections={RULE_SECTIONS.map(section => ({key:section.key,label:t(section.title),content:<FormSection title={t(section.title)} description={t(section.description)}>{section.render({form:ruleForm,category,t})}</FormSection>}))}/>
           <Form.Item
             name="changeReason"
             label={t("变更原因")}
@@ -433,7 +438,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
-      </Drawer>
+      </Modal>
       <Drawer
         title={t("新建规则向导")}
         size={760}

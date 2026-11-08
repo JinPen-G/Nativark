@@ -74,7 +74,7 @@ function RangePicker(props: RangePickerProps) {
   // Forward showTime unchanged so precision, time limits and confirmation survive.
   if (props.showTime || props.disabledTime || props.onOk || props.needConfirm || props.open !== undefined || (props.picker && props.picker !== "date") || props.cellRender || props.panelRender || Array.isArray(props.format) || typeof props.format === "function" || (props.presets && (props.disabledDate || props.minDate || props.maxDate))) return <AntDatePicker.RangePicker {...props} className={[props.className, props.showTime && !props.prefix ? "rental-datetime-range" : undefined].filter(Boolean).join(" ") || undefined} />;
   const partial = Array.isArray(props.allowEmpty) ? props.allowEmpty.some(Boolean) : props.allowEmpty;
-  const simple = !props.showTime && !props.disabledDate && !partial && !disabled && !props.minDate && !props.maxDate;
+  const simple = !props.showTime && !props.disabledDate && !partial && !disabled;
   const fullyDisabled = Array.isArray(disabled) ? disabled.every(Boolean) : disabled;
   const clearDisabled = Array.isArray(disabled) ? disabled.some(Boolean) : disabled;
   const inlineClear = props.allowClear !== false && draft.some(Boolean) && !clearDisabled;
@@ -83,6 +83,7 @@ function RangePicker(props: RangePickerProps) {
   // must not expand a 36px query row into a form that overlaps its neighbours.
   return <div ref={root} className={`arc-date-range ${props.className ?? ""}`} style={props.style} data-size={props.size ?? componentSize} data-inline-clear={inlineClear || undefined}><ArcLocale>
     {simple ? <ArcRangePicker locale={locale} label={t("日期范围")} placeholder={props.placeholder?.[0] ?? t("选择日期")} value={draft[0] && draft[1] ? { start: draft[0].toDate(), end: draft[1].toDate() } : null}
+      minDate={props.minDate?.toDate()} maxDate={props.maxDate?.toDate()}
       presets={(props.presets ?? []).filter(preset => typeof preset.value === "function" || (preset.value[0] && preset.value[1])).map(preset => ({ label: String(preset.label), range: () => { const pair = typeof preset.value === "function" ? preset.value() : preset.value; return { start: (pair[0] ?? dayjs()).toDate(), end: (pair[1] ?? dayjs()).toDate() }; } }))}
       onChange={range => emit([dayjs(range.start), dayjs(range.end)])} /> : <div className="arc-range-advanced"><Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild><Button className="arc-range-advanced-trigger" disabled={Boolean(fullyDisabled)} aria-label={`${t("日期范围")} · ${rangeLabel}`}><CalendarDays size={16} aria-hidden="true" /><span>{rangeLabel}</span><ChevronDown size={16} aria-hidden="true" /></Button></PopoverTrigger>

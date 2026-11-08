@@ -1,9 +1,9 @@
 import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@/components/ui/icons";
+import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
-import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
-import { App, Form } from "@/components/ui";
+import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App, Form, FormSection } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -86,11 +86,7 @@ export function CategoryTab({
   };
 
   return (
-    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
-      <div className="table-toolbar">
-        <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />
-      </div>
+    <Form<CategorySettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <CategoryPreparationEntry />
       <Alert
@@ -99,7 +95,7 @@ export function CategoryTab({
         title={t(category.name)}
         description={t("经营品类创建后固定；租户只能在品类支持的计价、履约、库存、预授权和资质能力内配置。")}
       />
-      <SettingsGroups><Card title={t("计价方式")} data-copilot-anchor="pricing-method">
+      <SettingsGroups footer={<SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />}><FormSection title={t("计价方式")} data-copilot-anchor="pricing-method">
               {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
                   允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
               <Form.Item
@@ -150,8 +146,8 @@ export function CategoryTab({
               >
                 <Switch />
               </Form.Item>
-            </Card>
-<Card title={t("收款方式")}>
+            </FormSection>
+<FormSection title={t("收款方式")}>
               {/* 支付时点、押金、预授权、异地归还与逾期计费都随报价进订单快照，事实源在「业务规则」页；
                   这里只保留不进快照的运行开关——空间实际开通哪些收款渠道。 */}
               <Form.Item
@@ -172,14 +168,20 @@ export function CategoryTab({
                 showIcon
                 title={t("支付时点、押金与预授权、异地归还、逾期计费在「业务规则」页配置，发布后随订单快照冻结。")}
               />
-            </Card>
-<Card title={t("租赁与履约方式")} data-copilot-anchor="fulfillment-method">
+            </FormSection>
+<FormSection title={t("资源分配")}>
+            <Row gutter={16}>
+            <Col span={12}>
             <Form.Item name={["allocation", "autoPreassign"]} label={t("自动预分配资源")} valuePropName="checked"><Switch /></Form.Item>
-            <Form.Item name={["allocation", "preassignDays"]} label={t("提前预分配（天）")}><InputNumber min={0} max={365} precision={0} /></Form.Item>
+            <Form.Item name={["allocation", "preassignDays"]} label={t("提前预分配（天）")}><InputNumber min={0} max={365} precision={0} style={{ width: "100%" }} /></Form.Item>
+            </Col><Col span={12}>
             <Form.Item name={["allocation", "autoLock"]} label={t("到时自动锁定分配")} valuePropName="checked"><Switch /></Form.Item>
-            <Form.Item name={["allocation", "lockMinutes"]} label={t("领取前锁定（分钟）")}><InputNumber min={0} max={43200} precision={0} /></Form.Item>
+            <Form.Item name={["allocation", "lockMinutes"]} label={t("领取前锁定（分钟）")}><InputNumber min={0} max={43200} precision={0} style={{ width: "100%" }} /></Form.Item>
+            </Col></Row>
             <Form.Item name={["allocation", "protectManual"]} label={t("保护人工分配结果")} valuePropName="checked"><Switch /></Form.Item>
             <Alert type="info" title={t("自动任务每分钟检查一次；不自动换掉锁定资源，不跨地点调拨，失败转待人工处理。")} style={{ marginBottom: 16 }} />
+            </FormSection>
+<FormSection title={t("租赁与履约方式")} data-copilot-anchor="fulfillment-method">
             <Form.Item
               name={["fulfillment", "enabledModes"]}
               label={t("启用方式")}
@@ -238,19 +240,19 @@ export function CategoryTab({
                         {t("区域按客户地址精确匹配。省、市必填；区县留空表示该市全域。")}
                       </Typography.Text>
                       {fields.map((field) => (
-                        <Row gutter={[8, 8]} align="middle" key={field.key}>
+                        <Row gutter={[8, 8]} align="bottom" key={field.key}>
                           <Col xs={24} md={7}>
-                            <Form.Item name={[field.name, "province"]} style={{ marginBottom: 0 }}>
+                            <Form.Item name={[field.name, "province"]} label={t("省份/直辖市")} style={{ marginBottom: 0 }}>
                               <Input maxLength={64} placeholder={t("省份/直辖市")} />
                             </Form.Item>
                           </Col>
                           <Col xs={24} md={7}>
-                            <Form.Item name={[field.name, "city"]} style={{ marginBottom: 0 }}>
+                            <Form.Item name={[field.name, "city"]} label={t("城市")} style={{ marginBottom: 0 }}>
                               <Input maxLength={64} placeholder={t("城市")} />
                             </Form.Item>
                           </Col>
                           <Col xs={20} md={7}>
-                            <Form.Item name={[field.name, "district"]} style={{ marginBottom: 0 }}>
+                            <Form.Item name={[field.name, "district"]} label={t("区县")} style={{ marginBottom: 0 }}>
                               <Input maxLength={64} placeholder={t("区县，可留空")} />
                             </Form.Item>
                           </Col>
@@ -277,7 +279,7 @@ export function CategoryTab({
                 <Tag key={value}>{t(locationTypeLabels[value] ?? value)}</Tag>
               ))}
             </Space>
-          </Card></SettingsGroups>
+          </FormSection></SettingsGroups>
       </Space>
     </Form>
   );

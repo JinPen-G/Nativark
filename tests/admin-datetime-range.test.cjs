@@ -44,6 +44,10 @@ for (const showTime of [true, { format: 'HH:mm:ss', minuteStep: 5 }]) {
 }
 const dateOnly = RangePicker({});
 assert.equal(dateOnly.props.children.props.children[0].type, arcRange, 'Pure date ranges still use upstream Arc');
+const bounded = RangePicker({ minDate: dayjs('2026-01-01'), maxDate: dayjs('2026-12-31') }).props.children.props.children[0];
+assert.equal(bounded.type, arcRange, 'Year-bounded whole-day selection uses the original range picker');
+assert.equal(dayjs(bounded.props.minDate).format('YYYY-MM-DD'), '2026-01-01');
+assert.equal(dayjs(bounded.props.maxDate).format('YYYY-MM-DD'), '2026-12-31');
 const order = fs.readFileSync(path.join(root, 'apps/admin/src/features/rental-core/RentalOrderCreatePage.tsx'), 'utf8');
 assert.match(order, /<DatePicker\.RangePicker showTime/);
 console.log('admin-datetime-range: integrated datetime, prop forwarding, seconds, clearing and date-only Arc contracts passed (no browser verification)');

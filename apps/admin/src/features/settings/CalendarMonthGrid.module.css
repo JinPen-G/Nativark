@@ -1,0 +1,29 @@
+.calendar { min-width: 0; container-type: inline-size; display: flex; flex-direction: column; gap: var(--space-3); }
+.header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.monthControl { display: flex; align-items: center; gap: var(--space-2); }
+.monthLabel { margin: 0; font-size: var(--rental-typography-section-title-size, 14px); line-height: var(--rental-typography-section-title-line-height, 20px); font-weight: 500; }
+.legend { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--space-2); }
+.weekday { padding-block: var(--space-1); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); text-align: center; }
+.day { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: 0; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--rental-ui-radius-input); background: var(--surface); color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.day:hover { background: var(--surface-muted); }
+.day:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+.dayHeading { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: var(--space-1); }
+.dayNumber { font-size: var(--rental-typography-body-size); line-height: var(--rental-typography-body-line-height); font-weight: 500; font-variant-numeric: tabular-nums; }
+.markers { display: inline-flex; gap: var(--space-1); color: var(--text-secondary); }
+.dayType, .dayDetails, .help { font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); color: var(--text-secondary); }
+.dayDetails { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { margin-inline-end: 0; max-width: 100%; white-space: normal; }
+.compactLabel { display: none; }
+.help { margin: 0; }
+.unavailable { cursor: default; background: var(--surface-muted); }
+@container (max-width: 600px) {
+  .grid { gap: var(--space-1); }
+  .day { padding: var(--space-2) var(--space-1); align-items: center; border-radius: min(var(--rental-ui-radius-input), var(--space-3)); }
+  .dayHeading { justify-content: center; flex-wrap: wrap; }
+  .markers:empty { display: none; }
+  .fullLabel, .dayDetails { display: none; }
+  .compactLabel { display: inline; }
+  .status { padding-inline: var(--space-1); }
+}

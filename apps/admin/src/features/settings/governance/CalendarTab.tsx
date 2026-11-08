@@ -1,11 +1,13 @@
-import { ListSection, SaveButton } from "@/components/ui";
+import { ActionButton, DataTableRowActions, Dropdown, FormSection, ListSection, SaveButton, Segmented } from "@/components/ui";
+import { RecordFacts } from "@/components/RecordDetailLayout";
+import { Ellipsis, FileText, Plus, RotateCcw, XCircle } from "lucide-react";
 import type {
   RentalCalendarDay,
   RentalCalendarVersionSummary,
   SaveRentalCalendarDayRequest,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Descriptions, InputNumber, Space, Tag, Typography } from "antd";
+import { InputNumber, Space, Tag, Typography } from "antd";
 import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -20,9 +22,12 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
+import { CalendarYearGrid } from "@/features/settings/CalendarYearGrid";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
 import { calendarDayTypeLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
+import styles from "./GovernanceForms.module.css";
 
 const currentYear = new Date().getFullYear();
 /** 四态营业状态（需求 4.5.4）。界面必须能看出限时/自助，否则状态翻转是不可见的。 */
@@ -32,6 +37,7 @@ const businessStatusLabels: Record<string, string> = {
   closed: "停止营业",
   self_service: "自助营业",
 };
+const calendarSourceLabels = { week_rule: "每周模板", official_cn: "官方日历", tenant_override: "人工覆盖" };
 /** 覆盖审计动作。 */
 const auditActionLabels: Record<string, string> = {
   override: "建立覆盖",
@@ -56,7 +62,7 @@ const previewFieldLabels: Record<string, string> = {
 };
 
 /**
- * 「营业日历」页签：年度日历（月历/全年列表）、官方来源应用、发布、历史版本与覆盖审计，
+ * 「营业日历」页签：同一年度数据的月历、全年日历与列表，官方来源应用、发布、历史版本与覆盖审计，
  * 以及逐日覆盖抽屉、范围覆盖抽屉与作废/恢复/移除覆盖三个原因弹窗。
  */
 export function CalendarTab({ permissions }: { permissions: GovernancePermissions }) {
@@ -68,7 +74,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
   const [year, setYear] = useState(currentYear);
   // PRICE-02A（需求 4.5.9）：默认按自然月运营日历；全年列表仅作为可选视图保留。
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth() + 1);
-  const [calendarListView, setCalendarListView] = useState(false);
+  const [calendarView, setCalendarView] = useState<"month" | "year" | "list">("month");
   const [rangeOpen, setRangeOpen] = useState(false);
   const [rangeMode, setRangeMode] = useState<"override" | "remove">("override");
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
@@ -259,7 +265,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       hours: _hours,
       ...editable
     } = row;
-    calendarDayForm.setFieldsValue({ ...editable, overrideReason: row.overrideReason ?? "" });
+    calendarDayForm.resetFields();
+    calendarDayForm.setFieldsValue({ ...editable, businessStatus: row.businessStatus ?? (row.closed ? "closed" : "open"), overrideReason: row.overrideReason ?? "" });
     setCalendarDay(row);
   }
 
@@ -269,6 +276,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         <div className="table-toolbar">
           <Space wrap>
             <Select
+              aria-label={t("日历年度")}
               value={year}
               onChange={setYear}
               options={[
@@ -292,58 +300,37 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           </Space>
           <Space wrap>
             {/* 需求 4.5.9：默认月历视图，全年逐日长列表仅作为可选视图保留。 */}
-            <Switch
-              checkedChildren={t("列表")}
-              unCheckedChildren={t("月历")}
-              checked={calendarListView}
-              onChange={setCalendarListView}
-            />
-            <Button
-              onClick={() => {
-                setHistoryVersion(undefined);
-                setHistoryOpen(true);
-              }}
-            >
-              {t("历史版本")}
-            </Button>
             {canEditCalendar && (
               <Button
                 type="primary"
+                icon={<Plus size={16} />}
+                disabled={calendar.isLoading || calendar.isError}
                 onClick={() => {
                   setRangeMode("override");
                   setRangeOpen(true);
                 }}
               >
-                {t("新增日期范围覆盖")}
+                {t("覆盖日期")}
               </Button>
             )}
-            {canEditCalendar && (
-              <Button
-                onClick={() => {
-                  setRangeMode("remove");
-                  setRangeOpen(true);
-                }}
-              >
-                {t("移除日期范围覆盖")}
-              </Button>
-            )}
-            {canEditCalendar && (
-              <Button onClick={() => setImportOpen(true)}>{t("应用官方来源")}</Button>
-            )}
-            {canPublishCalendar && (
-              <Button
-                type="primary"
-                loading={publishCalendar.isPending}
-                onClick={() => {
-                  publishForm.resetFields();
-                  setPublishOpen(true);
-                }}
-              >
-                {t("发布年度版本")}
-              </Button>
-            )}
+            <Dropdown trigger={["click"]} placement="bottomRight" menu={{ items: [
+              ...(canViewCalendarHistory ? [{ key: "history", label: t("历史版本"), onClick: () => { setHistoryVersion(undefined); setHistoryOpen(true); } }] : []),
+              ...(canEditCalendar ? [
+                { key: "source", label: t("应用官方来源"), onClick: () => setImportOpen(true) },
+                { key: "remove", label: t("移除日期范围覆盖"), onClick: () => { setRangeMode("remove"); setRangeOpen(true); } },
+              ] : []),
+              ...(canPublishCalendar ? [{ key: "publish", label: t("发布年度版本"), onClick: () => { publishForm.resetFields(); setPublishOpen(true); } }] : []),
+            ] }}>
+              <Button icon={<Ellipsis size={16} />} aria-label={t("日历操作")} disabled={calendar.isLoading || calendar.isError}>{t("日历操作")}</Button>
+            </Dropdown>
+            <Segmented<"month" | "year" | "list"> aria-label={t("日历视图")} value={calendarView} onChange={setCalendarView} options={[
+              { value: "month", label: t("月历") },
+              { value: "year", label: t("全年") },
+              { value: "list", label: t("列表") },
+            ]} />
           </Space>
         </div>
+        <QueryState loading={calendar.isLoading} error={calendar.error} transitionKey={String(year)} onRetry={() => calendar.refetch({ throwOnError: true })}><div className={styles.stack}>
         {/* 需求 4.5.2：平台登记官方来源后必须为空间生成「更新/可选择」提示，
             而不只是把状态放在 API 响应里。三态互斥：当前来源有新版 > 有来源可选择 >
             平台尚未登记。应用属编辑动作，只读/历史角色看得到提示但没有应用入口。 */}
@@ -390,14 +377,9 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             description={t("官方节假日来源由 SaaS 平台管理员维护；登记后这里会提示可选择应用。")}
           />
         ) : null}
-        <Alert
-          type="info"
-          showIcon
-          title={t("法定节假日与调休工作日必须来自有来源记录的年度数据")}
-          description={t("租户可以覆盖特殊营业日、停业日和营业时段；特殊价格只在价格模块维护，日历保存规则引用。报价会记录命中的年度日历与价格版本。")}
-        />
         {/* 需求 4.5.9：默认渲染自然月七列月历，点击日期查看/编辑；全年长列表按需切换。 */}
-        {!calendarListView && (
+        <ContentTransition value={calendarView}>
+        {calendarView === "month" && (
           <CalendarMonthGrid
             year={year}
             month={calendarMonth}
@@ -407,7 +389,9 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             onDayClick={(day) => openDay(day)}
           />
         )}
-        {calendarListView && (
+        {calendarView === "year" && <CalendarYearGrid year={year} days={calendar.data?.days ?? []} onDayClick={openDay}
+          onMonthClick={month => { setCalendarMonth(month); setCalendarView("month"); }} />}
+        {calendarView === "list" && (
         <ListSection title={t("全年日历")}>
           <Table<RentalCalendarDay>
             rowKey="date"
@@ -460,7 +444,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                     <Typography.Text type="secondary">{t("沿用每周模板")}</Typography.Text>
                   ),
               },
-              { title: t("来源"), dataIndex: "source" },
+              { title: t("来源"), dataIndex: "source", render: (value: RentalCalendarDay["source"]) => t(calendarSourceLabels[value]) },
               {
                 title: t("被覆盖的原始值"),
                 // 需求 4.5.3：日期详情必须能说明当前结果的来源并展示被覆盖的原始值。
@@ -470,7 +454,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                     <Space orientation="vertical" size={0}>
                       <Typography.Text className="text-meta">
                         {row.overriddenFrom
-                          ? `${row.overriddenFrom.name} · ${row.overriddenFrom.dayType} · ×${row.overriddenFrom.pricingMultiplier}`
+                          ? `${row.overriddenFrom.name} · ${t(calendarDayTypeLabels[row.overriddenFrom.dayType])} · ×${row.overriddenFrom.pricingMultiplier}`
                           : t("每周模板")}
                       </Typography.Text>
                       <Typography.Text type="secondary" className="text-meta">
@@ -511,6 +495,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           />
         </ListSection>
         )}
+        </ContentTransition>
+        </div></QueryState>
         {/* PRICE-02A（需求 4.5.9）：范围覆盖/移除的统一抽屉（预览 → 确认 → 原子应用）。 */}
         <CalendarRangeModal
           mode={rangeMode}
@@ -522,20 +508,27 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         />
       </Space>
 
-      <Drawer
-        title={`${t("覆盖营业日")} · ${calendarDay?.date ?? ""}`}
-        size={480}
+      <Modal presentation="side"
+        title={`${t(canEditCalendar ? "覆盖营业日" : "营业日详情")} · ${calendarDay?.date ?? ""}`}
+        width={640}
         open={Boolean(calendarDay)}
-        onClose={() => setCalendarDay(undefined)}
+        onCancel={() => setCalendarDay(undefined)}
+        closable={!saveDay.isPending}
+        keyboard={!saveDay.isPending}
+        maskClosable={!saveDay.isPending}
         forceRender
         destroyOnHidden
-        extra={
-          <SaveButton  label={t("保存覆盖")} form={calendarDayForm} pending={saveDay.isPending} onSave={async values => { const operation = saveDay.mutateAsync({ ...values, hours: calendarDay?.hours }); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
-        }
+        footer={canEditCalendar ? <><Button disabled={saveDay.isPending} onClick={() => setCalendarDay(undefined)}>{t("取消")}</Button><SaveButton label={t("保存覆盖")} form={calendarDayForm} pending={saveDay.isPending} onSave={values => saveDay.mutateAsync({ ...values, hours: calendarDay?.hours })} /></> : null}
       >
+        {calendarDay && <RecordFacts items={[
+          { key: "source", label: "来源", value: t(calendarSourceLabels[calendarDay.source]) },
+          { key: "hours", label: "营业时段", value: calendarDay.hours?.windows?.map(window => `${window.start}–${window.end}`).join("、") || t("沿用每周模板") },
+          ...(calendarDay.overriddenFrom ? [{ key: "original", label: "被覆盖的原始值", value: `${calendarDay.overriddenFrom.name} · ${t(calendarDayTypeLabels[calendarDay.overriddenFrom.dayType])} · ${t(businessStatusLabels[calendarDay.overriddenFrom.businessStatus ?? (calendarDay.overriddenFrom.closed ? "closed" : "open")])}`, wide: true }] : []),
+        ]} />}
         <Form
           form={calendarDayForm}
           layout="vertical"
+          disabled={!canEditCalendar || saveDay.isPending}
           onFinish={(values) =>
             // 营业时段原样带回被编辑那一行的值：抽屉里没有时段编辑器，而 PUT 是整日覆盖，
             // 不带回就会让一次改价把已配置的营业/领取/归还时段清空。
@@ -562,8 +555,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             />
           )}
           {calendarDay && (calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)?.entries.length ? (
-            <Card
-              size="small"
+            <ListSection
               title={t("当日分时价格摘要")}
               style={{ marginBottom: 16 }}
               extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>{t("进入价格版本与调价")}</Button> : undefined}
@@ -576,11 +568,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   </Typography.Text>
                 ))}
               </Space>
-            </Card>
+            </ListSection>
           ) : null}
-          <Form.Item name="date" label={t("日期")}>
+          <Form.Item name="date" hidden>
             <Input disabled />
           </Form.Item>
+          <FormSection title={t("日期与营业")}>
           <Form.Item name="dayType" label={t("日期类型")}>
             <Select
               options={[
@@ -595,9 +588,15 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Form.Item name="name" label={t("名称")}>
             <Input />
           </Form.Item>
+          <Form.Item name="businessStatus" label={t("营业状态")} tooltip={t("限时营业按已配置时段执行；自助营业需要地点具备自助能力。")}>
+            <Select options={Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label: t(label) }))} onChange={value => calendarDayForm.setFieldValue("closed", value === "closed")} />
+          </Form.Item>
+          <Form.Item name="closed" hidden valuePropName="checked"><Switch /></Form.Item>
+          </FormSection>
           <Form.Item name="pricingMultiplier" hidden>
             <InputNumber />
           </Form.Item>
+          <FormSection title={t("价格规则与原因")}>
           <Alert
             style={{ marginBottom: 16 }}
             type="info"
@@ -616,23 +615,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           >
             <Input />
           </Form.Item>
-          <Form.Item name="closed" label={t("停业")} valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          {/* 四态营业状态（需求 4.5.4）。此前抽屉只有「停业」开关、没有四态选择器，
-              于是限时营业与自助营业在界面上既看不到也配不了；服务端在未提供时会沿用原值，
-              这里显式给出选择器让运营能真正改它。 */}
-          <Form.Item
-            name="businessStatus"
-            label={t("营业状态")}
-            tooltip={t("留空表示按「停业」开关推导（停业=停止营业、否则正常营业）。限时营业需要配营业时段才会真正限制时点；自助营业需要地点声明自助能力。")}
-          >
-            <Select
-              allowClear
-              placeholder={t("留空按停业开关推导")}
-              options={Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label: t(label) }))}
-            />
-          </Form.Item>
+          </FormSection>
           {/* 营业时段是结构化对象，本轮不做可视化时段编辑器。它**不注册为表单字段**：
               rc-field-form 只提交已注册字段，而把对象塞进隐藏 Input 会让 React 收到
               非字符串 value。改为提交时从被编辑的那一行原样带回（见 onFinish）。 */}
@@ -640,14 +623,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             <Input />
           </Form.Item>
         </Form>
-      </Drawer>
+      </Modal>
       {/* 引用公共官方来源版本（需求 4.5.2/4.5.8）。空间侧不再手填原始官方 JSON：
           公共数据由 SaaS 平台管理员在注册表里维护，这里只能挑一版应用到本空间草稿。 */}
-      <Drawer
+      <Modal presentation="side"
         title={`${t("应用")} ${year} ${t("年公共官方日历来源")}`}
-        size={720}
+        width={720}
         open={importOpen}
-        onClose={() => setImportOpen(false)}
+        onCancel={() => setImportOpen(false)}
+        closable={!applyOfficialSource.isPending}
+        keyboard={!applyOfficialSource.isPending}
+        maskClosable={!applyOfficialSource.isPending}
+        footer={null}
         destroyOnHidden
       >
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -678,26 +665,25 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   title: t("操作"),
                   width: 110,
                   render: (_, row) => (
-                    <Button
-                      type="link"
-                      loading={applyOfficialSource.isPending}
-                      onClick={() => applyOfficialSource.mutate(row.id)}
-                    >
-                      {t("应用到草稿")}
-                    </Button>
+                    <ActionButton variant="secondary" label={t("应用到草稿")} disabled={applyOfficialSource.isPending} onAction={() => applyOfficialSource.mutateAsync(row.id)} />
                   ),
                 },
               ]}
             />
           </QueryState>
         </Space>
-      </Drawer>
-      <Modal
+      </Modal>
+      <Modal presentation="side"
         title={t("发布年度营业日历")}
         open={publishOpen}
         onCancel={() => setPublishOpen(false)}
         onConfirm={() => publishForm.validateFields().then((values) => publishCalendar.mutateAsync(values.changeReason))}
         confirmLoading={publishCalendar.isPending}
+        closable={!publishCalendar.isPending}
+        keyboard={!publishCalendar.isPending}
+        maskClosable={!publishCalendar.isPending}
+        cancelButtonProps={{ disabled: publishCalendar.isPending }}
+        okButtonProps={{ disabled: publishPreview.isLoading || publishPreview.isError || !publishPreview.data }}
         okText={t("发布")}
         width={760}
         forceRender
@@ -720,24 +706,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <QueryState loading={publishPreview.isLoading} error={publishPreview.error}>
             {publishPreview.data && (
               <Space orientation="vertical" size={12} style={{ width: "100%", marginBottom: 16 }}>
-                <Descriptions size="small" column={2} bordered>
-                  <Descriptions.Item label={t("待发布版本")}>v{publishPreview.data.draftVersion}</Descriptions.Item>
-                  <Descriptions.Item label={t("当前已发布")}>
-                    {publishPreview.data.publishedVersion
-                      ? `v${publishPreview.data.publishedVersion}`
-                      : t("无（首次发布）")}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t("受影响日期")}>
-                    {publishPreview.data.dates.length} {t("天")}
-                  </Descriptions.Item>
-                  <Descriptions.Item label={t("公共官方来源")}>
-                    {publishPreview.data.officialSourceConfirmed ? (
-                      <Tag color="success">{t("已确认")}</Tag>
-                    ) : (
-                      <Tag color="warning">{t("尚未确认")}</Tag>
-                    )}
-                  </Descriptions.Item>
-                </Descriptions>
+                <RecordFacts items={[
+                  { key: "draft", label: "待发布版本", value: `v${publishPreview.data.draftVersion}` },
+                  { key: "published", label: "当前已发布", value: publishPreview.data.publishedVersion ? `v${publishPreview.data.publishedVersion}` : t("无（首次发布）") },
+                  { key: "dates", label: "受影响日期", value: `${publishPreview.data.dates.length} ${t("天")}` },
+                  { key: "source", label: "公共官方来源", value: <Tag color={publishPreview.data.officialSourceConfirmed ? "success" : "warning"}>{t(publishPreview.data.officialSourceConfirmed ? "已确认" : "尚未确认")}</Tag> },
+                ]} />
                 {publishPreview.data.firstPublish && (
                   <Alert
                     type="info"
@@ -894,36 +868,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   title: t("操作"),
                   width: 170,
                   render: (_, row) => {
-                    if (!canEditCalendar) return <Typography.Text type="secondary">{t("只读")}</Typography.Text>;
-                    return (
-                      <Space size={0}>
-                        {row.status === "draft" ? (
-                          <Button
-                            type="link"
-                            danger
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              voidForm.resetFields();
-                              setVoidTarget(row);
-                            }}
-                          >
-                            {t("作废")}
-                          </Button>
-                        ) : (
-                          // 需求 4.5.7：恢复旧规则必须以旧内容生成新版本，不得原地改回。
-                          <Button
-                            type="link"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              restoreForm.resetFields();
-                              setRestoreTarget(row);
-                            }}
-                          >
-                            {t("以此版本建新草稿")}
-                          </Button>
-                        )}
-                      </Space>
-                    );
+                    return <DataTableRowActions details={() => setHistoryVersion(row.version)} detailLabel={t("查看详情")} menuLabel={`v${row.version} · ${t("更多操作")}`}
+                      primary={{ id: "details", label: t("查看详情"), icon: FileText, onSelect: () => setHistoryVersion(row.version) }}
+                      actions={canEditCalendar ? row.status === "draft"
+                        ? [{ id: "void", label: t("作废"), icon: XCircle, danger: true, onSelect: () => { voidForm.resetFields(); setVoidTarget(row); } }]
+                        : [{ id: "restore", label: t("以此版本建新草稿"), icon: RotateCcw, onSelect: () => { restoreForm.resetFields(); setRestoreTarget(row); } }]
+                        : []} />;
                   },
                 },
               ]}
@@ -938,36 +888,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               <QueryState loading={calendarVersionDetail.isLoading} error={calendarVersionDetail.error}>
                 {calendarVersionDetail.data && (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                    <Descriptions size="small" column={2} bordered>
-                      <Descriptions.Item label={t("状态")}>
-                        {t(calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status)}
-                      </Descriptions.Item>
-                      <Descriptions.Item label={t("官方来源")}>
-                        {calendarVersionDetail.data.sourceName ?? t("无")}
-                      </Descriptions.Item>
-                      <Descriptions.Item label={t("发布时间")}>
-                        {calendarVersionDetail.data.publishedAt
-                          ? dayjs(calendarVersionDetail.data.publishedAt).format("YYYY-MM-DD HH:mm")
-                          : t("未发布")}
-                      </Descriptions.Item>
-                      <Descriptions.Item label={t("被替代时间")}>
-                        {calendarVersionDetail.data.supersededAt
-                          ? dayjs(calendarVersionDetail.data.supersededAt).format("YYYY-MM-DD HH:mm")
-                          : "—"}
-                      </Descriptions.Item>
-                    </Descriptions>
+                    <RecordFacts items={[
+                      { key: "status", label: "状态", value: t(calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status) },
+                      { key: "source", label: "官方来源", value: calendarVersionDetail.data.sourceName ?? t("无") },
+                      { key: "published", label: "发布时间", value: calendarVersionDetail.data.publishedAt ? dayjs(calendarVersionDetail.data.publishedAt).format("YYYY-MM-DD HH:mm") : t("未发布") },
+                      { key: "superseded", label: "被替代时间", value: calendarVersionDetail.data.supersededAt ? dayjs(calendarVersionDetail.data.supersededAt).format("YYYY-MM-DD HH:mm") : "—" },
+                    ]} />
                     {calendarVersionDetail.data.publishDiff ? (
-                      <Descriptions size="small" column={3} bordered>
-                        <Descriptions.Item label={t("新增日期")}>
-                          {calendarVersionDetail.data.publishDiff.added.join("、") || "—"}
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t("移除日期")}>
-                          {calendarVersionDetail.data.publishDiff.removed.join("、") || "—"}
-                        </Descriptions.Item>
-                        <Descriptions.Item label={t("变更日期")}>
-                          {calendarVersionDetail.data.publishDiff.changed.join("、") || "—"}
-                        </Descriptions.Item>
-                      </Descriptions>
+                      <RecordFacts items={[
+                        { key: "added", label: "新增日期", value: calendarVersionDetail.data.publishDiff.added.join("、") || "—", wide: true },
+                        { key: "removed", label: "移除日期", value: calendarVersionDetail.data.publishDiff.removed.join("、") || "—", wide: true },
+                        { key: "changed", label: "变更日期", value: calendarVersionDetail.data.publishDiff.changed.join("、") || "—", wide: true },
+                      ]} />
                     ) : (
                       <Typography.Text type="secondary">{t("该版本没有相对上一版本的差异记录（首次发布或尚未发布）。")}</Typography.Text>
                     )}

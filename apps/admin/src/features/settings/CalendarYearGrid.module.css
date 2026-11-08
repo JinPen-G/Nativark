@@ -1,0 +1,29 @@
+.year { min-width: 0; container-type: inline-size; display: flex; flex-direction: column; gap: var(--space-4); }
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-2); }
+.legend i { display: inline-block; width: var(--space-2); height: var(--space-2); border-radius: var(--space-1); }
+.legend .holidaySample { background: var(--foreground); height: 2px; }
+.closedSample { background: var(--rental-status-error-ink); }
+.limitedSample { background: var(--rental-status-warning-ink); }
+.selfServiceSample { background: var(--rental-status-info-ink); }
+.legend .overrideSample { background: var(--foreground); width: var(--space-1); height: var(--space-1); }
+.months { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-5) var(--space-6); }
+.month { min-width: 0; }
+.monthHeading { margin: 0 0 var(--space-2); font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); font-weight: var(--rental-typography-section-title-weight); }
+.monthHeading button { justify-content: space-between; width: 100%; }
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.weekday { display: flex; align-items: center; justify-content: center; min-height: var(--space-6); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); color: var(--text-secondary); }
+.day { display: inline-flex; align-items: center; justify-content: center; position: relative; min-width: 0; min-height: 28px; border: 0; border-radius: min(var(--rental-ui-radius-button), var(--space-2)); padding: var(--space-1) 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); font-variant-numeric: tabular-nums; cursor: pointer; }
+.day[data-weekend] { color: var(--text-secondary); }
+.day[data-holiday] { text-decoration: underline; text-underline-offset: var(--space-1); font-weight: 500; }
+.day[data-status="closed"] { color: var(--rental-status-error-ink); background: var(--rental-status-error-surface); }
+.day[data-status="limited"] { color: var(--rental-status-warning-ink); background: var(--rental-status-warning-surface); }
+.day[data-status="self_service"] { color: var(--rental-status-info-ink); background: var(--rental-status-info-surface); }
+.day[data-override]::after { content: ""; position: absolute; bottom: 1px; width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+.day:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--border); background: var(--surface-muted); }
+.day:focus-visible { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.day:disabled { color: var(--text-muted); cursor: default; }
+.help { margin: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+@container (max-width: 899px) { .months { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (max-width: 679px) { .months { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5) var(--space-3); } }
+@container (max-width: 419px) { .months { grid-template-columns: minmax(0, 1fr); } .day { min-height: 36px; font-size: var(--rental-typography-body-size); } }

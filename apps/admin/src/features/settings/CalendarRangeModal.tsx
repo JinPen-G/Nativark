@@ -1,15 +1,15 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Divider, Space, Tag, Typography } from "antd";
-import { App } from "@/components/ui";
+import { Space, Tag, Typography } from "antd";
+import { ActionButton, App, FormSection, Modal } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table, TimeInput } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, Drawer } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
-import type { Dayjs } from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import {
   ApplyRentalCalendarRangeOverrideResult,
   ApplyRentalCalendarRangeRemoveResult,
@@ -20,6 +20,8 @@ import {
 } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
+import { errorText } from "./governance/shared";
+import styles from "./governance/GovernanceForms.module.css";
 
 type RangeRow = RentalCalendarRangeOverridePreview["days"][number] | RentalCalendarRangeRemovePreview["days"][number];
 
@@ -51,19 +53,6 @@ const businessStatusOptions: Array<{ value: RentalCalendarBusinessStatus; label:
 
 type FieldKey = "dayType" | "name" | "pricingOverrideRef" | "businessStatus" | "hours";
 
-/** 需求 4.5.9：周期性分时价格由 PRICE-03 价格计划维护，月历只消费其只读摘要。 */
-function PricePlaceholder() {
-  const { t } = useLocale();
-  return (
-    <Alert
-      type="info"
-      showIcon
-      title={t("一次性特殊价格由价格模块提供")}
-      description={t("价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。")}
-    />
-  );
-}
-
 export function CalendarRangeModal({
   mode,
   year,
@@ -88,6 +77,7 @@ export function CalendarRangeModal({
   const [overridePreview, setOverridePreview] = useState<RentalCalendarRangeOverridePreview>();
   const [removePreview, setRemovePreview] = useState<RentalCalendarRangeRemovePreview>();
   const [conflictAcknowledged, setConflictAcknowledged] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState<number>();
   const [useDatetime, setUseDatetime] = useState(false);
   const [selectedFields, setSelectedFields] = useState<Record<FieldKey, boolean>>({
     dayType: true,
@@ -102,21 +92,24 @@ export function CalendarRangeModal({
     setOverridePreview(undefined);
     setRemovePreview(undefined);
     setConflictAcknowledged(false);
+    setPreviewRevision(undefined);
     setUseDatetime(false);
+    setSelectedFields({ dayType: true, name: false, pricingOverrideRef: false, businessStatus: false, hours: false });
     form.resetFields();
+    previewMutation.reset();
+    applyMutation.reset();
   };
 
   const close = () => {
-    reset();
     onClose();
   };
 
   const previewMutation = useMutation({
     mutationFn: async () => {
+      await form.validateFields();
       const values = form.getFieldsValue(true) as {
         range?: [Dayjs, Dayjs];
-        startDateTime?: Dayjs;
-        endDateTime?: Dayjs;
+        dateTimeRange?: [Dayjs, Dayjs];
         dayType?: RentalDayType;
         name?: string;
         pricingOverrideRef?: string;
@@ -126,8 +119,9 @@ export function CalendarRangeModal({
         overrideReason?: string;
       };
       const [start, end] = values.range ?? [];
+      const [startDateTime, endDateTime] = values.dateTimeRange ?? [];
       if (!start || !end) throw new Error(t("请选择日期范围"));
-      if (mode === "override" && useDatetime && (!values.startDateTime || !values.endDateTime)) {
+      if (mode === "override" && useDatetime && (!startDateTime || !endDateTime)) {
         throw new Error(t("日期时间范围必须同时提供开始与结束时点"));
       }
       const startDate = start.format("YYYY-MM-DD");
@@ -135,8 +129,8 @@ export function CalendarRangeModal({
       const payload = {
         startDate,
         endDate,
-        startDateTime: mode === "override" && useDatetime ? values.startDateTime?.toISOString() : undefined,
-        endDateTime: mode === "override" && useDatetime ? values.endDateTime?.toISOString() : undefined,
+        startDateTime: mode === "override" && useDatetime ? startDateTime?.toISOString() : undefined,
+        endDateTime: mode === "override" && useDatetime ? endDateTime?.toISOString() : undefined,
         ...(mode === "override"
           ? {
               fields: {
@@ -156,24 +150,27 @@ export function CalendarRangeModal({
           throw new Error(t("至少选择并填写一个要设置的字段"));
         }
         if (!values.overrideReason?.trim()) throw new Error(t("请填写调整原因"));
-        return rentalCoreApi.calendarRangePreview(year, payload as Parameters<typeof rentalCoreApi.calendarRangePreview>[1]);
+        const preview = await rentalCoreApi.calendarRangePreview(year, payload as Parameters<typeof rentalCoreApi.calendarRangePreview>[1]);
+        return { preview, revision: currentRevision };
       }
-      return rentalCoreApi.calendarRangeRemovePreview(year, payload);
+      const preview = await rentalCoreApi.calendarRangeRemovePreview(year, payload);
+      return { preview, revision: currentRevision };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ preview, revision }) => {
       setConflictAcknowledged(false);
-      if (mode === "override") setOverridePreview(data as RentalCalendarRangeOverridePreview);
-      else setRemovePreview(data as RentalCalendarRangeRemovePreview);
+      setPreviewRevision(revision);
+      if (mode === "override") setOverridePreview(preview as RentalCalendarRangeOverridePreview);
+      else setRemovePreview(preview as RentalCalendarRangeRemovePreview);
       setStep("preview");
     },
   });
 
   const applyMutation = useMutation({
     mutationFn: async () => {
+      if (step !== "preview" || previewRevision !== currentRevision) throw new Error(t("日历已更新，请返回修改并重新预览"));
       const values = form.getFieldsValue(true) as {
         range?: [Dayjs, Dayjs];
-        startDateTime?: Dayjs;
-        endDateTime?: Dayjs;
+        dateTimeRange?: [Dayjs, Dayjs];
         dayType?: RentalDayType;
         name?: string;
         pricingOverrideRef?: string;
@@ -183,6 +180,7 @@ export function CalendarRangeModal({
         overrideReason?: string;
       };
       const [start, end] = values.range ?? [];
+      const [startDateTime, endDateTime] = values.dateTimeRange ?? [];
       if (!start || !end) throw new Error(t("请选择日期范围"));
       const startDate = start.format("YYYY-MM-DD");
       const endDate = end.format("YYYY-MM-DD");
@@ -190,8 +188,8 @@ export function CalendarRangeModal({
         return rentalCoreApi.calendarRangeApply(year, {
           startDate,
           endDate,
-          startDateTime: useDatetime ? values.startDateTime?.toISOString() : undefined,
-          endDateTime: useDatetime ? values.endDateTime?.toISOString() : undefined,
+          startDateTime: useDatetime ? startDateTime?.toISOString() : undefined,
+          endDateTime: useDatetime ? endDateTime?.toISOString() : undefined,
           fields: {
             ...(selectedFields.dayType ? { dayType: values.dayType } : {}),
             ...(selectedFields.name ? { name: values.name } : {}),
@@ -202,7 +200,7 @@ export function CalendarRangeModal({
               : {}),
           },
           overrideReason: values.overrideReason!.trim(),
-          expectedRevision: currentRevision,
+          expectedRevision: previewRevision,
           // 已在预览步确认过冲突：预览展示冲突且用户点击「确认覆盖」才会走到这里。
           overrideConfirmed: conflictAcknowledged || undefined,
         });
@@ -211,7 +209,7 @@ export function CalendarRangeModal({
         startDate,
         endDate,
         overrideReason: values.overrideReason!.trim(),
-        expectedRevision: currentRevision,
+        expectedRevision: previewRevision,
       });
     },
     onSuccess: (result) => {
@@ -230,6 +228,9 @@ export function CalendarRangeModal({
   const needsAck = mode === "override" && (overridePreview?.conflictCount ?? 0) > 0 && !conflictAcknowledged;
 
   const previewColumns = useMemo<ColumnsType<RangeRow>>(() => {
+    const dayLabel = (value: string) => t(dayTypeOptions.find(option => option.value === value)?.label ?? value);
+    const statusLabel = (value: string) => t(businessStatusOptions.find(option => option.value === value)?.label ?? value);
+    const fieldLabels: Record<string, string> = { dayType: "日期类型", name: "名称", businessStatus: "营业状态", closed: "停业", hours: "营业时段", pricingOverrideRef: "一次性价格引用", pricingMultiplier: "特殊价格", source: "来源" };
     const isRemoveRow = (row: RangeRow): row is RentalCalendarRangeRemovePreview["days"][number] =>
       "hasOverride" in row;
     if (mode === "remove") {
@@ -247,7 +248,7 @@ export function CalendarRangeModal({
             const status = "conflict" in row ? row.current.businessStatus ?? (row.current.closed ? "closed" : "open") : row.current.businessStatus ?? (row.current.closed ? "closed" : "open");
             return (
               <Typography.Text className="text-meta">
-                {row.current.dayType} · {status}
+                {dayLabel(row.current.dayType)} · {statusLabel(status)}
               </Typography.Text>
             );
           },
@@ -261,7 +262,7 @@ export function CalendarRangeModal({
                   {row.restoredSource === "official_cn" ? t("官方日历") : t("每周模板")}
                 </Tag>
                 <Typography.Text className="text-meta">
-                  {row.restored.dayType} · {row.restored.name}
+                  {dayLabel(row.restored.dayType)} · {row.restored.name}
                 </Typography.Text>
               </Space>
             ) : (
@@ -286,7 +287,7 @@ export function CalendarRangeModal({
           const row = raw;
           return (
             <Typography.Text className="text-meta">
-              {row.base.dayType} · {row.base.businessStatus ?? (row.base.closed ? "closed" : "open")}
+              {dayLabel(row.base.dayType)} · {statusLabel(row.base.businessStatus ?? (row.base.closed ? "closed" : "open"))}
               {row.base.hours?.windows?.length ? ` · ${row.base.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
             </Typography.Text>
           );
@@ -299,7 +300,7 @@ export function CalendarRangeModal({
           const row = raw;
           return (
             <Typography.Text className="text-meta">
-              {row.current.dayType} · {row.current.businessStatus ?? (row.current.closed ? "closed" : "open")}
+              {dayLabel(row.current.dayType)} · {statusLabel(row.current.businessStatus ?? (row.current.closed ? "closed" : "open"))}
               {row.current.hours?.windows?.length ? ` · ${row.current.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
             </Typography.Text>
           );
@@ -312,7 +313,7 @@ export function CalendarRangeModal({
           const row = raw;
           return (
             <Typography.Text className="text-meta">
-              {row.after.dayType} · {row.after.businessStatus ?? (row.after.closed ? "closed" : "open")}
+              {dayLabel(row.after.dayType)} · {statusLabel(row.after.businessStatus ?? (row.after.closed ? "closed" : "open"))}
               {row.after.hours?.windows?.length ? ` · ${row.after.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
               {row.after.pricingOverrideRef ? ` · ${t("特殊价格引用")} ${row.after.pricingOverrideRef}` : ""}
             </Typography.Text>
@@ -322,44 +323,48 @@ export function CalendarRangeModal({
       {
         title: t("将替换的字段"),
         dataIndex: "changedFields",
-        render: (value: string[]) => value.map((field) => <Tag key={field}>{field}</Tag>),
+        render: (value: string[]) => value.map((field) => <Tag key={field}>{t(fieldLabels[field] ?? field)}</Tag>),
       },
     ];
     return overrideColumns as ColumnsType<RangeRow>;
-  }, [mode]);
+  }, [mode, t]);
 
   const previewData: RangeRow[] | undefined =
     mode === "override" ? overridePreview?.days : removePreview?.days;
+  const operationError = applyMutation.error ?? previewMutation.error;
+  const isFieldError = operationError && typeof operationError === "object" && "errorFields" in operationError;
+  const busy = previewMutation.isPending || applyMutation.isPending;
 
   return (
-    <Drawer
+    <Modal presentation="side"
       title={mode === "override" ? `${t("新增日期范围覆盖")} · ${year} ${t("年")}` : `${t("移除日期范围覆盖")} · ${year} ${t("年")}`}
-      size={880}
+      width={880}
       open={open}
-      onClose={close}
+      onCancel={close}
+      afterClose={reset}
+      closable={!busy}
+      keyboard={!busy}
+      maskClosable={!busy}
       destroyOnHidden
-      extra={
+      footer={
         step === "input" ? (
-          <Button type="primary" loading={previewMutation.isPending} onClick={() => previewMutation.mutate()}>
-            {t("预览影响")}
-          </Button>
+          <><Button disabled={busy} onClick={close}>{t("取消")}</Button><ActionButton key="preview" label={t("预览影响")} pending={previewMutation.isPending} onAction={() => previewMutation.mutateAsync()} /></>
         ) : (
-          <Space>
-            <Button onClick={() => setStep("input")}>{t("返回修改")}</Button>
+          <>
+            <Button disabled={busy} onClick={() => { setStep("input"); setConflictAcknowledged(false); applyMutation.reset(); }}>{t("返回修改")}</Button>
             {mode === "override" ? (
-              <Button type="primary" danger={needsAck} loading={applyMutation.isPending} disabled={needsAck} onClick={() => applyMutation.mutate()}>
-                {t("确认应用")}（{overridePreview?.totalDays ?? 0} {t("天")}）
-              </Button>
+              <ActionButton key="apply" intent="confirm" label={`${t("确认应用")}（${overridePreview?.totalDays ?? 0} ${t("天")}）`} pending={applyMutation.isPending} disabled={needsAck} onAction={() => applyMutation.mutateAsync()} />
             ) : (
-              <Button type="primary" loading={applyMutation.isPending} onClick={() => applyMutation.mutate()}>
-                {t("确认移除")}（{removePreview?.overrideCount ?? 0} {t("天")}）
-              </Button>
+              <ActionButton key="remove" intent="confirm" label={`${t("确认移除")}（${removePreview?.overrideCount ?? 0} ${t("天")}）`} pending={applyMutation.isPending} onAction={() => applyMutation.mutateAsync()} />
             )}
-          </Space>
+          </>
         )
       }
     >
-      <Form form={form} layout="vertical" initialValues={{ hoursStart: "09:00", hoursEnd: "18:00" }}>
+      {operationError && !isFieldError && <Alert type="error" showIcon title={t("日历操作未完成")} description={errorText(operationError, operationError.message || t("请检查输入后重试"))} />}
+      <div hidden={step === "preview"}>
+      <Form form={form} layout="vertical" disabled={busy || step === "preview"} initialValues={{ hoursStart: "09:00", hoursEnd: "18:00" }} onValuesChange={() => { previewMutation.reset(); applyMutation.reset(); }}>
+        <FormSection title={t("覆盖范围")}>
         <Form.Item
           name="range"
           label={t("日期范围（同一自然年内；跨年度请按年度分两次提交）")}
@@ -368,14 +373,8 @@ export function CalendarRangeModal({
           <DatePicker.RangePicker
             style={{ width: "100%" }}
             format="YYYY-MM-DD"
-            onChange={() => {
-              // 起点变化后把时间范围约束到新年度：跨年请求会被后端拒绝，提前限制减少无效提交。
-              const [start] = form.getFieldValue("range") ?? [];
-              if (start) {
-                form.setFieldValue("range", [start, endOfYearIfDifferent(start, form.getFieldValue("range")?.[1])]);
-              }
-            }}
-            disabledDate={(current, info) => Boolean(info.from && current.year() !== info.from.year())}
+            minDate={dayjs(`${year}-01-01`)}
+            maxDate={dayjs(`${year}-12-31`)}
           />
         </Form.Item>
         {mode === "override" && (
@@ -388,18 +387,14 @@ export function CalendarRangeModal({
                 {t("指定开始与结束时点")}
               </Checkbox>
             </Form.Item>
-            {useDatetime && (
-              <Space size={16} wrap>
-                <Form.Item name="startDateTime" label={t("开始时点")} rules={[{ required: useDatetime }]}>
-                  <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-                </Form.Item>
-                <Form.Item name="endDateTime" label={t("结束时点")} rules={[{ required: useDatetime }]}>
-                  <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-                </Form.Item>
-              </Space>
-            )}
-            <Divider titlePlacement="left">{t("要设置的字段（未勾选字段保持原值）")}</Divider>
-            <Space size={24} wrap>
+            {useDatetime && <Form.Item name="dateTimeRange" label={t("起止时点")} rules={[{ required: true, message: t("日期时间范围必须同时提供开始与结束时点") }]}>
+              <DatePicker.RangePicker showTime format="YYYY-MM-DD HH:mm" />
+            </Form.Item>}
+          </>
+        )}
+        </FormSection>
+        {mode === "override" && <FormSection title={t("要设置的字段（未勾选字段保持原值）")}>
+            <Space size={16} wrap className={styles.fieldChoices}>
               {(
                 [
                   ["dayType", t("日期类型")],
@@ -448,14 +443,7 @@ export function CalendarRangeModal({
                 </Form.Item>
               </Space>
             )}
-            <Alert
-              style={{ marginBottom: 16 }}
-              type="info"
-              showIcon
-              title={t("价格说明")}
-              description={t("本抽屉不设置商品价格，也不会因为价格时段把整天改成假日；周期性分时价格由价格计划维护（PRICE-03）。")}
-            />
-            <PricePlaceholder />
+            {selectedFields.pricingOverrideRef && <Alert type="info" showIcon title={t("一次性特殊价格由价格模块提供")} description={t("价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。")} />}
             <Form.Item
               name="overrideReason"
               label={t("调整原因（必填，随本批全部日期一起记录）")}
@@ -464,8 +452,7 @@ export function CalendarRangeModal({
             >
               <Input maxLength={191} />
             </Form.Item>
-          </>
-        )}
+          </FormSection>}
         {mode === "remove" && (
           <Form.Item
             name="overrideReason"
@@ -476,6 +463,7 @@ export function CalendarRangeModal({
           </Form.Item>
         )}
       </Form>
+      </div>
 
       {step === "preview" && (
         <Space orientation="vertical" size={12} style={{ width: "100%", marginTop: 8 }}>
@@ -489,7 +477,7 @@ export function CalendarRangeModal({
             }
             description={
               mode === "override"
-                ? t("应用将一次性写入全部日期（共用原因、批次与操作时间，只推进一次版本修订）；与他人的并发编辑会返回 409，请刷新后重试。")
+                ? t("请核对以下日期的变化。其他人已修改日历时，本次应用会被拒绝，需要重新预览。")
                 : t("移除后日期恢复到官方日历或每周模板；只影响范围内的已有覆盖，不会产生空白日。")
             }
           />
@@ -500,7 +488,7 @@ export function CalendarRangeModal({
               title={`${t("有")} ${conflicts.length} ${t("天已存在人工覆盖，必须明确确认后才能应用")}`}
               description={`${t("冲突日期")}：${conflicts.map((row) => row.date).join("、")}。${t("应用会替换这些日期上现有人工覆盖的原因与取值（历史审计保留在覆盖审计流水里）。")}`}
               action={
-                <Checkbox checked={conflictAcknowledged} onChange={(event) => setConflictAcknowledged(event.target.checked)}>
+                <Checkbox disabled={applyMutation.isPending} checked={conflictAcknowledged} onChange={(event) => setConflictAcknowledged(event.target.checked)}>
                   {t("我已确认替换上述日期的现有人工覆盖")}
                 </Checkbox>
               }
@@ -516,14 +504,6 @@ export function CalendarRangeModal({
           />
         </Space>
       )}
-    </Drawer>
+    </Modal>
   );
-}
-
-/** 把范围终点约束到与起点同年度（需求 4.5.9：整日覆盖不得跨年度）。 */
-function endOfYearIfDifferent(start: Dayjs, end?: Dayjs): Dayjs {
-  if (!end || end.year() !== start.year() || end.isBefore(start)) {
-    return start.endOf("year");
-  }
-  return end;
 }
