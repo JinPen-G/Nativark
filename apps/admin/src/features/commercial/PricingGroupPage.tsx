@@ -3,7 +3,8 @@ import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, InputNumber, Space, Tag, Typography } from "antd";
-import { ListSection, App } from "@/components/ui";
+import { DataTableMoney, DataTableText, ListSection, App } from "@/components/ui";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -147,12 +148,12 @@ export function PricingGroupPage() {
       <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading || rules.isLoading || currentVersionDetail.isLoading} error={pricingGroups.error || models.error || settings.error || rules.error || currentVersionDetail.error}>
         <Table<RentalPricingGroup>
           cardView={pricingGroupCards({ t, rates: currentVersionDetail.data?.rates ?? [], models: models.data ?? [], defaultUnit: settings.data?.pricing.defaultUnit, money: value => formatRentalMoney(value, currency), canEditSecurity: Boolean(securityRateFields.length && currentVersionDetail.data), edit, security: editSecurityRates })} exportConfig={{ filename: t("定价分组"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("版本"), value: row => row.version }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }, { label: t("包含的型号"), value: row => row.members.map(item => item.name).join(" / ") }] }} rowKey="id" onRefresh={() => pricingGroups.refetch()} loading={pricingGroups.isLoading} refreshing={pricingGroups.isFetching} dataSource={rows} columns={[
-          { title: t("定价分组"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
-          { title: locale === "en-US" ? itemGroupLabel : `${t("包含的")}${itemGroupLabel}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="processing" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>{t("未配置")}</Tag>}</Space> },
+          { title: t("定价分组"), minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary, render: (_, row) => <DataTableText primary={row.name} secondary={`${row.code} · v${row.version}`}/> },
+          { title: locale === "en-US" ? itemGroupLabel : `${t("包含的")}${itemGroupLabel}`, render: (_, row) => <Space orientation="vertical" size={4}>{row.members.length ? row.members.map((member) => <DataTableText key={member.id} primary={member.name} secondary={member.code}/>) : <span className="muted">{t("未配置")}</span>}</Space> },
           { title: t("默认计价"), render: (_, row) => row.defaultPricingUnit ? t(RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] ?? row.defaultPricingUnit) : t("跟随价格配置") },
-          { title: t("当前基本价"), render: (_, row) => {
+          { title: t("当前基本价"), minWidth: ADMIN_TABLE_COLUMN_WIDTH.dateTime, render: (_, row) => {
             const rates = (currentVersionDetail.data?.rates ?? []).filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === row.id);
-            return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</Tag>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
+            return rates.length ? <Space orientation="vertical" size={4}>{rates.map((rate) => <span style={{whiteSpace:"nowrap"}} key={`${rate.itemGroupId}:${rate.unit}`}><DataTableMoney formatted={formatRentalMoney(rate.baseAmount,currency)}/><span className="muted"> / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</span></span>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
           } },
           { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "启用" : "停用")}</Tag> },
           { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => edit(row) }} details={() => edit(row)} detailLabel={t("编辑")} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[

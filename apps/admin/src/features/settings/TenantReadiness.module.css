@@ -1,9 +1,10 @@
 .checklist { display: flex; flex-direction: column; list-style: none; padding: 0; margin: 0; min-width: 0; }
-.item { display: flex; align-items: flex-start; gap: var(--space-3); padding-block: var(--space-4); border-bottom: 1px solid var(--border); min-width: 0; }
+.item { display: flex; align-items: center; gap: var(--space-3); padding-block: var(--space-3); border-bottom: 1px solid var(--rental-content-divider); min-width: 0; }
 .item:first-child { padding-top: var(--space-2); }
 .indicator { display: flex; align-items: center; flex: none; color: var(--warning); min-height: var(--rental-control-height-default); }
 .indicator[data-done] { color: var(--success); }
 .copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: var(--rental-control-height-default); color: var(--foreground); font-size: var(--rental-typography-body-size); }
-.copy p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.title strong { font-weight: var(--rental-list-primary-weight); }
+.copy p { margin: var(--rental-table-text-gap) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); }
 .item > button { flex: none; }

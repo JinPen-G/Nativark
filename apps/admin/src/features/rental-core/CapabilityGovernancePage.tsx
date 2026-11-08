@@ -1,4 +1,6 @@
-import { ListSection, SaveButton } from "@/components/ui";
+import { DataTableText, ListFilters, useListFilter, ListSection, SaveButton, Tabs } from "@/components/ui";
+import { Button as ArcButton } from "@/registry/components/button/button";
+import { CardBadge, CardFacts, CardSecondary, CardSection } from "@/components/ui/data-table/RecordCard";
 import { HistoryOutlined, SettingOutlined } from "@/components/ui/icons";
 import type {
   RentalCapabilityConfigField,
@@ -103,8 +105,13 @@ export function CapabilityGovernancePage() {
   const canManage = hasPermission("rental-core:capability:manage");
   const [editing, setEditing] = useState<WorkspaceCapabilityView>();
   const [auditCode, setAuditCode] = useState<string>();
+  const [view, setView] = useState("capabilities");
   const [form] = Form.useForm<LifecycleFormValues>();
   const overview = useQuery({ queryKey: ["rental-core", "capabilities"], queryFn: rentalCoreApi.capabilities });
+  const capabilityFilter = useListFilter(overview.data?.capabilities, {
+    fields: row => [row.definition.label, t(row.definition.label), row.definition.code],
+    status: row => row.state,
+  });
   const audits = useQuery({
     queryKey: ["rental-core", "capability-audits", auditCode],
     queryFn: () => rentalCoreApi.capabilityAudits(auditCode)
@@ -194,12 +201,22 @@ export function CapabilityGovernancePage() {
 
   const data = overview.data;
   const missing = data?.missingRequired ?? [];
+  const capabilityNames = (codes: string[]) => codes.map(code => t(data?.capabilities.find(item => item.definition.code === code)?.definition.label ?? code)).join(" · ");
+  const configValue = (value: RentalCapabilityConfig[string] | undefined) => {
+    if (value === undefined) return t("未配置");
+    if (typeof value === "boolean") return t(value ? "是" : "否");
+    if (Array.isArray(value)) return t("{count} 条兼容关系", { count: value.length });
+    return t(capabilityOptionLabels[String(value)] ?? String(value));
+  };
+  const inspectAudit = (code: string) => { setAuditCode(code); setView("audit"); };
 
   return (
     <>
       <PageHeader
         title={t("经营空间能力")}
       />
+      <Tabs activeKey={view} onChange={setView} aria-label={t("经营空间能力")} items={[
+        { key: "capabilities", label: t("能力目录"), children:
       <QueryState loading={overview.isLoading} error={overview.error}>
         {/* 「可访问」与「已达生产经营条件」分开表示：开发/演示空间可以继续验证通用
             Rental Core，但必须明确显示缺失的首期必选能力，不得因为进得去就当成能力齐备。 */}
@@ -233,22 +250,46 @@ export function CapabilityGovernancePage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <ListSection>
+        <ListSection controls={<ListFilters filter={capabilityFilter} placeholder="搜索能力名称" options={Object.entries(stateMeta).map(([value,meta])=>({value,label:t(meta.label)}))}/>}>
           <Table<WorkspaceCapabilityView>
+            cardView={{
+              kind: "capability", defaultView: "cards", title: row => t(row.definition.label), subtitle: row => row.definition.code,
+              status: row => <CardBadge tone={row.state === "enabled" ? "positive" : undefined} emphasis={row.state === "declared_not_implemented"}>{t(stateMeta[row.state].label)}</CardBadge>,
+              body: row => <>
+                <CardSecondary>{t(row.providedByCore ? "Core 内建" : row.requiredForCategory ? "品类必选" : kindMeta[row.definition.kind].label)}</CardSecondary>
+                <CardFacts items={[
+                  { label: t("依赖"), value: capabilityNames(row.definition.dependsOn) || t("无依赖") },
+                  { label: t("配置项"), value: row.definition.configSchema.length },
+                ]} />
+                {!!row.definition.conflictsWith.length && <CardSecondary>{t("互斥")}：{capabilityNames(row.definition.conflictsWith)}</CardSecondary>}
+                {!row.applicable && <CardSecondary>{t("不适用于当前品类")}</CardSecondary>}
+                {row.applicable && !row.declaredByCategory && <CardSecondary>{t("本品类未声明")}</CardSecondary>}
+                {row.upgradeAvailable && <CardSecondary>{t("可升级到")} {row.definition.implementationVersion}</CardSecondary>}
+              </>,
+              details: row => <CardSection title={t("状态与配置")}>
+                {row.providedByCore && <CardSecondary>{t("该能力由 Rental Core 内建提供，请到对应业务规则中配置")}</CardSecondary>}
+                {!row.implemented && <CardSecondary>{t("该能力只登记了扩展点，尚无可执行模块，不能启用")}</CardSecondary>}
+                <CardFacts items={[
+                  { label: t("实现"), value: row.instance?.implementationVersion ?? row.definition.implementationVersion ?? t("未实现") },
+                  { label: t("配置版本"), value: row.instance?.configVersion ?? t("未配置") },
+                  { label: t("依赖"), value: capabilityNames(row.definition.dependsOn) || t("无依赖") },
+                  ...row.definition.configSchema.map(field => ({ label: t(field.label), value: configValue(row.instance?.config?.[field.key]) })),
+                ]} />
+              </CardSection>,
+              actions: (row, afterClose) => <>
+                <ArcButton variant="secondary" size="sm" disabled={!canManage || !row.implemented || !row.applicable || row.providedByCore} onClick={() => afterClose(() => openEditor(row))}>{t("状态与配置")}</ArcButton>
+                {row.upgradeAvailable && <ArcButton variant="secondary" size="sm" disabled={!canManage || upgrade.isPending} onClick={() => afterClose(() => upgrade.mutate(row))}>{t("升级")}</ArcButton>}
+                <ArcButton variant="secondary" size="sm" onClick={() => afterClose(() => inspectAudit(row.definition.code))}>{t("审计")}</ArcButton>
+              </>,
+            }}
             rowKey={(row) => row.definition.code}
-            onRefresh={() => overview.refetch()} loading={overview.isLoading} refreshing={overview.isFetching} dataSource={data?.capabilities ?? []}
+            onRefresh={() => overview.refetch()} loading={overview.isLoading} refreshing={overview.isFetching} dataSource={capabilityFilter.rows} pagination={capabilityFilter.pagination}
             scroll={{ x: 1280 }}
             columns={[
               {
                 title: t("能力"),
                 fixed: "left",
-                render: (_, row) => (
-                  <>
-                    <b>{t(row.definition.label)}</b>
-                    <br />
-                    <span className="muted">{row.definition.code}</span>
-                  </>
-                )
+                render: (_, row) => <DataTableText primary={t(row.definition.label)} secondary={row.definition.code} />
               },
               {
                 title: t("当前品类定位"),
@@ -275,8 +316,8 @@ export function CapabilityGovernancePage() {
                 title: t("依赖 / 互斥"),
                 render: (_, row) => (
                   <Space orientation="vertical" size={2}>
-                    {row.definition.dependsOn.length ? <span>{t("依赖")}：{row.definition.dependsOn.join("、")}</span> : <span className="muted">{t("无依赖")}</span>}
-                    {row.definition.conflictsWith.length ? <span>{t("互斥")}：{row.definition.conflictsWith.join("、")}</span> : null}
+                    {row.definition.dependsOn.length ? <span>{t("依赖")}：{capabilityNames(row.definition.dependsOn)}</span> : <span className="muted">{t("无依赖")}</span>}
+                    {row.definition.conflictsWith.length ? <span>{t("互斥")}：{capabilityNames(row.definition.conflictsWith)}</span> : null}
                   </Space>
                 )
               },
@@ -297,7 +338,7 @@ export function CapabilityGovernancePage() {
                     <Space orientation="vertical" size={2}>
                       {row.definition.configSchema.map((field) => (
                         <span key={field.key}>
-                          {t(field.label)}：{String(row.instance?.config?.[field.key] ?? "-")}
+                          {t(field.label)}：{configValue(row.instance?.config?.[field.key])}
                         </span>
                       ))}
                     </Space>
@@ -335,7 +376,7 @@ export function CapabilityGovernancePage() {
                         {t("升级")}
                       </Button>
                     )}
-                    <Button type="link" icon={<HistoryOutlined />} onClick={() => setAuditCode(row.definition.code)}>
+                    <Button type="link" icon={<HistoryOutlined />} onClick={() => inspectAudit(row.definition.code)}>
                       {t("审计")}
                     </Button>
                   </Space>
@@ -344,14 +385,14 @@ export function CapabilityGovernancePage() {
             ]}
           />
         </ListSection>
-      </QueryState>
-
-      <ListSection title={
+      </QueryState> },
+        { key: "audit", label: t("生命周期审计"), children:
+      <ListSection id="capability-audits" title={
           <Space>
             <span>{t("生命周期审计")}</span>
             {auditCode ? <Tag>{auditCode}</Tag> : <Tag>{t("全部能力")}</Tag>}
           </Space>
-        } extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>{t("查看全部")}</Button> : null} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+        } extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>{t("查看全部")}</Button> : null}>
 
         <QueryState loading={audits.isLoading} error={audits.error}>
           <Table
@@ -374,7 +415,8 @@ export function CapabilityGovernancePage() {
             ]}
           />
         </QueryState>
-      </ListSection>
+      </ListSection> }
+      ]} />
 
       <Drawer
         title={editing ? `${t(editing.definition.label)} · ${t("状态与配置")}` : t("状态与配置")}

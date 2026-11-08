@@ -101,22 +101,22 @@ export function ListFilterBar({ children }: { children: ReactNode }) {
   const actions = entries.filter(item => item.kind === "action");
   const compact = available > 0 && available < ADMIN_LIST_METRICS.categoryInlineMinWidth;
   useLayoutEffect(() => {
-    const width = root.current?.getBoundingClientRect().width ?? 0;
+    const width = root.current?.clientWidth ?? 0;
     if (!width) return;
     for (const entry of entries) {
       const node = slots.current.get(entry.key);
       if (node && !node.closest('[role="dialog"]')) measured.current.set(entry.key,
         entry.kind === "category" ? Math.max(node.scrollWidth, ...[...node.querySelectorAll("*")].map(child => child.scrollWidth))
           : entry.kind === "filter" ? !entry.width && simpleSelect(entry)
-            ? Math.min(ADMIN_LIST_METRICS.adaptiveSelectMax, Math.max(ADMIN_LIST_METRICS.adaptiveSelectMin, (labels.current.get(entry.key)?.getBoundingClientRect().width ?? 0) + ADMIN_LIST_METRICS.adaptiveSelectInset))
-            : LIST_WIDTH[entry.width ?? "select"] : node.getBoundingClientRect().width);
+            ? Math.min(ADMIN_LIST_METRICS.adaptiveSelectMax, Math.max(ADMIN_LIST_METRICS.adaptiveSelectMin, (labels.current.get(entry.key)?.scrollWidth ?? 0) + ADMIN_LIST_METRICS.adaptiveSelectInset))
+            : LIST_WIDTH[entry.width ?? "select"] : node.offsetWidth);
     }
     const category = compact ? 0 : Math.min(categories.reduce((sum, entry) => sum + (measured.current.get(entry.key) ?? LIST_WIDTH.wide), 0), width * .6);
     const sizeOf = (entry: Entry) => measured.current.get(entry.key) ?? LIST_WIDTH[entry.width ?? "select"];
     const nextWidths = Object.fromEntries(fields.filter(entry => !entry.width && simpleSelect(entry)).map(entry => [entry.key, sizeOf(entry)]));
     setSelectWidths(previous => JSON.stringify(previous) === JSON.stringify(nextWidths) ? previous : nextWidths);
     const gap = parseFloat(getComputedStyle(root.current!).columnGap) || 0;
-    const moreWidth = moreTrigger.current?.getBoundingClientRect().width ??
+    const moreWidth = moreTrigger.current?.offsetWidth ??
       (width <= ADMIN_LIST_METRICS.compactTriggerMaxWidth ? ADMIN_LIST_METRICS.moreSearchCompactWidth : ADMIN_LIST_METRICS.moreSearchWidth);
     const categoryMin = Math.min(category, LIST_WIDTH.number);
     const next = planListFilters({ available: width, category,

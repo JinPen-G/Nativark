@@ -11,7 +11,7 @@ import styles from "./RecordCard.module.css";
 import { motion } from "motion/react";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 
-export type CardKind = "membership" | "catalog" | "pricing" | "discount" | "service" | "asset" | "stock" | "location";
+export type CardKind = "membership" | "catalog" | "pricing" | "discount" | "service" | "asset" | "stock" | "location" | "capability";
 export type CardAfterClose = (operation: () => void) => void;
 export interface RecordCardConfig<T> {
   kind?: CardKind;

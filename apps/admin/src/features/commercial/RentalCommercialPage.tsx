@@ -524,7 +524,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 {
                   title: t("状态"),
                   dataIndex: "status",
-                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value)}</Tag>,
+                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "已启用" : value === "disabled" ? "已停用" : value)}</Tag>,
                 },
                 {
                   title: t("操作"),
@@ -892,7 +892,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               { title: t("总量"), dataIndex: "totalCapacity" },
               { title: t("已预留"), dataIndex: "reservedQuantity" },
               { title: t("已确认/使用"), dataIndex: "usedQuantity" },
-              { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value)}</Tag> },
+              { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "已启用" : value === "disabled" ? "已停用" : value)}</Tag> },
               { title: t("操作"), render: (_, row) => <Button type="link" onClick={() => editCapacity(row)}>{t("编辑")}</Button> },
             ]}
           />
