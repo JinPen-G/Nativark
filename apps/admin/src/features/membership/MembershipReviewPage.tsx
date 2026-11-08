@@ -3,9 +3,9 @@ import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import { SearchField, useListFilter } from "@/components/ui";
 import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Tag } from "antd";
+import { Space, Tag } from "antd";
 import { ListSection, App, Modal, Radio } from "@/components/ui";
-import { Alert, Button, DataTableText, Drawer, Form, Input, Select, Table } from "@/components/ui";
+import { Alert, Button, DataTableText, Form, Input, Select, Table } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
@@ -14,6 +14,8 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { LiveRefresh, useLiveRefresh } from "@/components/ui";
 import { InsightMetrics } from "@/components/BusinessInsights";
+import { RecordFacts } from "@/components/RecordDetailLayout";
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 
 const statusMeta: Record<CustomerMembershipReviewStatus, { text: string; color: string }> = {
   pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" },
@@ -33,6 +35,7 @@ export function MembershipReviewPage() {
   const [filter, setFilter] = useState<{ status?: string; type?: string }>({ status: "pending" });
   const [selected, setSelected] = useState<CustomerMembershipReview>();
   const [detailTarget, setDetailTarget] = useState<CustomerMembershipReview>();
+  const detailDialog = useModalDismissal(Boolean(detailTarget), () => setDetailTarget(undefined));
   const [form] = Form.useForm<ReviewForm>();
   const live = useLiveRefresh("membership-reviews", Boolean(selected));
   const reviews = useQuery({ queryKey: ["membership-reviews", live.scope, filter], queryFn: () => membershipApi.reviews(filter), enabled: canView, placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === live.scope ? previous : undefined, ...live.queryOptions });
@@ -88,43 +91,55 @@ export function MembershipReviewPage() {
         </Space> },
       ]} />
     </ListSection>
-    <Modal title={selected ? `${t(typeText[selected.reviewType])}${t("审核")}` : t("审核")} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onConfirm={() => form.validateFields().then(async values => { const operation = selected && canHandle(selected) && decide.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; })} okButtonProps={{ disabled: !selected || !canHandle(selected) }} confirmLoading={decide.isPending} destroyOnHidden>
+    <Modal title={t("会员审核")} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onConfirm={() => form.validateFields().then(async values => { const operation = selected && canHandle(selected) && decide.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; })} okText={t("保存审核结果")} okButtonProps={{ disabled: !selected || !canHandle(selected) }} cancelButtonProps={{ disabled: decide.isPending }} closable={!decide.isPending} maskClosable={!decide.isPending} keyboard={!decide.isPending} confirmLoading={decide.isPending} destroyOnHidden>
+      {selected && <div style={{ marginBottom: "var(--space-4)" }}><RecordFacts items={[
+        { key: "member", label: "会员", value: selected.customerName ?? t("会员名称不可用") },
+        { key: "subject", label: "审核类型", value: selected.qualificationType ?? t(typeText[selected.reviewType]) },
+      ]} /></div>}
       <Form form={form} layout="vertical" disabled={!selected || !canHandle(selected)} onFinish={(values) => selected && canHandle(selected) && decide.mutate(values)}>
-        <Form.Item label={t("审核结论")} name="status" rules={[{ required: true }]}><Radio.Group options={[{ value: "approved", label: t("通过") }, { value: "supplement_required", label: t("补充资料") }, { value: "rejected", label: t("拒绝") }, { value: "cancelled", label: t("取消") }]} /></Form.Item>
+        <Form.Item label={t("审核结论")} name="status" rules={[{ required: true }]}><Radio.Group options={[{ value: "approved", label: t("通过") }, { value: "supplement_required", label: t("补充资料") }, { value: "rejected", label: t("拒绝") }, { value: "cancelled", label: t("取消审核") }]} /></Form.Item>
         <Form.Item label={t("说明")} name="reason" dependencies={["status"]} rules={[({ getFieldValue }) => ({ required: getFieldValue("status") !== "approved", whitespace: true, message: t("补件、拒绝或取消审核必须填写原因") })]}><Input.TextArea maxLength={500} rows={3} placeholder={t("补件、拒绝或取消时请说明原因")} /></Form.Item>
       </Form>
     </Modal>
-    <Drawer title={detailTarget ? `${t(typeText[detailTarget.reviewType] ?? detailTarget.reviewType)}${t("详情")}` : t("审核详情")} open={Boolean(detailTarget)} onClose={() => setDetailTarget(undefined)} size={520} destroyOnHidden>
+    <Modal presentation="side" title={t("审核详情")} open={detailDialog.visible} onCancel={detailDialog.dismiss} afterClose={detailDialog.afterClose} width={640} footer={null} destroyOnHidden>
       {detailTarget && <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-        <Card size="small" title={t("审核任务")}>
-          <div>{t("会员")}：{detailTarget.customerName ?? t("会员名称不可用")}</div>
-          <div>{t("证件类型")}：{detailTarget.qualificationType ?? "—"}</div>
-          <div>{t("提交渠道")}：{detailTarget.channel === "app" ? "APP" : t("后台")}</div>
-          <div>{t("来源空间")}：{workspaceName(detailTarget.sourceWorkspaceId)}（{t("仅供追溯")}）</div>
-          <div>{t("提交时间")}：{new Date(detailTarget.createdAt).toLocaleString()}</div>
-          <div>{t("审核状态")}：<Tag color={statusMeta[detailTarget.status].color}>{t(statusMeta[detailTarget.status].text)}</Tag></div>
-          <div>{t("审核意见")}：{detailTarget.reason ?? "—"}</div>
-        </Card>
-        {detailTarget.qualificationSnapshot && <Card size="small" title={t("本次证件快照")}>
-          <div>{t("证件编号")}：{detailTarget.qualificationSnapshot.referenceNoMasked ?? "—"}</div>
-          <div>{t("签发时间")}：{detailTarget.qualificationSnapshot.issuedAt?.slice(0, 10) ?? "—"}</div>
-          <div>{t("失效时间")}：{detailTarget.qualificationSnapshot.expiresAt?.slice(0, 10) ?? "—"}</div>
-          <div>{t("提交时业务配置")}：{categoryName(detailTarget.qualificationSnapshot.applicableScope.categoryCode)} / {workspaceName(detailTarget.qualificationSnapshot.applicableScope.workspaceId)}</div>
-          <div>{t("附件引用")}：{detailTarget.qualificationSnapshot.evidenceRef ?? t("未关联")}</div>
-          <div>{t("快照审核结果")}：{t(statusMeta[detailTarget.qualificationSnapshot.reviewStatus].text)}</div>
-        </Card>}
-        {detailTarget.corporateSnapshot && <Card size="small" title={t("本次企业主体资料快照")}>
-          <div>{t("企业法定名称")}：{detailTarget.corporateSnapshot.legalName}</div>
-          <div>{t("统一社会信用代码")}：{detailTarget.corporateSnapshot.unifiedSocialCreditCodeMasked}</div>
-          <div>{t("注册地址")}：{detailTarget.corporateSnapshot.registeredAddress ?? "—"}</div>
-          <div>{t("法定代表人")}：{detailTarget.corporateSnapshot.legalRepName ?? "—"}</div>
-          <div>{t("法定代表人联系电话")}：{detailTarget.corporateSnapshot.legalRepPhoneMasked ?? "—"}</div>
-          <div>{t("行业")}：{detailTarget.corporateSnapshot.industry ?? "—"}</div>
-          <div>{t("企业规模")}：{detailTarget.corporateSnapshot.scale ?? "—"}</div>
-          <div>{t("联系人")}：{detailTarget.corporateSnapshot.contactName} · {detailTarget.corporateSnapshot.contactPhoneMasked}</div>
-          <div>{t("邮箱")}：{detailTarget.corporateSnapshot.email ?? "—"}</div>
-        </Card>}
+        <ListSection title={t("审核任务")}>
+          <RecordFacts items={[
+            { key: "member", label: "会员", value: detailTarget.customerName ?? t("会员名称不可用") },
+            { key: "status", label: "审核状态", value: <Tag color={statusMeta[detailTarget.status].color}>{t(statusMeta[detailTarget.status].text)}</Tag> },
+            { key: "type", label: "审核类型", value: t(typeText[detailTarget.reviewType] ?? detailTarget.reviewType) },
+            { key: "channel", label: "提交渠道", value: detailTarget.channel === "app" ? "APP" : t("后台") },
+            { key: "submitted", label: "提交时间", value: new Date(detailTarget.createdAt).toLocaleString(locale) },
+            { key: "workspace", label: "来源空间", value: `${workspaceName(detailTarget.sourceWorkspaceId)}（${t("仅供追溯")}）`, wide: true },
+            ...(detailTarget.reviewType === "qualification" ? [{ key: "qualification", label: "证件类型", value: detailTarget.qualificationType ?? "—" }] : []),
+            ...(detailTarget.reason ? [{ key: "reason", label: "审核意见", value: detailTarget.reason, wide: true }] : []),
+          ]} />
+        </ListSection>
+        {detailTarget.qualificationSnapshot && <ListSection title={t("本次证件快照")}>
+          <RecordFacts items={[
+            { key: "reference", label: "证件编号", value: detailTarget.qualificationSnapshot.referenceNoMasked },
+            { key: "review", label: "快照审核结果", value: t(statusMeta[detailTarget.qualificationSnapshot.reviewStatus].text) },
+            { key: "issued", label: "签发时间", value: detailTarget.qualificationSnapshot.issuedAt?.slice(0, 10) },
+            { key: "expires", label: "失效时间", value: detailTarget.qualificationSnapshot.expiresAt?.slice(0, 10) },
+            { key: "scope", label: "提交时业务配置", value: `${categoryName(detailTarget.qualificationSnapshot.applicableScope.categoryCode)} · ${workspaceName(detailTarget.qualificationSnapshot.applicableScope.workspaceId)}`, wide: true },
+            { key: "evidence", label: "附件引用", value: detailTarget.qualificationSnapshot.evidenceRef ?? t("未关联"), wide: true },
+          ]} />
+        </ListSection>}
+        {detailTarget.corporateSnapshot && <ListSection title={t("本次企业主体资料快照")}>
+          <RecordFacts items={[
+            { key: "legalName", label: "企业法定名称", value: detailTarget.corporateSnapshot.legalName, wide: true },
+            { key: "creditCode", label: "统一社会信用代码", value: detailTarget.corporateSnapshot.unifiedSocialCreditCodeMasked, wide: true },
+            { key: "address", label: "注册地址", value: detailTarget.corporateSnapshot.registeredAddress, wide: true },
+            ...(detailTarget.corporateSnapshot.legalRepName ? [{ key: "representative", label: "法定代表人", value: detailTarget.corporateSnapshot.legalRepName }] : []),
+            ...(detailTarget.corporateSnapshot.legalRepPhoneMasked ? [{ key: "representativePhone", label: "法定代表人联系电话", value: detailTarget.corporateSnapshot.legalRepPhoneMasked }] : []),
+            { key: "industry", label: "行业", value: detailTarget.corporateSnapshot.industry },
+            { key: "scale", label: "企业规模", value: detailTarget.corporateSnapshot.scale },
+            { key: "contact", label: "联系人", value: detailTarget.corporateSnapshot.contactName },
+            { key: "phone", label: "联系电话", value: detailTarget.corporateSnapshot.contactPhoneMasked },
+            { key: "email", label: "邮箱", value: detailTarget.corporateSnapshot.email, wide: true },
+          ]} />
+        </ListSection>}
       </Space>}
-    </Drawer>
+    </Modal>
   </QueryState>;
 }

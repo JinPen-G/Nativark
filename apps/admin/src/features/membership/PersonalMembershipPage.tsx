@@ -4,8 +4,8 @@ import { ListSection, SaveButton } from "@/components/ui";
 import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
 import { CUSTOMER_GENDERS, CUSTOMER_GENDER_LABELS, CUSTOMER_SOURCE_CHANNELS, CUSTOMER_SOURCE_CHANNEL_LABELS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Space, Tag } from "antd";
-import { App, Radio } from "@/components/ui";
+import { Col, Row, Space, Tag } from "antd";
+import { App, DatePicker, FormSection, Modal, Radio } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -26,6 +26,17 @@ import { QualificationTypesEditor } from "./QualificationTypesPage";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
 import { MemberListInsights } from "./MemberListInsights";
 import { InsightMetrics } from "@/components/BusinessInsights";
+import { RecordFacts } from "@/components/RecordDetailLayout";
+import dayjs from "dayjs";
+
+const dateOnlyBinding = {
+  getValueProps: (value?: string) => ({ value: value ? dayjs(value) : null }),
+  getValueFromEvent: (value: dayjs.Dayjs | null) => value?.format("YYYY-MM-DD"),
+};
+const dateTimeBinding = {
+  getValueProps: (value?: string) => ({ value: value ? dayjs(value) : null }),
+  getValueFromEvent: (value: dayjs.Dayjs | null) => value?.toISOString(),
+};
 
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
 const qualificationStatus: Record<string, { text: string; color: string }> = { pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" }, rejected: { text: "已拒绝", color: "error" }, expired: { text: "已过期", color: "warning" }, revoked: { text: "已撤销", color: "default" }, not_submitted: { text: "未提交", color: "default" } };
@@ -60,6 +71,8 @@ export function PersonalMembershipPage() {
   const canManageTypes = Boolean(currentWorkspaceId) && (hasPermission("rental-os:qualification-type:manage") || hasPermission("rental-os:member:manage"));
   const [selected, setSelected] = useState<PersonalMembershipMember>(); const [drawer, setDrawer] = useState<"create" | "edit" | "password" | "qualification" | "types" | "grant">(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [statusTarget, setStatusTarget] = useState<PersonalMembershipMember>(); const [statusScope, setStatusScope] = useState<"account" | "membership">();
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [registrationMode, setRegistrationMode] = useState<"manual" | "automatic">();
   const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<SubmitCustomerQualificationRequest>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();
   const statusValue = Form.useWatch("status", statusForm); const acknowledgedManualChecks = Form.useWatch("acknowledgedManualChecks", statusForm);
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
@@ -78,7 +91,7 @@ export function PersonalMembershipPage() {
   const edit = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.savePersonal(selected!.customerId, { name: values.name, phone: values.phone, email: values.email, identityNo: values.identityNo, gender: values.gender, birthday: values.birthday, sourceChannel: values.sourceChannel, region: values.region }), onSuccess: async () => { await refresh(); setDrawer(undefined); message.success(t("会员资料已更新")); } });
   const password = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.setTemporaryPassword(selected!.customerId, { temporaryPassword: values.temporaryPassword! }), onSuccess: () => { setDrawer(undefined); form.resetFields(); message.success(t("已设置临时密码，会员首次登录后必须修改")); } });
   const submitQualification = useMutation({ mutationFn: (values: SubmitCustomerQualificationRequest) => membershipApi.submitQualification(selected!.customerId, values), onSuccess: async () => { await refresh(); setDrawer(undefined); qualificationForm.resetFields(); message.success(t("证件已提交，等待独立审核")); } });
-  const saveMode = useMutation({ mutationFn: (registrationMode: "automatic" | "manual") => membershipApi.saveRegistrationSettings({ registrationMode }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-registration-settings"] }); message.success(t("注册审核方式已保存")); } });
+  const saveMode = useMutation({ mutationFn: (registrationMode: "automatic" | "manual") => membershipApi.saveRegistrationSettings({ registrationMode }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-registration-settings"] }); setRegistrationOpen(false); message.success(t("注册审核方式已保存")); } });
   const grant = useMutation({ mutationFn: (values: { planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }) => membershipApi.assignPlan({ customerId: selected!.customerId, planVersionId: values.planVersionId, source: "manual", effectiveFrom: values.effectiveFrom, effectiveTo: values.effectiveTo, reason: values.reason }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-plan-assignments", selected?.customerId] }); setDrawer(undefined); grantForm.resetFields(); message.success(t("会员方案已授予；后续报价会以权益快照为准")); } });
   const revoke = useMutation({ mutationFn: (values: { assignmentId: string; reason: string }) => membershipApi.revokePlanAssignment(values.assignmentId, values.reason), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-plan-assignments", selected?.customerId] }); setRevokeTarget(undefined); revokeForm.resetFields(); message.success(t("会员方案授予已撤销；历史快照保留")); } });
   const ensureAccount = useMutation({
@@ -110,6 +123,8 @@ export function PersonalMembershipPage() {
   const openCreate = () => { form.resetFields(); setSelected(undefined); setDrawer("create"); };
   const openEdit = (member: PersonalMembershipMember) => { form.resetFields(); form.setFieldsValue({ name: member.name, phone: "", email: member.email, gender: member.gender, birthday: member.birthday, sourceChannel: member.sourceChannel, region: member.region }); setSelected(member); setDrawer("edit"); };
   const openStatus = (member: PersonalMembershipMember, scope: "account" | "membership") => { setStatusTarget(member); setStatusScope(scope); statusForm.resetFields(); };
+  const qualificationUnavailable = !canManage || types.isPending || qualificationHistory.isPending || types.isError || qualificationHistory.isError;
+  const grantUnavailable = !canGrant || plans.isPending || assignments.isPending || scopeOptions.isPending || plans.isError || assignments.isError || scopeOptions.isError;
   useEffect(() => {
     setDrawer(undefined); setSelected(undefined); setStatusTarget(undefined); setStatusScope(undefined); setRevokeTarget(undefined);
   }, [customerId]);
@@ -119,7 +134,7 @@ export function PersonalMembershipPage() {
     {!customerId && <>
     <PageHeader title={t("个人会员管理")} description={t("会员资料在租户内共享；状态变更影响全部空间。")}
       summary={<InsightMetrics items={[{ label: t("会员"), value: memberFilter.rows.length }, { label: t("待审核"), value: memberFilter.rows.filter(row => row.membershipStatus === "pending_activation").length }, { label: t("风险受限"), value: memberFilter.rows.filter(row => row.membershipStatus === "risk_restricted").length }]} />}
-      extra={<Space wrap><Tooltip title={t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}><Radio.Group size="small" value={settings.data?.registrationMode} disabled={!canManage} onChange={(event) => saveMode.mutate(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} /></Tooltip><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
+      extra={<Space wrap><Button disabled={!canManage} onClick={() => { setRegistrationMode(settings.data?.registrationMode); setRegistrationOpen(true); }}>{t("注册设置")}</Button><Button onClick={() => setDrawer("types")} disabled={!canManageTypes}>{t("当前空间证件类型")}</Button><Button type="primary" onClick={openCreate} disabled={!canManage}>{t("新增个人会员")}</Button></Space>} />
     <ListSection controls={<ListFilters filter={memberFilter} placeholder="姓名、邮箱或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}><Table<PersonalMembershipMember> toolbarNote={false} emptyScene={memberFilter.keyword || memberFilter.status ? "search" : "empty"}
       importConfig={personalImport(t, refresh, settings.data?.supportsOnlyNewImport === true)}
       exportConfig={{ filename: t("个人会员"), fields: [{ label: t("姓名"), value: row => row.name }, { label: t("手机号"), value: row => row.phoneMasked }, { label: t("会员状态"), value: row => t(membershipLabel[row.membershipStatus] ?? row.membershipStatus) }] }} rowKey="customerId" onRefresh={() => members.refetch()} loading={members.isLoading} refreshing={members.isFetching} dataSource={memberFilter.rows} pagination={memberFilter.pagination} columns={[
@@ -148,23 +163,48 @@ export function PersonalMembershipPage() {
         <Button disabled={!canGrant} onClick={() => { setSelected(detailMember); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
       </>}
     />}
-    <Drawer presentation={drawer === "password" ? "dialog" : "side"} title={drawer === "create" ? t("新增个人会员") : drawer === "edit" ? t("编辑个人会员") : drawer === "password" ? t("设置临时密码") : drawer === "qualification" ? t("提交品类证件") : drawer === "grant" ? t("授予会员方案") : t("证件类型配置")} size={520} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
+    <Modal title={t("注册设置")} open={registrationOpen} onCancel={() => setRegistrationOpen(false)} okText={t("保存设置")} confirmLoading={saveMode.isPending} okButtonProps={{ disabled: !canManage || !registrationMode }} cancelButtonProps={{ disabled: saveMode.isPending }} closable={!saveMode.isPending} keyboard={!saveMode.isPending} maskClosable={!saveMode.isPending} onConfirm={() => {
+      if (!canManage || !registrationMode) throw new Error(t("当前操作不可用"));
+      return saveMode.mutateAsync(registrationMode);
+    }}>
+      <p>{t("租户共享注册策略，仅影响后续 APP 注册和管理员新建")}</p>
+      <Radio.Group aria-label={t("注册审核方式")} value={registrationMode} disabled={!canManage || saveMode.isPending} onChange={event => setRegistrationMode(event.target.value)} options={[{ value: "manual", label: t("手动审核") }, { value: "automatic", label: t("自动通过") }]} />
+    </Modal>
+    <Drawer presentation={drawer === "password" ? "dialog" : "side"} title={drawer === "create" ? t("新增个人会员") : drawer === "edit" ? t("编辑个人会员") : drawer === "password" ? t("设置临时密码") : drawer === "qualification" ? t("提交品类证件") : drawer === "grant" ? t("授予会员方案") : t("证件类型配置")} size={drawer === "password" ? 520 : 640} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden
+      extra={(drawer === "create" || drawer === "edit" || drawer === "password") ? <SaveButton disabled={drawer === "password" ? !canManageAccount : !canManage} label={t("保存")} form={form} pending={create.isPending || edit.isPending || password.isPending} onSave={async values => { const operation = drawer === "create" ? canManage && create.mutateAsync(values) : drawer === "edit" ? canManage && edit.mutateAsync(values) : canManageAccount && password.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
+        : drawer === "qualification" ? <SaveButton disabled={qualificationUnavailable} label={t("提交审核")} form={qualificationForm} pending={submitQualification.isPending} onSave={async values => { if (qualificationUnavailable) throw new Error(t("当前操作不可用")); return submitQualification.mutateAsync(values); }} />
+          : drawer === "grant" ? <SaveButton disabled={grantUnavailable} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { if (grantUnavailable) throw new Error(t("当前操作不可用")); return grant.mutateAsync(values); }} /> : undefined}>
+      {selected && (drawer === "qualification" || drawer === "grant" || drawer === "password") && <div style={{ marginBottom: "var(--space-4)" }}><RecordFacts items={[
+        { key: "member", label: "会员", value: selected.name },
+        { key: "phone", label: "手机号", value: selected.phoneMasked },
+      ]} /></div>}
       {(drawer === "create" || drawer === "edit" || drawer === "password") && <Form layout="vertical" form={form} disabled={drawer === "password" ? !canManageAccount : !canManage} onFinish={(values) => drawer === "create" ? canManage && create.mutate(values) : drawer === "edit" ? canManage && edit.mutate(values) : canManageAccount && password.mutate(values)}>
-        {drawer !== "password" && <><Form.Item label={t("姓名")} name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label={t("手机号")} name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? t("留空则保持现有手机号") : undefined} /></Form.Item><Form.Item label={t("邮箱")} name="email"><Input /></Form.Item><Form.Item label={t("性别")} name="gender"><Select allowClear options={CUSTOMER_GENDERS.map((value) => ({ value, label: t(CUSTOMER_GENDER_LABELS[value]) }))} /></Form.Item><Form.Item label={t("生日")} name="birthday"><Input placeholder="YYYY-MM-DD" /></Form.Item><Form.Item label={t("来源渠道")} name="sourceChannel"><Select allowClear options={CUSTOMER_SOURCE_CHANNELS.map((value) => ({ value, label: t(CUSTOMER_SOURCE_CHANNEL_LABELS[value]) }))} /></Form.Item><Form.Item label={t("常驻城市")} name="region"><Input placeholder={t("如 上海")} /></Form.Item><Form.Item label={t("证件号")} name="identityNo"><Input placeholder={t("仅保存脱敏展示值")} /></Form.Item></>}
+        {drawer !== "password" && <FormSection title={t("基本资料")}>
+          <Form.Item label={t("姓名")} name="name" rules={[{ required: true }]}><Input /></Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} sm={12}><Form.Item label={t("手机号")} name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? t("留空则保持现有手机号") : undefined} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label={t("性别")} name="gender"><Select allowClear options={CUSTOMER_GENDERS.map((value) => ({ value, label: t(CUSTOMER_GENDER_LABELS[value]) }))} /></Form.Item></Col>
+            <Col span={24}><Form.Item label={t("邮箱")} name="email"><Input /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item {...dateOnlyBinding} label={t("生日")} name="birthday"><DatePicker needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label={t("常驻城市")} name="region"><Input placeholder={t("如 上海")} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label={t("来源渠道")} name="sourceChannel"><Select allowClear options={CUSTOMER_SOURCE_CHANNELS.map((value) => ({ value, label: t(CUSTOMER_SOURCE_CHANNEL_LABELS[value]) }))} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item label={t("证件号")} name="identityNo"><Input placeholder={t("仅保存脱敏展示值")} /></Form.Item></Col>
+          </Row>
+        </FormSection>}
         {drawer === "create" && canManageAccount && <Form.Item label={t("临时密码（可选）")} name="temporaryPassword" rules={[{ min: 8 }]}><Input.Password /></Form.Item>}
         {drawer === "create" && <Form.Item name="directApprove" valuePropName="checked"><Checkbox disabled={!canDirectApprove}>{t("直接通过")}</Checkbox></Form.Item>}
         {drawer === "password" && <Form.Item label={t("新临时密码")} name="temporaryPassword" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>}
-        <SaveButton disabled={drawer === "password" ? !canManageAccount : !canManage} label={t("保存")} form={form} pending={create.isPending || edit.isPending || password.isPending} onSave={async values => { const operation = drawer === "create" ? canManage && create.mutateAsync(values) : drawer === "edit" ? canManage && edit.mutateAsync(values) : canManageAccount && password.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
       </Form>}
       {drawer === "qualification" && <QueryState loading={types.isLoading || qualificationHistory.isLoading} error={types.error ?? qualificationHistory.error}>
         <Alert type="info" showIcon title={t("资质资料与审核结果在租户内共享")} description={t("此处按当前经营空间配置选择证件类型；其他空间是否要求该证件，由对应空间业务规则决定。")} style={{ marginBottom: 16 }} />
         <Form form={qualificationForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && submitQualification.mutate(values)}>
           <Form.Item label={t("证件类型")} name="qualificationType" rules={[{ required: true }]}><Select options={(types.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.code, label: item.name }))} /></Form.Item>
           <Form.Item label={t("证件编号")} name="referenceNo"><Input /></Form.Item>
-          <Form.Item label={t("签发时间")} name="issuedAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
-          <Form.Item label={t("失效时间")} name="expiresAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} sm={12}><Form.Item {...dateOnlyBinding} label={t("签发时间")} name="issuedAt"><DatePicker needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item {...dateOnlyBinding} label={t("失效时间")} name="expiresAt"><DatePicker needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+          </Row>
           <Form.Item label={t("附件引用")} name="evidenceRef" extra={t("仅填写文件服务返回的不可变引用，不填写本地路径或 URL")}><Input /></Form.Item>
-          <SaveButton disabled={!canManage} label={t("提交审核")} form={qualificationForm} pending={submitQualification.isPending} onSave={async values => { const operation = canManage && submitQualification.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <ListSection title={t("提交与审核历史")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
           <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isLoading} refreshing={qualificationHistory.isFetching} onRefresh={() => qualificationHistory.refetch()} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
@@ -184,10 +224,11 @@ export function PersonalMembershipPage() {
         <Form form={grantForm} layout="vertical" disabled={!canGrant} onFinish={(values) => canGrant && grant.mutate(values)}>
           <Form.Item label={t("已发布个人方案")} name="planVersionId" rules={[{ required: true }]}><Select options={(plans.data ?? []).flatMap((plan) => plan.targetType === "personal" ? (plan.versions ?? []).filter((version) => version.status === "published").map((version) => ({ value: version.id, label: `${plan.name} · v${version.version}` })) : [])} /></Form.Item>
           {selectedPlanVersion && <Alert type="info" showIcon title={t("本次授予的权益适用范围")} description={<MembershipBenefitScopeSummary benefits={selectedPlanVersion.benefits} options={scopeOptions.data} />} style={{ marginBottom: 16 }} />}
-          <Form.Item label={t("生效时间")} name="effectiveFrom" extra={t("留空为提交时生效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
-          <Form.Item label={t("失效时间")} name="effectiveTo" extra={t("留空为长期有效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} sm={12}><Form.Item {...dateTimeBinding} label={t("生效时间")} name="effectiveFrom" extra={t("留空为提交时生效")}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+            <Col xs={24} sm={12}><Form.Item {...dateTimeBinding} label={t("失效时间")} name="effectiveTo" extra={t("留空为长期有效")}><DatePicker showTime needConfirm style={{ width: "100%" }} /></Form.Item></Col>
+          </Row>
           <Form.Item label={t("授予原因")} name="reason" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={2} /></Form.Item>
-          <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <ListSection title={t("当前方案授予记录")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
           <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} refreshing={assignments.isFetching} onRefresh={() => assignments.refetch()} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
