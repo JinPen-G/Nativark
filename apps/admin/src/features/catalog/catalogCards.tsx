@@ -50,6 +50,7 @@ export function catalogCards({ t, fields, summaryFields, pricingGroups, canManag
       const parts = row.inventoryMode === "bundle" ? row.bundleComponents ?? [] : [];
       const memberships = groups(row);
       return <div className={styles.listing}>
+        {(specs.length > 0 || parts.length > 0) && <div className={styles.summaryFacts}>
         {specs.length > 0 && <dl className={styles.specs}>
           {specs.map(field => <div key={field.code}>
             <dt>{t(field.label)}</dt>
@@ -64,13 +65,15 @@ export function catalogCards({ t, fields, summaryFields, pricingGroups, canManag
           </li>)}</ul>
           {parts.length > 2 && <CardSecondary>{t("更多组成")} +{parts.length - 2}</CardSecondary>}
         </div>}
+        </div>}
         <div className={styles.pricing}>
-          <Layers3 aria-hidden="true" />
-          <div>
+          <div className={styles.groupDetails}><Layers3 aria-hidden="true" />
+          <div className={styles.groupText}>
             <span className={styles.label}>{t("所属定价分组")}</span>
             {memberships.length ? <ul className={styles.groupNames}>
               {memberships.map(group => <li key={group.id} title={group.name}>{group.name}</li>)}
             </ul> : <span className={styles.unassigned}>{t("未加入定价分组")}</span>}
+          </div>
           </div>
         </div>
       </div>;
