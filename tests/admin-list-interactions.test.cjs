@@ -41,7 +41,7 @@ test('modal feedback remains available between retained providers and refreshed 
   }
 });
 
-test('membership screens discard local task snapshots at identity or review-grant changes', () => {
+test('record screens discard local task snapshots at identity or related grant changes', () => {
   let identity = 'tenant-a:workspace-a:operator', grants = new Set(['rental-os:member:view', 'rental-os:member:review']);
   const boundary = (file, name, child) => {
     const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
@@ -59,7 +59,10 @@ test('membership screens discard local task snapshots at identity or review-gran
   const Rewards = boundary('apps/admin/src/features/membership/MembershipRewardsPage.tsx', 'MembershipRewardsPage', 'MembershipRewardsWorkspace');
   const Personal = boundary('apps/admin/src/features/membership/PersonalMembershipPage.tsx', 'PersonalMembershipPage', 'PersonalMembershipWorkspace');
   const Corporate = boundary('apps/admin/src/features/membership/CorporateMembershipPage.tsx', 'CorporateMembershipPage', 'CorporateMembershipWorkspace');
-  for (const Screen of [Review, Rewards, Personal, Corporate]) {
+  const Catalog = boundary('apps/admin/src/features/catalog/CatalogPage.tsx', 'CatalogPage', 'CatalogWorkspace');
+  const Assets = boundary('apps/admin/src/features/catalog/AssetWorkspacePage.tsx', 'AssetWorkspacePage', 'AssetWorkspace');
+  const Locations = boundary('apps/admin/src/features/fulfillment/LocationPage.tsx', 'LocationPage', 'LocationWorkspace');
+  for (const Screen of [Review, Rewards, Personal, Corporate, Catalog, Assets, Locations]) {
     identity = 'tenant-a:workspace-a:operator';
     const original = Screen();
     assert.equal(Screen().key, original.key, 'Ordinary rerenders retain the form.');
@@ -93,6 +96,67 @@ test('compact filter rows reserve actions and keep reset access in the overflow 
   assert.equal(wide.count, 2, 'A wide row exposes the criteria and reset without a needless overflow panel.');
 });
 
+test('opening another catalog record clears nested draft fields through the actual form store', context => {
+  // rc-form schedules watch notifications through MessageChannel. Close this test's
+  // native ports afterwards so its browser-style scheduler cannot retain Node.
+  const NativeMessageChannel = global.MessageChannel;
+  const channels = [];
+  context.mock.method(global, 'MessageChannel', function () {
+    const channel = new NativeMessageChannel();
+    channels.push(channel);
+    return channel;
+  });
+  context.after(() => channels.forEach(channel => { channel.port1.close(); channel.port2.close(); }));
+  const { FormStore } = require('@rc-component/form/lib/hooks/useForm');
+  const editor = (file, workspace, name, dependencies) => {
+    const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+    const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === workspace);
+    const fn = owner?.body?.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(fn, name);
+    const code = ts.transpileModule(`export ${fn.getText(source)}`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {};
+    new Function('exports', ...Object.keys(dependencies), code)(exports, ...Object.values(dependencies));
+    return exports[name];
+  };
+  for (const kind of ['model', 'asset']) {
+    const form = new FormStore(() => {}).getForm();
+    form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
+    let selected;
+    const common = { setEditing: value => { selected = value; }, editorUnavailable: false };
+    const open = kind === 'model' ? editor('apps/admin/src/features/catalog/CatalogPage.tsx', 'CatalogWorkspace', 'openEditor', {
+      ...common, form, busy: false, setPendingFiles() {}, setDrawerOpen() {}, presentation: undefined,
+      category: { supportedInventoryModes: ['serialized'] }, RentalInventoryMode: { Serialized: 'serialized' }
+    }) : editor('apps/admin/src/features/catalog/AssetWorkspacePage.tsx', 'AssetWorkspace', 'openAssetEditor', {
+      ...common, assetForm: form, saveAsset: { isPending: false }, setAssetDrawerOpen() {},
+      serializedGroups: [{ id: 'model-b' }], locations: { data: [{ id: 'location-b' }] }, RentalAssetStatus: { Available: 'available' }
+    });
+    form.setFieldsValue({ id: 'first', attributes: { retainedInFirst: 'unsaved' }, description: 'old draft' });
+    const next = { id: 'second', attributes: { suppliedBySecond: 'persisted' } };
+    open(next);
+    assert.equal(selected, next);
+    assert.deepEqual(form.getFieldValue('attributes'), next.attributes, `${kind}: nested fields from another record cannot merge into this one.`);
+    assert.equal(form.getFieldValue('description'), undefined, `${kind}: omitted fields do not retain the old draft.`);
+    open();
+    assert.equal(form.getFieldValue('id'), undefined, `${kind}: new records cannot inherit an existing identifier.`);
+    assert.deepEqual(form.getFieldValue('attributes'), {}, `${kind}: new attributes start empty.`);
+  }
+  const form = new FormStore(() => {}).getForm();
+  form.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
+  const openStock = editor('apps/admin/src/features/catalog/StockOperationsPanel.tsx', 'StockOperationsPanel', 'openEditor', {
+    form, canManage: true, unavailable: false, apply: { isPending: false },
+    quantityGroups: [{ id: 'quantity-model' }], storageLocations: [{ id: 'storage' }],
+    setOperationKey() {}, setOperationType() {}, setOpen() {},
+  });
+  form.setFieldsValue({ type: 'transfer', fromLocationId: 'old-source', toLocationId: 'old-target', actualOnHandQuantity: 15, batchNo: 'old-batch', idempotencyKey: 'old-operation' });
+  openStock();
+  assert.equal(form.getFieldValue('type'), 'receive');
+  assert.equal(form.getFieldValue('quantity'), 1);
+  for (const name of ['fromLocationId', 'toLocationId', 'actualOnHandQuantity', 'batchNo']) {
+    assert.equal(form.getFieldValue(name), undefined, `New stock operations cannot retain ${name} from a cancelled draft.`);
+  }
+  assert.notEqual(form.getFieldValue('idempotencyKey'), 'old-operation');
+});
+
 test('live refresh is opt-in, pauses while editing, stops on denial and resets across identities', () => {
   let identity = { tenant: { tenantId: 't' }, currentWorkspaceId: 'w', user: { id: 'u' } };
   let state;
@@ -113,6 +177,26 @@ test('live refresh is opt-in, pauses while editing, stops on denial and resets a
   assert.equal(useLiveRefresh('orders').enabled, false);
   identity = { ...identity, currentWorkspaceId: 'w' };
   assert.equal(useLiveRefresh('orders').enabled, false, 'returning to the prior workspace must not reactivate its old live switch');
+});
+
+test('list identity ignores permission ordering but retains access and organization boundaries', () => {
+  const permissions = ['catalog:view', 'assets:view'];
+  let identity = { tenant: { tenantId: 'tenant' }, currentWorkspaceId: 'workspace', user: {
+    id: 'operator', permissions, dataScope: 'self_org', organizationId: 'org-a', locationScope: { mode: 'selected', locationIds: ['one'] }
+  } };
+  const { useListQueryIdentity } = load('apps/admin/src/components/ui/LiveRefresh.tsx', {
+    react: {}, '@/features/auth/authStore': { useAuthStore: selector => selector(identity) }, '@/app/locale': {}, './Switch': {}
+  });
+  const original = useListQueryIdentity();
+  identity = { ...identity, user: { ...identity.user, permissions: ['assets:view', 'catalog:view', 'catalog:view'] } };
+  assert.equal(useListQueryIdentity(), original, 'An equivalent permission receipt must not discard a draft.');
+  assert.deepEqual(permissions, ['catalog:view', 'assets:view'], 'Key generation cannot reorder the authorization store.');
+  identity = { ...identity, user: { ...identity.user, permissions: ['catalog:view'] } };
+  assert.notEqual(useListQueryIdentity(), original, 'Revoking a permission still changes the scope.');
+  identity = { ...identity, user: { ...identity.user, permissions, organizationId: 'org-b' } };
+  assert.notEqual(useListQueryIdentity(), original, 'Moving the same operator to another organization changes their data range.');
+  identity = { ...identity, user: { ...identity.user, organizationId: 'org-a', locationScope: { mode: 'selected', locationIds: ['two'] } } };
+  assert.notEqual(useListQueryIdentity(), original, 'A changed location grant invalidates the prior view.');
 });
 
 test('a list keeps its ready content during loading but hides it after authorization errors or a changed scope', () => {

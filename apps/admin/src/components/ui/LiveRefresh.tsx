@@ -21,7 +21,9 @@ export function useLiveRefresh(name: string, paused = false) {
 }
 
 export function useListQueryIdentity() {
-  return useAuthStore(state => JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id, state.user?.isPlatformAdmin, state.user?.isSaasAdmin, state.user?.dataScope, state.user?.locationScope, state.user?.permissions]));
+  // Permission order is not an authorization change. Never sort the store's own array.
+  return useAuthStore(state => JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id, state.user?.isPlatformAdmin, state.user?.isSaasAdmin, state.user?.dataScope, state.user?.locationScope,
+    state.user?.permissions && [...new Set(state.user.permissions)].sort(), state.user?.organizationId]));
 }
 
 export function LiveRefresh({ enabled, onChange, busy, updatedAt, paused }: { enabled: boolean; onChange: (value: boolean) => void; busy?: boolean; updatedAt?: number; paused?: boolean }) {

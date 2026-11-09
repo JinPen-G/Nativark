@@ -2,13 +2,13 @@ import { catalogCards } from "./catalogCards";
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@/components/ui/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Col, InputNumber, Row, Tag, Typography } from "antd";
 import { ListSection, App, Empty } from "@/components/ui";
 import { Form, FormSection } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
+import { Button, ConfirmAction, DataTableText, DatePicker, Modal, SaveButton, SearchField, Select } from "@/components/ui";
 import type { UploadFile } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -21,6 +21,10 @@ import { ItemGroupPhoto } from "./ItemGroupPhoto";
 import { catalogCapabilities } from "@/features/listCapabilities";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { catalogAttributeText } from "./catalogAttributeText";
+import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
+import dayjs from "dayjs";
 import styles from "./CatalogEditors.module.css";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
@@ -80,10 +84,16 @@ function AttributeInput({
     // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。
     return <Switch id={id} checked={checked ?? Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
   }
-  return <Input id={id} type={field.type === "date" ? "date" : undefined} value={value as string} onChange={onChange as (event: unknown) => void} />;
+  if (field.type === "date") return <DatePicker id={id} value={typeof value === "string" && value ? dayjs(value) : null} onChange={date => (onChange as (value: string) => void)?.(date?.format("YYYY-MM-DD") ?? "")} />;
+  return <Input id={id} value={value as string} onChange={onChange as (event: unknown) => void} />;
 }
 
 export function CatalogPage() {
+  const scope = useListQueryIdentity();
+  return <CatalogWorkspace key={scope} scope={scope} />;
+}
+
+function CatalogWorkspace({ scope }: { scope: string }) {
   const { message } = App.useApp();
   const { t, locale } = useLocale();
   const queryClient = useQueryClient();
@@ -93,10 +103,11 @@ export function CatalogPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const [form] = Form.useForm<SaveRentalItemGroupRequest>();
-  const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
-  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
-  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
+  const editor = useModalDismissal(drawerOpen, () => { setDrawerOpen(false); setEditing(undefined); form.resetFields(); setPendingFiles([]); });
+  const groups = useQuery({ queryKey: ["rental-core", "groups", scope], queryFn: rentalCoreApi.itemGroups });
+  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups", scope], queryFn: rentalCoreApi.pricingGroups });
+  const profile = useQuery({ queryKey: ["rental-core", "profile", scope], queryFn: rentalCoreApi.profile });
+  const categories = useQuery({ queryKey: ["rental-core", "categories", scope], queryFn: rentalCoreApi.categories });
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
   const presentation = category?.businessModel.catalogPresentation;
   const groupFields = category?.businessModel.assetFields.filter((field) => field.scope === "item_group") ?? [];
@@ -114,10 +125,7 @@ export function CatalogPage() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] });
-      setDrawerOpen(false);
-      setEditing(undefined);
-      form.resetFields();
-      setPendingFiles([]);
+      editor.dismiss();
       message.success(`${itemGroupLabel}${t("已保存")}`);
     },
     onError: () => message.error(t("保存失败，请检查编码、库存模式、品类字段和套装组成"))
@@ -132,10 +140,15 @@ export function CatalogPage() {
     onError: () => message.error(t("照片删除失败"))
   });
   const rows = useMemo(() => (groups.data ?? []).filter((item) => `${item.code}${item.name}${Object.values(item.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [groups.data, keyword]);
+  const busy = save.isPending || removeImage.isPending;
+  const editorUnavailable = !canManage || !category || groups.isError || profile.isError || categories.isError;
 
   function openEditor(record?: RentalItemGroup) {
+    if (editorUnavailable || busy) return;
     setEditing(record);
     setPendingFiles([]);
+    // setFieldsValue merges nested attributes, so a new target needs a clean store.
+    form.resetFields();
     form.setFieldsValue(record ?? {
       code: "",
       name: "",
@@ -151,23 +164,23 @@ export function CatalogPage() {
 
   return (
     <>
-      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录")} note={{ title: `${itemGroupLabel}${t("是厂商产品主档，不是定价分组")}`, description: locale === "en-US" ? `This page stores manufacturer, brand, model, and shared specifications. ${t(profile.data?.terminology.identifierLabel ?? "资产编号")} and other per-asset information are maintained in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理")}”; customer-facing commercial groups are created in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组") }”.` : `这里保存厂商、品牌、型号和共享规格；${profile.data?.terminology.identifierLabel ?? "资产编号"}等单件信息在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”登记，面向客户的商业分组在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组"}”建立。` }} extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{locale === "en-US" ? `${t("新增")} ${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`}</Button> : undefined} />
+      <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录")} note={{ title: `${itemGroupLabel}${t("是厂商产品主档，不是定价分组")}`, description: locale === "en-US" ? `This page stores manufacturer, brand, model, and shared specifications. ${t(profile.data?.terminology.identifierLabel ?? "资产编号")} and other per-asset information are maintained in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理")}”; customer-facing commercial groups are created in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组") }”.` : `这里保存厂商、品牌、型号和共享规格；${profile.data?.terminology.identifierLabel ?? "资产编号"}等单件信息在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”登记，面向客户的商业分组在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组"}”建立。` }} extra={canManage ? <Button type="primary" disabled={editorUnavailable || busy} icon={<PlusOutlined />} onClick={() => openEditor()}>{locale === "en-US" ? t("新增型号") : `${t("新增")}${itemGroupLabel}`}</Button> : undefined} />
       <ListSection controls={<><SearchField label={t("搜索商品型号")} placeholder={t("搜索编码、名称或规格")} value={keyword} onValueChange={setKeyword} style={{ width: "var(--rental-control-width-search)" }} /></>}>
 
-        <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error}>
+        <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error} onRetry={() => Promise.all([groups.refetch({ throwOnError: true }), pricingGroups.refetch({ throwOnError: true }), profile.refetch({ throwOnError: true }), categories.refetch({ throwOnError: true })])}>
           <Table<RentalItemGroup> emptyScene={keyword.trim() ? 'search' : 'empty'} rowKey="id" onRefresh={() => groups.refetch()} loading={groups.isLoading} refreshing={groups.isFetching} dataSource={rows} scroll={{ x: 960 }}
             {...catalogCapabilities(t, groupFields, () => queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] }), category?.supportedInventoryModes ?? [], presentation?.fixedInventoryMode, presentation?.fixedUnit)}
             cardView={catalogCards({ t, fields: groupFields, summaryFields, pricingGroups: pricingGroups.data ?? [], canManage, edit: openEditor, risk: row => riskLevelLabels(String(row.attributes.securityRiskLevel ?? ""), locale, t) })} columns={[
             { title: t("照片"), width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },
-            { title: itemGroupLabel, fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
+            { title: itemGroupLabel, dataIndex: "name", minWidth: ADMIN_TABLE_COLUMN_WIDTH.resources, fixed: "left", render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
             { title: t("商品风控等级"), width: 120, render: (_, row) => {
               const riskLevel = String(row.attributes.securityRiskLevel ?? "");
               return riskLevelLabels(riskLevel, locale, t);
             } },
             ...summaryFields.map((field) => ({ title: t(field.label), render: (_: unknown, row: RentalItemGroup) => String(row.attributes[field.code] ?? "-") })),
-            { title: t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "所属定价分组"), render: (_, row) => {
+            { title: t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "所属定价分组"), minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary, render: (_, row) => {
               const memberships = (pricingGroups.data ?? []).filter((pricingGroup) => pricingGroup.memberItemGroupIds.includes(row.id));
-              return memberships.length ? <Space size={[4, 4]} wrap>{memberships.map((pricingGroup) => <Tag color="processing" key={pricingGroup.id}>{pricingGroup.name}</Tag>)}</Space> : <Typography.Text type="secondary">{t("未加入定价分组")}</Typography.Text>;
+              return memberships.length ? <div>{memberships.map((pricingGroup) => <DataTableText key={pricingGroup.id} primary={pricingGroup.name} />)}</div> : <Typography.Text type="secondary">{t("未加入定价分组")}</Typography.Text>;
             } },
             ...(!presentation?.fixedInventoryMode ? [{ title: t("库存方式"), dataIndex: "inventoryMode", render: (value: string) => <Tag color={value === "bundle" ? "purple" : value === "quantity" ? "gold" : "blue"}>{t(inventoryLabels[value] ?? value)}</Tag> }] : []),
             ...(!presentation?.fixedUnit ? [{ title: t("单位"), dataIndex: "unit" }] : []),
@@ -178,21 +191,23 @@ export function CatalogPage() {
         </QueryState>
       </ListSection>
 
-      <Drawer title={editing ? `${t("编辑")}${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })} />}>
-        <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
+      <Modal presentation="side" title={locale === "en-US" ? t(editing ? "编辑型号" : "新增型号") : `${t(editing ? "编辑" : "新增")}${itemGroupLabel}`} width={760} open={editor.visible} destroyOnHidden onCancel={editor.dismiss} afterClose={editor.afterClose}
+        closable={!busy} keyboard={!busy} maskClosable={!busy}
+        footer={<><Button disabled={busy} onClick={editor.dismiss}>{t("取消")}</Button><SaveButton disabled={editorUnavailable || removeImage.isPending} label={t("保存")} form={form} pending={save.isPending} onSave={(values) => editorUnavailable || busy ? Promise.reject(new Error("Operation unavailable")) : save.mutateAsync({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })} /></>}>
+        <Form<SaveRentalItemGroupRequest> name="catalog-item" form={form} layout="vertical" disabled={editorUnavailable || busy} onFinish={(values) => { if (!editorUnavailable && !busy) save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id }); }}>
           <SettingsWorkspace sections={[
             { key: "profile", label: t("基本资料"), content: <>
-          <FormSection title={t("型号基本资料")}>
+          <div>
           <Row gutter={16}>
-            <Col span={24}><Form.Item name="name" label={t(presentation?.itemGroupNameLabel ?? `${itemGroupLabel}${t("名称")}`)} extra={t("这是型号的显示名称，不是面向客户的定价组名称。")} rules={[{ required: true }]}><Input placeholder={t(presentation?.itemGroupNamePlaceholder ?? "")} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="code" label={t(presentation?.itemGroupCodeLabel ?? `${itemGroupLabel}${t("编码")}`)} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder={t("用于内部检索和接口引用")} /></Form.Item></Col>
+            <Col span={24}><Form.Item name="name" label={presentation?.itemGroupNameLabel ? t(presentation.itemGroupNameLabel) : locale === "en-US" ? t("型号名称") : `${itemGroupLabel}${t("名称")}`} extra={t("这是型号的显示名称，不是面向客户的定价组名称。")} rules={[{ required: true }]}><Input placeholder={t(presentation?.itemGroupNamePlaceholder ?? "")} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="code" label={presentation?.itemGroupCodeLabel ? t(presentation.itemGroupCodeLabel) : locale === "en-US" ? t("型号编码") : `${itemGroupLabel}${t("编码")}`} rules={[{ required: true }]}><Input disabled={Boolean(editing) || editorUnavailable || busy} placeholder={t("用于内部检索和接口引用")} /></Form.Item></Col>
             <Col span={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
-            {presentation?.fixedInventoryMode ? <Form.Item name="inventoryMode" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="inventoryMode" label={t("库存方式")} rules={[{ required: true }]}><Select disabled={Boolean(editing)} options={category?.supportedInventoryModes.map((value) => ({ value, label: t(inventoryLabels[value] ?? value) }))} /></Form.Item></Col>}
+            {presentation?.fixedInventoryMode ? <Form.Item name="inventoryMode" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="inventoryMode" label={t("库存方式")} rules={[{ required: true }]}><Select disabled={Boolean(editing) || editorUnavailable || busy} options={category?.supportedInventoryModes.map((value) => ({ value, label: t(inventoryLabels[value] ?? value) }))} /></Form.Item></Col>}
             {presentation?.fixedUnit ? <Form.Item name="unit" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="unit" label={t("计量单位")} rules={[{ required: true }]}><Input placeholder={t("台、套、顶、辆")} /></Form.Item></Col>}
           </Row>
           {presentation?.fixedInventoryMode && <Typography.Text type="secondary">{locale === "en-US" ? `${t("固定按“")}${t(inventoryLabels[presentation.fixedInventoryMode])}${t(" / ")}${presentation.fixedUnit}${t("”管理，具体")}${t(profile.data?.terminology.assetLabel ?? "资产")}${t("在“")}${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? t("资产管理")}${t("”中登记。")}` : `该品类固定按“${inventoryLabels[presentation.fixedInventoryMode]} / ${presentation.fixedUnit}”管理，具体${profile.data?.terminology.assetLabel ?? "资产"}在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中登记。`}</Typography.Text>}
           <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
-          </FormSection>
+          </div>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
             <FormSection title={t("套装组成")}>
               <Form.List name="bundleComponents">{(fields, { add, remove }) => <div className={styles.bundleList}>
@@ -213,18 +228,19 @@ export function CatalogPage() {
             </FormSection>
           )}</Form.Item>
             </> },
-            { key: "specifications", label: t("型号规格"), content: <FormSection title={`${t(category?.name ?? "品类")}${t("厂商与型号规格")}`}>
+            { key: "specifications", label: t("型号规格"), content: <div>
               <Row gutter={16}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.code === "securityRiskLevel" ? t("未分级商品按未获风控许可处理；会员押金或预授权减免只对空间规则明确允许的等级生效。") : field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
-            </FormSection> },
-            { key: "photos", label: t("展示照片"), content: <FormSection title={`${itemGroupLabel}${t("照片")}`}>
+            </div> },
+            { key: "photos", label: t("展示照片"), content: <div>
             <Typography.Paragraph type="secondary">{t("上传型号的标准展示图，第一张作为列表封面；具体资产的实拍、状态和损伤照片在资产管理中维护。")}</Typography.Paragraph>
-            {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="processing" style={{ position: "absolute", left: 6, top: 6 }}>{t("封面")}</Tag>}<Button danger size="small" shape="circle" aria-label={t("删除图片")} icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
+            {editing?.images?.length ? <div className={styles.photoList}>{editing.images.map((image) => <div key={image.id} className={styles.photoItem}><div className={styles.photoPreview}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="processing" className={styles.photoCover}>{t("封面")}</Tag>}</div><ConfirmAction label={t("删除图片")} prompt={t("删除这张型号照片？")} icon={<DeleteOutlined />} disabled={editorUnavailable || busy} onConfirm={() => removeImage.mutateAsync({ groupId: editing.id, imageId: image.id })} /></div>)}</div> : null}
             <Upload
               accept="image/jpeg,image/png,image/webp"
               multiple
               listType="picture"
               fileList={pendingFiles}
               maxCount={Math.max(0, 6 - (editing?.images?.length ?? 0))}
+              disabled={editorUnavailable || busy}
               beforeUpload={(file) => {
                 if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { message.error(t("只支持 JPG、PNG 或 WebP 图片")); return Upload.LIST_IGNORE; }
                 if (file.size > 5 * 1024 * 1024) { message.error(t("单张图片不能超过 5MB")); return Upload.LIST_IGNORE; }
@@ -234,11 +250,11 @@ export function CatalogPage() {
             >
               {(editing?.images?.length ?? 0) + pendingFiles.length < 6 && <Button icon={<UploadOutlined />}>{t("选择照片")}</Button>}
             </Upload>
-            {pendingFiles.length > 0 && <Typography.Text type="secondary">{t("所选照片将在点击右上角“保存”后上传。")}</Typography.Text>}
-            </FormSection> }
+            {pendingFiles.length > 0 && <Typography.Text type="secondary">{t("所选照片将在保存时上传。")}</Typography.Text>}
+            </div> }
           ]} />
         </Form>
-      </Drawer>
+      </Modal>
     </>
   );
 }

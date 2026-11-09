@@ -7,6 +7,10 @@
 .bundleMain { display: grid; grid-template-columns: minmax(0, 1fr) var(--rental-control-width-number) auto; gap: var(--space-3); align-items: start; }
 .bundleRemove { align-self: end; margin-bottom: var(--rental-form-field-gap); }
 .bundleOptions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4); }
+.photoList { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--rental-form-field-gap); }
+.photoItem { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); max-width: 100%; }
+.photoPreview { position: relative; }
+.photoCover { position: absolute; top: var(--space-2); left: var(--space-2); }
 @container settings-panel (max-width: 420px) {
   .bundleMain { grid-template-columns: minmax(0, 1fr) auto; }
   .bundleProduct { grid-column: 1 / -1; }
