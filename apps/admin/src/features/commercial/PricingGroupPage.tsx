@@ -8,7 +8,7 @@ import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, DataTableRowActions, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
+import { Button, DataTableRowActions, Modal, SaveButton, SearchField, Select } from "@/components/ui";
 import { Pencil, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -19,8 +19,15 @@ import { QueryState } from "@/components/QueryState";
 import { toPricingGroupRequest, type PricingGroupFormValues } from "./pricing-group-initial-rate";
 import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
 import styles from "./PricingGroupPage.module.css";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
+import { useModalDismissal } from "@/components/ui/useModalDismissal";
 
 export function PricingGroupPage() {
+  const scope = useListQueryIdentity();
+  return <PricingGroupWorkspace key={scope} scope={scope} />;
+}
+
+function PricingGroupWorkspace({ scope }: { scope: string }) {
   const { message } = App.useApp();
   const { locale, t } = useLocale();
   const queryClient = useQueryClient();
@@ -31,13 +38,15 @@ export function PricingGroupPage() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [form] = Form.useForm<PricingGroupFormValues>();
   const [securityForm] = Form.useForm<UpdateRentalPricingGroupSecurityRatesRequest>();
-  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const models = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
-  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
-  const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
-  const rules = useQuery({ queryKey: ["rental-core", "rule-versions"], queryFn: rentalCoreApi.ruleVersions });
+  const editor = useModalDismissal(open, () => { setOpen(false); setEditing(undefined); form.resetFields(); });
+  const securityEditor = useModalDismissal(securityOpen, () => { setSecurityOpen(false); setSecurityEditing(undefined); securityForm.resetFields(); });
+  const profile = useQuery({ queryKey: ["rental-core", "profile", scope], queryFn: rentalCoreApi.profile });
+  const models = useQuery({ queryKey: ["rental-core", "groups", scope], queryFn: rentalCoreApi.itemGroups });
+  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups", scope], queryFn: rentalCoreApi.pricingGroups });
+  const settings = useQuery({ queryKey: ["rental-core", "business-settings", scope], queryFn: rentalCoreApi.businessSettings });
+  const rules = useQuery({ queryKey: ["rental-core", "rule-versions", scope], queryFn: rentalCoreApi.ruleVersions });
   const currency = settings.data?.pricing.currency;
-  const { currentVersionDetail } = usePriceVersions();
+  const { versions, currentVersion, currentVersionDetail } = usePriceVersions();
   // 已发布（含未来生效）与最新草稿都参与字段展示，避免先配价格后配资金规则时
   // 出现“发布被拒、页面却没有补录入口”的死锁。
   const rateRuleCandidates = (rules.data ?? []).filter((row) =>
@@ -64,9 +73,7 @@ export function PricingGroupPage() {
         queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }),
         queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY })
       ]);
-      setOpen(false);
-      setEditing(undefined);
-      form.resetFields();
+      editor.dismiss();
       message.success(t("定价分组已保存"));
     },
     onError: () => message.error(t("保存失败，请检查编码、成员型号和库存方式"))
@@ -78,9 +85,7 @@ export function PricingGroupPage() {
         queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ["rental-core", "price-version"] })
       ]);
-      setSecurityOpen(false);
-      setSecurityEditing(undefined);
-      securityForm.resetFields();
+      securityEditor.dismiss();
       message.success(t("资金费率已保存，新价格版本已生效") + ` · ${result.version}`);
     },
     onError: (error) => message.error(error instanceof Error ? error.message : t("资金费率保存失败，请检查规则与待生效调价"))
@@ -92,8 +97,11 @@ export function PricingGroupPage() {
   const routeLabel = t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组");
   const itemLabel = t(profile.data?.terminology.itemLabel ?? "商品");
   const itemGroupLabel = t(profile.data?.terminology.itemGroupLabel ?? "产品型号");
+  const editorUnavailable = !settings.data || !rules.data || models.isPending || settings.isError || rules.isError || models.isError || pricingGroups.isError;
+  const securityUnavailable = editorUnavailable || versions.isPending || versions.isError || currentVersionDetail.isPending || currentVersionDetail.isError || !currentVersionDetail.data || !securityRateFields.length;
 
   function edit(record?: RentalPricingGroup) {
+    if (save.isPending) return;
     if (!settings.data || !rules.data) {
       const failed = settings.isError || rules.isError;
       message.error(t(failed ? "基础经营设置或业务规则读取失败，请刷新后重试" : "基础经营设置或业务规则仍在加载，请稍后重试"));
@@ -120,6 +128,7 @@ export function PricingGroupPage() {
   }
 
   function editSecurityRates(record: RentalPricingGroup) {
+    if (securityUnavailable || saveSecurityRates.isPending) return;
     const currentRates = (currentVersionDetail.data?.rates ?? [])
       .filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === record.id)
       .map(({ unit, depositAmount, depositMultiple, preAuthAmount, preAuthMultiple }) => ({ unit, depositAmount, depositMultiple, preAuthAmount, preAuthMultiple }));
@@ -144,14 +153,16 @@ export function PricingGroupPage() {
         title: locale === "en-US" ? "Rate groups and models" : `定价分组不是${itemGroupLabel}`,
         description: locale === "en-US" ? "A rate group can include several models, and a model can belong to several groups. Stock is tracked once. The quote determines which model fulfills the booking." : `一个定价分组可以包含多个${itemGroupLabel}；同一${itemGroupLabel}也可以加入多个定价分组。资产与库存始终只维护一份，报价后由系统选择实际承接型号。`
       }}
-      extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>{t("新增定价分组")}</Button>}
+      extra={<Button type="primary" icon={<PlusOutlined />} disabled={editorUnavailable || save.isPending} onClick={() => edit()}>{t("新增定价分组")}</Button>}
     />
     <ListSection controls={<SearchField label={t("搜索定价分组")} value={keyword} onValueChange={setKeyword} placeholder={t("搜索分组或成员型号")} style={{ width: "var(--rental-control-width-search)" }} />}>
 
-      <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading || rules.isLoading || currentVersionDetail.isLoading} error={pricingGroups.error || models.error || settings.error || rules.error || currentVersionDetail.error}>
+      <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading || rules.isLoading || versions.isLoading || currentVersionDetail.isLoading} error={pricingGroups.error || models.error || settings.error || rules.error || versions.error || currentVersionDetail.error}
+        onRetry={() => Promise.all([pricingGroups.refetch({ throwOnError: true }), models.refetch({ throwOnError: true }), settings.refetch({ throwOnError: true }), rules.refetch({ throwOnError: true }), versions.refetch({ throwOnError: true }), ...(currentVersion ? [currentVersionDetail.refetch({ throwOnError: true })] : [])])}>
         <Table<RentalPricingGroup>
+          emptyScene={keyword.trim() ? "search" : "empty"}
           cardView={pricingGroupCards({ t, rates: currentVersionDetail.data?.rates ?? [], models: models.data ?? [], defaultUnit: settings.data?.pricing.defaultUnit, money: value => formatRentalMoney(value, currency), canEditSecurity: Boolean(securityRateFields.length && currentVersionDetail.data), edit, security: editSecurityRates })} exportConfig={{ filename: t("定价分组"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("名称"), value: row => row.name }, { label: t("版本"), value: row => row.version }, { label: t("状态"), value: row => t(row.status === "enabled" ? "已启用" : "已停用") }, { label: t("包含的型号"), value: row => row.members.map(item => item.name).join(" / ") }] }} rowKey="id" onRefresh={() => pricingGroups.refetch()} loading={pricingGroups.isLoading} refreshing={pricingGroups.isFetching} dataSource={rows} columns={[
-          { title: t("定价分组"), minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary, render: (_, row) => <DataTableText primary={row.name} secondary={`${row.code} · v${row.version}`}/> },
+          { title: t("定价分组"), dataIndex: "name", minWidth: ADMIN_TABLE_COLUMN_WIDTH.summary, render: (_, row) => <DataTableText primary={row.name} secondary={`${row.code} · v${row.version}`}/> },
           { title: locale === "en-US" ? itemGroupLabel : `${t("包含的")}${itemGroupLabel}`, render: (_, row) => <Space orientation="vertical" size={4}>{row.members.length ? row.members.map((member) => <DataTableText key={member.id} primary={member.name} secondary={member.code}/>) : <span className="muted">{t("未配置")}</span>}</Space> },
           { title: t("默认计价"), render: (_, row) => row.defaultPricingUnit ? t(RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] ?? row.defaultPricingUnit) : t("跟随价格配置") },
           { title: t("当前基本价"), minWidth: ADMIN_TABLE_COLUMN_WIDTH.dateTime, render: (_, row) => {
@@ -159,21 +170,23 @@ export function PricingGroupPage() {
             return rates.length ? <Space orientation="vertical" size={4}>{rates.map((rate) => <span style={{whiteSpace:"nowrap"}} key={`${rate.itemGroupId}:${rate.unit}`}><DataTableMoney formatted={formatRentalMoney(rate.baseAmount,currency)}/><span className="muted"> / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</span></span>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
           } },
           { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "启用" : "停用")}</Tag> },
-          { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => edit(row) }} details={() => edit(row)} detailLabel={t("编辑")} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
-            { id: "security", label: t("押金/预授权"), icon: ShieldCheck, disabled: !securityRateFields.length || !currentVersionDetail.data, onSelect: () => editSecurityRates(row) }
+          { title: t("操作"), render: (_, row) => <DataTableRowActions primary={{ id: "edit", label: t("编辑"), icon: Pencil, disabled: editorUnavailable || save.isPending, onSelect: () => edit(row) }} details={() => edit(row)} detailLabel={t("编辑")} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
+            { id: "security", label: t("押金/预授权"), icon: ShieldCheck, disabled: securityUnavailable || saveSecurityRates.isPending, onSelect: () => editSecurityRates(row) }
           ]} /> }
         ]} />
       </QueryState>
     </ListSection>
-    <Drawer title={t(editing ? "编辑定价分组" : "新增定价分组")} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(toPricingGroupRequest(values, editing?.id))} />}>
-      <Form<PricingGroupFormValues> form={form} layout="vertical" onFinish={(values) => save.mutate(toPricingGroupRequest(values, editing?.id))}>
+    <Modal presentation="side" title={t(editing ? "编辑定价分组" : "新增定价分组")} width={640} open={editor.visible} destroyOnHidden onCancel={editor.dismiss} afterClose={editor.afterClose}
+      closable={!save.isPending} keyboard={!save.isPending} maskClosable={!save.isPending}
+      footer={<><Button disabled={save.isPending} onClick={editor.dismiss}>{t("取消")}</Button><SaveButton label={t("保存")} form={form} disabled={editorUnavailable} pending={save.isPending} onSave={(values) => editorUnavailable || save.isPending ? Promise.reject(new Error("Operation unavailable")) : save.mutateAsync(toPricingGroupRequest(values, editing?.id))} /></>}>
+      <Form<PricingGroupFormValues> name="pricing-group" form={form} layout="vertical" disabled={editorUnavailable || save.isPending} onFinish={(values) => { if (!editorUnavailable && !save.isPending) save.mutate(toPricingGroupRequest(values, editing?.id)); }}>
         <FormSection title={t("基本资料")}>
         <Form.Item name="name" label={t("分组名称")} rules={[{ required: true }]}><Input placeholder={locale === "en-US" ? `e.g. Standard ${itemLabel} group` : `如：标准${itemLabel}分组`} /></Form.Item>
         <Row gutter={16}>
-          <Col xs={24} sm={12}><Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="STANDARD_GROUP" /></Form.Item></Col>
+          <Col xs={24} sm={12}><Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing) || editorUnavailable || save.isPending} placeholder="STANDARD_GROUP" /></Form.Item></Col>
           <Col xs={24} sm={12}><Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item></Col>
         </Row>
-        <Form.Item name="memberItemGroupIds" label={`${t("包含的")}${itemGroupLabel}`} rules={[{ required: true, type: "array", min: 1 }]} extra={t("同一型号可以加入多个定价分组；库存不会因此复制。")}>
+        <Form.Item name="memberItemGroupIds" label={locale === "en-US" ? t("包含的型号") : `${t("包含的")}${itemGroupLabel}`} rules={[{ required: true, type: "array", min: 1 }]} extra={t("同一型号可以加入多个定价分组；库存不会因此复制。")}>
           <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} optionRender={(option) => {
             const model = (models.data ?? []).find((item) => item.id === option.value);
             const specification = model ? [model.attributes.manufacturer, model.attributes.brand, model.attributes.model, model.attributes.trim].filter(Boolean).join(" · ") : "";
@@ -288,19 +301,20 @@ export function PricingGroupPage() {
         </FormSection>}
         <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
       </Form>
-    </Drawer>
-    <Drawer presentation="dialog"
+    </Modal>
+    <Modal presentation="side"
       title={`${t("押金/预授权费率")} · ${securityEditing?.name ?? ""}`}
-      size={640}
-      open={securityOpen}
+      width={640}
+      open={securityEditor.visible}
       destroyOnHidden
-      onClose={() => setSecurityOpen(false)}
-      extra={<SaveButton label={t("保存并生成新价格版本")} form={securityForm} pending={saveSecurityRates.isPending} onSave={(values) => saveSecurityRates.mutateAsync(values)} />}
+      onCancel={securityEditor.dismiss} afterClose={securityEditor.afterClose}
+      closable={!saveSecurityRates.isPending} keyboard={!saveSecurityRates.isPending} maskClosable={!saveSecurityRates.isPending}
+      footer={<><Button disabled={saveSecurityRates.isPending} onClick={securityEditor.dismiss}>{t("取消")}</Button><SaveButton label={t("保存费率")} form={securityForm} disabled={securityUnavailable} pending={saveSecurityRates.isPending} onSave={(values) => securityUnavailable || saveSecurityRates.isPending ? Promise.reject(new Error("Operation unavailable")) : saveSecurityRates.mutateAsync(values)} /></>}
     >
       <Typography.Paragraph type="secondary">
         {t("只调整本定价组的押金与预授权金额，不改基本租金。保存后会为整个经营空间追加新价格版本，历史版本和既有订单快照保持不变。")}
       </Typography.Paragraph>
-      <Form<UpdateRentalPricingGroupSecurityRatesRequest> form={securityForm} layout="vertical" onFinish={(values) => saveSecurityRates.mutate(values)}>
+      <Form<UpdateRentalPricingGroupSecurityRatesRequest> name="pricing-security-rates" form={securityForm} layout="vertical" disabled={securityUnavailable || saveSecurityRates.isPending} onFinish={(values) => { if (!securityUnavailable && !saveSecurityRates.isPending) saveSecurityRates.mutate(values); }}>
         <Form.List name="rates">
           {(fields) => <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             {fields.map((field) => {
@@ -323,6 +337,6 @@ export function PricingGroupPage() {
           </Space>}
         </Form.List>
       </Form>
-    </Drawer>
+    </Modal>
   </>;
 }

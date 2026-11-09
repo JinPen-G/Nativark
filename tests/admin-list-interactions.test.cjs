@@ -155,6 +155,48 @@ test('opening another catalog record clears nested draft fields through the actu
     assert.equal(form.getFieldValue(name), undefined, `New stock operations cannot retain ${name} from a cancelled draft.`);
   }
   assert.notEqual(form.getFieldValue('idempotencyKey'), 'old-operation');
+  const adjustmentForm = new FormStore(() => {}).getForm();
+  adjustmentForm.getInternalHooks('RC_FORM_INTERNAL_HOOKS');
+  const rate = { itemGroupId: 'group-a', unit: 'calendar_day', baseAmount: 100 };
+  let openedSource;
+  const openAdjustment = editor('apps/admin/src/features/commercial/RentalCommercialPage.tsx', 'RentalCommercialWorkspace', 'openAdjustment', {
+    adjustmentForm, enabledPlans: [{}], adjustmentBusy: false, priceMatrixReady: true,
+    currentPriceVersionDetail: { data: { version: 'v1', rates: [rate] } },
+    setAdjustmentPreview() {}, setCreatedAdjustmentId() {}, setAdjustmentPlan() {},
+    setAdjustmentSource: value => { openedSource = value; }, dayjs: require('dayjs'), t: text => text,
+  });
+  adjustmentForm.setFieldsValue({ scheduledAtValue: require('dayjs')('2030-01-01'), changeReason: 'cancelled draft' });
+  openAdjustment();
+  assert.equal(adjustmentForm.getFieldValue('scheduledAtValue'), undefined, 'A new price adjustment cannot inherit a cancelled schedule.');
+  rate.baseAmount = 180;
+  assert.equal(openedSource.rates[0].baseAmount, 100, 'Refreshing the price cache cannot relabel or reprice an open draft.');
+});
+
+test('price adjustment submission keeps untouched prices out of a refreshed draft and cannot create it twice', async () => {
+  const file = 'apps/admin/src/features/commercial/RentalCommercialPage.tsx';
+  const source = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true);
+  const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'RentalCommercialWorkspace');
+  const submit = owner.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'submitAdjustment');
+  const rateKey = source.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(item => item.name.getText(source) === 'pricingRateKey'));
+  const code = ts.transpileModule(`${rateKey.getText(source)}\nexport ${submit.getText(source)}`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const base = [{ itemGroupId: 'a', unit: 'calendar_day', baseAmount: 100 }, { itemGroupId: 'b', unit: 'calendar_day', baseAmount: 200 }];
+  const submitted = [];
+  const createSubmit = (extra = {}) => {
+    const dependencies = { adjustmentBusy: false, createdAdjustmentId: undefined, adjustmentSource: { version: 'v1', rates: base }, priceMatrixReady: true,
+      currentPriceVersionDetail: { data: { rates: base.map(rate => ({ ...rate, baseAmount: rate.baseAmount + 20 })) } },
+      message: { warning() {} }, t: text => text, createAdjustment: { mutateAsync: async value => { submitted.push(value); return { id: 'draft-a' }; } }, ...extra };
+    const exports = {};
+    new Function('exports', ...Object.keys(dependencies), code)(exports, ...Object.values(dependencies));
+    return exports.submitAdjustment;
+  };
+  const draft = { code: 'ADJ', name: 'Adjustment', changeReason: 'New rate', changes: base.map(rate => ({ itemGroupId: rate.itemGroupId, unit: rate.unit, op: 'set_base', value: rate.baseAmount })) };
+  await assert.rejects(createSubmit()(draft), /价格没有变化/);
+  assert.equal(submitted.length, 0, 'A refreshed query cannot turn an unchanged form into a price rollback.');
+  const changed = { ...draft, changes: [draft.changes[0], { ...draft.changes[1], value: 250 }] };
+  await createSubmit()(changed);
+  assert.deepEqual(submitted[0].changes, [changed.changes[1]], 'Only the price the operator changed belongs in the plan.');
+  await assert.rejects(createSubmit({ createdAdjustmentId: 'draft-a' })(changed), /当前操作不可用/);
+  assert.equal(submitted.length, 1, 'A created draft must move to confirmation instead of creating another draft.');
 });
 
 test('live refresh is opt-in, pauses while editing, stops on denial and resets across identities', () => {
