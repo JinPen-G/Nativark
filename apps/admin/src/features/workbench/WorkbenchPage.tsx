@@ -1,5 +1,5 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@/components/ui/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Space } from "antd";
 import { AnimatedNumber } from "@/components/ui";
@@ -15,8 +15,13 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { CircleAlert } from "lucide-react";
+import { InventoryOverview } from "@/components/insights/InventoryOverview";
+import { SplitBar } from "@/components/insights/split-bar/SplitBar";
+import { retainedHiddenSegments } from "@/components/insights/chartVisibility";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { orderStatusChartColor } from "@/features/rental-core/orderStatusSemantics";
-import { DistributionChart, InsightPanel, MetricBand, RankedFacts, ViewChoice, insightStyles as viewStyles } from "@/components/insights/OperationalCharts";
+import { InsightPanel, MetricBand, RankedFacts, ViewChoice } from "@/components/insights/OperationalCharts";
+import viewStyles from "@/components/insights/OperationalCharts.module.css";
 
 const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.Draft]: "草稿",
@@ -31,7 +36,6 @@ const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.NoShow]: "已爽约"
 };
 const activeStatuses: RentalCoreOrderStatus[] = [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.PickupOverdue, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.ReturnInspection, RentalCoreOrderStatus.Settling];
-const assetStatusLabels: Record<RentalAssetStatus, string> = { available: "可用", reserved: "已预占", rented: "租赁中", inspection: "检查中", maintenance: "维护中", disabled: "已停用" };
 const todoTypeLabels: Record<RentalWorkbenchTodoType, string> = {
   pending_payment: "待支付超时",
   no_show_notice: "待通知爽约",
@@ -65,9 +69,10 @@ export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const [todoView, setTodoView] = useState("focus");
   const [statusView, setStatusView] = useState("chart");
+  const [statusSelection, setHiddenStatuses] = useState<readonly string[]>([]);
   const navigate = useNavigate();
   const { message } = App.useApp();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewOrders = hasPermission("rental-os:order:view");
   const canViewAssets = hasPermission("rental-core:asset:view");
@@ -100,6 +105,8 @@ export function WorkbenchPage() {
   const money = (value: number) => formatRentalMoney(Number(value), data?.currency);
   const orderCount = data?.orderCount ?? 0;
   const statusRows = (data?.statusBreakdown ?? []).filter((row) => row.count > 0).map((row) => ({ ...row, name: t(orderStatusLabels[row.status] ?? row.status) }));
+  const statusSegments = statusRows.map(row => ({ id: row.status, label: row.name, value: row.count, color: orderStatusChartColor(row.status) }));
+  const hiddenStatuses = retainedHiddenSegments(statusSegments, statusSelection);
   const activeCount = statusRows.filter((row) => activeStatuses.includes(row.status)).reduce((sum, row) => sum + row.count, 0);
   const completedCount = statusRows.find((row) => row.status === RentalCoreOrderStatus.Completed)?.count ?? 0;
   const assets = data?.utilization.serializedAssets;
@@ -117,10 +124,10 @@ export function WorkbenchPage() {
   }
 
   return <>
-    <PageHeader title="运营概览" description={data ? t("当前经营空间") + " · " + new Date(data.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : undefined}
+    <PageHeader title="运营概览" description={data ? t("当前经营空间") + " · " + new Date(data.generatedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) : undefined}
       view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />}
-      extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => { const result = await reconcilePayments.mutateAsync(); if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention"); }} />}</Space>} />
-    <QueryState loading={loading} error={error}>
+      extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} loading={profile.isFetching || report.isFetching || todos.isFetching} onClick={refresh} />{canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => { const result = await reconcilePayments.mutateAsync(); if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention"); }} />}</Space>} />
+    <QueryState loading={loading} error={error} onRetry={() => Promise.all([(canViewOrders || canViewAssets) ? profile.refetch({ throwOnError: true }) : Promise.resolve(), showMetrics ? report.refetch({ throwOnError: true }) : Promise.resolve(), todos.refetch({ throwOnError: true })])}>
       <div className={viewStyles.page}>
         {showMetrics && data ? <MetricBand items={[
           ...(canViewOrders ? [
@@ -130,10 +137,11 @@ export function WorkbenchPage() {
           ] : []),
           ...(canViewAssets ? [{ label: t("可租库存"), value: availableUnits, detail: t("独立资产 + 数量库存") + " · " + t("当前快照") }] : []),
         ]} /> : <Alert type="info" title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} />}
-        <div className={viewStyles.grid}>
+        <div className={viewStyles.overviewLayout}>
+          <div className={viewStyles.insightColumn}>
           <InsightPanel title={t("运营待办")} description={<><AnimatedNumber value={todos.data?.items.length ?? 0} /> {t("项待处理")}</>}
             actions={<ViewChoice value={todoView} onChange={setTodoView} options={[{ value: "focus", label: t("重点事项") }, { value: "table", label: t("明细") }]} />}>
-            {todoView === "table" ? <Table<RentalWorkbenchTodo> rowKey="id" toolbarNote={false} pagination={{ pageSize: 8 }} onRefresh={() => todos.refetch()} dataSource={todos.data?.items ?? []} columns={[
+            <ContentTransition value={todoView}>{todoView === "table" ? <Table<RentalWorkbenchTodo> rowKey="id" toolbarNote={false} pagination={{ pageSize: 8 }} onRefresh={() => todos.refetch()} dataSource={todos.data?.items ?? []} columns={[
               { title: t("事项"), dataIndex: "title" }, { title: t("说明"), dataIndex: "description" },
               { title: t("金额"), dataIndex: "amount", render: value => value === undefined ? "—" : money(value) },
               { title: t("操作"), render: (_, item) => canOpenTodo(item) ? <Button type="link" onClick={() => navigate(item.href)}>{t("处理")}</Button> : t("无详情权限") },
@@ -144,24 +152,32 @@ export function WorkbenchPage() {
               </article>)}
               {!todos.data?.items.length && <p className={viewStyles.note}>{t("当前空间没有需要处理的待办")}</p>}
               {(todos.data?.items.length ?? 0) > 5 && <Button type="text" onClick={() => setTodoView("table")}>{t("查看全部")} <AnimatedNumber value={todos.data!.items.length} /></Button>}
-            </div>}
+            </div>}</ContentTransition>
           </InsightPanel>
-          {showMetrics && canViewOrders && <InsightPanel title={t("订单状态")} description={t(period) + " · " + t("非草稿")}
-            actions={<ViewChoice value={statusView} onChange={setStatusView} options={[{ value: "chart", label: t("分布") }, { value: "list", label: t("明细") }]} />}>
-            {statusView === "chart" ? <DistributionChart title={t("订单状态")} unit={t("单")} rows={statusRows.map(row => ({ key: row.status, label: row.name, value: row.count, color: orderStatusChartColor(row.status) }))} />
-              : <RankedFacts rows={statusRows.map(row => ({ id: row.status, label: row.name, value: row.count }))} empty={t("暂无订单")} />}
-            <dl className={viewStyles.facts}><div><dt>{t("履约中")}</dt><dd><AnimatedNumber value={activeCount} /></dd></div><div><dt>{t("已关闭")}</dt><dd><AnimatedNumber value={completedCount} /></dd></div></dl>
-          </InsightPanel>}
+            {showMetrics && canViewOrders && <InsightPanel title={t("订单状态")} description={t(period) + " · " + t("非草稿")}
+              actions={<ViewChoice value={statusView} onChange={setStatusView} options={[{ value: "chart", label: t("分布") }, { value: "list", label: t("明细") }]} />}>
+              <ContentTransition value={statusView}>{statusView === "chart" && statusRows.length > 0 ? <>
+                <SplitBar segments={statusSegments}
+                  label={t("订单状态")} unit={t("单")} locale={locale} totalLabel={t("图中合计")} hidden={hiddenStatuses} onHiddenChange={setHiddenStatuses} />
+                {hiddenStatuses.length > 0 && <div className={viewStyles.chartFilter}><span>{t("图例筛选仅影响图中占比")}</span><Button type="text" size="small" onClick={() => setHiddenStatuses([])}>{t("显示全部分类")}</Button></div>}
+              </> : <RankedFacts rows={statusRows.map(row => ({ id: row.status, label: row.name, value: row.count }))} empty={t("暂无订单")} />}</ContentTransition>
+              <dl className={viewStyles.snapshotFacts}>
+                <div><dt>{t("履约中")}</dt><dd><AnimatedNumber value={activeCount} /></dd></div>
+                <div><dt>{t("已关闭")}</dt><dd><AnimatedNumber value={completedCount} /></dd></div>
+                <div><dt>{t("异常订单")}</dt><dd><AnimatedNumber value={data?.exceptionOrderCount ?? 0} /></dd></div>
+                <div><dt>{t("平均租期")}</dt><dd>{data?.utilization.orderOccupancy.averageHours ?? 0} <small>{t("小时")}</small></dd></div>
+              </dl>
+            </InsightPanel>}
+          </div>
+          {showMetrics && data && <div className={viewStyles.insightColumn}>
+            {canViewAssets && <InsightPanel title={t("库存状态（当前快照）")} description={t("库存快照不随报表日期变化")} actions={<Button type="text" size="small" onClick={() => navigate("/rental/assets")}>{t("资产与库存")} <ArrowRightOutlined /></Button>}>
+              <InventoryOverview utilization={data.utilization} />
+            </InsightPanel>}
+            {canViewOrders && <InsightPanel title={t("客户贡献")} description={t("按当前筛选应收金额排序")} actions={<Button type="text" size="small" onClick={() => navigate("/reports/operations")}>{t("经营报表")} <ArrowRightOutlined /></Button>}>
+              <RankedFacts rows={[...data.customerBreakdown].sort((a,b) => b.receivableTotal-a.receivableTotal).slice(0,5).map((row,index) => ({ id: row.customerId ?? String(index), label: row.customerName, value: row.receivableTotal, note: t("订单量") + " " + row.orderCount }))} format={money} empty={t("暂无订单")} />
+            </InsightPanel>}
+          </div>}
         </div>
-        {showMetrics && data && <div className={viewStyles.equal}>
-          {canViewOrders && <InsightPanel title={t("客户贡献")} description={t("按当前筛选应收金额排序")} actions={<Button type="text" size="small" onClick={() => navigate("/reports/operations")}>{t("经营报表")} <ArrowRightOutlined /></Button>}>
-            <RankedFacts rows={[...data.customerBreakdown].sort((a,b) => b.receivableTotal-a.receivableTotal).slice(0,5).map((row,index) => ({ id: row.customerId ?? String(index), label: row.customerName, value: row.receivableTotal, note: row.orderCount + " " + t("单") }))} format={money} empty={t("暂无订单")} />
-          </InsightPanel>}
-          {canViewAssets && <InsightPanel title={t("库存状态（当前快照）")} description={t("这一节是读取瞬间的快照，不是区间利用率")} actions={<Button type="text" size="small" onClick={() => navigate("/rental/assets")}>{t("资产与库存")} <ArrowRightOutlined /></Button>}>
-            <RankedFacts rows={(assets?.statusBreakdown ?? []).map(row => ({ id: row.status, label: t(assetStatusLabels[row.status] ?? row.status), value: row.count }))} empty={t("尚未建立资产或数量库存。")} />
-            {stock && <dl className={viewStyles.facts}><div><dt>{t("数量库存")}</dt><dd><AnimatedNumber value={stock.onHandTotal} /></dd></div><div><dt>{t("可租余量")}</dt><dd><AnimatedNumber value={stock.availableTotal} /></dd></div><div><dt>{t("已占用")}</dt><dd><AnimatedNumber value={stock.reservedTotal} /></dd></div><div><dt>{t("维修占用")}</dt><dd><AnimatedNumber value={stock.maintenanceTotal} /></dd></div></dl>}
-          </InsightPanel>}
-        </div>}
       </div>
     </QueryState>
   </>;

@@ -1,0 +1,12 @@
+{
+  "source": "https://uiarc.dev/components/donut-chart",
+  "upstreamFile": "packages/ui-arc/vendor/registry/components/donut-chart/donut-chart.tsx",
+  "upstreamSha256": "079c5203f7078df4670b2f6c4eef3ec9671b8559fac001753f34425159ce2de7",
+  "license": "UIArc MIT; original license preserved at packages/ui-arc/LICENSE",
+  "integration": "DonutChart.tsx",
+  "adaptations": [
+    "Reuse the upstream public props, CSS, arc geometry, spring parameters and interaction handlers",
+    "Use the existing admin locale for share text, legend instructions, grouped labels and accessibility summaries/table headings",
+    "Preserve selected and hidden segments when language changes; never translate business labels by replacing rendered text"
+  ]
+}

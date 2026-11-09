@@ -1,13 +1,10 @@
 /** Presentation of existing report facts. No forecasting, permission decisions or monetary recalculation. */
 import type { ReactNode } from "react";
-import { DonutChart, type DonutChartDatum } from "@/registry/components/donut-chart/donut-chart";
-import { AnimatedNumber, Empty, Segmented } from "@/components/ui";
+import { AnimatedNumber, DonutChart, Empty, Segmented, type DonutChartDatum } from "@/components/ui";
 import { AnimatedCountText } from "@/components/ui/AnimatedNumber";
 import { useLocale } from "@/app/locale";
 import { ADMIN_INSIGHT_METRICS } from "@/app/designTokens";
 import styles from "./OperationalCharts.module.css";
-
-export { styles as insightStyles };
 
 export function InsightPanel({ title, description, actions, children, className = "" }: {
   title: string; description?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string;

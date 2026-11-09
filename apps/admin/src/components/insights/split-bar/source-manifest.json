@@ -1,0 +1,61 @@
+{
+  "source": "https://uiarc.dev/components/split-bar",
+  "captured": "2026-11-08",
+  "files": [
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\SplitBar.tsx",
+      "file": "SplitBar.tsx",
+      "sourceSha256": "71fa5b2895a4e72d65a8969ae27a609bc6de5ce78e74562b02e546421f566e4d",
+      "integrationSha256": "8782c6cb90f13d3637a55049d2a6b8958edf3610f1e851265ea592a32fb9762b"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\FormattedNumber.tsx",
+      "file": "FormattedNumber.tsx",
+      "sourceSha256": "5ae9a0a8313f1785a4390fb3664887e1122a6bda271fcfd5a492bee5917e3417",
+      "integrationSha256": "bcdea7ebcb90a9fee75bc757790ccf20d9c51a0c280a35fa218045e3da192de6"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\SegmentLayer.tsx",
+      "file": "SegmentLayer.tsx",
+      "sourceSha256": "22f82f8dff697cd1be15ffdf53dd750021f681cdf04956f5f1e2496af5bcc2ba",
+      "integrationSha256": "f755d3cf14cebfe77429277b9893016c7900f246c90090e96088bce4b3755d1b"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\geometry.ts",
+      "file": "geometry.ts",
+      "sourceSha256": "1c2dbef5f0db2e946ffdee505ec97b90027597b69b37a0ede2db865c547c9a8c",
+      "integrationSha256": "1c2dbef5f0db2e946ffdee505ec97b90027597b69b37a0ede2db865c547c9a8c"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\styles.ts",
+      "file": "styles.ts",
+      "sourceSha256": "4d9f8de984e30370616b511cf2c67a7561495f50a83b76d3be396960eb84064c",
+      "integrationSha256": "4d9f8de984e30370616b511cf2c67a7561495f50a83b76d3be396960eb84064c"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\types.ts",
+      "file": "types.ts",
+      "sourceSha256": "74c1e5a87f5970795932394c8e91844d4e7e488d1018d1f1429d2ceb3a2f6140",
+      "integrationSha256": "74c1e5a87f5970795932394c8e91844d4e7e488d1018d1f1429d2ceb3a2f6140"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\split-bar\\original.css",
+      "file": "original.css",
+      "sourceSha256": "c323b2c1c7438a8d8527a26a5d20ed7d40069da247acb6a80f275c47628d8ddc",
+      "integrationSha256": "c323b2c1c7438a8d8527a26a5d20ed7d40069da247acb6a80f275c47628d8ddc"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\primitives\\types.ts",
+      "file": "integration-types.ts",
+      "sourceSha256": "f236c67db768e4adc2815a0427ac2f1f9c521c49ae072ef439fe33e890aedb7c",
+      "integrationSha256": "f236c67db768e4adc2815a0427ac2f1f9c521c49ae072ef439fe33e890aedb7c"
+    },
+    {
+      "source": "D:\\工作文件\\uiarc-pro-archive\\preview\\src\\components\\primitives\\motion.ts",
+      "file": "motion.ts",
+      "sourceSha256": "14709ce5eb6b399e8735b2b7a8c7722fd680c7b08a98a80f43ca4dfdb6ed8e16",
+      "integrationSha256": "baa8e9133ddab2b2f9130519e6f510c591706482b54922c70e79905552471776"
+    }
+  ],
+  "scope": "Local public-preview reconstruction, not protected authored Pro TSX. Data/examples excluded; original CSS, geometry and motion parameters retained. Import scope/locale/motion preference adapted; reserve the maximum required label lane so hover cannot move legend click targets."
+}
