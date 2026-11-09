@@ -4,6 +4,8 @@
 
 本地保留库 manifest 含 123 个公开源码条目 / 263 个唯一文件，Pro 101 个条目只有目录元数据；独立接入的用户组件归档见各 SOURCE 说明。源码校验异常 0 个（2026-11-09 复核，263 文件零异常）。
 
+运营概览示范页复用现有 Button、Segmented、AnimatedCounter、DonutChart、HoverCard 和 Split bar 集成，增加只读原位指标明细、待办预览与固定，保留原分段图及实际详情路由。KPI drilldown Pro 仅为交互选型参考，未取得受保护源码或补造其所需历史序列。改动与登录后待补验边界见[示范页记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09运营概览交互示范页)。
+
 2026-10-08 原源码复核：日期范围选择器的 TSX/CSS 曾偏离下载清单，已从官方 `https://uiarc.dev/r/date-range-picker.json` 重新同步，并补齐该版本新增的 `lib/use-today.ts`。恢复上游月份容器布局与 `AnimatePresence mode="popLayout"`；仅将上游导入路径映射到项目 vendor 别名，不修改样式、动画参数或行为。三个文件均与本次官网响应逐字核对（导入路径及换行规范化后）；manifest 分别记录上游响应哈希、本地规范化哈希及同步日期。
 
 适配层复核：Accordion、Dialog、RadioGroup、ToastStack、UserMenu、Dropdown 的动效常量、Motion 属性及 `animate()` 调用与各自保留的官方源码一致。业务接口、本地化、禁用状态、租户主题/圆角、音效和此前明确要求的登录容器布局继续由适配层负责；兼容分支不冒称原生 UIArc。类型检查及现有表单、日期范围、账号菜单、侧栏动效、主题动效静态回归通过；未进行浏览器视觉验收。
