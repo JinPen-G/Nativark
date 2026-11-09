@@ -13,6 +13,7 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "未登记序列号": "Serial number not recorded",
   "月均": "Monthly average",
   "当月": "This month",
   "月份": "Month",
@@ -1729,6 +1730,7 @@ const ENGLISH: Record<string, string> = {
   "登记，面向客户的商业分组在": "; customer-facing commercial groups are created in ",
   "建立。": ".",
   "所属定价分组": "Rate groups",
+  "更多组成": "More components",
   "未加入定价分组": "Not in a rate group",
   "库存方式": "Inventory mode",
   "单位": "Unit",

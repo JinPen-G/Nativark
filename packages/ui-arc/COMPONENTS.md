@@ -14,6 +14,8 @@
 
 新增页面先查本清单和适配器 API；备用组件按需单独接入并安装其依赖，不要打包整个目录。不要修改 vendor，尺寸与动效保留原设计；颜色、圆角、语言和声音由平台适配层负责。
 
+型号、资产和数量库存卡使用原 UIArc Card / quick look / BottomSheet；图片区域由 [CatalogCardMedia](../../apps/admin/src/features/catalog/CatalogCardMedia.tsx) 复用本地 Product listing Pro 公开编译预览的图片子树与原 CSS，仍走既有鉴权图片读取和 190px contain 图像区。仅接入图片部分，没有接入商城筛选或快速加购；来源、固定哈希及许可边界见 [SOURCE](../../apps/admin/src/features/catalog/archive/product-listing/SOURCE.md)。定价分组、品类属性、库存余额及异常原因来自原业务接口，相关实页验证见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09型号与库存卡片及租户实页补查)。
+
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`UserMenu`、`Modal`、`App`、`Empty`、`Skeleton`、`Radio`、`Collapse`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`InfoPopover`、`Input`、`SearchField`、`DataTableLeading`、`DataTableMoney`、`dataTableSelectionColumn`、`DataTableSelectionSummary`、`useDataTableSelection`、`DataTableStatus`、`DataTableNote`、`DataTableStatusTone`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`ListSection`、`ListFilters`、`useListFilter`、`ListFilterBar`、`ListFilterItem`、`AnimatedTable`、`DataTable`、`DataTableColumnHeader`、`DataTableViewOptions`、`DataTableSortList`、`DataTableToolbar`、`TableRefreshProvider`、`DataTableRowActions`、`DataTableRowAction`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
 
 ## 2026-10-29 业务 Copilot 预览

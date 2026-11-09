@@ -1,0 +1,27 @@
+/* Catalog-specific content inside the original UIArc Card; other record cards keep their layout. */
+.context { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); width: 100%; }
+.mode { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.mode svg, .pricing > svg { flex: none; width: var(--rental-icon-control-size); height: var(--rental-icon-control-size); stroke-width: var(--rental-icon-control-stroke); }
+.badges { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.badges :global(.ant-tag) { margin: 0; }
+.listing { display: grid; gap: var(--space-3); min-width: 0; }
+.specs { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: var(--space-3); margin: 0; }
+.specs > div { display: grid; align-content: start; gap: var(--space-1); min-width: 0; }
+.specs dt, .label { color: var(--text-secondary); font-size: var(--rental-list-secondary-size); font-weight: var(--rental-typography-meta-weight); line-height: var(--rental-list-secondary-line-height); }
+.specs dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); font-weight: 500; line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
+.components { display: grid; gap: var(--space-1); }
+.components ul, .groupNames { display: grid; gap: var(--space-1); list-style: none; margin: 0; padding: 0; }
+.components li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.components li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quantity { flex: none; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pricing { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; padding-block-start: var(--space-3); border-block-start: 1px solid var(--border-subtle); }
+.pricing > svg { margin-block-start: 2px; color: var(--text-secondary); }
+.pricing > div { display: grid; flex: 1; gap: var(--space-1); min-width: 0; }
+.groupNames li { color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); font-weight: 500; line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
+.unassigned { color: var(--rental-status-warning-ink); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+/* Native footer spacing remains; prevent equal-height grid rows from inventing a large summary spacer. */
+:global([data-record-card][data-kind="catalog"]):has(.listing) { align-self: start; }
+:global([data-record-card][data-kind="catalog"]):has(.listing) > article { height: auto; }
+/* The quick look already contains the complete component list, including alternatives. */
+:global([role="dialog"]:has([data-record-card-preview-owner][data-kind="catalog"])) .components { display: none; }
+:global([data-record-card-preview-owner][data-kind="catalog"]) > div:only-child { border-block-start: 0; padding-block-start: 0; }
