@@ -46,6 +46,7 @@ temp/
 备份.zip
 .claude/
 .worktrees/
+/worktree/
 
 # Local design originals and references; retain the default mark imported by admin.
 /assets/*
