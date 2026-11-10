@@ -207,7 +207,8 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
-    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true }],
+    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true },
+    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
@@ -215,7 +216,10 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
     settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
-    moduleRef?: Pick<ModuleRef, 'get'>) => {
+    moduleRef?: Pick<ModuleRef, 'get'>,
+    selectedOrderDecision?: { decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
+      prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> }) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
     const clarification = () => {
       type Call = (request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) => Promise<unknown>;
@@ -240,7 +244,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       humanApprovals: {
         order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
         settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },
-        decisions: { order: order.enabled, settings: settings.enabled }
+        decisions: { order: order.enabled, settings: settings.enabled }, selectedOrderDecision
       } });
   }
 };
@@ -786,13 +790,15 @@ export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOT
       limits: { maxSteps: 1, maxCalls: 1, maxTotalMs: 1, maxStepMs: 1, maxOutputBytes: 1, maxConcurrent: 1 as const } };
     const admission = createOriginalTaskStartAdmission({ ...dependencies, db }, 'quote_clarification');
     const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare,
-      configuration.enabled ? { admission: (request, original, signal) => admission(request, original, undefined, signal) } : undefined);
+      configuration.enabled ? { admission: (request, original, signal) => admission(request, original, undefined, signal) } : undefined,
+      configuration.enabled ? { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+        configuration.enabled && sceneCode === 'quote_clarification' && sceneVersion === '1' } : undefined);
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
     const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile']
       : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal',
-        'reissueSelectedRequest', 'selectReissuedQuote'];
+        'reissueSelectedRequest', 'selectReissuedQuote', 'prepareTaskCenterApproval'];
     return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) => [method,
       !configuration.enabled && closedMethods.includes(method)
         ? async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } : call])));

@@ -3,8 +3,23 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。治理整理不改变需求v1.14/任务v1.18的范围或验收，也不新增功能进度。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain-quote-approval-policy-consumer-20261111"></a>
+## 原报价审批与再准备的显式准入及任务中心消费（2026-11-11）
+
+原等待输入片已提交并推送 `acfa35b4d6c14151da086e70b4e6fe0e0b640381`，远端已核。本片接回原AIN-07/12/15：首次短动作政策到期后，本人仍可对有效原确认等待明确批准、继续，或按原理由重新准备。AI-dev1交付[准入应用](../../apps/api/src/modules/ai-native/task-approval-admission.application.ts)和[原CAS权威](../../apps/api/src/modules/ai-native/task-approval-admission.authority.ts)，固定blob分别为 `1e0e1148004eb04351a70c5fee5c068ed42f7cd7`、`c664818ee86346422e0ad4eb70cbfb2d2f23e93d`，负责人逐文件核过blob及SHA256。当前Auth/Guard、本人scope、原Task/Run/Step/selection/计划/输入/提案/确认phase、场景发布和真实运行开关逐次重验；有效决定3项、继续5项、有效旧提案改方案的再准备2项、已记录拒绝终态再准备4项。保留既有更严格权限、原期限和资源，不给新Task复制旧政策。
+
+[原命令适配器](../../apps/api/src/modules/ai-native/task-approval-admission.composition.ts)只消费现有selection、checkpoint及replacement合同，核对原提案、理由与替换九字段，不增加前端填写内容。负责人补入原module/provider和三个明确写动作。实际[任务中心审批](../../apps/api/src/modules/ai-native/task-center-approval.composition.ts)此前会先读已过期read_step_terminal/read_metadata，尚未到达新准入就失败；现明确决定/继续先按当前身份和原本人Task/Step定位所属域，再由完整原等待权威核准并走CAS，随后恢复原受政策约束的审阅、批准与运行器。纯review/receipt不进入签发，其他域和旧published action-input计划保持各自原路径；TaskCenter选单订单的决定与继续复用同一个原选单宿主，无新执行链。服务端明确决定有界20秒，当前后台API等待25秒，不自动重试。
+
+保持原reason三值：change_plan仅对应仍有效、无批准、无后续phase/消费的原确认等待及不同真实新材料；已拒绝、已过期按原分类核对，已批准未执行仍只核原操作。原CAS应答丢失时保留固定reference，来源组验证首次已记录、同组不完整时再次issue只回原收据，不补签或派发。读取、签发、业务批准、继续和Core结果各自独立；用户字段或旧CAS收据不授当前执行权。
+
+负责人独立用当前真实Controller、Guard/ALS、module和实际后台API运行原fixture内存冒烟：session `26865`/exit0验证三项读取/决定政策确已过期后，TaskCenter签3个原CAS批准，再推进真实fixture时钟并核政策过期，签5个原CAS继续，只创建1张Core订单、额外模型0；纯审阅不续权，伪造提案/Task/checkpoint均在签发前拒绝，决定/业务原收据读取不改变状态。同组有效change_plan经实际报价API只签旧Task的2项CAS，replacement政策逐字节不变、批准0/订单0，篡改替换planHash在签发前拒绝。另对失效证据单独补核终态分支，session `45299`/exit0：原拒绝/继续结束后真实推进时钟，三项旧读取政策全部过期且reprepare政策不存在，原再准备签4个CAS，保留新Task政策及旧冻结行；新批准/原继续后仍仅1张订单、额外模型0。
+
+原成功命令来源SHA256 `9bec16dddfbef9d0e8f76d2e997467bbf80f8077229c2521e2051ec32fc03508`，按本对话标准输入交 `node --no-compilation-cache`，不落测试文件。首个实际消费者组及诊断组均exit1：Date使用`+=120001`变为字符串，读取时间未前进，导致2项读政策被retain、总CAS为6而非8；保留原数量断言，改用明确Date并先断言毫秒严格前进及政策确实过期，再只复验受影响场景。来源助手已撤回相应“全部过期”的旧声明，未改源码门槛或原测试文件来补绿。API3根及后台12根含声明的strict/noEmit为0诊断（session `70252`/exit0）；所有验证审计0、任务临时目录从未创建，没有新增/扩写测试脚本或复制依赖。
+
+本片证明原选单订单在短政策到期后的实际人工消费，不代表settings、企业代客、所有恢复/接管变体、真库并发、真实宿主或供应商已通过。AIN-07/12/15及相关ENTRY原G4全文与前置仍未齐，唯一任务表不加分，本轮新增完整任务仍0；设置等待及客户本人报价两端消费已分别交两助手继续。没有真实业务HTTP/DB/模型、迁移、安装或部署。
 
 <a id="ain-original-input-admission-20261111"></a>
 ## 原等待输入显式准入、提交与继续（2026-11-11）

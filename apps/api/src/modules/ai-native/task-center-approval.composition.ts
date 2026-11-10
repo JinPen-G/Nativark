@@ -12,6 +12,8 @@ import { approvalApplicationContract } from './approval-execution/approval-appli
 import { composeApprovedSettingsApplication } from './approval-execution/approved-settings-application.composition';
 import type { ApprovedSettingsApplicationDependencies } from './approval-execution/approved-settings-task.authority';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { resolveTaskCenterBusinessTarget, readTaskCenterOrderSelection } from './task-center-business.reader';
+import { validateQuoteSelectionResponse } from './task-request/quote-selection.validation';
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const taskCenterReviewSchema = z.object({ taskId: id, runId: id, stepId: id }).strict();
@@ -25,6 +27,13 @@ export interface TaskCenterApprovalDependencies {
   order: Omit<ControlledApprovedOrderDependencies, 'credentials'>;
   settings: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>;
   decisions: { order: boolean; settings: boolean };
+  /** The original selected-quote decision host owns its explicit admission.
+   * The task center derives this selection from the owned native step. */
+  selectedOrderDecision?: {
+    decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
+    prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+      intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void>;
+  };
 }
 export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, credentials: AiTaskCredentialSource,
   tasks: Pick<AiTaskRepository, 'resolveAccess'>) {
@@ -65,6 +74,23 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
     draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, taskId, proposalId: reference.proposalId,
     proposalRevision: reference.proposalRevision, reviewedPayloadHash: reference.reviewedPayloadHash
   });
+  const decideOrder = async (query: z.infer<typeof taskCenterReviewSchema>, proposal: z.infer<typeof taskCenterDecisionSchema>['proposal']) => {
+    if (!d.selectedOrderDecision) return order().decide(query.taskId, proposal);
+    const target = await resolveTaskCenterBusinessTarget({ db }, tasks, query);
+    // Older published action-input plans retain their existing authority. A
+    // selected-quote failure cannot fall back to that different provenance.
+    if (target.task.inputRef === null) return order().decide(query.taskId, proposal);
+    const selected = await readTaskCenterOrderSelection(db, target);
+    await selected.verify();
+    const current = await credentials.current();
+    const result = await d.selectedOrderDecision.decideSelectedProposal({ headers: { authorization: current.authorization } },
+      { selection: selected.selection, proposal });
+    const approval = validateQuoteSelectionResponse('AiHumanQuoteOrderDecisionResponseDraft', result, true).approval;
+    if (approval.proposalId !== proposal.proposalId || approval.proposalRevision !== proposal.proposalRevision
+      || approval.payloadHash !== proposal.reviewedPayloadHash || approval.decision !== (proposal.decision === 'approve' ? 'approved' : 'rejected'))
+      throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+    return approval;
+  };
   const read = async (value: unknown): Promise<AiTaskHumanReviewDraft> => {
     const query = taskCenterReviewSchema.parse(structuredClone(value)), before = await ownedStep(query);
     const wait = await checkpoint(query);
@@ -82,8 +108,16 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
     return { ...query, taskRevision: wait.taskRevision, checkpointRef: wait.checkpointRef,
       kind: 'settings', review, businessExecution: 'not_attested' };
   };
-  const act = async (value: unknown, write: boolean): Promise<AiTaskHumanDecisionReceiptDraft> => {
-    const { proposal, ...query } = taskCenterDecisionSchema.parse(structuredClone(value)), before = await ownedStep(query);
+  const act = async (value: unknown, write: boolean, signal?: AbortSignal): Promise<AiTaskHumanDecisionReceiptDraft> => {
+    const command = taskCenterDecisionSchema.parse(structuredClone(value)), { proposal, ...query } = command;
+    // The explicit decision owns admission. Pure review/receipt reads never
+    // enter this bridge, and the normal policy checks remain after it.
+    if (write && d.decisions.order && d.selectedOrderDecision?.prepareTaskCenterApproval) {
+      const current = await credentials.current();
+      await d.selectedOrderDecision.prepareTaskCenterApproval({ headers: { authorization: current.authorization } },
+        command, 'explicit_decide', signal);
+    }
+    const before = await ownedStep(query);
     const { decision, reviewVersion, ...reference } = proposal;
     if (write) {
       if (before.kind === 'order' && decision === 'approve' && reviewVersion !== AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION)
@@ -113,7 +147,7 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
       || action.data.actions[0].toolCode !== before.step.toolCode) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     await recheck(query, before);
     const receipt = before.kind === 'order'
-      ? write ? { kind: 'recorded' as const, record: await order().decide(query.taskId, proposal) }
+      ? write ? { kind: 'recorded' as const, record: await decideOrder(query, proposal) }
         : await order().readReceipt(query.taskId, proposal)
       : await (async () => {
         const ref = settingsReference(query.taskId, proposal);
@@ -130,5 +164,6 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
     }
     return { ...query, receipt: approvalApplicationContract('AiApprovalApplicationReceiptDraft', receipt, true), businessExecution: 'not_attested' };
   };
-  return Object.freeze({ review: read, decision: (value: unknown) => act(value, true), decisionReceipt: (value: unknown) => act(value, false) });
+  return Object.freeze({ review: read, decision: (value: unknown, signal?: AbortSignal) => act(value, true, signal),
+    decisionReceipt: (value: unknown) => act(value, false) });
 }

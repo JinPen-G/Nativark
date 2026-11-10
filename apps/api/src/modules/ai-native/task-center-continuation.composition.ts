@@ -39,6 +39,11 @@ export async function continueTaskCenterOriginal(d: TaskCenterContinuationDepend
   const order = d.order?.continueConfirmation.bind(d.order), settings = d.settings?.continueSettingsConfirmation.bind(d.settings);
   const originalOrder = d.originalOrder?.continueConfirmation.bind(d.originalOrder);
   if (approval.order.db !== d.db || approval.settings.db !== d.db) throw unavailable();
+  if (approval.decisions.order && approval.selectedOrderDecision?.prepareTaskCenterApproval) {
+    const current = await credentials.current();
+    await approval.selectedOrderDecision.prepareTaskCenterApproval({ headers: { authorization: current.authorization } },
+      command, 'explicit_continue', signal);
+  }
   // Bound only preflight reads, not the original runner's legitimate duration.
   // A late preflight never enters the continuation below.
   const prepared = await waitForTaskApplicationDependency(async () => {

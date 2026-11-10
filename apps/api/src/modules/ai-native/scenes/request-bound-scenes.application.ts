@@ -11,6 +11,8 @@ import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, c
   type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies,
   type OriginalSceneInputWaitMode } from './original-scene-model.composition';
 import { prepareOriginalInputContinuation, type OriginalInputContinuationConfiguration } from '../task-input-admission.composition';
+import { prepareOriginalQuoteApprovalAdmission, prepareTaskCenterQuoteApprovalAdmission,
+  type OriginalQuoteApprovalAdmissionConfiguration, type TaskCenterQuoteApprovalIntent } from '../task-approval-admission.composition';
 import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
@@ -47,7 +49,7 @@ import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePe
   type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
 import { BudgetError } from '../budget/budget.ports';
 import { presentTaskBudgetUsageRecord } from '../budget/task-budget-usage.reader';
-import { AiTaskRunnerError, inheritAiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, inheritAiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection, parseClarifiedQuoteSelection, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
@@ -1958,7 +1960,8 @@ export function composeClarifiedQuoteSelectionRequests(
 }
 
 export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQuoteOrderDependencies,
-  options: AiSceneRequestOptions, configuration: SelectedQuoteTaskConfiguration) {
+  options: AiSceneRequestOptions, configuration: SelectedQuoteTaskConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
   const server = { ...configuration, host: structuredClone(configuration.host), limits: structuredClone(configuration.limits) };
   const retainedCall = bindRequests(dependencies, options, input => {
     const clock = input.clock ?? (() => new Date());
@@ -1999,7 +2002,12 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
     const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business, scenes: { requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
-    return Object.freeze({ ...tasks, readScene: center.readScene,
+    return Object.freeze({ ...tasks,
+      continueConfirmation: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_continue', approvalAdmission, signal);
+        return tasks.continueConfirmation(value, signal);
+      }, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
       readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskReconnect: center.readReconnect, readTaskUsage: center.readUsage });
@@ -2028,7 +2036,8 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
 }
 
 export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-  reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration) {
+  reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
   if (reprepare && 'reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const configuration = reprepare ? { holderId: reprepare.holderId, creationRules: structuredClone(reprepare.creationRules),
     memberships: reprepare.memberships } : undefined;
@@ -2054,6 +2063,20 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
     // Existing history readers do not acquire new Core preparation dependencies.
     const linked = () => composeQuoteRequestReissue({ ...input, originals, source: human.readRequestReissueSource }, reissue);
     return Object.freeze({ ...human,
+      prepareTaskCenterApproval: async (value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterQuoteApprovalAdmission({ ...input, originals }, value, intent, approvalAdmission, signal);
+      },
+      decideSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_decide', approvalAdmission, signal);
+        return human.decideSelectedProposal(value);
+      },
+      reprepareSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_reprepare', approvalAdmission, signal);
+        return human.reprepareSelectedProposal(value);
+      },
       readReissuePreparation: (value: unknown) => linked().readReissuePreparation(value),
       reissueSelectedRequest: (value: unknown, signal?: AbortSignal) => linked().reissueSelectedRequest(value, signal),
       readReissueOperation: (value: unknown) => linked().readReissueOperation(value),
@@ -2063,6 +2086,11 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
       readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
   });
   return Object.freeze({
+    // Internal task-center bridge only. No Controller/OpenAPI route is added.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) =>
+      call(request, value, (app, command) => callAiTaskRunnerDependency(
+        () => app.prepareTaskCenterApproval(command, intent, signal), 15000, 'task_center_approval_admission', signal),
+      { write: true, signal, preflightOnly: true }),
     readSelectedAvailability: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.readSelectedAvailability(command), { write: false }),
     readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command), { write: false }),
