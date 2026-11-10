@@ -25,6 +25,16 @@ export function applyColorMode(mode: ThemeMode) {
   if (themeColor) themeColor.content = mode === 'dark' ? '#000000' : '#ffffff';
 }
 
+/** Keep tenant identity in the tab; demo marks use the supplied monochrome SVG. */
+export function applyTenantFavicon(tenant: Tenant, mode: ThemeMode) {
+  const icon = document.querySelector<HTMLLinkElement>('#site-favicon');
+  if (!icon) return;
+  const defaults = new Set(['/brand/mark-black.svg', '/brand/mark-white.svg', '/brand/logo-black.svg', '/brand/logo-white.svg']);
+  const custom = tenant.logoCompact && !defaults.has(tenant.logoCompact);
+  icon.href = custom ? tenant.logoCompact : mode === 'dark' ? '/brand/mark-white.svg' : '/brand/mark-black.svg';
+  if (custom) icon.removeAttribute('type'); else icon.type = 'image/svg+xml';
+}
+
 function textOnBackground(hex: string): '#142638' | '#ffffff' {
   const normalized = hex.replace('#', '');
   if (!/^[\da-fA-F]{6}$/.test(normalized)) return '#ffffff';

@@ -4,7 +4,7 @@ import { siteRepository } from './data/siteRepository';
 import { loadRemoteBootstrap, loadRemoteCatalogs } from './data/remoteSite';
 import { resolveSite, type SiteResolution } from './data/resolveTenant';
 import { clientApi } from './data/apiClient';
-import { applyColorMode, applyTenantTheme, getInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from './theme';
+import { applyColorMode, applyTenantTheme, applyTenantFavicon, getInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from './theme';
 import { createTranslator, LANGUAGE_STORAGE_KEY, localizeProduct, localizeTenant, type Language } from './i18n';
 import type { CategoryMode, DemoTenantKey, Product, Tenant } from './types';
 
@@ -108,9 +108,17 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // 链接参数：演示模式带 ?tenant=；真实模式仅当租户来自显式 ?tenantCode= 时才回带（域名/子域/环境变量识别的无需带，保持干净 URL）。
   const explicitCode = new URLSearchParams(location.search).get('tenantCode')?.trim() || null;
   const href = (path: string) => {
-    const param = effective.kind === 'demo' ? `tenant=${tenantKey}` : explicitCode ? `tenantCode=${encodeURIComponent(explicitCode)}` : null;
-    if (!param) return path;
-    return `${path}${path.includes('?') ? '&' : '?'}${param}`;
+    const identity = effective.kind === 'demo' ? ['tenant', tenantKey] : explicitCode ? ['tenantCode', explicitCode] : null;
+    if (!identity) return path;
+    const hashIndex = path.indexOf('#');
+    const hash = hashIndex < 0 ? '' : path.slice(hashIndex);
+    const route = hashIndex < 0 ? path : path.slice(0, hashIndex);
+    const queryIndex = route.indexOf('?');
+    const pathname = queryIndex < 0 ? route : route.slice(0, queryIndex);
+    const query = new URLSearchParams(queryIndex < 0 ? '' : route.slice(queryIndex + 1));
+    query.delete(identity[0] === 'tenant' ? 'tenantCode' : 'tenant');
+    query.set(identity[0], identity[1]);
+    return `${pathname}?${query}${hash}`;
   };
   const t = useMemo(() => createTranslator(language), [language]);
   const localize = useMemo(() => (product: Product) => localizeProduct(product, language), [language]);
@@ -150,12 +158,13 @@ export function SiteProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyColorMode(theme);
+    applyTenantFavicon(sourceTenant, theme);
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
       // Local storage may be unavailable in a restricted preview; the in-memory state still works.
     }
-  }, [theme]);
+  }, [theme, sourceTenant]);
 
   function toggleLanguage() {
     setLanguage(current => current === 'zh' ? 'en' : 'zh');

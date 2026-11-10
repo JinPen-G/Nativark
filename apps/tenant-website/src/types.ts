@@ -45,6 +45,8 @@ export interface Store {
   id: string;
   name: string;
   nameEn?: string;
+  city?: string;
+  cityEn?: string;
   address?: string;
   addressEn?: string;
   businessHours?: string;
@@ -59,6 +61,10 @@ export interface Tenant {
   nameEn?: string;
   logo: string;
   logoCompact: string;
+  logoDark?: string;
+  campaigns?: Array<{ id: string; title: string; titleEn?: string; description: string; descriptionEn?: string; image: string; categoryId?: string; demo?: boolean }>;
+  announcement?: string;
+  announcementEn?: string;
   slogan: string;
   sloganEn?: string;
   primaryColor: string;

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Address, Bell, Plus, Ticket, Trash } from '../components/SiteIcon';
+import { MemberLayout, type MemberSection } from '../components/MemberLayout';
+import { LoadingState, PageState } from '../components/PageState';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/Toast';
@@ -8,119 +10,96 @@ import { sessionApi } from '../data/authClient';
 
 const emptyAddress = { recipient: '', phone: '', province: '', city: '', district: '', detail: '', isDefault: false };
 
-function AddressBook() {
-  const { t } = useSite();
+function AddressBook({ demo }: { demo: boolean }) {
+  const { t, language } = useSite();
+  const en = language === 'en';
   const toast = useToast();
   const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!demo);
   const [error, setError] = useState('');
   const [form, setForm] = useState(emptyAddress);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-
   const reload = useCallback(async () => {
+    if (demo) { setItems([]); setLoading(false); return; }
     setLoading(true); setError('');
-    try { const r = await sessionApi.addresses(); setItems(((r as any).items as any[]) ?? []); }
+    try { const response = await sessionApi.addresses(); setItems(Array.isArray(response.items) ? response.items : []); }
     catch (e: any) { setError(e?.message || t('loadFailed')); }
     finally { setLoading(false); }
-  }, []);
-  useEffect(() => { reload(); }, [reload]);
+  }, [demo, t]);
+  useEffect(() => { void reload(); }, [reload]);
 
-  const save = useCallback(async (event: FormEvent) => {
+  async function save(event: FormEvent) {
     event.preventDefault();
+    if (demo || busy) return;
     setBusy(true); setError('');
-    try {
-      await sessionApi.saveAddress(form);
-      setForm(emptyAddress); setAdding(false); await reload();
-      toast.success(t('addressSaved'));
-    } catch (e: any) { const msg = e?.message || t('saveFailed'); setError(msg); toast.error(msg); }
+    try { await sessionApi.saveAddress(form); setForm(emptyAddress); setAdding(false); await reload(); toast.success(t('addressSaved')); }
+    catch (e: any) { const message = e?.message || t('saveFailed'); setError(message); toast.error(message); }
     finally { setBusy(false); }
-  }, [form, reload]);
-
-  const remove = useCallback(async (id: string) => {
+  }
+  async function remove(id: string) {
+    if (demo || busy) return;
     setBusy(true); setError('');
     try { await sessionApi.deleteAddress(id); await reload(); toast.success(t('addressDeleted')); }
-    catch (e: any) { const msg = e?.message || t('deleteFailed'); setError(msg); toast.error(msg); }
+    catch (e: any) { const message = e?.message || t('deleteFailed'); setError(message); toast.error(message); }
     finally { setBusy(false); }
-  }, [reload]);
+  }
 
-  return <section className="account-section">
-    <div className="account-section-head"><h2>{t('addressBook')}</h2><button type="button" className="button button-outline" onClick={() => setAdding(v => !v)}><PlusOutlined /> {t('addAddress')}</button></div>
-    {error && <p className="form-error">{error}</p>}
+  return <section className="member-section">
+    <div className="member-section-toolbar"><p>{en ? 'For your delivery and return arrangements.' : '用于配送与取还安排。'}</p><button type="button" className="button button-outline" aria-expanded={adding} onClick={() => setAdding(!adding)}><Plus />{adding ? en ? 'Close form' : '收起表单' : t('addAddress')}</button></div>
+    {error && <div className="inline-error" role="alert"><p>{error}</p><button type="button" className="text-button" onClick={() => { void reload(); }}>{en ? 'Try again' : '重新加载'}</button></div>}
     {adding && <form className="address-form" onSubmit={save}>
+      <h2>{t('addAddress')}</h2>
       <div className="form-grid">
-        <label>{t('addrRecipient')}<input value={form.recipient} maxLength={120} onChange={e => setForm({ ...form, recipient: e.target.value })} /></label>
-        <label>{t('addrPhone')}<input inputMode="tel" value={form.phone} maxLength={32} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
-        <label>{t('addrProvince')}<input value={form.province} maxLength={64} onChange={e => setForm({ ...form, province: e.target.value })} /></label>
-        <label>{t('addrCity')}<input value={form.city} maxLength={64} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
-        <label>{t('addrDistrict')}<input value={form.district} maxLength={64} onChange={e => setForm({ ...form, district: e.target.value })} /></label>
+        <label>{t('addrRecipient')}<input required autoComplete="shipping name" value={form.recipient} maxLength={120} onChange={e => setForm({ ...form, recipient: e.target.value })} /></label>
+        <label>{t('addrPhone')}<input required type="tel" autoComplete="shipping tel" value={form.phone} maxLength={32} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
+        <label>{t('addrProvince')}<input required autoComplete="shipping address-level1" value={form.province} maxLength={64} onChange={e => setForm({ ...form, province: e.target.value })} /></label>
+        <label>{t('addrCity')}<input required autoComplete="shipping address-level2" value={form.city} maxLength={64} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
+        <label>{t('addrDistrict')}<input autoComplete="shipping address-level3" value={form.district} maxLength={64} onChange={e => setForm({ ...form, district: e.target.value })} /></label>
       </div>
-      <label className="full-field">{t('addrDetail')}<input value={form.detail} maxLength={255} onChange={e => setForm({ ...form, detail: e.target.value })} /></label>
+      <label className="full-field">{t('addrDetail')}<input required autoComplete="shipping street-address" value={form.detail} maxLength={255} onChange={e => setForm({ ...form, detail: e.target.value })} /></label>
       <label className="login-agree"><input type="checkbox" checked={form.isDefault} onChange={e => setForm({ ...form, isDefault: e.target.checked })} /><span>{t('addrDefault')}</span></label>
-      <button type="submit" className="button button-dark" disabled={busy}>{busy ? t('saving') : t('save')}</button>
+      <div className="form-actions"><button type="submit" className="button button-dark" disabled={busy || demo}>{busy ? t('saving') : t('save')}</button><button type="button" className="text-button" onClick={() => setAdding(false)}>{en ? 'Cancel' : '取消'}</button></div>
+      {demo && <p className="field-note">{en ? 'Form preview only. Saving is available for signed-in real tenants.' : '当前可预览表单，保存地址需在真实租户下登录。'}</p>}
     </form>}
-    {loading ? <div className="list-skeleton" aria-label={t('loading')}>{Array.from({ length: 3 }, (_, i) => <div className="list-skeleton-row" key={i} />)}</div>
-      : items.length ? <ul className="address-list">{items.map(a => <li key={a.id}><div><strong>{a.recipient} · {a.phone}</strong><span>{[a.province, a.city, a.district, a.detail].filter(Boolean).join(' ')}</span>{a.isDefault && <em className="addr-default-tag">{t('addrDefault')}</em>}</div><button type="button" className="link-danger" disabled={busy} onClick={() => remove(a.id)} aria-label={t('delete')}><DeleteOutlined /></button></li>)}</ul>
-      : <p className="mock-note">{t('addressEmpty')}</p>}
+    {loading ? <LoadingState label={t('loading')} /> : items.length ? <ul className="member-addresses">{items.map(item => <li key={item.id}><Address /><div><h2>{item.recipient}<span>{item.phone}</span></h2><p>{[item.province, item.city, item.district, item.detail].filter(Boolean).join(' ')}</p>{item.isDefault && <span className="quiet-tag">{t('addrDefault')}</span>}</div><button className="icon-button" type="button" disabled={busy} onClick={() => { void remove(item.id); }} aria-label={t('delete')}><Trash /></button></li>)}</ul>
+      : !error && !adding && <PageState icon={<Address />} title={t('addressEmpty')} description={en ? 'Add a delivery address when you are ready.' : '需要配送时，可以在这里添加常用地址。'} />}
   </section>;
 }
 
-function Coupons() {
-  const { t } = useSite();
+function AccountCollection({ kind, demo }: { kind: 'coupons' | 'notifications'; demo: boolean }) {
+  const { t, language } = useSite();
   const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!demo);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    sessionApi.coupons()
-      .then(r => { if (!cancelled) setItems(Array.isArray(r) ? r : ((r as any).items ?? [])); })
-      .catch(() => { if (!cancelled) setItems([]); })
+    setItems([]); setError('');
+    if (demo) { setLoading(false); return; }
+    setLoading(true);
+    const request = kind === 'coupons' ? sessionApi.coupons() : sessionApi.notifications({ page: 1, pageSize: 20 });
+    request.then(response => { if (!cancelled) setItems(Array.isArray(response) ? response : Array.isArray(response.items) ? response.items : []); })
+      .catch((e: any) => { if (!cancelled) setError(e?.message || t('loadFailed')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
-  return <section className="account-section"><div className="account-section-head"><h2>{t('coupons')}</h2></div>
-    {loading ? <div className="list-skeleton" aria-label={t('loading')}>{Array.from({ length: 3 }, (_, i) => <div className="list-skeleton-row" key={i} />)}</div>
-      : items.length ? <ul className="coupon-list">{items.map((c, i) => <li key={c.id ?? i}><strong>{c.name || c.title || c.templateName || t('coupon')}</strong><span>{c.description || c.rule || ''}</span>{c.expiresAt && <small>{t('couponExpires', { date: String(c.expiresAt).slice(0, 10) })}</small>}</li>)}</ul>
-      : <p className="mock-note">{t('couponsEmpty')}</p>}
-  </section>;
+  }, [kind, demo, revision, t]);
+  if (loading) return <LoadingState label={t('loading')} />;
+  if (error) return <PageState error title={t('loadFailed')} description={error}><button type="button" className="button button-outline" onClick={() => setRevision(revision + 1)}>{language === 'en' ? 'Try again' : '重试'}</button></PageState>;
+  if (!items.length) return <PageState icon={kind === 'coupons' ? <Ticket /> : <Bell />} title={kind === 'coupons' ? t('couponsEmpty') : t('notificationsEmpty')} />;
+  return <ul className={kind === 'coupons' ? 'member-coupons' : 'member-notices'}>{items.map((item, index) => <li key={item.id ?? index}>{kind === 'coupons' ? <Ticket /> : <Bell />}<div><h2>{item.name || item.title || item.templateName || (kind === 'coupons' ? t('coupon') : t('notification'))}</h2><p>{item.description || item.content || item.body || item.message || item.rule || ''}</p>{kind === 'coupons' && item.expiresAt && <small>{t('couponExpires', { date: String(item.expiresAt).slice(0, 10) })}</small>}{kind === 'notifications' && item.createdAt && <time>{String(item.createdAt).slice(0, 16).replace('T', ' ')}</time>}</div></li>)}</ul>;
 }
 
-function Notifications() {
-  const { t } = useSite();
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    sessionApi.notifications({ page: 1, pageSize: 20 })
-      .then(r => { if (!cancelled) setItems((r as any).items ?? []); })
-      .catch(() => { if (!cancelled) setItems([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-  return <section className="account-section"><div className="account-section-head"><h2>{t('notifications')}</h2></div>
-    {loading ? <div className="list-skeleton" aria-label={t('loading')}>{Array.from({ length: 3 }, (_, i) => <div className="list-skeleton-row" key={i} />)}</div>
-      : items.length ? <ul className="notice-list">{items.map((n, i) => <li key={n.id ?? i}><strong>{n.title || n.type || t('notification')}</strong><span>{n.content || n.body || n.message || ''}</span>{n.createdAt && <small>{String(n.createdAt).slice(0, 16).replace('T', ' ')}</small>}</li>)}</ul>
-      : <p className="mock-note">{t('notificationsEmpty')}</p>}
-  </section>;
-}
-
-/** 账户中心：地址簿、优惠券、通知。仅真实租户 + 已登录可用。 */
+/** The demo previews the complete layout but never calls account APIs. */
 export function AccountPage() {
   const { href, isRemote, t } = useSite();
-  const { isAuthenticated, customerName, logout } = useAuth();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (isRemote && !isAuthenticated) navigate(href(`/login?redirect=${encodeURIComponent('/account')}`), { replace: true });
-  }, [isRemote, isAuthenticated]);
-
-  if (!isRemote) return <div className="shell simple-page"><div className="page-intro"><h1>{t('accountTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
-  if (!isAuthenticated) return null;
-
-  return <div className="shell simple-page account-page">
-    <div className="page-intro"><h1>{t('accountTitle')}</h1><p>{customerName ? t('accountGreeting', { name: customerName }) : t('accountSubtitle')}</p></div>
-    <div className="account-quicklinks"><Link className="button button-outline" to={href('/orders')}>{t('orders')}</Link><button type="button" className="button button-outline" onClick={() => { logout(); navigate(href('/')); }}>{t('logoutCta')}</button></div>
-    <AddressBook />
-    <Coupons />
-    <Notifications />
-  </div>;
+  const [params] = useSearchParams();
+  const active: MemberSection = params.get('section') === 'coupons' ? 'coupons' : params.get('section') === 'notifications' ? 'notifications' : 'addresses';
+  useEffect(() => { if (isRemote && !isAuthenticated) navigate(href('/login?redirect=' + encodeURIComponent('/account?' + params)), { replace: true }); }, [isRemote, isAuthenticated, params]);
+  if (isRemote && !isAuthenticated) return <div className="shell simple-page"><PageState title={t('loginRequired')}><Link className="button button-dark" to={href('/login')}>{t('loginCta')}</Link></PageState></div>;
+  return <MemberLayout active={active} title={active === 'addresses' ? t('addressBook') : active === 'coupons' ? t('coupons') : t('notifications')} description={t('accountSubtitle')}>
+    {active === 'addresses' ? <AddressBook demo={!isRemote} /> : <AccountCollection key={active} kind={active} demo={!isRemote} />}
+  </MemberLayout>;
 }

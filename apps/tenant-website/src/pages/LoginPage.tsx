@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircleOutlined } from '@ant-design/icons';
+import { Eye, EyeOff, Loader } from '../components/SiteIcon';
+import { PageHeading } from '../components/PageHeader';
+import { Img } from '../components/Img';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { authApi, type ClientSession } from '../data/authClient';
@@ -16,13 +18,16 @@ function phoneValid(phone: string) {
 }
 
 export function LoginPage() {
-  const { tenantCode, isRemote, href, t } = useSite();
+  const { tenantCode, isRemote, href, t, tenant, language } = useSite();
   const { setSession, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const redirect = params.get('redirect') || '/orders';
+  const requestedRedirect = params.get('redirect') || '/orders';
+  const redirect = /^\/(?:account|orders|booking)(?:[/?#]|$)/.test(requestedRedirect) ? requestedRedirect : '/orders';
+  const en = language === 'en';
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
-  const [view, setView] = useState<View>('login');
+  const [view, setView] = useState<View>(params.get('view') === 'register' ? 'register' : 'login');
   const [loginMode, setLoginMode] = useState<LoginMode>('sms');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -111,36 +116,30 @@ export function LoginPage() {
       setPending(false);
     }
   }
-  if (!isRemote) {
-    return <div className="shell simple-page"><div className="page-intro"><h1>{t('loginTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
-  }
-
-  return <div className="shell simple-page login-page">
-    <div className="page-intro"><h1>{isRegister ? t('loginRegister') : t('loginCta')}</h1><p>{isRegister ? t('registerSubtitle') : t('loginSubtitle')}</p></div>
-    <div className="login-card">
-      {!isRegister && <div className="login-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={loginMode === 'sms'} className={loginMode === 'sms' ? 'active' : ''} onClick={() => { setLoginMode('sms'); setError(''); }}>{t('loginSms')}</button>
-        <button type="button" role="tab" aria-selected={loginMode === 'password'} className={loginMode === 'password' ? 'active' : ''} onClick={() => { setLoginMode('password'); setError(''); }}>{t('loginPassword')}</button>
-      </div>}
-      <form className="login-form" onSubmit={submit}>
-        {isRegister && <label>{t('contactName')}<input value={name} onChange={e => setName(e.target.value)} placeholder={t('namePlaceholder')} maxLength={120} /></label>}
-        <label>{t('loginPhone')}<input inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder={t('phonePlaceholder')} maxLength={11} /></label>
-        {(!isRegister && loginMode === 'password') && <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordPlaceholder')} /></label>}
-        {isRegister && <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordRule')} /></label>}
-        {needsCode && <label>{t('loginCode')}
-          <span className="login-code-row">
-            <input inputMode="numeric" value={code} onChange={e => setCode(e.target.value)} placeholder={t('loginCodePlaceholder')} maxLength={6} />
-            <button type="button" className="button button-outline" disabled={pending || countdown > 0 || !phoneValid(phone)} onClick={sendCode}>{countdown > 0 ? `${countdown}s` : t('loginSendCode')}</button>
-          </span>
-        </label>}
-        {devCode && <p className="login-dev-code"><CheckCircleOutlined /> {t('loginDevCode', { code: devCode })}</p>}
-        {isRegister && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
-        {error && <p className="form-error" role="alert">{error}</p>}
-        <button type="submit" className="button button-dark button-block" disabled={pending}>{isRegister ? t('loginRegisterSubmit') : t('loginSubmit')}</button>
-      </form>
-      <p className="login-switch">{isRegister ? t('haveAccount') : t('noAccount')} <button type="button" className="login-switch-link" onClick={() => switchView(isRegister ? 'login' : 'register')}>{isRegister ? t('loginCta') : t('loginRegister')}</button></p>
-      <p className="login-foot">{t('loginFootNote')}</p>
-    </div>
+  return <div className="shell auth-page">
+    <div className="auth-layout"><div className="auth-form-side">
+      <PageHeading title={isRegister ? t('loginRegister') : t('loginCta')} description={isRegister ? t('registerSubtitle') : t('loginSubtitle')} />
+      {!isRemote && <p className="preview-notice">{en ? 'Layout preview · Sign-in and SMS are disabled in demo mode.' : '布局预览 · 演示模式不发送短信，也不执行登录。'}</p>}
+      <div className="login-card">
+        {!isRegister && <div className="login-tabs" role="group" aria-label={t('loginTitle')}>
+          <button type="button" aria-pressed={loginMode === 'sms'} className={loginMode === 'sms' ? 'active' : ''} onClick={() => { setLoginMode('sms'); setError(''); }}>{t('loginSms')}</button>
+          <button type="button" aria-pressed={loginMode === 'password'} className={loginMode === 'password' ? 'active' : ''} onClick={() => { setLoginMode('password'); setError(''); }}>{t('loginPassword')}</button>
+        </div>}
+        <form className="login-form" onSubmit={submit} aria-busy={pending}>
+          {isRegister && <label>{t('contactName')}<input required autoComplete="name" value={name} onChange={e => setName(e.target.value)} placeholder={t('namePlaceholder')} maxLength={120} /></label>}
+          <label>{t('loginPhone')}<input type="tel" required autoComplete="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder={t('phonePlaceholder')} maxLength={11} /></label>
+          {(isRegister || loginMode === 'password') && <label>{t('loginPasswordField')}<span className="password-field"><input required type={passwordVisible ? 'text' : 'password'} minLength={isRegister ? 8 : undefined} autoComplete={isRegister ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={isRegister ? t('loginPasswordRule') : t('loginPasswordPlaceholder')} /><button type="button" className="icon-button" aria-label={passwordVisible ? en ? 'Hide password' : '隐藏密码' : en ? 'Show password' : '显示密码'} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(!passwordVisible)}>{passwordVisible ? <EyeOff /> : <Eye />}</button></span></label>}
+          {needsCode && <label>{t('loginCode')}<span className="login-code-row"><input required inputMode="numeric" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} placeholder={t('loginCodePlaceholder')} maxLength={6} /><button type="button" className="button button-outline" disabled={!isRemote || pending || countdown > 0 || !phoneValid(phone)} onClick={sendCode}>{countdown > 0 ? countdown + 's' : t('loginSendCode')}</button></span></label>}
+          {devCode && <p className="login-dev-code">{t('loginDevCode', { code: devCode })}</p>}
+          {isRegister && <label className="login-agree"><input required type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button type="submit" className="button button-dark button-block" disabled={!isRemote || pending}>{pending && <Loader />}{isRegister ? t('loginRegisterSubmit') : t('loginSubmit')}</button>
+        </form>
+        <p className="login-switch">{isRegister ? t('haveAccount') : t('noAccount')} <button type="button" className="login-switch-link" onClick={() => switchView(isRegister ? 'login' : 'register')}>{isRegister ? t('loginCta') : t('loginRegister')}</button></p>
+        <p className="login-foot">{en ? 'Before continuing, read our ' : '继续前，请阅读'}<Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link>{en ? '.' : '。'}</p>
+      </div>
+      <Link className="auth-back" to={href('/products')}>{t('continueExplore')}</Link>
+    </div><aside className="auth-story"><Img src={isRemote ? tenant.heroImage : '/assets/brand-journey.webp'} alt="" /><div><h2>{tenant.name}</h2><p>{tenant.slogan}</p></div></aside></div>
   </div>;
 }
 

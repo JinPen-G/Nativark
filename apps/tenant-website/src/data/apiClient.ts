@@ -111,7 +111,7 @@ export interface PublicCatalogResponse {
   categoryCode: string;
   items: CatalogItem[];
   pricingGroups?: CatalogPricingGroup[];
-  locations?: Array<{ id: string; code: string; name: string; address?: string; businessHours?: string; contactPhone?: string; capabilities?: string[] }>;
+  locations?: Array<{ id: string; code: string; name: string; city?: string; address?: string; businessHours?: string; contactPhone?: string; capabilities?: string[] }>;
 }
 
 /** 公开可用性检索：给定门店 + 时段 + 候选型号，返回各行可租状态（供官网按时段/门店真实过滤商品）。 */
