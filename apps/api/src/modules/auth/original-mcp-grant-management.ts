@@ -46,7 +46,7 @@ export function createOriginalMcpGrantManagement(
       return Object.freeze({ actorId: before.userId, tenantId: g.tenantId, workspaceId: g.workspaceId, authority: owner ? 'owner' as const : 'tenant_manager' as const });
     } catch { throw unavailable(); }
   };
-  return Object.freeze({ authorize,
+  return Object.freeze<OriginalOAuthGrantManagement<Prisma.TransactionClient>>({ authorize,
     async owner(tx, signal) {
       const abort = AbortSignal.any([signal, browser.signal]);
       try {

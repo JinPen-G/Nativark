@@ -124,12 +124,18 @@ function createOrderResources(mode: 'status' | 'all', [mcp, context, raw, requir
     // context is never a historical source. Absence retains original not_loaded.
     const history = originalQuoteRead ? new AiNativeOrderSavedQuoteSource({ readQuoteInTransaction: originalQuoteRead },
       { getOrderInTransaction: getOrder }, authority, native, signal, () => live(signal)) : undefined;
-    const facts = new AiOrderReadFactsService({ readOrderFacts: async (tenant, id) => { live(signal); const order = await getOrder(tenant, id, native, signal, () => live(signal)); live(signal); return { ...order, workspaceId: expected.context.scope.kind === 'workspace' ? expected.context.scope.workspaceId : '' }; } }, authority, clock, history);
+    const orderFacts: Pick<RentalCoreService, 'readOrderFacts'> = { readOrderFacts: async (tenant, id) => {
+      live(signal);
+      if (expected.context.scope.kind !== 'workspace' || tenant !== expected.context.scope.tenantId || id !== orderId) throw unavailable();
+      const order = await getOrder(tenant, id, native, signal, () => live(signal)); live(signal);
+      return { ...order, workspaceId: expected.context.scope.workspaceId };
+    } };
+    const facts = new AiOrderReadFactsService(orderFacts, authority, clock, history);
     // Optional persisted observations use the same order authority/Native; the
     // original reader bounds and projects them, never loads templates or URLs.
     const inspections = originalInspectionRead ? new AiOrderInspectionFactsService({
-      getOrder: (tenant, id) => { live(signal); return getOrder(tenant, id, native, signal, () => live(signal)); },
-      listInspectionsPage: (tenant, id, query) => { live(signal); return originalInspectionRead(tenant, id, query, native, signal, () => live(signal)); }
+      ...orderFacts,
+      readInspectionFactsPage: (tenant, id, query) => { live(signal); return originalInspectionRead(tenant, id, query, native, signal, () => live(signal)); }
     }, authority, clock) : undefined;
     const paymentRoutes: AiBusinessReadAuthority = { withRead: async (kind, input, consume) => {
       live(signal);
@@ -138,12 +144,15 @@ function createOrderResources(mode: 'status' | 'all', [mcp, context, raw, requir
       return read(value => consume(value), { kind, input: structuredClone(input) });
     } };
     const payments = intentRead && refundRead ? new AiOrderPaymentFactsService({
-      // The original facts service requires these legacy signatures, but this
-      // bounded Native source must never fall back to an unbounded/global list.
-      listPaymentIntents: async () => { throw unavailable(); }, listPaymentRefunds: async () => { throw unavailable(); },
-      listPaymentIntentsPage: (tenant, space, id, query) => { live(signal); return intentRead(tenant, space, id, query, native, signal, () => live(signal)); },
-      listPaymentRefundsPage: (tenant, space, id, intent, query) => { live(signal); return refundRead(tenant, space, id, intent, query, native, signal, () => live(signal)); }
-    }, { getOrder: (tenant, id) => { live(signal); return getOrder(tenant, id, native, signal, () => live(signal)); } }, authority, paymentRoutes, clock) : undefined;
+      // Adapt the current bounded facts ports to the same original Native read;
+      // never use a global list or leave the caller's transaction and guards.
+      readOrderPaymentIntentsPage: async (tenant, space, id, query) => {
+        live(signal); const page = await intentRead(tenant, space, id, query, native, signal, () => live(signal)); live(signal);
+        return { ...page, rows: page.rows.map(row => ({ intentId: row.intentId, instrument: row.instrument, amount: row.amount,
+          currency: row.currency, status: row.status, expiresAt: row.expiresAt, paidAt: row.paidAt })) };
+      },
+      readOrderPaymentRefundsPage: (tenant, space, id, intent, query) => { live(signal); return refundRead(tenant, space, id, intent, query, native, signal, () => live(signal)); }
+    }, orderFacts, authority, paymentRoutes, clock) : undefined;
     const explanation = new AiOrderExplanationFactsService(authority, facts, payments, clock, inspections);
     const prepare = new AiOrderExplanationPreparationService(authority, explanation, new AiOrderNextStepsService(authority, explanation));
     await prepare.prepare({ question: body.input.question }); live(signal);

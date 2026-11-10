@@ -62,7 +62,7 @@ export function createOriginalMcpConsentPolicyManagement(
       if (!isDeepStrictEqual(await current(), before) || candidate && !isDeepStrictEqual(await permit(tx, scope, candidate, abort), allowed)) throw unavailable(); live(); return before;
     } catch { throw unavailable(); }
   };
-  return Object.freeze({ authorize,
+  return Object.freeze<OriginalOAuthConsentPolicyManagement<Prisma.TransactionClient>>({ authorize,
     async audit(tx, input, signal) {
       const abort = AbortSignal.any([signal, browser.signal]), live = () => { if (abort.aborted) throw unavailable(); };
       try {
@@ -80,8 +80,10 @@ export function createOriginalMcpConsentPolicyManagement(
         if (row.actorId !== before.actorId || row.targetKind !== scope.kind || row.resource !== resource || row.tenantId !== (scope.kind === 'workspace' ? scope.tenantId : null)
           || row.workspaceId !== (scope.kind === 'workspace' ? scope.workspaceId : null) || saved.operationKey !== v.operationKey || !isDeepStrictEqual(saved.target, scope) || !isDeepStrictEqual(saved.policy, current)) throw unavailable();
         const tenantId = scope.kind === 'workspace' ? scope.tenantId : p!.tenantId;
-        await record(tx, { tenantId, userId: before.actorId, workspaceId: scope.kind === 'workspace' ? scope.workspaceId : null,
-          action: scope.kind === 'workspace' ? 'mcp.oauth.consent.policy.workspace.saved' : 'mcp.oauth.consent.policy.platform.saved',
+        await record(tx, { tenantId, userId: before.actorId,
+          ...(scope.kind === 'workspace'
+            ? { workspaceId: scope.workspaceId, action: 'mcp.oauth.consent.policy.workspace.saved' as const }
+            : { workspaceId: null, action: 'mcp.oauth.consent.policy.platform.saved' as const }),
           targetType: 'mcp-oauth-consent-policy', targetId: scope.kind === 'workspace' ? scope.workspaceId : v.operationKey,
           operationKey: v.operationKey, revision: v.revision, grantId: null }, abort); live();
         if (!isDeepStrictEqual(await authorize(tx, { action: 'save', target: scope, policy: current }, abort), before)

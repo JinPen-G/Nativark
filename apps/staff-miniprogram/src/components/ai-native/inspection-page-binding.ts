@@ -1,3 +1,5 @@
+/** Binds original inspection hosts to one live page attachment, not just its
+ * resource/session IDs. Rebinding revokes old references; this is not a server grant. */
 import { currentSession, contextVersion, sessionEvents } from "../../core/session";
 import type { StaffInspectionHost, StaffInspectionReceiptHost, InspectionRecognitionReference } from "./inspection-host";
 import { createStaffInspectionTransportHost, createStaffInspectionReceiptHost, readStaffInspectionHistory } from './inspection-transport';
@@ -10,7 +12,9 @@ interface InspectionPage {
 }
 const subscriptions = new WeakMap<object, () => void>();
 const remoteLoads = new WeakMap<object, object>();
+const pageBindings = new WeakMap<object, object>();
 export function clearInspectionPage(page: InspectionPage) {
+  pageBindings.delete(page);
   remoteLoads.delete(page);
   subscriptions.get(page)?.(); subscriptions.delete(page);
   page.selectComponent("#ai-inspection-assist")?.detachHost?.();
@@ -82,10 +86,11 @@ export function attachReceiptInspectionPage(page: InspectionPage, host: StaffIns
     || host.context.ownerId !== session.user.id || host.target.orderId !== page.data.id || host.target.stage !== stage) return false;
   const target = { ...host.target }, context = { ...host.context }, component = page.selectComponent('#ai-inspection-assist');
   if (typeof component?.attachReceiptHost !== 'function') return false;
-  const current = () => { const now = currentSession(); return contextVersion() === version && page.data.id === target.orderId
+  const binding = {}; pageBindings.set(page, binding);
+  const current = () => { const now = currentSession(); return pageBindings.get(page) === binding && contextVersion() === version && page.data.id === target.orderId
     && now?.tenant.tenantId === context.tenantId && now?.currentWorkspaceId === context.workspaceId && now?.user.id === context.ownerId && host.current() === true; };
   try {
-    if (!current()) return false;
+    if (!current()) { clearInspectionPage(page); return false; }
     subscriptions.set(page, sessionEvents.on(() => clearInspectionPage(page)));
     component.attachReceiptHost({ ...host, context, target, current });
     if (!current()) { clearInspectionPage(page); return false; }
@@ -121,18 +126,20 @@ export function attachInspectionPage(page: InspectionPage, host: StaffInspection
   const target = { ...host.target }, context = { ...host.context }, draftId = host.draftId, templateVersion = page.template?.version;
   const component = page.selectComponent("#ai-inspection-assist");
   if (typeof component?.attachHost !== "function") return false;
+  const binding = {}; pageBindings.set(page, binding);
   const current = () => {
     const now = currentSession();
-    return contextVersion() === version && now?.tenant.tenantId === context.tenantId && now?.user.id === context.ownerId
+    return pageBindings.get(page) === binding && contextVersion() === version && now?.tenant.tenantId === context.tenantId && now?.user.id === context.ownerId
       && now?.currentWorkspaceId === context.workspaceId && page.data.id === target.orderId
       && page.template?.id === target.templateId && page.template?.version === templateVersion && host.current() === true;
   };
-  try { if (!current()) return false; } catch { return false; }
-  subscriptions.set(page, sessionEvents.on(() => clearInspectionPage(page)));
-  component.attachHost({ ...host, context, target, draftId, current });
-  try { if (!current()) { clearInspectionPage(page); return false; } }
-  catch { clearInspectionPage(page); return false; }
-  page.setData({ aiInspectionVisible: true });
-  void page.selectComponent("#ai-inspection-assist")?.hostShow?.();
-  return true;
+  try {
+    if (!current()) { clearInspectionPage(page); return false; }
+    subscriptions.set(page, sessionEvents.on(() => clearInspectionPage(page)));
+    component.attachHost({ ...host, context, target, draftId, current });
+    if (!current()) { clearInspectionPage(page); return false; }
+    page.setData({ aiInspectionVisible: true });
+    void page.selectComponent("#ai-inspection-assist")?.hostShow?.();
+    return true;
+  } catch { clearInspectionPage(page); return false; }
 }

@@ -624,6 +624,10 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         ${query.name ? Prisma.sql`AND name = ${query.name}` : Prisma.empty}
         ${query.cursor ? Prisma.sql`AND id > ${query.cursor}` : Prisma.empty}
         ORDER BY id LIMIT ${query.limit + 1} LOCK IN SHARE MODE`);
+      // The sentinel still belongs to this page's scope, even though it is not returned.
+      if (rows.length > query.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length
+        || rows.some(row => row.tenantId !== tenantId || row.workspaceId !== workspaceId))
+        throw new ConflictException('商品配置来源无效或超出读取上限');
       const page = rows.slice(0, query.limit), result: RentalItemGroupReadFacts[] = [];
       for (const row of page) {
         const parts = await tx.$queryRaw<Array<{ componentItemGroupId: string; quantity: number; optional: number | boolean;

@@ -981,7 +981,7 @@ export class ApiAuthGuard implements CanActivate {
     return this.withTrustedRead(path, fields, resolve, consume, signal);
   }
 
-  private async withTrustedRead<T>(url: string, query: object, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
+  private async withTrustedRead<T>(url: string, query: Record<string, unknown>, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
     consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal, method: 'GET' | 'POST' = 'GET'): Promise<T> {
     if (method !== 'GET' && (method !== 'POST' || url !== '/api/rental/v1/availability')) throw new ForbiddenException('可信读取路径不可用');
     const live = () => { if (signal.aborted) throw new ForbiddenException('可信只读调用已停止'); };
@@ -1350,7 +1350,7 @@ export class ApiAuthGuard implements CanActivate {
       await this.assertStaffLocationAccess(request, path, user, workspaceId, locationScope, scopedDatabase);
     }
     enterRequestIdentity({
-      accessSession: accessContext?.accessSession,
+      accessSession: original ? undefined : accessContext?.accessSession,
       tenantId: user.tenantId,
       userId: user.id,
       audience: staffApiRequest ? 'staff' : 'operator',

@@ -9,7 +9,7 @@ const ids = (value: unknown): value is string[] => Array.isArray(value) && value
   && value.every(id => typeof id === "string" && Boolean(id.trim()) && id.length <= 191);
 export const copyEnterprisePolicy = (p?: EnterpriseScopePolicy): EnterpriseScopePolicy | undefined => {
   if (p === undefined) return undefined;
-  if (!p || !ids(p.workspaceIds) || !ids(p.categoryCodes) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).includes(code))
+  if (!p || !ids(p.workspaceIds) || !ids(p.categoryCodes) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))
     || typeof p.personalPaymentAllowed !== "boolean" || typeof p.enterprisePaymentAllowed !== "boolean"
     || !["per_order", "without_per_order", "unconfigured"].includes(p.approvalMode)
     || typeof p.noticeVersion !== "string" || !p.noticeVersion.trim() || p.noticeVersion.length > 191
@@ -25,8 +25,8 @@ export const copyEnterprisePolicy = (p?: EnterpriseScopePolicy): EnterpriseScope
 export const copyEnterprisePolicyView = (view?: EnterpriseScopePolicyView): EnterpriseScopePolicyView | undefined => {
   if (view === undefined) return undefined;
   if (!view || [view.revision, view.merchantRevision, view.companyRevision, view.employeeRevision].some(value => !Number.isSafeInteger(value) || value < 0)
-    || !ids(view.effectiveWorkspaceIds) || !ids(view.effectiveCategoryCodes) || view.effectiveCategoryCodes.some(code => !Object.values(RentalCategoryCode).includes(code)) || !Array.isArray(view.workspaces) || view.workspaces.length > 200
-    || view.workspaces.some(row => !row || typeof row.id !== "string" || !row.id.trim() || row.id.length > 191 || typeof row.name !== "string" || !Object.values(RentalCategoryCode).includes(row.categoryCode))) throw unavailable();
+    || !ids(view.effectiveWorkspaceIds) || !ids(view.effectiveCategoryCodes) || view.effectiveCategoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code)) || !Array.isArray(view.workspaces) || view.workspaces.length > 200
+    || view.workspaces.some(row => !row || typeof row.id !== "string" || !row.id.trim() || row.id.length > 191 || typeof row.name !== "string" || !Object.values(RentalCategoryCode).some(registered => registered === row.categoryCode))) throw unavailable();
   return { revision: view.revision, merchantRevision: view.merchantRevision, companyRevision: view.companyRevision, employeeRevision: view.employeeRevision,
     merchant: copyEnterprisePolicy(view.merchant), company: copyEnterprisePolicy(view.company), employee: copyEnterprisePolicy(view.employee), effectiveWorkspaceIds: [...view.effectiveWorkspaceIds],
     effectiveCategoryCodes: [...view.effectiveCategoryCodes], workspaces: view.workspaces.map(row => ({ id: row.id, name: row.name, categoryCode: row.categoryCode })) };

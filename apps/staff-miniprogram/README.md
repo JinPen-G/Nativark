@@ -40,6 +40,14 @@
 - 客户：列表、详情、编辑（复用平台与会员接口）。
 - 上传与线下收款：检查照片、工单证据、交接签字、线下收款凭证走已签名上传会话；线下收款先登记待确认，具结算权限者确认后才入资金账本。
 
+## AI 检查宿主边界
+
+交付/归还页通过[原页面绑定](src/components/ai-native/inspection-page-binding.ts)接入[检查辅助](src/components/ai-native/inspection-host.ts)；页面参数、缓存开关及模型内容不能注入宿主或扩大员工权限。当前检查草稿与历史原收据分别绑定，读取历史不授予编辑、再次识别或检查提交权限。
+
+绑定既核对当前账号、租户、空间、订单和适用模板，也核对本次页面挂接身份。同一页重新挂接、切换到原收据模式、清除或卸载后，旧回调永久失效；即使资源和会话 ID 相同也不能复活。隐藏时仍沿原组件代次停止迟到展示，unknown 不被解释为未提交，不换键重做。
+
+验证入口复用[既有 B11 宿主测试](../../tests/ai-native-b11-workbench.test.cjs)；离线页面/组件替身不代替实际微信宿主、指定真机、弱网、相机录音上传或正式业务收据验收。
+
 ## 多品类兼容
 
 页面不写死任何品类名词。`src/core/context.ts` 进入经营空间后从 `GET /rental/v1/categories` 取品类定义（与 Web 后台同一事实源），暴露 `terms()`（`assetLabel / itemLabel / itemGroupLabel / fulfillmentLabel / pickupLabel / returnLabel / identifierLabel / usageMetricLabel / collectionLabel`）与 `assetFields`（资产详情与新建表单据此动态渲染）；检查项来自 `GET /rental/v1/inspection-templates?stage=`。新增品类只需在服务端补一条品类定义；小程序中唯一按品类码分支的地方是 `categoryIcon()`，因为图标是客户端资源。

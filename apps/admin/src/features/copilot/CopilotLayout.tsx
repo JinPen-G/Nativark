@@ -4,6 +4,10 @@ import { ArrowUp, FileText, PanelRightClose, Plus, RotateCcw, ShieldCheck, Squar
 import Markdown from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
+import { currentSessionEpoch } from '@/app/queryClient';
+import { APP_ROUTES, canAccessRoute } from '@/app/navigation';
+import { useAuthStore } from '@/features/auth/authStore';
+import { ServerConversationPanel } from '@/features/ai-native/ServerConversationPanel';
 import { AnimatedIcon } from '@/components/ui/AnimatedIcon';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -67,6 +71,11 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
   const input = useRef<HTMLTextAreaElement>(null), panel = useRef<HTMLElement>(null), thread = useRef<HTMLDivElement>(null);
   const [review, setReview] = useState<CopilotTurn | null>(null), [reviewOpen, setReviewOpen] = useState(false);
   const [availableContext, setAvailableContext] = useState({ detail: false, configuration: false });
+  const [serverOpen, setServerOpen] = useState(false);
+  const auth = useAuthStore();
+  const canContinue = canAccessRoute(APP_ROUTES.aiOperator, auth.hasPermission, auth.hasCapability,
+    auth.tenant?.categoryCode, Boolean(auth.user?.isSaasAdmin), auth.hasTenantMembershipPermission);
+  useEffect(() => { setServerOpen(false); }, [open, pathname, copilot.focusVersion]);
   useEffect(() => {
     if (!open || !background) return;
     const read = () => {
@@ -76,7 +85,9 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
     read(); const observer = new MutationObserver(read); observer.observe(background, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [open, background, pathname]);
-  useEffect(() => { if (open) input.current?.focus({ preventScroll: true }); }, [open, copilot.focusVersion]);
+  useEffect(() => {
+    if (open) (serverOpen ? panel.current?.querySelector<HTMLElement>('button') : input.current)?.focus({ preventScroll: true });
+  }, [open, copilot.focusVersion, serverOpen]);
   useEffect(() => {
     const node = thread.current;
     if (node && (copilot.busy || node.scrollHeight - node.scrollTop - node.clientHeight < 200)) node.scrollTo({ top: node.scrollHeight });
@@ -87,7 +98,7 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
       const anotherDialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).some(node => node !== panel.current && node.getClientRects().length);
       if (event.key === 'Escape' && !anotherDialog && !document.querySelector('[role="menu"]')) { event.preventDefault(); copilot.close(); }
       if (narrow && !anotherDialog && event.key === 'Tab' && panel.current) {
-        const items = Array.from(panel.current.querySelectorAll<HTMLElement>('button:not(:disabled),textarea,a[href]'));
+        const items = Array.from(panel.current.querySelectorAll<HTMLElement>('button:not(:disabled),textarea,input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]'));
         const first = items[0], last = items.at(-1);
         if (event.shiftKey && (document.activeElement === first || !panel.current.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -106,8 +117,24 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
   };
   const changed = (turn: CopilotTurn) => turn.changes?.filter(change => change.after !== change.before) ?? [];
   const contextLabel = (record: CopilotRecord) => record.label;
+  if (serverOpen) return <aside id="business-copilot" ref={panel} className="asp-panel" role={narrow ? 'dialog' : 'complementary'}
+    aria-modal={narrow && open || undefined} aria-label="Copilot">
+    <header className="asp-panel-header"><div className="asp-identity"><AnimatedIcon name="ai" /><strong>Copilot</strong><span>{t('服务端对话')}</span>
+      <Button onClick={() => setServerOpen(false)}>{t('返回示例工作区')}</Button>
+      <button type="button" aria-label={t('关闭 Copilot')} data-sound="press" onClick={copilot.close}><PanelRightClose size={16} /></button>
+    </div></header>
+    <div className="asp-thread"><ServerConversationPanel visible={open} onOpenConversation={canContinue ? selection => {
+      const now = useAuthStore.getState();
+      if (!canAccessRoute(APP_ROUTES.aiOperator, now.hasPermission, now.hasCapability, now.tenant?.categoryCode,
+        Boolean(now.user?.isSaasAdmin), now.hasTenantMembershipPermission)) return;
+      navigate(APP_ROUTES.aiOperator.path, { state: { aiConversation: { ...selection,
+        identity: JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user?.id]), sessionEpoch: currentSessionEpoch() } } });
+      copilot.close();
+    } : undefined} /></div>
+  </aside>;
   return <aside id="business-copilot" ref={panel} className="asp-panel" role={narrow ? 'dialog' : 'complementary'} aria-modal={narrow && open || undefined} aria-label="Copilot">
     <header className="asp-panel-header"><div className="asp-identity"><AnimatedIcon name="ai" /><strong>Copilot</strong><span>{t('本地演示')}</span>
+      <Button onClick={() => { copilot.stop(); setReviewOpen(false); setServerOpen(true); }}>{t('服务端对话')}</Button>
       <button type="button" title={t('新对话')} aria-label={t('新对话')} data-sound="press" onClick={copilot.clear}><RotateCcw size={15} /></button>
       <button type="button" aria-label={t('关闭 Copilot')} data-sound="press" onClick={copilot.close}><PanelRightClose size={16} /></button>
     </div><div className="asp-context"><span><FileText size={12} />{t(copilot.page?.label ?? '当前页面')}</span></div></header>

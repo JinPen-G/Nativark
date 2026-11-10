@@ -88,6 +88,7 @@ import { RentalBusinessService, type BusinessContext } from "./rental-business.s
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 import { requestFingerprint } from "./rental-idempotency.repository";
+import { roundMoney } from "./rental-money";
 import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { getRequestIdentity } from "../../common/request-identity";

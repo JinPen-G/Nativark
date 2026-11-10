@@ -1338,6 +1338,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!identity?.workspaceId || identity.tenantId !== tenantId || !identity.userId || identity.isSaasAdmin
       || identity.audience !== 'operator' || !native || '$transaction' in native
       || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalItemGroup?.findMany !== 'function'
+      || typeof native.$queryRaw !== 'function'
       || typeof this.configStore.listItemGroupsPage !== 'function') throw new ServiceUnavailableException('商品事务分页读取范围不可用');
     const binding = requestFingerprint(structuredClone(identity));
     const live = () => {
@@ -1355,13 +1356,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     } });
     const workspace = guarded(native.businessWorkspace), groups = guarded(native.rentalItemGroup);
     const transaction = new Proxy(native, { get(target, property, receiver) {
+      if (property === '$queryRaw') {
+        return new Proxy(target.$queryRaw, { apply(method, _owner, args) { live(); return Reflect.apply(method, target, args); } });
+      }
       return property === 'businessWorkspace' ? workspace : property === 'rentalItemGroup' ? groups : Reflect.get(target, property, receiver);
     } });
     const page = structuredClone(await this.configStore.listItemGroupsPage(tenantId, identity.workspaceId, query, transaction));
     live();
     if (!Array.isArray(page.rows) || page.rows.length > query.limit || page.rows.some(row => row.tenantId !== tenantId)
       || page.source !== 'persisted_workspace_configuration') throw new ConflictException('商品分页读取来源变化');
-    return { ...page, rows: page.rows.map(row => this.publicItemGroup(row)) };
+    return page;
   }
 
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }

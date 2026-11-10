@@ -81,7 +81,7 @@ export function createOriginalMcpPublicClientManagement(
       live(); return Object.freeze({ actorId: before.userId });
     } catch { throw unavailable(); }
   };
-  return Object.freeze({ authorize,
+  return Object.freeze<OriginalPublicClientManagement<Prisma.TransactionClient>>({ authorize,
     async audit(transaction, input, signal) {
       const abort = AbortSignal.any([signal, browser.signal]), live = () => { if (abort.aborted) throw unavailable(); };
       try {

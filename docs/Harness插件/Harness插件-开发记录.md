@@ -4,6 +4,17 @@
 > 用途：按完整阶段记录本专项实际已做、剩余及证据，不作为第二份百分比台账。
 > 正式范围见[需求](Harness插件-需求.md)，任务与研发进度见[开发任务](Harness插件-开发任务.md)，当前现场见[协作接续](Harness插件-协作接续.md)。原定制客户端历史仍保留在[Agent接入改造开发记录](../Agent接入改造/Agent接入改造-开发记录.md)，不搬来计作插件成果。
 
+<a id="agp-main-consolidation-20261110"></a>
+## 固定插件成果合入 main 与门槛复核（2026-11-10）
+
+插件0.1.8随固定快照`c6b7872435e42cde484f068969e32f3bacd900ca`归入main。重新核对原tarball SHA-256及清单16份包源，main与固定源等价、无缺项，见[包源核对](../../output/other-worktrees-consolidation-20261110/harness-package-source-audit.json)。历史原稿和Loader日志在主仓库D盘档案保留，源树冻结后没有新增成果；不恢复分树或原循环施工。
+
+本次实际main插件strict/声明构建退出0、审计0，使用其声明的SDK2.2.0、Zod4.4.3及固定Host公开类型，只读借用既有依赖；没有安装或复制依赖到main。首次验证误解析到根Zod3及不完整依赖锚点的失败保留，按实际包声明修正验证解析后通过。原0.1.8 Loader 19/19日志与同次包指纹已核对，它仍是2026-11-06证据，本次未重跑Loader或称真实用户安装通过。命令和边界见[验证回执](../../output/other-worktrees-consolidation-20261110/validation/summary.json)。
+
+按原G1真实入口/消费者与可实施设计、G2主实现、G3装配/自动化/类型、G4完整变体与所需环境逐项复核：AGP-01原75%保持；AGP-03登录/刷新/断开真实SDK消费者与恢复设计满足G1，长期安全凭据、跨进程恢复及可信解除仍缺；AGP-04精确Agent/Session的单连接、Tools/指引消费与撤回已有主实现，登记G2，完整生产发布/schema/字段组合尚未达G3；AGP-05原Host发送前材料检查和生命周期接点满足G1，最终Provider线包、派生材料及完整留存仍缺；AGP-10固定Loader/升级故障验证入口和实施设计满足G1，完整原版连接/呈现/升级验收未齐。相应仅补25/50分档，唯一任务表等权20%、正式0/10，没有新增100%。
+
+AGP-02授权摘要/空间/可信Action、06持久目标准入及原业务键、07完整业务schema与自主呈现、08可信Web选择/批准办单、09有限云协同仍缺完整可实施消费合同，保持0%；不把MCP生产者、generic Tools桥或旧AGC功能算作这些客户端任务完成。旧记录保留当时判断，当前缺口继续见接续。项目合并与环境边界见[主记录](<../AI Native/AI Native-开发记录.md#ain-main-consolidation-20261110>)。
+
 ## 阶段：工具发布状态准确消费（2026-11-06）
 
 - 按AGP-02 / 04及R02 / R03 / R04，在[原Tools消费者](../../clients/harness-plugin/src/mcp-tools.ts)从已有generation / 注册名 / 精确Agent-Session直接派生published、完整empty及unavailable，不增加第二缓存或授权状态机。[现有命令](../../clients/harness-plugin/src/index.ts)的登录 / check / status共用该状态，[双语反馈](../../clients/harness-plugin/src/locales.ts)明确OAuth握手不等于业务就绪，最近本地注册不证明服务端当前权限。同步中、失败 / 撤回、错owner不显示已发布；完整空列表说明未启用业务工具，不用重复登录确认就绪。status不发现、刷新、发模型或管理grant，仍只写原command/done；README同步，版本0.1.8，未改原Host / MCP / API / Guard / shared或根lock。

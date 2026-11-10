@@ -127,7 +127,7 @@ async function main() {
   const profile = id => ({ id, tenantId: 'tenant-1', customerType: id === 'corp-1' ? 'corporate' : 'personal', name: id, mergedIntoCustomerId: null });
   const relation = { id: 'employment-1', tenantId: 'tenant-1', corporateCustomerId: 'corp-1', personalCustomerId: 'member-1',
     role: 'employee', status: 'active', effectiveFrom: new Date('2020-01-01'), effectiveTo: null, createdAt: new Date(), updatedAt: new Date(), reason: null };
-  let targetCapability = null, changeBeforeWorkspaceLock = false;
+  let targetCapability = null, changeBeforeWorkspaceLock = false, workspaceStatus = 'active';
   const currentDb = {
     $queryRaw: async query => {
       if (query.sql.includes('customer_membership_qualification_types')) {
@@ -136,7 +136,8 @@ async function main() {
       }
       assert.match(query.sql, /business_workspaces.*FOR UPDATE/su); reads.push('workspace-lock');
       if (changeBeforeWorkspaceLock) targetCapability = 'camera_only';
-      return [{ id: 'workspace-1', status: 'ACTIVE' }];
+      // Raw SQL returns the database-mapped enum, not Prisma's member name.
+      return [{ id: 'workspace-1', status: workspaceStatus }];
     },
     businessWorkspace: { findFirst: async () => ({ id: 'workspace-1', categoryCode: 'camera' }) },
     customerProfile: { findFirst: async ({ where }) => { reads.push(`profile:${where.id}`); return profile(where.id); } },
@@ -164,6 +165,12 @@ async function main() {
   assert.equal(current.corporateMembershipId, 'employment-1');
   assert.deepEqual(lockTrace.slice(0, 2), ['corp-1', 'member-1']); assert.equal(qualificationReads, 1);
   assert.ok(reads.indexOf('workspace-lock') < reads.indexOf('target-type'));
+  for (workspaceStatus of ['frozen', 'disabled']) {
+    const beforeQualifications = qualificationReads;
+    await assert.rejects(actualMemberships.resolveBookingIdentity('tenant-1', 'workspace-1', 'member-1', request.bookingIdentity, currentTx), /经营空间不可用/);
+    assert.equal(qualificationReads, beforeQualifications, 'inactive mapped status must stop before accepting qualifications');
+  }
+  workspaceStatus = 'active';
   changeBeforeWorkspaceLock = true;
   const changedTarget = await actualMemberships.resolveBookingIdentity('tenant-1', 'workspace-1', 'member-1', request.bookingIdentity, currentTx);
   assert.deepEqual(changedTarget.qualifications, [], 'target capability changed before the writer mutex must be read before accepting qualification');

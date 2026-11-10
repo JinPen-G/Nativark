@@ -1,8 +1,7 @@
 # MCP 服务：当前协作接续
 
-> 专项：Rental OS MCP 服务；更新时间：2026-11-06。
-> 当前状态：本次已收口，十分钟循环已按用户`/loop clear`取消，不自动进入下一片。分类率桶原生SQL片仅有核查与前像，未实现`--traffic-meter`、改测试或启库，见[收口记录](MCP服务-开发记录.md#当前收口2026-11-06)。原认证JSON-RPC协议发现类实际限流已供给，见[当前阶段](MCP服务-开发记录.md#阶段原认证协议发现实际限流2026-11-06)。原认证后有界读actual body.method逐request分类，原Core同store／grant／Auth Native与class率桶计发现／纯指引；原parsedBody交SDK，Header不能把工具体变为发现，validator／原列表／双代保持。实际Core／SDK1/1与必要strict声明通过，缺policy／超限／字节越界拒绝，close等原准备work；SQL／commit／policy仍夹具。目录自动类及前片本人收据类已消费；人工复核／匿名可信来源限流／全部原策略、Resources／其他业务／副作用及完整活跃、wire-release／Nest／UI／Host安装仍缺，任务表未整项跨门。原目标／预算／hold、原收据撤销历史保持，无新DDL／安装／外联、迁移或提交，实库失败与WIP保留。
-> Harness消费者0.1.8已准确区分本地Tools完整同步后的已注册 / empty与未就绪 / 撤回，离线Loader / SDK19/19，见[插件阶段](../Harness插件/Harness插件-开发记录.md#阶段工具发布状态准确消费2026-11-06)及[接续](../Harness插件/Harness插件-协作接续.md)。原0.1.7截止 / 取消成果保持；状态不发网络 / 模型、不证明当前服务端授权、目标准入或MCP进度。原「Agent接入改造」v1.5及源码仍封存保留，未恢复实施。
+> 更新日期：2026-11-10。固定成果已合入main；清理前类型/构建证据与恢复后复验分别记录，当前完整API类型仍受本地依赖缺件阻塞，MCP四组离线冒烟已重跑通过。详细修复和逐项门槛依据见[本阶段](MCP服务-开发记录.md#mcp-main-consolidation-20261110)及[恢复后回执](../../output/other-worktrees-consolidation-20261110/validation/post-recovery/summary.json)。原十分钟循环保持取消，分类率桶下一片和生产业务发布未恢复。
+> 旧接续全文见[前像清单](../../output/other-worktrees-consolidation-20261110/main-docs-before/manifest.json)。下列原实现接点及未完项继续有效；旧output按源树路径在D盘档案追溯，不视为main已安装的运行依赖。Harness仍为0.1.8，其进度独立登记，旧AGC继续封存。
 
 ## 1. 当前决定
 
@@ -16,23 +15,23 @@
 
 | 项目 | 当前现场 |
 | --- | --- |
-| 工作树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-harness-plugin-20261104`；原foundation树保留，只消费冻结迁入基线，不回写 / 追活动HEAD |
-| 分支 / HEAD | `ai/harness-plugin-20261104` / `a064c473279fa58973ffc5f52fd2d6479e496512`，固定基线见[迁入清单](../../output/harness-worktree-base-20261104-9c03g31v/baseline.json)，不作reset目标 |
-| Git状态 / 写入者 | 暂存为空，无MERGE_HEAD / CHERRY_PICK_HEAD，全部未提交；“Harness 插件”会话同时维护MCP与AGP对应源码 / 独立测试及各自记录 / 接续。原冻结WIP保留：authorization-server-metadata / oauth-token-endpoint / public-client-authorization及tests/mcp-foundation.test.cjs不认领 / 不修改 / 不夹带；AI服务端与企业管理端在各自授权树，仅实际文件冲突时必要协商，不泛发消息 |
-| 文档 | 本专项四册v1.0；MCP-01～10登记0%，正式0/10，不能用文档或旧SDK依赖计完成 |
+| 工作树 | `D:/工作文件/rental-OS`／`main`；原Harness树固定成果已归集，原工作目录按负责人授权移除，原稿与Windows残留保留在D盘档案，见[清理回执](../../output/other-worktrees-consolidation-20261110/worktree-removal-result.json) |
+| 分支 / HEAD | 当前main；固定源提交`c6b7872435e42cde484f068969e32f3bacd900ca`已进入祖先链，最终提交见[交付回执](../../output/other-worktrees-consolidation-20261110/final-receipt.json) |
+| Git状态 / 写入者 | 本对话负责main整合与合后修复，不恢复原循环或分树施工；未知并行修改单独保留 |
+| 文档 | 原四册、范围和任务身份保持；本次按原G1/G2登记已核门槛，唯一进度见任务册，不另抄百分比表 |
 | 当前实现 | `packages/mcp-server/service`已统一装配原同意 / 同仓储的AS控制面与MCP资源入口，原宿主仍须供给生产者、TLS / API与业务权限；不监听或读环境。`packages/mcp-server/`提供受保护fetch / RFC9728 / 标准挑战、固定AS introspection、可注入原发布 / 权限 / 持久计量 / 投影的只读注册、版本化instructions / 可选Prompts、精确text/plain Resources与15秒 / 64 KiB完整响应限制。conversation-result-read、original-task-recovery-read、conversation-operation-read、conversation-list-read、quote-selection-read、selected-proposal-read及selected-order-result-read子出口捕获普通JSON输入 / 完整观察快照，经公共schema / 原关联校验后交原release，构造不发布。authorization-server-metadata、public-client-authorization / endpoint、authorization-code-binding及oauth-token-endpoint子出口提供当前AS元数据 / 登记预检查、标准回调、原码S256绑定与token / 撤销控制面；persistent-oauth-tokens提供原事务码消费 / refresh轮换撤销与当前资源回读主实现，原store / grant仍需生产适配；capability-mapping子出口固定七项原业务码到运输名，四读与报价 / 提案保存 / 原批准建单分开，映射不注册或授权；包内共用原schema装配不删约束，编译包已在离线夹具执行原对话 / 结果服务 / artifact和原Task恢复状态读取；同事务原身份 / 持久Web同意 / grant及经营空间管理接点见下文，仍无生产API装配、原适用验证生产者与可信UI、持久计量 / 字段生产者或业务发布 |
 | Harness已读接点 | 原mcp-client有发现 / tools / resources / instructions及Streamable HTTP；所读transport仅配置headers，OAuth / refresh / 安全凭据及业务重试仍待真实消费核验 |
 | 旧研究 | 原MCP v0.3正文继续留原路径作为研究历史，当前正式任务已独立，不再执行旧P1～P7建议表 |
-| 本轮范围 | 已收口，仅更新本专项开发记录及MCP／Harness两份接续；[31份前像](../../output/mcp-traffic-native-20261106-1/hashes.json)及[核对](../../output/mcp-traffic-native-20261106-1/verification.json)保留。上一完成片仍为原认证协议发现类，业务／测试源码、README、包、schema及冻结他作者WIP均未改。分类率桶原生SQL下一片尚未实施：没有`--traffic-meter`模式或Date／率桶表驱动支持，runner未执行、未启库；旧实库失败保留。人工复核／匿名可信来源及全策略、Resources／其他业务／副作用与完整活动／发布前置仍缺，取消循环不等于这些任务完成 |
-| 保全与证据 | 下列旧MCP证据链接沿迁入文本保留，部分产物没有迁入本树，不称本树新验证；当前仓储验证以[本阶段](MCP服务-开发记录.md#阶段oauth-具体-mysql-仓储与联合推进恢复2026-11-05)为准。输入错误片七份前像在[保全目录](../../output/mcp-input-error-closeout-20261031-hthswluh/)，旧协议 / Resources / 插件前像与全部output保留。[修前错误外发](../../output/agent-desktop-install-20261023-q16gtnf6/logs/mcp-input-error-before-20261031-1.log)退出1、1 fail，SDK错误实际回显输入字段路径；[修后源码 / 正式ESM](../../output/agent-desktop-install-20261023-q16gtnf6/logs/mcp-input-error-fixed-20261031-1.log)退出0、3 pass，含全MCP / shared strict、协议固定及既有原reader / OAuth / Resources组合。插件源码未改，0.1.1包 / 原Loader证据见插件记录，未重复正常Host回归。原providers仍为外部夹具，非生产Guard / 字段或持久计量；实际Tools schema仍拒绝，无用户原版安装或业务开放。静态 / 冻结 / audit结果文件为`output/harness-oauth-session-20261028-m3kvbehy/mcp-input-error-static-20261031-1.json` |
+| 本轮范围 | 已有源码整合、必要修复及有界离线验证；分类率桶原生SQL下一片仍仅有核查/前像，未实现`--traffic-meter`或启库，其他原未完项保持 |
+| 保全与证据 | 旧输出与失败按原来源保留在主仓库D盘[固定档案](../../output/other-worktrees-consolidation-20261110/peer-results/claude-harness-plugin-20261104-verified.zip)；当前main验证见[本阶段](MCP服务-开发记录.md#mcp-main-consolidation-20261110)及[回执](../../output/other-worktrees-consolidation-20261110/validation/summary.json)，旧日志不冒充本轮通过 |
 
-本树官方SDK2.2.0已通过进程内2026-07-28及2025-11-25发现 / Tools / 拒绝行为；实例显式固定两代，未声明请求版本头拒绝 / 零reader，旧initialize仅反提议声明旧版。不是完整协议一致性验收。原版Harness Host、真实OAuth / 数据库 / 模型与生产部署未验。本包依赖未安装、根lock未更新，测试明确使用既有Harness SDK，不能当root安装 / 产物就绪。
+本树官方SDK2.2.0已通过进程内2026-07-28及2025-11-25发现 / Tools / 拒绝行为；实例显式固定两代，未声明请求版本头拒绝 / 零reader，旧initialize仅反提议声明旧版。不是完整协议一致性验收。原版Harness Host、真实OAuth / 数据库 / 模型与生产部署未验。本次包声明和根lock已归main；本地未安装依赖，隔离构建只读借用既有固定SDK，不称root安装或生产就绪。
 
 ## 3. 当前实施入口
 
 本树[createPrismaOAuthStore](../../packages/mcp-server/src/prisma-oauth-store.ts)已提供具体参数化MySQL仓储，不再只有token store接口；[结构源码](../../packages/mcp-server/mysql-oauth-schema.sql)已在本次独立MySQL空库执行并验证DDL / 约束，尚未进入原API增量迁移或业务 / 生产库。原AS可将此store供给[createRentalMcpService](../../packages/mcp-server/src/service.ts)，但consent / issuance / access作者必须使用`store.native(transaction)`在同一事务内锁住原身份 / 登记 / 同意 / grant，原code审计亦必需同事务。缺表 / 原生产者仍不可用；原store码 / refresh竞争与预算原锁 / 结算已用真实native prepared SQL定向验证，见[本阶段](MCP服务-开发记录.md#阶段原仓储原生sql实库事务2026-11-06)。驱动不是PrismaClient，grant / 原目标仍为测试夹具，不称完整原API / 生产持久化或全部隔离变体验收。
 
-原[AuthService.withTrustedWorkspacePrincipal](../../apps/api/src/modules/auth/auth.service.ts)已接同事务当前主体解析，原Platform重用角色 / 空间成员，原[Guard.withTrustedCatalogRead](../../apps/api/src/common/api-auth.guard.ts)固定目录GET，在原私有票据及同事务地点范围下执行真Guard / ALS和读后复验。票据只在原callback内一次消费，普通HTTP / JSON / 他实例不能注入；原Web token方法仍保留原路径。此通路不是OAuth issuer / grant核验，原当前grant作者必须提供固定user / tenant / workspace / operator绑定并锁住原记录；缺生产者仍不可用，不交客户端native handle。当前仅原源码离线行为及shared / 新内部契约strict，完整API strict / 原Prisma类型和Nest装配未验。
+原[AuthService.withTrustedWorkspacePrincipal](../../apps/api/src/modules/auth/auth.service.ts)已接同事务当前主体解析，原Platform重用角色 / 空间成员，原[Guard.withTrustedCatalogRead](../../apps/api/src/common/api-auth.guard.ts)固定目录GET，在原私有票据及同事务地点范围下执行真Guard / ALS和读后复验。票据只在原callback内一次消费，普通HTTP / JSON / 他实例不能注入；原Web token方法仍保留原路径。此通路不是OAuth issuer / grant核验，原当前grant作者必须提供固定user / tenant / workspace / operator绑定并锁住原记录；缺生产者仍不可用，不交客户端native handle。该阶段原证据限定为离线行为和内部契约；本次已补齐完整API类型及当前schema的隔离Prisma Client验证，真实Nest装配仍未验。
 
 [createPrismaPublicClientRegistry](../../packages/mcp-server/src/prisma-public-client-registry.ts)已具体生产原AS public-client投影，原precheck / token handler可消费read，原grant / 签发作者可在store.native(tx)内消费readIn；save / operation须原当前平台管理权与同事务审计，不是模型管理工具。完整应用负责人 / confidential client及后台权限 / UI仍不在此投影内；缺表或原管理依赖不保存。原键收据只证明那次保存，不冒充当前登记或grant。
 
@@ -92,7 +91,7 @@ MCP-01 / AGP-01协议与发现已有代码及真实SDK证据，OAuth客户端已
 
 可选Resources已补当前精确URI目录和text/plain说明 / 原结果文字引用的标准读路径，原权限 / 持久计量 / release缺一拒绝，返回前复验描述符及资源身份，现代零TTL、不支持模板 / 订阅 / 通知；实际源码 / 正式ESM两代SDK证据见开发记录。当前没有生产资源发布。插件已沿同一私有连接显式列目录 / 按名称选择资源，以普通有来源消息交原maintenance / inbox / Loop；精确Agent / Session、取消 / 断开 / 重载 / 模型服务移除及来源重建后的材料上限已有原Loader证据。原Harness公开mcpResources.register的继承式provider未注册，模型自主资源访问、最终Provider线包 / 目的地及全部重放仍缺控制证据。不将资源形式包装原业务绕Tools schema或前台目标准入；首片仍以目录Tools为目标，不等可选Resources才交付。
 
-已按负责人本轮指令恢复联合持续目标；不因分册或旧暂停拒绝推进MCP，也不因问题记录 / Stop hook扩大到无关专项。版本化instructions及可选Prompts已通过真实两代SDK / 编译包出口，当前均以synthetic政策provider验证，生产审查文字未交付；Prompts只提供无业务参数的当前起步指引，不自动成为Host SystemPrompt，缺许可 / 撤回 / 版本冲突拒绝。Harness已接显式人类列表 / 选择：列表零正文 / 模型，选择形成一条有来源 / 版本的原用户消息，取消 / 断开 / Agent销毁 / 重载 / 模型服务移除的未提交迟到正文拒绝；消费与日志证据见插件记录，不重复记MCP实现或生产进度。Harness原SystemPrompt已验证精确Agent / Session消费、更新、撤回和释放；当前无生产批准文字。Harness原公开MCP工具桥已接只读消费和精确Agent / Session释放，真实业务provider仍缺；原AgentLoop / MCP续轮、中立模型材料256 KiB及同一Session断开后检查已有离线证据；最终Provider线包 / 目的地、磁盘 / fork / 跨重启仍未保证。下一入口为固定原身份 / 发布 / 字段 / 持久目标生产者及所需发送 / 恢复控制，缺前置不开放真实业务，不以synthetic provider或本地Map补齐，不重复native通路。
+此前联合施工成果保留；本轮整合不恢复循环、分树目标或新功能施工。版本化instructions及可选Prompts已通过真实两代SDK / 编译包出口，当前均以synthetic政策provider验证，生产审查文字未交付；Prompts只提供无业务参数的当前起步指引，不自动成为Host SystemPrompt，缺许可 / 撤回 / 版本冲突拒绝。Harness已接显式人类列表 / 选择：列表零正文 / 模型，选择形成一条有来源 / 版本的原用户消息，取消 / 断开 / Agent销毁 / 重载 / 模型服务移除的未提交迟到正文拒绝；消费与日志证据见插件记录，不重复记MCP实现或生产进度。Harness原SystemPrompt已验证精确Agent / Session消费、更新、撤回和释放；当前无生产批准文字。Harness原公开MCP工具桥已接只读消费和精确Agent / Session释放，真实业务provider仍缺；原AgentLoop / MCP续轮、中立模型材料256 KiB及同一Session断开后检查已有离线证据；最终Provider线包 / 目的地、磁盘 / fork / 跨重启仍未保证。下一入口为固定原身份 / 发布 / 字段 / 持久目标生产者及所需发送 / 恢复控制，缺前置不开放真实业务，不以synthetic provider或本地Map补齐，不重复native通路。
 
 原结果候选的当前入口为[conversation-result-read](../../packages/mcp-server/src/conversation-result-read.ts)，验证为[既有测试](../../tests/mcp-foundation.test.cjs)的original conversation result / compiled MCP package。当前普通JSON快照先于异步校验，原私有输入32 KiB / 完整结果128 KiB与后续外发上限分离；编译包实际调用原对话应用和原scene / artifact reader，unknown空正文、哈希 / Run错配、换用户 / 空间及读后失权拒绝，读取前后状态无变化。原Web身份 / 数据库与MCP发布 / 权限 / 计量 / 释放仍是明确夹具，API执行为transpileOnly，不是生产身份或API严格类型证据。当前缺项：MCP到原Guard / ALS的固定身份出口；AiOrderExplainRequestDraft / Input原组件正式供给；原字段作者闭合投影schema / 来源 / 期限及持久目标准入。完整Web schema发现超64 KiB，不能裁剪原事实迁就发现；Harness原校验器不支持实际输入部分约束，保持拒绝 / 不发布，不宣称全端冻结。原Reader仍负责Run / 来源 / 当前权限复验，不接管API / shared作者或主树Core / 支付整改。
 
@@ -120,8 +119,9 @@ MCP-01 / AGP-01协议与发现已有代码及真实SDK证据，OAuth客户端已
 
 固定公共合同必须来自原唯一作者；MCP生产者不依赖整个插件工程，AGP不反向重写服务端。并行须独立工作树。任何真实依赖未齐按对应能力不可用处理，不用恒真身份、空成功或静态token冒充闭环。
 
+
 ## 4. 接手限制
 
-先读根[AGENTS](../../AGENTS.md)、[README](../../README.md)、本专项四册及插件当前接续；修改后端 / shared / 后台 / Harness前读其具体规则、消费者和验证入口。旧AGC暂停不因本接续解除。
+当前唯一整合树为main，后续按本专项任务与固定生产者接手，不追活动HEAD或抢写公共文件。首片仍为后台开通→OAuth同意→Harness会话→发现/目录→安全结果与撤权拒绝；人工/匿名可信计量、全部原策略、完整活跃口径、字段/wire发布、Nest/UI/MFA及其他Host仍缺，原记录的细项不因合并取消。
 
-负责人2026-11-05已明确MCP与Harness联合推进；2026-11-06追加明确授权所有隔离库测试并要求持续至需求完成。可自行执行本树经核实的独立MySQL实例 / 自建空库、测试DDL及仅本次实例停止，不逐次问；不授权生产 / 共享库、原库导出或生产迁移。保全WIP并核对唯一作者，只在实际冲突时必要协调，不泛发消息；原AGC暂停不解除。其余仍未授权读`.env`、安装依赖 / 用户profile、启应用 / 浏览器、真实HTTP / DNS / 模型 / 支付 / 对象存储、提交 / 合main / 推送 / 签名 / 发布或清理未知成果。
+本轮仅授权整合、必要修复/离线验证、提交、合main和普通推送。旧隔离库授权不在本轮自动续用；不读真实.env、安装、启服务/浏览器、真实HTTP/DB/DNS/模型/支付/对象存储、迁移、签名、部署或生产启用。工作树清理由负责人另行决定。

@@ -168,3 +168,102 @@ test('actual detail wrapper gives a new command lifecycle to another order, tena
   context.route = 'a'; context.auth.tenant.tenantId = 'other'; assert.notEqual(context.render().key, initial);
   context.auth.tenant.tenantId = 'tenant'; context.auth.user.id = 'other'; assert.notEqual(context.render().key, initial);
 });
+
+function humanReviewConsumer() {
+  const file = '../ai-native/TaskHumanApproval.tsx', text = process.env.AI_AIN07_REVIEW_SOURCE
+    ? fs.readFileSync(path.resolve(__dirname, '..', process.env.AI_AIN07_REVIEW_SOURCE), 'utf8') : feature(file);
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set(['id', 'materialId', 'materialText', 'validPeriod', 'fulfillmentLabels', 'amountLabels',
+    'hasProposalExecutionBoundary', 'hasOrderReviewMaterial', 'taskHumanStepKey', 'taskHumanSteps', 'taskHumanStepQuery',
+    'stepStatusLabels', 'originalBusinessObservation', 'TaskProposalExecutionBoundary', 'TaskActionResults', 'TaskHumanReviewDetails']);
+  const declarations = source.statements.filter(node => ts.isFunctionDeclaration(node) && names.has(node.name?.text)
+    || ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => names.has(declaration.name.getText(source))));
+  for (const name of ['TaskProposalExecutionBoundary', 'TaskActionResults', 'taskHumanSteps'])
+    assert.ok(declarations.some(node => node.name?.text === name), `real consumer must contain ${name}`);
+  const format = {}, safe = {};
+  for (const [file, exports] of [['formatters.ts', format], ['safe-display.ts', safe]]) {
+    vm.runInNewContext(ts.transpileModule(feature('../ai-native/' + file), { compilerOptions: { module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022 } }).outputText, { exports });
+  }
+  const shared = require('../packages/shared/src'), context = { exports: {}, ...format, ...safe,
+    AI_PROPOSAL_DRAFT_VERSION: shared.AI_PROPOSAL_DRAFT_VERSION, AI_TASK_DRAFT_VERSION: shared.AI_TASK_DRAFT_VERSION,
+    AI_STEP_STATUSES_DRAFT: shared.AI_STEP_STATUSES_DRAFT, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION: shared.AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION,
+    structuredClone, RENTAL_FULFILLMENT_MODES: shared.RENTAL_FULFILLMENT_MODES,
+    RENTAL_PRICING_UNIT_CODES: shared.RENTAL_PRICING_UNIT_CODES, useLocale: () => ({ t: value => value }),
+    Alert: props => require('react').createElement('aside', null, props.title),
+    require: name => { assert.equal(name, 'react/jsx-runtime'); return require(name); } };
+  vm.runInNewContext(ts.transpileModule(declarations.map(node => node.getText(source)).join('\n'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }
+  }).outputText, context);
+  return { source, context, ...context.exports };
+}
+const boundaryValue = atomicity => ({ kind: 'settings', taskId: 'task', runId: 'run', stepId: 'step', taskRevision: 1,
+  review: { proposal: { payload: { contractVersion: require('../packages/shared/src').AI_PROPOSAL_DRAFT_VERSION,
+    taskId: 'task', proposalId: 'proposal', revision: 1, atomicity, failurePolicy: 'stop_and_reconcile',
+    actions: atomicity === 'single_action' ? [{}] : [{}, {}], expiresAt: '2099-01-01T00:00:00Z' } },
+    change: { diff: { 'notifications.enabledEvents': { before: [], after: ['created'] },
+      'notifications.editableChannels': { before: [], after: ['sms'] } }, baseRevision: 1 } } });
+const confirmationSnapshot = () => ({ contractVersion: require('../packages/shared/src').AI_TASK_DRAFT_VERSION, taskId: 'task', steps: [
+  { stepId: 'first', runId: 'run', sequence: 1, revision: 2, status: 'succeeded', kind: 'confirmation' },
+  { stepId: 'second', runId: 'run', sequence: 2, revision: 3, status: 'unknown', kind: 'confirmation' }] });
+const originalObservation = (stepId, status) => ({ taskId: 'task', runId: 'run', stepId, kind: 'order', status,
+  observedAt: '2026-11-06T07:00:00Z', execution: 'read_only_no_start_no_reconnect_side_effect', payment: 'not_inferred', fulfillment: 'not_inferred',
+  ...(status === 'committed' ? { order: { id: 'original-first-order', status: 'pending_allocation', quoteId: 'original-quote' } } : {}) });
+
+test('AIN07 trusted confirmation renders atomic/failure/compensation boundaries and rejects missing policy', () => {
+  const h = humanReviewConsumer(), render = require('react-dom/server').renderToStaticMarkup;
+  const single = render(h.TaskHumanReviewDetails({ value: boundaryValue('single_action') }));
+  assert.match(single, /只覆盖当前一个动作，不代表整个任务原子提交/);
+  assert.match(single, /停止后续动作并核对原操作结果/); assert.match(single, /补偿须走原业务入口与审批/);
+  assert.match(single, /外部副作用不承诺回滚/); assert.match(single, /原高风险审核链不变/);
+  assert.match(render(h.TaskProposalExecutionBoundary({ value: boundaryValue('ordered_partial') })), /允许部分完成/);
+  const missing = boundaryValue('single_action'); delete missing.review.proposal.payload.failurePolicy;
+  assert.equal(h.hasOrderReviewMaterial(missing), false);
+  assert.match(render(h.TaskHumanReviewDetails({ value: missing })), /不能批准或继续/);
+  missing.review.proposal.payload.failurePolicy = 'automatic_rollback'; assert.equal(h.hasOrderReviewMaterial(missing), false);
+});
+
+test('AIN07 actual action results keep a committed predecessor beside unknown successor without inferring payment or rollback', () => {
+  const h = humanReviewConsumer(), render = require('react-dom/server').renderToStaticMarkup, steps = h.taskHumanSteps(confirmationSnapshot(), 'task');
+  const observations = { 'run:first': originalObservation('first', 'committed'), 'run:second': originalObservation('second', 'unknown') };
+  const html = render(h.TaskActionResults({ steps, observations }));
+  assert.match(html, /original-first-order/); assert.match(html, /原业务结果待核对，不能自动重试/);
+  assert.match(html, /后继失败或待核对不会自动回滚此前已提交动作/);
+  assert.match(html, /不代表完整未执行计划/); assert.equal(html.includes('付款成功'), false);
+  const noReceipt = render(h.TaskActionResults({ steps, observations: {} }));
+  assert.equal(noReceipt.includes('原Core订单已确认提交'), false); assert.match(noReceipt, /不推断未执行或已回滚/);
+  const foreign = originalObservation('first', 'committed'); foreign.taskId = 'other'; foreign.order.id = 'foreign-order';
+  assert.equal(render(h.TaskActionResults({ steps, observations: { 'run:first': foreign } })).includes('foreign-order'), false);
+  assert.throws(() => h.taskHumanSteps({ ...confirmationSnapshot(), taskId: 'other' }, 'task'));
+  assert.throws(() => h.taskHumanSteps({ ...confirmationSnapshot(), steps: Array(21).fill(confirmationSnapshot().steps[0]) }, 'task'));
+});
+
+test('AIN07 real refresh and original-result callback retain receipt scope while sending only original query fields', async () => {
+  const h = humanReviewConsumer(), initializers = new Map(); let businessCallback;
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && node.initializer) initializers.set(node.name.getText(h.source), node.initializer.getText(h.source));
+    if (ts.isCallExpression(node) && node.expression.getText(h.source) === 'aiTaskCenterApi.business') {
+      let parent = node.parent;
+      while (parent && !(ts.isArrowFunction(parent) && parent.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword))) parent = parent.parent;
+      businessCallback = parent?.getText(h.source);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(h.source); assert.ok(businessCallback);
+  let rows = [], observations = { 'run:first': originalObservation('first', 'committed') }, sent;
+  const context = { ...h.context.exports, structuredClone, taskId: 'task', same: () => true, selected: 'run:second', original: null, continuation: null,
+    steps: h.taskHumanSteps(confirmationSnapshot(), 'task'), run: work => work(new AbortController().signal), t: value => value,
+    setReview: () => {}, setReceipt: () => {}, setBusiness: () => {}, setSelected: () => {}, setMessage: () => {},
+    setContinuation: () => {}, continueKey: 'held', sessionStorage: { removeItem: () => assert.fail('unknown cannot clear original continuation') },
+    setSteps: value => { rows = value; }, setStepObservations: value => { observations = typeof value === 'function' ? value(observations) : value; },
+    aiTaskCenterApi: { snapshot: async () => confirmationSnapshot(), business: async query => { sent = query; return originalObservation('second', 'unknown'); } } };
+  const evaluate = text => vm.runInNewContext(ts.transpileModule(`globalThis.value=(${text});`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
+  }).outputText, context);
+  evaluate(businessCallback); await context.value(new AbortController().signal);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), { taskId: 'task', runId: 'run', stepId: 'second' });
+  assert.equal(observations['run:first'].status, 'committed'); assert.equal(observations['run:second'].status, 'unknown');
+  evaluate(initializers.get('readSteps')); await context.value();
+  assert.equal(Object.keys(observations).length, 0, 'explicit current-scope refresh clears previous receipt projections');
+  assert.equal(rows.length, 2);
+});

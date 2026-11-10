@@ -15,6 +15,8 @@ export interface AuthAccessContext {
   workspaceId?: string;
   hasWorkspaces: boolean;
   workspaceValid: boolean;
+  /** Original Web sessions only; a trusted workspace ticket is not a Web session. */
+  accessSession?: { sessionId: string; expiresAt: number };
 }
 // A type-only brand; the actual permission to consume this ticket is private to
 // the issuing AuthService instance and ends with its enclosing callback.

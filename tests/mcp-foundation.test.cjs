@@ -7,10 +7,11 @@ const path = require("node:path");
 const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "..");
-const ts = require(path.join(root, "clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js"));
+const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || path.join(root, "clients/agent-desktop/harness"));
+const ts = require(path.join(toolchainRoot, "node_modules/typescript/lib/typescript.js"));
 // Test-only resolution of this tree's existing, fixed SDK installation. Product
 // sources use package exports, never this Harness path or copied node_modules.
-const installed = createRequire(path.join(root, "clients/agent-desktop/harness/packages/mcp/mcp-client/package.json"));
+const installed = createRequire(path.join(toolchainRoot, "packages/mcp/mcp-client/package.json"));
 const sourceCache = new Map();
 function source(relative) {
   const file = path.join(root, relative);

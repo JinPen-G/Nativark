@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { aiModelSettingsApi } from '@/api/aiModelSettings';
 import { settingsSummary } from '@/features/ai-native/model-settings-session';
 import { currentSessionEpoch } from '@/app/queryClient';
+import { AI_TASK_CENTER_ENTRY_PERMISSIONS } from '@rental-os/shared';
+import { ConversationHistory } from '@/features/ai-native/ConversationHistory';
+import { ServerConversationPanel } from '@/features/ai-native/ServerConversationPanel';
+import { readConversationNavigation } from '@/features/ai-native/conversation-navigation';
+import { useLocation } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
 import type { ChatModel } from './archive/ai-chat/chat-state';
 import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, ShieldCheck, X } from "lucide-react";
@@ -55,11 +60,23 @@ function useNarrow() {
 export function AiOperatorPage() {
   const { t } = useLocale();
   const operator = useOperator();
-  const tenant = useAuthStore(state => state.tenant), user = useAuthStore(state => state.user);
-  const title = operator.view === "chat" ? operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
+  const auth = useAuthStore(), { tenant, user } = auth, location = useLocation();
+  const identity = JSON.stringify([tenant?.tenantId, auth.currentWorkspaceId, user?.id]);
+  const owner = JSON.stringify([identity, user, currentSessionEpoch()]);
+  const incoming = readConversationNavigation(location.state?.aiConversation, identity, currentSessionEpoch());
+  const [serverOwner, setServerOwner] = useState<string | null>(() => incoming ? owner : null);
+  const serverOpen = serverOwner === owner;
+  useEffect(() => { setServerOwner(incoming ? owner : null); if (incoming) operator.setView('chat'); }, [location.key, owner]);
+  const title = operator.view === "chat" ? serverOpen ? '服务端对话' : operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
   useEffect(() => { document.title = `${t(title)} · ${t("Agent工作台")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
   return <ArcLocale><ContentTransition value={operator.view} className="operator-page">
-    {operator.view === "chat" ? <OperatorChat /> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
+    {operator.view === "chat" ? <>
+      <div className="operator-result-tools"><Button aria-pressed={serverOpen} onClick={() => {
+        operator.cancel(); setServerOwner(serverOpen ? null : owner);
+      }}>{t(serverOpen ? '返回示例工作区' : '服务端对话')}</Button></div>
+      {serverOpen ? <div className="operator-work-body operator-artifact"><ServerConversationPanel visible initialConversation={incoming ?? undefined} /></div>
+        : <OperatorChat />}
+    </> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
   </ContentTransition></ArcLocale>;
 }
 function OperatorChat() {
@@ -95,34 +112,72 @@ function OperatorChat() {
           />
         </ResizablePanel>
         <ResizablePanel id="operator-work" label="Agent工作区" defaultSize={40} minSize={310} maxSize={720} collapsible defaultCollapsed={narrow}>
-          {!narrow && <WorkArea />}
+          {!narrow && <WorkArea visible={workOpen} />}
         </ResizablePanel>
       </ResizablePanels>
     </div>
-    <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="Agent 工作区" destroyOnHidden width="min(100vw, 520px)"><div id="operator-mobile-work" className="operator-mobile-work"><WorkArea /></div></Drawer>
+    <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="Agent 工作区" destroyOnHidden width="min(100vw, 520px)"><div id="operator-mobile-work" className="operator-mobile-work"><WorkArea visible={mobileOpen} /></div></Drawer>
   </section>;
 }
-function WorkArea() {
+function WorkArea({ visible = true }: { visible?: boolean }) {
   const operator = useOperator(), thread = operator.active;
+  const auth = useAuthStore(), { locale } = useLocale();
+  const journalIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id]);
+  const owner = JSON.stringify([journalIdentity, auth.user, currentSessionEpoch(), thread.id, operator.capability.id]);
+  const [historyOwner, setHistoryOwner] = useState<string | null>(null);
+  const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
+    && AI_TASK_CENTER_ENTRY_PERMISSIONS.some(auth.hasPermission);
+  const serverOpen = visible && allowed && historyOwner === owner;
+  const local = useRef({ owner, open: serverOpen }), lifetime = useRef(0);
+  local.current = { owner, open: serverOpen };
+  const generation = lifetime.current;
+  // Journal identity stays account/scope-bound across panel reopen. Display and
+  // stale callbacks additionally bind current access, epoch and local selection.
+  const current = () => {
+    const now = useAuthStore.getState();
+    const identity = JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user?.id]);
+    return generation === lifetime.current && local.current.open && local.current.owner === owner && !document.hidden && !!now.token && !!now.user && !now.user.isSaasAdmin
+      && AI_TASK_CENTER_ENTRY_PERMISSIONS.some(now.hasPermission)
+      && journalIdentity === identity
+      && owner === JSON.stringify([identity, now.user, currentSessionEpoch(), thread.id, operator.capability.id]);
+  };
   const [confirmOpen, setConfirmOpen] = useState(false), [notice, setNotice] = useState("");
   useEffect(() => { setConfirmOpen(false); setNotice(""); }, [thread.id, thread.artifact]);
+  useEffect(() => { lifetime.current++; setHistoryOwner(null); }, [owner, visible, allowed]);
+  useEffect(() => {
+    const hide = () => { if (document.hidden) { lifetime.current++; local.current.open = false; setHistoryOwner(null); } };
+    document.addEventListener('visibilitychange', hide);
+    return () => { lifetime.current++; local.current.open = false; document.removeEventListener('visibilitychange', hide); };
+  }, []);
   const artifact = thread.artifact;
   const confirmation = artifact ? confirmationDetails(artifact) : null;
   const printable = artifact ? [artifact.title, artifact.summary, ...(artifact.metrics ?? []).map(item => `${item.label}：${item.value}`), artifact.columns.join(" | "), ...artifact.rows.map(row => row.join(" | ")), artifact.note].join("\n\n") : "";
   async function copy() { try { await navigator.clipboard.writeText(printable); setNotice("已复制示例结果"); } catch { setNotice("浏览器未允许复制，请使用下载"); } }
   function download() { if (!artifact) return; const url = URL.createObjectURL(new Blob([printable], { type: "text/plain;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${artifact.title}-示例.txt`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice("已下载示例结果"); }
   return <section className="operator-work-area" aria-label="Agent工作区">
-    <header><span><AnimatedIcon name="folder" /> Agent 工作区</span><span className="operator-demo-tag">示例</span></header>
-    <ContentTransition value={`${thread.id}:${artifact ? "result" : thread.run ? "run" : "empty"}`} className="operator-work-body">
-      {artifact ? <ArtifactView artifact={artifact} /> : thread.run ? <div className="operator-run-host"><AgentRun key={thread.runId} task={`${operator.capability.name} · 执行过程`} model={{ name: thread.runModel?.name ?? "日常助手", mark: <BrandMark brand={thread.runModel?.brand ?? "openai"} size={14} /> }} run={thread.run} autoPlay={false} activityOnly /></div> : <div className="operator-work-empty"><AnimatedIcon name="folder" /><h2>结果会出现在这里</h2><p>运行时展示资料与工具步骤，完成后在这里核对结果。</p></div>}
+    <header><span><AnimatedIcon name="folder" /> Agent 工作区</span><span className="operator-demo-tag">{serverOpen ? (locale === 'en-US' ? 'Server records' : '服务端原记录') : '示例'}</span></header>
+    <div className="operator-result-tools">
+      <Button size="small" aria-pressed={serverOpen} disabled={!visible || !allowed} onClick={() => {
+        if (!visible || !allowed || document.hidden) return;
+        lifetime.current++; local.current.open = false; setConfirmOpen(false); setHistoryOwner(serverOpen ? null : owner);
+      }}>
+        {locale === 'en-US' ? (serverOpen ? 'Back to demo workspace' : 'Server conversations') : (serverOpen ? '返回示例工作区' : '服务端对话')}
+      </Button>
+    </div>
+    <ContentTransition value={`${thread.id}:${serverOpen ? 'server-conversations' : artifact ? "result" : thread.run ? "run" : "empty"}`} className="operator-work-body">
+      {serverOpen ? <><p className="operator-caption">{locale === 'en-US'
+        ? 'Original conversations, requests and task results. The chat on the left remains a local demo; opening or reading records does not start a model or business action.'
+        : '这里读取原对话、请求与任务结果。左侧聊天仍为本地示例；打开或读取记录不会启动模型或业务。'}</p>
+        <ConversationHistory key={owner} identity={journalIdentity} enabled current={current} /></>
+        : artifact ? <ArtifactView artifact={artifact} /> : thread.run ? <div className="operator-run-host"><AgentRun key={thread.runId} task={`${operator.capability.name} · 执行过程`} model={{ name: thread.runModel?.name ?? "日常助手", mark: <BrandMark brand={thread.runModel?.brand ?? "openai"} size={14} /> }} run={thread.run} autoPlay={false} activityOnly /></div> : <div className="operator-work-empty"><AnimatedIcon name="folder" /><h2>结果会出现在这里</h2><p>运行时展示资料与工具步骤，完成后在这里核对结果。</p></div>}
 
     </ContentTransition>
     <footer className="operator-work-footer">
-      {artifact && <><div className="operator-result-tools"><Button size="small" icon={<Copy size={14} />} onClick={copy}>复制</Button><Button size="small" icon={<Download size={14} />} onClick={download}>下载</Button></div>
+      {!serverOpen && artifact && <><div className="operator-result-tools"><Button size="small" icon={<Copy size={14} />} onClick={copy}>复制</Button><Button size="small" icon={<Download size={14} />} onClick={download}>下载</Button></div>
         {operator.capability.action && <Button type="primary" block disabled={Boolean(thread.receipt || thread.revisionRequest) || !operator.enabled} onClick={() => setConfirmOpen(true)}>{thread.receipt ? "已确认此示例" : operator.capability.action}</Button>}
         <p className="operator-caption" role="status">{thread.receipt || (thread.revisionRequest ? `待补充：${thread.revisionRequest}` : "") || notice || artifact.note}</p></>}
     </footer>
-    <Modal open={confirmOpen} className="operator-confirmation" title={<span className="operator-confirmation-title"><ShieldCheck size={20} aria-hidden="true" />确认后继续执行</span>}
+    <Modal open={!serverOpen && confirmOpen} className="operator-confirmation" title={<span className="operator-confirmation-title"><ShieldCheck size={20} aria-hidden="true" />确认后继续执行</span>}
       width={520} closable={false} footer={null} onCancel={() => setConfirmOpen(false)}>
       {confirmation && <div className="operator-confirmation-content">
         <p className="operator-confirmation-description">{confirmation.description}</p>

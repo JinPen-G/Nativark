@@ -12,9 +12,9 @@ import { RentalServiceCapacityService } from "./rental-service-capacity.service"
 import { exchangePickupInspectionRequirements } from "./rental-exchange-inspection";
 import { exchangeServiceConfirmationHash } from "./rental-service-catalog";
 import { serviceCancellationAmounts } from "./rental-service-cancellation";
+import { roundMoney } from "./rental-money";
 
 type ExchangeIntent = Pick<ApplyRentalOrderChangeRequest, "orderLineId" | "allocationId" | "replacementItemGroupId" | "replacementAssetId" | "replacementPricingGroupId" | "priceBasis" | "originalDisposition" | "exchangeLocationId" | "inspectionSnapshot" | "cancelServiceOccurrenceIds" | "services">;
-const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class RentalExchangePreviewService {
@@ -23,9 +23,8 @@ export class RentalExchangePreviewService {
     @Optional() private readonly serviceCapacities?: RentalServiceCapacityService) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
-    const profile = this.core.getProfile(tenantId), category = await this.core.getWorkspaceCategory(tenantId);
-    return { profile, category, settings: this.core.getBusinessSettings(tenantId), groups: this.core.listItemGroups(tenantId), pricingGroups: this.core.listPricingGroups(tenantId),
-      couponTemplates: this.core.listCouponTemplates(tenantId), locations: this.core.listLocations(tenantId), operators: this.core.listOperators(tenantId) };
+    // Core owns the committed combination; separate getters can cross an adoption revision.
+    return this.business.refreshWorkspaceContext(tenantId, await this.core.readBusinessContext(tenantId));
   }
 
   private exchangeable(order: RentalOrder, allocationId: string) {

@@ -40,6 +40,123 @@ function harness(kind, store) {
   return { create, command, key, current, get writes() { return writes; }, get received() { return received; },
     unknown(value) { unknown = value; }, failRead(value) { lostRead = value; } };
 }
+// Execute the page's reference adapters without rendering a synthetic host.
+// Only the named, unmodified source functions enter this existing Node harness.
+function creditAdapters() {
+  const filename = path.resolve(__dirname, '../apps/admin/src/features/ai-native/AiCreditSettings.tsx');
+  const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
+  const names = new Set(['referenceStorage', 'savedPending', 'savedAllocation', 'savedDecision']);
+  const functions = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text));
+  const mod = new Module(filename, module); mod.filename = filename; mod.paths = Module._nodeModulePaths(path.dirname(filename));
+  mod.require = request => request === './credit-operation-reference' ? load('credit-operation-reference.ts') : module.require(request);
+  const helper = fs.existsSync(path.join(path.dirname(filename), 'credit-operation-reference.ts'))
+    ? "const { readCreditOperationReference } = require('./credit-operation-reference');\n" : '';
+  const code = helper + functions.map(node => node.getText(source)).join('\n') + '\nmodule.exports = {'
+    + functions.map(node => node.name.text).join(',') + '};';
+  mod._compile(ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
+  return mod.exports;
+}
+test('credit: corrupt or unavailable original references never become an empty writable journal', () => {
+  const adapters = creditAdapters(), previous = globalThis.window;
+  try {
+    for (const failure of ['corrupt', 'read', 'getter']) {
+      const s = storage(); if (failure === 'corrupt') s.setItem('credit', '{invalid');
+      if (failure === 'read') s.failRead = true;
+      globalThis.window = failure === 'getter' ? Object.defineProperty({}, 'sessionStorage', { get() { throw Error('blocked storage getter'); } }) : { sessionStorage: s };
+      assert.equal(adapters.savedPending('credit')?.blocked, true);
+      assert.equal(adapters.savedAllocation('credit')?.blocked, true);
+    }
+    const s = storage(); globalThis.window = { sessionStorage: s };
+    s.setItem('credit', JSON.stringify({ operationKey: 'original-request', currency: 'USD', amount: '1.000001' }));
+    assert.equal(adapters.savedPending('credit').reference.operationKey, 'original-request');
+    const legacy = { operationKey: 'original-allocation', currency: 'USD', expectedRevision: 7,
+      allocations: Array.from({ length: 64 }, (_, index) => ({ workspaceId: `workspace-${index}-${'a'.repeat(100)}`, amount: '1.000001' })) };
+    s.setItem('credit', JSON.stringify(legacy)); assert.ok(s.getItem('credit').length > 1024);
+    const allocation = adapters.savedAllocation('credit'); assert.equal(allocation.blocked, false);
+    assert.deepEqual(allocation.reference, { operationKey: legacy.operationKey, currency: 'USD', expectedRevision: 7 });
+    assert.equal(allocation.marker, JSON.stringify(legacy)); assert.equal(s.getItem('credit'), allocation.marker);
+    s.setItem('decision', 'original-legacy-decision');
+    assert.deepEqual(adapters.savedDecision('decision', 'request-a').reference, { requestId: 'request-a', operationKey: 'original-legacy-decision' });
+  } finally { globalThis.window = previous; }
+});
+
+test('credit: verified non-secret locators survive unknown and cannot clear another editor or silently lost storage', () => {
+  const { readCreditOperationReference, retainCreditOperationReference, clearCreditOperationReference } = load('credit-operation-reference.ts');
+  const references = [{ operationKey: 'original-request', currency: 'USD', amount: '1.000001' },
+    { operationKey: 'original-allocation', currency: 'USD', expectedRevision: 7 }, { requestId: 'request-a', operationKey: 'original-decision' }];
+  for (const reference of references) {
+    for (const failure of ['absent', 'write', 'discard', 'read', 'existing']) {
+      const s = failure === 'absent' ? undefined : storage();
+      if (failure === 'write') s.failWrite = true;
+      if (failure === 'discard') s.discardWrite = true;
+      if (failure === 'read') s.failRead = true;
+      if (failure === 'existing') s.setItem('credit', 'another-editor-marker');
+      let sends = 0;
+      assert.throws(() => { retainCreditOperationReference(s, 'credit', reference); sends++; });
+      assert.equal(sends, 0); if (failure === 'existing') assert.equal(s.getItem('credit'), 'another-editor-marker');
+    }
+    const s = storage(), original = retainCreditOperationReference(s, 'credit', reference);
+    const reopened = readCreditOperationReference(s, 'credit', value => value);
+    assert.deepEqual(reopened.reference, reference); assert.equal(reopened.marker, original.marker);
+    assert.equal(reopened.marker.includes('allocations'), false); assert.equal(reopened.marker.includes('apiKey'), false);
+    assert.throws(() => retainCreditOperationReference(s, 'credit', { ...reference, operationKey: 'new-operation' }));
+    s.failClear = true; assert.throws(() => clearCreditOperationReference(s, 'credit', original));
+    assert.equal(s.getItem('credit'), original.marker); s.failClear = false;
+    const remove = s.removeItem; s.removeItem = () => {};
+    assert.throws(() => clearCreditOperationReference(s, 'credit', original)); assert.equal(s.getItem('credit'), original.marker);
+    s.removeItem = remove; s.setItem('credit', 'other-original-operation');
+    assert.throws(() => clearCreditOperationReference(s, 'credit', original)); assert.equal(s.getItem('credit'), 'other-original-operation');
+    s.setItem('credit', original.marker); clearCreditOperationReference(s, 'credit', original); assert.equal(s.getItem('credit'), null);
+  }
+  const source = fs.readFileSync(path.resolve(__dirname, '../apps/admin/src/features/ai-native/AiCreditSettings.tsx'), 'utf8');
+  for (const call of ['request(command)', 'allocate(command)', 'platformDecide({']) assert.ok(source.includes(`aiCreditApi.${call}`));
+  assert.equal((source.match(/retainCreditOperationReference\(referenceStorage\(\),/gu) ?? []).length, 3);
+  assert.ok(source.includes('requestJournal.blocked')); assert.ok(source.includes('allocationJournal.blocked')); assert.ok(source.includes('journal.blocked'));
+  assert.ok(!source.includes('sessionStorage.removeItem('));
+});
+
+test('budget: a definite rejection may clear only its own reference and cannot unlock another unknown', async () => {
+  const { BudgetSettingsSession } = load('budget-settings-session.ts');
+  const selector = { scope: 'tenant', sceneCode: 'original-scene' }, journalKey = 'original-budget-journal';
+  const fields = { state: 'limited', unit: 'calls', amount: '7', currency: '', concurrent: '2', calls: '2', enabled: false };
+  const settings = { budget: { state: 'limited', quantity: { unit: 'calls', value: 7 } }, allowedScenes: [selector.sceneCode],
+    maxConcurrent: 2, maxCallsPerRun: 2, gates: { platform: { enabled: true, revision: 1 }, tenant: { enabled: false, revision: 1 }, scene: { enabled: true, revision: 1 } } };
+  for (const operation of ['change', 'initialize', 'refreshConfiguration']) for (const code of ['AI_INVALID_INPUT', 'AI_REVISION_CONFLICT']) {
+    for (const outcome of ['same', 'other', 'read-unavailable', 'clear-dropped']) {
+      const s = storage(); let sends = 0, keys = 0, sentMarker;
+      const foreign = JSON.stringify({ ...selector, expectedRevision: 1, operationKey: 'other-original-key',
+        commandHash: 'c'.repeat(64), operation: 'change' });
+      const reject = async () => {
+        sends++; sentMarker = s.getItem(journalKey);
+        if (outcome === 'other') s.setItem(journalKey, foreign);
+        if (outcome === 'read-unavailable') s.failRead = true;
+        if (outcome === 'clear-dropped') s.removeItem = () => {};
+        throw Object.assign(Error('definite original-command rejection'), { response: { status: code === 'AI_INVALID_INPUT' ? 400 : 409, data: { code } } });
+      };
+      const ports = { read: async () => operation === 'initialize'
+        ? { ...selector, state: 'not_configured', revision: null, settings: null, modelPolicy: null, admission: 'not_granted' }
+        : { ...selector, state: 'configured', revision: 1, settings, admission: 'not_granted',
+          configurationMeaning: 'saved_policy_reference_not_current_selection', modelPolicy: { mode: 'platform_managed', serviceName: 'Rental OS AI', selection: 'managed_by_platform' } },
+        readOperation: async () => assert.fail('a rejection is not an observation of another operation'), change: reject,
+        initialize: reject, refreshConfiguration: reject };
+      const session = new BudgetSettingsSession(selector, ports, () => true, s, journalKey, () => `original-key-${++keys}`);
+      await session.read();
+      await assert.rejects(operation === 'refreshConfiguration' ? session.refresh() : session.save(fields));
+      assert.equal(sends, 1); assert.equal(keys, 1);
+      if (outcome === 'same') {
+        assert.equal(s.getItem(journalKey), null); assert.equal(session.snapshot().locked, false);
+        assert.equal(session.snapshot().feedback, code === 'AI_INVALID_INPUT' ? 'invalid' : 'conflict');
+      } else {
+        assert.equal(s.values.get(journalKey), outcome === 'other' ? foreign : sentMarker);
+        assert.equal(session.snapshot().locked, true); assert.equal(session.snapshot().feedback, 'unknown');
+        s.failRead = false; await session.read();
+        await assert.rejects(operation === 'refreshConfiguration' ? session.refresh() : session.save(fields));
+        assert.equal(sends, 1); assert.equal(keys, 1);
+      }
+    }
+  }
+});
+
 for (const kind of ['tenant', 'platform']) {
   test(`${kind}: no save is dispatched unless the original non-secret reference is stored and read back`, async () => {
     for (const failure of ['absent', 'write', 'discard', 'read', 'corrupt']) {

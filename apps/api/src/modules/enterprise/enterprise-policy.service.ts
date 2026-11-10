@@ -24,7 +24,7 @@ export class EnterprisePolicyService {
   private validate(p: EnterpriseScopePolicy) {
     const ids = (values: unknown, max: number): values is string[] => Array.isArray(values) && values.length <= max
       && new Set(values).size === values.length && values.every(id => typeof id === "string" && !!id.trim() && id.length <= 191);
-    if (!p || !ids(p.workspaceIds, 200) || !ids(p.categoryCodes, 200) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).includes(code))
+    if (!p || !ids(p.workspaceIds, 200) || !ids(p.categoryCodes, 200) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))
       || typeof p.personalPaymentAllowed !== "boolean" || typeof p.enterprisePaymentAllowed !== "boolean"
       || !["per_order", "without_per_order", "unconfigured"].includes(p.approvalMode)
       || typeof p.noticeVersion !== "string" || !p.noticeVersion.trim() || p.noticeVersion.length > 191

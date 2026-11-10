@@ -78,7 +78,7 @@ export class EnterpriseManagementRequestService {
       if (proposal.currency !== "CNY" || typeof proposal.requestedCreditLimit !== "string" || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/u.test(proposal.requestedCreditLimit)) throw new BadRequestException("原企业授信仅支持人民币及两位小数；此申请不改额度");
     } else if (!Array.isArray(proposal.workspaceIds) || !Array.isArray(proposal.categoryCodes) || proposal.workspaceIds.length > 200 || proposal.categoryCodes.length > 200
       || new Set(proposal.workspaceIds).size !== proposal.workspaceIds.length || new Set(proposal.categoryCodes).size !== proposal.categoryCodes.length
-      || proposal.workspaceIds.some(id => typeof id !== "string" || !id || id.length > 191) || proposal.categoryCodes.some(code => !Object.values(RentalCategoryCode).includes(code as RentalCategoryCode))) throw new BadRequestException("范围申请须使用登记的品类和有界空间引用");
+      || proposal.workspaceIds.some(id => typeof id !== "string" || !id || id.length > 191) || proposal.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))) throw new BadRequestException("范围申请须使用登记的品类和有界空间引用");
     return proposal;
   }
   private async evidence(tenantId: string, applicant: string, ids: string[], tx: Prisma.TransactionClient) {

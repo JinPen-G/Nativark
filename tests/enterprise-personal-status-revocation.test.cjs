@@ -37,6 +37,7 @@ function load(relative, deps = {}) {
     if (name.startsWith('node:')) return require(name);
     if (name === '@nestjs/common') return common;
     if (name === '@prisma/client') return { Prisma }; // No generated client or engine.
+    if (name === './rental-category-code' && relative === 'packages/shared/src/core.ts') return load('packages/shared/src/rental-category-code.ts');
     throw new Error(`Unexpected runtime dependency: ${name}`);
   }, Date: ClockDate, Map, Set, JSON }, { filename: file });
   return exports;
@@ -49,6 +50,7 @@ const operationsModule = load('apps/api/src/modules/platform/customer-operations
 const { CustomerOperationsService } = load('apps/api/src/modules/platform/customer-operations.service.ts', {
   '@rental-os/shared': shared, './shared-customer.repository': customerModule, './customer-operations.repository': operationsModule,
   '../../common/request-identity': identity,
+  './customer-insights': load('apps/api/src/modules/platform/customer-insights.ts'),
 });
 const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/shared': shared });
 const fingerprints = load('apps/api/src/modules/rental-core/rental-idempotency.repository.ts', { './workspace-scope': {} });

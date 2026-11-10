@@ -178,10 +178,10 @@ export class OperationLogService {
       const descriptors = Object.getOwnPropertyDescriptors(input), value: Record<string, unknown> = {};
       if (Reflect.ownKeys(descriptors).length !== keys.length) throw fail();
       for (const key of keys) { const field = descriptors[key]; if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw fail(); value[key] = field.value; }
-      const id = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(v);
+      const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(v);
       const hash = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
       const uint = (v: unknown, max: number) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 && v <= max;
-      if (![value.tenantId, value.workspaceId, value.userId, value.scopeId].every(id)
+      if (!id(value.tenantId) || !id(value.workspaceId) || !id(value.userId) || !id(value.scopeId)
         || typeof value.inputRef !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value.inputRef)
         || !uint(value.revision, 4294967295) || !uint(value.policyRevision, 4294967295) || !uint(value.grantRevision, 2147483647)
         || !hash(value.contentHash) || !hash(value.policyHash) || typeof value.sceneCode !== 'string'

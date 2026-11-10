@@ -7,7 +7,6 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import type { AiWorkspaceScope } from '@rental-os/shared';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { getRequestIdentity } from '../../../common/request-identity';
-import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiOrderHistoricalQuoteSource } from '../order-read-facts.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 

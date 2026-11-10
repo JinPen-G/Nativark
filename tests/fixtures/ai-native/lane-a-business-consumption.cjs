@@ -66,7 +66,7 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
     timeZone: 'Asia/Shanghai', enabledItemGroupCount: 1, serviceableLocationCount: 1,
     pricingGroups: [{ id: 'opening-pricing-sample', name: 'Synthetic pricing group' }] });
   const { RENTAL_OPENING_TERMINOLOGY_FIELDS } = require('../../../apps/api/src/modules/rental-core/rental-core-config.repository');
-  const syntheticProfile = core.getProfile('tenant_001'), syntheticSettings = core.getBusinessSettings('tenant_001');
+  const syntheticProfile = await core.getProfile('tenant_001'), syntheticSettings = await core.getBusinessSettings('tenant_001');
   const openingConfiguration = { tenantId: 'tenant_001', workspaceId: 'workspace-a', categoryCode,
     profile: { configVersion: syntheticProfile.configVersion, terminology: Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field => [field, syntheticProfile.terminology[field]])) },
     settings: { configVersion: syntheticSettings.configVersion, pricing: { currency: syntheticSettings.pricing.currency,
@@ -106,8 +106,9 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
     locations: core.listLocations('tenant_001'), operators: core.listOperators('tenant_001')
   });
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
+  const rentalStart = Date.now() + 24 * 60 * 60 * 1000;
   const candidate = { customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
-    start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00',
+    start: new Date(rentalStart).toISOString(), end: new Date(rentalStart + 24 * 60 * 60 * 1000).toISOString(),
     // The reference sample must use a registered category mode; a warehouse
     // category must not be blocked by this fixture's old store-only assumption.
     fulfillmentMode: core.listCategories().find(row => row.code === categoryCode).businessModel.fulfillmentModes[0], locationName: location.name };

@@ -28,6 +28,7 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 | `apps/miniprogram` | 租赁客户微信小程序：浏览、报价、本人订单、付款及资料 | [开发说明](apps/miniprogram/README.md) |
 | `apps/staff-miniprogram` | 商户员工微信小程序：配货、交接、归还等授权现场操作 | [开发说明](apps/staff-miniprogram/README.md) |
 | `apps/tenant-website` | 商户面向客户的独立 Web 网站与租赁入口 | [开发说明](apps/tenant-website/README.md) |
+| `apps/enterprise-portal` | 企业客户管理 Web 端，复用客户登录并独立核验企业权限；持续开发中 | [开发说明](apps/enterprise-portal/README.md) |
 | `apps/website`、`apps/website-next` | 平台营销网站的静态实现与 Next.js 源码工程，不是租户业务后台 | [静态站说明](apps/website/README.md)、[Next.js 说明](apps/website-next/README.md) |
 | `packages/shared` | 公共类型、枚举、schema 和运行时工具，不是纯类型包 | [包出口](packages/shared/package.json)、[源码出口](packages/shared/src/index.ts) |
 | `packages/ui-arc` | UIArc 来源、许可及保留的组件源码；业务适配位于 admin | [组件与兼容说明](packages/ui-arc/README.md) |
@@ -42,8 +43,8 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 ### 当前能力应如何理解
 
 - **已有主业务实现：** 多租户后台、客户与企业会员、商品资产、报价订单、分配交接、归还检查、资金及多端消费。具体场景的实现缺口和验收证据见各专项记录，不等于四品类所有组合都已验证。
-- **持续开发中的接入：** AI Native、MCP 和 Harness 有独立代码及合同。MCP 传输接口存在不等于原身份、授权服务器、业务工具和生产发布已经接通；插件可装配也不等于真实业务联调通过。
-- **已规划但不能当作现成功能：** 企业客户后台、APP、完整动态品类创建和平台跨行业 Core 接入。品类治理已有部分版本/解析/准备实现，正式采用、动态编码和全端交付仍有未完项。
+- **持续开发中的专项：** AI Native、MCP、Harness 和企业客户后台有独立代码及合同。企业端已有成员、政策、审批和客户入口实现，完整验收仍有缺口；MCP 传输接口存在不等于原身份、授权服务器、业务工具和生产发布已经接通，插件可装配也不等于真实业务联调通过。
+- **已规划但不能当作现成功能：** APP、完整动态品类创建和平台跨行业 Core 接入。品类治理已有部分版本/解析/准备实现，正式采用、动态编码和全端交付仍有未完项。
 - **外部能力另行配置和验证：** 支付、预授权、短信、对象存储、微信身份及模型服务需要相应供应商账号与真实证据。示例、模拟状态和界面成功提示不能代替外部执行结果。
 
 ## 理解架构
@@ -255,7 +256,7 @@ npm run build:staff-miniprogram
 | 接入支付、通知或对象存储 | [integrations](apps/api/src/modules/integrations)、[客户端共用任务](docs/客户端共用/客户端共用-开发任务.md) | 原商户/对象归属、凭据持有者、签名回调、unknown、幂等和真实沙箱 |
 | 参与 AI Native | [需求与当前入口](<docs/AI Native/AI Native-协作接续.md>)、[应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 唯一 Gateway、预算账、累计任务资源、事实投影、批准与恢复；不在场景中另建直连模型通道 |
 | 接入外部 Agent 客户端 | [MCP](docs/MCP服务/MCP服务-协作接续.md)、[Harness 插件](docs/Harness插件/Harness插件-协作接续.md) | 身份授权、工具发布、字段外发与宿主边界；不把可连接等同可调用业务 |
-| 企业客户后台或跨行业 Core | [企业客户后台](docs/企业客户后台/企业客户后台-协作接续.md)、[平台 Core 接入](docs/平台底座/Core接入/平台Core接入-协作接续.md) | 先取得明确切片和接口合同；这是待实施专项，不是现成应用/SDK |
+| 企业客户后台或跨行业 Core | [企业客户后台](docs/企业客户后台/企业客户后台-协作接续.md)、[平台 Core 接入](docs/平台底座/Core接入/平台Core接入-协作接续.md) | 企业端沿已批准任务和现有入口收口；跨行业 Core 仍按规划推进，不视为已发布 SDK |
 
 ### 数据与合同变更
 

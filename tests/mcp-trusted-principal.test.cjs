@@ -593,7 +593,7 @@ test("native catalog resources execute original Guard Core configuration and pro
   const mcp = source('packages/mcp-server/src/capability-mapping.ts'), name = mcp.MCP_BUSINESS_CAPABILITIES.find(row => row.code === 'rental.catalog.search').name;
   const now = new Date('2026-11-06T00:00:00Z'), authorization = { subject: 'issuer-not-user', token: 'private-native-catalog-token', clientId: 'client-a', scopes: ['catalog:read'], resource: 'https://mcp.example.invalid/mcp' };
   const make = (input = { limit: 2 }) => {
-    const f = fixture(), control = { queries: [], afterScope: undefined, afterPage: undefined, rows: [] };
+    const f = fixture(), control = { queries: [], bundleQueries: [], afterScope: undefined, afterPage: undefined, rows: [] };
     const raw = id => ({ id, tenantId: 'tenant-a', workspaceId: 'workspace-a', categoryCode: 'CAMERA', code: id, name: 'Camera ' + id,
       inventoryMode: 'SERIALIZED', unit: 'day', status: 'enabled', description: 'private description', attributes: { privateCost: 99 }, bundleComponents: [], createdAt: now, updatedAt: now });
     control.rows = ['group-a','group-b','group-c'].map(raw);
@@ -603,6 +603,26 @@ test("native catalog resources execute original Guard Core configuration and pro
     f.tx.rentalItemGroup = { async findMany(args) { control.queries.push(structuredClone(args)); assert.deepEqual(args.where.tenantId, 'tenant-a'); assert.equal(args.where.workspaceId, 'workspace-a'); assert.equal(args.take, input.limit + 1);
       let rows = control.rows.filter(row => (!args.where.id || row.id === args.where.id) && (!args.where.name || row.name === args.where.name)
         && (!args.where.AND || row.id > args.where.AND[0].id.gt)).slice(0, args.take); rows = structuredClone(rows); await control.afterPage?.(); return rows; } };
+    f.tx.$queryRaw = async query => {
+      const values = [], flatten = part => part.strings.map((text, i) => {
+        if (!i) return text; const value = part.values[i - 1];
+        return (value?.strings ? flatten(value) : (values.push(value), '?')) + text;
+      }).join('');
+      const sql = flatten(query).replace(/\s+/g, ' ').trim();
+      if (sql.startsWith('SELECT id FROM business_workspaces')) {
+        assert.deepEqual(values, ['tenant-a', 'workspace-a']); assert.match(sql, /FOR UPDATE$/); return [{ id: 'workspace-a' }];
+      }
+      if (sql.startsWith('SELECT * FROM rental_item_groups')) {
+        assert.match(sql, /WHERE tenantId = \? AND workspaceId = \?/); assert.match(sql, /ORDER BY id LIMIT \? LOCK IN SHARE MODE$/);
+        assert.deepEqual(values, ['tenant-a', 'workspace-a', ...(input.itemGroupId ? [input.itemGroupId] : []), ...(input.name ? [input.name] : []), ...(input.cursor ? [input.cursor] : []), input.limit + 1]);
+        control.queries.push({ sql, values });
+        const rows = structuredClone(control.rows.filter(row => (!input.itemGroupId || row.id === input.itemGroupId) && (!input.name || row.name === input.name) && (!input.cursor || row.id > input.cursor)).slice(0, input.limit + 1));
+        await control.afterPage?.(); return rows;
+      }
+      assert.match(sql, /FROM rental_bundle_components b JOIN rental_item_groups g/); assert.match(sql, /LIMIT 257 LOCK IN SHARE MODE$/); assert.equal(values.length, 1);
+      control.bundleQueries.push({ sql, values });
+      return (control.rows.find(row => row.id === values[0])?.bundleComponents ?? []).map(part => ({ ...part, ...part.componentItemGroup }));
+    };
     const forbidden = () => { throw Error('Native catalog escaped into global configuration or state initialization'); };
     const config = new RentalCoreConfigRepository({ rentalItemGroup: { findMany: forbidden }, businessWorkspace: { findFirst: forbidden } });
     const core = Object.create(RentalCoreService.prototype); core.configStore = config; core.state = forbidden;
@@ -618,7 +638,8 @@ test("native catalog resources execute original Guard Core configuration and pro
   assert.equal(page.source, 'persisted_workspace_configuration'); assert.match(page.configurationVersion, /^[a-f0-9]{64}$/u);
   assert.doesNotMatch(JSON.stringify(page), /private|description|attributes|images|token|grantId/);
   for (const item of page.items) assert.deepEqual(Object.keys(item).sort(), ['categoryCode','code','id','name','status','unit'], 'original item projection is closed; tenant/space remain only in its original scope');
-  assert.deepEqual(h.control.rows, before); assert.equal(h.control.queries.length, 1); assert.equal(h.control.queries[0].include.bundleComponents.take, 257);
+  assert.deepEqual(h.control.rows, before); assert.equal(h.control.queries.length, 1); assert.equal(h.control.bundleQueries.length, 2);
+  assert.ok(h.control.bundleQueries.every(query => /LIMIT 257 LOCK IN SHARE MODE$/.test(query.sql)), 'original bundle reads stay bounded in the current native SQL path');
   assert.equal(h.f.configReads, 0); assert.equal(identity.getRequestIdentity(), undefined);
   await assert.rejects(() => escaped.readIn(h.f.tx, h.input, signal()));
   await assert.rejects(() => escaped.read(h.input, signal())); assert.equal(h.control.queries.length, 1);
@@ -651,7 +672,7 @@ test("native catalog resources execute original Guard Core configuration and pro
     if (kind === 'scope-cancel') value.control.afterScope = () => abort.abort();
     if (kind === 'page-cancel') value.control.afterPage = () => abort.abort();
     if (kind === 'foreign-row') value.control.rows[2].workspaceId = 'foreign-space';
-    if (kind === 'foreign-bundle') value.control.rows[2].bundleComponents = [{ componentItemGroup: { tenantId: 'tenant-a', workspaceId: 'foreign-space' } }];
+    if (kind === 'foreign-bundle') value.control.rows[0].bundleComponents = [{ componentItemGroup: { tenantId: 'tenant-a', workspaceId: 'foreign-space' } }];
     if (kind === 'no-permission') value.f.member.role.permissions = [];
     if (kind === 'late-revoke') value.control.afterPage = () => { value.f.member.role.permissions = []; };
     await assert.rejects(() => value.run((read, stop) => read.readIn(kind === 'global' ? { ...value.f.tx, $transaction() {} } : value.f.tx,
@@ -965,7 +986,7 @@ test("native order status resources execute original Guard Core repository and p
     assert.equal(fees.facts.fulfillment.value.originalEndAt, questions.state.row.endAt.toISOString());
     assert.equal(fees.facts.inspections.coverage, 'unavailable', 'fees requested inspection evidence; a missing dedicated source is unavailable, not unrequested');
     assert.equal(payments.facts.payments.coverage, 'unavailable'); assert.equal(Object.hasOwn(payments.facts.payments, 'value'), false);
-    assert.equal(payments.facts.actualReceivedTotal.coverage, 'not_loaded'); assert.equal(payments.facts.fundingLedger.coverage, 'not_loaded');
+    assert.equal(payments.facts.actualReceivedTotal.coverage, 'not_loaded'); assert.equal(payments.facts.fundingLedger.coverage, 'unavailable', 'requested ledger evidence has no native source; no empty ledger is inferred');
     assert.equal(next.handoff.allowedActions, 'unavailable'); assert.ok(next.handoff.candidates.every(value => value.executable === false));
     assert.ok(packets.every(value => value.payload.model.answer === 'not_generated' && value.payload.handoff.execution === 'not_attempted'));
     assert.equal(questions.f.configReads, 0);
@@ -1048,7 +1069,8 @@ test("native order status resources execute original Guard Core repository and p
       assert.equal(evidence.value.attachments, 'not_loaded'); assert.equal(evidence.value.execution, 'not_attempted');
       assert.doesNotMatch(JSON.stringify(evidence), /private-inspection-result|private-inspector|private\.example|privateResult/);
       assert.doesNotMatch(JSON.stringify(observed), /historical-pickup|recorded-condition|inspection-0|private/);
-      assert.equal(pageQueries.length, 1); assert.equal(pageQueries[0].take, 51); assert.equal(cursorQueries.length, 0);
+      assert.equal(pageQueries.length, 2); assert.equal(pageQueries[0].take, 51); assert.equal(cursorQueries.length, 0);
+      assert.deepEqual(pageQueries[1], pageQueries[0], 'current facts re-open the same bounded inspection page before release');
       const tail = await inspected.core.listInspectionsPageInTransaction('tenant-a', 'order-a', { limit: 50, cursor: 'inspection-049' }, inspected.native, stop);
       assert.deepEqual(tail.items.map(row => row.id), ['inspection-050']); assert.equal(tail.nextCursor, null);
       assert.deepEqual(cursorQueries.at(-1).where, { tenantId: 'tenant-a', workspaceId: 'workspace-a', orderId: 'order-a', id: 'inspection-049' });
@@ -1126,13 +1148,14 @@ test("native order status resources execute original Guard Core repository and p
       assert.equal(page.rows.length, 20); assert.equal(page.truncated, true); assert.equal(page.nextCursor, 'bounded-19'); intents = recorded;
       const ownerLive = () => { paid.context.current(paid.call); };
       const count = financeQueries.length;
+      const intentPagesBeforeInvalidInput = financeQueries.filter(([kind]) => kind === 'intent-page').length;
       await assert.rejects(() => runtime.listPaymentIntentsPageInTransaction('tenant-a', 'workspace-a', 'order-a', { limit: 21 }, paid.native, stop, ownerLive));
       await assert.rejects(() => runtime.listPaymentIntentsPageInTransaction('tenant-a', 'foreign-space', 'order-a', { limit: 20 }, paid.native, stop, ownerLive));
       await assert.rejects(() => runtime.listPaymentIntentsPageInTransaction('tenant-a', 'workspace-a', 'order-a', { limit: 20 }, { ...paid.native, $transaction: paid.outside }, stop, ownerLive));
       const aborted = new AbortController(); aborted.abort(); await assert.rejects(() => runtime.listPaymentIntentsPageInTransaction('tenant-a', 'workspace-a', 'order-a', { limit: 20 }, paid.native, aborted.signal, ownerLive));
       assert.equal(financeQueries.length, count);
       await assert.rejects(() => runtime.listPaymentIntentsPageInTransaction('tenant-a', 'workspace-a', 'order-a', { limit: 20, cursor: 'foreign-cursor' }, paid.native, stop, ownerLive));
-      assert.equal(financeQueries.filter(([kind]) => kind === 'intent-page').length, 2, 'foreign cursor cannot start a page');
+      assert.equal(financeQueries.filter(([kind]) => kind === 'intent-page').length, intentPagesBeforeInvalidInput, 'foreign cursor cannot start a page');
       const emptyIntents = intents; intents = [];
       await paymentResource.authorizeResourcesIn(question, paid.native, stop); const empty = packets.at(-1).payload.facts.payments.value;
       assert.deepEqual(empty.intents, []); assert.deepEqual(empty.refunds, []); assert.equal(empty.totals, 'not_computed');

@@ -41,7 +41,7 @@ export function createOriginalMcpClientReviewManagement(
   const hash = captures.registrationHash, verify = verification.current.bind(verification), record = logs.recordOriginalOAuthAudit.bind(logs);
   return Object.freeze({ forRequest(browser: Request) {
     const identity = createOriginalMcpPlatformIdentity(auth, browser);
-    return Object.freeze({
+    return Object.freeze<ReturnType<OriginalPublicClientReviewManagement<Prisma.TransactionClient>['forRequest']>>({
       async current(transaction, registration, signal, purpose = 'review') {
         const abort = AbortSignal.any([signal, browser.signal]); if (abort.aborted) throw unavailable();
         const before = await identity.current(transaction, abort); if (!before || abort.aborted) throw unavailable();

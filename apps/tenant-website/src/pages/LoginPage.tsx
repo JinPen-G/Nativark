@@ -20,7 +20,7 @@ function phoneValid(phone: string) {
 
 export function LoginPage() {
   const { tenantCode, isRemote, href, t, enterpriseDomainBound, tenant, language } = useSite();
-  const { isAuthenticated, setSession } = useAuth();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const domainBound = enterpriseDomainBound;

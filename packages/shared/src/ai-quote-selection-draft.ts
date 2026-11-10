@@ -1,5 +1,5 @@
 import type { CreateRentalOrderRequest } from './core';
-import type { AiSceneRequestReadDraft, AiSceneModelAnswerQueryDraft } from './ai-scene-request-draft';
+import type { AiSceneModelAnswerQueryDraft } from './ai-scene-request-draft';
 import type { AiTaskRunnerOutcomeDraft } from './ai-task-recovery-draft';
 import type { AiTaskConfirmationHistoryDraft } from './ai-task-confirmation-history-draft';
 import type { AiTaskEventDraft } from './ai-task-draft';

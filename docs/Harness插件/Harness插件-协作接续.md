@@ -1,31 +1,18 @@
 # Harness 插件：当前协作接续
 
-> 专项：Rental OS Harness 插件；更新时间：2026-11-06。
-> 当前状态：本次已收口，十分钟循环已按用户`/loop clear`取消，不自动进入下一片。MCP分类率桶原生SQL片仅有核查与前像，未实现`--traffic-meter`、改测试或启库，见[MCP收口](../MCP服务/MCP服务-开发记录.md#当前收口2026-11-06)。插件仍0.1.8／19/19，未改源码／包或重跑Loader。MCP已供给原认证JSON-RPC发现类实际限流，见[MCP当前阶段](../MCP服务/MCP服务-开发记录.md#阶段原认证协议发现实际限流2026-11-06)：原Core同store／grant／Auth与class桶，按actual body.method逐request计量，原parsedBody仍交SDK validator／列表／代次，Header不能给工具体发现豁免。实际Core／SDK1/1及strict声明通过；缺policy／超限／原字节越界拒绝，close等原准备，SQL／commit／policy仍夹具，未由Harness消费／生产发布。目录自动与本人收据类已接；人工复核／匿名可信来源及全原策略、Resources／其他业务／副作用和完整活动、wire-release／Nest／UI／Host安装仍缺，原目标／预算／hold与收据历史保持，任务表未整项跨门。无新DDL／安装／外联、迁移或提交，实库失败与WIP保留。
-> 正式依据：[需求v1.1](Harness插件-需求.md)、[开发任务v1.1](Harness插件-开发任务.md)。任务百分比只以原任务表为准；本片无整项跨原G门，正式验收仍0/10。MCP生产者由同一开发线按独立[MCP任务](../MCP服务/MCP服务-开发任务.md)和[接续](../MCP服务/MCP服务-协作接续.md)推进；插件仍只消费，不重复实现服务端政策或继承MCP进度。
-> 本树离线Host / SDK / TS / Node已有独立副本，原件及历史失败保留，不是新安装许可。用户2026-11-06新增授权所有隔离库测试，可自行执行本树经核实的独立MySQL实例 / 自建空测试库、测试DDL及仅本次实例停止，无需逐次问；不授权生产 / 共享库或原库导出。其余仍不读`.env`、安装依赖 / 用户profile、启应用 / 浏览器、访问真实HTTP / DNS / 模型 / 支付 / 对象存储，不做生产迁移、提交 / 合main / 推送、签名、部署 / 启用或未知现场清理；原已核对错误junction修正事实保持，未知WIP不动。
+> 更新日期：2026-11-10。插件0.1.8固定成果已合入`D:/工作文件/rental-OS`的`main`；原循环和分树施工保持停止。正式依据仍为[需求](Harness插件-需求.md)及[开发任务](Harness插件-开发任务.md)，本次来源、验证与门槛复核见[记录](Harness插件-开发记录.md#agp-main-consolidation-20261110)。
 
 ## 1. 当前目标与职责
 
-首片目标保持：后台开通 → OAuth登录 / 同意 → Harness当前会话与经营空间 → 同一MCP Tools发现 / 有界目录查询 → 自主安全结果 → 撤权 / 过期 / 越权拒绝。不等待全部可选Resources / Prompts、其他Host或报价建单；必需安全生产者缺失则不开放，不造假前置。
+本阶段完成已有成果整合，并按负责人授权提交/普通推送。清理前的插件构建证据保留；恢复后MCP四组离线冒烟通过，但完整主工程复验仍受本地依赖缺件阻塞，见[恢复后回执](../../output/other-worktrees-consolidation-20261110/validation/post-recovery/summary.json)。后续业务首片仍为后台开通→OAuth→当前会话/空间→同一MCP发现/目录→自主安全结果与撤权拒绝，不恢复旧Goal或自动进入新功能。
 
-- 原Harness MCP客户端是唯一业务通路。Rental Bundle只补必要OAuth / 凭据、连接、会话 / 空间、状态及同源指引，不建插件私有业务API或第二份native工具。原生与增强不同时持有 / 刷新 / 驱动同一连接。
-- MCP及原作者唯一负责身份 / grant、后台开通、当前Guard / ALS、字段 / 能力发布、持久目标 / 累计计量、Core / 批准 / 原收据。插件只消费，客户端字段、scope、缓存、instructions和安装均不自授权。
-- Harness原Agent自主选择文字、表格、图表、报告和合规展示文件；插件不造AgentLoop、renderer、固定业务表单或后台副本。真实客户选择 / 核对 / 批准回原可信Web，生成页面或聊天确认不替人批准。
-- 本地模型由用户配置并自付，不交本地Key；实际云任务沿原Gateway / 财务单账，任务累计资源另计。原服务端 / Web / 官网 / 小程序 / 巡检 / 协作继续并存，未登录只禁Rental业务，不停止个人功能。
+原Harness MCP客户端仍是唯一业务通路；插件只补OAuth/连接、会话、状态和指引，不建AgentLoop、业务API或第二renderer。服务端MCP负责原身份、grant、字段、累计计量、批准/Core与收据；本地用户模型自付，真正云委托仍走原Gateway和单账。客户端状态不自授权。
 
-## 2. 工作树、归属与产物
+## 2. 主树与固定证据
 
-| 项目 | 当前现场 |
-| --- | --- |
-| 工作树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-harness-plugin-20261104`；源基线为原`claude-ai-native-foundation`，原树保留，插件不再回写其源码 |
-| 分支 / 基线HEAD | `ai/harness-plugin-20261104` / `a064c473279fa58973ffc5f52fd2d6479e496512`，按原树固定HEAD建立，不取main或活动HEAD；未提交基线见[清单](../../output/harness-worktree-base-20261104-9c03g31v/baseline.json) |
-| Git现场 | 暂存为空，未提交。原树2,150个源码WIP条目及305份引用证据按冻结指纹迁入；非插件改动只是原基线，不认领、不夹带提交。当前0.1.8仍是未提交源码，不称HEAD已包含；本树测试依赖已按明确许可独立复制，原件不动，部分复制及失败现场保留 |
-| 当前写入者 | 本会话联合维护MCP／插件，当前写入已收口，不泛发消息。本次只更新MCP开发记录及两专项接续，见[收口](../MCP服务/MCP服务-开发记录.md#当前收口2026-11-06)；所有业务／测试源码、插件包及任务表保持。上一完成片为原认证协议发现类；分类率桶原生SQL片尚未实现或运行，不接续为已完成。人工复核／匿名可信来源、Resources／副作用、完整活动、Nest／UI／全原策略及Harness消费仍缺。实库失败与WIP保留，未重启MySQL、Loader或打包 |
-| 排除范围 | 本次仅收口三份现行文档，不改任何业务／测试源码、schema或包；MCP三份OAuth源码及tests/mcp-foundation.test.cjs他作者WIP不认领。原catalog authority／可用性授权与资源／Core库存／Guard、grant管理／目录组合／receipt／grant控面／host／client rate service／Prisma schema、read-tools／整次计量／日志／DDL／goal准备和source／adoption／settlement／bindings／预算SQL／context／目录资源／router、配置／facts／occupancy／scope、原请求／policy／订单前片、其他API／订阅／shared／OpenAPI／根lock／后台／AI Native文档／插件与SDK vendor不改；实库失败与此前成果保持 |
-| 当前候选 | [0.1.8预构建tarball](../../output/harness-plugin-loader-eQR5Kx/delivery/rental-os-harness-plugin-0.1.8.tgz)、[清单](../../output/harness-plugin-loader-eQR5Kx/delivery/bundle-manifest.json)，SHA-256 `1edaed7fd9f2a4f44ff46568cc5cea0a540a7bfdc89b69a2986659e9771b2239`；同一次本树Loader组合生成 / 消费并交用户，不重复打包。Host固定`0.2.1-rc.2`、官方SDK`2.2.0`、现代协议pin`2026-07-28` |
-| 旧成果 | 原树全部旧包 / 失败日志 / output / 依赖与WIP不移动、不清理；本树保留引用证据的固定副本，包括[0.1.7候选](../../output/harness-plugin-loader-Gq1ngA/delivery/rental-os-harness-plugin-0.1.7.tgz)、[0.1.6候选](../../output/harness-plugin-loader-pD4WV7/delivery/rental-os-harness-plugin-0.1.6.tgz)、[0.1.5候选](../../output/harness-plugin-loader-Z42mYi/delivery/rental-os-harness-plugin-0.1.5.tgz)及此前成果，不冒充0.1.8或本片新验证 |
-| 本片保全 / 验证 | 十一份[前像](../../output/harness-tools-publication-status-20261106-1/hashes.json)、[19/19最终定向组合](../../output/agent-desktop-install-20261023-q16gtnf6/logs/harness-tools-publication-status-final-20261106-1.log)与[阶段记录](Harness插件-开发记录.md#阶段工具发布状态准确消费2026-11-06)保留首次测试语法失败，不把分次合算。双语状态 / command日志、零新网络 / 模型及pending / empty / 撤回已验，不冒充生产权限。工作树冻结基线 / 迁入及[独立工具链收据](../../output/harness-toolchain-copy-20261104-53ex9x2s/result-hoisted.json)、旧候选和失败现场保留 |
+当前源码入口为main。固定源提交`c6b7872435e42cde484f068969e32f3bacd900ca`已进入祖先链；[逐树核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)确认冻结后无新增差异。原工作目录按负责人授权移除，旧失败和全部保全原稿保持在D盘档案；实际清理与Windows残留保留位置见[清理回执](../../output/other-worktrees-consolidation-20261110/worktree-removal-result.json)，最终提交与远端核对见[交付回执](../../output/other-worktrees-consolidation-20261110/final-receipt.json)。
+
+原0.1.8 tarball及清单、0.1.7/更早包、Loader日志在D盘[固定档案](../../output/other-worktrees-consolidation-20261110/peer-results/claude-harness-plugin-20261104-verified.zip)内。0.1.8 SHA-256为`1edaed7fd9f2a4f44ff46568cc5cea0a540a7bfdc89b69a2986659e9771b2239`；[16份包源核对](../../output/other-worktrees-consolidation-20261110/harness-package-source-audit.json)与main等价。旧Loader19/19为11月6日证据，本次只重新构建/类型核对，不称新宿主安装验收。覆盖前接续见[前像](../../output/other-worktrees-consolidation-20261110/main-docs-before/manifest.json)。
 
 ## 3. 已接通的客户端接点
 
@@ -56,7 +43,6 @@
 
 ## 5. 验证与接手边界
 
-- 继续先核实际目录 / 分支 / HEAD / status / 暂存 / 操作状态及并行作者，读根[AGENTS](../../AGENTS.md)、[README](../../README.md)、本专项正式依据及原MCP接续。只能接原作者固定成果，不追活动HEAD或抢写公共文件。
-- 本树已有原离线runner、独立Node24.21.0 / npm CLI及本片所需固定Host / SDK / TS产物，6,094份文件 / 135包、498个本树可读目标链接已核对；初期长路径 / 错junction / hoist失败及部分文件全部保留，以[最终收据](../../output/harness-toolchain-copy-20261104-53ex9x2s/result-hoisted.json)和实际Loader组合为准，不以早期不充分检查宣称环境可用。验证沿本树preload、固定无效DATABASE_URL、绝对audit / writeRoot / TEMP / cache；不从原树运行后冒认，不擅自安装、联网或复制共享Prisma / shared产物绕保护，不跑根lint / build重建shared。
-- 当前通过区分为全插件strict / 公开声明、离线实际归档 / profile / Loader / Registry / AgentLoop / SDK组合。HTTP / AS / grant / Web同意 / 浏览器 / listener / 模型是明确外部夹具，不等于真实用户安装、OS / GUI、数据库 / 外部服务、正式业务验收或发布；不要求用户手工代验未验证部分。
-- 各完整阶段按原连续G门逐项核对，有证据跨档才改原任务百分比；未跨档留原记录。阶段证据写原开发记录，接续只覆盖当前目标 / 归属 / 缺口 / 下一入口，精简前像已保全，不另建第五册、临时主计划或修复流水队列。
+本次main插件strict/声明构建通过，实际使用固定Host公开类型、SDK2.2.0与声明的Zod4.4.3；现有第三方依赖仅从旧树只读解析，生成物在main私有output。未安装、替换用户profile或复制别树生成物冒充main。原19/19保留其HTTP/AS/浏览器/模型夹具边界，不等于真实用户安装、GUI、业务发布或整项完成。
+
+后续从main、原MCP固定交付和上述未完项接手；各项跨原G门后只改唯一任务表。当前已明确授权本阶段提交/合main/普通推送，其余真实.env、安装、启服务、真实外联/DB、迁移、签名、部署、生产启用及工作树删除不自动执行。旧AGC仍封存。

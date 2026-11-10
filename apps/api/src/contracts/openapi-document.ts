@@ -1819,7 +1819,11 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       }, ["id", "code", "name", "inventoryMode"], false)),
       pricingGroups: arrayOf(objectSchema),
       services: arrayOf(objectSchema),
-      locations: arrayOf(objectSchema),
+      locations: arrayOf(objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, status: stringSchema,
+        address: stringSchema, city: stringSchema, latitude: numberSchema, longitude: numberSchema,
+        businessHours: stringSchema, contactPhone: stringSchema,
+        capabilities: arrayOf({ type: "string", enum: ["pickup", "return", "storage", "delivery"] })
+      }, ["id", "code", "name", "status"], false)),
       discountPlans: arrayOf(objectSchema),
       fulfillment: objectOf({
         enabledModes: arrayOf(stringSchema),

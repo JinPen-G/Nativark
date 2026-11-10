@@ -45,8 +45,6 @@ import { rentalPaymentBalance } from "../rental-core/rental-funding-events";
 import { roundMoney, toCents } from "./payment-money";
 import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
 import { fromStripeMinorUnits, hasStripeLiveReceipt, isStripeLiveKey, mapStripeCheckoutStatus, toStripeMinorUnits, verifyStripeSignature } from "./stripe-payment";
-import { getRequestIdentity } from '../../common/request-identity';
-import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type JsonRecord = Record<string, unknown>;
 

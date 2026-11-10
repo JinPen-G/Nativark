@@ -60,7 +60,7 @@ export function createOriginalMcpNoticeReviewManagement(
       if (!isDeepStrictEqual(await authorizer.authorize(tx, { action: 'read', target }, signal), before) || signal.aborted) throw unavailable();
       return Object.freeze({ userId: v.userId as string, tenantId: v.tenantId as string, workspaceId: target.kind === 'workspace' ? target.workspaceId : null, audience: 'operator', sessionId: v.sessionId as string, expiresAt: v.expiresAt });
     };
-    return Object.freeze({
+    return Object.freeze<ReturnType<OriginalOAuthNoticeReviewManagement<Prisma.TransactionClient>['forRequest']>>({
       async current(tx, target, policy, signal, purpose = 'review') {
         const abort = AbortSignal.any([signal, browser.signal]);
         try {
@@ -91,11 +91,13 @@ export function createOriginalMcpNoticeReviewManagement(
           const item = Object.getOwnPropertyDescriptor(rows, '0'); if (!item?.enumerable || !Object.hasOwn(item, 'value')) throw unavailable();
           const r = fields(item.value, ['operationKey', 'scopeKey', 'actorId', 'actorTenantId', 'actorWorkspaceId', 'reviewRevision', 'state'], false);
           if (r.operationKey !== v.operationKey || r.scopeKey !== scopeKey(resource, target) || r.actorId !== before.userId || r.actorTenantId !== before.tenantId || r.actorWorkspaceId !== before.workspaceId || r.reviewRevision !== v.revision || r.state !== (v.stage === 'prepared' ? 'pending' : v.stage)) throw unavailable();
-          const actions = target.kind === 'workspace'
-            ? { prepared: 'mcp.oauth.notice.review.workspace.prepared', approved: 'mcp.oauth.notice.review.workspace.approved', denied: 'mcp.oauth.notice.review.workspace.denied' } as const
-            : { prepared: 'mcp.oauth.notice.review.platform.prepared', approved: 'mcp.oauth.notice.review.platform.approved', denied: 'mcp.oauth.notice.review.platform.denied' } as const;
-          await record(tx, { tenantId: before.tenantId, userId: before.userId, workspaceId: before.workspaceId,
-            action: actions[v.stage as keyof typeof actions], targetType: 'mcp-oauth-consent-review', targetId: v.operationKey,
+          const workspaceActions = { prepared: 'mcp.oauth.notice.review.workspace.prepared', approved: 'mcp.oauth.notice.review.workspace.approved', denied: 'mcp.oauth.notice.review.workspace.denied' } as const;
+          const platformActions = { prepared: 'mcp.oauth.notice.review.platform.prepared', approved: 'mcp.oauth.notice.review.platform.approved', denied: 'mcp.oauth.notice.review.platform.denied' } as const;
+          const auditScope = target.kind === 'workspace'
+            ? { workspaceId: target.workspaceId, action: workspaceActions[v.stage as keyof typeof workspaceActions] }
+            : { workspaceId: null, action: platformActions[v.stage as keyof typeof platformActions] };
+          await record(tx, { tenantId: before.tenantId, userId: before.userId, ...auditScope,
+            targetType: 'mcp-oauth-consent-review', targetId: v.operationKey,
             operationKey: v.operationKey, revision: v.revision, grantId: null }, abort); live();
           if (!isDeepStrictEqual(await currentIdentity(tx, target, abort), before)) throw unavailable();
         } catch { throw unavailable(); }

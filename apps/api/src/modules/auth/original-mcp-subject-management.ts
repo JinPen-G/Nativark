@@ -57,7 +57,7 @@ export function createOriginalMcpSubjectManagement(
       return who;
     } catch { throw unavailable(); }
   };
-  return Object.freeze({ authorize,
+  return Object.freeze<OriginalOAuthSubjectManagement<Prisma.TransactionClient>>({ authorize,
     async audit(transaction, input, signal) {
       const abort = AbortSignal.any([signal, requestSignal]), live = () => { if (abort.aborted) throw unavailable(); };
       try {

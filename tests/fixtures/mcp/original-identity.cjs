@@ -1,4 +1,5 @@
 "use strict";
+require('reflect-metadata');
 /** Original Auth/Platform/Guard and bounded reader, with explicit external
  * Prisma/current-grant and Nest decorator/exception facades. No API boot or DB. */
 const assert = require("node:assert/strict");
@@ -6,14 +7,16 @@ const fs = require("node:fs"), path = require("node:path");
 const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "../../..");
-const installed = createRequire(path.join(root, "clients/agent-desktop/harness/packages/mcp/mcp-client/package.json"));
-const ts = require(path.join(root, "clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js"));
-const output = fs.mkdtempSync(path.join(root, "output/mcp-trusted-principal-verification-"));
+// An explicit existing toolchain may be read for dependencies; all tested sources stay in root.
+const toolchainRoot = path.resolve(process.env.MCP_TEST_TOOLCHAIN_ROOT || path.join(root, "clients/agent-desktop/harness"));
+const installed = createRequire(path.join(toolchainRoot, "packages/mcp/mcp-client/package.json"));
+const ts = require(path.join(toolchainRoot, "node_modules/typescript/lib/typescript.js"));
+const output = fs.mkdtempSync(path.join(process.env.MCP_TEST_OUTPUT_ROOT || path.join(root, "output"), "mcp-trusted-principal-verification-"));
 const packageRoot = path.join(root, "packages/shared"), staged = path.join(output, "node_modules/@rental-os/shared");
 fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(staged, "package.json"));
 const parsed = ts.readConfigFile(path.join(packageRoot, "tsconfig.json"), ts.sys.readFile);
 const configured = ts.parseJsonConfigFileContent(parsed.config, ts.sys, packageRoot);
-const typeRoots = [path.join(root, "clients/agent-desktop/harness/node_modules/@types")];
+const typeRoots = [path.join(toolchainRoot, "node_modules/@types")];
 const options = { ...configured.options, module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16,
   composite: false, rootDir: path.join(packageRoot, "src"), outDir: path.join(staged, "dist"), typeRoots,
   paths: { zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] } };
@@ -70,7 +73,7 @@ const shared = require(path.join(runtimeShared, "dist/index.js"));
 class HttpException extends Error { constructor(message, status) { super(message); this.status = status; } getStatus() { return this.status; } }
 const nest = { HttpException, Injectable: () => () => {}, Inject: () => () => {}, Optional: () => () => {}, Logger: class { warn() {} log() {} error() {} } };
 for (const [name, status] of Object.entries({ ForbiddenException: 403, UnauthorizedException: 401, BadRequestException: 400, NotFoundException: 404, ConflictException: 409, ServiceUnavailableException: 503, InternalServerErrorException: 500 })) nest[name] = class extends HttpException { constructor(message) { super(message, status); } };
-const prisma = { Prisma: { TransactionIsolationLevel: { Serializable: "Serializable", RepeatableRead: "RepeatableRead" }, sql: (strings, ...values) => ({ strings, values }), join: values => ({ values }),
+const prisma = { Prisma: { TransactionIsolationLevel: { Serializable: "Serializable", RepeatableRead: "RepeatableRead" }, sql: (strings, ...values) => ({ strings, values }), empty: { strings: [''], values: [] }, join: values => ({ values }),
   PrismaClientKnownRequestError: class extends Error { constructor(message, options) { super(message); this.code = options.code; } } },
   PrismaClient: class { constructor() { throw new Error('Offline fixture must not construct a PrismaClient'); } } };
 for (const [, name, body] of fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8").matchAll(/enum\s+(\w+)\s*\{([^}]+)\}/g)) {
@@ -90,6 +93,7 @@ function source(relative) {
     if (specifier === "@rental-os/shared") return shared;
     if (specifier === "zod") return installed("zod");
     if (specifier === 'ajv' || specifier === 'ajv-formats') return installed(specifier);
+    if (specifier === 'class-transformer' || specifier === 'class-validator') return require(specifier);
     if (specifier.startsWith("node:")) return require(specifier);
     if (specifier.startsWith(".")) return source(path.relative(root, path.resolve(path.dirname(file), specifier.endsWith(".js") ? specifier.slice(0, -3) + ".ts" : specifier + ".ts")));
     throw new Error("Unexpected external dependency: " + specifier);
@@ -317,11 +321,12 @@ function checkNativeOrderStatusTypes() {
   assert.ok(parserStart > 0 && parserEnd > parserStart);
   write('modules/rental-core/rental-core-fact.repository.ts', 'import type { RentalInspectionRecord } from "@rental-os/shared"; import { BadRequestException } from "@nestjs/common";\n' + repositorySource.slice(parserStart, parserEnd));
   write('modules/rental-core/rental-core.service.ts', [
-    'import type { Prisma } from "@prisma/client"; import type { RentalOrder } from "@rental-os/shared";',
+    'import type { Prisma } from "@prisma/client"; import type { RentalOrder, RentalOrderInspectionBasisFacts } from "@rental-os/shared";',
     'import { getRequestIdentity } from "../../common/request-identity"; import { ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";',
     'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalFactTx = Prisma.TransactionClient;',
     'import { parseRentalInspectionPageQuery, type RentalInspectionPageQuery, type RentalInspectionPage } from "./rental-core-fact.repository";',
     'export class RentalCoreService { constructor(private readonly factStore: { findOrder(tenant: string, id: string, tx: Prisma.TransactionClient): Promise<RentalOrder | undefined>; listInspectionsPage?(tenant: string, id: string, query: RentalInspectionPageQuery, tx?: Prisma.TransactionClient): Promise<RentalInspectionPage> }) {} private publicOrder(row: RentalOrder): RentalOrder { return row; } getOrder(tenant: string, id: string): Promise<RentalOrder> { throw new Error("Type facade only, never a runtime Core"); } listInspectionsPage(tenant: string, id: string, query: RentalInspectionPageQuery): Promise<RentalInspectionPage> { throw new Error("Type facade only"); }',
+    'readOrderFacts(tenant: string, id: string): Promise<RentalOrder & { workspaceId: string }> { throw new Error("Type facade only"); } readInspectionFactsPage(tenant: string, id: string, query: RentalInspectionPageQuery): Promise<RentalInspectionPage> { throw new Error("Type facade only"); } readOrderInspectionBasis(tenant: string, id: string): Promise<RentalOrderInspectionBasisFacts> { throw new Error("Type facade only"); }',
     method, pageMethod, '}',
   ].join('\n'));
   write('core-inspection-method-fragment.txt', pageMethod);
@@ -338,6 +343,7 @@ function checkNativeOrderStatusTypes() {
     'import { getRequestIdentity } from "../../common/request-identity"; import { ServiceUnavailableException, NotFoundException, ConflictException } from "@nestjs/common";',
     'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalBusinessFactTx = Prisma.TransactionClient;',
     'export class RentalBusinessService { constructor(private readonly factStore: { findQuote(tenant: string, id: string, tx?: Prisma.TransactionClient): Promise<RentalQuoteSnapshotV1 | undefined> }) {} loadQuote(tenant: string, context: unknown, id: string, tx?: Prisma.TransactionClient): Promise<RentalQuoteSnapshotV1> { throw new Error("Type facade only"); }',
+    'readOrderLinkedQuoteFacts(tenant: string, order: string, quote: string): Promise<RentalQuoteSnapshotV1 | undefined> { throw new Error("Type facade only"); }',
     quoteMethods, '}',
   ].join('\n'));
   write('business-quote-method-fragments.txt', quoteMethods);
@@ -357,7 +363,7 @@ function checkNativeOrderStatusTypes() {
   const paymentSource = fs.readFileSync(path.join(root, 'apps/api/src/modules/integrations/payment.runtime.service.ts'), 'utf8');
   const part = (begin, finish) => { const s = paymentSource.indexOf(begin), e = paymentSource.indexOf(finish, s); assert.ok(s > 0 && e > s, begin); return paymentSource.slice(s, e); };
   const paymentMethods = [
-    part('  async listPaymentIntentsPage(', '\n  async listPaymentRefunds('),
+    part('  async listPaymentIntentsPage(', '\n  private async withOrderPaymentFacts'),
     part('  async listPaymentRefundsPage(', '\n  /** Native local observations only.'),
     part('  async listPaymentIntentsPageInTransaction(', '\n  /**'),
     part('  private async requirePaymentIntent(', '\n  private async confirmedRefundTotal('),
@@ -370,6 +376,7 @@ function checkNativeOrderStatusTypes() {
     'import { BadRequestException, NotFoundException, ServiceUnavailableException } from "@nestjs/common"; import { getRequestIdentity } from "../../common/request-identity"; import { requestFingerprint } from "../rental-core/rental-idempotency.repository";',
     rowTypes,
     'export class PaymentRuntimeService { constructor(private readonly prisma: Prisma.TransactionClient) {} listPaymentIntents(tenant: string, space: string, order: string): Promise<unknown[]> { throw new Error("Type facade only"); } listPaymentRefunds(tenant: string, space: string, order: string, intent: string): Promise<unknown[]> { throw new Error("Type facade only"); }',
+    'readOrderPaymentIntentsPage(tenant: string, space: string, order: string, query: { limit: number; cursor?: string }): Promise<{ rows: Array<Pick<ClientPaymentIntentResponse, "intentId" | "instrument" | "amount" | "currency" | "status" | "expiresAt"> & { paidAt: string | undefined }>; truncated: boolean; nextCursor: string | undefined }> { throw new Error("Type facade only"); } readOrderPaymentRefundsPage(tenant: string, space: string, order: string, intent: string, query: { limit: number; cursor?: string }): ReturnType<PaymentRuntimeService["listPaymentRefundsPage"]> { throw new Error("Type facade only"); }',
     paymentMethods, '}',
   ].join('\n'));
   write('payment-read-method-fragments.txt', paymentMethods);
@@ -505,7 +512,7 @@ function checkNativeRequestAuditTypes() {
   write('original-request-observe-method-fragments.txt', observer);
   const logs = fs.readFileSync(path.join(root, 'apps/api/src/common/operation-log.service.ts'), 'utf8');
   const typeStart = logs.indexOf('export interface OriginalMcpRequestSaveAuditRecord '), typeEnd = logs.indexOf('\nexport interface HttpMutationAuditInput ', typeStart);
-  const methodStart = logs.indexOf('  async recordOriginalMcpRequestSaveAudit('), methodEnd = logs.indexOf('\n  async recordHttpMutation(', methodStart);
+  const methodStart = logs.indexOf('  async recordOriginalMcpRequestSaveAudit('), methodEnd = logs.indexOf('\n  /**', methodStart);
   assert.ok(typeStart > 0 && typeEnd > typeStart && methodStart > typeEnd && methodEnd > methodStart);
   const logMethod = logs.slice(methodStart, methodEnd);
   write('common/operation-log.service.ts', [
@@ -587,14 +594,15 @@ function checkNativeCatalogTypes() {
   const build = path.join(output, 'native-request-scope-types');
   const write = (relative, text) => { const target = path.join(build, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, text); };
   const prisma = path.join(build, 'node_modules/@prisma/client/index.d.ts');
-  write('node_modules/@prisma/client/index.d.ts', fs.readFileSync(prisma, 'utf8') + '\nexport namespace Prisma { export interface CatalogGroupRowFacade { id: string; tenantId: string; workspaceId: string; bundleComponents: Array<{ componentItemGroup: { tenantId: string; workspaceId: string } }> } export interface TransactionClient { rentalItemGroup: { findMany(args: unknown): Promise<CatalogGroupRowFacade[]> } } }');
+  write('node_modules/@prisma/client/index.d.ts', fs.readFileSync(prisma, 'utf8') + '\nexport namespace Prisma { export const empty: unknown; export interface CatalogGroupRowFacade { id: string; tenantId: string; workspaceId: string; categoryCode: string; code: string; name: string; inventoryMode: string; unit: string; status: string; createdAt: Date; updatedAt: Date; bundleComponents: Array<{ componentItemGroupId: string; quantity: number; optional: boolean; substitutionGroup: string | null; componentItemGroup: { code: string; name: string; tenantId: string; workspaceId: string } }> } export type RentalItemGroupGetPayload<T> = CatalogGroupRowFacade; export interface TransactionClient { rentalItemGroup: { findMany(args: unknown): Promise<CatalogGroupRowFacade[]> } } }');
   const config = fs.readFileSync(path.join(root, 'apps/api/src/modules/rental-core/rental-core-config.repository.ts'), 'utf8');
   const start = config.indexOf('export interface RentalItemGroupPageQuery '), end = config.indexOf('\n/**', start);
   const pageStart = config.indexOf('  async listItemGroupsPage('), pageEnd = config.indexOf('\n  async readFulfillmentAdmission(', pageStart);
   assert.ok(start > 0 && end > start && pageStart > end && pageEnd > pageStart);
   const page = config.slice(pageStart, pageEnd);
   write('modules/rental-core/rental-core-config.repository.ts', [
-    'import { BadRequestException, ConflictException } from "@nestjs/common"; import { createHash } from "node:crypto"; import type { Prisma } from "@prisma/client"; import type { RentalItemGroup } from "@rental-os/shared"; import { resolveScopeWorkspaceId } from "./workspace-scope"; export type RentalConfigTx = Prisma.TransactionClient;',
+    'import { BadRequestException, ConflictException } from "@nestjs/common"; import { createHash } from "node:crypto"; import { Prisma } from "@prisma/client"; import type { RentalItemGroup, RentalCategoryCode, RentalInventoryMode } from "@rental-os/shared"; import { resolveScopeWorkspaceId } from "./workspace-scope"; export type RentalConfigTx = Prisma.TransactionClient;',
+    'const lower = <T extends string>(value: string): T => value.toLowerCase() as T; const iso = (value: Date): string => value.toISOString();',
     config.slice(start, end), 'export class RentalCoreConfigRepository { constructor(private readonly prisma: Prisma.TransactionClient) {} private toItemGroup(row: Prisma.CatalogGroupRowFacade): RentalItemGroup { throw new Error("Named conversion type facade only; actual complete repository executes at runtime"); }', page, '}',
   ].join('\n'));
   write('catalog-config-page-method-fragment.txt', page);
@@ -634,7 +642,7 @@ function checkNativeCatalogTypes() {
     rootDir: build, outDir: path.join(build, 'compiled-native-catalog'), paths: { ...options.paths, '@rental-os/shared': [path.join(runtimeShared, 'dist/index.d.ts')] } }));
   nativeCatalogTypesChecked = true;
 }
-module.exports = { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, runtimeShared, cache, root,
+module.exports = { fixture, source, shared, identity, signal, AiCatalogReadFactsService, catalogConsumerUrl, output, runtimeShared, cache, root, toolchainRoot,
   checkNativeCatalogTypes, nativeCatalogTypesChecked: () => nativeCatalogTypesChecked,
   checkNativeRequestParticipantTypes, nativeRequestParticipantTypesChecked: () => nativeRequestParticipantTypesChecked,
   checkNativeRequestReconcileTypes, nativeRequestReconcileTypesChecked: () => nativeRequestReconcileTypesChecked,

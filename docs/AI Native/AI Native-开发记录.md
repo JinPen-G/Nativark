@@ -6,6 +6,29 @@
 > 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-main-consolidation-20261110"></a>
+## 三树及指定工作树合入 main、合后修复与工作树收口（2026-11-10）
+
+负责人明确授权将AI Native三树归集成果合入main，再核接`core-platform-docs`、`enterprise-members`、`enterprise-portal`、`claude-harness-plugin-20261104`及`codex-tenant-website-refresh`，最后普通推送GitHub；随后明确保留main和`claude-ai-native-foundation`，删除其余工作树。本阶段只整合已有成果、修复合并问题并维护证据，没有恢复功能施工或新增C盘保全。
+
+实际主仓库为`D:/工作文件/rental-OS`。AI Native固定成果提交`ec5c3886734e5b62518cc092e36eefe86e94f25c`及五树的独有提交均已进入main祖先链；五树最后合并基线为`9f5c72f0239f691b07ed4acca5842a1c9d8f74ed`。重新核查1539项AI主树文件、四份补充源码快照及源树status，冻结后没有新增差异；文档树干净且HEAD已是main祖先。主仓库内七份成果档案的SHA-256与原回执一致。逐树来源、状态及归档位置见[独立核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)，手工冲突的去向保留在同目录各树`merge-plan.json`、`resolution-log.json`和`main-applied.json`。归档中的设计原稿、旧日志及隔离产物是原始证据，不冒充运行源码或已安装依赖。
+
+合后修复了重复导入、当前Web会话与MCP主体的类型区分、MCP管理审计的空间/平台关联、企业政策品类校验及公开门店城市投影。MCP原订单适配接回当前有界订单/检查/支付事实端口；目录事务SQL补齐取消派发检查和分页哨兵归属检查。换货预览复用Core同一份已提交经营配置及原业务刷新，不再拼接跨修订的独立getter；金额继续使用原`rental-money`工具。原Guard/ALS、审批、Core提交及unknown按原收据恢复的边界保持。
+
+补核AI主树快照之外的23个差异，补回10个文件的固定原稿：管理后台原服务端记录入口、员工检查页面绑定撤回、B02原迁移链准备/状态核对及既有断言；其余13项沿用main中的后继版本，没有把旧0.1.5插件覆盖0.1.8。前后像、SHA及去向见[补核回执](../../output/other-worktrees-consolidation-20261110/foundation-extra-source/receipt.json)。后台572个入口及员工绑定依赖图再次类型检查为0诊断；原后台开关/撤权、员工原收据/页面绑定和B02伪链拒绝4组冒烟通过，6份脚本语法通过、审计0。仅纠正隔离执行器的入口路径及Node 24对应的ES2022类型库，前两次执行器失败仍保留，没有改断言或扩展测试工程。
+
+清理前的必要检查均使用main源码：API 855个入口、后台572个、企业端42个、网站103个的类型诊断均为0；最后的换货上下文变更另复验其依赖图。shared两个正式出口、MCP 59个源码入口与Harness插件分别在D盘私有目录构建通过。企业状态撤销/恢复13项、报价再准备→新批准→Core单次订单→丢失应答原收据1组、网站原订单事实1组通过；MCP主体拒绝、SDK受控读取、原生目录和原生订单4组分别通过。分次复验不合称一次全套通过；原失败及当前命令/退出码汇总在[验证回执](../../output/other-worktrees-consolidation-20261110/validation/summary.json)。旧测试夹具补了异步配置读取、未来租期、原Tenant父锁、现行SQL及相同有界页复读，未删除安全断言、增加skip/todo或放宽生产验证。
+
+隔离Prisma Client从当前main schema生成，未覆盖共享client/dist。首次生成曾被守卫拦截一次C盘Prisma缓存写入；改用D盘LOCALAPPDATA后重生成退出0、审计0。其余最终验证审计0；MCP/Harness仅只读借用旧树固定第三方SDK/Host依赖，生成物来自main。没有安装、启服务、浏览器/微信宿主、真实DB/HTTP/模型/支付/对象存储、迁移或部署。源码上传与正式业务验收分开。 文档检查仍仅报告导航第54行三条继承的历史附件缺链；本阶段新增入口有效，未伪造历史附件补绿。
+
+按原门槛复核，AIN及ENTRY本阶段没有整项跨档，唯一任务表保持；AIN-15服务端原再准备、新批准与Core恢复链有本次证据，完整新材料/选择/对比前端消费仍缺。企业任务已带入原阶段进度，未增加正式验收；MCP/Harness按各自原G1～G4在其记录逐项补登记落后的进度，不借本次合并计100%。覆盖前现行文档见[前像清单](../../output/other-worktrees-consolidation-20261110/main-docs-before/manifest.json)。原未完项继续由下方原28项、ENTRY摘要及各专项接续承接。
+
+清理前核对13棵登记工作树的HEAD、status及main祖先关系，并重核7份D盘档案SHA；两侧41,553份源码/文档与固定档案无差异，另3个未登记残留目录的内容已核实。删除仅针对该清单，main、AI主树原现场与Git分支历史保留，见[前置核对](../../output/other-worktrees-consolidation-20261110/worktree-removal-preflight.json)及[清理回执](../../output/other-worktrees-consolidation-20261110/worktree-removal-result.json)。Git遇Windows路径/非空目录错误后，原生递归删除又被自动审批拒绝；剩余文件可撤回地移入D盘`retired-residuals/`，未换工具绕过拒绝继续删数据。两侧停止指令已送达，新的Goal暂停回执因模型供应商资源不匹配未取得；两侧没有执行文件工具，旧Goal不恢复施工。最终提交、远端SHA及保留的既有并行WIP以[交付回执](../../output/other-worktrees-consolidation-20261110/final-receipt.json)为准。
+
+清理后发现main的2,313个tracked文件缺失，根因尚未确认；按当时HEAD仅恢复缺失路径，再从本对话已执行补丁及固定原稿恢复25个未提交修改文件，未reset或覆盖31个现存修改。恢复后逐字节核对全部25个重建文件和31个保留文件，7个重建文件另恢复原CRLF，代码内容不变；见[恢复回执](../../output/other-worktrees-consolidation-20261110/main-file-recovery/wip-recovery-result.json)及[行尾核对](../../output/other-worktrees-consolidation-20261110/main-file-recovery/original-eol-restoration.json)。AI主树HEAD与2,484条status、既有docker-compose.yml哈希均与清理前一致，main有效差异没有删除项。24条目录原已不存在的Git登记在D盘保全元数据后prune；实际目录与登记仅保留main和AI主树，旧分支引用保留。残留目录仍占D盘空间，不把移出工作树目录等同彻底删除。
+
+恢复后复验为企业状态13/13、MCP原Guard/Core/SDK4/4、网站原订单事实1/1及员工绑定类型0诊断，退出均0、审计均0。其余检查保留失败：API/后台/企业端/网站完整类型分别356/2,010/360/43诊断，缺少Nest、UI等本地依赖并引出关联类型错误；报价和B02组合在加载缺失的`@cspotcode/source-map-support`时退出1，业务测试未执行。没有以替身包、放宽类型或skip补绿，未获安装授权而未重装依赖；必须恢复锁定依赖后只复验这些失败范围。当前结果及命令见[恢复后回执](../../output/other-worktrees-consolidation-20261110/validation/post-recovery/summary.json)，清理前绿色不能代替本次完整通过。源码整合/上传不代表整项业务验收，原进度门槛保持。
+
 <a id="ain-emergency-consolidation-20261110"></a>
 ## 两树成果紧急归集与主树代码整合（2026-11-10）
 

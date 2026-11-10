@@ -449,6 +449,8 @@ export interface ClientCatalogLocation {
   name: string;
   status: string;
   address?: string;
+  /** Configured public store city; absent when the original location has none. */
+  city?: string;
   /** 门店坐标（客户端按位置排序与地图导航使用）；未录入时为空，客户端退回按列表顺序展示、不显示距离。 */
   latitude?: number;
   longitude?: number;

@@ -208,6 +208,11 @@ function createTaskInputStore(initial, constraints = {}) {
     return {
       $queryRaw: async sql => {
         const text = sql.sql ?? '', values = sql.values ?? [];
+        if (text.replace(/\s+/g, ' ').trim() === 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE') {
+          if (!Array.isArray(data.tenant) || values.length !== 1) throw Error('tenant lock facts not configured');
+          trace.push('row.lock');
+          return data.tenant.filter(row => row.id === values[0]).map(row => ({ id: row.id }));
+        }
         if (text.includes('FROM business_workspaces')) {
           if (!Array.isArray(data.businessWorkspace)) throw Error('workspace lock facts not configured');
           // Raw SQL returns the schema's mapped enum value, not Prisma's
@@ -286,7 +291,7 @@ function createTaskInputStore(initial, constraints = {}) {
         Object.assign(state, draft); trace.push('transaction.commit');
         if (control.loseReply) { control.loseReply = false; throw Error('synthetic lost COMMIT reply'); }
         return result;
-      } catch (error) { trace.push('transaction.error'); throw error; }
+      } catch (error) { control.lastTransactionError = error; trace.push('transaction.error'); throw error; }
     });
     tail = work.catch(() => {}); return work;
   };

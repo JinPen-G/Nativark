@@ -4,10 +4,10 @@
  * Web login, MFA/CSRF/consent page, DB locks/DI or OAuth grant publication. */
 const assert = require('node:assert/strict'), { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path');
-const { fixture: originalFixture, source, output, root } = require('./fixtures/mcp/original-identity.cjs');
+const { fixture: originalFixture, source, output, root, toolchainRoot } = require('./fixtures/mcp/original-identity.cjs');
 const { PlatformService } = source('apps/api/src/modules/platform/platform.service.ts');
 const { createOriginalMcpBrowserIdentity } = source('apps/api/src/modules/auth/original-mcp-browser-identity.ts');
-const ts = require(path.join(root, 'clients/agent-desktop/harness/node_modules/typescript/lib/typescript.js'));
+const ts = require(path.join(toolchainRoot, 'node_modules/typescript/lib/typescript.js'));
 const signal = () => new AbortController().signal;
 function fixture() {
   const f = originalFixture(), now = Math.floor(Date.now() / 1000);
@@ -35,7 +35,7 @@ test('original signed Web session resolves fixed operator principal with same-tr
   const originalContext = await f.platform.resolveTrustedWorkspacePrincipal(f.binding, f.tx);
   assert.ok(originalContext.user.permissions.includes('rental-core:catalog:view')); assert.ok(!originalContext.user.permissions.includes('unrelated:permission'), 'uses original space roles, not tenant role copy');
   assert.ok(!JSON.stringify(current).includes(browser.headers.get('authorization'))); assert.deepEqual(Object.keys(current).sort(), ['audience', 'expiresAt', 'sessionId', 'tenantId', 'userId', 'workspaceId'].sort());
-  const typeRoots = [path.join(root, 'clients/agent-desktop/harness/node_modules/@types')];
+  const typeRoots = [path.join(toolchainRoot, 'node_modules/@types')];
   const program = ts.createProgram([path.join(root, 'apps/api/src/modules/auth/trusted-browser-principal.ts')], {
     strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16,
     types: ['node'], typeRoots, rootDir: path.join(root, 'apps/api/src/modules/auth'), outDir: path.join(output, 'browser-principal-types'),

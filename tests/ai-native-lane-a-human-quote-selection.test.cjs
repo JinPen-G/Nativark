@@ -178,7 +178,7 @@ async function exerciseMultilineApprovedConsumer(enterprise = false, expireBefor
         ordinaryRevision: 1, status: 'active', mergedIntoCustomerId: null, email: 'retained@example.test', phone: 'synthetic-phone', identityVerified: false }],
         customerMembership: [{ tenantId: 'tenant_001', customerId: 'customer-a', status: 'active' }],
         customerApprovedProfileChange: [], customerApprovedProfileOperation: [] } : {}) }, undefined, categoryCode);
-  assert.equal(h.b.core.getProfile('tenant_001').categoryCode, categoryCode);
+  assert.equal((await h.b.core.getProfile('tenant_001')).categoryCode, categoryCode);
   assert.equal(h.b.quoteConfiguration.categoryCode, categoryCode);
   const app = h.model.createApplication({ holderId: 'same-quote-clarification', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
   const original = structuredClone(candidate), history = [], touched = new Set(), enterpriseFields = new Set(); let finalQuery, reviewed;
@@ -1084,7 +1084,10 @@ test('AIN15 actual Core requote new quantity reuses normal-run proposal then new
     lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
   } };
   const uncertain = await f.orderTask.continueConfirmation({ selection: f.newSelection, checkpointRef: f.newWaiting.checkpointRef });
-  assert.equal(lost, true); assert.equal(uncertain.outcome.status, 'unknown');
+  assert.equal(lost, true, JSON.stringify({ outcome: uncertain.outcome, orders: h.state.rentalOrder.length,
+    transactionError: h.control.lastTransactionError?.message,
+    steps: h.state.aiStep.map(({ status, lastErrorCode, errorCode }) => ({ status, lastErrorCode, errorCode })) }));
+  assert.equal(uncertain.outcome.status, 'unknown');
   assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.aiApprovalConsumption.length, 1);
   const observed = await f.orderTask.readResult({ selection: f.newSelection });
   assert.equal(observed.status, 'committed'); assert.equal(observed.order.quoteId, f.newQuote.id);
