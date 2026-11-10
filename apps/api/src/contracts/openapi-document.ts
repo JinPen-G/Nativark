@@ -2735,7 +2735,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
       method: 'post' as const, path: `/api/${contract.basePath}${action ? `/${action}` : ''}`, tag: 'AI Native',
       operationId: `originalSelectedQuote_${name}_${contract.basePath.split('/').at(-1)}`,
-      permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(name)
+      permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal',
+        'readReissuePreparation', 'reissueSelectedRequest', 'readReissueOperation', 'readReissuedSelectionPreparation',
+        'selectReissuedQuote', 'readReissuedSelectionOperation'].includes(name)
         ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
       summary: 'Same current owner/original input and exact persisted Core quote selection. Selection is not approval; only the existing runner consumes a real human approval through the original Core transaction. New actions require the server quote-order host/limits and current persisted policies. Disabled execution still permits original selection/approval/order receipt reads; unknown is never a new quote/order. No model, stock/payment success claim or second runtime. Response is draft-polymorphic.',
       requestSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT

@@ -11,6 +11,7 @@ import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, t
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { composeSelectedQuoteStockReview } from './selected-quote-stock-review';
+import { composeQuoteRequestReissue, type QuoteRequestReissueConfiguration } from './quote-reissue.composition';
 import { composeClarifiedQuoteSelectionPreparation } from './clarified-quote-selection-preparation';
 import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene, readSettingsTaskCenterScene } from '../task-center-scene.composition';
@@ -1993,7 +1994,7 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
 }
 
 export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-  reprepare?: FormalApprovedOrderReprepareConfiguration) {
+  reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration) {
   if (reprepare && 'reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const configuration = reprepare ? { holderId: reprepare.holderId, creationRules: structuredClone(reprepare.creationRules),
     memberships: reprepare.memberships } : undefined;
@@ -2011,15 +2012,20 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
       }
     }, clock);
     const originals = new PrismaOriginalRequestRepository(input.db, authority, clock);
-    if (configuration) {
-      // Only the server's formal replacement factory may prepare new material.
-      // Historical access above grants neither a replacement nor approval.
-      const factory = (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
-        composeFormalApprovedOrderReprepareServices(current, configuration);
-      return Object.freeze({ ...composeHumanQuoteOrder({ ...input, originals, reprepareServices: factory }),
-        readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
-    }
-    return Object.freeze({ ...composeHumanQuoteOrder({ ...input, originals }),
+    // Only the server's formal replacement factory may prepare new material.
+    // Historical access above grants neither a replacement nor approval.
+    const factory = configuration ? (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
+      composeFormalApprovedOrderReprepareServices(current, configuration) : undefined;
+    const human = composeHumanQuoteOrder({ ...input, originals, ...(factory ? { reprepareServices: factory } : {}) });
+    // Existing history readers do not acquire new Core preparation dependencies.
+    const linked = () => composeQuoteRequestReissue({ ...input, originals, source: human.readRequestReissueSource }, reissue);
+    return Object.freeze({ ...human,
+      readReissuePreparation: (value: unknown) => linked().readReissuePreparation(value),
+      reissueSelectedRequest: (value: unknown, signal?: AbortSignal) => linked().reissueSelectedRequest(value, signal),
+      readReissueOperation: (value: unknown) => linked().readReissueOperation(value),
+      readReissuedSelectionPreparation: (value: unknown) => linked().readReissuedSelectionPreparation(value),
+      selectReissuedQuote: (value: unknown, signal?: AbortSignal) => linked().selectReissuedQuote(value, signal),
+      readReissuedSelectionOperation: (value: unknown) => linked().readReissuedSelectionOperation(value),
       readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
   });
   return Object.freeze({
@@ -2032,7 +2038,19 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
     readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command), { write: false }),
     readSelectedRepreparePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedRepreparePreparation(command), { write: false }),
     reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command), { write: true }),
-    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false })
+    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false }),
+    readReissuePreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuePreparation(command), { write: false, signal }),
+    reissueSelectedRequest: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.reissueSelectedRequest(command, signal), { write: true, signal }),
+    readReissueOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissueOperation(command), { write: false, signal }),
+    readReissuedSelectionPreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionPreparation(command), { write: false, signal }),
+    selectReissuedQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.selectReissuedQuote(command, signal), { write: true, signal }),
+    readReissuedSelectionOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionOperation(command), { write: false, signal })
   });
 }
 

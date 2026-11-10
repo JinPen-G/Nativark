@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
-import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
+import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
   AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVAL_APPLICATION_DRAFT_VERSION,
-  type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft } from '@rental-os/shared';
+  type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft,
+  type AiQuoteRequestReissuePreparationInputDraft } from '@rental-os/shared';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -115,6 +116,31 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     return freezeOriginalInput({ receipt, replacement, order: 'not_created_by_reprepare' as const });
   };
   return Object.freeze({
+    /** Internal source for different human conditions. Historical receipts only
+     * check ownership; a fresh request/selection also needs original eligibility. */
+    async readRequestReissueSource(value: unknown, requireEligible: boolean) {
+      const input = validateQuoteSelectionHttpRequest('AiQuoteRequestReissuePreparationInputDraft', value) as AiQuoteRequestReissuePreparationInputDraft;
+      const old = await selectedReview(input.selection, input.original);
+      const reference = { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: old.ref.originalInputRef };
+      const original = await dependencies.originals.readHistorical(reference);
+      if (original.request.sceneCode !== 'quote_clarification' || original.receipt.state === 'revoked'
+        || original.context.scope.kind !== 'workspace' || original.context.actor.kind !== 'user') throw denied();
+      const eligibility = requireEligible ? await controlled.application.readReprepareEligibility(old.ref.taskId,
+        { draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, original: input.original, intent: input.intent }) : null;
+      if (requireEligible && (!eligibility?.canRequestReprepare || !['rejected', 'expired', 'change_requested'].includes(eligibility.state)))
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const closing = await dependencies.originals.readHistorical(reference);
+      await selectedReview(old.ref, input.original);
+      if (closing.receipt.contentHash !== original.receipt.contentHash || orderContextHash(closing.context) !== orderContextHash(original.context)) throw denied();
+      const access = await controlled.tasks.resolveAccess(old.ref.taskId, 'read_metadata');
+      const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true, inputRef: true } });
+      if (!task || task.id !== old.ref.taskId || task.inputRef !== reference.inputRef) throw denied();
+      return freezeOriginalInput({ selection: old.ref, original: input.original, context: original.context,
+        scopeId: task.scopeId,
+        candidate: original.request.input.candidate, originalInput: reference, originalHash: original.receipt.contentHash,
+        reason: eligibility?.state, sourceHash: requestFingerprint({ selection: old.ref, original: input.original,
+          originalHash: original.receipt.contentHash }), intent: input.intent });
+    },
     /** Only locate a new already-selected normal-run wait. The original
      * reprepare transaction still owns supersession and revalidates all refs. */
     async readSelectedRepreparePreparation(value: unknown): Promise<AiHumanQuoteOrderRepreparePreparationDraft> {

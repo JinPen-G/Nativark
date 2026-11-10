@@ -2,7 +2,8 @@
  * schema, coercion/defaults, business calculation or execution authority.
  * Unknown schema keywords and bounded-work exhaustion fail closed. */
 import { AI_SCENE_QUOTE_HTTP_SCHEMAS, type AiSceneModelQuotePreparationResponseDraft,
-  type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft } from './ai-scene-quote-http-draft';
+  type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
+  type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft, type AiOriginalQuoteReceiptResponseDraft } from './ai-scene-quote-http-draft';
 import { AI_SCENE_REQUEST_DRAFT_SCHEMAS } from './ai-scene-request-draft-schemas';
 import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from './ai-quote-selection-draft-schemas';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from './ai-task-recovery-draft';
@@ -15,15 +16,29 @@ import { z } from 'zod';
 import type { AiClarifiedQuoteSelectionPreparationDraft, AiClarifiedQuoteSelectionOriginalOperationReadDraft,
   AiQuoteSelectionSelectResponseDraft, AiQuoteSelectionReconcileResponseDraft,
   AiSelectedQuoteTaskRunDraft, AiSelectedQuoteTaskResultDraft, AiHumanQuoteOrderRepreparePreparationDraft,
-  AiHumanQuoteOrderReprepareRequestDraft, AiHumanQuoteOrderReprepareResponseDraft } from './ai-quote-selection-draft';
+  AiHumanQuoteOrderReprepareRequestDraft, AiHumanQuoteOrderReprepareResponseDraft,
+  AiQuoteRequestReissuePreparationInputDraft, AiQuoteRequestReissueReferenceDraft, AiQuoteRequestReissuePreparationDraft,
+  AiQuoteRequestReissueCreateDraft, AiQuoteRequestReissueOperationDraft, AiQuoteRequestReissueSelectionPreparationDraft,
+  AiQuoteRequestReissueSelectDraft, AiQuoteRequestReissueSelectionOperationDraft } from './ai-quote-selection-draft';
 import type { AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 interface Responses {
   AiSceneModelQuotePreparationResponseDraft: AiSceneModelQuotePreparationResponseDraft;
   AiSceneModelQuoteConfirmResponseDraft: AiSceneModelQuoteConfirmResponseDraft;
   AiSceneModelQuoteReceiptResponseDraft: AiSceneModelQuoteReceiptResponseDraft;
+  AiOriginalQuoteReviewResponseDraft: AiOriginalQuoteReviewResponseDraft;
+  AiOriginalQuoteConfirmResponseDraft: AiOriginalQuoteConfirmResponseDraft;
+  AiOriginalQuoteReceiptResponseDraft: AiOriginalQuoteReceiptResponseDraft;
 }
 interface SelectionValues {
+  AiQuoteRequestReissuePreparationInputDraft: AiQuoteRequestReissuePreparationInputDraft;
+  AiQuoteRequestReissueReferenceDraft: AiQuoteRequestReissueReferenceDraft;
+  AiQuoteRequestReissuePreparationDraft: AiQuoteRequestReissuePreparationDraft;
+  AiQuoteRequestReissueCreateDraft: AiQuoteRequestReissueCreateDraft;
+  AiQuoteRequestReissueOperationDraft: AiQuoteRequestReissueOperationDraft;
+  AiQuoteRequestReissueSelectionPreparationDraft: AiQuoteRequestReissueSelectionPreparationDraft;
+  AiQuoteRequestReissueSelectDraft: AiQuoteRequestReissueSelectDraft;
+  AiQuoteRequestReissueSelectionOperationDraft: AiQuoteRequestReissueSelectionOperationDraft;
   AiClarifiedQuoteSelectionPreparationDraft: AiClarifiedQuoteSelectionPreparationDraft;
   AiClarifiedQuoteSelectionOriginalOperationReadDraft: AiClarifiedQuoteSelectionOriginalOperationReadDraft;
   AiQuoteSelectionSelectResponseDraft: AiQuoteSelectionSelectResponseDraft;

@@ -315,7 +315,9 @@ export function requiredPermissions(method: string, path: string) {
   if (originalOpeningModelRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   if (originalSettingsRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   const selectedQuoteAction = selectedQuoteRoutes.get(`${method.toUpperCase()} ${path}`);
-  if (selectedQuoteAction) return ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(selectedQuoteAction)
+  if (selectedQuoteAction) return ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal',
+    'readReissuePreparation', 'reissueSelectedRequest', 'readReissueOperation', 'readReissuedSelectionPreparation',
+    'selectReissuedQuote', 'readReissuedSelectionOperation'].includes(selectedQuoteAction)
     ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm}`)

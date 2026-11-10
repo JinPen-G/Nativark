@@ -782,12 +782,15 @@ export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOT
     // selection/plan/approval themselves; all methods that can run are closed.
     const task = configuration.enabled ? configuration : { host: { holderId: dependencies.holderId, leaseMs: 1 },
       limits: { maxSteps: 1, maxCalls: 1, maxTotalMs: 1, maxStepMs: 1, maxOutputBytes: 1, maxConcurrent: 1 as const } };
-    const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare);
+    const admission = createOriginalTaskStartAdmission({ ...dependencies, db }, 'quote_clarification');
+    const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare,
+      configuration.enabled ? { admission: (request, original, signal) => admission(request, original, undefined, signal) } : undefined);
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
     const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile']
-      : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal'];
+      : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal',
+        'reissueSelectedRequest', 'selectReissuedQuote'];
     return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) => [method,
       !configuration.enabled && closedMethods.includes(method)
         ? async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } : call])));

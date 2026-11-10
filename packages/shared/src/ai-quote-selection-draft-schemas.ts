@@ -43,7 +43,29 @@ const orderResult = { oneOf: [
   object({ status: choice('not_observed'), retryable: no, nextAction: choice('read_selected_order_result'), sideEffect: choice('not_attested'),
     taskOutcome: choice('owned_by_runner'), payment: choice('not_inferred'), fulfillment: choice('not_inferred') })] };
 const reprepare = AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareReceiptDraft.oneOf!;
+const reissueFields = { selection: selectionProof, original: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalApplicationReferenceDraft,
+  intent: choice('inspect', 'change_plan') };
+const reissueReference = object({ ...reissueFields, operationKey: uuid });
+const reissueScope = object({ kind: choice('workspace'), tenantId: id(), workspaceId: id() });
+const reissueOperation = { reference: reissueReference, scope: reissueScope, retryable: no,
+  quotation: choice('not_attempted_by_request'), approval: choice('not_granted'), order: choice('not_created_by_request') };
 export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiQuoteRequestReissuePreparationInputDraft: object({ ...reissueFields, candidate: ref('AiSceneQuoteCandidateDraft') }, Object.keys(reissueFields)),
+  AiQuoteRequestReissueReferenceDraft: reissueReference,
+  AiQuoteRequestReissuePreparationDraft: object({ ...reissueFields, candidate: ref('AiSceneQuoteCandidateDraft'),
+    scope: reissueScope, reason: choice('rejected', 'expired', 'change_requested'), preparation: ref('AiSceneQuotePreparationDraft'), sourceHash: hash,
+    requestPersistence: choice('not_attempted'), quotation: choice('not_attempted'), approval: choice('not_granted'), order: choice('not_created') }),
+  AiQuoteRequestReissueCreateDraft: object({ ...reissueReference.properties!, candidate: ref('AiSceneQuoteCandidateDraft'),
+    sourceHash: hash, decision: choice('create_linked_quote_request') }),
+  AiQuoteRequestReissueOperationDraft: { oneOf: [object({ ...reissueOperation, status: choice('not_observed') }),
+    object({ ...reissueOperation, status: choice('linked_request_recorded'), original: ref('AiSceneRequestReadDraft'),
+      task: ref('AiSceneTaskReceiptDraft'), admission: choice('current_policies_available', 'unavailable') })] },
+  AiQuoteRequestReissueSelectionPreparationDraft: object({ reference: reissueReference, original: ref('AiSceneRequestReadDraft'), scope: reissueScope,
+    selection: selectionCreate, material: AI_APPROVAL_ORDER_MATERIAL_SCHEMA, reviewHash: hash, quotation: choice('original_saved_quote'),
+    selectionState: choice('not_saved'), approval: choice('not_granted'), order: choice('not_created') }),
+  AiQuoteRequestReissueSelectDraft: object({ ...reissueReference.properties!, reviewHash: hash, decision: choice('select_reissued_quote') }),
+  AiQuoteRequestReissueSelectionOperationDraft: object({ reference: reissueReference, original: ref('AiSceneRequestReadDraft'), scope: reissueScope,
+    selection: ref('AiQuoteSelectionReconcileResponseDraft'), approval: choice('not_granted'), order: choice('not_created_by_selection') }),
   AiOriginalTaskEventsReadDraft: object({ original: ref('AiSceneRequestReadDraft'), after: {
     type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: integer(1, 100) }),
   AiSelectedQuoteTaskRunDraft: runResult,
