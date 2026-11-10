@@ -34,8 +34,54 @@ test('order citations reopen through current authority and refresh compares only
 test('manual handoff stays candidate-only when Core allowed-actions source is unavailable', async () => {
   const h = await orderTools();
   const handoff = await h.tools.orderManualHandoff('order-a', { code: 'rental.order.commit' });
-  assert.equal(handoff.status, 'manual_review');
+  // The live reader proves only its R0 explanation code, not order commit.
+  assert.equal(handoff.status, 'unavailable');
+  assert.equal(handoff.reason, 'candidate_not_currently_verified');
   assert.equal(handoff.execution, 'not_attempted');
+});
+
+test('AIN13 original manual handoff retains one server-resolved principal through the composed reader', async () => {
+  const { setup } = require('./fixtures/ai-native/lane-a-original-request.cjs');
+  const { AiOriginalSceneFactsService } = require('../apps/api/src/modules/ai-native/scenes/original-scene-facts.service');
+  const h = await setup();
+  // The same explicit persisted-order projection leaf as the existing original
+  // source consumer. Guard, Core and original repository remain real services.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId);
+    return row ? { ...row, workspaceId } : undefined;
+  };
+  const input = h.command(); input.input.question = 'next_steps';
+  const created = await h.app.create(input), ref = h.ref(created.receipt.inputRef);
+  const grant = await h.app.requests.resolve('order_explanation', ref.inputRef);
+  const command = { ...ref, expectedOrderVersion: '2026-01-01T00:00:00Z', code: 'rental.order.explain' };
+  const writes = h.b.businessFacts.writes.length;
+  const normal = await h.app.prepareOrderManualHandoff(command);
+  assert.equal(normal.handoff.status, 'manual_review');
+  assert.equal(normal.handoff.candidate.code, command.code);
+  assert.equal(normal.handoff.candidate.executable, false);
+  assert.equal(normal.handoff.destinationReauthorization, 'required');
+  assert.equal(normal.approval, 'not_granted'); assert.equal(normal.execution, 'not_attempted');
+  const original = h.app.tools.orderManualHandoff, actor = h.b.h.identity.user.id;
+  const wrapped = new AiOriginalSceneFactsService(h.app.requests, { ...h.app.tools,
+    orderManualHandoff: async (...args) => {
+      // A temporary switch restored before the final original-request read must
+      // still fail at the actual nested Guard/reader, not join two principals.
+      h.b.h.identity.user.id = 'another-current-order-reader';
+      try { return await original(...args); }
+      finally { h.b.h.identity.user.id = actor; }
+    }
+  });
+  // The original order route maps binding failures to its scope-denial code;
+  // this is not the unwrapped ModelGatewayError code from the helper.
+  await assert.rejects(wrapped.prepareOrderManualHandoff(command), error => error.code === 'AI_ACCESS_DENIED');
+  assert.equal(h.b.h.identity.user.id, actor);
+  h.b.h.identity.user.id = 'another-current-order-reader';
+  try {
+    await assert.rejects(original('order-a', { code: command.code }, grant.context), error => error.code === 'AI_ACCESS_DENIED');
+  } finally { h.b.h.identity.user.id = actor; }
+  await assert.rejects(h.app.prepareOrderManualHandoff({ ...command, context: grant.context }), error => error.code === 'AI_INVALID_INPUT');
+  assert.equal(h.b.businessFacts.writes.length, writes);
+  assert.equal(h.state.aiTask.length, 1);
 });
 
 test('opening section preparation and member profile submission remain bounded candidates', async () => {

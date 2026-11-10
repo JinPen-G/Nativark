@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { composeRequestBoundClientApplication, AiClientApplicationRequest } from './client-request.application';
 import { AiClientEntryError, entryId, parseEntry } from './client-entry-action';
 import { AiClientMaterialError } from './prisma-client-scene-material.repository';
-import { bookingSelectionSchema } from './client-booking-material';
+import { bookingSelectionSchema, oneTimeQuoteSnapshotFingerprint } from './client-booking-material';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { aiClientQuoteConfirmationRequestSchema } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -56,24 +56,56 @@ export function composeClientOriginalBookingFlow(application: Application) {
         orderExecution: 'not_attempted' as const });
       const quote = original.quote, selection = command.selection, membership = quote.membershipSnapshot;
       if (quote.id !== selection.quoteId) throw new AiClientEntryError('AI_ACCESS_DENIED', 'quote_original_selection_mismatch');
+      // Historical association only: compare the caller's explicit original
+      // confirmation, never reopen today's service area or address book here.
+      const snapshot = quote.deliveryAddressSnapshot;
+      if (quote.request.deliveryAddressDraft && (!snapshot || quote.request.deliveryAddressId || snapshot.addressId))
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_one_time_quote_address_basis_missing');
+      const addressConfirmation = quote.request.deliveryAddressDraft && snapshot ? {
+        source: 'original_quote_one_time_address' as const, snapshotFingerprint: oneTimeQuoteSnapshotFingerprint(snapshot), confirmed: true as const
+      } : undefined;
+      // Begin original Core service history normalization.
+      // Preparation persisted Core-normalized occurrences, not the caller's
+      // omitted optional fields. Rebuild only from the SAME immutable quote;
+      // service/quantity remain explicit, and no current capacity/config is read.
+      let originalServices = quote.request.services ?? [], expectedServices = selection.services ?? [], receiptSelection = selection;
+      const hasServices = Boolean(quote.serviceSnapshots?.length || quote.request.services?.length || selection.services?.length);
+      if (hasServices) {
+        if (!Array.isArray(quote.serviceSnapshots) || !quote.serviceSnapshots.length || quote.serviceSnapshots.length > 20
+          || quote.serviceSnapshots.some(row => typeof row.scheduledStartAt !== 'string' || typeof row.scheduledEndAt !== 'string'
+            || typeof row.serviceLocationId !== 'string'))
+          throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_quote_service_occurrences_missing');
+        if (!selection.services?.length) throw new AiClientEntryError('AI_INVALID_INPUT', 'confirm_original_quote_services', 'clarify');
+        originalServices = quote.serviceSnapshots.map(row => ({ serviceId: row.serviceId, quantity: row.quantity,
+          scheduledStartAt: row.scheduledStartAt, scheduledEndAt: row.scheduledEndAt, serviceLocationId: row.serviceLocationId }));
+        const supplied = selection.services.map(row => ({ ...row, scheduledStartAt: row.scheduledStartAt ?? quote.request.startAt,
+          scheduledEndAt: row.scheduledEndAt ?? quote.request.endAt, serviceLocationId: row.serviceLocationId ?? quote.request.fulfillmentLocationId }));
+        const serviceKeys = (rows: typeof originalServices) => rows.map(row => requestFingerprint(JSON.parse(JSON.stringify(row)))).sort();
+        if (requestFingerprint(serviceKeys(supplied)) !== requestFingerprint(serviceKeys(originalServices)))
+          throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_service_selection_mismatch');
+        expectedServices = originalServices;
+        receiptSelection = parseEntry(bookingSelectionSchema, { ...selection, services: originalServices,
+          returnLocationId: selection.returnLocationId ?? quote.request.returnLocationId ?? quote.request.fulfillmentLocationId });
+      }
+      // End original Core service history normalization.
       const recorded = bookingSelectionSchema.safeParse({ quoteId: quote.id, timeZone: quote.pricingContext?.timeZone,
         startAt: quote.request.startAt, endAt: quote.request.endAt,
         fulfillmentMode: quote.request.fulfillmentMode, fulfillmentLocationId: quote.request.fulfillmentLocationId,
         returnLocationId: quote.request.returnLocationId ?? quote.request.fulfillmentLocationId,
-        deliveryAddressId: quote.request.deliveryAddressId, services: quote.request.services ?? [],
+        deliveryAddressId: quote.request.deliveryAddressId, ...(addressConfirmation ? { deliveryAddressConfirmation: addressConfirmation } : {}), services: originalServices,
         lines: quote.request.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity })),
         bookingIdentity: membership && { bookingIdentity: membership.bookingIdentity,
           ...(membership.corporateCustomerId ? { corporateCustomerId: membership.corporateCustomerId } : {}),
           enterpriseContractAndPayer: membership.enterpriseContractAndPayer } });
-      if (!recorded.success || quote.request.deliveryAddressDraft) {
+      if (!recorded.success) {
         throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_quote_selection_basis_missing');
       }
-      const expected = { ...selection, services: selection.services ?? [],
+      const expected = { ...selection, services: expectedServices,
         returnLocationId: selection.returnLocationId ?? recorded.data.returnLocationId };
       const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
       if (hash(recorded.data) !== hash(expected)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_selection_mismatch');
       const receipt = await application.readBookingMaterialReceipt(currentRequest, { operationKey: command.operationKey,
-        command: { kind: 'booking_quote', selection } });
+        command: { kind: 'booking_quote', selection: receiptSelection } });
       const latest = await application.readPreparedQuoteOriginal(currentRequest, command.original);
       if (latest.state !== 'observed' || hash(latest) !== hash(original)) {
         throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_changed');
@@ -88,6 +120,9 @@ export function composeClientOriginalBookingFlow(application: Application) {
     acceptPage: application.acceptBookingSubmission.bind(application),
     submitPage: application.submitAcceptedBooking.bind(application),
     readSubmission: application.readBookingSubmission.bind(application),
-    readDraftOperation: application.readBookingOperation.bind(application)
+    readDraftOperation: application.readBookingOperation.bind(application),
+    // Versioned minimal observation; preserve the original receipt consumer.
+    // Expired/terminal metadata does not revive a page Action or old material.
+    readDraftObservation: application.readBookingOperationObservation.bind(application)
   });
 }

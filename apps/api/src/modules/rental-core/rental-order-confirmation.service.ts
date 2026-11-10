@@ -47,6 +47,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
     sourceSnapshot: quote.sourceSnapshot,
+    inventoryBasis: quote.inventoryBasis,
     request: quote.request,
     deliveryAddressSnapshot: quote.deliveryAddressSnapshot,
     membershipSnapshot: quote.membershipSnapshot,
@@ -268,8 +269,8 @@ export class RentalOrderConfirmationService {
     /**
      * CUSTOMER-01C：解析并校验四类主体。
      *
-     * 放在事务**之前**：主体校验是纯读判定（客户归属、合同有效期、经办人授权），
-     * 被拒时不该已经锁过库存。校验失败直接抛，绝不降级为「按下单客户本人处理」——
+     * 事务前预检改善反馈；提交时在库存锁之前共锁客户并重读合同/开票/经办人，
+     * 防止准备期间撤销后仍使用旧结果。校验失败直接抛，绝不降级为「按下单客户本人处理」——
      * 那会把一次显式的企业主体声明静默改成个人订单。
      *
      * 用 `committedAt` 作为判定时点，与报价消费、券锁定同一时刻：
@@ -306,6 +307,23 @@ export class RentalOrderConfirmationService {
         if (approval && approvalBinding) {
           await approval.authorize(structuredClone(approvalBinding));
           await approval.prepare(tx, structuredClone(approvalBinding));
+        }
+        // Lock ALL role customers before membership's customer -> workspace gate.
+        // A preliminary subject snapshot is not permission to commit a contract,
+        // invoice or agent that was revoked while preparation waited.
+        if (this.subjects && orderInput.customerId) {
+          const subjectCustomers = [orderInput.customerId, membershipSubjects?.contractSubjectCustomerId ?? orderInput.customerId,
+            membershipSubjects?.payerSubjectCustomerId ?? orderInput.customerId, membershipSubjects?.userSubjectCustomerId ?? orderInput.customerId,
+            quote.membershipSnapshot?.personalCustomerId, quote.membershipSnapshot?.corporateCustomerId]
+            .filter((id): id is string => Boolean(id));
+          await this.subjects.lockOrderSubjectCustomers(tenantId, subjectCustomers, tx);
+          const currentSubjects = await this.subjects.resolveOrderSubjects(tenantId, orderInput.customerId, committedAt, membershipSubjects, tx);
+          if (requestFingerprint(currentSubjects) !== requestFingerprint(resolvedSubjects)) throw new ConflictException("订单责任主体或授权已变化，请重新核对后提交");
+          order.contractSubjectCustomerId = currentSubjects.contractSubjectCustomerId;
+          order.payerSubjectCustomerId = currentSubjects.payerSubjectCustomerId;
+          order.userSubjectCustomerId = currentSubjects.userSubjectCustomerId;
+          order.agentId = currentSubjects.agentId;
+          order.subjectSnapshot = currentSubjects.snapshot;
         }
         // Acquire personal/corporate customer gates in the relation writer's
         // canonical order, before the individual customer business check below.
@@ -349,7 +367,7 @@ export class RentalOrderConfirmationService {
           startAt: input.startAt,
           endAt: input.endAt,
           lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
-        }, tx, quote.ruleSnapshot);
+        }, tx, quote.ruleSnapshot, quote);
 
         // The number belongs to this creation transaction, not to preparation
         // or a process-local count. Hooks and all persisted snapshots see it.
@@ -456,7 +474,12 @@ export class RentalOrderConfirmationService {
           await approval.authorize(structuredClone(approvalBinding));
           await approval.commit(tx, structuredClone(approvalBinding), order.id);
         }
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      // Approved creation also revalidates immutable inputs and current rights
+      // through its original participant before and after the business writes.
+      // Keep that transaction finite without changing manual creation defaults;
+      // a timeout still requires original-key reconciliation, never replay.
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        ...(approval ? { maxWait: 2500, timeout: 30000 } : {}) });
     } catch (error) {
       // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
       if (error instanceof IdempotentReplay) {

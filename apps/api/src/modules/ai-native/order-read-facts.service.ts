@@ -4,6 +4,7 @@ import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { AiOrderRouteContextAuthority } from './order-route-context.authority';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const time = z.string().max(40).datetime({ offset: true });
@@ -19,8 +20,30 @@ const projection = z.object({
 // Internal provenance projection, not a new public transport contract. Parse
 // only saved order fields; current configuration is deliberately not a source.
 const version = z.string().min(1).max(191);
+const calendarDay = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).refine(value => {
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }),
+  year: z.number().int().min(1).max(9999),
+  dayType: z.enum(['workday', 'weekend', 'statutory_holiday', 'makeup_workday', 'tenant_special']),
+  businessStatus: z.enum(['open', 'limited', 'closed', 'self_service']),
+  source: z.enum(['week_rule', 'official_cn', 'tenant_override']), calendarVersion: version, itemGroupId: id,
+  unitCount: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  unitAmount: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  multiplier: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  amount: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  priceAt: time.optional(), hitLayer: z.enum(['date_override', 'periodic', 'day_type', 'day_type_legacy', 'base']).optional(),
+  pricingPlanVersion: version.optional()
+}).strict().refine(row => Number(row.date.slice(0, 4)) === row.year, 'calendar date/year mismatch');
+/** Original applied daily facts, not a new public DTO or a repricing input. */
+export const aiOrderCalendarFactsSchema = z.union([
+  z.object({ status: z.enum(['missing', 'unavailable']) }).strict(),
+  z.object({ status: z.literal('available'), rows: z.array(calendarDay).max(200) }).strict()
+]);
 const historicalProjection = z.object({
-  id, tenantId: id, updatedAt: time,
+  id, tenantId: id, updatedAt: time, currency: z.string().regex(/^[A-Z]{3}$/u),
+  calendarFacts: aiOrderCalendarFactsSchema.optional(),
   quoteId: id.optional(),
   ruleVersion: version.optional(),
   ruleSnapshot: z.object({ fulfillment: z.object({
@@ -40,7 +63,7 @@ const historicalProjection = z.object({
 });
 
 export interface AiOrderHistoricalQuoteSource {
-  read(scope: AiWorkspaceScope, quoteId: string): Promise<
+  read(scope: AiWorkspaceScope, quoteId: string, orderId: string): Promise<
     { status: 'available'; quote: unknown } | { status: 'missing' | 'unavailable' }>;
 }
 const historicalQuoteProjection = z.object({
@@ -58,20 +81,22 @@ const historicalQuoteProjection = z.object({
  * require their dedicated readers and are explicitly absent in this slice.
  */
 export class AiOrderReadFactsService {
-  constructor(private readonly core: Pick<RentalCoreService, 'getOrder'>,
+  constructor(private readonly core: Pick<RentalCoreService, 'readOrderFacts'>,
     private readonly authority: AiOrderRouteContextAuthority, private readonly clock: () => Date = () => new Date(),
     private readonly historicalQuotes?: AiOrderHistoricalQuoteSource) {}
 
-  /** Version references and saved inspection requirements only. This does not
-   * reconstruct historical prices, return raw rule JSON, or compute fees. */
+  /** Saved references, inspection requirements and applied daily facts only.
+   * Does not reconstruct calendars/prices, return raw rule JSON, or compute fees. */
   async readHistoricalBasis(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
       assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
         || (context.audience !== 'operator' && context.audience !== 'staff')) throw Error('unsupported read scope');
-      const order = historicalProjection.parse(await this.core.getOrder(context.scope.tenantId, orderId));
+      const order = historicalProjection.parse(await this.core.readOrderFacts(context.scope.tenantId, orderId));
       if (order.id !== orderId || order.tenantId !== context.scope.tenantId) throw Error('order binding mismatch');
       const savedQuote = await this.readSavedQuote(order, context.scope);
+      const after = historicalProjection.parse(await this.core.readOrderFacts(context.scope.tenantId, orderId));
+      if (requestFingerprint(after) !== requestFingerprint(order)) throw Error('order history changed during linked quote read');
       const observed = this.clock();
       if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw Error('invalid observation time');
       return {
@@ -82,6 +107,9 @@ export class AiOrderReadFactsService {
         // reference alone must never be presented as complete pricing evidence.
         complete: false as const,
         savedQuote,
+        // Order-owned applied facts survive quote cleanup. No current calendar
+        // lookup, annual-calendar reconstruction or unit/quantity recalculation.
+        calendar: order.calendarFacts ?? { status: 'missing' as const },
         rule: order.ruleSnapshot ? { status: 'available' as const, version: order.ruleVersion!,
           ...order.ruleSnapshot.fulfillment } : { status: 'missing' as const },
         price: { status: order.pricingPlanVersion ? 'references_only' as const : 'missing' as const,
@@ -97,11 +125,12 @@ export class AiOrderReadFactsService {
   private async readSavedQuote(order: z.infer<typeof historicalProjection>, scope: AiWorkspaceScope) {
     if (!order.quoteId) return { status: 'missing_link' as const };
     if (!this.historicalQuotes) return { status: 'not_loaded' as const };
-    const result = await this.historicalQuotes.read(structuredClone(scope), order.quoteId);
+    const result = await this.historicalQuotes.read(structuredClone(scope), order.quoteId, order.id);
     if (result.status === 'missing' || result.status === 'unavailable') return { status: result.status };
     if (result.status !== 'available') throw Error('unsupported quote history response');
     const quote = historicalQuoteProjection.parse(result.quote);
     if (quote.id !== order.quoteId || quote.tenantId !== order.tenantId
+      || (quote.currency !== undefined && quote.currency !== order.currency)
       || (order.ruleVersion && quote.ruleVersion !== order.ruleVersion)
       || (order.pricingPlanVersion && quote.pricingPlanVersion !== order.pricingPlanVersion)
       || (order.priceVersionId && quote.priceVersionId !== order.priceVersionId)
@@ -121,7 +150,7 @@ export class AiOrderReadFactsService {
       assertAiReadContextBinding(context, expectedContext);
       const audience = context.audience;
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (audience !== 'operator' && audience !== 'staff')) throw Error('unsupported read scope');
-      const order = projection.parse(await this.core.getOrder(context.scope.tenantId, orderId));
+      const order = projection.parse(await this.core.readOrderFacts(context.scope.tenantId, orderId));
       if (order.id !== orderId || order.tenantId !== context.scope.tenantId) throw Error('order binding mismatch');
       const observed = this.clock();
       if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw Error('invalid observation time');

@@ -325,6 +325,72 @@ test('authorized original probe request lifecycle executes through persisted run
   assert.equal(sends, beforeSends);
   assert.equal(BigInt(h.state.aiRun.find(row => row.id === unknownTask.runId).fencingToken.toFixed(0)) > BigInt(beforeFence), true);
 
+  // The fixed shared vocabulary permits selection, not invented protocol
+  // support. This is the same production HTTP/original/task chain over offline
+  // DB/identity substitutes, with zero native model evidence.
+  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = require('@rental-os/shared');
+  const probeContract = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  // The current text-only profile is not widened to pretend it supports eight
+  // kinds. Missing local methods may be described, but still cannot invoke.
+  const eightFactory = TextCapabilityProbeModule.registerHttp({ enabled: true,
+    dependencies: { ...httpDependencies, probeCapabilities: kinds } }).providers[0].useValue;
+  const eightHttp = new TextCapabilityProbeController(eightFactory);
+  await assert.rejects(http.prepare(request(), { requestKey: 'not-whitelisted', capability: 'embedding' }));
+  const executionCounts = () => JSON.stringify({ sends, decrypts,
+    invocations: h.state.aiGatewayInvocation, admissions: h.state.aiInvocationAdmission,
+    reservations: h.state.aiBudgetReservation, ledger: h.state.aiBudgetLedgerEntry,
+    receipts: h.state.aiTextCapabilityReceipt, charges: h.state.aiTaskExecutionCharge },
+    (_key, value) => typeof value === 'bigint' ? value.toString() : value);
+  for (const capability of ['embedding', 'reasoning']) {
+    const originalKey = { requestKey: `probe-no-method-${capability}` }, selection = { ...originalKey, capability };
+    const noExecution = executionCounts();
+    const prepared = checked('AiTextCapabilityPrepareResponseDraft', await eightHttp.prepare(request(), selection));
+    assert.equal(prepared.capability, capability); assert.equal(prepared.methodVersion, `${capability}-unavailable-1`);
+    const stored = checked('AiTextCapabilityPublishResponseDraft', await eightHttp.publish(request(), selection));
+    assert.equal((await eightHttp.publish(request(), selection)).inputRef, stored.inputRef);
+    await assert.rejects(eightHttp.publish(request(), { ...originalKey, capability: 'text' }), error => error.getStatus() === 409);
+    const task = checked('AiTextCapabilityCreateTaskResponseDraft', await eightHttp.createTask(request(), originalKey));
+    await authorizeTask(task.taskId);
+    const row = h.state.aiTaskOriginalRequest.find(value => value.id === stored.inputRef);
+    const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+    const command = payload.command;
+    const preparation = await root.application.prepareCurrent(command);
+    assert.equal(preparation.intent, null); assert.equal(preparation.expected, null);
+    assert.equal(payload.preparationHash, require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(preparation));
+    const taskState = () => JSON.stringify({ task: h.state.aiTask.find(value => value.id === task.taskId),
+      run: h.state.aiRun.find(value => value.id === task.runId) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
+    const stateBeforeRun = taskState();
+    const preflightMethod = root.application.capabilities.preflight;
+    root.application.capabilities.preflight = async () => assert.fail('remote evidence cannot supply a missing method');
+    try { assert.equal((await root.application.preflightCurrent(command)).allowed, false); }
+    finally { root.application.capabilities.preflight = preflightMethod; }
+    const preflight = checked('AiTextCapabilityPreflightResponseDraft', await eightHttp.preflight(request(), originalKey));
+    assert.equal(preflight.capability, capability); assert.equal(preflight.allowed, false); assert.equal(preflight.missing, true);
+    for (const operation of ['start', 'reconcile']) {
+      const result = checked('AiTextCapabilityRunResponseDraft', await eightHttp[operation](request(), originalKey));
+      assert.equal(result.kind, 'not_started'); assert.equal(result.reason, 'task_not_runnable');
+    }
+    const observed = checked('AiTextCapabilityReceiptResponseDraft', await eightHttp.readCapabilityReceipt(request(), originalKey));
+    assert.equal(observed.capability, capability); assert.equal(observed.status, 'unverified');
+    assert.equal(observed.reason, capability === 'embedding' ? 'capability_not_enabled' : 'objective_method_unavailable'); assert.equal(observed.observation, null);
+    const held = { stepId: 'unavailable-step', lease: { runId: task.runId, holderId: 'unavailable-holder', fencingToken: '1' },
+      priceVersion: 'price', expiresAt: new Date(h.control.now.getTime() + 1000) };
+    assert.equal((await root.application.runHeldCurrent(command, held)).status, 'unverified');
+    await assert.rejects(root.application.prepareHeldInvocationCurrent(command, held), { code: 'CAPABILITY_UNSUPPORTED' });
+    const current = await root.application.currentRequest(), authority = root.application.authority(current.context, command);
+    const route = await authority.resolve(current.context, probeContract.textProbeRequirements(command));
+    await assert.rejects(authority.authorizeDispatch(current.context, {}, route.route), { code: 'CAPABILITY_UNSUPPORTED' });
+    const locator = { creationKey: require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition').textProbeTaskCreationKey(originalKey.requestKey), inputRef: stored.inputRef };
+    assert.equal((await root.workflow.startOriginal(locator)).kind, 'not_started');
+    assert.equal((await root.workflow.reconcileOriginal(locator)).kind, 'not_started');
+    await assert.rejects(eightHttp.releaseUnsent(request(), originalKey), error => error.getStatus() === 409);
+    assert.equal(taskState(), stateBeforeRun);
+    h.identity.user.permissions.splice(permissionIndex, 1);
+    try { await assert.rejects(eightHttp.readCapabilityReceipt(request(), originalKey), error => error.getStatus() === 403); }
+    finally { h.identity.user.permissions.splice(permissionIndex, 0, 'system:params:manage'); }
+    assert.equal(executionCounts(), noExecution);
+  }
+
   // Historical consumption keeps the old receipt after mode/revision changes,
   // disablement and expiry, but never treats it as current capability evidence.
   await root.workflow.taskPolicies.put({ taskId: cancellable.taskId, operation: 'read_step_terminal',
@@ -344,6 +410,14 @@ test('authorized original probe request lifecycle executes through persisted run
     [ProviderCapabilityService.prototype, 'record'], [PrismaTextProbeOriginalRequestRepository.prototype, 'publish']]
     .map(([target, method]) => { const originalMethod = target[method];
       target[method] = async () => { writeAttempts++; throw Error('history must be read-only'); }; return { target, method, originalMethod }; });
+  // Synthetic historical receipt metadata only: this remains mock and does
+  // not revise accounting, certify a capability or invoke the provider again.
+  const historicalReceipt = h.state.aiTextCapabilityReceipt.find(row => row.id === receipt.receiptId);
+  const cachedObservation = typeof historicalReceipt.observation === 'string'
+    ? JSON.parse(historicalReceipt.observation) : structuredClone(historicalReceipt.observation);
+  cachedObservation.usage.billingDetails = { cachedInputTokens: 1, cacheCreationInputTokens: 0 };
+  historicalReceipt.observation = typeof historicalReceipt.observation === 'string' ? JSON.stringify(cachedObservation) : cachedObservation;
+  historicalReceipt.observationHash = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(cachedObservation);
   const stateJson = () => JSON.stringify(h.state, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
   try {
     const beforeHistory = stateJson(), beforeDecrypts = decrypts;
@@ -353,6 +427,7 @@ test('authorized original probe request lifecycle executes through persisted run
     assert.equal(history.original.validity, 'expired'); assert.equal(history.observation.validity, 'expired');
     assert.equal(history.currentCapability, 'not_assessed'); assert.equal(history.applicability, 'historical_only');
     assert.equal(history.observation.mode, 'mock'); assert.equal(history.resultObserved, true);
+    assert.deepEqual(history.observation.reportedUsage, { inputTokens: 1, outputTokens: 2 });
     const cancelledHistory = checked('AiTextCapabilityHistoryResponseDraft', await http.readHistory(request(), cancelKey));
     assert.equal(cancelledHistory.task.status, 'cancel_requested'); assert.equal(cancelledHistory.observation, null);
     assert.equal((await http.readHistory(request(), { requestKey: 'absent-history' })).state, 'not_observed');
@@ -370,6 +445,189 @@ test('authorized original probe request lifecycle executes through persisted run
   h.db.aiTaskOriginalRequest.findFirst = async args => { const row = await find(args); h.identity.session = false; return row; };
   await assert.rejects(http.readOriginal(request(), key), error => error.getStatus() === 403);
   assert.equal(sends, beforeSends);
+});
+
+test('native Responses reasoning crosses original HTTP task and single ledger without exporting thought text', async () => {
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { SecretBox } = require('../apps/api/src/common/secret-box');
+  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
+  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, REASONING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
+    systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
+    aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
+  h.control.now = new Date(); h.identity.user.permissions.push('system:params:manage');
+  h.db.aiPlatformModelConnection.update = async () => assert.fail('BYOK probe must not mutate platform configuration');
+  const guard = new ApiAuthGuard(h.authorization.auth), clock = () => new Date(h.control.now);
+  const secrets = new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'offline-reasoning-encryption' : undefined });
+  const settings = { enabled: true, protocol: 'openai_responses', baseUrl: 'https://offline.example/v1',
+    model: 'synthetic-model', timeoutMs: 30000, maxConcurrent: 1, maxOutputTokens: 32 };
+  h.state.aiTenantModelConfiguration.push({ tenantId: 'tenant-a', revision: 1, mode: 'tenant_managed', settings,
+    credentialsEncrypted: secrets.encrypt({ apiKey: 'offline-reasoning-key', tenantId: 'tenant-a',
+      protocol: settings.protocol, baseUrl: settings.baseUrl, model: settings.model }) });
+  const profile = { id: 'tenant-profile', scopeId: 'scope-tenant', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT',
+    serviceMode: 'tenant_managed', protocol: settings.protocol, provider: settings.protocol, model: settings.model,
+    credentialRef: tenantModelCredentialReference('tenant-a', 1), configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['text', 'reasoning'] };
+  h.state.aiProviderProfile.push(profile);
+  for (const policy of h.state.aiBudgetPolicy) { policy.sceneCode = TEXT_PROBE_SCENE; policy.unitKind = 'calls';
+    policy.settingsJson.sceneCode = TEXT_PROBE_SCENE; policy.settingsJson.allowedScenes = [TEXT_PROBE_SCENE]; }
+  await new PrismaTaskPlanPolicyRepository(h.db, { ...h.authorization, guard,
+    scene: { code: TEXT_PROBE_SCENE, version: '1' }, tool: TEXT_CAPABILITY_PROBE_TOOL }, clock)
+    .put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: new Date(h.control.now.getTime() + 60000).toISOString() });
+  let sends = 0;
+  const dependencies = { ...h.authorization, db: h.db, guard, secrets, platformProfileId: 'platform-default',
+    pricing: { mode: 'persisted_calls', priceVersion: 'price' }, audit: { append: async () => {} },
+    protocol: { post: async request => { sends++; assert.equal(request.url.endsWith('/responses'), true);
+      const body = JSON.parse(request.body), question = body.input[0].content, match = /Compute \((\d+) \+ (\d+)\) \* (\d+)/u.exec(question);
+      assert.ok(match); assert.equal(body.store, false);
+      return { status: 200, body: JSON.stringify({ status: 'completed', output: [
+        { type: 'reasoning', id: 'reasoning-native-1', summary: [{ text: 'unexported synthetic thought' }] },
+        { type: 'message', id: 'answer-native-1', role: 'assistant', status: 'completed', content: [{ type: 'output_text',
+          text: String((Number(match[1]) + Number(match[2])) * Number(match[3])) }] }],
+        usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12, output_tokens_details: { reasoning_tokens: 4 } } }) }; } },
+    host: { holderId: 'reasoning-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick };
+  const root = composeAuthorizedPersistedTextProbeWorkflow(dependencies), { credentials, ...httpDependencies } = dependencies;
+  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
+  const { TextCapabilityProbeController } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const http = new TextCapabilityProbeController(TextCapabilityProbeModule.registerHttp({ enabled: true,
+    dependencies: { ...httpDependencies, probeCapabilities: ['text', 'reasoning'] } }).providers[0].useValue);
+  const request = { headers: { authorization: (await credentials.current()).authorization } }, key = { requestKey: 'native-reasoning-original' };
+  assert.equal((await http.prepare(request, { ...key, capability: 'reasoning' })).methodVersion, REASONING_PROBE_METHOD);
+  const original = await http.publish(request, { ...key, capability: 'reasoning' });
+  const task = await http.createTask(request, key);
+  for (const operation of ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'request_input'])
+    await root.workflow.taskPolicies.put({ taskId: task.taskId, operation, requiredPermissions: ['rental-os:order:view'],
+      expiresAt: new Date('2027-01-01T00:00:00Z') }, null);
+  const result = await http.start(request, key);
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'succeeded');
+  assert.equal(sends, 1); assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.state.aiBudgetReservation.length, 1);
+  assert.equal(h.state.aiBudgetReservation[0].status, 'settled'); assert.equal(h.state.aiBudgetLedgerEntry.filter(row => row.kind === 'settle').length, 1);
+  const publicReceipt = await http.readCapabilityReceipt(request, key);
+  assert.equal(publicReceipt.status, 'unverified'); assert.equal(publicReceipt.observation.mode, 'mock');
+  const stored = h.state.aiTextCapabilityReceipt.find(row => row.id === publicReceipt.receiptId), observation = typeof stored.observation === 'string' ? JSON.parse(stored.observation) : structuredClone(stored.observation);
+  assert.equal(observation.matched, true); assert.equal(observation.reasoningEvidence.methodVersion, REASONING_PROBE_METHOD);
+  assert.equal(observation.reasoningEvidence.reasoningTokens, 4); assert.deepEqual(observation.usage, { inputTokens: 5, outputTokens: 7 });
+  assert.equal(JSON.stringify({ publicReceipt, stored }).includes('unexported synthetic thought'), false);
+  assert.equal(JSON.stringify({ publicReceipt, stored }).includes('reasoning-native-1'), false);
+  // Synthetic live marker tests ONLY the original verifier's coherent payload
+  // boundary. It does not convert this mock execution into supplier evidence.
+  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const { textProbeEvidenceHash } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  // The generic in-memory insert delegate omits nullable DB columns. MySQL/
+  // Prisma returns NULL for these schema-defined columns; model those defaults,
+  // not missing usage, quantities or timestamps, before testing the real verifier.
+  for (const row of h.state.aiBudgetReservation) for (const field of ['actualTokens', 'actualMoney', 'moneyCurrency'])
+    if (row[field] === undefined) row[field] = null;
+  for (const row of h.state.aiBudgetLedgerEntry) for (const field of ['inputTokens', 'outputTokens', 'moneyAmount', 'moneyCurrency', 'reason'])
+    if (row[field] === undefined) row[field] = null;
+  const verifier = new PrismaTextCapabilityReceiptRepository(h.db, clock), savedObservation = stored.observation, savedHash = stored.observationHash;
+  const currentStored = () => h.state.aiTextCapabilityReceipt.find(row => row.id === stored.id);
+  try {
+    const live = { ...observation, transport: 'node_https' };
+    const verify = async value => {
+      currentStored().observation = typeof savedObservation === 'string' ? JSON.stringify(value) : value;
+      currentStored().observationHash = requestFingerprint(value);
+      const receipt = await verifier.read(stored.id);
+      return verifier.verify({ profile, capability: 'reasoning', status: 'supported', source: 'connection_test',
+        evidenceHash: textProbeEvidenceHash(receipt), checkedAt: new Date(value.checkedAt), expiresAt: new Date(value.expiresAt),
+        details: { receiptId: stored.id, verification: { evidence: 'live', methodVersion: REASONING_PROBE_METHOD,
+          capability: 'reasoning', profileFingerprint: capabilityProfileFingerprint(profile) } } });
+    };
+    assert.equal(await verify(live), true);
+    const missing = structuredClone(live); delete missing.reasoningEvidence;
+    assert.equal(await verify(missing), false);
+    assert.equal(await verify({ ...live, reasoningEvidence: { ...live.reasoningEvidence, reasoningTokens: 8 } }), false);
+  } finally { currentStored().observation = savedObservation; currentStored().observationHash = savedHash; }
+  assert.equal((await http.publish(request, { ...key, capability: 'reasoning' })).inputRef, original.inputRef);
+  assert.equal((await http.reconcile(request, key)).kind, 'not_started'); assert.equal(sends, 1);
+});
+
+test('native Embedding probe crosses original HTTP task and ledger with opaque vectors and zero generated tokens', async () => {
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { SecretBox } = require('../apps/api/src/common/secret-box');
+  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
+  const { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, EMBEDDING_PROBE_METHOD, textProbeEvidenceHash } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
+    systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
+    aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
+  h.control.now = new Date(); h.identity.user.permissions.push('system:params:manage');
+  h.db.aiPlatformModelConnection.update = async () => assert.fail('BYOK probe must not mutate platform configuration');
+  const guard = new ApiAuthGuard(h.authorization.auth), clock = () => new Date(h.control.now);
+  const secrets = new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'offline-embedding-encryption' : undefined });
+  const settings = { enabled: true, protocol: 'openai_chat_completions', baseUrl: 'https://offline.example/v1',
+    model: 'synthetic-embedding', timeoutMs: 30000, maxConcurrent: 1, maxOutputTokens: 32 };
+  h.state.aiTenantModelConfiguration.push({ tenantId: 'tenant-a', revision: 1, mode: 'tenant_managed', settings,
+    credentialsEncrypted: secrets.encrypt({ apiKey: 'offline-embedding-key', tenantId: 'tenant-a',
+      protocol: settings.protocol, baseUrl: settings.baseUrl, model: settings.model }) });
+  const profile = { id: 'tenant-profile', scopeId: 'scope-tenant', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT',
+    serviceMode: 'tenant_managed', protocol: settings.protocol, provider: settings.protocol, model: settings.model,
+    credentialRef: tenantModelCredentialReference('tenant-a', 1), configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['embedding'] };
+  h.state.aiProviderProfile.push(profile);
+  for (const policy of h.state.aiBudgetPolicy) { policy.sceneCode = TEXT_PROBE_SCENE; policy.unitKind = 'calls';
+    policy.settingsJson.sceneCode = TEXT_PROBE_SCENE; policy.settingsJson.allowedScenes = [TEXT_PROBE_SCENE]; }
+  await new PrismaTaskPlanPolicyRepository(h.db, { ...h.authorization, guard,
+    scene: { code: TEXT_PROBE_SCENE, version: '1' }, tool: TEXT_CAPABILITY_PROBE_TOOL }, clock)
+    .put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: new Date(h.control.now.getTime() + 60000).toISOString() });
+  let sends = 0;
+  const dependencies = { ...h.authorization, db: h.db, guard, secrets, platformProfileId: 'platform-default',
+    pricing: { mode: 'persisted_calls', priceVersion: 'price' }, audit: { append: async () => {} },
+    protocol: { post: async request => { sends++; assert.equal(request.url.endsWith('/embeddings'), true);
+      const body = JSON.parse(request.body); assert.equal(body.input.length, 2); assert.notEqual(body.input[0], body.input[1]);
+      assert.equal(Object.hasOwn(body, 'messages'), false);
+      return { status: 200, body: JSON.stringify({ object: 'list', model: body.model, data: [
+        { object: 'embedding', index: 0, embedding: [0.2, 0.5, 0.7] }, { object: 'embedding', index: 1, embedding: [0.8, -0.1, 0.3] }],
+        usage: { prompt_tokens: 5, total_tokens: 5 } }) }; } },
+    host: { holderId: 'embedding-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick };
+  const root = composeAuthorizedPersistedTextProbeWorkflow(dependencies), { credentials, ...httpDependencies } = dependencies;
+  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
+  const { TextCapabilityProbeController } = require('../apps/api/src/modules/ai-native/text-capability-probe.controller');
+  const http = new TextCapabilityProbeController(TextCapabilityProbeModule.registerHttp({ enabled: true,
+    dependencies: { ...httpDependencies, probeCapability: 'embedding', probeCapabilities: ['embedding'] } }).providers[0].useValue);
+  const request = { headers: { authorization: (await credentials.current()).authorization } }, key = { requestKey: 'native-embedding-original' };
+  assert.equal((await http.prepare(request, { ...key, capability: 'embedding' })).methodVersion, EMBEDDING_PROBE_METHOD);
+  const original = await http.publish(request, { ...key, capability: 'embedding' }), task = await http.createTask(request, key);
+  for (const operation of ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'request_input'])
+    await root.workflow.taskPolicies.put({ taskId: task.taskId, operation, requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01T00:00:00Z') }, null);
+  const result = await http.start(request, key);
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'succeeded');
+  assert.equal(sends, 1); assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.state.aiBudgetReservation.length, 1);
+  assert.equal(h.state.aiBudgetReservation[0].status, 'settled'); assert.equal(h.state.aiBudgetLedgerEntry.filter(row => row.kind === 'settle').length, 1);
+  const publicReceipt = await http.readCapabilityReceipt(request, key);
+  assert.equal(publicReceipt.status, 'unverified'); assert.equal(publicReceipt.observation.mode, 'mock');
+  const stored = () => h.state.aiTextCapabilityReceipt.find(row => row.id === publicReceipt.receiptId);
+  const observation = typeof stored().observation === 'string' ? JSON.parse(stored().observation) : structuredClone(stored().observation);
+  assert.equal(observation.matched, true); assert.deepEqual(observation.usage, { inputTokens: 5, outputTokens: 0 });
+  assert.equal(observation.embeddingEvidence.methodVersion, EMBEDDING_PROBE_METHOD); assert.equal(observation.embeddingEvidence.vectorCount, 2);
+  assert.equal(Object.hasOwn(publicReceipt.observation, 'embeddingEvidence'), false);
+  assert.equal(JSON.stringify(stored()).includes('[0.2,0.5,0.7]'), false);
+  // Model known SQL NULL defaults only; synthetic live marker is verifier logic,
+  // not native environment/provider evidence or a change to production facts.
+  for (const row of h.state.aiBudgetReservation) for (const field of ['actualTokens', 'actualMoney', 'moneyCurrency']) if (row[field] === undefined) row[field] = null;
+  for (const row of h.state.aiBudgetLedgerEntry) for (const field of ['inputTokens', 'outputTokens', 'moneyAmount', 'moneyCurrency', 'reason']) if (row[field] === undefined) row[field] = null;
+  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const verifier = new PrismaTextCapabilityReceiptRepository(h.db, clock), oldObservation = stored().observation, oldHash = stored().observationHash;
+  try {
+    const live = { ...observation, transport: 'node_https' };
+    const verify = async value => { stored().observation = typeof oldObservation === 'string' ? JSON.stringify(value) : value; stored().observationHash = requestFingerprint(value);
+      const receipt = await verifier.read(stored().id);
+      return verifier.verify({ profile, capability: 'embedding', status: 'supported', source: 'connection_test',
+        evidenceHash: textProbeEvidenceHash(receipt), checkedAt: new Date(value.checkedAt), expiresAt: new Date(value.expiresAt), details: {
+          receiptId: receipt.id, verification: { evidence: 'live', methodVersion: EMBEDDING_PROBE_METHOD, capability: 'embedding', profileFingerprint: capabilityProfileFingerprint(profile) } } }); };
+    assert.equal(await verify(live), true);
+    const missing = structuredClone(live); delete missing.embeddingEvidence; assert.equal(await verify(missing), false);
+    assert.equal(await verify({ ...live, embeddingEvidence: { ...live.embeddingEvidence, inputHash: 'a'.repeat(64) } }), false);
+  } finally { stored().observation = oldObservation; stored().observationHash = oldHash; }
+  assert.equal((await http.publish(request, { ...key, capability: 'embedding' })).inputRef, original.inputRef);
+  assert.equal((await http.reconcile(request, key)).kind, 'not_started'); assert.equal(sends, 1);
 });
 
 test('text request host distinguishes an early response disconnect from normal body or response close', async () => {

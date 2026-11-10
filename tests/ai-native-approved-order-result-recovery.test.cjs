@@ -45,6 +45,24 @@ for (const [label, change] of [
   assert.deepEqual((await h.compose().reconcile(h.command)).order, h.first.order);
 });
 
+for (const method of ['submit', 'reconcile']) test(`${method} cannot replace the original result with another quote's order`, async () => {
+  const h = await committed(), original = h.state.records.rentalOrder[0];
+  const other = { ...structuredClone(original), id: 'other-order', quoteId: 'other-quote' };
+  h.state.records.rentalOrder.push(other);
+  const receipt = h.state.records.aiApprovalConsumption[0], originalRef = receipt.resultRef;
+  receipt.resultRef = other.id;
+  // Same tenant/workspace/current read permission and self-consistent result ID
+  // do not make a different quote the original approved business result.
+  await assert.rejects(h.compose()[method](h.command), unknown);
+  oneEffect(h); assert.equal(h.state.records.rentalOrder.length, 2);
+  assert.equal(h.state.records.aiApprovalConsumption[0].resultRef, other.id, 'read-only reconciliation never repairs or rewrites a receipt');
+  // The transaction fixture publishes a cloned committed state after reads;
+  // restore the current row, not a stale object captured before that read.
+  h.state.records.aiApprovalConsumption[0].resultRef = originalRef;
+  assert.deepEqual((await h.compose().reconcile(h.command)).order, h.first.order);
+  oneEffect(h); assert.equal(h.state.records.rentalOrder.length, 2);
+});
+
 for (const [label, change] of [
   ['workspace changed', state => { state.workspace = 'workspace-b'; }],
   ['membership withdrawn', state => { state.member = false; }]
@@ -66,6 +84,16 @@ test('Core read failure is unknown while current read authority remains and neve
   const h = await committed();
   h.dependencies.core.getOrder = async () => { throw Error('private result-read credential'); };
   await assert.rejects(h.compose().reconcile(h.command), e => unknown(e) && !e.cause && !String(e.stack).includes('credential'));
+  oneEffect(h);
+});
+
+test('later order state and rental period remain readable through the immutable original quote', async () => {
+  const h = await committed(), row = h.state.records.rentalOrder[0];
+  row.status = 'renting'; row.effectiveEndAt = '2026-11-15T09:00:00Z';
+  const result = await h.compose().reconcile(h.command);
+  assert.equal(result.replayed, true); assert.equal(result.order.id, h.first.order.id);
+  assert.equal(result.order.quoteId, h.first.order.quoteId);
+  assert.equal(result.order.status, 'renting'); assert.equal(result.order.effectiveEndAt, row.effectiveEndAt);
   oneEffect(h);
 });
 

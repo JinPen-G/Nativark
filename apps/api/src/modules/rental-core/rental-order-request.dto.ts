@@ -35,6 +35,7 @@ import {
   type ApplyRentalOrderChangeRequest,
   type PreviewRentalOrderChangeRequest,
   type RentalOrderExchangeInspectionSnapshot,
+  type RentalExchangePickupInspectionRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
   type RentalDeliveryAddressDraft,
@@ -56,6 +57,7 @@ import {
 import { Transform, Type } from "class-transformer";
 import {
   ArrayNotEmpty,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -949,7 +951,14 @@ export class InitiateRentalFundingDto implements InitiateRentalFundingRequest {
 }
 
 /** 追加、抵扣/转扣、退款：都带金额与幂等键。 */
+export class OfflineDepositEvidenceDto {
+  @IsString() @IsNotEmpty() @MaxLength(191) sourceEventId!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) evidenceFileAssetId!: string;
+}
+
 export class RentalFundingAmountDto implements RentalFundingAmountRequest {
+  @IsOptional() @ValidateNested() @Type(() => OfflineDepositEvidenceDto)
+  offlineDeposit?: OfflineDepositEvidenceDto;
   @IsIn(FUNDING_INSTRUMENTS)
   instrument!: (typeof FUNDING_INSTRUMENTS)[number];
 
@@ -1126,6 +1135,18 @@ export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequ
   @IsOptional() @ValidateNested() @Type(() => RentalOrderExchangeInspectionSnapshotDto)
   inspectionSnapshot?: RentalOrderExchangeInspectionSnapshotDto;
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) cancelServiceOccurrenceIds?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => RentalQuoteServiceInputDto)
+  services?: RentalQuoteServiceInputDto[];
+}
+
+export class RentalExchangePickupInspectionDto implements RentalExchangePickupInspectionRequest {
+  @IsString() @IsNotEmpty() @MaxLength(191) templateId!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) templateVersion!: string;
+  @IsString() @Matches(/^[a-f0-9]{64}$/u) confirmationHash!: string;
+  @IsObject() results!: Record<string, unknown>;
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) @MaxLength(191, { each: true }) attachments?: string[];
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(191) handoverSignatureFileAssetId?: string;
+  @IsBoolean() customerConfirmed!: boolean;
 }
 
 export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
@@ -1151,6 +1172,12 @@ export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest 
   @IsOptional() @ValidateNested() @Type(() => RentalOrderExchangeInspectionSnapshotDto)
   inspectionSnapshot?: RentalOrderExchangeInspectionSnapshotDto;
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) cancelServiceOccurrenceIds?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => RentalQuoteServiceInputDto)
+  services?: RentalQuoteServiceInputDto[];
+  @IsOptional() @IsString() @Matches(/^[a-f0-9]{64}$/u)
+  serviceConfirmationHash?: string;
+  @IsOptional() @ValidateNested() @Type(() => RentalExchangePickupInspectionDto)
+  replacementPickupInspection?: RentalExchangePickupInspectionDto;
 
   @IsString()
   @IsNotEmpty()

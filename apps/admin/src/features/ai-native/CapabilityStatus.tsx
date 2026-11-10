@@ -1,4 +1,4 @@
-import type { AiGatewayCapabilityAssessmentDraft } from "../../../../../packages/shared/src/ai-gateway-draft";
+import type { AiGatewayCapabilityAssessmentDraft } from "@rental-os/shared";
 export interface CapabilityStatusProps {
   assessments?: readonly AiGatewayCapabilityAssessmentDraft[];
 }

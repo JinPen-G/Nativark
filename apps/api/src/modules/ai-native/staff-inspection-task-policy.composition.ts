@@ -115,12 +115,14 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
           return (await resolve()).context;
         }
       }, clock);
+      // Save exact CAS evidence with the policy, not from a later current-row
+      // read. This records neither inspection submission nor a new model grant.
       const result = mode === 'read' ? await repository.read(original.taskId, command.operation)
-        : mode === 'clear' ? await repository.clear(original.taskId, command.operation, clear.parse(command).expectedRevision)
+        : mode === 'clear' ? await repository.clear(original.taskId, command.operation, clear.parse(command).expectedRevision, true)
           : await repository.put({ taskId: original.taskId, operation: command.operation,
             requiredPermissions: original.permissions,
             expiresAt: new Date(Math.min(original.expiresAt.getTime(), clock().getTime() + selected.ttlMs)) },
-          configure.parse(command).expectedRevision);
+          configure.parse(command).expectedRevision, true);
       try { await resolve(); }
       catch (error) {
         if (mode !== 'read') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });

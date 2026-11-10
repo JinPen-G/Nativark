@@ -75,9 +75,25 @@ export class PrismaTaskRecoverySnapshotRepository implements AiTaskRecoverySnaps
         };
         if (plan) scoped(plan);
         for (const row of steps) scoped(row);
-        for (const row of [...artifacts, ...charges]) {
+        for (const row of artifacts) {
           scoped(row);
           if (!steps.some(step => step.id === row.stepId && step.actionId === row.actionId && step.requestFingerprint === row.stepFingerprint)) {
+            throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+          }
+        }
+        for (const row of charges) {
+          scoped(row);
+          if (row.stepId === null) {
+            // The existing resource contract permits original Run active time.
+            // Project it through cumulative counters only, never as a made-up
+            // Step, model invocation, business action or success receipt.
+            const amount = uint64(row.amount);
+            if (row.actualAmount !== null) uint64(row.actualAmount);
+            if (row.resource !== 'ACTIVE_MS' || row.actionId !== null || row.stepFingerprint !== null || row.gatewayInvocationId !== null
+              || !id.safeParse(row.chargeId).success || !chargeStatuses.safeParse(row.status.toLowerCase()).success
+              || amount === '0' || (row.actualAmount !== null && row.actualAmount > row.amount)
+              || row.status === 'RECORDED' && (row.actualAmount === null || row.evidenceRef === null)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+          } else if (!steps.some(step => step.id === row.stepId && step.actionId === row.actionId && step.requestFingerprint === row.stepFingerprint)) {
             throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
           }
         }

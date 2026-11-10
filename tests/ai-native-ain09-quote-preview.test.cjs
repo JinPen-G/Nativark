@@ -8,14 +8,14 @@ const scope = { kind: 'workspace', tenantId: 'tenant-quote', workspaceId: 'works
 const context = { contractVersion: 'ain-test', requestId: 'req-quote', authorizedAt: '2026-10-05T01:00:00.000Z', audience: 'operator', actor: { kind: 'user', userId: 'operator-quote' }, scope };
 const input = { customerType: 'personal', customerId: 'customer-quote', fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: 'location-quote', startAt: '2026-10-10T09:00:00+08:00', endAt: '2026-10-11T09:00:00+08:00', lines: [{ itemGroupId: 'group-quote', quantity: 2, pricingUnit: 'day_24h' }] };
 const business = { profile: {}, category: {}, settings: {}, groups: [], couponTemplates: [], locations: [], operators: [] };
-function quote() { return { id: 'quote-1', tenantId: scope.tenantId, quoteNo: 'RQ-1', request: input, chargeLines: [{ code: 'rental:camera', name: '租金', type: 'rental', amount: 200 }], rentalAmount: 200, discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 500, preAuthAmount: 0, payableAmount: 200, receivableAmount: 700, pricingPlanVersion: '3.0', priceVersionId: 'price-v3', priceVersion: '3', ruleVersion: '2.1', calendarVersion: '2026:v5', pricingContext: { timeZone: 'Asia/Shanghai' }, expiresAt: '2026-10-05T02:00:00.000Z', createdAt: '2026-10-05T01:00:00.000Z' }; }
+function quote() { return { id: 'quote-1', tenantId: scope.tenantId, quoteNo: 'RQ-1', currency: 'CNY', request: input, chargeLines: [{ code: 'rental:camera', name: '租金', type: 'rental', amount: 200 }], rentalAmount: 200, discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 500, preAuthAmount: 0, payableAmount: 200, receivableAmount: 700, pricingPlanVersion: '3.0', priceVersionId: 'price-v3', priceVersion: '3', ruleVersion: '2.1', calendarVersion: '2026:v5', pricingContext: { timeZone: 'Asia/Shanghai' }, expiresAt: '2026-10-05T02:00:00.000Z', createdAt: '2026-10-05T01:00:00.000Z' }; }
 const authority = { withQuote: async (value, consume) => { assert.deepEqual(value, input); return consume(context); } };
 
 test('quote preview calls the formal Core pricing entry and exposes snapshot evidence without reserving inventory', async () => {
   let calls = 0;
   const service = new AiQuotePreviewService({ createQuote: async (tenantId, receivedContext, receivedInput) => { calls++; assert.equal(tenantId, scope.tenantId); assert.deepEqual(receivedContext, business); assert.deepEqual(receivedInput, input); return quote(); } }, { current: async receivedScope => { assert.deepEqual(receivedScope, scope); return business; } }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
   const result = await service.preview(input);
-  assert.equal(result.status, 'quoted'); assert.equal(result.quote.reservation, 'not_reserved'); assert.equal(result.quote.priceVersionId, 'price-v3'); assert.equal(result.quote.timeZone, 'Asia/Shanghai'); assert.equal(calls, 1);
+  assert.equal(result.status, 'quoted'); assert.equal(result.quote.reservation, 'not_reserved'); assert.equal(result.quote.priceVersionId, 'price-v3'); assert.equal(result.quote.timeZone, 'Asia/Shanghai'); assert.equal(result.quote.currency, 'CNY'); assert.equal(calls, 1);
 });
 
 test('explicit personal booking identity reaches Core unchanged, without inferred enterprise rights', async () => {
@@ -51,6 +51,11 @@ test('expired Core quote is not presented as a usable quote', async () => {
 
 test('a Core quote for a different request is not returned as the current quote', async () => {
   const service = new AiQuotePreviewService({ createQuote: async () => ({ ...quote(), request: { ...input, endAt: '2026-10-12T09:00:00+08:00' } }) }, { current: async () => business }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
+  await assert.rejects(() => service.preview(input), error => error.code === 'INVALID_RESPONSE');
+});
+
+for (const field of ['currency', 'pricingContext']) test(`new Core quote missing ${field} is not filled from current settings`, async () => {
+  const service = new AiQuotePreviewService({ createQuote: async () => { const row=quote(); delete row[field]; return row; } }, { current: async () => business }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
   await assert.rejects(() => service.preview(input), error => error.code === 'INVALID_RESPONSE');
 });
 

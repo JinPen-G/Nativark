@@ -4,6 +4,7 @@ import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionDraftState
 import { boundedText } from "./display-format";
 import type { NativeAiHost } from "./ai-task-workbench/index";
 
+type InspectionDisplayTemplate = Pick<RentalInspectionTemplate, 'id' | 'version' | 'stage' | 'fields'>;
 /** Internal display binding, not an HTTP DTO or an authorization source. */
 export interface InspectionHostDetail {
   draftId: string; revision: number; status: string; target: AiInspectionTarget;
@@ -39,7 +40,7 @@ export interface StaffInspectionHost {
     save?: (operationId: string) => Promise<unknown>;
     reconcileSave?: (operationId: string) => Promise<AiInspectionReceiptLookup>;
   };
-  templates: { read: (target: AiInspectionTarget) => Promise<{ bindingFingerprint: string; template: RentalInspectionTemplate }> };
+  templates: { read: (target: AiInspectionTarget) => Promise<{ bindingFingerprint: string; template: InspectionDisplayTemplate }> };
   drafts: {
     read: (request: AiInspectionTarget & { draftId: string }) => Promise<InspectionHostDetail>;
     edit?: (request: AiInspectionDraftEditRequest) => Promise<unknown>;
@@ -78,7 +79,7 @@ export class StaffInspectionHostBinding {
   private shown = false;
   private pending = false;
   private detail?: InspectionHostDetail;
-  private template?: RentalInspectionTemplate;
+  private template?: InspectionDisplayTemplate;
   private uncertain?: PendingInspectionCommand;
   private receipt?: InspectionSubmissionObservation;
   private recognitionSaveCommand?: Pick<AiInspectionDraftEditRequest, "draftId" | "operationId" | "expectedRevision">;

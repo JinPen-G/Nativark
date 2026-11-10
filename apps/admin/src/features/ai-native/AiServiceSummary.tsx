@@ -1,4 +1,4 @@
-import type { AiTenantModelSettingsSummaryDraft } from "../../../../../packages/shared/src/ai-usage-draft";
+import type { AiTenantModelSettingsSummaryDraft } from "@rental-os/shared";
 
 export interface AiServiceSummaryProps {
   summary?: AiTenantModelSettingsSummaryDraft | null;

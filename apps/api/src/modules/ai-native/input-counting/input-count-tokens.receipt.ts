@@ -50,6 +50,9 @@ const countTokensReceiptFields = z.object({
 export const countTokensReceiptSchema = countTokensReceiptFields.refine(value => (value.state === 'observed') === (value.inputTokens !== undefined)
   && (value.state === 'failed') === (value.failureCode !== undefined));
 export type CountTokensReceipt = z.infer<typeof countTokensReceiptSchema>;
+export const countTokensDispatchClaimSchema = countTokensReceiptFields.pick({ tenantId: true, workspaceId: true,
+  actorId: true, callId: true, registrationHash: true, intentHash: true, configurationHash: true, countRequestHash: true })
+  .extend({ reservationId: identifier.max(36) }).strict();
 export type CountTokensReceiptDb = Pick<PrismaClient, 'operationLog'>;
 /** Only a successful original-key lookup returning no row proves absence.
  * Storage/authorization errors must never be treated as a missing receipt. */
@@ -63,6 +66,9 @@ export function countTokensOperationId(value: Pick<CountTokensReceipt, 'tenantId
     value.tenantId, value.workspaceId, value.actorId, value.callId])).digest('hex');
 }
 export function countTokensReference(receiptId: string) { return `count-tokens:${receiptId}`; }
+export function countTokensDispatchOperationId(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>) {
+  return createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1', countTokensOperationId(value)])).digest('hex');
+}
 /** Stable document hash for evidence provenance: the receipt minus the
  * admission reservation id, which the budget account already attests. */
 export function countTokensReceiptDocumentHash(value: CountTokensReceipt) {
@@ -80,7 +86,7 @@ export class PrismaCountTokensReceipts {
   async claimDispatch(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'
     | 'registrationHash' | 'intentHash' | 'configurationHash' | 'countRequestHash'> & { reservationId: string }) {
     const binding = structuredClone(value);
-    const id = createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1', countTokensOperationId(binding)])).digest('hex');
+    const id = countTokensDispatchOperationId(binding);
     const action = 'ai.model.count_tokens.dispatch';
     try {
       const row = await this.db.operationLog.create({ data: { id, action, tenantId: binding.tenantId,
@@ -98,13 +104,10 @@ export class PrismaCountTokensReceipts {
   async readDispatchClaim(value: Pick<CountTokensReceipt, 'tenantId' | 'workspaceId' | 'actorId' | 'callId'>
     & Partial<Pick<CountTokensReceipt, 'registrationHash' | 'intentHash' | 'configurationHash' | 'countRequestHash'> & { reservationId: string }>) {
     const binding = structuredClone(value);
-    const id = createHash('sha256').update(JSON.stringify(['ai-count-tokens-dispatch-1',
-      countTokensOperationId(binding)])).digest('hex');
+    const id = countTokensDispatchOperationId(binding);
     const row = structuredClone(await this.db.operationLog.findUnique({ where: { id } }));
     if (!row) return null;
-    const detail = countTokensReceiptFields.pick({ tenantId: true, workspaceId: true, actorId: true,
-      callId: true, registrationHash: true, intentHash: true, configurationHash: true, countRequestHash: true })
-      .extend({ reservationId: identifier.max(36) }).strict().safeParse(row.detail);
+    const detail = countTokensDispatchClaimSchema.safeParse(row.detail);
     if (row.id !== id || row.action !== 'ai.model.count_tokens.dispatch' || !detail.success
       || row.tenantId !== binding.tenantId || row.workspaceId !== binding.workspaceId || row.userId !== binding.actorId
       || Object.entries(binding).some(([key, value]) => detail.data[key as keyof typeof detail.data] !== value))

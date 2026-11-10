@@ -7,11 +7,22 @@ export const AI_TASK_INPUT_FIELD_IDS_DRAFT = Object.freeze([
 ] as const);
 export type AiTaskInputFieldIdDraft = typeof AI_TASK_INPUT_FIELD_IDS_DRAFT[number];
 type ChoiceId = "customer_selection" | "item_selection" | "pickup_location" | "return_location" | "fulfillment_selection" | "pricing_unit_selection" | "delivery_address_selection" | "enterprise_selection" | "enterprise_payer_selection";
+export const AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION = "ain-quote-row-target-1" as const;
+/** Server-prepared original candidate binding, never client selection or authority.
+ * The quote consumer checks the normalized pre-round fingerprint and row bounds. */
+export interface AiTaskInputQuoteRowTargetDraft {
+  bindingVersion: typeof AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION;
+  kind: "quote_item";
+  rowIndex: number;
+  candidateInputFingerprint: string;
+}
 interface FieldBase { required: boolean; label: string }
 export type AiTaskInputFieldDraft = FieldBase & (
-  | { fieldId: ChoiceId; kind: "choice"; options: { value: string; label: string }[] }
-  | { fieldId: "quantity"; kind: "integer"; minimum: number; maximum: number }
-  | { fieldId: "starts_at" | "ends_at" | "usage_quantity" | "clarification_text"; kind: "text"; maxLength: number }
+  | { fieldId: Exclude<ChoiceId, "item_selection" | "pricing_unit_selection">; kind: "choice"; options: { value: string; label: string }[]; target?: never }
+  | { fieldId: "item_selection" | "pricing_unit_selection"; kind: "choice"; options: { value: string; label: string }[]; target?: AiTaskInputQuoteRowTargetDraft }
+  | { fieldId: "quantity"; kind: "integer"; minimum: number; maximum: number; target?: AiTaskInputQuoteRowTargetDraft }
+  | { fieldId: "starts_at" | "ends_at" | "clarification_text"; kind: "text"; maxLength: number; target?: never }
+  | { fieldId: "usage_quantity"; kind: "text"; maxLength: number; target?: AiTaskInputQuoteRowTargetDraft }
 );
 export interface AiTaskInputContractDraft {
   draftVersion: typeof AI_TASK_INPUT_DRAFT_VERSION;
@@ -55,23 +66,42 @@ const id = (value: unknown, max = 191): value is string => typeof value === "str
 const int = (value: unknown, min: number, max: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 const fieldId = (value: unknown): value is AiTaskInputFieldIdDraft => typeof value === "string" && (AI_TASK_INPUT_FIELD_IDS_DRAFT as readonly string[]).includes(value);
 
+/** Structural data binding only; original server provenance and row existence
+ * remain the quote consumer's responsibility. */
+export function isAiTaskInputQuoteRowTargetDraft(value: unknown): value is AiTaskInputQuoteRowTargetDraft {
+  return object(value) && closed(value, ["bindingVersion", "kind", "rowIndex", "candidateInputFingerprint"])
+    && value.bindingVersion === AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION && value.kind === "quote_item"
+    && int(value.rowIndex, 0, Number.MAX_SAFE_INTEGER) && typeof value.candidateInputFingerprint === "string"
+    && /^[a-f0-9]{64}$/u.test(value.candidateInputFingerprint);
+}
+
 export function isAiTaskInputContractDraft(value: unknown): value is AiTaskInputContractDraft {
   if (!object(value) || !closed(value, ["draftVersion", "code", "version", "fields"])
     || value.draftVersion !== AI_TASK_INPUT_DRAFT_VERSION || !id(value.code, 64) || !id(value.version, 64)
     || !Array.isArray(value.fields) || value.fields.length < 1 || value.fields.length > 8) return false;
-  const seen = new Set<string>();
-  return value.fields.every(field => {
+  const seen = new Set<string>(), candidateFingerprints = new Set<string>();
+  const valid = value.fields.every(field => {
     if (!object(field) || !fieldId(field.fieldId) || seen.has(field.fieldId) || typeof field.required !== "boolean" || !text(field.label, 160)) return false;
     seen.add(field.fieldId);
+    const targeted = Object.prototype.hasOwnProperty.call(field, "target");
+    if (targeted) {
+      if (!["item_selection", "quantity", "pricing_unit_selection", "usage_quantity"].includes(field.fieldId)
+        || !isAiTaskInputQuoteRowTargetDraft(field.target)) return false;
+      candidateFingerprints.add(field.target.candidateInputFingerprint);
+    }
+    const keys = (specific: string[]) => ["fieldId", "kind", "required", "label", ...specific, ...(targeted ? ["target"] : [])];
     if (field.kind === "choice") return ["customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection"].includes(field.fieldId)
-      && closed(field, ["fieldId", "kind", "required", "label", "options"]) && Array.isArray(field.options) && field.options.length > 0 && field.options.length <= 50
+      && closed(field, keys(["options"])) && Array.isArray(field.options) && field.options.length > 0 && field.options.length <= 50
       && field.options.every(option => object(option) && closed(option, ["value", "label"]) && id(option.value) && text(option.label, 160))
       && new Set(field.options.map(option => option.value)).size === field.options.length;
-    if (field.kind === "integer") return field.fieldId === "quantity" && closed(field, ["fieldId", "kind", "required", "label", "minimum", "maximum"])
+    if (field.kind === "integer") return field.fieldId === "quantity" && closed(field, keys(["minimum", "maximum"]))
       && int(field.minimum, 1, 1000000) && int(field.maximum, field.minimum, 1000000);
     return field.kind === "text" && ["starts_at", "ends_at", "usage_quantity", "clarification_text"].includes(field.fieldId)
-      && closed(field, ["fieldId", "kind", "required", "label", "maxLength"]) && int(field.maxLength, 1, 2048);
+      && closed(field, keys(["maxLength"])) && int(field.maxLength, 1, 2048);
   });
+  // One round binds one pre-answer candidate. Field IDs stay unique; the same
+  // field for another row is offered in a later bounded round, not privately encoded.
+  return valid && candidateFingerprints.size <= 1;
 }
 
 export function isAiTaskInputSubmissionDraft(value: unknown): value is AiTaskInputSubmissionDraft {

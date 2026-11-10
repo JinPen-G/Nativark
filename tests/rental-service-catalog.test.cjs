@@ -8,7 +8,10 @@ require("ts-node").register({
 const {
   resolveQuoteServices,
   serviceBillingUnits,
-  mandatoryRuleHit
+  mandatoryRuleHit,
+  assertExchangeServices,
+  resolveExchangeServices,
+  exchangeServiceConfirmationHash
 } = require("../apps/api/src/modules/rental-core/rental-service-catalog");
 
 /**
@@ -239,6 +242,54 @@ const rejects = (fn, pattern, label) => {
   assert.equal(resolved.capacityQuantity, 1);
   assert.equal(resolved.serviceLocationId, "loc1");
   ok("实际服务时段：按小时计价与容量预留共用明确的服务地点、开始和结束时间");
+}
+
+// 换货只复核当前准入与原承诺，不把旧可选服务改标强制，不重新计费。
+{
+  const current = service({ code: "EXCHANGE", selectionMode: "mandatory", mandatoryRule: { itemGroupIds: ["g1"] } });
+  const snapshot = resolveQuoteServices([current], ctx({ selections: [{ serviceId: current.id, quantity: 1 }] })).snapshots[0];
+  const original = { ...snapshot, occurrenceId: "original", executionStatus: "not_started", amount: 7, terms: "原条款" };
+  const before = structuredClone(original);
+  assert.deepEqual(assertExchangeServices([current], ctx(), [original], []), [original]);
+  assert.deepEqual(original, before);
+  const older = { ...original, serviceVersion: "old", termsVersion: "old" };
+  assert.deepEqual(assertExchangeServices([current], ctx(), [older], []), [older], "当前版本不能替换原已锁定条款");
+  assert.deepEqual(assertExchangeServices([{ ...current, status: "disabled" }], ctx(), [older], []), [older], "停用不改写原承诺");
+  rejects(() => assertExchangeServices([current], ctx(), [{ ...original, executionStatus: "completed" }], []), /须先选择/u, "已完成服务不能冒充新商品待履约承诺");
+  rejects(() => assertExchangeServices([current], ctx({ itemGroupIds: ["g1", "g2"] }), [{ ...original, applicableItemGroupIds: ["g1"] }], []), /须先选择/u, "仅旧商品范围不能覆盖替换后整单要求");
+  for (const patch of [{ requiredByRule: false }, { serviceVersion: "" }, { termsVersion: "" },
+    { scheduledEndAt: ctx().startAt }, { applicableItemGroupIds: ["other"] }, { occurrenceId: undefined },
+    { workspaceId: "other" }, { quantity: 0 }]) {
+    rejects(() => assertExchangeServices([current], ctx(), [{ ...original, ...patch }], []), /须先选择|不适用|稳定来源/u, "原服务缺少换货覆盖");
+  }
+  rejects(() => assertExchangeServices([current], ctx(), [original], ["original"]), /须先选择/u, "不能取消仍命中的强制服务");
+  const optional = service({ code: "OPTIONAL" });
+  assert.equal(assertExchangeServices([optional], ctx(), [{ ...original, serviceId: optional.id, executionStatus: "completed" }], []).length, 0,
+    "已完成服务保留历史，但不再次核占待履约容量");
+  ok("换货服务：原条款/金额不变；强制覆盖、稳定来源、空间及数量拒绝边界保留");
+}
+
+{
+  const current = service({ code: "NEW", selectionMode: "mandatory", mandatoryRule: { itemGroupIds: ["g1"] } });
+  const selection = { serviceId: current.id, quantity: 1, serviceLocationId: "loc1", scheduledStartAt: "2026-06-02T02:00:00.000Z", scheduledEndAt: ctx().endAt };
+  const resolved = resolveExchangeServices([current], ctx(), [], [], [selection]);
+  assert.equal(resolved.snapshots[0].requiredByRule, true);
+  rejects(() => resolveExchangeServices([current], ctx(), [], [], [{ ...selection, scheduledStartAt: "2026-05-31T02:00:00.000Z" }]), /不能追溯/u, "新增保障不能追溯原事件");
+  rejects(() => resolveExchangeServices([current], ctx(), [], [], [{ ...selection, serviceLocationId: undefined }]), /地点和时段/u, "服务时段地点不能猜测");
+  const old = { ...resolved.snapshots[0], occurrenceId: "old", executionStatus: "not_started" };
+  rejects(() => resolveExchangeServices([current], ctx(), [old], [], [selection]), /重复收费/u, "原承诺未取消不得重买同时间服务");
+  assert.equal(resolveExchangeServices([current], ctx(), [old], ["old"], [selection]).totalAmount, resolved.totalAmount);
+  const completed = { ...old, executionStatus: "completed", serviceType: "support" };
+  assert.equal(resolveExchangeServices([current], ctx(), [completed], [], [selection]).snapshots.length, 1,
+    "已完成的原安装/作业不阻止替换商品独立新服务");
+  rejects(() => resolveExchangeServices([current], ctx(), [{ ...completed, serviceType: "damage_waiver" }], [], [selection]), /重复收费/u,
+    "保障购买完成仍须保留实际有效期防重复");
+  const binding = { orderId: "o", expectedUpdatedAt: "r", orderLineId: "l", replacementItemGroupId: "g1", cancelledIds: [] };
+  const hash = exchangeServiceConfirmationHash(binding, resolved.snapshots);
+  for (const patch of [{ terms: "变更" }, { serviceVersion: "2" }, { amount: 0 }, { quantity: 2 }]) {
+    assert.notEqual(exchangeServiceConfirmationHash(binding, [{ ...resolved.snapshots[0], ...patch }]), hash, "新服务正文变化必须重新确认");
+  }
+  ok("换货新增服务：显式时段、强制规则、原重叠承诺和确认指纹边界通过");
 }
 
 console.log("\nMKT-02A 增值服务目录与条款快照专项：全部通过");

@@ -151,7 +151,7 @@ export interface AiTaskEventResetDraft {
  * model text and original usage have separate current-authorized reads. No
  * execution or lease; cursor continuation is never authority. */
 export const AI_TASK_CENTER_HTTP_DRAFT = Object.freeze({ basePath: "ai-native/task-center", method: "POST",
-  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", confirmation: "confirmation",
+  list: "list", snapshot: "snapshot", events: "events", result: "result", usage: "usage", usageSummary: "usage-summary", performance: "performance", visibleReport: "visible-report", outcomes: 'outcomes', confirmation: "confirmation",
   review: "review", decision: "decision", decisionReceipt: "decision-receipt", business: "business", continue: "continue", source: "source",
   stop: 'stop', stopReceipt: 'stop-receipt', input: 'input', resumeInput: 'input/resume',
   inputReceipt: 'input/receipt', continueInput: 'input/continue' } as const);

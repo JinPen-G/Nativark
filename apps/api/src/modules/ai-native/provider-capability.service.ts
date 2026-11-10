@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiProfileCapability, AiProviderProfileRecord } from './provider-profile.ports';
@@ -89,11 +90,7 @@ export class ProviderCapabilityService {
     try { return await this.repository.upsert(input); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
-  async preflight(value: AiProviderProfileRecord, requested: readonly AiProfileCapability[]): Promise<CapabilityPreflight> {
-    const profile = this.profile(value);
-    const parsed = z.array(capabilityNameSchema).min(1).max(8).safeParse(requested);
-    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
-    const required = [...new Set(parsed.data)];
+  private async evidence(profile: AiProviderProfileRecord) {
     let rows;
     try {
       const records = this.snapshot(await this.repository.list(this.snapshot(profile)));
@@ -107,6 +104,14 @@ export class ProviderCapabilityService {
       if (seen.has(key)) throw new ModelGatewayError('CONFIG_INVALID');
       seen.add(key);
     }
+    return rows;
+  }
+
+  async preflight(value: AiProviderProfileRecord, requested: readonly AiProfileCapability[]): Promise<CapabilityPreflight> {
+    const profile = this.profile(value);
+    const parsed = z.array(capabilityNameSchema).min(1).max(8).safeParse(requested);
+    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+    const required = [...new Set(parsed.data)], rows = await this.evidence(profile);
     const approved = new Map<AiProfileCapability, RecordCapabilityEvidenceInput>(), stale = new Set<AiProfileCapability>();
     for (const row of rows) {
       if (!required.includes(row.capability)) continue;
@@ -116,6 +121,15 @@ export class ProviderCapabilityService {
         evidenceHash: row.evidenceHash, checkedAt: row.checkedAt, expiresAt: row.expiresAt, details: row.details
       };
       if (row.status === 'supported' && await this.verified(input)) approved.set(row.capability, input);
+    }
+    if (approved.size) {
+      // Receipt verification yields to persistence. A concurrent failed probe
+      // can replace this revision's evidence without changing the Profile.
+      // Compare the exact required rows, including dates, after all verifiers;
+      // never retry or silently switch to the replacement proof in this call.
+      const relevant = (records: typeof rows) => records.filter(row => required.includes(row.capability)
+        && row.observedRevision === profile.configRevision).sort((a, b) => a.capability < b.capability ? -1 : a.capability > b.capability ? 1 : 0);
+      if (!isDeepStrictEqual(relevant(rows), relevant(await this.evidence(profile)))) throw new ModelGatewayError('CONFIG_INVALID');
     }
     const now = this.now(), current = new Set<AiProfileCapability>();
     for (const [capability, input] of approved) {

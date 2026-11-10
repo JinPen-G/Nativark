@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import type { AiExecutionContext, RentalPricingRate } from '@rental-os/shared';
+import type { AiExecutionContext, RentalFulfillmentLocation, RentalPricingRate } from '@rental-os/shared';
+import type { AiBusinessReadAuthority } from '../business-read-route.authority';
+import { assertAiReadContextBinding } from './read-context-binding';
 import { isDeepStrictEqual } from 'node:util';
 import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
@@ -12,6 +14,12 @@ import { quoteAddressFingerprint, quoteAddressIdentity, type AiQuoteAddressSourc
 const name = z.string().trim().min(1).max(191);
 const id = name.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const AI_QUOTE_CANDIDATE_LIMITS = Object.freeze({ lines: 50, quantity: 10000, usageQuantity: 1000000 });
+/** Preparation-only binding of an enclosing server principal. Reuse the
+ * original Core context return contract; legacy R1 source callers remain intact. */
+export interface AiQuotePreparationContextSource extends AiQuoteCoreContextSource {
+  current(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>,
+    expectedContext?: AiExecutionContext): ReturnType<AiQuoteCoreContextSource['current']>;
+}
 export const aiQuoteCandidateInputSchema = z.object({
   customerType: z.enum(['personal', 'corporate']), customerId: name.optional(), customerName: name.optional(),
   // Candidate intent may be incomplete. Only the formal preview schema accepts
@@ -62,12 +70,27 @@ export class AiQuoteCandidatePreparationService {
     members: Pick<AiMembershipCandidateReadFactsService, 'read'> & Partial<Pick<AiMembershipCandidateReadFactsService, 'readBookingOptions'>>;
     addresses?: AiQuoteAddressSource;
     rates?: { read(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>,
-      context: Awaited<ReturnType<AiQuoteCoreContextSource['current']>>, at: string): Promise<readonly RentalPricingRate[]> };
-  }, private readonly contexts: AiQuoteCoreContextSource, private readonly clock: () => Date = () => new Date()) {
+      context: Awaited<ReturnType<AiQuoteCoreContextSource['current']>>, at: string,
+      expectedContext?: AiExecutionContext): Promise<readonly Pick<RentalPricingRate, 'itemGroupId' | 'pricingGroupId' | 'unit'>[]> };
+  }, private readonly contexts: AiQuotePreparationContextSource, private readonly clock: () => Date = () => new Date(),
+    private readonly aggregateAuthority?: AiBusinessReadAuthority) {
     if (typeof readers?.catalog?.read !== 'function' || typeof readers?.members?.read !== 'function'
-      || typeof contexts?.current !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      || typeof contexts?.current !== 'function'
+      || (aggregateAuthority !== undefined && typeof aggregateAuthority?.withRead !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
   }
   async prepare(value: unknown, expectedContext?: AiExecutionContext) {
+    // Standard composition resolves one original principal before any source.
+    // Leaf Guards still authorize each read and the enclosing Guard rechecks at
+    // completion. Legacy constructors retain their original protected sources;
+    // a supplied server context is a binding assertion, never a grant.
+    if (!this.aggregateAuthority) return this.prepareBound(value, expectedContext);
+    const snapshot = structuredClone(value), expected = expectedContext && structuredClone(expectedContext);
+    return this.aggregateAuthority.withRead('quote_context', {}, async context => {
+      assertAiReadContextBinding(context, expected);
+      return this.prepareBound(snapshot, context);
+    });
+  }
+  private async prepareBound(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = aiQuoteCandidateInputSchema.safeParse(value);
     if (!parsed.success) {
       const missingFields = [...new Set(parsed.error.issues.map(row => row.path.join('.') || 'request'))];
@@ -75,8 +98,12 @@ export class AiQuoteCandidatePreparationService {
         reason: 'invalid_or_missing_input', action: 'supply_valid_value', candidates: [] })) };
     }
     const input = parsed.data;
-    if (input.customerType === 'corporate') return { status: 'qualification_required' as const, reason: 'enterprise_identity_reader_unavailable' as const,
-      clarifications: [{ field: 'customerId', reason: 'trusted_enterprise_qualification_required', action: 'use_original_qualification_flow', candidates: [] }] };
+    // The original member quote requires a personal user, with an optional
+    // current enterprise-employee identity. Do not invent a direct corporate
+    // user path or silently rewrite the requested customer type.
+    if (input.customerType === 'corporate') return { status: 'unavailable' as const, reason: 'direct_corporate_booking_not_supported' as const,
+      clarifications: [{ field: 'customerId', reason: 'personal_user_with_optional_enterprise_identity_required',
+        action: 'select_personal_user_in_original_booking_flow', candidates: [] }] };
     const memberQuery = { limit: 50, ...(input.customerId ? { customerId: input.customerId } : input.customerName ? { name: input.customerName } : {}) };
     // Exact persisted lookups for the supplied lines; never scan additional
     // pages until a name appears unique. One page per distinct query, <=50
@@ -120,7 +147,7 @@ export class AiQuoteCandidatePreparationService {
       || bookingOptions.audience !== members.audience)) throw new ModelGatewayError('FORBIDDEN');
     if (catalog.scope.kind !== 'workspace' || JSON.stringify(catalog.scope) !== JSON.stringify(members.scope)
       || catalog.audience !== members.audience) throw new ModelGatewayError('FORBIDDEN');
-    const scope = structuredClone(catalog.scope), context = structuredClone(await this.contexts.current(scope));
+    const scope = structuredClone(catalog.scope), context = structuredClone(await this.contexts.current(scope, expectedContext));
     if (context.profile.tenantId !== scope.tenantId || context.settings.tenantId !== scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
     if (!RENTAL_CATEGORY_DEFINITIONS.some(row => row.code === context.profile.categoryCode)
       || context.category.code !== context.profile.categoryCode) return { status: 'unavailable' as const, reason: 'category_unavailable' as const };
@@ -130,7 +157,7 @@ export class AiQuoteCandidatePreparationService {
     let startAt: string | undefined, endAt: string | undefined;
     try { startAt = resolveInstant(input.start ?? '', timeZone, now); endAt = resolveInstant(input.end ?? '', timeZone, now); }
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }
-    const rates = startAt && this.readers.rates ? structuredClone(await this.readers.rates.read(scope, context, startAt)) : undefined;
+    const rates = startAt && this.readers.rates ? structuredClone(await this.readers.rates.read(scope, context, startAt, expectedContext)) : undefined;
     if (rates && !Array.isArray(rates)) throw new ModelGatewayError('INVALID_RESPONSE');
     const clarifications: Array<{ field: string; reason: string; action: string;
       candidates: Array<{ id: string; label: string; phoneMasked?: string }>; truncated?: boolean }> = [];
@@ -139,7 +166,14 @@ export class AiQuoteCandidatePreparationService {
     };
     if (enterprise && bookingOptions && !bookingOptions.options.some(row => row.corporateCustomerId === enterprise.corporateCustomerId)) {
       missingFields.push('bookingIdentity.corporateCustomerId');
-      choose('bookingIdentity.corporateCustomerId', 'current_authorized_enterprise_choice_required',
+      if (enterprise.corporateCustomerId && bookingOptions.truncated) {
+        // A selected enterprise absent from an incomplete page is not proven
+        // ineligible. Preserve that intent; neither chase pages nor suggest a
+        // different payer merely because it appeared in the bounded prefix.
+        clarifications.push({ field: 'bookingIdentity.corporateCustomerId',
+          reason: 'selected_enterprise_not_observed_in_bounded_page', action: 'use_original_qualification_flow',
+          candidates: [], truncated: true });
+      } else choose('bookingIdentity.corporateCustomerId', 'current_authorized_enterprise_choice_required',
         bookingOptions.options.map(row => ({ id: row.corporateCustomerId, label: row.corporateCustomerName })));
     }
     if (enterprise && enterprise.enterpriseContractAndPayer === undefined) {
@@ -155,7 +189,7 @@ export class AiQuoteCandidatePreparationService {
     const pricingUnits = context.category.businessModel.pricingUnits.filter(unit => context.settings.pricing.enabledUnits.includes(unit));
     const unitsFor = (itemGroupId?: string) => pricingUnits.filter(unit => rates?.some(rate =>
       (rate.pricingGroupId ?? rate.itemGroupId) === itemGroupId && rate.unit === unit));
-    const unavailableRates: string[] = [];
+    const unavailableRates: string[] = [], originalGroupBookingFields: string[] = [];
     const lines = (input.items ?? []).map((item, index) => {
       const partialName = !item.itemGroupId && catalog.queryBasis.some(page => 'name' in page.query
         && page.query.name === item.productName && page.truncated);
@@ -165,7 +199,15 @@ export class AiQuoteCandidatePreparationService {
       if (matches.length !== 1) choose(`items.${index}`, partialName ? 'partial_name_candidates_require_explicit_id' : matches.length ? 'ambiguous_product' : 'product_not_resolved',
         (availableMatches.length ? availableMatches : catalog.items.filter(row => row.status === 'enabled')).map(row => ({ id: row.id, label: row.name })), partialName);
       const units = matches.length === 1 ? unitsFor(matches[0].id) : [];
-      if (matches.length === 1 && startAt && !units.length) unavailableRates.push(`items.${index}.pricingUnit`);
+      if (matches.length === 1 && startAt && !units.length) {
+        // A versioned group rate is not a product-ID rate. The current original
+        // candidate/material contracts cannot select pricingGroupId; identify
+        // the real configured dependency without inventing an alias or price.
+        const configuredGroupRate = context.pricingGroups?.some(group => group.status === 'enabled'
+          && group.memberItemGroupIds.includes(matches[0].id)
+          && rates?.some(rate => rate.pricingGroupId === group.id && pricingUnits.includes(rate.unit)));
+        (configuredGroupRate ? originalGroupBookingFields : unavailableRates).push(`items.${index}.pricingUnit`);
+      }
       if (!item.pricingUnit || !units.includes(item.pricingUnit)) {
         missingFields.push(`items.${index}.pricingUnit`);
         choose(`items.${index}.pricingUnit`, 'explicit_supported_pricing_unit_required', units.map(unit => ({ id: unit, label: unit })));
@@ -183,18 +225,32 @@ export class AiQuoteCandidatePreparationService {
     if (!input.customerId || customerCandidates.length !== 1) (customerCandidates.length > 1 ? ambiguous : missingFields).push('customerId');
     if (!input.customerId || customerCandidates.length !== 1) choose('customerId', 'explicit_customer_selection_required',
       customerCandidates.map(row => ({ id: row.customerId, label: row.name, phoneMasked: row.phoneMasked })));
-    const location = (text: string | undefined, selectedId: string | undefined, field: string) => {
-      const rows = context.locations.filter(row => row.status === 'enabled' && (selectedId ? row.id === selectedId : row.name === text));
+    const fulfillmentModes = context.settings.fulfillment.enabledModes.filter(mode => context.category.businessModel.fulfillmentModes.includes(mode));
+    const selectedMode = input.fulfillmentMode && fulfillmentModes.includes(input.fulfillmentMode) ? input.fulfillmentMode : undefined;
+    if (!selectedMode) {
+      missingFields.push('fulfillmentMode'); choose('fulfillmentMode', 'server_supported_mode_required', fulfillmentModes.map(mode => ({ id: mode, label: mode })));
+    }
+    // Mirror only Core's current location-capability requirements for clarification.
+    // This read neither grants admission nor replaces Core's operator/rule/lock checks.
+    const eligibleLocations = (capability?: RentalFulfillmentLocation['capabilities'][number]) => context.locations.filter(row =>
+      row.status === 'enabled' && (!capability || Array.isArray(row.capabilities) && row.capabilities.includes(capability)));
+    const location = (text: string | undefined, selectedId: string | undefined, field: string,
+      capability?: RentalFulfillmentLocation['capabilities'][number]) => {
+      const eligible = eligibleLocations(capability), rows = eligible.filter(row => selectedId ? row.id === selectedId : row.name === text);
       if (rows.length !== 1) (rows.length ? ambiguous : missingFields).push(field);
-      if (rows.length !== 1) choose(field, 'location_selection_required',
-        (rows.length ? rows : context.locations.filter(row => row.status === 'enabled')).map(row => ({ id: row.id, label: row.name })));
+      if (rows.length !== 1) choose(field, capability ? 'location_capability_selection_required' : 'location_selection_required',
+        (rows.length ? rows : eligible).map(row => ({ id: row.id, label: row.name })));
       return rows.length === 1 ? rows[0].id : undefined;
     };
-    const fulfillmentLocationId = location(input.locationName, input.locationId, 'location'),
-      returnLocationId = input.returnLocationName || input.returnLocationId ? location(input.returnLocationName, input.returnLocationId, 'returnLocation') : undefined;
-    const fulfillmentModes = context.settings.fulfillment.enabledModes.filter(mode => context.category.businessModel.fulfillmentModes.includes(mode));
-    if (!input.fulfillmentMode || !fulfillmentModes.includes(input.fulfillmentMode)) {
-      missingFields.push('fulfillmentMode'); choose('fulfillmentMode', 'server_supported_mode_required', fulfillmentModes.map(mode => ({ id: mode, label: mode })));
+    const pickupCapability = selectedMode ? ['delivery', 'onsite_delivery'].includes(selectedMode) ? 'delivery' : 'pickup' : undefined;
+    const fulfillmentLocationId = location(input.locationName, input.locationId, 'location', pickupCapability);
+    const explicitReturn = Boolean(input.returnLocationName || input.returnLocationId);
+    const returnLocationId = explicitReturn ? location(input.returnLocationName, input.returnLocationId, 'returnLocation', 'return') : undefined;
+    // Core falls back to the pickup/delivery source when return is omitted. Ask
+    // for an explicit current choice if that source cannot return; never switch it.
+    if (!explicitReturn && fulfillmentLocationId && !eligibleLocations('return').some(row => row.id === fulfillmentLocationId)) {
+      missingFields.push('returnLocation');
+      choose('returnLocation', 'return_location_capability_required', eligibleLocations('return').map(row => ({ id: row.id, label: row.name })));
     }
     const needsAddress = Boolean(input.fulfillmentMode && fulfillmentModes.includes(input.fulfillmentMode)
       && ['delivery', 'onsite_delivery'].includes(input.fulfillmentMode) && context.category.businessModel.deliveryDestination === 'customer_address');
@@ -222,9 +278,9 @@ export class AiQuoteCandidatePreparationService {
       || JSON.stringify(currentCatalog.items) !== JSON.stringify(catalog.items)
       || JSON.stringify(currentMembers.candidates) !== JSON.stringify(members.candidates)) throw new ModelGatewayError('FORBIDDEN');
     if (currentCatalog.configurationVersion !== catalog.configurationVersion) throw new ModelGatewayError('CONFIG_INVALID');
-    const currentContext = structuredClone(await this.contexts.current(scope));
+    const currentContext = structuredClone(await this.contexts.current(scope, expectedContext));
     if (!isDeepStrictEqual(currentContext, context)) throw new ModelGatewayError('CONFIG_INVALID');
-    if (rates && startAt && !isDeepStrictEqual(rates, await this.readers.rates!.read(scope, context, startAt))) throw new ModelGatewayError('CONFIG_INVALID');
+    if (rates && startAt && !isDeepStrictEqual(rates, await this.readers.rates!.read(scope, context, startAt, expectedContext))) throw new ModelGatewayError('CONFIG_INVALID');
     if (addresses && !isDeepStrictEqual(addresses, await this.readers.addresses!.list(scope, input.customerId!))) throw new ModelGatewayError('CONFIG_INVALID');
     if (bookingOptions) {
       const current = await this.readers.members.readBookingOptions!({ customerId: input.customerId!, limit: 50 }, expectedContext);
@@ -232,22 +288,41 @@ export class AiQuoteCandidatePreparationService {
         || !isDeepStrictEqual(current.options, bookingOptions.options) || current.truncated !== bookingOptions.truncated
         || current.nextCursor !== bookingOptions.nextCursor) throw new ModelGatewayError('FORBIDDEN');
     }
+    // Resolve relative words once against the initial observation. Waiting for
+    // protected projections must not make an elapsed period confirmable, nor
+    // silently move "today/tomorrow" to another day. Ask for new explicit times;
+    // the original candidate, quote and approval are not changed or replayed.
+    const completedAt = this.clock();
+    if (!(completedAt instanceof Date) || !Number.isFinite(completedAt.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
+    for (const [field, instant] of [['start', startAt], ['end', endAt]] as const) {
+      if (instant && Date.parse(instant) <= completedAt.getTime()) {
+        if (!missingFields.includes(field)) missingFields.push(field);
+        const clarification = { field, reason: 'rental_time_elapsed', action: 'supply_absolute_time', candidates: [] };
+        const index = clarifications.findIndex(row => row.field === field);
+        if (index < 0) clarifications.push(clarification); else clarifications[index] = clarification;
+      }
+    }
     // The supplied revision is an assertion, not part of its own identity.
     // Bind the full candidate so a quantity, period, payer, location or mode
     // edit cannot silently reuse an earlier resource-choice confirmation.
     const { selectionRevision: _assertedRevision, ...candidateInput } = input;
-    const selectionRevision = requestFingerprint({ scope, context, candidateInput, items: catalog.items,
+    // The same relative end words may resolve to a different day on a later
+    // review. Bind both resolved instants, not only raw words/the pricing start.
+    const selectionRevision = requestFingerprint({ scope, context, candidateInput, resolvedPeriod: { startAt, endAt }, items: catalog.items,
       catalogBasis: catalog.queryBasis, members: members.candidates,
       pricing: rates ? { at: startAt, ratesHash: requestFingerprint(rates) } : null,
       ...(addresses ? { addresses } : {}),
       ...(bookingOptions ? { bookingOptions: bookingOptions.options, truncated: bookingOptions.truncated, nextCursor: bookingOptions.nextCursor } : {}) });
-    // Relationship visibility is not independent corporate signing/payment
-    // authority. Keep the legitimate enterprise-benefit/personal-payer path.
-    if (enterprise?.enterpriseContractAndPayer === true) return { status: 'unavailable' as const,
-      reason: 'enterprise_payer_authority_unavailable' as const, selectionRevision,
-      missingFields: ['bookingIdentity.enterpriseContractAndPayer'],
-      clarifications: [{ field: 'bookingIdentity.enterpriseContractAndPayer', reason: 'current_enterprise_payer_authority_required',
-        action: 'use_original_qualification_flow', candidates: [] }] };
+    // Both payer selections are candidate intent supported by the original
+    // quote flow. Current relationship/benefit and quote-credit checks happen
+    // in Core after explicit confirmation; neither option grants order-side
+    // signing/payment authority or reserves credit.
+    if (originalGroupBookingFields.length) return { status: 'unavailable' as const,
+      reason: 'pricing_group_booking_requires_original_flow' as const, selectionRevision,
+      missingFields: [...originalGroupBookingFields, ...unavailableRates],
+      clarifications: [...originalGroupBookingFields.map(field => ({ field,
+        reason: 'configured_group_rate_not_product_only_quote', action: 'use_original_pricing_group_booking_flow', candidates: [] })),
+      ...unavailableRates.map(field => ({ field, reason: 'effective_product_rates_required', action: 'use_original_pricing_flow', candidates: [] }))] };
     if (startAt && (!this.readers.rates || unavailableRates.length)) return { status: 'unavailable' as const,
       reason: 'current_product_rates_unavailable' as const, selectionRevision,
       missingFields: unavailableRates.length ? unavailableRates : ['pricingRates'],
@@ -260,6 +335,19 @@ export class AiQuoteCandidatePreparationService {
         missingFields: ['deliveryAddressId'], clarifications: [{ field: 'deliveryAddressId', reason: 'current_customer_address_ownership_required',
           action: 'use_original_delivery_address_flow', candidates: [] }] };
     }
+    // Core forbids repeated quote lines for the same product/pricing group.
+    // Detect only exact products already resolved by the protected catalog here:
+    // do not infer grouping, add quantities, remove a row or choose a substitute.
+    const selectedProducts = new Set<string>(), duplicateFields: string[] = [];
+    for (const [index, line] of lines.entries()) {
+      if (!line.itemGroupId) continue;
+      if (selectedProducts.has(line.itemGroupId)) duplicateFields.push(`items.${index}`);
+      selectedProducts.add(line.itemGroupId);
+    }
+    if (duplicateFields.length) return { status: 'unavailable' as const,
+      reason: 'duplicate_product_lines_require_original_form' as const, selectionRevision,
+      missingFields: duplicateFields, clarifications: duplicateFields.map(field => ({ field,
+        reason: 'explicit_product_and_quantity_correction_required', action: 'use_original_booking_flow', candidates: [] })) };
     const hasExplicitResourceSelection = Boolean(enterprise || input.locationId || input.returnLocationId || input.deliveryAddressId || input.items?.some(item => item.itemGroupId));
     if ((hasExplicitResourceSelection && !input.selectionRevision) || (input.selectionRevision && input.selectionRevision !== selectionRevision)) {
       // Offer current authorized choices again, rather than advancing the old

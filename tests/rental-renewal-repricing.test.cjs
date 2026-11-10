@@ -409,6 +409,7 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     }];
     const priced = await price(member, 3);
     assert.equal(priced.pricingSnapshot.recalculatedRentalAmount, 240, '全租期租金不变');
+    assert.deepEqual(priced.pricingSnapshot.rentalLineAmounts, { [group.id]: 240 }, '原重算收据冻结逐目标毛租金');
     assert.equal(priced.payableAmount, 0, '会员折扣必须被继承，否则会虚收整个折扣额');
     const twoDays = await price(member, 26);
     assert.equal(business.calculateEarlyReturnRefund(tenant, ctx, member, at(26), at(24), 0, twoDays.pricingSnapshot).amount, 216,
@@ -468,6 +469,19 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     const priced = await price(quote, 3);
     assert.equal(priced.pricingSnapshot.recalculatedCouponAmount, 120, '券减免额不应因整单基数而放大');
     assert.equal(priced.payableAmount, 0, '券必须按原适用范围取基数，不能扩大到整单');
+    const explicit = clone(quote); explicit.couponEvaluation.applicableItemGroupIds = [quote.request.lines[0].itemGroupId];
+    assert.equal((await price(explicit, 3)).pricingSnapshot.recalculatedCouponAmount, 120);
+    for (const scope of [null, [quote.request.lines[0].itemGroupId, quote.request.lines[0].itemGroupId], [12], ['']]) {
+      const bad = clone(explicit); bad.couponEvaluation.applicableItemGroupIds = scope;
+      await assert.rejects(price(bad, 3), /原优惠券商品适用范围/);
+    }
+    const all = clone(quote); all.couponEvaluation.applicableItemGroupIds = [];
+    all.couponEvaluation.discountType = 'fixed_amount'; all.couponEvaluation.discountValue = 120;
+    const expanded = await price(all, 3);
+    assert.equal(expanded.pricingSnapshot.recalculatedCouponAmount, 120);
+    assert.deepEqual(Object.keys(expanded.pricingSnapshot.couponEvaluation.rentalAllocations).sort(), Object.keys(all.rentalLineAmounts).sort(),
+      'explicit all-item scope includes an eligible original line with no prior allocation');
+    assert.deepEqual(expanded.pricingSnapshot.couponEvaluation.applicableItemGroupIds, []);
     pass('反例3 限定商品券：延长仍在已买当天，补款 0（修复前虚退 120）');
   }
 

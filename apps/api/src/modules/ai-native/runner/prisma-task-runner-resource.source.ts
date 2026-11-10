@@ -79,10 +79,27 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
     const budget = await this.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: { scopeId: access.scopeId, taskId: lease.taskId } } });
     if (!budget || budget.scopeId !== access.scopeId || budget.taskId !== lease.taskId
       || budget.consumedOutputBytes < 0n || budget.reservedOutputBytes < 0n) throw fail();
-    const outputAllowance = BigInt(plan.limits.maxOutputBytes) - budget.consumedOutputBytes - budget.reservedOutputBytes;
-    if (outputAllowance <= 0n) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
     const current = await this.scopes.resolve(lease.taskId, lease, 'write');
     if (access.bindingKey !== current.bindingKey || access.scopeId !== current.scopeId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    const bounds = [
+      [budget.maxSteps, budget.consumedSteps, budget.reservedSteps, BigInt(plan.limits.maxSteps)],
+      [budget.maxActiveMs, budget.consumedActiveMs, budget.reservedActiveMs, BigInt(plan.limits.maxTotalMs)],
+      [budget.maxOutputBytes, budget.consumedOutputBytes, budget.reservedOutputBytes, BigInt(plan.limits.maxOutputBytes)],
+      [budget.maxCalls, budget.consumedCalls, budget.reservedCalls, BigInt(plan.limits.maxCalls)]
+    ];
+    if (bounds.some(([maximum, consumed, reserved, expected]) => typeof maximum !== 'bigint' || typeof consumed !== 'bigint'
+      || typeof reserved !== 'bigint' || maximum !== expected || maximum <= 0n || consumed < 0n || reserved < 0n
+      || consumed + reserved > maximum)) throw fail();
+    const outputAllowance = budget.maxOutputBytes - budget.consumedOutputBytes - budget.reservedOutputBytes;
+    // Stop from the original cumulative snapshot before creating any new charge.
+    // Atomic reserve remains authoritative if another mutation wins after this
+    // observation; its uncertain/partial writes are not reclassified here.
+    if (budget.consumedSteps + budget.reservedSteps + 1n > budget.maxSteps
+      || budget.consumedActiveMs + budget.reservedActiveMs + BigInt(plan.limits.maxStepMs) > budget.maxActiveMs
+      || outputAllowance <= 0n
+      || descriptor.modelCall && budget.consumedCalls + budget.reservedCalls + 1n > budget.maxCalls) {
+      throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
+    }
     const resources: AiTaskExecutionResource[] = ['steps', 'active_ms', 'output_bytes'];
     return { modelCall: descriptor.modelCall, ...(descriptor.modelCall ? { deferredModelCall: true as const } : {}), requests: resources.map(resource => ({ taskId: lease.taskId, lease: structuredClone(lease), resource,
       chargeId: uuid(requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId: stored.id, actionId: stored.actionId, fingerprint: stored.requestFingerprint, resource })),

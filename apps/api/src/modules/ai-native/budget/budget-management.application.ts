@@ -250,6 +250,10 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const selected = await selectConfiguration(), context = (await root.current()).context;
       if (context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
       const initial = refresh ? null : initialize.parse(value);
+      // BYOK has usage limits, not a tenant-authored supplier money budget.
+      // Refresh still preserves old monetary policy/history with its gate off.
+      if (initial && selected.config.serviceMode === 'tenant_managed' && initial.budget.state !== 'not_configured'
+        && initial.budget.quantity.unit === 'money') throw new BudgetError('INVALID');
       const enabled = { enabled: true, revision: 1 }, controlled = { enabled: initial?.enabled ?? false, revision: 1 };
       const settings: AiUsageSettingsDraft = previous ? structuredClone(previous.settings) : { draftVersion: AI_USAGE_DRAFT_VERSION,
         scope: { kind: 'tenant', tenantId: context.scope.tenantId }, config: selected.config, sceneCode: command.sceneCode,
@@ -295,6 +299,10 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       if (previous.revision !== command.expectedRevision) throw new BudgetError('REVISION_CONFLICT');
       const settings = structuredClone(previous.settings), patch = command.changes;
       if (patch.budget !== undefined) settings.budget = patch.budget;
+      // An old money snapshot remains readable/disableable after a mode change;
+      // it cannot become a new BYOK money limit or be re-enabled as one.
+      if (settings.config.serviceMode === 'tenant_managed' && (patch.budget !== undefined || patch.enabled === true)
+        && settings.budget.state !== 'not_configured' && settings.budget.quantity.unit === 'money') throw new BudgetError('INVALID');
       if (patch.maxConcurrent !== undefined) settings.maxConcurrent = patch.maxConcurrent;
       if (patch.maxCallsPerRun !== undefined) settings.maxCallsPerRun = patch.maxCallsPerRun;
       if (patch.enabled !== undefined) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { modelResponseContainsSecret } from './model-response-secret';
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest, type ModelProtocolInvocation } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
@@ -9,6 +10,9 @@ import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
 import type { ModelResponsePolicy, ProtocolToolCall } from './model-gateway.ports';
 import { modelEgressEvidence } from './model-egress.transport';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { encodeNativeToolResultBody, nativeToolResultInputHash } from './native-tool-result.encoding';
+import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
+import type { NativeAdapterResult } from './model-gateway.ports';
 
 export interface ChatProtocolOptions {
   /** Supplied by trusted server registration; only the existing C02 input is supported. */
@@ -59,6 +63,7 @@ export class ChatProtocolPolicy implements ModelResponsePolicy {
         schema: this.output.schema, strict: true });
     }
   }
+  get nativeToolResults(): boolean { return this.tool?.name === 'rental_order_explain'; }
   body(features: readonly ModelFeature[]): Record<string, unknown> {
     if (features.includes('tools') && !this.tools || features.includes('structuredOutput') && !this.structured || features.includes('tools') && features.includes('structuredOutput')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     return {
@@ -113,6 +118,18 @@ export class ChatCompletionsAdapter implements ModelAdapter {
   readonly provider = "openai_chat_completions";
   get evidenceMode(): 'live' | 'mock' { return modelEgressEvidence(this.transport); }
   get structuredSchemaHash(): string | undefined { return this.policy.structuredSchemaHash; }
+  get supportsNativeToolResults(): boolean { return this.policy.nativeToolResults; }
+  private nativeBody(input: Readonly<ModelProtocolRequest>, value: ResolvedNativeToolResult) {
+    if (!this.supportsNativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    const selected = this.policy.selected(input.features ?? []);
+    selected.parse('', [value.call]); // Reuse the frozen C02 argument validator; no tool execution here.
+    return encodeNativeToolResultBody(this.provider, input, this.body({ model: input.model,
+      messages: this.messages(input), stream: false, max_completion_tokens: input.maxOutputTokens,
+      ...selected.body(input.features ?? []) }), value);
+  }
+  nativeInputBoundHash(input: Readonly<ModelProtocolRequest>, value: ResolvedNativeToolResult) {
+    return nativeToolResultInputHash(this.provider, this.nativeBody(modelProtocolRequestSchema.parse(structuredClone(input)), structuredClone(value)));
+  }
   private readonly policy: ChatProtocolPolicy;
   private readonly mediaInput: readonly ('image' | 'audio')[];
   get features(): readonly ModelFeature[] { return [...this.mediaInput, ...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }
@@ -162,7 +179,15 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     const features = input.features ?? [], selected = this.policy.selected(features);
     if (features.includes('audio')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const baseUrl = normalizeTenantModelBaseUrl(connection.baseUrl), decoder = new ChatCompletionsStream(credential, 1_048_576, selected);
-    let headers = false;
+    let headers = false, recorded = false;
+    const recordKnownUsage = async () => {
+      const usage = decoder.accountingUsage();
+      if (!usage || recorded) return;
+      // The original receipt may have committed even if this await fails. Never
+      // automatically retry it on another chunk or on rejected delivery.
+      recorded = true;
+      await input.recordUsage?.(usage);
+    };
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     for await (const event of this.transport.postStream({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
@@ -176,8 +201,10 @@ export class ChatCompletionsAdapter implements ModelAdapter {
         if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
       } else {
         if (!headers) throw new ModelGatewayError("INVALID_RESPONSE");
-        const deltas = decoder.push(event.bytes), usage = decoder.accountingUsage();
-        if (usage) await input.recordUsage?.(usage);
+        let deltas: string[];
+        try { deltas = decoder.push(event.bytes); }
+        catch (error) { await recordKnownUsage(); throw error; }
+        await recordKnownUsage();
         if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
         // The decoder validates the whole bounded network block before any
         // text escapes. Deliver it as one unit so coalesced SSE frames do not
@@ -196,17 +223,31 @@ export class ChatCompletionsAdapter implements ModelAdapter {
   }
 
   async generate(input: ModelProtocolInvocation, credential: string,
-    connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
+    connection?: Readonly<{ baseUrl: string }>): Promise<NativeAdapterResult> {
+    return this.generateRequest(input, credential, connection);
+  }
+  async generateNativeToolResult(input: ModelProtocolInvocation, credential: string,
+    value: ResolvedNativeToolResult, connection?: Readonly<{ baseUrl: string }>): Promise<NativeAdapterResult> {
+    if (!this.supportsNativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    return this.generateRequest(input, credential, connection, structuredClone(value));
+  }
+  private async generateRequest(input: ModelProtocolInvocation, credential: string,
+    connection?: Readonly<{ baseUrl: string }>, native?: ResolvedNativeToolResult): Promise<NativeAdapterResult> {
+    const expectedInputBoundHash = input.expectedInputBoundHash;
     input = this.request(input);
     if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
     const features = input.features ?? [];
     if (features.includes('streaming')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const selected = this.policy.selected(features);
     const baseUrl = normalizeTenantModelBaseUrl(connection.baseUrl);
+    const body = native ? this.nativeBody(input, native) : this.body({ model: input.model,
+      messages: this.messages(input), stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) });
+    if (native && expectedInputBoundHash !== undefined && nativeToolResultInputHash(this.provider, body) !== expectedInputBoundHash)
+      throw new ModelGatewayError('CONFIG_INVALID');
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     const result = await this.transport.post({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-      body: this.body({ model: input.model, messages: this.messages(input), stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
+      body,
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" });
     if (result.status === 401 || result.status === 403) throw new ModelAdapterError("AUTHENTICATION_FAILED");
     if (result.status === 429) throw new ModelAdapterError("RATE_LIMITED");
@@ -215,16 +256,21 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     let parsed;
     try { parsed = responseSchema.safeParse(JSON.parse(result.body)); } catch { throw new ModelGatewayError("INVALID_RESPONSE"); }
     if (!parsed.success) throw new ModelGatewayError("INVALID_RESPONSE");
-    // Persist only protocol-validated original counts before cancellation or
-    // rejected text/tool/structured output. Never serialize this callback to HTTP.
-    if (parsed.data.usage) await input.recordUsage?.(chatCompletionsUsage(parsed.data.usage));
-    if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     const choice = parsed.data.choices[0];
+    // Usage receipts may reconcile unknown dispatches; interim counters must
+    // never be recorded as final. Rejected terminal output retains its usage.
+    if (parsed.data.usage) {
+      if (!choice.finish_reason || !['stop', 'tool_calls', 'length', 'content_filter'].includes(choice.finish_reason))
+        throw new ModelGatewayError('INVALID_RESPONSE');
+      await input.recordUsage?.(chatCompletionsUsage(parsed.data.usage));
+    }
+    if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     // Partial/truncated, refused or tool responses must not be presented as a complete text answer.
     const text = choice.message.content ?? '', calls = choice.message.tool_calls ?? [];
-    if (choice.message.refusal || choice.finish_reason !== (calls.length ? 'tool_calls' : 'stop') || (!calls.length && choice.message.content === null) || text.length > 128_000 || text.includes(credential) || calls.some(call => call.function.arguments.includes(credential))) throw new ModelGatewayError("INVALID_RESPONSE");
+    if (choice.message.refusal || choice.finish_reason !== (calls.length ? 'tool_calls' : 'stop') || (!calls.length && choice.message.content === null) || text.length > 128_000 || modelResponseContainsSecret({ text, calls }, credential)) throw new ModelGatewayError("INVALID_RESPONSE");
     const extras = selected.parse(text, calls);
-    if (JSON.stringify(extras).includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
-    return { text, ...extras, usage: parsed.data.usage ? chatCompletionsUsage(parsed.data.usage) : undefined };
+    if (modelResponseContainsSecret(extras, credential)) throw new ModelGatewayError('INVALID_RESPONSE');
+    return { text, ...extras, usage: parsed.data.usage ? chatCompletionsUsage(parsed.data.usage) : undefined,
+      ...(selected.nativeToolResults && calls.length ? { nativeToolCalls: structuredClone(calls) } : {}) };
   }
 }

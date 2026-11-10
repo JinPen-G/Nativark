@@ -55,7 +55,9 @@ export class PrismaTaskOrderStepAuthority implements AiStepTransitionAuthority {
       outcome = unknown;
     } else if (evidence.result.kind === 'succeeded' && evidence.businessResultRef && evidence.observedAt) {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_committed' : 'result_observed')) throw denied();
-      outcome = { status: 'succeeded', effect: 'committed', facts: [{ scope: context.scope, resourceType: this.confirmationTool === 'rental.order.commit' ? 'order' : 'configuration', resourceId: evidence.businessResultRef,
+      // The ordinary-name fact references the immutable operation receipt
+      // report, not today's mutable customer object or a configuration.
+      outcome = { status: 'succeeded', effect: 'committed', facts: [{ scope: context.scope, resourceType: this.confirmationTool === 'rental.order.commit' ? 'order' : this.confirmationTool === 'membership.profile.commit' ? 'report' : 'configuration', resourceId: evidence.businessResultRef,
         observedAt: evidence.observedAt, basis: { kind: 'current' } }] };
     } else if (evidence.result.kind === 'failed' && ['AI_BUSINESS_REJECTED', 'AI_CANCELLED'].includes(evidence.result.errorCode)) {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_not_committed' : 'result_observed')) throw denied();

@@ -192,6 +192,7 @@ export class SharedCustomerRepository {
         tenantId: input.tenantId,
         customerType: input.customerType,
         name: input.name.trim(),
+        ordinaryRevision: 1,
         phone: input.phone.trim(),
         phoneMasked: this.mask(input.phone),
         email: input.email?.trim() || null,
@@ -222,11 +223,34 @@ export class SharedCustomerRepository {
     tx?: SharedCustomerTx
   ): Promise<PrismaCustomerProfile | undefined> {
     try {
-      return await this.db(tx).customerProfile.update({ where: { id: customerId, tenantId }, data });
+      // All existing full/partial profile writers share one server-owned
+      // monotonic revision, including self-service registration refreshes.
+      // Extra full-profile edits may conservatively invalidate an ordinary
+      // proposal; callers must never supply/reset the revision themselves.
+      return await this.db(tx).customerProfile.update({ where: { id: customerId, tenantId },
+        data: { ...data, ordinaryRevision: { increment: 1 } } });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
       throw error;
     }
+  }
+
+  /** Ordinary-name CAS participant only; authorization, frozen material and
+   * single approval consumption belong to the enclosing domain transaction.
+   * Never call the full-profile update for this name-only action. */
+  async updateOrdinaryNameAtRevision(tenantId: string, customerId: string, expectedRevision: number,
+    beforeName: string, name: string, tx: SharedCustomerTx): Promise<PrismaCustomerProfile | undefined> {
+    if (!tx || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= 4294967295
+      || typeof name !== 'string' || !name.trim() || Array.from(name.trim()).length > 120) {
+      throw new Error('INVALID_ORDINARY_PROFILE_CAS');
+    }
+    const changed = await tx.customerProfile.updateMany({ where: { tenantId, id: customerId,
+      customerType: 'personal', status: 'active', mergedIntoCustomerId: null,
+      ordinaryRevision: expectedRevision, name: beforeName },
+      data: { name: name.trim(), ordinaryRevision: { increment: 1 } } });
+    if (changed.count !== 1) return undefined;
+    return tx.customerProfile.findFirst({ where: { tenantId, id: customerId, ordinaryRevision: expectedRevision + 1 } })
+      .then(row => row ?? undefined);
   }
 
   /** 实名核验事实更新入口；只能由核验服务在审核记录同一事务内调用。 */

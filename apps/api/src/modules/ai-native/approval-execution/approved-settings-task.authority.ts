@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { PrismaService } from '../../database/prisma.service';
@@ -20,6 +21,15 @@ export interface ApprovedSettingsApplicationDependencies extends PersistedTaskAu
   holderId: string;
   scene: { code: string; version: string };
 }
+/** Server-owned acknowledged execution tuple; never a public commit/DTO field. */
+export const settingsExecutionLeaseSchema = z.object({
+  runId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+  holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+  revision: z.number().int().min(1).max(4294967294),
+  fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u),
+  expiresAt: z.string().datetime({ offset: true })
+}).strict();
+export type ApprovedSettingsExecutionLease = z.infer<typeof settingsExecutionLeaseSchema>;
 export const settingsUnavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 export const settingsDenied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 export const settingsConflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -93,7 +103,8 @@ export class ApprovedSettingsTaskAuthority {
   }
 
   async heldStep(grant: Awaited<ReturnType<ApprovedSettingsTaskAuthority['resolve']>>, stepId: string,
-    change: { changeId: string; changeHash: string }, tx: Prisma.TransactionClient, runId?: string) {
+    change: { changeId: string; changeHash: string }, tx: Prisma.TransactionClient, runId?: string,
+    executionLease?: ApprovedSettingsExecutionLease) {
     const taskWhere = { ...grant.access.where, scopeId: grant.scopeId, revision: grant.task.revision, status: 'RUNNING' as const, cancelRequestedAt: null };
     if ((await tx.aiTask.updateMany({ where: taskWhere, data: { revision: grant.task.revision } })).count !== 1) throw settingsConflict();
     const step = await tx.aiStep.findFirst({ where: { id: stepId, scopeId: grant.scopeId, taskId: grant.task.id } });
@@ -102,6 +113,11 @@ export class ApprovedSettingsTaskAuthority {
     const run = await tx.aiRun.findFirst({ where: { id: step.runId, scopeId: grant.scopeId, taskId: grant.task.id } });
     if (!run || run.status !== 'RUNNING' || run.actorKind !== 'USER' || run.actorId !== grant.actor.actorId ||
         run.leaseOwnerId !== this.d.holderId || !run.leaseExpiresAt || run.leaseExpiresAt <= this.clock() || run.fencingToken.lessThanOrEqualTo(0)) throw settingsDenied();
+    // Holding the same host name is not holding the same lease. A late callback
+    // must never borrow a newer revision/fence after recovery by this host.
+    if (executionLease && (run.id !== executionLease.runId || run.leaseOwnerId !== executionLease.holderId
+      || run.revision !== executionLease.revision || run.fencingToken.toFixed(0) !== executionLease.fencingToken
+      || run.leaseExpiresAt.toISOString() !== executionLease.expiresAt)) throw settingsDenied();
     const runWhere = { id: run.id, scopeId: grant.scopeId, taskId: grant.task.id, revision: run.revision, fencingToken: run.fencingToken,
       leaseOwnerId: this.d.holderId, leaseExpiresAt: { gt: this.clock() }, status: 'RUNNING' as const };
     if ((await tx.aiRun.updateMany({ where: runWhere, data: { revision: run.revision } })).count !== 1 ||

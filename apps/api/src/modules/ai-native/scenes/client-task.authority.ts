@@ -9,6 +9,7 @@ import { validateBudgetSettings } from '../budget/budget-settings';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialDb, AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { clientSqlPolicyRevisionSchema } from './client-sql-revisions';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const clientTaskSceneSchema = z.object({ sceneCode: id.max(128), sceneVersion: id.max(64) }).strict();
@@ -27,7 +28,7 @@ const policySchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId
   allowRequestInput: sqlBoolean.optional().default(false), allowSubmitInput: sqlBoolean.optional().default(false),
   allowResumeInput: sqlBoolean.optional().default(false),
   allowCancel: sqlBoolean.optional().default(false),
-  revision: z.number().int().min(1).max(4294967294), expiresAt: z.date() }).strict();
+  revision: clientSqlPolicyRevisionSchema, expiresAt: z.date() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 type ClientPolicyOperation = 'create' | 'read' | 'capabilities' | 'execute' | 'request_input' | 'submit_input' | 'resume_input' | 'cancel';

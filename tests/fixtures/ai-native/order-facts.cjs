@@ -35,11 +35,29 @@ async function setup(audience = 'operator', tenantId = 'tenant-a') {
     return { items, nextCursor: all.length > query.limit ? items[items.length - 1].id : null,
       coverage: 'page_not_total' };
   };
+  // Explicit leaf over the same synthetic records; not a SQL projection or ACL
+  // emulator. Existing tests keep their malformed/foreign rows for Core rejection.
+  facts.readInspectionFactsPage = async (tenant, _workspaceId, orderId, query) => facts.listInspectionsPage(tenant, orderId, query);
   facts.findOrder = async (tenant, orderId) => {
     const identity = structuredClone(getRequestIdentity()); state.reads.push({ tenant, orderId, identity });
     if (identity?.tenantId !== tenant || identity?.workspaceId !== 'workspace-a') return null;
     const row = structuredClone(state.order); if (state.afterRead) await state.afterRead(); return row;
   };
+  // Explicit persisted leaf for the new projection. It does not simulate SQL,
+  // joins or ACL; real MySQL covers those, while original Guard/ALS stays live.
+  facts.readOrderFacts = async (tenant, workspaceId, orderId) => {
+    const identity = structuredClone(getRequestIdentity()); state.reads.push({ tenant, orderId, identity });
+    if (identity?.tenantId !== tenant || identity?.workspaceId !== workspaceId) return undefined;
+    const row = state.order ? { ...structuredClone(state.order), workspaceId } : undefined;
+    if (state.afterRead) await state.afterRead(); return row;
+  };
+  // Declared lifecycle leaf, not database filtering or financial evidence.
+  // Tests may replace it with foreign, overflowing or concurrently changed data.
+  facts.readOrderExplanationState = async (tenant, workspaceId, orderId) => ({
+    tenantId: tenant, workspaceId, orderId, sourceOrderUpdatedAt: state.order.updatedAt,
+    allocations: [], changes: [], extensions: [], truncated: { changes: false, extensions: false },
+    semantics: 'recorded_lifecycle_not_financial_or_action_eligibility'
+  });
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
   return { state, core, facts, authority, guard, credentials, reader: new AiOrderReadFactsService(core, authority) };
 }

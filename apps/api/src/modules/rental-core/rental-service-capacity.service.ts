@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type {
   RentalOrder,
+  RentalOrderServiceOccurrence,
   RentalQuoteServiceSnapshot,
   RentalServiceCapacity,
   SaveRentalServiceCapacityRequest
@@ -11,6 +12,8 @@ import { PrismaService } from "../database/prisma.service";
 import { serviceReservationKey } from "./rental-service-occurrence";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding } from "./category-active-write";
+import { getRequestIdentity } from '../../common/request-identity';
+import { requestFingerprint } from './rental-idempotency.repository';
 
 type Tx = Prisma.TransactionClient;
 
@@ -131,6 +134,60 @@ export class RentalServiceCapacityService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
+  /** Read-only observation of the SAME quoted service occurrences. Unlike the
+   * original quote/write gate below, this cannot release another order's expired
+   * hold under a read grant. Stored reservations remain counted until the formal
+   * maintenance/write path settles them; a timestamp never proves a release.
+   * No price/quantity is derived here, and observation never reserves capacity. */
+  async readAvailabilityForQuote(tenantId: string, snapshots: RentalQuoteServiceSnapshot[]) {
+    const identity = getRequestIdentity();
+    if (!identity?.userId || identity.tenantId !== tenantId || !identity.workspaceId || identity.isSaasAdmin
+      || identity.staffApi || !['client', 'operator'].includes(identity.audience ?? '')) throw new ForbiddenException('服务容量读取缺少原业务身份');
+    if (!Array.isArray(snapshots) || snapshots.length > 20 || snapshots.some(row => !row.serviceId || !row.serviceLocationId
+      || typeof row.requiresCapacity !== 'boolean' || !Number.isSafeInteger(row.capacityQuantity) || row.capacityQuantity < 1
+      || !Number.isFinite(Date.parse(row.scheduledStartAt)) || !Number.isFinite(Date.parse(row.scheduledEndAt))
+      || Date.parse(row.scheduledStartAt) >= Date.parse(row.scheduledEndAt))) throw new BadRequestException('原服务发生项不可用');
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    if (workspaceId !== identity.workspaceId) throw new ForbiddenException('服务容量读取空间已变化');
+    return this.prisma.$transaction(async tx => {
+      const observations = [], required = new Map<string, { capacity: NonNullable<Awaited<ReturnType<RentalServiceCapacityService['findCapacity']>>>; quantity: number }>();
+      let available = true;
+      for (const snapshot of snapshots) {
+        const [service, location] = await Promise.all([
+          tx.rentalValueAddedService.findFirst({ where: { id: snapshot.serviceId, tenantId, workspaceId },
+            select: { id: true, tenantId: true, workspaceId: true, status: true, requiresCapacity: true, version: true } }),
+          tx.rentalFulfillmentLocation.findFirst({ where: { id: snapshot.serviceLocationId, tenantId, workspaceId },
+            select: { id: true, tenantId: true, workspaceId: true, status: true } })
+        ]);
+        if (!service || service.tenantId !== tenantId || service.workspaceId !== workspaceId || service.status !== 'enabled'
+          || service.requiresCapacity !== snapshot.requiresCapacity || !location || location.tenantId !== tenantId
+          || location.workspaceId !== workspaceId || location.status !== 'enabled') available = false;
+        const capacity = snapshot.requiresCapacity ? await this.findCapacity(tenantId, workspaceId, snapshot, tx) : null;
+        if (snapshot.requiresCapacity && !capacity) available = false;
+        if (capacity) {
+          if (capacity.tenantId !== tenantId || capacity.workspaceId !== workspaceId || capacity.serviceId !== snapshot.serviceId
+            || capacity.locationId !== snapshot.serviceLocationId || capacity.status !== 'enabled'
+            || !(capacity.windowStart instanceof Date) || !(capacity.windowEnd instanceof Date)
+            || !Number.isFinite(capacity.windowStart.getTime()) || !Number.isFinite(capacity.windowEnd.getTime())
+            || capacity.windowStart.getTime() > Date.parse(snapshot.scheduledStartAt) || capacity.windowEnd.getTime() < Date.parse(snapshot.scheduledEndAt)
+            || ![capacity.totalCapacity, capacity.reservedQuantity, capacity.usedQuantity].every(value => Number.isSafeInteger(value) && value >= 0)
+            || capacity.totalCapacity < capacity.reservedQuantity + capacity.usedQuantity) throw new ConflictException('服务容量原账不可用');
+          const prior = required.get(capacity.id);
+          required.set(capacity.id, { capacity, quantity: (prior?.quantity ?? 0) + snapshot.capacityQuantity });
+        }
+        observations.push({ service, location, capacity, occurrence: { serviceId: snapshot.serviceId,
+          serviceLocationId: snapshot.serviceLocationId, scheduledStartAt: snapshot.scheduledStartAt,
+          scheduledEndAt: snapshot.scheduledEndAt, requiresCapacity: snapshot.requiresCapacity, capacityQuantity: snapshot.capacityQuantity } });
+      }
+      for (const { capacity, quantity } of required.values()) {
+        if (!Number.isSafeInteger(quantity) || capacity.totalCapacity - capacity.reservedQuantity - capacity.usedQuantity < quantity) available = false;
+      }
+      if (await resolveScopeWorkspaceId(tx, tenantId) !== workspaceId) throw new ForbiddenException('服务容量读取空间已变化');
+      return { available, fingerprint: requestFingerprint(JSON.parse(JSON.stringify(observations))),
+        reservation: 'not_attempted' as const, maintenance: 'not_attempted' as const };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
   /** 报价只校验，不增量写容量。过期软预留先惰性释放，避免假性不足。 */
   async assertAvailableForQuote(tenantId: string, snapshots: RentalQuoteServiceSnapshot[]): Promise<void> {
     const required = snapshots.filter((row) => row.requiresCapacity);
@@ -147,8 +204,100 @@ export class RentalServiceCapacityService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  /** 下单事务内预留；失败时由外层事务整体回滚。 */
-  async reserveForOrder(tenantId: string, order: Pick<RentalOrder, "id" | "serviceSnapshots" | "reservations">, requestKey: string, tx: Tx): Promise<void> {
+  /** A replacement may retain an original promise, never an expired or released
+   * capacity row. Read the real occurrence receipt under the caller's order lock;
+   * current capacity admission does not alter its frozen price or actual execution. */
+  async assertRetainedForExchange(tenantId: string, orderId: string, occurrences: RentalOrderServiceOccurrence[], tx: Tx): Promise<void> {
+    await this.assertExchangeReceipts(tenantId, orderId, occurrences, [], tx);
+  }
+
+  /** 取消善后仍核原收据/计数；原窗口停用不应阻止释放它自己的占用。 */
+  async assertServiceChangeForExchange(tenantId: string, orderId: string, retained: RentalOrderServiceOccurrence[],
+    cancelled: RentalOrderServiceOccurrence[], tx: Tx): Promise<void> {
+    await this.assertExchangeReceipts(tenantId, orderId, [...retained, ...cancelled], cancelled, tx);
+  }
+
+  private async assertExchangeReceipts(tenantId: string, orderId: string, occurrences: RentalOrderServiceOccurrence[],
+    cancelled: RentalOrderServiceOccurrence[], tx: Tx): Promise<void> {
+    const required = occurrences.filter(row => row.requiresCapacity);
+    if (!required.length) return;
+    if (new Set(required.map(row => row.reservationKey)).size !== required.length) {
+      throw new ConflictException("多个服务发生项共用了容量收据，不能重复保留或释放");
+    }
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const rows = await tx.$queryRaw<Array<{ id: string; idempotencyKey: string; serviceId: string; capacityId: string;
+      quantity: number; status: string }>>(Prisma.sql`
+      SELECT id, idempotencyKey, serviceId, capacityId, quantity, status FROM rental_service_reservations
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId} FOR UPDATE`);
+    for (const occurrence of [...required].sort((a, b) => (a.reservationKey ?? "").localeCompare(b.reservationKey ?? ""))) {
+      const matches = rows.filter(row => row.idempotencyKey === occurrence.reservationKey);
+      const receipt = matches[0];
+      if (!occurrence.reservationKey || matches.length !== 1 || occurrence.workspaceId !== workspaceId
+        || !Number.isInteger(occurrence.quantity) || occurrence.quantity < 1
+        || !Number.isFinite(Date.parse(occurrence.scheduledStartAt)) || !Number.isFinite(Date.parse(occurrence.scheduledEndAt))
+        || Date.parse(occurrence.scheduledEndAt) <= Date.parse(occurrence.scheduledStartAt)
+        || receipt.serviceId !== occurrence.serviceId || receipt.quantity !== occurrence.capacityQuantity
+        || occurrence.capacityQuantity !== occurrence.quantity || receipt.status !== "confirmed") {
+        throw new ConflictException(`服务「${occurrence.serviceName}」缺少原已确认容量依据，不能交付换货`);
+      }
+      const capacity = (await tx.$queryRaw<Array<{ serviceId: string; locationId: string; windowStart: Date; windowEnd: Date;
+        totalCapacity: number; reservedQuantity: number; usedQuantity: number; status: string }>>(Prisma.sql`
+        SELECT serviceId, locationId, windowStart, windowEnd, totalCapacity, reservedQuantity, usedQuantity, status
+        FROM rental_service_capacities WHERE id = ${receipt.capacityId} AND tenantId = ${tenantId}
+          AND workspaceId = ${workspaceId} FOR UPDATE`))[0];
+      const releasing = cancelled.some(row => row.occurrenceId === occurrence.occurrenceId && row.reservationKey === occurrence.reservationKey);
+      if (!capacity || !releasing && capacity.status !== "enabled" || capacity.serviceId !== occurrence.serviceId
+        || capacity.locationId !== occurrence.serviceLocationId
+        || capacity.windowStart.getTime() > Date.parse(occurrence.scheduledStartAt)
+        || capacity.windowEnd.getTime() < Date.parse(occurrence.scheduledEndAt)
+        || ![capacity.totalCapacity, capacity.reservedQuantity, capacity.usedQuantity].every(value => Number.isFinite(value) && value >= 0)
+        || capacity.usedQuantity < receipt.quantity || capacity.reservedQuantity + capacity.usedQuantity > capacity.totalCapacity) {
+        throw new ConflictException(`服务「${occurrence.serviceName}」原容量已停用或时段/数量不一致，不能交付换货`);
+      }
+    }
+  }
+
+  /** 换货试算只核锁后容量，不释放过期行或占用。被显式取消的原确认收据才可抵本次容量。 */
+  async assertAvailableForExchange(tenantId: string, orderId: string, snapshots: RentalQuoteServiceSnapshot[],
+    cancelled: RentalOrderServiceOccurrence[], tx: Tx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const needed = new Map<string, number>();
+    const receipts = cancelled.some(row => row.requiresCapacity) ? await tx.$queryRaw<Array<{ idempotencyKey: string;
+      capacityId: string; serviceId: string; quantity: number; status: string }>>(Prisma.sql`
+        SELECT idempotencyKey, capacityId, serviceId, quantity, status FROM rental_service_reservations
+        WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId} FOR UPDATE`) : [];
+    const cancelledCapacity = cancelled.filter(row => row.requiresCapacity);
+    if (new Set(cancelledCapacity.map(row => row.reservationKey)).size !== cancelledCapacity.length) {
+      throw new ConflictException("原服务共用了容量依据，不能重复释放或抵扣容量");
+    }
+    for (const occurrence of cancelledCapacity) {
+      const matched = receipts.filter(row => row.idempotencyKey === occurrence.reservationKey);
+      if (matched.length !== 1 || matched[0].status !== "confirmed" || occurrence.workspaceId !== workspaceId
+        || matched[0].serviceId !== occurrence.serviceId || matched[0].quantity !== occurrence.quantity
+        || occurrence.quantity !== occurrence.capacityQuantity) throw new ConflictException("取消服务缺少原已确认容量收据");
+    }
+    for (const snapshot of snapshots.filter(row => row.requiresCapacity).sort((a, b) => a.serviceId.localeCompare(b.serviceId))) {
+      const capacity = await this.findCapacity(tenantId, workspaceId, snapshot, tx, true);
+      if (!capacity) throw new ConflictException(`服务「${snapshot.serviceName}」没有覆盖所选地点和时段的可用容量`);
+      const credit = cancelled.reduce((sum, occurrence) => {
+        const receipt = receipts.find(row => row.idempotencyKey === occurrence.reservationKey);
+        return sum + (occurrence.requiresCapacity && receipt?.status === "confirmed" && receipt.capacityId === capacity.id
+          && receipt.serviceId === occurrence.serviceId && receipt.quantity === occurrence.capacityQuantity ? receipt.quantity : 0);
+      }, 0);
+      const quantity = (needed.get(capacity.id) ?? 0) + snapshot.capacityQuantity;
+      needed.set(capacity.id, quantity);
+      if (!Number.isInteger(snapshot.capacityQuantity) || snapshot.capacityQuantity < 1
+        || ![capacity.totalCapacity, capacity.reservedQuantity, capacity.usedQuantity].every(value => Number.isInteger(value) && value >= 0)
+        || capacity.reservedQuantity + capacity.usedQuantity > capacity.totalCapacity || credit > capacity.usedQuantity
+        || capacity.totalCapacity - capacity.reservedQuantity - capacity.usedQuantity + credit < quantity) {
+        throw new ConflictException(`服务「${snapshot.serviceName}」在所选地点和时段容量不足`);
+      }
+    }
+  }
+
+  /** 下单事务内预留；失败时由外层事务整体回滚。换货使用锁后当前窗口。 */
+  async reserveForOrder(tenantId: string, order: Pick<RentalOrder, "id" | "serviceSnapshots" | "reservations">, requestKey: string, tx: Tx,
+    currentRead = false): Promise<void> {
     const required = (order.serviceSnapshots ?? [])
       .filter((row) => row.requiresCapacity)
       .sort((left, right) => [left.serviceId, left.serviceLocationId, left.scheduledStartAt, left.scheduledEndAt]
@@ -156,7 +305,8 @@ export class RentalServiceCapacityService {
         .localeCompare([right.serviceId, right.serviceLocationId, right.scheduledStartAt, right.scheduledEndAt].join("|")));
     if (!required.length) return;
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    await this.releaseExpired(tenantId, tx);
+    // 换货在原订单事务中提交即确认，不顺带释放其他订单的软预留。
+    if (!currentRead) await this.releaseExpired(tenantId, tx);
     const expiresAt = order.reservations.map((row) => row.expiresAt).filter(Boolean).sort()[0];
     for (const snapshot of required) {
       const idempotencyKey = this.reservationKey(requestKey, snapshot);
@@ -167,7 +317,7 @@ export class RentalServiceCapacityService {
         }
         continue;
       }
-      const capacity = await this.findCapacity(tenantId, workspaceId, snapshot, tx);
+      const capacity = await this.findCapacity(tenantId, workspaceId, snapshot, tx, currentRead);
       if (!capacity) throw new ConflictException(`服务「${snapshot.serviceName}」没有覆盖所选地点和时段的可用容量`);
       const updated = await tx.rentalServiceCapacity.updateMany({
         where: {
@@ -205,19 +355,21 @@ export class RentalServiceCapacityService {
   }
 
   /** 订单确认：软预留转已确认，占用量继续计入 available 公式并停止超时。 */
-  async confirmForOrder(tenantId: string, orderId: string, confirmedAt: string, tx: Tx): Promise<void> {
+  async confirmForOrder(tenantId: string, orderId: string, confirmedAt: string, tx: Tx, currentRead = false,
+    reservationKeys?: readonly string[]): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
-    for (const row of rows.filter((item) => item.status === "reserved")) {
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx, currentRead);
+    for (const row of rows.filter((item) => item.status === "reserved" && (!reservationKeys || reservationKeys.includes(item.idempotencyKey)))) {
       const moved = await tx.rentalServiceCapacity.updateMany({
         where: { id: row.capacityId, tenantId, workspaceId, reservedQuantity: { gte: row.quantity } },
         data: { reservedQuantity: { decrement: row.quantity }, usedQuantity: { increment: row.quantity } }
       });
       if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝确认订单");
-      await tx.rentalServiceReservation.updateMany({
+      const confirmed = await tx.rentalServiceReservation.updateMany({
         where: { id: row.id, tenantId, workspaceId, status: "reserved" },
         data: { status: "confirmed", confirmedAt: new Date(confirmedAt), expiresAt: null }
       });
+      if (confirmed.count !== 1) throw new ConflictException("服务容量确认收据已变化，拒绝只移动容量计数");
     }
   }
 
@@ -327,11 +479,12 @@ export class RentalServiceCapacityService {
     reservationKey: string | undefined,
     reason: string,
     releasedAt: string,
-    tx: Tx
+    tx: Tx,
+    currentRead = false
   ): Promise<void> {
     if (!reservationKey) return;
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx, currentRead);
     const row = rows.find((item) => item.idempotencyKey === reservationKey);
     if (!row || row.status === "released" || row.status === "expired") return;
     const data = row.status === "reserved"
@@ -518,7 +671,14 @@ export class RentalServiceCapacityService {
     return rows.length;
   }
 
-  private async findCapacity(tenantId: string, workspaceId: string, snapshot: RentalQuoteServiceSnapshot, tx: Tx) {
+  private async findCapacity(tenantId: string, workspaceId: string, snapshot: RentalQuoteServiceSnapshot, tx: Tx, currentRead = false) {
+    if (currentRead) return (await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; serviceId: string;
+      locationId: string; windowStart: Date; windowEnd: Date; totalCapacity: number; reservedQuantity: number; usedQuantity: number; status: string }>>(Prisma.sql`
+      SELECT id, tenantId, workspaceId, serviceId, locationId, windowStart, windowEnd, totalCapacity, reservedQuantity, usedQuantity, status
+      FROM rental_service_capacities WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND serviceId = ${snapshot.serviceId} AND locationId = ${snapshot.serviceLocationId} AND status = 'enabled'
+        AND windowStart <= ${new Date(snapshot.scheduledStartAt)} AND windowEnd >= ${new Date(snapshot.scheduledEndAt)}
+      ORDER BY windowEnd, id LIMIT 1 FOR UPDATE`))[0] ?? null;
     return tx.rentalServiceCapacity.findFirst({
       where: {
         tenantId,
@@ -533,8 +693,11 @@ export class RentalServiceCapacityService {
     });
   }
 
-  private async lockOrderReservations(tenantId: string, orderId: string, tx: Tx) {
+  private async lockOrderReservations(tenantId: string, orderId: string, tx: Tx, currentRead = false) {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    if (currentRead) return tx.$queryRaw<Prisma.RentalServiceReservationGetPayload<object>[]>(Prisma.sql`
+      SELECT * FROM rental_service_reservations
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId} ORDER BY id FOR UPDATE`);
     await tx.$queryRaw(Prisma.sql`
       SELECT id FROM rental_service_reservations
       WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId}

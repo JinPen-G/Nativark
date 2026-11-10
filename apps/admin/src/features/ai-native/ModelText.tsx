@@ -26,7 +26,7 @@ export function ModelText({ text, kind = "text" }: ModelTextProps) {
           ? "工具动作候选（未执行）"
           : "AI 生成内容（需核对）"}
       </h3>
-      <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</p>
+      <p data-ai-visible-text={kind === 'text' ? '' : undefined} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</p>
       {bounded.length > preview.length && (
         <details>
           <summary>展开剩余文本</summary>

@@ -9,6 +9,33 @@ const { runWithRequestIdentity } = require('../apps/api/src/common/request-ident
 const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
 const { hashPassword, verifyPassword } = require('../apps/api/src/common/password');
 
+test('corporate reversal retains only original locators and refuses unavailable or corrupted recovery storage', () => {
+  const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
+  const helper = {};
+  const shared = {};
+  const sharedSource = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/ai-native/settings-operation-reference.ts'), 'utf8');
+  new Function('exports', ts.transpileModule(sharedSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(shared);
+  const source = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/corporate-payment-reference.ts'), 'utf8');
+  new Function('exports', 'require', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(helper, () => shared);
+  const data = new Map(), storage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) };
+  const reference = { version: 1, scope: 'tenant/workspace/operator', customerId: 'company', paymentId: 'original-payment', key: 'original-reverse-key' };
+  helper.retainCorporatePaymentReference(storage, reference);
+  assert.deepEqual(helper.readCorporatePaymentReference(storage, reference.scope, reference.customerId).pending, reference);
+  assert.throws(() => helper.retainCorporatePaymentReference(storage, { ...reference, key: 'another' }));
+  assert.equal(helper.readCorporatePaymentReference(undefined, reference.scope, reference.customerId).blocked, true);
+  assert.throws(() => helper.retainCorporatePaymentReference(undefined, reference));
+  assert.equal(helper.matchesCorporatePaymentReversal(reference, null), false);
+  assert.equal(helper.matchesCorporatePaymentReversal(reference, { customerId: 'company', paymentId: 'original-payment', idempotencyKey: 'other-winner' }), true);
+  assert.equal(helper.matchesCorporatePaymentReversal(reference, { customerId: 'company', paymentId: 'another-payment' }), false);
+  helper.clearCorporatePaymentReference(storage, reference); assert.equal(data.size, 0);
+  data.set([...data.keys()][0] ?? `rental.corporate-payment-reversal.v1:${encodeURIComponent(reference.scope)}:${encodeURIComponent(reference.customerId)}`, JSON.stringify({ ...reference, reason: 'sensitive' }));
+  assert.equal(helper.readCorporatePaymentReference(storage, reference.scope, reference.customerId).blocked, true);
+  const page = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/CorporateMembershipPage.tsx'), 'utf8');
+  assert.match(page, /retainCorporatePaymentReference\(reversalStorage\(\), reference\)/);
+  assert.match(page, /customerApi\.creditPaymentReversal\(reference.customerId, reference.paymentId\)/);
+  assert.match(page, /ConfirmAction label=\{t\("冲销回款"\)\}/);
+});
+
 test('corporate credit input retains the revision from its own read instead of a refreshed query', () => {
   const fs = require('node:fs'), path = require('node:path'), ts = require('typescript');
   const helperSource = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/membership/corporate-credit-draft.ts'), 'utf8');
@@ -165,24 +192,100 @@ test('logout revokes only the session proved by the original refresh token witho
   await service.logout({ refreshToken: 'fixture-refresh' }, 'staff'); assert.equal(revoked, undefined);
 });
 
-test('customer operational overview rejects tenant-only identity and missing financial or workspace scope before reading business facts', async () => {
+test('customer operational overview rejects tenant-only or mismatched identity and keeps legitimate restricted partitions', async () => {
   const permissions = ['rental-os:member:view', 'rental-os:order:view', 'rental-os:marketing:manage', 'rental-os:finance:view'];
   const user = { id: 'u', tenantId: 't', isActive: true, permissions, dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
   const platform = Object.create(PlatformService.prototype);
   platform.requireWorkspaceDataSource = () => undefined;
   platform.findWorkspaceScopedUser = async () => undefined;
   platform.requireCustomerOperations = () => { throw Error('business must not be read'); };
-  await runWithRequestIdentity({ tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'all' }, () =>
-    assert.rejects(platform.getCustomerProfileOverview('c', {}, user), forbidden));
+  await runWithRequestIdentity({ tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'all' }, async () => {
+    await assert.rejects(platform.getCustomerProfileOverview('c', {}, user), forbidden);
+    for (const scoped of [{ ...user, isActive: false }, { ...user, tenantId: 'other' }]) {
+      platform.findWorkspaceScopedUser = async () => scoped;
+      await assert.rejects(platform.getCustomerProfileOverview('c', {}, user), forbidden);
+    }
+  });
   const service = Object.create(CustomerOperationsService.prototype);
   service.getCustomerDetail = async () => { throw Error('authorized read reached'); };
   await runWithRequestIdentity({ tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'all' }, async () => {
-    await assert.rejects(service.getProfileOverview('t', 'w', 'c', { ...user, permissions: ['rental-os:member:view'] }), forbidden);
+    await assert.rejects(service.getProfileOverview('t', 'w', 'c', { ...user, permissions: ['rental-os:member:view'] }), /authorized read reached/);
     await assert.rejects(service.getProfileOverview('t', 'w', 'c', { ...user, dataScope: 'own' }), forbidden);
     await assert.rejects(service.getProfileOverview('t', 'w', 'c', user), /authorized read reached/);
   });
   await runWithRequestIdentity({ tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'all', locationScope: { mode: 'selected', locationIds: ['loc'] } }, () =>
-    assert.rejects(service.getProfileOverview('t', 'w', 'c', user), forbidden));
+    assert.rejects(service.getProfileOverview('t', 'w', 'c', user), /authorized read reached/));
+});
+
+test('customer profile partitions retain visible orders without financial facts and never query restricted ledgers', async () => {
+  const calls = [], now = new Date(0);
+  const user = { id: 'u', tenantId: 't', isActive: true, permissions: ['rental-os:member:view', 'rental-os:order:view'], dataScope: 'own',
+    locationScope: { mode: 'selected', locationIds: ['loc'] } };
+  const profile = { id: 'c', tenantId: 't', customerType: 'personal', name: 'Customer', phoneMasked: '***', status: 'active' };
+  const service = Object.create(CustomerOperationsService.prototype);
+  const visibility = [];
+  service.customers = { findById: async (tenant, customer) => {
+    assert.equal(tenant, 't'); assert.equal(customer, 'c'); return profile;
+  } };
+  const rows = [];
+  service.prisma = {
+    customerDeliveryAddress: { findMany: async () => [] }, customerMembershipPlanAssignment: { findMany: async () => [] },
+    customerCorporateMembership: { findMany: async () => [] },
+    customerQualificationRevision: { findMany: async () => { throw Error('restricted qualification read'); } },
+    rentalBenefitAccount: { findMany: async () => { throw Error('restricted financial ledger read'); } },
+    rentalRewardLedgerEntry: { findMany: async () => { throw Error('restricted reward read'); } },
+    rentalCustomerCoupon: { findMany: async () => { throw Error('restricted coupon read'); } },
+    rentalOrder: {
+      findFirst: async ({ where }) => {
+        visibility.push(where);
+        return where.tenantId === 't' && where.workspaceId === 'w'
+          && where.AND[0].OR[0].fulfillmentLocationId.in.includes('loc') ? { id: 'visible-order' } : null;
+      },
+      count: async ({ where }) => { calls.push(['count', where]); return rows.length; },
+      findMany: async query => { calls.push(['orders', query]); return rows; }
+    }
+  };
+  service.operations = { recordSensitiveAccess: async (_tenant, input) => { assert.equal(input.revealed, false); },
+    listStatusHistory: async () => { throw Error('restricted status audit'); },
+    listSensitiveAccess: async () => { throw Error('restricted sensitive audit'); } };
+  const scope = { tenantId: 't', userId: 'u', workspaceId: 'w', dataScope: 'own', locationScope: { mode: 'selected', locationIds: ['loc'] },
+    permissions: user.permissions };
+  rows.push({ id: 'visible-order', orderNo: 'ORDER', workspaceId: 'w', categoryCode: 'camera', status: 'renting',
+    customerId: 'c', membershipSnapshot: {}, startAt: now, endAt: now, createdAt: now,
+    finalPayableAmount: 999, currency: 'CNY', workspace: { id: 'w', name: 'Workspace' } });
+  const result = await runWithRequestIdentity(scope, () => service.getProfileOverview('t', 'w', 'c', user));
+  assert.equal(result.profile.id, 'c'); assert.equal(result.orders.total, 1); assert.equal(result.orders.items[0].id, 'visible-order');
+  assert.equal(visibility[0].workspaceId, 'w'); assert.equal(visibility[0].tenantId, 't');
+  assert.deepEqual(visibility[0].AND[1].OR, [{ createdBy: 'u' }, { workOrders: { some: { OR: [{ createdBy: 'u' }, { assigneeId: 'u' }] } } }]);
+  assert.equal(Object.hasOwn(result.orders.items[0], 'finalPayableAmount'), false, 'an ORM substitute returning extra fields cannot leak financial amount');
+  assert.deepEqual(result.access, { orders: 'available', orderAmounts: 'restricted', benefits: 'restricted', qualifications: 'restricted', audit: 'restricted' });
+  const query = calls.find(row => row[0] === 'orders')[1];
+  assert.equal(query.select.finalPayableAmount, false);
+  assert.equal(query.where.tenantId, 't'); assert.equal(query.where.workspaceId, 'w');
+  assert.deepEqual(query.where.AND[0].OR, [{ fulfillmentLocationId: { in: ['loc'] } }, { returnLocationId: { in: ['loc'] } }]);
+  assert.deepEqual(query.where.AND[1].OR, [{ createdBy: 'u' }, { workOrders: { some: { OR: [{ createdBy: 'u' }, { assigneeId: 'u' }] } } }]);
+  calls.length = 0;
+  const withFinance = { ...user, permissions: [...user.permissions, 'rental-os:finance:view'] };
+  const financial = await runWithRequestIdentity({ ...scope, permissions: withFinance.permissions }, () => service.getProfileOverview('t', 'w', 'c', withFinance));
+  assert.equal(financial.orders.items[0].finalPayableAmount, 999);
+  assert.equal(financial.access.orderAmounts, 'available'); assert.equal(financial.access.benefits, 'restricted');
+  calls.length = 0;
+  const memberOnly = { ...user, permissions: ['rental-os:member:view'] };
+  const restricted = await runWithRequestIdentity({ ...scope, permissions: memberOnly.permissions }, () => service.getProfileOverview('t', 'w', 'c', memberOnly));
+  assert.equal(restricted.access.orders, 'restricted'); assert.deepEqual(calls, [], 'member-only profile must not query orders at all');
+  assert.deepEqual(restricted.benefits, { accounts: [], rewards: [], coupons: [] });
+  const { OPENAPI_COMPONENT_SCHEMAS: schemas, API_CONTRACT_OPERATIONS: operations } = require('../apps/api/src/contracts/openapi-document');
+  assert.equal(operations.find(row => row.operationId === 'getCustomerProfileOverview').responseSchema, 'CustomerProfileOverview');
+  assert.ok(schemas.CustomerProfileOverview.properties.access.properties.orderAmounts);
+  assert.equal(schemas.CustomerProfileOverview.properties.orders.properties.items.items.required.includes('finalPayableAmount'), false);
+  const sources = require('node:fs').readFileSync(require('node:path').join(__dirname, '../apps/admin/src/features/membership/CustomerProfileDetails.tsx'), 'utf8');
+  for (const key of ['benefits', 'orders', 'qualifications', 'audit']) assert.ok(sources.includes(`access?.${key} === "restricted"`), `consumer preserves ${key} restriction`);
+  await assert.rejects(runWithRequestIdentity({ ...scope, workspaceId: 'foreign' }, () => service.getProfileOverview('t', 'w', 'c', user)), forbidden);
+  await assert.rejects(runWithRequestIdentity({ ...scope, userId: 'other' }, () => service.getProfileOverview('t', 'w', 'c', user)), forbidden);
+  calls.length = 0;
+  await assert.rejects(runWithRequestIdentity({ ...scope, locationScope: { mode: 'selected', locationIds: ['outside'] } }, () =>
+    service.getProfileOverview('t', 'w', 'c', { ...user, locationScope: { mode: 'selected', locationIds: ['outside'] } })), error => error.status === 404);
+  assert.deepEqual(calls, [], 'an invisible shared customer must fail before operational partitions are read');
 });
 
 test('client Guard passes only its matched server route to the temporary-password recovery gate', async () => {

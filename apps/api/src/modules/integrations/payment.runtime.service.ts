@@ -36,6 +36,9 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { assertOutboundUrl } from "../../common/outbound-url";
+import { getRequestIdentity, getRequestWorkspaceId } from '../../common/request-identity';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { requestRentalOrderVisibilityWhere } from '../rental-core/rental-core-fact.repository';
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { rentalPaymentBalance } from "../rental-core/rental-funding-events";
@@ -636,6 +639,74 @@ export class PaymentRuntimeService {
     const page = rows.slice(0, limit);
     return { rows: page.map((row) => this.toResponse(row)), nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined,
       truncated: rows.length > limit };
+  }
+
+  /** AI/local fact reads only. These scalar projections never load checkout,
+   * provider payloads, credentials or refresh the provider. Existing client and
+   * financial write/reconciliation entry points keep their original behavior. */
+  private async withOrderPaymentFacts<T>(tenantId: string, workspaceId: string, orderId: string, read: () => Promise<T>): Promise<T> {
+    const identity = getRequestIdentity();
+    if (!identity?.userId || identity.isSaasAdmin || identity.tenantId !== tenantId || getRequestWorkspaceId() !== workspaceId)
+      throw new HttpException('支付事实缺少当前租户及空间', HttpStatus.FORBIDDEN);
+    const binding = requestFingerprint(identity), where = () => ({ id: orderId, tenantId, workspaceId, ...requestRentalOrderVisibilityWhere() });
+    const before = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!before) throw new NotFoundException('支付事实关联订单不可读');
+    const value = await read();
+    const after = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!after || after.updatedAt.getTime() !== before.updatedAt.getTime() || requestFingerprint(getRequestIdentity()) !== binding)
+      throw new HttpException('支付事实读取期间授权或订单变化', HttpStatus.FORBIDDEN);
+    return value;
+  }
+
+  async readOrderPaymentIntentsPage(tenantId: string, workspaceId: string, orderId: string, input: { limit: number; cursor?: string }) {
+    if (!input || Object.keys(input).some(key => !['limit', 'cursor'].includes(key)) || !Number.isSafeInteger(input.limit)
+      || input.limit < 1 || input.limit > 20 || (input.cursor !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(input.cursor)))
+      throw new BadRequestException('支付事实分页参数无效');
+    return this.withOrderPaymentFacts(tenantId, workspaceId, orderId, async () => {
+      const where = { tenantId, workspaceId, orderId };
+      if (input.cursor && !await this.prisma.rentalPaymentIntent.findFirst({ where: { ...where, id: input.cursor }, select: { id: true } }))
+        throw new BadRequestException('支付事实游标不属于当前订单');
+      const rows = await this.prisma.rentalPaymentIntent.findMany({ where,
+        ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: input.limit + 1,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, tenantId: true, workspaceId: true, orderId: true,
+          instrument: true, amount: true, currency: true, status: true, expiresAt: true, paidAt: true } });
+      if (rows.length > input.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length
+        || rows.some(row => row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.orderId !== orderId))
+        throw new ConflictException('支付事实分页来源变化');
+      const page = rows.slice(0, input.limit);
+      return { rows: page.map(row => ({ intentId: row.id, instrument: row.instrument, amount: Number(row.amount), currency: row.currency,
+        // Same original runtime mapping: verified-but-not-funded is pending,
+        // never paid. Missing external receipt is not inferred here.
+        status: row.status === 'verified_pending_funding' ? 'pending' : row.status,
+        expiresAt: row.expiresAt.toISOString(), paidAt: row.paidAt?.toISOString() })),
+        nextCursor: rows.length > input.limit ? page.at(-1)!.id : undefined, truncated: rows.length > input.limit };
+    });
+  }
+
+  async readOrderPaymentRefundsPage(tenantId: string, workspaceId: string, orderId: string, intentId: string, input: { limit: number; cursor?: string }) {
+    if (!input || Object.keys(input).some(key => !['limit', 'cursor'].includes(key)) || !Number.isSafeInteger(input.limit)
+      || input.limit < 1 || input.limit > 50 || (input.cursor !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(input.cursor)))
+      throw new BadRequestException('退款事实分页参数无效');
+    return this.withOrderPaymentFacts(tenantId, workspaceId, orderId, async () => {
+      // Original parent intent binding, without its complete provider payload.
+      if (!await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId }, select: { id: true } }))
+        throw new NotFoundException('退款事实原支付单不可读');
+      const where = { tenantId, workspaceId, orderId, paymentIntentId: intentId };
+      if (input.cursor && !await this.prisma.rentalPaymentRefund.findFirst({ where: { ...where, id: input.cursor }, select: { id: true } }))
+        throw new BadRequestException('退款事实游标不属于原支付单');
+      const rows = await this.prisma.rentalPaymentRefund.findMany({ where,
+        ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: input.limit + 1,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, tenantId: true, workspaceId: true, orderId: true,
+          paymentIntentId: true, amount: true, currency: true, status: true, acceptedAt: true, succeededAt: true, fundedAt: true, createdAt: true, updatedAt: true } });
+      if (rows.length > input.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length
+        || rows.some(row => row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.orderId !== orderId || row.paymentIntentId !== intentId))
+        throw new ConflictException('退款事实分页来源变化');
+      const page = rows.slice(0, input.limit);
+      return { rows: page.map(row => ({ refundId: row.id, paymentIntentId: row.paymentIntentId, orderId: row.orderId,
+        amount: Number(row.amount), currency: row.currency, status: row.status, acceptedAt: row.acceptedAt?.toISOString(),
+        succeededAt: row.succeededAt?.toISOString(), fundedAt: row.fundedAt?.toISOString(), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() })),
+        nextCursor: rows.length > input.limit ? page.at(-1)!.id : undefined, truncated: rows.length > input.limit };
+    });
   }
 
   async listPaymentRefunds(tenantId: string, workspaceId: string, orderId: string, intentId: string) {

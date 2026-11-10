@@ -116,7 +116,9 @@ export class AiTaskCreationRepository {
     const access = aiTaskAccessFromContext(grant.context as AiExecutionContext, candidateId, this.clock());
     return { grant, access, fingerprint: requestFingerprint({
       version: "ai-task-creation-1", scope: access.scope, audience: access.audience, ownerKind: access.actorKind, ownerId: access.actorId,
-      authorizationBinding: access.bindingKey, sceneCode: grant.sceneCode, sceneVersion: grant.sceneVersion,
+      // Durable creation fingerprints retain their original owner tuple. Current
+      // access.bindingKey separately rechecks rights; never reinterpret old keys.
+      authorizationBinding: access.ownershipBindingKey, sceneCode: grant.sceneCode, sceneVersion: grant.sceneVersion,
       inputRef: grant.inputRef, inputRevision: grant.inputRevision, inputHash: grant.inputHash
     }) };
   }

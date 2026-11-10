@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { inspectPcmWav } from './pcm-wav';
 import { inspectBoundedImage } from './bounded-image';
+import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
-export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
+export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio" | "reasoning" | "embedding";
 /** Explicit SaaS/platform gateway principal, never an absent tenantId silently
  * interpreted as platform work. Discriminate by field presence: platform
  * contexts carry actorId only, workspace consumers keep the legacy shape. */
@@ -68,7 +69,7 @@ export type ModelProtocolContent = z.infer<typeof modelProtocolContentSchema>;
 export const modelProtocolRequestBaseSchema = modelRequestSchema.extend({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
     content: z.union([z.string().max(32000), z.array(modelProtocolContentSchema).min(1).max(16)]) }).strict()).min(1).max(64),
-  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming', 'image', 'audio'])).max(5).optional()
+  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming', 'image', 'audio', 'reasoning', 'embedding'])).max(7).optional()
 });
 export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRefine((input, ctx) => {
   let mediaCount = 0;
@@ -119,7 +120,20 @@ export type ModelProtocolInvocation = Readonly<ModelProtocolRequest> & {
   expectedInputBoundHash?: string;
 };
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
-export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
+/** Native Responses output-channel evidence, not a thought transcript or an
+ * extra accounting unit. reasoningTokens is already included in outputTokens. */
+export const modelReasoningEvidenceSchema = z.object({ methodVersion: z.literal('reasoning-channel-1'),
+  itemCount: z.number().int().min(1).max(32), reasoningTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  channelHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+export type ModelReasoningEvidence = z.infer<typeof modelReasoningEvidenceSchema>;
+/** Opaque native vector evidence for a bounded server-owned probe. Vectors stay
+ * in the adapter, not in public text/JSON or financial quantity fields. */
+export const modelEmbeddingEvidenceSchema = z.object({ methodVersion: z.literal('embedding-vector-1'),
+  vectorCount: z.literal(2), dimensions: z.number().int().min(1).max(8192),
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/u), vectorHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+export type ModelEmbeddingEvidence = z.infer<typeof modelEmbeddingEvidenceSchema>;
+export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown;
+  reasoningEvidence?: ModelReasoningEvidence; embeddingEvidence?: ModelEmbeddingEvidence; }
 export interface ProtocolToolCall { id: string; type: 'function'; function: { name: string; arguments: string }; }
 /** Server-built protocol policy only. Never loaded from model text or request fields. */
 export interface ModelResponsePolicy {
@@ -128,8 +142,22 @@ export interface ModelResponsePolicy {
 }
 /** Internal protocol events, not task/approval/business completion events. */
 export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind: "result"; result: AdapterResult };
+export interface NativeAdapterResult extends AdapterResult {
+  /** Original validated call identity remains private until its encrypted
+   * binding is captured; public C03 output must not expose this field. */
+  nativeToolCalls?: ProtocolToolCall[];
+}
 export interface ModelAdapter {
   readonly provider: string;
+  /** True only with real original-call/result encoding, not a remote grant. */
+  readonly supportsNativeToolResults?: boolean;
+  /** Same original invocation's private tool-result wire, never a new HTTP loop
+   * or a user-text snapshot fallback. Missing implementation is unavailable. */
+  generateNativeToolResult?(input: ModelProtocolInvocation, credential: string,
+    value: ResolvedNativeToolResult, connection?: Readonly<{ baseUrl: string }>): Promise<NativeAdapterResult>;
+  /** Hash of the actual native input-determining wire. A text hash cannot
+   * certify this material; absence keeps recorded-token dispatch unavailable. */
+  nativeInputBoundHash?(input: Readonly<ModelProtocolRequest>, value: ResolvedNativeToolResult): string;
   readonly structuredSchemaHash?: string;
   readonly features: readonly ModelFeature[];
   /** Exact input-determining wire material; absence cannot consume a provider
@@ -146,10 +174,13 @@ export interface ModelAdapter {
 export function modelAdapterSupportsCapabilities(adapter: ModelAdapter | undefined, capabilities: readonly string[]): boolean {
   if (!adapter || typeof adapter.generate !== 'function' || !Array.isArray(adapter.features)) return false;
   const features: Readonly<Record<string, ModelFeature>> = { streaming: 'streaming', tools: 'tools',
-    structured_output: 'structuredOutput', vision: 'image', audio: 'audio' };
-  return capabilities.every(capability => capability === 'text' || Object.hasOwn(features, capability)
-    && adapter.features.includes(features[capability])
-    && (capability !== 'streaming' || typeof adapter.stream === 'function'));
+    structured_output: 'structuredOutput', vision: 'image', audio: 'audio', reasoning: 'reasoning', embedding: 'embedding' };
+  // Embedding is the probe-only non-text operation here. Sharing the generate
+  // seam must not advertise a text implementation before admission.
+  return capabilities.every(capability => capability === 'text'
+    ? !adapter.features.includes('embedding')
+    : Object.hasOwn(features, capability) && adapter.features.includes(features[capability])
+      && (capability !== 'streaming' || typeof adapter.stream === 'function'));
 }
 export interface GatewayProfile {
   enabled: boolean;

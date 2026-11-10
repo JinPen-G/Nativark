@@ -17,7 +17,8 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
   for (const table of ['aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption',
     'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiApprovalReprepare',
     'aiTaskOriginalRequest', 'aiTaskQuoteSelection',
-    'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
+    'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskRunPreparation', 'aiTaskRunOverhead',
+    'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
     'aiTaskInputRequest', 'aiTaskInputReceipt']) state.records[table] = [];
   Object.assign(state.records.aiTask[0], { eventCursor: 0n });
   state.records.aiRun[0].fencingToken = new Prisma.Decimal('9');
@@ -27,7 +28,8 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
   function client(records, inTransaction) {
     const rows = name => (records ?? state.records)[name];
     const related = (name, row) => name === 'aiTask' ? { ...row, runs: rows('aiRun').filter(run => run.taskId === row.id)
-      .map(run => ({ ...run, executionPlan: rows('aiTaskRunPlan').find(plan => plan.runId === run.id) ?? null })) }
+      .map(run => ({ ...run, executionPlan: rows('aiTaskRunPlan').find(plan => plan.runId === run.id) ?? null,
+        steps: rows('aiStep').filter(step => step.scopeId === run.scopeId && step.taskId === run.taskId && step.runId === run.id) })) }
       : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
       : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
       : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
@@ -72,6 +74,12 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
         if (model === 'aiRun') Object.assign(row, { leaseOwnerId: null, leaseExpiresAt: null });
         if (model === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const resource of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${resource}`] ??= 0n;
         if (model === 'aiTaskExecutionCharge') Object.assign(row, { gatewayInvocationId: null, actualAmount: null, evidenceRef: null, outcomeFingerprint: null, ...row });
+        // Match schema null/default fields only; the actual host still produces
+        // each preparation/overhead marker, its measurement and original charge.
+        if (model === 'aiTaskRunPreparation' || model === 'aiTaskRunOverhead') {
+          for (const field of ['chargeId', 'requestFingerprint', 'completedAt', 'activeMs', 'measurementHash']) row[field] ??= null;
+          if (model === 'aiTaskRunPreparation') { row.prepared ??= false; row.planHash ??= null; }
+        }
         if (model === 'rentalOrderIdempotencyRecord') { row.id = 'idempotency-a'; row.status = 'succeeded'; }
         if (model === 'aiApprovalConsumption') {
           row.createdAt ??= h.dependencies.clock(); row.updatedAt ??= h.dependencies.clock();
@@ -131,6 +139,9 @@ async function controlledApprovedOrderHarness({ prepare = true, initializeOnly =
   const limits = { maxSteps: 4, maxCalls: 4, maxTotalMs: 10000, maxStepMs: 1000, maxOutputBytes: 4096, maxConcurrent: 1 };
   await root.policy.put({ expectedRevision: null, enabled: true, limits, expiresAt: '2099-01-01T00:00:00Z' });
   if (initializeOnly) {
+    // This fixture explicitly starts its first Run with no published plan or
+    // steps. Do not infer a missing production sequence or grant another origin.
+    Object.assign(state.records.aiRun[0], { sequence: 1 });
     Object.assign(state.records.aiTask[0], { createdAt: dependencies.clock(), updatedAt: dependencies.clock() });
     for (const operation of ['claim_run', 'claim_recovery_run', 'release_run', 'read_step_terminal', 'read_events']) state.records.aiTaskActionPolicy.push({
       scopeId: 'scope-a', taskId: 'task-a', operation, revision: 1, expiresAt: new Date('2099-01-01'),

@@ -21,27 +21,40 @@ test('formal S3 object producer reads bound bytes via header auth, denies cross-
     assert.ok(host.get(INSPECTION_OBJECT_READER) instanceof TenantInspectionObjectReader);
     assert.equal(configReads,0); // Explicit registration does not open objects or read configuration.
   } finally { await host.close(); }
-  Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length});
-  Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id});
+  const digest=require('node:crypto').createHash('sha256').update(png).digest('hex');
+  const staging=`tenant-files/tenant-a/${asset.id}/blob`,storageKey=`${staging}.committed/12345678-1234-4123-8123-123456789abc/${digest}`;
+  Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length,storageKey,checksum:digest});
+  Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id,storageKey});
   f.db.rentalOrder={findFirst:async({where})=>where.id==='order-a'&&where.tenantId==='tenant-a'&&where.workspaceId==='workspace-a'?{id:'order-a'}:null};
   const config={id:'config-a',capability:'file',provider:'s3_compatible',settings:{endpoint:'https://objects.example.test',bucket:'synthetic-bucket',region:'us-east-1',forcePathStyle:true},credentials:{accessKeyId:'synthetic-access',secretAccessKey:'synthetic-secret'}};
-  const at=new Date('2026-10-08T00:00:00Z'), request=s3ObjectReadRequest(config,'object-a',at);
+  const {fileStorageLocationHash}=require('../apps/api/src/modules/integrations/file-content-binding');
+  asset.metadata={fileUploadVersion:2,fileContentVersion:1,contentHash:digest,stagingStorageKey:staging,storageLocationHash:fileStorageLocationHash(config)};
+  const at=new Date('2026-10-08T00:00:00Z'), request=s3ObjectReadRequest(config,storageKey,at);
   assert.equal(new URL(request.url).search,''); assert.match(request.headers.Authorization,/^AWS4-HMAC-SHA256 /);
   assert.equal(request.headers['x-amz-date'],'20261008T000000Z');
   assert.throws(()=>s3ObjectReadRequest(config,'../escape',at));
-  let calls=0,startedResolve;const started=new Promise(resolve=>{startedResolve=resolve;});let hang=false;
+  let calls=0,startedResolve;const started=new Promise(resolve=>{startedResolve=resolve;});let hang=false,body=png;
   const producer=new TenantInspectionObjectReader(f.db,{runtimeConfig:async()=>structuredClone(config)},async(url,init)=>{
     calls++;assert.equal(url,request.url);assert.equal(init.redirect,'error');assert.equal(new URL(url).search,'');
     if(hang){startedResolve();return new Promise(()=>{});}
-    return new Response(png,{headers:{'content-type':'image/png','content-length':String(png.length)}});
+    return new Response(body,{headers:{'content-type':'image/png','content-length':String(png.length)}});
   },async url=>url,()=>at); // Explicit transport/egress mocks: no DNS or connection.
   const storage=new FileStorageRuntimeService(f.db,{runtimeConfig:async()=>structuredClone(config)},undefined,producer);
   const actual=await storage.readInspectionBytes('tenant-a','file-a',{businessType:'rental_order',businessId:'order-a',workspaceId:'workspace-a',actorUserId:f.state.user.id,uploadScene:'return-evidence'},png.length,new AbortController().signal);
   assert.deepEqual(actual.bytes,png);
-  const ref={tenantId:'tenant-a',workspaceId:'workspace-other',fileAssetId:'file-a',provider:'s3_compatible',storageKey:'object-a'};
+  const ref={tenantId:'tenant-a',workspaceId:'workspace-other',fileAssetId:'file-a',provider:'s3_compatible',storageKey};
   await assert.rejects(producer.open(ref,new AbortController().signal));assert.equal(calls,1);
+  const originalMetadata=structuredClone(asset.metadata);
+  for(const changed of [{fileContentVersion:undefined},{contentHash:'0'.repeat(64)},{storageLocationHash:'changed'}]){
+    asset.metadata={...originalMetadata,...changed};
+    await assert.rejects(producer.open({...ref,workspaceId:'workspace-a'},new AbortController().signal));
+  }
+  asset.metadata=originalMetadata;assert.equal(calls,1,'missing freeze evidence fails before transport');
+  body=Buffer.from(png);body[body.length-1]^=1;
+  await assert.rejects(async()=>readInspectionMedia(await producer.open({...ref,workspaceId:'workspace-a'},new AbortController().signal),png.length,new AbortController().signal));
+  body=png;assert.equal(calls,2,'same-length changed content cannot become a new evidence digest');
   hang=true;const control=new AbortController(), pending=producer.open({...ref,workspaceId:'workspace-a'},control.signal);
-  await started;control.abort();await assert.rejects(pending);assert.equal(calls,2);
+  await started;control.abort();await assert.rejects(pending);assert.equal(calls,3);
 });
 function mediaFixture(bytes=png){
   const f=fixture();
@@ -364,7 +377,7 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   }
   delete taskDependencies.inspection.credentials;
   const staffTasks=new InspectionRecognitionTaskApplication(taskDependencies);
-  const staffRequest={headers:{authorization:`Bearer ${staffAuth.signAccessToken({sub:'user-a',tid:'tenant-a',sid:'staff-session',aud:'staff',exp:Math.floor(Date.now()/1000)+600})}`}};
+  const staffRequest={headers:{authorization:`Bearer ${staffAuth.signAccessToken({sub:'user-a',tid:'tenant-a',sid:'staff-session',wid:f.state.workspace,aud:'staff',exp:Math.floor(Date.now()/1000)+600})}`}};
   await assert.rejects(staffTasks.create(staffRequest,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision}));
   const staffServices=composeInspectionAssist({...f.ports,guard:staffGuard,storage:f.storage,
     credentials:{current:async()=>({authorization:staffRequest.headers.authorization,requestId:'staff-request',audience:'staff'})}});
@@ -454,6 +467,25 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
     const policies=composeStaffInspectionTaskPolicies(taskDependencies,{enabled:true,ttlMs:120000,
       operations:['read_metadata','read_events','transition_task','read_step_terminal']});
     const policyHttp=new StaffInspectionTaskPolicyController(policies);
+    const {PrismaTaskActionPolicyRepository}=require('../apps/api/src/modules/ai-native/prisma-task-action-policy.repository');
+    const {AiScopeRepository}=require('../apps/api/src/modules/ai-native/ai-scope.repository');
+    const {AiTaskCurrentIdentityAuthority}=require('../apps/api/src/modules/ai-native/task-current-identity.authority');
+    const {InspectionActionAuthority}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-action.authority');
+    const receiptCredentials={current:async()=>({authorization:staffRequest.headers.authorization,
+      audience:'staff',requestId:'staff-policy-receipt-read'})};
+    const receiptScopes=new AiScopeRepository(combinedDb,
+      new AiTaskCurrentIdentityAuthority(staffAuth,receiptCredentials,h.config.clock),h.config.clock);
+    const receiptAuthority=new InspectionActionAuthority(staffGuard,receiptCredentials);
+    // Repository-level evidence check, not a new HTTP recovery route. It retains
+    // real current Auth/Guard; an old receipt is never a new execution grant.
+    const receiptRepository=new PrismaTaskActionPolicyRepository(combinedDb,receiptScopes,{resolve:async taskId=>{
+      assert.equal(taskId,owned.id);
+      await receiptAuthority.withAction(originalReference,'bind',async()=>{});
+      return (await receiptScopes.resolveCurrent()).context;
+    }},h.config.clock);
+    const originalPolicy=(operation,expectedRevision,mutation='configure')=>runWithRequestIdentity({},
+      ()=>receiptRepository.readMutation(owned.id,operation,expectedRevision,mutation));
+    const policyReceipts=()=>h.state.operationLog.filter(row=>row.action==='ai_native_task_policy_saved');
     const policyBeforeBytes=f.calls.length;
     for(const operation of ['read_metadata','read_events','transition_task']) {
       const command={reference:originalReference,operation};
@@ -461,14 +493,64 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
       const saved=await policyHttp.configure(staffRequest,{...command,expectedRevision:null});
       assert.equal(saved.result.taskId,owned.id);assert.equal(saved.result.revision,1);
       assert.deepEqual(saved.result.requiredPermissions,['rental-os:order:view','rental-os:order:return']);
+      const original=await originalPolicy(operation,null);
+      assert.equal(original.state,'recorded');assert.deepEqual(original.policy,saved.result);assert.equal(original.retryable,false);
+      assert.equal((await originalPolicy(operation,1,'clear')).state,'not_observed');
       assert.equal((await policyHttp.read(staffRequest,command)).result.policy.revision,1);
+      const receiptCount=policyReceipts().length;
       await assert.rejects(policyHttp.configure(staffRequest,{...command,expectedRevision:null}),error=>error.getStatus()===409);
+      assert.equal(policyReceipts().length,receiptCount,'CAS conflict cannot append a second mutation receipt');
     }
     const toClear={reference:originalReference,operation:'read_step_terminal',expectedRevision:null};
     await assert.rejects(policyHttp.configure(staffRequest,{...toClear,requiredPermissions:['root']}),error=>error.getStatus()===400);
-    await policyHttp.configure(staffRequest,toClear);
+    const originalConfigured=await policyHttp.configure(staffRequest,toClear);
     const clearResponse=await policyHttp.clear(staffRequest,{...toClear,expectedRevision:1});
     assert.equal(clearResponse.result.revision,2);assert.equal(clearResponse.result.expiresAt,h.config.clock().toISOString());
+    assert.deepEqual((await originalPolicy(toClear.operation,null)).policy,originalConfigured.result,
+      'later clear cannot substitute the original configure evidence');
+    assert.deepEqual((await originalPolicy(toClear.operation,1,'clear')).policy,clearResponse.result);
+    assert.equal((await originalPolicy(toClear.operation,1)).state,'not_observed','clear is not configure evidence');
+    const policyTransaction=combinedDb.$transaction;
+    try {
+      combinedDb.$transaction=async callback=>{await policyTransaction(callback);throw Error('policy commit reply lost');};
+      await assert.rejects(policyHttp.configure(staffRequest,{...toClear,expectedRevision:2}),
+        error=>error.getStatus()===409&&error.getResponse().code==='AI_RESULT_UNKNOWN'&&error.getResponse().retryable===false);
+    } finally {combinedDb.$transaction=policyTransaction;}
+    const lostConfigure=await originalPolicy(toClear.operation,2);
+    assert.equal(lostConfigure.state,'recorded');assert.equal(lostConfigure.policy.revision,3);
+    try {
+      combinedDb.$transaction=async callback=>{await policyTransaction(callback);f.state.active=false;throw Error('policy clear reply lost');};
+      await assert.rejects(policyHttp.clear(staffRequest,{...toClear,expectedRevision:3}),
+        error=>error.getStatus()===409&&error.getResponse().code==='AI_RESULT_UNKNOWN'&&error.getResponse().retryable===false);
+      await assert.rejects(originalPolicy(toClear.operation,3,'clear'),{code:'AI_ACCESS_DENIED'});
+    } finally {combinedDb.$transaction=policyTransaction;f.state.active=true;}
+    const lostClear=await originalPolicy(toClear.operation,3,'clear');
+    assert.equal(lostClear.state,'recorded');assert.equal(lostClear.policy.revision,4);
+    assert.equal(lostClear.policy.expiresAt,h.config.clock().toISOString());
+    assert.deepEqual((await originalPolicy(toClear.operation,2)).policy,lostConfigure.policy);
+    const beforeUnavailable=structuredClone({policies:h.state.aiTaskActionPolicy,receipts:policyReceipts()});
+    const operationLog=combinedDb.operationLog;
+    try {
+      combinedDb.operationLog=undefined;
+      await assert.rejects(policyHttp.configure(staffRequest,{...toClear,expectedRevision:4}),
+        error=>error.getStatus()===503&&error.getResponse().code==='AI_RESOURCE_UNAVAILABLE');
+      await assert.rejects(policyHttp.clear(staffRequest,{...toClear,expectedRevision:4}),
+        error=>error.getStatus()===503&&error.getResponse().code==='AI_RESOURCE_UNAVAILABLE');
+    } finally {combinedDb.operationLog=operationLog;}
+    // A receipt failure inside the transaction must also roll back the policy.
+    try {
+      combinedDb.$transaction=callback=>policyTransaction(tx=>callback({...tx,operationLog:{...tx.operationLog,create:undefined}}));
+      await assert.rejects(policyHttp.configure(staffRequest,{...toClear,expectedRevision:4}),
+        error=>error.getStatus()===503&&error.getResponse().code==='AI_RESOURCE_UNAVAILABLE');
+      await assert.rejects(policyHttp.clear(staffRequest,{...toClear,expectedRevision:4}),
+        error=>error.getStatus()===503&&error.getResponse().code==='AI_RESOURCE_UNAVAILABLE');
+    } finally {combinedDb.$transaction=policyTransaction;}
+    assert.deepEqual({policies:h.state.aiTaskActionPolicy,receipts:policyReceipts()},beforeUnavailable);
+    for(const row of policyReceipts()) {
+      assert.equal(row.tenantId,'tenant-a');assert.equal(row.workspaceId,'workspace-a');assert.equal(row.userId,'user-a');
+      assert.equal(row.detail.payloadHash,requestFingerprint(row.detail.payload));
+      assert.equal(row.detail.payload.taskId,owned.id);
+    }
     assert.equal(f.calls.length,policyBeforeBytes);assert.equal(h.modelControl.sent.length,0);
     const {AI_INSPECTION_TASK_POLICY_HTTP_CONTRACTS:policyContracts,AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT:policyRoutes}=require('@rental-os/shared');
     for(const [action,contract] of Object.entries(policyContracts)) {

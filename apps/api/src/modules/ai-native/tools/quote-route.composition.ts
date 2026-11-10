@@ -4,6 +4,7 @@ import type { BusinessContext } from '../../rental-core/rental-business.service'
 import type { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiQuoteCoreContextSource, AiQuotePreviewAuthority } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { assertAiReadContextBinding } from './read-context-binding';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiQuotePreviewService } from '../quote-preview.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
@@ -12,8 +13,9 @@ import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
 import { parseQuoteAddresses, quoteAddressIdentity, type AiQuoteAddressSource } from '../scenes/original-quote-address';
 
-/** Server-side fixed quote route. Corporate identity/qualification has no
- * trusted adapter here; never reinterpret it as personal membership. */
+/** Original quote Guard/ALS only. Enterprise-employee selections reach Core's
+ * current membership and quote-credit checks, not a new signing/payment grant.
+ * Direct corporate users are unsupported by the original member quote flow. */
 export class AiQuoteRouteAuthority implements AiQuotePreviewAuthority {
   constructor(private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withQuote'>) {
     if (typeof routes?.withQuote !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
@@ -21,38 +23,37 @@ export class AiQuoteRouteAuthority implements AiQuotePreviewAuthority {
   async withQuote<T>(input: RentalQuoteRequest, consume: (context: AiExecutionContext) => Promise<T>): Promise<T> {
     const snapshot = structuredClone(input);
     if (snapshot?.customerType === 'corporate') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-    return this.routes.withQuote(structuredClone(snapshot), context => {
-      // A visible employment relationship is not independent signing/payment
-      // authority. Do not turn a requested enterprise payer into a grant.
-      if (snapshot.bookingIdentity?.enterpriseContractAndPayer === true) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-      return consume(context);
-    });
+    // Preserve the selected payer intent. Core re-resolves the current personal
+    // member and enterprise relationship and applies its quote-credit rules.
+    // Those quote facts do not attest order subjects, payment or credit capacity.
+    return this.routes.withQuote(snapshot, consume);
   }
 }
 
-type ContextCore = Pick<RentalCoreService, 'readBusinessContext'>;
+type ContextCore = Pick<RentalCoreService, 'readQuoteConfiguration'>;
 
-/** Same public Core sources as the manual controller, resolved under the
- * existing settings-read Guard and ALS. Expected scope is only a binding to
- * compare with the authenticated session, never a source of authority. */
+/** Dedicated bounded persisted Core source under the existing settings-read
+ * Guard/ALS, never state/cache getters or recovery snapshots. Preparation can
+ * bind its enclosing server principal before Core access; scope/context are not
+ * new authority. Legacy source callers retain the original one-argument port. */
 export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource {
   constructor(private readonly core: ContextCore, private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'>) {
-    if (typeof core?.readBusinessContext !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if (typeof core?.readQuoteConfiguration !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     if (typeof routes?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<BusinessContext> {
+  async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, expectedContext?: AiExecutionContext): Promise<BusinessContext> {
     if (expected?.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
-    const scope = structuredClone(expected);
+    const scope = structuredClone(expected), principal = expectedContext && structuredClone(expectedContext);
     return this.routes.withRead('quote_context', {}, async context => {
+      assertAiReadContextBinding(context, principal);
       if (context.scope.kind !== 'workspace' || context.scope.tenantId !== scope.tenantId
         || context.scope.workspaceId !== scope.workspaceId) throw new ModelGatewayError('FORBIDDEN');
       const tenantId = context.scope.tenantId;
-      // Core owns the binding and detached configuration snapshot. Separate
-      // getters could combine values from before and after category adoption.
-      const result = structuredClone(await this.core.readBusinessContext(tenantId));
-      if (result.profile.tenantId !== tenantId || result.settings.tenantId !== tenantId
-        || result.profile.categoryCode !== result.category.code) throw new ModelGatewayError('INVALID_RESPONSE');
-      return result;
+      const facts = structuredClone(await this.core.readQuoteConfiguration(tenantId));
+      if (facts.tenantId !== tenantId || facts.workspaceId !== scope.workspaceId || facts.profile.tenantId !== tenantId
+        || facts.settings.tenantId !== tenantId || facts.profile.categoryCode !== facts.category.code) throw new ModelGatewayError('INVALID_RESPONSE');
+      return { ...(facts.categoryVersionId ? { categoryVersionId: facts.categoryVersionId, categoryAdoptionRevision: facts.categoryAdoptionRevision } : {}), profile: facts.profile, category: facts.category, settings: facts.settings, groups: facts.groups,
+        pricingGroups: facts.pricingGroups, couponTemplates: facts.couponTemplates, locations: facts.locations, operators: facts.operators };
     });
   }
 }
@@ -62,7 +63,7 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
  * authorized task path. No runner/approval/dispatch is installed here. */
 export function composeAiGuardedQuoteTools(input: {
   core: ContextCore & Pick<RentalCoreService, 'resolvePricingGroupQuoteRequest'>;
-  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference' | 'listSpaceRatesAt' | 'listCustomerDeliveryAddresses'>>;
+  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference' | 'readQuoteRateTargets' | 'listCustomerDeliveryAddresses'>>;
   routes: AiBusinessReadRouteAuthority;
   readers: { catalog: Pick<AiCatalogReadFactsService, 'read'>; members: Pick<AiMembershipCandidateReadFactsService, 'read'>
     & Partial<Pick<AiMembershipCandidateReadFactsService, 'readBookingOptions'>> };
@@ -82,17 +83,23 @@ export function composeAiGuardedQuoteTools(input: {
     }
   } : undefined;
   const candidates = new AiQuoteCandidatePreparationService({ ...input.readers, addresses,
-    ...(typeof input.business.listSpaceRatesAt === 'function' ? { rates: {
-      read: async (scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, supplied: BusinessContext, at: string) => {
+    ...(typeof input.business.readQuoteRateTargets === 'function' ? { rates: {
+      read: async (scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, supplied: BusinessContext, at: string,
+        expectedContext?: AiExecutionContext) => {
         const expected = structuredClone(scope), snapshot = structuredClone(supplied);
+        const principal = expectedContext && structuredClone(expectedContext);
         return input.routes.withRead('quote_context', {}, async current => {
+          // Rate values/configuration can be identical under another principal.
+          // Bind this Guard to the enclosing preparation before the lookup,
+          // and bind its nested configuration Guard to this current reader.
+          assertAiReadContextBinding(current, principal);
           if (requestFingerprint(current.scope) !== requestFingerprint(expected)
-            || requestFingerprint(await context.current(expected)) !== requestFingerprint(snapshot)) throw new ModelGatewayError('FORBIDDEN');
-          return structuredClone(await input.business.listSpaceRatesAt!(expected.tenantId, snapshot, at));
+            || requestFingerprint(await context.current(expected, current)) !== requestFingerprint(snapshot)) throw new ModelGatewayError('FORBIDDEN');
+          return structuredClone(await input.business.readQuoteRateTargets!(expected.tenantId, snapshot, at));
         });
       }
     } } : {})
-  }, context, input.clock);
+  }, context, input.clock, input.routes);
   const preview = new AiQuotePreviewService(input.business, context, authority, input.clock, input.core, addresses);
   // Historical observations use the same original Guard, not the new-effect
   // payer gate. This instance is exposed only through exact-key recovery.

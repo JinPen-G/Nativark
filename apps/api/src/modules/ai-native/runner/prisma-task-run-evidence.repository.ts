@@ -19,7 +19,14 @@ export type AiTaskOrderPhaseBusinessEvidence = {
   readWaiting(input: Parameters<OrderBusiness['readWaiting']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['readWaiting']>;
   reconcile(input: Parameters<OrderBusiness['reconcile']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['reconcile']>;
 };
-export type AiConfirmationTool = 'rental.order.commit' | 'tenant.notifications.commit';
+export type AiConfirmationTool = 'rental.order.commit' | 'tenant.notifications.commit' | 'membership.profile.commit';
+/** Exact domain phase version, not a general-purpose confirmation registry. */
+export function aiTaskConfirmationPhaseVersion(tool: string) {
+  if (tool === 'rental.order.commit') return 'approved-order-wait-1';
+  if (tool === 'tenant.notifications.commit') return 'approved-settings-wait-1';
+  if (tool === 'membership.profile.commit') return 'approved-profile-wait-1';
+  throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+}
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -29,7 +36,7 @@ const confirmationContinuationSchema = z.object({ checkpointRef: id.max(36), ste
 const resumedConfirmationSchema = z.object({ data: z.object({ from: z.literal('waiting_confirmation'), to: z.literal('running'), reason: z.literal('resume') }).strict(),
   confirmation: confirmationContinuationSchema.extend({ phaseId: id.max(36), contentHash: hash, runId: id.max(36),
     runRevision: z.number().int().positive().max(4294967294), holderId: id, fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict() }).passthrough();
-const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1']),
+const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1', 'approved-profile-wait-1']),
   binding: z.object({ scopeId: id.max(36), taskId: id.max(36), runId: id.max(36), stepId: id.max(36), actionId: id, inputRef: id.max(36), fingerprint: hash }).strict(),
   presentedLease: z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision: z.number().int().positive().max(4294967294),
     fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().datetime({ offset: true }) }).strict(),
@@ -40,11 +47,14 @@ const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait
   businessResultRef: id.optional(), replayed: z.boolean().optional() }).strict();
 export const aiTaskRunnerLimitsSchema = z.object({ maxSteps: z.number().int().min(1).max(1000), maxCalls: z.number().int().min(1).max(1000), maxConcurrent: z.literal(1),
   maxTotalMs: z.number().int().min(1).max(86400000), maxStepMs: z.number().int().min(1).max(86400000), maxOutputBytes: z.number().int().min(1).max(16777216) }).strict();
+export function isAiTaskRunPlanBounded(plan: Pick<AiTaskRunnerPlan, 'steps' | 'limits'>) {
+  return plan.steps.length <= plan.limits.maxSteps && plan.limits.maxStepMs <= plan.limits.maxTotalMs
+    && new Set(plan.steps.map(step => step.registrationRef)).size === plan.steps.length;
+}
 const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevision: z.number().int().min(1).max(4294967294),
   steps: z.array(z.object({ registrationRef: id, operation: z.enum(['readonly', 'idempotent', 'external_unknown']), toolCode: id, toolVersion: id }).strict()).max(1000),
   limits: aiTaskRunnerLimitsSchema
-}).strict().refine(p => p.steps.length <= p.limits.maxSteps && p.limits.maxStepMs <= p.limits.maxTotalMs
-  && new Set(p.steps.map(s => s.registrationRef)).size === p.steps.length);
+}).strict().refine(isAiTaskRunPlanBounded);
 export { planSchema as aiTaskRunPlanSchema };
 // Read-only original receipt consumers share the persisted validators, not
 // the live execution/lease authorization performed by this repository.
@@ -54,6 +64,9 @@ const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u
 export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
+  /** Resource-definition admission before input publication, NOT plan authorization. */
+  authorizePreparation?: (definition: import('./task-run-preparation.ports').AiTaskPreparationDefinition,
+    lease: AiTaskRunnerLease, db?: Prisma.TransactionClient) => Promise<z.infer<typeof proofSchema>>;
   /** Current-authorized binding of an existing step, never a start grant. */
   resolveOriginal?: (command: import('../ai-step-registration.repository').AiStepRegistrationCommand,
     tx?: Prisma.TransactionClient) => Promise<import('../ai-step-registration.repository').AiStepOriginalRegistrationGrant>;
@@ -69,6 +82,16 @@ const conflict = () => new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
  * Activity means the measured uninterrupted tool interval, not paused wall time.
  */
 export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceSource {
+  private toolActivityObserver?: (lease: AiTaskRunnerLease, chargeId: string, started: number, ended: number) => void;
+
+  /** Composition-only timing handoff. Neither callback data nor a client field
+   * can supply an interval; capture derives it from this process's clock and the
+   * locked original ACTIVE_MS reservation. Bind once, before running work. */
+  bindToolActivityObserver(observer: NonNullable<PrismaTaskRunEvidenceRepository['toolActivityObserver']>) {
+    if (this.toolActivityObserver || typeof observer !== 'function') throw unavailable();
+    this.toolActivityObserver = observer;
+  }
+
   constructor(private readonly db: Db, private readonly scopes: AiTaskExecutionScopeSource,
     private readonly planAuthority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
     private readonly monotonic: () => number = () => performance.now(),
@@ -77,13 +100,13 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskRunPlan?.findUnique !== 'function'
       || typeof db?.aiTaskResultArtifact?.create !== 'function' || typeof scopes?.resolve !== 'function' || typeof planAuthority?.authorize !== 'function'
-      || !['rental.order.commit', 'tenant.notifications.commit'].includes(confirmationTool)
+      || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(confirmationTool)
       || (orderEvidence && (typeof orderEvidence.readWaiting !== 'function' || typeof orderEvidence.reconcile !== 'function'))) throw unavailable();
   }
 
   private phasePayload(value: unknown) {
     const parsed = orderPhasePayloadSchema.parse(value);
-    if (parsed.version !== (this.confirmationTool === 'rental.order.commit' ? 'approved-order-wait-1' : 'approved-settings-wait-1')) throw denied();
+    if (parsed.version !== aiTaskConfirmationPhaseVersion(this.confirmationTool)) throw denied();
     return parsed;
   }
 
@@ -96,33 +119,101 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     return access;
   }
 
-  private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false) {
+  private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false, accountingOnly = false) {
+    const statuses: import('@prisma/client').AiTaskStatus[] = accountingOnly
+      ? ['QUEUED', 'RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] : ['QUEUED', 'RUNNING'];
     const current = await this.access(lease);
     if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId) throw denied();
     const task = await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true, scopeId: true } });
-    const run = await db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId, leaseOwnerId: lease.holderId,
-      fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: { in: ['QUEUED', 'RUNNING'] }, leaseExpiresAt: { gt: this.wall() } },
+    const receiptOnly = accountingOnly && lease.expiresAt === '';
+    const run = await db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId,
+      fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: { in: statuses },
+      ...(receiptOnly ? { OR: [{ status: { in: ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] } },
+        { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.wall() } },
+        { leaseOwnerId: null, leaseExpiresAt: null }] }
+        : { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.wall() } }) },
       select: { id: true, scopeId: true, taskId: true, leaseOwnerId: true, fencingToken: true, revision: true, status: true, leaseExpiresAt: true } });
-    // A collation match is not an exact logical identity/lease. Never accept
-    // corrupt readback merely because the query and later CAS matched a row.
+    // A released or terminal receipt is not a held execution lease. It can
+    // verify original measured time, never reserve or enter ordinary marker writes.
+    const terminalReceipt = receiptOnly && run && (!['QUEUED', 'RUNNING'].includes(run.status)
+      || run.leaseOwnerId === null && run.leaseExpiresAt === null);
     if (!task || task.id !== lease.taskId || task.scopeId !== current.scopeId || !run || run.id !== lease.runId
-      || run.scopeId !== current.scopeId || run.taskId !== lease.taskId || run.leaseOwnerId !== lease.holderId
-      || run.fencingToken.toFixed(0) !== lease.fencingToken || run.revision !== lease.revision
-      || !['QUEUED', 'RUNNING'].includes(run.status) || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()) throw denied();
+      || run.scopeId !== current.scopeId || run.taskId !== lease.taskId
+      || run.fencingToken.toFixed(0) !== lease.fencingToken || run.revision !== lease.revision || !statuses.includes(run.status)
+      || terminalReceipt && locked
+      || !terminalReceipt && (run.leaseOwnerId !== lease.holderId || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()
+        || lease.expiresAt && Date.parse(lease.expiresAt) !== run.leaseExpiresAt.getTime())) throw denied();
     if (locked && (await db.aiRun.updateMany({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId,
       leaseOwnerId: lease.holderId, fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision,
-      status: { in: ['QUEUED', 'RUNNING'] }, leaseExpiresAt: { gt: this.wall() } }, data: { revision: lease.revision } })).count !== 1) throw denied();
+      status: { in: statuses }, leaseExpiresAt: { gt: this.wall() } }, data: { revision: lease.revision } })).count !== 1) throw denied();
   }
 
-  private async locked<T>(lease: AiTaskRunnerLease, consume: (tx: Tx, access: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>) => Promise<T>) {
+  private async locked<T>(lease: AiTaskRunnerLease, consume: (tx: Tx, access: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>) => Promise<T>, accountingOnly = false) {
     lease = structuredClone(lease); const access = await this.access(lease);
     try {
       return await this.db.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${access.scopeId} AND id = ${lease.taskId} FOR UPDATE`);
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${access.scopeId} AND taskId = ${lease.taskId} AND id = ${lease.runId} FOR UPDATE`);
-        await this.held(tx, lease, access, true);
+        await this.held(tx, lease, access, true, accountingOnly);
         const result = await consume(tx, access);
-        await this.held(tx, lease, access, true);
+        await this.held(tx, lease, access, true, accountingOnly);
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof AiTaskExecutionBudgetError) throw error;
+      throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+    }
+  }
+
+  /** Internal resource participant: execute no business/model callback in this transaction. */
+  withHeldRun<T>(lease: AiTaskRunnerLease, participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
+    return this.locked(lease, (tx, access) => participant(tx, access.scopeId));
+  }
+
+  async assertHeldRun(lease: AiTaskRunnerLease) {
+    const access = await this.access(lease);
+    await this.held(this.db, lease, access);
+    return access.scopeId;
+  }
+
+  /** Original time receipts only. A nonempty deadline still needs the exact
+   * live holder; empty released/terminal observation can read saved measurements
+   * after release/expiry, never capture, prepare, dispatch or write a new marker. */
+  async assertAccountingRun(lease: AiTaskRunnerLease) {
+    const access = await this.access(lease);
+    await this.held(this.db, lease, access, false, true);
+    return access.scopeId;
+  }
+
+  async withAccountingRun<T>(lease: AiTaskRunnerLease, participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
+    if (!lease.expiresAt) throw denied();
+    return this.locked(lease, (tx, access) => participant(tx, access.scopeId), true);
+  }
+
+  /** Infrastructure-only final time participant. A terminal/absent holder alone
+   * is insufficient: lock the exact released CAS+1 tuple, recheck current receipt
+   * authority, and leave owner/deadline/fence untouched. The caller must also own
+   * the original same-process measurement; no tool/model callback belongs here. */
+  async withReleasedAccountingRun<T>(before: AiTaskRunnerLease, receipt: { released: true; revision: number },
+    participant: (tx: Prisma.TransactionClient, scopeId: string) => Promise<T>) {
+    before = structuredClone(before); receipt = structuredClone(receipt);
+    if (!before.expiresAt || !Number.isFinite(Date.parse(before.expiresAt)) || receipt?.released !== true
+      || !Number.isSafeInteger(receipt.revision) || receipt.revision !== before.revision + 1
+      || receipt.revision > 0xffffffff) throw denied();
+    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease);
+    const key = { scopeId: access.scopeId, taskId: lease.taskId, id: lease.runId, revision: lease.revision,
+      fencingToken: new Prisma.Decimal(lease.fencingToken), leaseOwnerId: null, leaseExpiresAt: null };
+    try {
+      return await this.db.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${access.scopeId} AND id = ${lease.taskId} FOR UPDATE`);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${access.scopeId} AND taskId = ${lease.taskId} AND id = ${lease.runId} FOR UPDATE`);
+        await this.held(tx, lease, access, false, true);
+        // The FOR UPDATE lock already fences this observation. A no-op Prisma
+        // update would still change AiRun.updatedAt during original-time closure.
+        if (!await tx.aiRun.findFirst({ where: key })) throw denied();
+        const result = await participant(tx, access.scopeId);
+        await this.held(tx, lease, access, false, true);
+        if (!await tx.aiRun.findFirst({ where: key })) throw denied();
         return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
@@ -161,18 +252,19 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     });
   }
 
-  async resolve(task: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, recovery: boolean): Promise<AiTaskRunnerPlan> {
+  async resolve(task: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, recovery: boolean, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     task = structuredClone(task); lease = structuredClone(lease);
-    const access = await this.access(lease); await this.held(this.db, lease, access);
+    if (accountingOnly && !recovery) throw denied();
+    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
     const plan = await this.currentPlan(this.db, lease, access.scopeId, recovery);
     if (plan.taskId !== task.taskId) throw denied();
-    await this.held(this.db, lease, access);
+    await this.held(this.db, lease, access, false, accountingOnly);
     return { ...plan, taskRevision: task.revision };
   }
 
-  async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease): Promise<AiTaskRunnerPlan> {
+  async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
-    const access = await this.access(lease); await this.held(this.db, lease, access);
+    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
     const key = { scopeId: access.scopeId, taskId: lease.taskId };
     const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
     if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
@@ -198,7 +290,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     const original = planSchema.parse(stored.payload);
     if (original.taskId !== key.taskId || original.runId !== origin.id
       || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
-    await this.held(this.db, lease, access);
+    await this.held(this.db, lease, access, false, accountingOnly);
     return original;
   }
 
@@ -263,6 +355,11 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
   async capture(lease: AiTaskRunnerLease, stepId: string, signal: AbortSignal,
     execute: () => Promise<AiTaskRunnerObservedResult>, phase?: 'confirmation' | AiTaskRunnerConfirmationContinuation,
     prepare?: () => Promise<void>): Promise<AiTaskRunnerEffectResult> {
+    // Current authorization, charge reads and the original marker COMMIT are
+    // active work too. Start before those waits so recreation cannot make this
+    // prefix free; a new confirmation invocation still excludes human waiting.
+    const started = this.monotonic();
+    if (!Number.isFinite(started)) throw unavailable();
     lease = structuredClone(lease);
     const continuing = typeof phase === 'object' && phase !== null ? confirmationContinuationSchema.parse(structuredClone(phase)) : null;
     if (!id.max(36).safeParse(stepId).success || typeof execute !== 'function' || signal.aborted) throw denied();
@@ -327,7 +424,6 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         outputBytesChargeId: lockedCharges.find(c => c.resource === 'OUTPUT_BYTES')!.chargeId, createdAt: this.wall() });
     });
     if (signal.aborted) throw unavailable();
-    const started = this.monotonic();
     if (prepare) {
       // Count is an external request too. Its preparation runs only after the
       // original marker committed, so a crash can always reopen that marker.
@@ -346,7 +442,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       });
       if (signal.aborted) throw unavailable();
     }
-    const result = structuredClone(await execute()); const elapsed = this.monotonic() - started;
+    const result = structuredClone(await execute()), ended = this.monotonic(), elapsed = ended - started;
     if (signal.aborted || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > 86400000
       || !['succeeded', 'failed', 'unknown', ...(firstPhase ? ['paused'] : [])].includes(result.kind)
       || result.kind === 'paused' && (!firstPhase || result.pause !== 'confirmation')
@@ -355,6 +451,8 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     const outputBytes = Buffer.byteLength(encoded, 'utf8');
     if (outputBytes > 16777216) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
     const activeMs = BigInt(Math.ceil(elapsed));
+    const timeCharge = charges.find(charge => charge.resource === 'ACTIVE_MS');
+    if (!timeCharge || activeMs > timeCharge.amount) throw unavailable();
     if (firstPhase) {
       const payload = this.phasePayload(result.payload);
       if (requestFingerprint(payload.binding) !== requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId,
@@ -367,6 +465,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         || (result.kind === 'failed' && (payload.effectState !== 'rejected' || !payload.proposal || !payload.decisionRef || payload.decision !== 'rejected' || payload.businessResultRef))
         || (result.kind === 'unknown' && (!['preparation_unknown', 'unresolved'].includes(payload.effectState) || payload.businessResultRef))) throw denied();
       const receiptId = randomUUID();
+      this.toolActivityObserver?.(structuredClone(lease), timeCharge.chargeId, started, ended);
       await this.locked(lease, async tx => {
         // This records the result of the already-started phase; it grants no
         // next action. Closing new execution must not erase its measurement.
@@ -405,6 +504,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
           : { kind: result.kind, resultRef: receiptId, outputBytes };
     }
     if (result.kind === 'paused') throw unavailable();
+    this.toolActivityObserver?.(structuredClone(lease), timeCharge.chargeId, started, ended);
     await this.locked(lease, async tx => {
       await this.currentPlan(tx, lease, access.scopeId, true);
       const current = await tx.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, id: stepId,
@@ -497,15 +597,18 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     let result: AiTaskRunnerEffectResult = { kind: 'unknown', resultRef: last?.id ?? snapshot.artifact.id,
       outputBytes: snapshot.measurement ? Number(snapshot.measurement.outputBytes) : 0 };
     let businessResultRef: string | null = null, observedAt: string | null = null;
-    if (snapshot.measurement && last?.kind === 'confirmation' && !snapshot.consumption
-      && snapshot.task.cancelRequestedAt !== null && ['CANCEL_REQUESTED', 'CANCELLED'].includes(snapshot.task.status)) {
+    if (snapshot.measurement && last?.kind === 'confirmation' && !snapshot.consumption) {
       // Preserve the immutable confirmation receipt. Only the original business
-      // adapter may attest that no approval/submission phase ever followed it.
+      // adapter may attest cancellation or a recorded rejection plus the complete
+      // no-submission witness; pending/approved decisions remain unknown.
       const business = await this.orderEvidence.reconcile({ taskId: lease.taskId, runId: lease.runId, stepId,
         actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!, fingerprint: snapshot.step.requestFingerprint,
         lease: structuredClone(lease) }, transaction);
-      if (business.kind === 'failed' && business.errorCode === 'AI_CANCELLED')
+      if (business.kind === 'failed' && business.errorCode === 'AI_CANCELLED'
+        && snapshot.task.cancelRequestedAt !== null && ['CANCEL_REQUESTED', 'CANCELLED'].includes(snapshot.task.status))
         result = { kind: 'failed', resultRef: last.id, errorCode: 'AI_CANCELLED', outputBytes: Number(snapshot.measurement.outputBytes) };
+      else if (business.kind === 'failed' && business.errorCode === 'AI_APPROVAL_REJECTED')
+        result = { kind: 'failed', resultRef: last.id, errorCode: 'AI_BUSINESS_REJECTED', outputBytes: Number(snapshot.measurement.outputBytes) };
     }
     if (snapshot.measurement && last && last.kind !== 'confirmation') {
       const binding = { taskId: lease.taskId, runId: lease.runId, stepId, actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!,

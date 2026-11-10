@@ -24,9 +24,13 @@ export function composeStandardPlatformProbe(
   try { configuration = configurationSchema.parse(structuredClone(value)); }
   catch { return unavailable(); }
   const { enabled, ...settings } = configuration;
-  // The workspace OperationLog requires tenant attribution. A platform host
-  // must supply its own approved audit sink, never a fabricated tenant.
-  if (enabled && typeof input.audit?.append !== 'function') return unavailable();
+  // Without an explicit server sink, the request composition binds the original
+  // task and SAME accounting facts to PrismaPlatformGatewayAudit. Its journal
+  // tenant comes only from the persisted current SaaS user; call attribution
+  // stays platform/null. Check storage methods without reading or seeding it.
+  if (enabled && (input.audit !== undefined ? typeof input.audit?.append !== 'function'
+    : typeof input.db?.$transaction !== 'function' || typeof input.db.user?.findUnique !== 'function'
+      || typeof input.db.operationLog?.create !== 'function' || typeof input.db.operationLog.findUnique !== 'function')) return unavailable();
   const factory = new PlatformCapabilityProbeRequestFactory({ ...input, ...settings,
     ...(!enabled ? { protocol: { post: async () => { throw new ModelGatewayError('DISABLED'); } } } : {}) });
   return Object.freeze({ open: request => {

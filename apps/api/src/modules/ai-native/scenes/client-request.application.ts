@@ -46,7 +46,7 @@ type PersistedClientModelServerDependencies = Omit<Parameters<typeof composeClie
     runtime?: never; priceVersion?: never; financialEvidence?: never;
   };
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
-import { prepareClientOrderExplanation } from './client-order-explanation';
+import { prepareClientOrderExplanation, readClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
 import { PrismaClientBookingRepository } from './prisma-client-booking.repository';
 import { composeClientBooking } from './client-booking.composition';
@@ -356,9 +356,35 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (command.kind !== 'booking_quote') throw new AiClientEntryError('AI_INVALID_INPUT', 'booking_material_required');
     return { row, material: row.material as AiBookingMaterial, policyFingerprint: grant.policyFingerprint, policyExpiresAt: grant.expiresAt };
   };
+  const loadHistoricalBookingMaterial = async (bound: Bound, ref: string) => {
+    requireBooking();
+    const row = await repository.findSource(scopeOf(bound), ref);
+    if (!row || row.bindingHash !== bound.bindingHash) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_material_unavailable');
+    const command = commandSchema.safeParse(row.command);
+    if (!command.success || command.data.kind !== 'booking_quote' || row.inputHash !== requestFingerprint(command.data)
+      || row.materialHash !== materialHash(command.data, row.material)
+      || row.publicationHash !== jsonHash(row.publication) || row.publicationHash !== jsonHash(bound.published.value))
+      throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_historical_basis_invalid');
+    const before = await entryGrant(bound, row, 'read'), latest = await repository.findSource(scopeOf(bound), ref);
+    if (!latest || jsonHash(latest) !== jsonHash(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_historical_basis_changed');
+    const after = await entryGrant(bound, row, 'read');
+    if (before.policyFingerprint !== after.policyFingerprint) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_history_policy_changed');
+    await bound.assertCurrent();
+    return { row, material: row.material as AiBookingMaterial, policyFingerprint: after.policyFingerprint, policyExpiresAt: after.expiresAt };
+  };
   const booking = (bound: Bound) => composeClientBooking({ repository: bookingRepository, scope: scopeOf(bound),
     bindingHash: bound.bindingHash, surface: requireEntry(), clock, assertCurrent: bound.assertCurrent,
-    loadMaterial: ref => loadBookingMaterial(bound, ref) });
+    loadMaterial: ref => loadBookingMaterial(bound, ref), loadHistoricalMaterial: ref => loadHistoricalBookingMaterial(bound, ref),
+    withReceiptRead: async read => {
+      if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+      const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+      const subject = { ...scopeOf(bound), identity: structuredClone(bound.identity) };
+      const before = await policy.authorize(subject, 'read');
+      const result = await read();
+      await bound.assertCurrent();
+      assertReadPolicyUnchanged(before, await policy.authorize(subject, 'read'));
+      return result;
+    } });
   const bookingOperation = async <T>(request: AiClientApplicationRequest, value: unknown, writes: boolean,
     consume: (app: ReturnType<typeof composeClientBooking>, command: unknown) => Promise<T>): Promise<T> => {
     requireBooking();
@@ -1005,13 +1031,32 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const attemptKey = `booking-attempt:${row.id}`;
         if (await repository.findOperation(scopeOf(bound), attemptKey)) return readSubmission(request, bound, acceptance);
         if (row.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
-        // Before the ORIGINAL business call, commit a stable local attempt. A
-        // crashed/unknown attempt is observed only, never automatically resent.
+        // Accept this explicit page request atomically with the original attempt.
+        // submitted is not a Core receipt; failed/unknown attempts are never resent.
         await booking(bound).readHandoff({ handoffRef: material.handoffRef });
-        const attempt = await repository.save({ ...row, id: randomUUID(), operationKey: attemptKey });
-        if (attempt.replayed) return readSubmission(request, bound, acceptance);
+        const expected = await bookingRepository.find(scopeOf(bound), material.bookingDraftId);
+        if (!expected || expected.bindingHash !== bound.bindingHash || expected.inputHash !== material.inputFingerprint
+          || expected.selectionRevision !== material.selectionRevision) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_accepted_draft_changed');
         const original = parseEntry(submissionDraft, row.command);
         const body = { quoteId: material.quoteId, ...(original.contactPhone !== undefined ? { contactPhone: original.contactPhone } : {}) };
+        await originalBookingCall(request, bound, body, true, async identity => {
+          const current = await port.prepareOrderSubmission(identity, body);
+          if (jsonHash(current) !== jsonHash(material.accepted)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_request_changed');
+        });
+        await bound.assertCurrent();
+        const attempt = await bookingRepository.acceptSubmission(expected, material.handoffRef, async (tx, replayOnly) => {
+          const current = await repository.findOperation(scopeOf(bound), row.operationKey, tx);
+          if (!current || jsonHash(current) !== jsonHash(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
+          const prior = await repository.findOperation(scopeOf(bound), attemptKey, tx);
+          if (prior) {
+            if (jsonHash(prior) !== jsonHash({ ...row, id: prior.id, operationKey: attemptKey }))
+              throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_attempt_changed');
+            return { row: prior, replayed: true };
+          }
+          if (replayOnly) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_submission_attempt_missing');
+          return repository.save({ ...row, id: randomUUID(), operationKey: attemptKey }, tx);
+        });
+        if (attempt.replayed) return readSubmission(request, bound, acceptance);
         let called = false;
         try {
           await originalBookingCall(request, bound, body, true, async identity => {
@@ -1158,6 +1203,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         : 'unavailable_original_page_acceptance_receipt_missing' as const });
     }),
     readBookingOperation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readOperation(command)),
+    /** Explicit server-host observation; no new HTTP endpoint or execution. */
+    readBookingOperationObservation: (request: AiClientApplicationRequest, value: unknown) =>
+      bookingOperation(request, value, false, (app, command) => app.observeOperation(command)),
     async issueAction(request: AiClientApplicationRequest, value: unknown) {
       requireEntry();
       const input = parseEntry(z.object({ actionCode: z.enum(['OPEN_ORDER', 'CREATE_BOOKING_DRAFT']), materialRef: z.string().uuid() }).strict(), value);
@@ -1256,13 +1304,16 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       const parsed = explanationSchema.safeParse(structuredClone(value));
       if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
       const command = freezeOriginalInput(parsed.data);
-      return withBinding(request, true, 'order', async bound => freezeOriginalInput({
-        facts: prepareClientOrderExplanation(await bound.scenes.member.order(command.orderId), command.orderId, command.question,
-          command.question === 'fees' && typeof bound.scenes.member.feeItems === 'function'
-            ? await bound.scenes.member.feeItems(command.orderId) : undefined),
-        scope: bound.published.scope, publication: bound.published.value, observedAt: clock().toISOString(),
-        execution: 'read_only_no_task_start' as const
-      }));
+      return withBinding(request, true, 'order', async bound => {
+        const facts = await readClientOrderExplanation({
+          order: () => bound.scenes.member.order(command.orderId),
+          feeItems: typeof bound.scenes.member.feeItems === 'function'
+            ? bound.scenes.member.feeItems.bind(bound.scenes.member, command.orderId) : undefined
+        }, command.orderId, command.question);
+        return freezeOriginalInput({ facts,
+          scope: bound.published.scope, publication: bound.published.value, observedAt: clock().toISOString(),
+          execution: 'read_only_no_task_start' as const });
+      });
     },
     async readOrderCancellationPreview(request: AiClientApplicationRequest, value: unknown) {
       const parsed = z.object({ orderId: id }).strict().safeParse(structuredClone(value));

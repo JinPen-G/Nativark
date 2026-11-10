@@ -9,7 +9,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.reposit
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
 import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
-import { aiTaskRunPlanSchema, aiTaskConfirmationPhasePayloadSchema, aiTaskResumedConfirmationSchema } from './prisma-task-run-evidence.repository';
+import { aiTaskRunPlanSchema, aiTaskConfirmationPhaseVersion, aiTaskConfirmationPhasePayloadSchema, aiTaskResumedConfirmationSchema } from './prisma-task-run-evidence.repository';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u);
 const revision = z.number().int().min(1).max(4294967295);
@@ -49,7 +49,7 @@ export class PrismaTaskConfirmationHistoryReader {
       if (!run || run.id !== key.runId || run.scopeId !== key.scopeId || run.taskId !== task.id
         || run.actorKind !== access.actorKind || run.actorId !== access.actorId || !step
         || step.id !== key.stepId || step.scopeId !== key.scopeId || step.taskId !== task.id || step.runId !== run.id
-        || !['rental.order.commit', 'tenant.notifications.commit'].includes(step.toolCode) || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+        || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(step.toolCode) || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
       const store = taskExecutionPhaseStore(tx), starts = structuredClone(await store.readStarts(key)), receipts = structuredClone(await store.readReceipts(key));
       const saved = starts.length ? structuredClone(await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
         scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } } })) : null;
@@ -71,7 +71,7 @@ export class PrismaTaskConfirmationHistoryReader {
         if (!start || Object.entries(key).some(([k, v]) => receipt[k as keyof typeof receipt] !== v)
           || hash(receipt.payload) !== receipt.contentHash || BigInt(Buffer.byteLength(JSON.stringify(receipt.payload), 'utf8')) !== receipt.outputBytes
           || !validDate(receipt.createdAt) || receipt.createdAt < start.createdAt || receipt.createdAt > access.now
-          || payload.version !== (step.toolCode === 'rental.order.commit' ? 'approved-order-wait-1' : 'approved-settings-wait-1')
+          || payload.version !== aiTaskConfirmationPhaseVersion(step.toolCode)
           || hash(payload.binding) !== hash({ ...key, actionId: step.actionId, inputRef: step.inputRef, fingerprint: step.requestFingerprint })
           || payload.presentedLease.taskId !== task.id || payload.presentedLease.runId !== run.id
           || payload.presentedLease.holderId !== start.leaseOwnerId || payload.presentedLease.fencingToken !== start.fencingToken
@@ -88,7 +88,7 @@ export class PrismaTaskConfirmationHistoryReader {
       const first = starts[0], checkpoint = first ? receipts.find(row => row.phaseId === first.id && row.kind === 'confirmation') : undefined;
       const payload = checkpoint ? waitingPayloadSchema.parse(structuredClone(checkpoint.payload)) : null;
       if (checkpoint && (!payload || hash(payload.binding) !== hash({ ...key, actionId: step.actionId, inputRef: step.inputRef, fingerprint: step.requestFingerprint })
-        || payload.version !== (step.toolCode === 'rental.order.commit' ? 'approved-order-wait-1' : 'approved-settings-wait-1')
+        || payload.version !== aiTaskConfirmationPhaseVersion(step.toolCode)
         || payload.proposal.proposalId !== checkpoint.proposalId || payload.proposal.proposalRevision !== checkpoint.proposalRevision
         || payload.proposal.reviewedPayloadHash !== checkpoint.reviewedPayloadHash
         || payload.presentedLease.taskId !== task.id || payload.presentedLease.runId !== run.id

@@ -46,7 +46,10 @@ export const AI_CREDIT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     mode: { type: 'string', enum: ['platform_managed', 'tenant_managed', 'unknown'] }, modelLabel: string,
     state: { type: 'string', enum: ['registered', 'reserved', 'dispatched', 'settled', 'cancelled', 'unknown'] },
     inputTokens: { type: 'string', pattern: '^[0-9]+$', nullable: true }, outputTokens: { type: 'string', pattern: '^[0-9]+$', nullable: true },
-    cachedInputTokens: { type: 'string', pattern: '^[0-9]+$', nullable: true }, amount: { ...amount, nullable: true }, currency: { ...currency, nullable: true } }),
+    cachedInputTokens: { type: 'string', pattern: '^[0-9]+$', nullable: true }, amount: { ...amount, nullable: true }, currency: { ...currency, nullable: true },
+    operationKind: { type: 'string', enum: ['model', 'input_counting'] }, calls: { type: 'string', pattern: '^[0-9]+$', nullable: true } },
+    ['id', 'taskId', 'callId', 'createdAt', 'workspaceId', 'workspaceName', 'actorName', 'sceneCode', 'mode', 'modelLabel',
+      'state', 'inputTokens', 'outputTokens', 'cachedInputTokens', 'amount', 'currency']),
   AiTenantCallRecords: object({ records: array(ref('AiTenantCallRecord'), 50), nextCursor: { ...id, nullable: true },
     observedAt: { type: 'string', format: 'date-time' } })
 };
@@ -59,7 +62,7 @@ const definitions = [
   ['platform-read', 'AiCreditPlatformRead', 'AiCreditPlatformQueue', 'SaaS-only bounded pending queue with opaque cursor.'],
   ['platform-decide', 'AiCreditDecision', 'AiCreditRequest', 'SaaS-only one original decision; grant and immutable request decision commit together.'],
   ['platform-receipt', 'AiCreditRequestRead', 'AiCreditDecisionReceipt', 'SaaS-only original decision observation. Distinguishes own match from a superseding decision; never grants credit again.'],
-  ['calls', 'AiTenantCallQuery', 'AiTenantCallRecords', 'Tenant-admin scoped model invocation metadata; interval <=31 days, cursor max50 rows. No prompts, secrets, dispatch tokens or supplier prices; absent usage stays null.']
+  ['calls', 'AiTenantCallQuery', 'AiTenantCallRecords', 'Tenant-admin scoped original model and input-counting call metadata; interval <=31 days, cursor max50 rows. Counting input is not consumed Tokens or money. No prompts, secrets, dispatch tokens or supplier prices; absent usage stays null.']
 ] as const;
 export const AI_CREDIT_OPERATIONS: ContractOperation[] = definitions.map(([action, requestSchema, responseSchema, summary]) => ({
   method: 'post', path: `/api/ai-native/credits/${action}`, tag: 'AI Native', operationId: `aiCredit_${action.replaceAll('-', '_')}`,

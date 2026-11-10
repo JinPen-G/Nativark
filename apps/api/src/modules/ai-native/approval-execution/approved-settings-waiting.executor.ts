@@ -87,13 +87,18 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
     // not permission to retry, including after expiry or a lost COMMIT reply.
     const result = await app.readOperation({ draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, operationKey: found.operationKey });
     if (result.state !== 'committed') {
-      if (waiting.kind === 'waiting_reference' && waiting.receipt.kind === 'absent') {
+      if (waiting.kind === 'waiting_reference' && (waiting.receipt.kind === 'absent'
+        || waiting.receipt.kind === 'recorded' && waiting.receipt.record.decision === 'rejected')) {
+        const decision = waiting.receipt;
         const key = { scopeId: found.binding.scopeId, taskId: input.taskId, runId: input.runId, stepId: input.stepId };
         const witness = async (tx: Prisma.TransactionClient) => {
           await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${key.scopeId} AND id = ${key.taskId} FOR UPDATE`);
           await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${key.scopeId} AND taskId = ${key.taskId} AND id = ${key.runId} FOR UPDATE`);
           const task = await tx.aiTask.findFirst({ where: { id: key.taskId, scopeId: key.scopeId,
-            ownerKind: 'USER', ownerId: found.grant.actor.actorId, status: { in: ['CANCEL_REQUESTED', 'CANCELLED'] }, cancelRequestedAt: { not: null } } });
+            ownerKind: 'USER', ownerId: found.grant.actor.actorId,
+            ...(decision.kind === 'absent'
+              ? { status: { in: ['CANCEL_REQUESTED', 'CANCELLED'] }, cancelRequestedAt: { not: null } }
+              : { status: { in: ['RUNNING', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED', 'CANCELLED'] } }) } });
           const run = await tx.aiRun.findFirst({ where: { id: key.runId, scopeId: key.scopeId, taskId: key.taskId,
             actorKind: 'USER', actorId: found.grant.actor.actorId, leaseOwnerId: input.lease.holderId,
             revision: input.lease.revision, fencingToken: new Prisma.Decimal(input.lease.fencingToken),
@@ -120,15 +125,28 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
             proposalId: waiting.proposal.proposalId, proposalRevision: waiting.proposal.proposalRevision } });
           const consumption = await tx.aiApprovalConsumption.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, actionId: input.actionId } });
           const operation = await tx.rentalApprovedSettingsOperation.findFirst({ where: { operationKey: found.operationKey } });
-          return !approval && !consumption && !operation;
+          // A rejection proves no submission only together with this sole
+          // original confirmation phase and no consumption/operation. A later
+          // started phase or missing acknowledgement must remain unknown.
+          if (consumption || operation) return false;
+          if (decision.kind === 'absent') return !approval;
+          const record = decision.record;
+          return !!approval && approval.id === record.approvalId && approval.decision === 'REJECTED'
+            && approval.payloadHash === record.payloadHash && approval.payloadHash === waiting.proposal.reviewedPayloadHash
+            && approval.audience.toLowerCase() === record.audience && record.actor.kind === 'user'
+            && approval.actorKind === 'USER' && approval.actorId === record.actor.userId
+            && approval.issuedAt.toISOString() === record.issuedAt && approval.expiresAt.toISOString() === record.expiresAt;
         };
         const notSubmitted = transaction ? await witness(transaction) : await d.db.$transaction(witness,
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
         if (notSubmitted) {
           const latest = await readWaiting(input);
-          if (latest.kind !== 'waiting_reference' || latest.receipt.kind !== 'absent'
+          if (latest.kind !== 'waiting_reference' || requestFingerprint(latest.receipt) !== requestFingerprint(decision)
+            || requestFingerprint(latest.proposal) !== requestFingerprint(waiting.proposal)
             || requestFingerprint(latest.binding) !== requestFingerprint(waiting.binding)) throw settingsDenied();
-          return { kind: 'failed', errorCode: 'AI_CANCELLED', payload: material(waiting, 'cancelled_before_business_submission') };
+          return decision.kind === 'absent'
+            ? { kind: 'failed', errorCode: 'AI_CANCELLED', payload: material(waiting, 'cancelled_before_business_submission') }
+            : { kind: 'failed', errorCode: 'AI_APPROVAL_REJECTED', payload: material(waiting, 'rejected') };
         }
       }
       return { kind: 'unknown', payload: material(waiting, 'unresolved') };
@@ -162,7 +180,9 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
     if (waiting.receipt.record.decision === 'rejected') return { kind: 'failed', errorCode: 'AI_APPROVAL_REJECTED', payload: material(waiting, 'rejected') };
     await locate(input, true);
     try {
-      await app.commitApprovedChange({ ...waiting.reference, operationKey: initial.operationKey, approvalId: waiting.receipt.record.approvalId });
+      await app.commitApprovedChange({ ...waiting.reference, operationKey: initial.operationKey, approvalId: waiting.receipt.record.approvalId },
+        { runId: input.runId, holderId: input.lease.holderId, revision: input.lease.revision,
+          fencingToken: input.lease.fencingToken, expiresAt: input.lease.expiresAt });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       return { kind: 'unknown', payload: material(waiting, 'unresolved') };

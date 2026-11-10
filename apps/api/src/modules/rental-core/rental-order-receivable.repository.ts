@@ -5,6 +5,8 @@ import type { RentalFundingEvent } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { rentalPaymentBalance } from "./rental-funding-events";
 import { confirmedCorporateSettlement } from "./rental-corporate-settlement-basis";
+import { readCorporateCreditLedger } from "./rental-corporate-ledger-reader";
+import { corporateOrderPaid } from "./rental-corporate-payment-receipt";
 
 /** Bridges original cash events and corporate allocation receipts, not a second
  * money ledger or payment dispatcher. Cash remains cash; an allocation settles
@@ -25,20 +27,15 @@ export class RentalOrderReceivableRepository {
   }
 
   private async ledgerRows(tenantId: string, customerId: string, tx?: Prisma.TransactionClient) {
-    const rows = tx
-      ? await tx.$queryRaw<Prisma.CustomerCorporateCreditLedgerGetPayload<object>[]>(Prisma.sql`
-          SELECT * FROM customer_corporate_credit_ledger WHERE tenantId = ${tenantId} AND customerId = ${customerId}
-          ORDER BY id LIMIT 501 LOCK IN SHARE MODE`)
-      : await this.prisma.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId }, orderBy: { id: "asc" }, take: 501 });
-    if (rows.length > 500 || rows.some(row => row.tenantId !== tenantId || row.customerId !== customerId)
-      || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException("企业原回款核对超过安全窗口或来源不一致，须财务核对");
-    return rows;
+    return readCorporateCreditLedger(this.prisma, tenantId, customerId, tx);
   }
 
   async corporatePaid(tenantId: string, workspaceId: string, orderId: string,
-    order: { membershipSnapshot?: unknown; payerSubjectCustomerId?: string | null; contractSubjectCustomerId?: string | null; currency?: string }, tx?: Prisma.TransactionClient) {
+    order: { membershipSnapshot?: unknown; payerSubjectCustomerId?: string | null; contractSubjectCustomerId?: string | null; currency?: string }, tx?: Prisma.TransactionClient): Promise<number> {
     const customerId = this.payer(order);
     if (!customerId) return 0;
+    if (!tx) return this.prisma.$transaction(transaction => this.corporatePaid(tenantId, workspaceId, orderId, order, transaction),
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     const settlement = confirmedCorporateSettlement(order);
     const credit = tx
       ? (await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM customer_corporate_credits
@@ -55,29 +52,7 @@ export class RentalOrderReceivableRepository {
 
   private paidFromRows(workspaceId: string, orderId: string, currency: string | undefined,
     rows: Prisma.CustomerCorporateCreditLedgerGetPayload<object>[]) {
-    const paidRows = rows.filter(row => row.orderId === orderId && ["payment", "payment_allocation"].includes(row.entryType));
-    let paid = new Prisma.Decimal(0);
-    for (const allocation of paidRows) {
-      if (allocation.entryType !== "payment_allocation" || allocation.workspaceId !== workspaceId
-        || allocation.currency !== currency || allocation.amount.lte(0) || !allocation.reservedDelta.eq(0)
-        || !allocation.receivableDelta.eq(allocation.amount.neg())) throw new ConflictException("企业逐单核销来源不一致，须财务核对原回款");
-      const parents = rows.filter(row => row.entryType === "payment" && row.orderId === null &&
-        allocation.idempotencyKey === `payment.allocation:${createHash("sha256").update(`${row.idempotencyKey}:${orderId}`).digest("hex")}`);
-      if (parents.length !== 1) throw new ConflictException("企业核销缺少唯一原回款，不能当作订单已付");
-      const parent = parents[0];
-      const legs = rows.filter(row => row.entryType === "payment_allocation" && row.idempotencyKey === (row.orderId
-        ? `payment.allocation:${createHash("sha256").update(`${parent.idempotencyKey}:${row.orderId}`).digest("hex")}`
-        : `payment.legacy:${createHash("sha256").update(parent.idempotencyKey).digest("hex")}`));
-      if (parent.workspaceId !== null || parent.currency !== currency || parent.amount.lte(0)
-        || !parent.reservedDelta.eq(0) || !parent.receivableDelta.eq(0)
-        || legs.some(row => row.currency !== parent.currency || row.orderId && !row.workspaceId
-          || row.amount.lte(0) || !row.reservedDelta.eq(0) || !row.receivableDelta.eq(row.amount.neg()))
-        || !legs.reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0)).eq(parent.amount)) {
-        throw new ConflictException("企业原回款与全部核销金额不一致，不能重复计入订单实收");
-      }
-      paid = paid.plus(allocation.amount);
-    }
-    return Number(paid.toFixed(2));
+    return Number(corporateOrderPaid(workspaceId, orderId, currency, rows).toFixed(2));
   }
 
   /** Called only after a new cash event is persisted in the SAME order-locked

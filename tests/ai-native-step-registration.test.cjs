@@ -5,7 +5,9 @@ const h = require('./fixtures/ai-native/step-registration.cjs');
 const { code } = require('./fixtures/ai-native/step-repository.cjs');
 const { AI_TASK_DRAFT_COMPONENT_SCHEMAS: schemas } = require('../apps/api/src/contracts/ai-task-draft-schemas');
 const { AI_NATIVE_COMPONENT_SCHEMAS: foundation } = require('../apps/api/src/contracts/ai-native-schemas');
-const validate = validatorsFor(schemas, foundation).AiTaskEventDraft;
+// This suite checks the registration event, not the unrelated clarification
+// and approval HTTP contracts whose schema families have separate consumers.
+const validate = validatorsFor({ AiTaskEventDraft: schemas.AiTaskEventDraft }, foundation).AiTaskEventDraft;
 const snapshot = f => h.clone({ task: f.state.task, run: f.state.run, steps: f.state.steps, events: f.state.events });
 const of = (f, kind) => f.state.calls.find(c => c.kind === kind)?.args;
 

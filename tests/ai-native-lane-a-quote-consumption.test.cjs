@@ -34,3 +34,42 @@ test('insufficient availability and permission loss do not save another quote or
   h.h.identity.user.permissions = [];
   await assert.rejects(h.tools.quote.businessPreparation.prepareInput(h.candidate, 'unavailable'));
 });
+
+test('AIN15 standalone candidate preparation binds the original principal before every nested source', async () => {
+  const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
+  for (const kind of ['catalog', 'members', 'configuration', 'rates']) {
+    const h = await setup(), candidates = h.tools.quote.candidates, untouched = structuredClone(h.candidate);
+    const normal = await candidates.prepare(h.candidate);
+    assert.equal(normal.status, 'needs_confirmation'); assert.equal(normal.reservation, 'not_reserved');
+    const actor = h.h.identity.user.id; let sourceReads = 0, foreignLookups = 0, quoteAttempts = 0;
+    const leaf = kind === 'configuration' ? candidates.contexts : candidates.readers[kind];
+    const method = kind === 'configuration' ? 'current' : 'read', read = leaf[method].bind(leaf);
+    const owner = kind === 'catalog' || kind === 'configuration' ? h.core
+      : kind === 'members' ? h.memberships.prisma.customerProfile : h.business;
+    const lookup = kind === 'catalog' ? 'listItemGroupsPage' : kind === 'configuration' ? 'readQuoteConfiguration'
+      : kind === 'members' ? 'findMany' : 'readQuoteRateTargets';
+    const originalLookup = owner[lookup].bind(owner);
+    owner[lookup] = async (...args) => {
+      foreignLookups++; assert.equal(getRequestIdentity().userId, 'another-standalone-source-reader');
+      return originalLookup(...args);
+    };
+    const create = h.business.createQuote.bind(h.business);
+    h.business.createQuote = (...args) => { quoteAttempts++; return create(...args); };
+    leaf[method] = async (...args) => {
+      // The nested original Guard resolves B for its whole read, then restores A.
+      // Equal values/scope and an A-only closing check cannot bind this source.
+      sourceReads++; h.h.identity.user.id = 'another-standalone-source-reader';
+      try { return await read(...args); } finally { h.h.identity.user.id = actor; }
+    };
+    await assert.rejects(candidates.prepare(h.candidate), error => error.code === 'FORBIDDEN',
+      `${kind}: a standalone aggregate must not accept another principal's source`);
+    assert.equal(sourceReads, 1, `${kind}: reject at the first changed nested Guard`);
+    assert.equal(foreignLookups, 0, `${kind}: no foreign principal reaches the business lookup`);
+    assert.equal(quoteAttempts, 0); assert.equal(h.h.identity.user.id, actor);
+    assert.deepEqual(h.candidate, untouched, 'candidate, revision and caller choices are not rewritten');
+    assert.equal(h.businessFacts.writes.length, 0);
+  }
+  const withdrawn = await setup(); withdrawn.h.identity.user.permissions = [];
+  await assert.rejects(withdrawn.tools.quote.candidates.prepare({}), error => error.code === 'FORBIDDEN',
+    'the standard standalone entry must resolve current authority even for missing candidate input');
+});

@@ -89,3 +89,37 @@ test("missing reconcile capability and invalid limits fail closed", async () => 
 test("runner dependencies are explicit and do not provide an allow-all fallback", () => {
   assert.throws(() => new AiTaskRunner({}), error => error instanceof AiTaskRunnerError && error.code === "AI_RESOURCE_UNAVAILABLE");
 });
+
+test('fixed held preparation window preserves default timeout, lease cap and total task time', async () => {
+  const { withAiTaskHeldPreparationWindow } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
+  for (const mode of ['default', 'fixed_sequence', 'lease_cap', 'task_cap']) {
+    let now = 0, effects = 0;
+    const timers = new Map(), clock = { now: () => now,
+      setTimeout: (fn, delay) => { const key = {}; timers.set(key, { fn, at: now + delay }); return key; },
+      clearTimeout: key => timers.delete(key) };
+    const advance = ms => { now += ms; for (const [key, timer] of [...timers]) if (timer.at <= now) { timers.delete(key); timer.fn(); } };
+    const h = harness({ clock, effects: { execute: async () => { effects++; return { kind: 'succeeded', resultRef: 'result-1', outputBytes: 1 }; } } });
+    const claim = { ...input };
+    claim.leaseMs = mode === 'lease_cap' ? 1000 : 30000;
+    h.runner.deps.plan.resolve = async () => ({ taskId: claim.taskId, runId: claim.runId, taskRevision: 3,
+      limits: { maxSteps: 1, maxTotalMs: mode === 'task_cap' ? 5000 : 30000, maxStepMs: 100,
+        maxOutputBytes: 100, maxConcurrent: 1, maxCalls: 1 },
+      steps: [{ registrationRef: 's1', operation: 'readonly', toolCode: 'orders.read', toolVersion: '1' }] });
+    const prepare = async () => { advance(6000); };
+    prepare.timeoutMs = 120000; // Function properties cannot self-authorize a window.
+    const held = mode === 'default' ? prepare : withAiTaskHeldPreparationWindow(prepare, 20000);
+    if (mode === 'default' || mode === 'lease_cap') {
+      await assert.rejects(h.runner.runPrepared(claim, held), error => error.code === 'AI_RESULT_UNKNOWN', mode);
+      assert.equal(effects, 0, mode);
+    } else if (mode === 'task_cap') {
+      await assert.rejects(h.runner.runPrepared(claim, held), error => error.code === 'AI_RUN_LIMIT');
+      assert.equal(effects, 0, mode);
+    } else {
+      const result = await h.runner.runPrepared(claim, held);
+      assert.equal(result.status, 'succeeded', mode);
+      assert.equal(effects, 1, mode);
+    }
+    assert.equal(timers.size, 0, mode);
+  }
+  assert.throws(() => withAiTaskHeldPreparationWindow(async () => {}, 120001), error => error.code === 'AI_INVALID_INPUT');
+});

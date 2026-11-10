@@ -19,7 +19,7 @@ const deterministic = {
     depositAmount: money, preAuthAmount: money, payableAmount: money, receivableAmount: money }),
   currency: text(16), quoteExpiresAt: time, decisionExpiresAt: time
 };
-const orderMaterial = obj({
+export const AI_APPROVAL_ORDER_MATERIAL_SCHEMA = obj({
   customer: obj({ id: id(), type: choice('personal', 'corporate'), name: text() }, ['id', 'type']),
   booking: obj({ identity: choice('personal', 'enterprise_employee'), corporateCustomerId: id(), corporateCustomerName: text(),
     enterpriseContractAndPayer: { type: 'boolean' } }, ['identity', 'enterpriseContractAndPayer']),
@@ -42,7 +42,7 @@ export const AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaD
   AiApprovalApplicationReviewDraftV1: obj({ draftVersion: version, proposal: ref('AiProposalRecordDraft'),
     deterministic: obj(deterministic), generatedText: { type: 'null' } }),
   AiApprovalApplicationReviewDraft: obj({ draftVersion: choice(AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION), proposal: ref('AiProposalRecordDraft'),
-    deterministic: obj({ ...deterministic, order: orderMaterial }), generatedText: { type: 'null' } }),
+    deterministic: obj({ ...deterministic, order: AI_APPROVAL_ORDER_MATERIAL_SCHEMA }), generatedText: { type: 'null' } }),
   AiApprovalReprepareEligibilityRequestDraft: obj({ draftVersion: version, original, intent: choice('inspect', 'change_plan') }),
   AiApprovalReprepareEligibilityDraft: { oneOf: [eligibility('pending', false, 'review_or_decide'),
     eligibility('change_requested', true, 'provide_new_materials'), eligibility('rejected', true, 'provide_new_materials'),

@@ -67,7 +67,9 @@ export async function inspectRetentionSource(tx: Prisma.TransactionClient, scope
   const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId, status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { taskId: true }, orderBy: { chargeId: 'asc' }, take: 51 });
   const reservations = await tx.aiBudgetReservation.findMany({ where: { scopeId, scopeKind: 'WORKSPACE', status: { in: ['reserved', 'pending_reconciliation'] } }, select: { runId: true }, orderBy: { id: 'asc' }, take: 51 });
   const admissions = await tx.aiInvocationAdmission.findMany({ where: { ...owner, status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
-  const legacy = await tx.aiUsageReservation.findMany({ where: { ...owner, status: { in: ['reserved', 'pending_reconciliation'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
+  // Legacy workspace usage persists `unknown`; do not lose its material hold
+  // by using only the budget ledger's different reconciliation vocabulary.
+  const legacy = await tx.aiUsageReservation.findMany({ where: { ...owner, status: { in: ['reserved', 'unknown', 'pending_reconciliation'] } }, select: { callId: true }, orderBy: { id: 'asc' }, take: 51 });
   if ([active, steps, charges, reservations, admissions, legacy].some(rows => rows.length > 50)) return 'unavailable';
   const tasks = new Set([...active.map(row => row.id), ...steps.map(row => row.taskId), ...charges.map(row => row.taskId)]);
   for (const row of reservations) {

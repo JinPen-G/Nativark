@@ -6,24 +6,30 @@ import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
+import { nativeToolResultReferenceSchema, nativeToolResultIntentFingerprint } from './native-tool-result.ports';
 
 export const TASK_TEXT_MODEL_TOOL = AI_TEXT_MODEL_STEP_CODE;
 export const TASK_IMAGE_MODEL_TOOL = AI_IMAGE_MODEL_STEP_CODE;
 export const TASK_AUDIO_MODEL_TOOL = AI_AUDIO_MODEL_STEP_CODE;
 export const isTaskModelTool = (value: string) => value === TASK_TEXT_MODEL_TOOL || value === TASK_IMAGE_MODEL_TOOL || value === TASK_AUDIO_MODEL_TOOL;
 export type TaskModelKind = 'image' | 'audio';
-export type TaskModelPolicy = GatewayTextIntentPolicy & { kind?: TaskModelKind };
+export type TaskModelPolicy = GatewayTextIntentPolicy & { kind?: TaskModelKind; nativeToolResults?: boolean };
 /** Capture server configuration, never flags supplied in model material. Keep
  * the same policy through publication, fingerprinting and terminal evidence. */
 export function taskModelPolicy(value: TaskModelPolicy): TaskModelPolicy {
-  const { kind, ...raw } = structuredClone(value);
+  const { kind, nativeToolResults, ...raw } = structuredClone(value);
   const parsed = gatewayTextIntentPolicySchema.parse(raw);
+  if (nativeToolResults !== undefined && typeof nativeToolResults !== 'boolean'
+    || nativeToolResults && (kind || parsed.structuredOutput || parsed.orderExplainTool !== true)) {
+    throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  }
   if ((kind !== undefined && kind !== 'image' && kind !== 'audio')
     || (kind && (parsed.structuredOutput || parsed.orderExplainTool))
     || (parsed.structuredOutput && parsed.orderExplainTool)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   if (parsed.structuredOutput && !parsed.structuredSchemaHash
     || parsed.structuredSchemaHash && !parsed.structuredOutput) throw new ModelGatewayError('CONFIG_INVALID');
-  return Object.freeze({ ...parsed, ...(kind ? { kind } : {}) });
+  return Object.freeze({ ...parsed, ...(kind ? { kind } : {}),
+    ...(nativeToolResults !== undefined ? { nativeToolResults } : {}) });
 }
 export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'vision' | 'audio' | 'tools' | 'structured_output'> {
   const policy = taskModelPolicy(value);
@@ -33,7 +39,8 @@ export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'v
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const taskModelMaterialSchema = z.object({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
-    content: z.array(z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict()).min(1).max(64)
+    content: z.array(z.union([z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict(),
+      z.object({ kind: z.literal('tool_result_reference'), reference: nativeToolResultReferenceSchema }).strict()])).min(1).max(64)
   }).strict()).min(1).max(64),
   maxOutputTokens: z.number().int().min(1).max(32768)
 }).strict();
@@ -88,7 +95,13 @@ export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
     }
   } else {
     if (input.media) throw new ModelGatewayError('INVALID_REQUEST');
-    prepareGatewayTextIntent(input.intent, policy, input.mode);
+    if (input.intent.messages.some(message => message.content.some(part => part.kind === 'tool_result_reference'))) {
+      taskModelMaterialSchema.parse({ messages: input.intent.messages, maxOutputTokens: input.intent.maxOutputTokens });
+      nativeToolResultIntentFingerprint(input.intent, policy);
+    } else {
+      const { nativeToolResults: _native, ...textPolicy } = policy;
+      prepareGatewayTextIntent(input.intent, textPolicy, input.mode);
+    }
   }
   if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 262144) throw new ModelGatewayError('INVALID_REQUEST');
   return input;
@@ -124,13 +137,25 @@ export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPol
     return requestFingerprint({ intent: input.intent, mode: input.mode, media });
   }
   if (policy.structuredOutput) input = parseTaskModelInput(input, policy);
-  return prepareGatewayTextIntent(input.intent, taskModelPolicy(policy), input.mode).intentHash;
+  if (input.intent.messages.some(message => message.content.some(part => part.kind === 'tool_result_reference'))) {
+    return nativeToolResultIntentFingerprint(input.intent, taskModelPolicy(policy));
+  }
+  const { nativeToolResults: _native, ...textPolicy } = taskModelPolicy(policy);
+  return prepareGatewayTextIntent(input.intent, textPolicy, input.mode).intentHash;
 }
 
 export function taskModelIntent(taskId: string, runId: string, registrationRef: string, sceneCode: string,
-  material: z.infer<typeof taskImageMaterialSchema> | z.infer<typeof taskAudioMaterialSchema>, kind?: TaskModelKind,
+  material: z.infer<typeof taskModelMaterialSchema> | z.infer<typeof taskImageMaterialSchema> | z.infer<typeof taskAudioMaterialSchema>, kind?: TaskModelKind,
   orderExplainTool = false, structuredOutput = false): AiGatewayIntentDraft {
   if ((kind && (orderExplainTool || structuredOutput)) || (orderExplainTool && structuredOutput)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  for (const message of material.messages) {
+    for (const part of message.content) {
+      if (part.kind === 'tool_result_reference' && (part.reference.taskId !== taskId || part.reference.runId !== runId
+        || part.reference.modelRegistrationRef === registrationRef || part.reference.toolRegistrationRef === registrationRef)) {
+        throw new ModelGatewayError('FORBIDDEN');
+      }
+    }
+  }
   return { draftVersion: 'ain-c03-draft-2',
     requestId: `model-${requestFingerprint({ taskId, runId, registrationRef })}`, sceneCode,
     messages: material.messages, maxOutputTokens: material.maxOutputTokens,

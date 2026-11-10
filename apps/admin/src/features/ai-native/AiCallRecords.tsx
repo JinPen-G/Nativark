@@ -40,13 +40,17 @@ export function AiCallRecords({ identity }: { identity: string }) {
     { title: t('调用人'), dataIndex: 'actorName', key: 'actor' },
     { title: t('经营空间'), dataIndex: 'workspaceName', key: 'workspace' },
     { title: t('服务来源 / 模型'), key: 'model', render: (_: unknown, row: AiTenantCallRecord) => <>
-      <span>{t(row.mode === 'platform_managed' ? '平台 AI' : row.mode === 'tenant_managed' ? '自带供应商' : '配置待核对')}</span><br />{row.modelLabel}</> },
+      <span>{t(row.mode === 'platform_managed' ? '平台 AI' : row.mode === 'tenant_managed' ? '自带供应商' : '配置待核对')}</span><br />{row.modelLabel}
+      {row.operationKind === 'input_counting' && <><br /><span className="muted">{t('输入计数')} · {row.calls
+        ? t(row.calls === '1' ? '1 次调用' : '{count} 次调用').replace('{count}', row.calls) : t('待核对')}</span></>}</> },
     { title: t('状态'), dataIndex: 'state', key: 'state', render: (value: AiTenantCallRecord['state']) => t(states[value]) },
-    { title: t('输入 / 输出 Token'), key: 'tokens', render: (_: unknown, row: AiTenantCallRecord) => <>
+    { title: t('输入 / 输出 Token'), key: 'tokens', render: (_: unknown, row: AiTenantCallRecord) => row.operationKind === 'input_counting'
+      ? t('仅记录调用次数') : <>
       {row.inputTokens ?? t('待核对')} / {row.outputTokens ?? t('待核对')}
       {row.cachedInputTokens !== null && <><br /><span className="muted">{t('其中缓存命中')} {row.cachedInputTokens}</span></>}
     </> },
-    { title: t('平台使用金额'), key: 'amount', render: (_: unknown, row: AiTenantCallRecord) => row.mode === 'tenant_managed'
+    { title: t('平台使用金额'), key: 'amount', render: (_: unknown, row: AiTenantCallRecord) => row.operationKind === 'input_counting'
+      ? '—' : row.mode === 'tenant_managed'
       ? t('供应商直接计费') : row.amount !== null && row.currency ? `${row.currency} ${row.amount}` : t('待核对') },
     { title: t('关联任务'), dataIndex: 'taskId', key: 'task', render: (value: string) => <code>{value}</code> }
   ], [t]);

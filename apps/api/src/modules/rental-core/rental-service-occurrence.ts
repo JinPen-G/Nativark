@@ -27,7 +27,7 @@ export function extensionRequestKey(extensionId: string) {
  * 带序号是因为同一次续租里同一个服务仍可能出现两条（例如两个不同时段），
  * 只用 serviceId 会让它们互相覆盖——这正是 MKT-02C 要修的那类覆盖。
  */
-export function occurrenceIdOf(origin: "order" | "extension", ownerId: string, serviceId: string, index: number) {
+export function occurrenceIdOf(origin: "order" | "extension" | "exchange", ownerId: string, serviceId: string, index: number) {
   return `${origin}:${ownerId}:${serviceId}:${index}`;
 }
 
@@ -39,7 +39,7 @@ export function occurrenceIdOf(origin: "order" | "extension", ownerId: string, s
  */
 export function stampOccurrences(
   snapshots: RentalQuoteServiceSnapshot[],
-  source: { origin: "order" | "extension"; ownerId: string; requestKey: string; extensionId?: string; extensionSequence?: number }
+  source: { origin: "order" | "extension" | "exchange"; ownerId: string; requestKey: string; extensionId?: string; extensionSequence?: number; exchangeId?: string }
 ): RentalOrderServiceOccurrence[] {
   return snapshots.map((snapshot, index) => ({
     ...snapshot,
@@ -47,6 +47,7 @@ export function stampOccurrences(
     origin: source.origin,
     extensionId: source.extensionId,
     extensionSequence: source.extensionSequence,
+    exchangeId: source.exchangeId,
     // MKT-02D：实际履约必须由运营动作明确推进，不能由计划时间或归还时间自动完成。
     executionStatus: "not_started",
     executedQuantity: 0,

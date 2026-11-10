@@ -73,7 +73,7 @@ export interface ApprovedOrderCompositionDependencies {
   executionInput?: ApprovedOrderExecutionInputSource;
   confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder'>;
   core: Pick<RentalCoreService, 'resolveWorkspaceId' | 'readBusinessContext' | 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups' | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'getOrder'>
-    & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>;
+    & Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'readQuoteConfiguration' | 'resolvePricingGroupQuoteRequest'>>;
   quoteFacts: Pick<RentalBusinessFactStore, 'findQuote'>;
   toolVersion: string;
   clock?: () => Date;

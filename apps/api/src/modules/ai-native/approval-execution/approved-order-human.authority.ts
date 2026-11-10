@@ -36,7 +36,10 @@ export class ApprovedOrderHumanAuthority {
         contractVersion: true, revision: true, sceneCode: true, sceneVersion: true, status: true, cancelRequestedAt: true } });
       if (!task || task.contractVersion !== AI_TASK_DRAFT_VERSION || !validRevision(task.revision)
         || task.sceneCode !== this.d.scene.code || task.sceneVersion !== this.d.scene.version
-        || !(operation === 'decide_approval' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['RUNNING', 'WAITING_CONFIRMATION', 'FAILED', 'CANCELLED']).includes(task.status)
+        // A rejected business tail can leave a successful clarification/model
+        // prefix. Reprepare still needs its own policy and exact no-submission
+        // eligibility; this terminal aggregate never grants another decision.
+        || !(operation === 'decide_approval' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['RUNNING', 'WAITING_CONFIRMATION', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED']).includes(task.status)
         || (operation === 'decide_approval' && task.cancelRequestedAt !== null)) throw deniedOrder();
       const key = { scopeId, taskId, operation };
       const policy = await db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: key }, select: {

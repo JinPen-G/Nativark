@@ -50,12 +50,13 @@ export function OrderDetailSummary({ order, funding, fundingState, deliveryAddre
       {deliveryAddress && <div className={styles.address}><span className={styles.label}>{t("收货地址")}</span><div>{deliveryAddress}</div></div>}
     </div>
     <aside className={styles.balance} aria-label={t("租金与费用摘要")}>
-      <div className={styles.balanceTop}><span className={styles.label}>{t("当前待收")}</span>{fundingState === "ready" && <span className={styles.secondary}>{t("模拟资金")}</span>}</div>
+      <div className={styles.balanceTop}><span className={styles.label}>{t("当前待收")}</span>{fundingState === "ready" && funding?.balanceBasis === "simulated" && <span className={styles.secondary}>{t("模拟资金")}</span>}</div>
       <span data-copilot-field="due" data-copilot-label={t("当前待收")}><OrderMoney value={fundingState === "ready" ? funding?.rental.due : undefined} currency={order.currency} prominent /></span>
       {fundingState === "ready" && knownMoney(funding?.rental.pendingExtensionAmount) && funding!.rental.pendingExtensionAmount > 0 && <span className={styles.secondary}>{t("含续租待补")} · <OrderMoney value={funding!.rental.pendingExtensionAmount} currency={order.currency} /></span>}
       {fundingState === "ready" ? <dl className={styles.balanceFacts}>
         <div><dt>{t("当前应收")}</dt><dd><OrderMoney value={funding?.rental.payable} currency={order.currency} /></dd></div>
-        <div><dt>{t("累计收款")}</dt><dd><OrderMoney value={funding?.rental.collected} currency={order.currency} /></dd></div>
+        <div><dt>{t("现金实收")}</dt><dd><OrderMoney value={funding?.rental.collected} currency={order.currency} /></dd></div>
+        <div><dt>{t("企业回款已核销")}</dt><dd><OrderMoney value={funding?.rental.corporatePaid} currency={order.currency} /></dd></div>
         {knownMoney(funding?.rental.balance) && funding!.rental.balance < 0 && <div><dt>{t("待退款")}</dt><dd><OrderMoney value={Math.abs(funding!.rental.balance)} currency={order.currency} /></dd></div>}
       </dl> : <p className={styles.note}>{t(fundingState === "restricted" ? "当前账号无资金查看权限" : fundingState === "error" ? "资金读取失败，请在费用与资金中重试" : "正在读取资金摘要")}</p>}
       {fundingState !== "ready" && <span className={styles.secondary}>{t("订单应付")} · <OrderMoney value={order.finalPayableAmount ?? order.payableAmount} currency={order.currency} /></span>}

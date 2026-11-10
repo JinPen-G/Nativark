@@ -38,6 +38,10 @@ export class AiApprovalDecisionResultUnknownError extends Error {
 
 export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDependencies) {
   const human = new ApprovedOrderHumanAuthority(d), clock = d.clock ?? (() => new Date());
+  // Current original-material/identity rechecks need a finite native window,
+  // not separate 5s slices that abort an otherwise valid human decision. The
+  // stopped callback still cannot commit, and uncertainty never permits retry.
+  const humanWindowMs = 15000;
   const snapshots = new PrismaApprovedOrderSnapshotSource(d.db, human.policy);
   const route = new AiApprovedOrderRouteAuthority(d.guard, d.credentials, clock);
   const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
@@ -81,11 +85,11 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
   const same = (first: Awaited<ReturnType<typeof load>>, next: Awaited<ReturnType<typeof load>>, includeHead = true) => {
     if (first.stable !== next.stable || (includeHead && requestFingerprint(first.head) !== requestFingerprint(next.head))) throw conflict();
   };
-  const readOriginal = async (taskId: string, value: Reference, verifyMaterial = false) => {
+  const readOriginal = async (taskId: string, value: Reference, verifyMaterial = false, tx?: Prisma.TransactionClient) => {
     taskId = parse(id, taskId);
-    const reference = parse(referenceSchema, value), first = await load(taskId, reference);
+    const reference = parse(referenceSchema, value), first = await load(taskId, reference, tx);
     return route.withOrderReview(first.context, first.facts.input.payload, async () => {
-      same(first, await load(taskId, reference));
+      same(first, await load(taskId, reference, tx));
       if (verifyMaterial) assertQuoteReadAccess(first.facts.preview.payload as unknown as RentalQuoteSnapshotV1);
       const proposal: AiProposalRecordDraft = { payload: first.payload, payloadHash: reference.reviewedPayloadHash,
         status: first.head.status.toLowerCase() as AiProposalRecordDraft['status'] };
@@ -99,15 +103,15 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
     return { ...view, deterministic: { ...view.deterministic,
       order: approvedOrderReviewMaterial(view.facts.input.payload, view.facts.preview.payload) } };
   };
-  const readReceipt = async (taskId: string, value: AiApprovalApplicationDecisionDraft) => {
+  const readReceipt = async (taskId: string, value: AiApprovalApplicationDecisionDraft, tx?: Prisma.TransactionClient) => {
     taskId = parse(id, taskId);
     const command = parse(decisionSchema, value), { decision, reviewVersion, ...reference } = command;
-    const first = await load(taskId, reference);
+    const first = await load(taskId, reference, tx);
     const read = async () => {
       if (first.context.actor.kind !== 'user') throw deniedOrder();
       const key = { scopeId: first.scopeId, taskId, proposalId: reference.proposalId, proposalRevision: reference.proposalRevision,
         actorKind: 'USER' as const, actorId: first.context.actor.userId };
-      const row = await d.db.aiApproval.findFirst({ where: key });
+      const row = await (tx ?? d.db).aiApproval.findFirst({ where: key });
       if (!row) {
         if (first.head.status !== 'PENDING_CONFIRMATION') return { kind: 'unknown' as const,
           retryable: false as const, nextAction: 'read_decision_receipt' as const };
@@ -127,7 +131,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
     };
     return route.withOrderReview(first.context, first.facts.input.payload, async () => {
       const before = await read();
-      same(first, await load(taskId, reference));
+      same(first, await load(taskId, reference, tx));
       const after = await read();
       if (requestFingerprint(before) !== requestFingerprint(after)) return { kind: 'unknown' as const,
         retryable: false as const, nextAction: 'read_decision_receipt' as const };
@@ -173,7 +177,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
           const record = await new PrismaAiApprovalRepository(db, clock).decide(input, principal);
           await recheck(tx);
           return record;
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: humanWindowMs });
         committed = true;
         return record;
       } }, { authorize: async (context, input) => {
@@ -199,7 +203,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       return outcome.record;
     };
     try {
-      return await callAiTaskRunnerDependency(attempt, 5000, 'approval_decision', undefined, d.runnerClock);
+      return await callAiTaskRunnerDependency(attempt, humanWindowMs, 'approval_decision', undefined, d.runnerClock);
     } catch (error) {
       if (committed && !(error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED')) {
         throw new AiApprovalDecisionResultUnknownError();
@@ -215,7 +219,7 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
   // Observing a historical decision never creates one. Bound the complete
   // observation, including current ACL and route revalidation, independently.
   const observe = async <T>(operation: () => Promise<T>) => {
-    try { return await callAiTaskRunnerDependency(operation, 5000, 'approval_observation', undefined, d.runnerClock); }
+    try { return await callAiTaskRunnerDependency(operation, humanWindowMs, 'approval_observation', undefined, d.runnerClock); }
     catch (error) {
       if (error instanceof AiTaskRunnerError && ['AI_RUN_LIMIT', 'AI_RESULT_UNKNOWN'].includes(error.code)) throw unavailable();
       throw error;
@@ -224,9 +228,12 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
   return Object.freeze({
     // Internal historical observation preserves legacy evidence; public hosts
     // use readProposal and cannot promote an incomplete snapshot to approval.
-    readOriginal: (taskId: string, value: Reference) => observe(() => readOriginal(taskId, structuredClone(value))),
+    // Transition-local observation must see that transaction's task/proposal
+    // rows. The transaction is server-supplied; current credential/Guard checks
+    // remain independent, and no HTTP body can select a database reader.
+    readOriginal: (taskId: string, value: Reference, tx?: Prisma.TransactionClient) => observe(() => readOriginal(taskId, structuredClone(value), false, tx)),
     readProposal: (taskId: string, value: Reference) => observe(() => readProposal(taskId, structuredClone(value))),
     decide,
-    readReceipt: (taskId: string, value: AiApprovalApplicationDecisionDraft) => observe(() => readReceipt(taskId, structuredClone(value)))
+    readReceipt: (taskId: string, value: AiApprovalApplicationDecisionDraft, tx?: Prisma.TransactionClient) => observe(() => readReceipt(taskId, structuredClone(value), tx))
   });
 }

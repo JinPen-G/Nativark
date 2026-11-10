@@ -62,9 +62,9 @@ test('原订单页面：实际hook逻辑切上下文首次渲染清旧事实、�
 
 test('原预约交接：默认零读取、人工继续复验、上下文/卸载隔离且不创建报价', async () => {
   const url = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src/features/ai-native/booking-handoff.ts')).href;
-  const { createBookingHandoffConsumer, handoffLocalInput, readOriginalBookingQuote } = await import(url);
+  const { createBookingHandoffConsumer, handoffLocalInput, readOriginalBookingQuote, normalizeBookingAcceptanceObservation } = await import(url);
   const value = {
-    contractVersion: 'ain-booking-draft-1', handoffRef: 'synthetic-ref', bookingDraftId: 'synthetic-draft', revision: 1,
+    contractVersion: 'ain-booking-draft-1', handoffRef: '22222222-2222-4222-8222-222222222222', bookingDraftId: '33333333-3333-4333-8333-333333333333', revision: 1,
     audience: 'customer', surface: 'tenant_website', scope: { kind: 'workspace', tenantId: 't', workspaceId: 'w' },
     expiresAt: '2030-01-02T00:00:00Z', actionCode: 'OPEN_BOOKING', submission: 'original_booking_page_required', inventory: 'not_reserved',
     fields: { quoteId: 'original-quote', timeZone: 'Asia/Shanghai', startAt: '2030-01-03T00:00:00Z', endAt: '2030-01-04T00:00:00Z',
@@ -72,7 +72,7 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
       lines: [{ itemGroupId: 'p', quantity: 2 }] },
   };
   let reads = 0;
-  const host = { enabled: true, capability: { tenantCode: 'tenant', workspaceCode: 'space', customerId: 'customer', tenantId: 't', workspaceId: 'w', releaseRevision: 'r1' },
+  const host = { enabled: true, mode: 'interactive', capability: { tenantCode: 'tenant', workspaceCode: 'space', customerId: 'customer', tenantId: 't', workspaceId: 'w', releaseRevision: 'r1' },
     handoffRef: value.handoffRef, readBookingHandoff: async () => { reads++; return structuredClone(value); } };
   const context = { tenantCode: 'tenant', workspaceCode: 'space', customerId: 'customer', authenticated: true, productId: 'p' };
   const states = [];
@@ -138,12 +138,12 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
   {
 
   const fs = require('node:fs'), vm = require('node:vm'), ts = require('typescript');
-  const capability = { contractVersion: 'ain-client-host-capabilities-1', enabled: true, audience: 'customer',
+  const capability = { contractVersion: 'ain-client-host-capabilities-2', enabled: true, audience: 'customer',
     surface: 'tenant_website', channel: 'web', customerId: 'customer', customerType: 'personal',
     tenantCode: 'tenant', serviceCode: 'space', scope: { kind: 'workspace', tenantId: 't', workspaceId: 'w' },
     policy: { revision: 1, allowRead: true, allowCreate: true }, releaseRevision: 'r1',
     observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
-    capabilities: { entryActions: ['CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'], bookingDrafts: true, savedDeliveryAddresses: false },
+    capabilities: { entryActions: ['CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'], bookingDrafts: true, savedDeliveryAddresses: false, bookingReceiptRead: true },
     authorization: 'observation_only_recheck_each_action' };
   const events = new Map(), document = { hidden: false, addEventListener: (key, fn) => events.set(key, fn), removeEventListener: key => events.delete(key) };
   const calls = []; let hold = false, finish, hostSubmitCalls = 0, holdSubmission = false, finishSubmission;
@@ -180,7 +180,8 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
   const auth = load('data/authClient.ts', { './apiClient': { API_BASE: '' } });
   let session = { accessToken: 'synthetic-session', customer: { customerId: 'customer', customerType: 'personal' }, workspace: { workspaceCode: 'space' } };
   auth.configureAuthBridge({ getSession: () => session, setSession: next => { session = next; } });
-  const { createBookingHandoffHostFactory: factory } = load('features/ai-native/booking-host.factory.ts', { '../../data/authClient': auth });
+  const { createBookingHandoffHostFactory: factory } = load('features/ai-native/booking-host.factory.ts', { '../../data/authClient': auth,
+    './booking-handoff': { normalizeBookingAcceptanceObservation } });
   const publication = { tenantCode: 'tenant', serviceCode: 'space', scope: capability.scope, releaseRevision: 'r1' };
   assert.equal(await factory().openFromUser(value.handoffRef), null); assert.equal(calls.length, 0);
   const owner = factory(publication); assert.equal(calls.length, 0);
@@ -189,12 +190,20 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
   assert.equal(JSON.stringify(trusted).includes('synthetic-session'), false);
   assert.equal((await trusted.readBookingHandoff({ handoffRef: value.handoffRef })).handoffRef, value.handoffRef);
   assert.equal(calls.length, 4, 'explicit action rechecks capabilities before and after the handoff read');
+  capability.contractVersion = 'ain-client-host-capabilities-1';
+  assert.equal(await factory(publication).openFromUser(value.handoffRef), null);
+  capability.contractVersion = 'ain-client-host-capabilities-2';
+  const receiptOnly = structuredClone(capability);
+  capability.policy.allowCreate = false; capability.capabilities = { entryActions: [], bookingDrafts: false, savedDeliveryAddresses: false, bookingReceiptRead: true };
+  const readOnly = await factory(publication, 'receipt_only').openFromUser(value.handoffRef);
+  assert.ok(readOnly?.enabled); assert.equal(readOnly.mode, 'receipt_only'); assert.equal(readOnly.submitAcceptedBooking, undefined);
+  Object.assign(capability, receiptOnly);
   assert.equal((await trusted.acceptBookingSubmission({ handoffRef: value.handoffRef })).acceptanceRef, accepted.acceptanceRef);
   const decision = { acceptanceRef: accepted.acceptanceRef, decision: 'submit_original_booking' };
   const sentFromHost = trusted.submitAcceptedBooking(decision);
-  await assert.rejects(trusted.submitAcceptedBooking(decision));
+  await assert.rejects(async () => trusted.submitAcceptedBooking(decision));
   assert.equal((await sentFromHost).state, 'unknown'); assert.equal(hostSubmitCalls, 1);
-  await assert.rejects(trusted.submitAcceptedBooking(decision));
+  await assert.rejects(async () => trusted.submitAcceptedBooking(decision));
   assert.equal((await trusted.readBookingSubmission({ acceptanceRef: accepted.acceptanceRef })).state, 'observed');
   assert.equal(hostSubmitCalls, 1);
   const lateOwner = factory(publication), lateHost = await lateOwner.openFromUser(value.handoffRef);

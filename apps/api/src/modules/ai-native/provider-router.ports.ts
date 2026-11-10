@@ -1,7 +1,7 @@
 import type { AiProfileCapability, AiProfileScope, AiProviderProfileRecord, AiProviderProfileRole, AiProfileServiceMode, ProviderProfileRepository } from './provider-profile.ports';
 import type { CapabilityPreflight, ProviderCapabilityService } from './provider-capability.service';
 
-export type AiRouteScene = 'chat' | 'builder' | 'vision' | 'knowledge' | 'reasoning';
+export type AiRouteScene = 'chat' | 'builder' | 'vision' | 'knowledge' | 'reasoning' | 'embedding';
 export interface ProviderRouteRequest {
   consumerScope: AiProfileScope;
   configurationScope: AiProfileScope;

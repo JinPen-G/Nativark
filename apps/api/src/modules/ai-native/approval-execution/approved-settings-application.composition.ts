@@ -11,14 +11,17 @@ import { AiProposalRepository, AiProposalRepositoryError } from '../ai-proposal-
 import { AiApprovalService, AiApprovalRepositoryError, PrismaAiApprovalRepository, type AiApprovalRecord } from '../ai-approval-repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { settingsContract, registeredSettingsTool, ApprovedSettingsApplicationUnknownError } from './approved-settings-contracts';
-import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsConflict, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
+import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsConflict, settingsDenied, settingsUnavailable,
+  settingsExecutionLeaseSchema, type ApprovedSettingsExecutionLease, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { PrismaApprovedSettingsParticipant } from './prisma-approved-settings.participant';
 import { composePersistedSettingsTaskInput } from '../settings-task-input.composition';
 
 export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicationDependencies) {
   const authority = new ApprovedSettingsTaskAuthority(d), participant = new PrismaApprovedSettingsParticipant(authority);
   const route = new ApprovedSettingsRouteAuthority(d.guard, d.credentials);
-  const domain = (tx?: Prisma.TransactionClient) => new ApprovedSettingsChangeService(tx ? settingsTransactionDb(d.db, tx) : d.db, d.core, route, participant, authority.clock);
+  const domain = (tx?: Prisma.TransactionClient, executionLease?: ApprovedSettingsExecutionLease) =>
+    new ApprovedSettingsChangeService(tx ? settingsTransactionDb(d.db, tx) : d.db, d.core, route,
+      executionLease ? new PrismaApprovedSettingsParticipant(authority, executionLease) : participant, authority.clock);
   const sameActor = (a: object, b: object) => { if (requestFingerprint(a) !== requestFingerprint(b)) throw settingsDenied(); };
   const write = async <T>(next: 'read_preparation_receipt' | 'read_decision_receipt', work: () => Promise<T>) => {
     try { return await work(); }
@@ -143,11 +146,16 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
     });
   };
 
-  const commitApprovedChange = async (value: unknown) => {
+  const commitApprovedChange = async (value: unknown, executionLease?: ApprovedSettingsExecutionLease) => {
     const command = settingsContract('AiApprovedSettingsCommitDraft', value);
     registeredSettingsTool();
+    // Only the original runner supplies its acknowledged tuple as a separate
+    // server argument. Public commit fields/current database state cannot grant
+    // it; callers without that binding must use the original host continuation.
+    const held = settingsExecutionLeaseSchema.safeParse(structuredClone(executionLease));
+    if (!held.success || held.data.holderId !== d.holderId) throw settingsUnavailable();
     const loaded = await participant.load(command, 'read');
-    const result = await domain().commitApprovedChange({ operationKey: command.operationKey, changeId: loaded.change.id, changeHash: loaded.change.changeHash,
+    const result = await domain(undefined, held.data).commitApprovedChange({ operationKey: command.operationKey, changeId: loaded.change.id, changeHash: loaded.change.changeHash,
       approval: { proposalId: command.proposalId, proposalRevision: command.proposalRevision, approvalId: command.approvalId, reviewedPayloadHash: command.reviewedPayloadHash } });
     return settingsContract('AiApprovedSettingsOperationResultDraft', { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, ...result }, true);
   };

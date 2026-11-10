@@ -2,6 +2,14 @@ import { leafClosed as obj, leafEnum as choice, leafInt as int, leafText as text
   leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 import type { AiTaskBudgetUsageRecordDraft } from './ai-scene-request-draft';
 
+/** Capability names are a closed selection vocabulary, not implemented probe
+ * methods or support evidence. Server policy may expose fewer kinds; absent
+ * objective protocol evidence stays unverified and grants no dispatch. */
+export const AI_CAPABILITY_PROBE_KINDS_DRAFT = Object.freeze([
+  'text', 'streaming', 'vision', 'audio', 'structured_output', 'tools', 'embedding', 'reasoning'
+] as const);
+export type AiCapabilityProbeKindDraft = typeof AI_CAPABILITY_PROBE_KINDS_DRAFT[number];
+
 /** Opt-in request contract. Publication does not enable the HTTP module. */
 export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/text-capability', method: 'POST',
@@ -26,7 +34,7 @@ export type AiTextCapabilityRequestDraft = { requestKey: string };
 /** Selection is constrained by the server whitelist and current management
  * authorization; this field cannot select a provider or confer capability. */
 export type AiTextCapabilityPrepareRequestDraft = AiTextCapabilityRequestDraft & {
-  capability?: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools';
+  capability?: AiCapabilityProbeKindDraft;
 };
 export type AiTextCapabilityCancelRequestDraft = AiTextCapabilityRequestDraft & { expectedRevision: number };
 export type AiTextCapabilityActionRequestDraft = AiTextCapabilityRequestDraft & { operation: string };
@@ -63,7 +71,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     semantics: 'action_policy_not_dispatch_or_business_approval' };
   readTaskActionReceipt: AiTextCapabilityConfigureActionDraft & { state: 'recorded' | 'not_observed'; policy: ActionPolicy | null;
     retryable: false; semantics: 'original_action_policy_save_not_current_permission' };
-  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; methodVersion: string;
+  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: AiCapabilityProbeKindDraft; methodVersion: string;
     configurationRevision: number; execution: 'not_started' };
   publish: AiTextCapabilityRequestDraft & { state: 'stored'; inputRef: string; inputHash: string; replayed: boolean; retryable: false };
   readOriginal: AiTextCapabilityRequestDraft & ({ state: 'stored'; inputRef: string; inputHash: string; retryable: false }
@@ -76,7 +84,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     run: { runId: string; status: string }; semantics: 'task_outcome_not_capability_evidence' };
   cancel: AiTextCapabilityRequestDraft & { status: 'cancel_requested'; revision: number; retryable: false };
   reconcile: RunResponse;
-  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; status: 'supported' | 'unsupported' | 'unverified';
+  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: AiCapabilityProbeKindDraft; status: 'supported' | 'unsupported' | 'unverified';
     receiptId?: string; evidenceHash?: string; reason?: string; observation: null | { methodVersion: string; mode: 'mock' | 'live';
       configurationRevision: number; checkedAt: string; expiresAt: string };
     retryable: false; semantics: 'original_receipt_not_task_outcome' };
@@ -89,7 +97,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     observation: null | { receiptId: string; methodVersion: string; mode: 'mock' | 'live'; checkedAt: string; expiresAt: string;
       validity: 'expired' | 'historical_only'; matched: boolean; reportedUsage: null | { inputTokens: number; outputTokens: number } };
   };
-  preflight: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; allowed: boolean; missing: boolean; stale: boolean;
+  preflight: AiTextCapabilityRequestDraft & { capability: AiCapabilityProbeKindDraft; allowed: boolean; missing: boolean; stale: boolean;
     semantics: 'current_preflight_not_dispatch_permission' };
 };
 export type AiTextCapabilityHttpErrorDraft = {
@@ -115,7 +123,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
   // probe command. Other public operations accept the original request key only.
   AiPlatformCapabilityPublishRequestDraft: obj({ ...key, command: obj({ operationId: text(128),
     profileKey: text(64), profileFingerprint: hash,
-    capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') },
+    capability: choice(...AI_CAPABILITY_PROBE_KINDS_DRAFT) },
   ['operationId', 'profileKey', 'profileFingerprint']) }),
   AiTextCapabilityAccountingOperationRequestDraft: obj({ ...key, operation: choice('releaseUnsent', 'reconcileAccounting') }),
   AiTextCapabilityAccountingOperationResponseDraft: obj({ ...key, operation: choice('releaseUnsent', 'reconcileAccounting'),
@@ -138,9 +146,9 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     oneOf: [int(1, 4294967293), { type: 'null' }] }, state: choice('recorded', 'not_observed'),
     policy: { oneOf: [actionPolicy, { type: 'null' }] }, retryable: no,
     semantics: choice('original_action_policy_save_not_current_permission') }),
-  AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') }, ['requestKey']),
+  AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice(...AI_CAPABILITY_PROBE_KINDS_DRAFT) }, ['requestKey']),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
-  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), methodVersion: text(64),
+  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice(...AI_CAPABILITY_PROBE_KINDS_DRAFT), methodVersion: text(64),
     configurationRevision: int(0, 4294967295), execution: choice('not_started') }),
   AiTextCapabilityPublishResponseDraft: obj({ ...stored, replayed: bool }),
   AiTextCapabilityReadOriginalResponseDraft: { oneOf: [obj(stored), obj({ ...key, state: choice('not_observed'), retryable: no })] },
@@ -152,7 +160,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     task: obj({ taskId: id, revision, status: text(64), cancelRequestedAt: { oneOf: [time, { type: 'null' }] } }),
     run: obj({ runId: id, status: text(64) }), semantics: choice('task_outcome_not_capability_evidence') }),
   AiTextCapabilityCancelResponseDraft: obj({ ...key, status: choice('cancel_requested'), revision, retryable: no }),
-  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), status: choice('supported', 'unsupported', 'unverified'),
+  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice(...AI_CAPABILITY_PROBE_KINDS_DRAFT), status: choice('supported', 'unsupported', 'unverified'),
     receiptId: id, evidenceHash: hash, reason: text(64), observation: { oneOf: [{ type: 'null' }, obj({
       methodVersion: text(64), mode: choice('mock', 'live'), configurationRevision: int(1, 4294967295), checkedAt: time, expiresAt: time })] },
     retryable: no, semantics: choice('original_receipt_not_task_outcome') },
@@ -168,7 +176,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
       checkedAt: time, expiresAt: time, validity: choice('expired', 'historical_only'), matched: bool,
       reportedUsage: { oneOf: [{ type: 'null' }, obj({ inputTokens: int(0, Number.MAX_SAFE_INTEGER), outputTokens: int(0, Number.MAX_SAFE_INTEGER) })] } })] },
   }),
-  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), allowed: bool, missing: bool, stale: bool,
+  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice(...AI_CAPABILITY_PROBE_KINDS_DRAFT), allowed: bool, missing: bool, stale: bool,
     semantics: choice('current_preflight_not_dispatch_permission') }),
   AiTextCapabilityHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_RESOURCE_UNAVAILABLE',
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,

@@ -21,6 +21,9 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { requestFingerprint } from './rental-idempotency.repository';
 import { readRentalFulfillmentAdmission } from './rental-fulfillment-admission';
+import { RentalCoreConfigRepository } from './rental-core-config.repository';
+import { assertRentalInventoryBasis } from './rental-quote-inventory-basis';
+import { requestRentalOrderVisibilityWhere } from './rental-core-fact.repository';
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 /** Server-derived opaque hashes, never authorization or a client DTO. The key
@@ -81,6 +84,8 @@ export interface TenantBusinessFactSnapshot {
 export interface RentalBusinessFactStore {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
   findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined>;
+  /** Minimal immutable quote projection, reachable only by its visible original order. */
+  readOrderLinkedQuoteFacts?(tenantId: string, workspaceId: string, orderId: string, quoteId: string): Promise<unknown | undefined>;
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, rentalStartAt: string, discountAmount: number, tx: RentalBusinessFactTx): Promise<boolean>;
   redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid">;
@@ -209,6 +214,64 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId, workspaceId } });
     return row ? this.toQuote(row) : undefined;
+  }
+
+  /** Never initializes business state or locates historical rates through current
+   * configuration. Restrict the original parent before/after the bounded JOIN. */
+  async readOrderLinkedQuoteFacts(tenantId: string, workspaceId: string, orderId: string, quoteId: string): Promise<unknown | undefined> {
+    if (await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('历史报价空间变化');
+    const where = () => ({ id: orderId, tenantId, workspaceId, quoteId, ...requestRentalOrderVisibilityWhere() });
+    const parent = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!parent) throw new ForbiddenException('历史报价原订单不可读或关联变化');
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string;
+      createdAt: Date; currency: string; ruleVersion: string; pricingPlanVersion: string;
+      priceVersionId: string | null; priceVersion: string | null; calendarVersion: string | null;
+      ratesType: string | null; rateCount: bigint | number | null; rates: unknown;
+      contextType: string | null; context: unknown }>>(Prisma.sql`
+      SELECT q.id, q.tenantId, q.workspaceId, q.createdAt, q.currency, q.ruleVersion, q.pricingPlanVersion,
+        q.priceVersionId, q.priceVersion, q.calendarVersion, JSON_TYPE(q.rateSnapshot) AS ratesType,
+        JSON_LENGTH(q.rateSnapshot) AS rateCount,
+        (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', CASE WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].id'))) = 'STRING' THEN j.rateId ELSE NULL END,
+          'itemGroupId', CASE WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].itemGroupId'))) = 'STRING' THEN j.itemGroupId ELSE NULL END,
+          'pricingGroupId', CASE WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].pricingGroupId'))) = 'STRING' THEN j.pricingGroupId
+            WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].pricingGroupId'))) IS NULL THEN NULL ELSE '!' END,
+          'unit', CASE WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].unit'))) = 'STRING' THEN j.rateUnit ELSE NULL END,
+          'baseAmount', CASE WHEN JSON_TYPE(JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].baseAmount'))) IN ('INTEGER', 'DOUBLE')
+            THEN JSON_EXTRACT(q.rateSnapshot, CONCAT('$[', j.ordinality - 1, '].baseAmount')) ELSE NULL END))
+          FROM JSON_TABLE(CASE WHEN JSON_TYPE(q.rateSnapshot) = 'ARRAY' AND JSON_LENGTH(q.rateSnapshot) <= 100
+            THEN q.rateSnapshot ELSE JSON_ARRAY() END, '$[*]' COLUMNS(ordinality FOR ORDINALITY,
+              rateId VARCHAR(192) PATH '$.id', itemGroupId VARCHAR(192) PATH '$.itemGroupId',
+              pricingGroupId VARCHAR(192) PATH '$.pricingGroupId', rateUnit VARCHAR(32) PATH '$.unit')) AS j) AS rates,
+        JSON_TYPE(q.pricingContext) AS contextType,
+        CASE WHEN JSON_TYPE(q.pricingContext) = 'OBJECT' THEN JSON_OBJECT('timeZone',
+          CASE WHEN JSON_TYPE(JSON_EXTRACT(q.pricingContext, '$.timeZone')) = 'STRING'
+            THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(q.pricingContext, '$.timeZone')), 101) ELSE NULL END) ELSE NULL END AS context
+      FROM rental_orders AS o JOIN rental_quotes AS q ON q.id = o.quoteId
+        AND q.tenantId = o.tenantId AND q.workspaceId = o.workspaceId
+      WHERE o.id = ${orderId} AND o.tenantId = ${tenantId} AND o.workspaceId = ${workspaceId}
+        AND o.quoteId = ${quoteId} AND o.updatedAt = ${parent.updatedAt} LIMIT 1`);
+    const after = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!after || after.updatedAt.getTime() !== parent.updatedAt.getTime()
+      || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ConflictException('历史报价读取期间订单或范围变化');
+    if (!rows.length) return undefined;
+    if (rows.length !== 1) throw new ConflictException('历史报价投影不唯一');
+    const row = rows[0], absent = (type: string | null) => type === null || type === 'NULL';
+    if (row.id !== quoteId || row.tenantId !== tenantId || row.workspaceId !== workspaceId) throw new ConflictException('历史报价来源绑定无效');
+    if (!absent(row.ratesType) && row.ratesType !== 'ARRAY') throw new ConflictException('历史报价价格快照格式无效');
+    if (!absent(row.contextType) && row.contextType !== 'OBJECT') throw new ConflictException('历史报价上下文格式无效');
+    const count = row.ratesType === 'ARRAY' ? Number(row.rateCount) : 0;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 100) throw new ConflictException('历史报价价格快照超过只读上限');
+    const rates = row.ratesType === 'ARRAY' ? (count === 0 ? [] : row.rates) : undefined;
+    if (rates !== undefined && (!Array.isArray(rates) || rates.length !== count)) throw new ConflictException('历史报价价格投影不完整');
+    // Optional target is absent, not null, in the original shared rate contract.
+    const rateSnapshot = Array.isArray(rates) ? rates.map(value => {
+      const rate = value as Record<string, unknown>;
+      return { ...rate, pricingGroupId: rate.pricingGroupId === null ? undefined : rate.pricingGroupId };
+    }) : undefined;
+    return { id: row.id, tenantId: row.tenantId, createdAt: iso(row.createdAt), currency: row.currency,
+      ruleVersion: row.ruleVersion, pricingPlanVersion: row.pricingPlanVersion, priceVersionId: row.priceVersionId ?? undefined,
+      priceVersion: row.priceVersion ?? undefined, calendarVersion: row.calendarVersion ?? undefined,
+      rateSnapshot, pricingContext: absent(row.contextType) ? undefined : row.context };
   }
 
   async findQuoteForOriginalOperation(tenantId: string, value: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined> {
@@ -496,6 +559,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
       sourceSnapshot: quote.sourceSnapshot === undefined ? Prisma.DbNull : quote.sourceSnapshot as unknown as Prisma.InputJsonValue,
+      inventoryBasis: quote.inventoryBasis === undefined ? Prisma.DbNull : quote.inventoryBasis as unknown as Prisma.InputJsonValue,
       deliveryAddressSnapshot: quote.deliveryAddressSnapshot === undefined ? Prisma.DbNull : quote.deliveryAddressSnapshot as unknown as Prisma.InputJsonValue,
       rentalLineAmounts: quote.rentalLineAmounts === undefined ? Prisma.DbNull : quote.rentalLineAmounts as unknown as Prisma.InputJsonValue,
       categoryCode: rentalCategoryStorageCode(quote.categoryCode),
@@ -558,7 +622,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
         throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
       }
-      if (existing && ['sourceSnapshot', 'deliveryAddressSnapshot', 'rentalLineAmounts'].some(field =>
+      if (existing && ['sourceSnapshot', 'inventoryBasis', 'deliveryAddressSnapshot', 'rentalLineAmounts'].some(field =>
         !isDeepStrictEqual(existing[field as keyof typeof existing] ?? null, quote[field as keyof typeof quote] ?? null))) {
         throw new ConflictException('已有报价的创建来源、地址及租金分摊不可改写或补造');
       }
@@ -611,6 +675,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
           }
         }
         await validateQuotedCapabilityRequirements(client, workspaceId, quote);
+        await assertRentalInventoryBasis(new RentalCoreConfigRepository(this.prisma), quote.tenantId, workspaceId,
+          quote.request.lines, quote.inventoryBasis, client);
         await client.rentalQuote.create({
           data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt),
             ...(original ? { originalOperationKey: original.key, originalInputHash: original.inputHash } : {}) }
@@ -1035,6 +1101,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       categoryVersionId: row.categoryVersionId ?? undefined,
       sourceSnapshot: row.sourceSnapshot === null ? undefined : row.sourceSnapshot as unknown as RentalQuoteSnapshotV1['sourceSnapshot'],
+      inventoryBasis: row.inventoryBasis == null ? undefined : row.inventoryBasis as unknown as RentalQuoteSnapshotV1['inventoryBasis'],
       deliveryAddressSnapshot: row.deliveryAddressSnapshot === null ? undefined : row.deliveryAddressSnapshot as unknown as RentalQuoteSnapshotV1['deliveryAddressSnapshot'],
       rentalLineAmounts: row.rentalLineAmounts === null ? undefined : row.rentalLineAmounts as unknown as RentalQuoteSnapshotV1['rentalLineAmounts'],
       inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalQuoteSnapshotV1["inspectionTemplateSnapshots"],

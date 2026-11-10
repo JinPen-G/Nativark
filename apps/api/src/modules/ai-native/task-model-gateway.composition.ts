@@ -32,12 +32,15 @@ import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocat
 import { BudgetError } from './budget/budget.ports';
 import { createNativeModelAdapters } from './native-model-adapters';
 import { isNativeModelProtocol, type NativeModelProtocol } from './native-model-protocols';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-os/shared';
+import { PrismaNativeToolCallBindings } from './model-input/prisma-native-tool-call-bindings';
+import type { ProtocolToolCall } from './model-gateway.ports';
 import { z } from 'zod';
 import { composeTaskInputCountingChain } from './input-counting/input-count-tokens.composition';
 import { createNativeModelEgressTransport } from './model-egress.transport';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { GatewayConnectionResolver } from './routed-model-transport';
+import type { NativeToolResultResolver } from './model-input/native-tool-result.ports';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -48,6 +51,9 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   routeScene: AiRouteScene;
   callPriceVersion: string;
   adapters?: readonly ModelAdapter[];
+  /** Explicit server native-result mode. Requires a declared local codec and
+   * its own migrated private binding store; default remains the old chain. */
+  nativeToolResults?: boolean;
   /** Explicit server selection of the existing bounded transport, instead of
    * injected adapters. Neither omission nor an empty array enables transport.
    * This is protocol support only, never a live provider/capability grant. */
@@ -66,6 +72,9 @@ export type PersistedTaskGatewayDependencies = Omit<PersistedTaskCallGatewayDepe
   pricing: PersistedTaskGatewayPricing;
   /** Explicit recorded-host decision; never enabled for calls pricing or media. */
   inputCounting?: TaskInputCountingConfiguration;
+  /** Explicit original Task/Core resolver shared by native counting and model
+   * delivery. This server dependency grants no client/native execution policy. */
+  nativeCounting?: NativeToolResultResolver;
 };
 export const taskInputCountingConfigurationSchema = z.object({
   countingPriceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
@@ -165,11 +174,16 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     || input.nativeProtocol !== undefined && input.adapters !== undefined
     || input.nativeProtocol === undefined && (!Array.isArray(input.adapters) || !input.adapters.length)
     || input.audit !== undefined && typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  if (input.nativeToolResults !== undefined && typeof input.nativeToolResults !== 'boolean'
+    || input.nativeToolResults && (input.media || input.routeScene !== 'chat')) throw new ModelGatewayError('CONFIG_INVALID');
   const selection = checkedPricing(input.pricing);
   const counted = input.inputCounting === undefined ? undefined : taskInputCountingConfigurationSchema.safeParse(structuredClone(input.inputCounting));
   if (counted && (!counted.success || selection.kind !== 'recorded' || input.routeScene !== 'chat' || input.media
     || input.nativeProtocol === undefined)) throw new ModelGatewayError('CONFIG_INVALID');
   const counting = counted?.success ? counted.data : undefined;
+  if (input.nativeCounting !== undefined && (!input.nativeToolResults || !counting
+    || typeof input.nativeCounting.resolve !== 'function' || typeof input.nativeCounting.assertCurrent !== 'function'))
+    throw new ModelGatewayError('CONFIG_INVALID');
   // Recorded evidence currently attests plain-text input/output tokens only.
   // Never price image/audio traffic with an unrelated text/calls upper bound.
   if (selection.kind === 'recorded' && (input.media || input.routeScene === 'vision')) throw new ModelGatewayError('CONFIG_INVALID');
@@ -179,8 +193,13 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   const adapters = input.nativeProtocol !== undefined
     ? createNativeModelAdapters(input.nativeProtocol, {
       orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION },
-      ...(input.media ? { mediaInput: ['image', 'audio'] as const } : {})
+      ...(input.media ? { mediaInput: ['image', 'audio'] as const } : {}),
+      ...(input.nativeToolResults ? { nativeToolResults: true } : {})
     }) : [...input.adapters!];
+  if (input.nativeToolResults && adapters.some(adapter => adapter.supportsNativeToolResults !== true
+    || typeof adapter.generateNativeToolResult !== 'function')) {
+    throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  }
   const dependencies = { db, auth, credentials, subscriptions, clock };
   const authorization = composePersistedTaskAuthorization(dependencies);
   const invocation = { resolve: () => authorization.execution.authorize(taskId) };
@@ -230,12 +249,67 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     new ProviderRouterService({ profiles: new PrismaProviderProfileRepository(db), capabilities }), routeScene);
   const admissions = new PrismaAdmissionRepository(db);
   const deliveryObservation = new PrismaTaskGatewayAudit(db, scopes, accounting.facts, taskId, clock);
+  // Original binding receipts use current terminal-read authority, not a new
+  // RUNNING-only execution grant. Capture still checks the live original task,
+  // lease, dispatch and usage itself; routing/dispatch retain execution gates.
+  const nativeToolBindings = input.nativeToolResults ? new PrismaNativeToolCallBindings(db,
+    new AiScopeRepository(db, { resolve: () => authorization.authority.resolve(taskId, 'read_step_terminal') }, clock),
+    secrets, taskId, clock) : undefined;
+  const originalTransport = new RoutedModelTransport({ platform, tenant }, adapters);
+  // The domain transport must implement the private native operation, not merely
+  // advertise a codec marker. No original-prompt fallback or extra HTTP loop.
+  const nativeTransport = originalTransport as RoutedModelTransport & Pick<import('./unified-ai-gateway.ports').UnifiedGatewayTransport,
+    'invokeNativeToolResult' | 'nativeInputBoundHash'>;
+  if (input.nativeToolResults && typeof nativeTransport.invokeNativeToolResult !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const transport = {
+    ...(typeof nativeTransport.nativeInputBoundHash === 'function' ? {
+      nativeInputBoundHash: nativeTransport.nativeInputBoundHash.bind(nativeTransport)
+    } : {}),
+    ...(typeof nativeTransport.invokeNativeToolResult === 'function' ? {
+      invokeNativeToolResult: async (...args: Parameters<NonNullable<typeof nativeTransport.invokeNativeToolResult>>) => {
+        const result = structuredClone(await nativeTransport.invokeNativeToolResult!(...args));
+        const calls: unknown = Reflect.get(result, 'nativeToolCalls');
+        if (nativeToolBindings && Array.isArray(result.toolRequests) && result.toolRequests.length) {
+          if (!Array.isArray(calls)) throw new ModelGatewayError('INVALID_RESPONSE');
+          if (result.usage && args[5]) await args[5](result.usage);
+          await nativeToolBindings.capture(args[0], args[1].callId, calls as ProtocolToolCall[],
+            result.toolRequests as AiOrderExplainRequestDraft[], args[3]);
+        } else if (nativeToolBindings && Array.isArray(calls) && calls.length) throw new ModelGatewayError('INVALID_RESPONSE');
+        const visible: import('./unified-ai-gateway.ports').GatewayInvocationResult = { ...result };
+        delete visible.nativeToolCalls;
+        return visible;
+      }
+    } : {}),
+    inputBoundHash: originalTransport.inputBoundHash.bind(originalTransport),
+    invoke: async (...args: Parameters<RoutedModelTransport['invoke']>) => {
+      const result = await originalTransport.invoke(...args);
+      const calls: unknown = Reflect.get(result, 'nativeToolCalls');
+      if (nativeToolBindings && Array.isArray(result.toolRequests) && result.toolRequests.length) {
+        if (!Array.isArray(calls)) throw new ModelGatewayError('INVALID_RESPONSE');
+        // The original recorder owns deduplication. Retain reported consumption
+        // before a private receipt write can fail; never invent or reset usage.
+        if (result.usage && args[4]) await args[4](result.usage);
+        await nativeToolBindings.capture(args[0], args[1].callId, calls as ProtocolToolCall[],
+          result.toolRequests as AiOrderExplainRequestDraft[], args[3]);
+      } else if (nativeToolBindings && Array.isArray(calls) && calls.length) throw new ModelGatewayError('INVALID_RESPONSE');
+      // Raw call identity stays in the encrypted store, including for callers
+      // preserving the old format-only path. Public C03 never sees this field.
+      const visible: import('./unified-ai-gateway.ports').GatewayInvocationResult = { ...result };
+      delete visible.nativeToolCalls;
+      return visible;
+    },
+    async *stream(...args: Parameters<RoutedModelTransport['stream']>) {
+      if (input.nativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      yield* originalTransport.stream(...args);
+    }
+  };
   const runtime: PublicGatewayRuntime = {
     evidence: 'live',
     ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
       dispatch: new InvocationDispatchService(admissions), budget: accounting.budget,
       audit: audit ?? deliveryObservation, observation: deliveryObservation,
-      transport: new RoutedModelTransport({ platform, tenant }, adapters), ...(media ? { media } : {}) },
+      transport, ...(media ? { media } : {}),
+      ...(input.nativeCounting ? { nativeToolResults: input.nativeCounting } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
       // Remote evidence cannot make an absent local protocol feature work.
@@ -251,8 +325,12 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
   // still re-read by the services, not frozen into a permanent grant.
   Object.freeze(runtime.ports);
   Object.freeze(runtime);
-  const inputCounting: TaskModelHostDependencies['inputCounting'] = counting ? Object.freeze({ preparation: (inner, frozen, policy) => {
+  const inputCounting: TaskModelHostDependencies['inputCounting'] = counting ? Object.freeze({ preparation: (inner, frozen, policy, native) => {
     if (policy.kind || policy.structuredOutput || policy.structuredSchemaHash) throw new ModelGatewayError('CONFIG_INVALID');
+    if (native && input.nativeCounting && native !== input.nativeCounting) throw new ModelGatewayError('CONFIG_INVALID');
+    const nativeCounting = native ?? input.nativeCounting;
+    if (nativeCounting && (policy.nativeToolResults !== true || typeof nativeCounting.resolve !== 'function'
+      || typeof nativeCounting.assertCurrent !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
     const taskExecution = { authorize: (selectedTaskId: string) => {
       if (selectedTaskId !== taskId) throw new ModelGatewayError('FORBIDDEN');
       return authorization.execution.authorize(taskId);
@@ -282,9 +360,11 @@ export function composePersistedTaskGateway(input: PersistedTaskGatewayDependenc
     return composeTaskInputCountingChain({ ...dependencies, guard, frozen, taskExecution,
       resolvers: { platform: bind(platform), tenant: bind(tenant) }, transport: createNativeModelEgressTransport(),
       policyOptions: { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } },
+      ...(nativeCounting ? { nativeToolResults: nativeCounting } : {}),
       countingPriceVersion: counting.countingPriceVersion, timeoutMs: counting.timeoutMs }).preparation(inner);
   } }) : undefined;
   return Object.freeze({ runtime, priceVersion: selection.priceVersion, accountingRecovery: accounting.recovery,
+    ...(nativeToolBindings ? { nativeToolBindings } : {}),
     ...(inputCounting ? { inputCounting } : {}),
     financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
 }

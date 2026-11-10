@@ -8,10 +8,10 @@ import type { GatewayRoutingResolution } from './gateway-routing.service';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { ModelGatewayError, type WorkspaceGatewayContext, type ModelProtocolRequest } from './model-gateway.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
-import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttachmentResolver } from './gateway-intent';
+import { prepareGatewayTextIntent, prepareGatewayIntent, prepareGatewayEmbeddingProbeIntent, type GatewayMediaAttachmentResolver } from './gateway-intent';
 import { visionCapabilityChallenge } from './vision-capability-challenge';
 import { audioCapabilityChallenge } from './audio-capability-challenge';
-import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements,
+import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -79,13 +79,16 @@ export class TextCapabilityProbeAuthority {
     const profile = await d.profiles.get(scope, this.command.profileKey);
     if (!profile || !profile.enabled || profile.disabledAt || profile.serviceMode !== selection.mode
       || profile.scopeId !== scope.id || profile.scopeKind !== scope.kind || profile.configRevision !== selection.revision
-      || !textProbeRequirements(this.command).every(value => profile.allowedCapabilities.includes(value))
+      // Unavailable metadata is not an invocation: do not require inventing a
+      // profile capability just to report unverified. Dispatch rejects it below.
+      || !['embedding', 'reasoning'].includes(textProbeCapability(this.command))
+        && !textProbeRequirements(this.command).every(value => profile.allowedCapabilities.includes(value))
       || capabilityProfileFingerprint(profile) !== this.command.profileFingerprint) {
       throw new ModelGatewayError('CONFIG_INVALID');
     }
-    const prepared = textProbeIntent(this.command.operationId, resolved.consumerScope.id, textProbeCapability(this.command));
+    const prepared = textProbePreparation(this.command.operationId, resolved.consumerScope.id, textProbeCapability(this.command), textProbeExecutionProtocol(this.command, profile));
     const required = textProbeRequirements(this.command);
-    return { context: c, consumerScope: resolved.consumerScope, selection, scene: 'chat', requiredCapabilities: required,
+    return { context: c, consumerScope: resolved.consumerScope, selection, scene: textProbeRouteScene(this.command), requiredCapabilities: required,
       route: { profile, scope, role: profile.role,
         preflight: { allowed: false, required, missing: required, stale: [] },
         probe: { purpose: 'capability_text_probe', operationId: this.command.operationId,
@@ -106,10 +109,14 @@ export class TextCapabilityProbeAuthority {
   async authorizeDispatch(context: WorkspaceGatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
     if (mode !== textProbeMode(this.command)) throw new ModelGatewayError('FORBIDDEN');
     const current = await this.resolve(context, textProbeRequirements(this.command));
+    if (!canExecuteTextProbe(this.command, current.route.profile)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
-    const expected = ['vision', 'audio'].includes(textProbeCapability(this.command))
+    const expected = textProbeCapability(this.command) === 'embedding'
+      ? prepareGatewayEmbeddingProbeIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32, embeddingProbe: true }).request
+      : ['vision', 'audio'].includes(textProbeCapability(this.command))
       ? (await prepareGatewayIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode, context, this.media, signal)).request
       : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32,
+        ...(textProbeCapability(this.command) === 'reasoning' ? { reasoningChannel: true } : {}),
         ...(textProbeCapability(this.command) === 'structured_output' ? { structuredOutput: true } : {}),
         ...(textProbeCapability(this.command) === 'tools' ? { orderExplainTool: true } : {}) }, mode).request;
     if (requestFingerprint(request) !== requestFingerprint({ ...expected, model: current.route.profile.model })

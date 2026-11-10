@@ -1,13 +1,31 @@
 import { ConflictException } from "@nestjs/common";
-import type { RentalCalendarYear, RentalOrder, RentalOrderExtension, RentalPricingRate, RentalQuoteCalendarDay, RentalQuoteChargeLine, RentalRepricingContext } from "@rental-os/shared";
+import type { RentalCalendarYear, RentalOrder, RentalOrderExtension, RentalPricingRate, RentalQuoteCalendarDay, RentalQuoteChargeLine, RentalQuoteSnapshotV1, RentalRepricingContext } from "@rental-os/shared";
 import { hasOriginalRentalCurrency, roundMoney } from "./rental-money";
 import { businessDateKey, businessDateKeyFromIndex, businessDayIndex, isValidTimeZone } from "./rental-business-day";
+
+/** A present gross target map is a receipt, not a hint. Legacy absence stays
+ * absent; callers must not repair malformed maps from display codes. */
+export function assertRentalTargetAmounts(
+  snapshot: Pick<NonNullable<RentalOrderExtension["pricingSnapshot"]>, "rentalLineAmounts" | "recalculatedRentalAmount">,
+  targets: readonly string[]
+): void {
+  if (snapshot.rentalLineAmounts === undefined) return;
+  const map = snapshot.rentalLineAmounts, expected = new Set(targets);
+  if (!map || typeof map !== "object" || Array.isArray(map)
+    || targets.some(target => typeof target !== "string" || !target)
+    || Object.keys(map).length !== expected.size || Object.keys(map).some(target => !expected.has(target))
+    || !Number.isFinite(snapshot.recalculatedRentalAmount) || snapshot.recalculatedRentalAmount < 0
+    || Object.values(map).some(amount => !Number.isFinite(amount) || amount < 0)
+    || roundMoney(Object.values(map).reduce((sum, amount) => sum + amount, 0)) !== roundMoney(snapshot.recalculatedRentalAmount)) {
+    throw new ConflictException("原全租期重算逐行租金来源与目标或总额不一致，不能重新计算覆盖坏收据");
+  }
+}
 
 /** Validate the effective original-total receipt chain before consuming its
  * latest context. A missing successor must not fall back to the initial quote. */
 export function assertOriginalTotalExtensionReceipts(tenantId: string, workspaceId: string,
   order: { id: string; endAt: string }, dueAt: string, currency: unknown, rows: readonly RentalOrderExtension[],
-  original: { rentalAmount: number; serviceAmount: number; fulfillmentAmount: number; payableAmount: number }): number {
+  original: Pick<RentalQuoteSnapshotV1, "rentalAmount" | "serviceAmount" | "fulfillmentAmount" | "payableAmount" | "request">): number {
   let cursor = Date.parse(order.endAt), sequence = 0;
   let rentalAmount = original.rentalAmount, serviceAmount = original.serviceAmount, chargedAmount = original.payableAmount;
   const approvedReductions = new Map<string, number>();
@@ -28,6 +46,7 @@ export function assertOriginalTotalExtensionReceipts(tenantId: string, workspace
       throw new ConflictException("原全租期续租收据缺失或与本订单空间、期间、模式不一致，不能退回原报价重算");
     }
     const snapshot = row.pricingSnapshot;
+    assertRentalTargetAmounts(snapshot, original.request.lines.map(line => line.pricingGroupId ?? line.itemGroupId!));
     const review = snapshot.refundReview;
     const amounts = [row.rentalAmount, row.serviceAmount, row.payableAmount, row.depositDelta, row.preAuthDelta, row.billableUnits,
       snapshot.previousPayableAmount, snapshot.recalculatedPayableAmount, snapshot.recalculatedRentalAmount,

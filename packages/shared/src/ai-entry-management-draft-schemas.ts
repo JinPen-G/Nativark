@@ -1,6 +1,7 @@
 import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
-import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES, AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
+import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES,
+  AI_BOOKING_ACCEPTANCE_READ_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION } from './ai-booking-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, AI_CLIENT_MATERIAL_RECEIPT_VERSION } from './ai-client-entry-draft-schemas';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
@@ -16,7 +17,13 @@ const literal = (value: string | boolean | number) => ({ const: value });
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) =>
   ({ type: 'object', properties, required, additionalProperties: false });
 const taskRevision = { type: 'integer', minimum: 1, maximum: 4294967295 };
-const cancelTransition = { taskRevision, cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' }, observedAt: date };
+// Decimal-string cursors cannot use numeric JSON Schema bounds. Each branch
+// stays below the original uint64 maximum without coercing it to a Number.
+const uint64Max = '18446744073709551615';
+const uint64Prefixes = [...uint64Max].slice(1).flatMap((digit, offset) => Number(digit) === 0 ? []
+  : [`${uint64Max.slice(0, offset + 1)}[0-${Number(digit) - 1}][0-9]{${18 - offset}}`]);
+const positiveCursor = { type: 'string', pattern: `^(?:[1-9][0-9]{0,18}|${uint64Prefixes.join('|')}|${uint64Max})$` };
+const cancelTransition = { taskRevision, cursor: positiveCursor, observedAt: date };
 const cancelObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
   expectedRevision: { ...taskRevision, maximum: 4294967294 }, execution: literal('not_authorized_by_observation'),
   externalRollback: literal('not_claimed'), retryable: literal(false), nextAction: literal('read_original_task') };
@@ -24,15 +31,29 @@ const permissions = { type: 'array', minItems: 1, maxItems: 64, uniqueItems: tru
   items: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$' } };
 const scope = object({ kind: literal('workspace'), tenantId: id, workspaceId: id });
 const quantity = { type: 'integer', minimum: 1, maximum: 999 };
-const selection = object({ quoteId: id, timeZone: { type: 'string', minLength: 1, maxLength: 100 }, startAt: date, endAt: date,
+const oneTimeAddressConfirmation = object({ source: literal('original_quote_one_time_address'), snapshotFingerprint: hash, confirmed: literal(true) });
+const savedAddressEvidence = object({ addressId: id, observedRevision: { type: 'integer', minimum: 1 },
+  observedUpdatedAt: date, quoteAddressRevision: { type: 'null' }, snapshotFingerprint: hash,
+  serviceAreaFingerprint: hash, source: literal('current_client_saved_address') });
+const oneTimeAddressEvidence = object({ source: literal('original_quote_one_time_address'), quoteId: id,
+  quoteCreatedAt: date, quoteExpiresAt: date, snapshotFingerprint: hash, serviceAreaFingerprint: hash });
+const selection = { ...object({ quoteId: id, timeZone: { type: 'string', minLength: 1, maxLength: 100 }, startAt: date, endAt: date,
   fulfillmentMode: { enum: [...RENTAL_FULFILLMENT_MODES] }, fulfillmentLocationId: id, returnLocationId: id, deliveryAddressId: id,
+  deliveryAddressConfirmation: oneTimeAddressConfirmation,
   bookingIdentity: object({ bookingIdentity: { enum: ['personal', 'enterprise_employee'] }, corporateCustomerId: id,
     enterpriseContractAndPayer: { type: 'boolean' } }, ['bookingIdentity', 'enterpriseContractAndPayer']),
   lines: { type: 'array', minItems: 1, maxItems: 20, items: object({ itemGroupId: id, quantity }) },
   services: { type: 'array', maxItems: 20, items: object({ serviceId: id, quantity, scheduledStartAt: date,
     scheduledEndAt: date, serviceLocationId: id }, ['serviceId', 'quantity']) }
-}, ['quoteId', 'timeZone', 'startAt', 'endAt', 'fulfillmentMode', 'fulfillmentLocationId', 'bookingIdentity', 'lines']);
+}, ['quoteId', 'timeZone', 'startAt', 'endAt', 'fulfillmentMode', 'fulfillmentLocationId', 'bookingIdentity', 'lines']),
+  not: { type: 'object', properties: { deliveryAddressId: id, deliveryAddressConfirmation: oneTimeAddressConfirmation },
+    required: ['deliveryAddressId', 'deliveryAddressConfirmation'] } };
 const nullableId = { anyOf: [id, { type: 'null' }] };
+// A Core service charge binds serviceVersion/termsVersion. This is historical
+// version data, not a resource ID or a URL; preserve bounded non-empty segments.
+const bookingSourceVersion = { type: 'string', minLength: 1, maxLength: 191,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*(?:/[A-Za-z0-9][A-Za-z0-9._:-]*)*$' };
+const nullableSourceVersion = { anyOf: [bookingSourceVersion, { type: 'null' }] };
 const { taskId: _submissionTaskId, ...clientAnswerProperties } = AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft.properties!;
 const clientAnswer = object(clientAnswerProperties);
 const inputReceipt = { taskId: { ...id, maxLength: 36 }, requestId: { ...id, maxLength: 36 },
@@ -45,33 +66,44 @@ const amount = { type: 'number', minimum: 0 };
 const quote = object({ quoteId: id, quoteVersion: hash, pricingPlanVersion: id, ruleVersion: id,
   priceVersionId: nullableId, calendarVersion: nullableId, categoryVersionId: nullableId,
   currency: { type: 'string', pattern: '^[A-Z]{3}$' }, payableAmount: amount, depositAmount: amount, preAuthAmount: amount,
-  chargeLines: { type: 'array', maxItems: 100, items: object({ type: id, amount: { type: 'number' }, sourceId: nullableId, sourceVersion: nullableId }) },
+  chargeLines: { type: 'array', maxItems: 100, items: object({ type: id, amount: { type: 'number' }, sourceId: nullableId, sourceVersion: nullableSourceVersion }) },
   expiresAt: date, createdAt: date });
 const source = { enum: [...AI_BOOKING_INPUT_SOURCES] };
 const sources = object(Object.fromEntries(Object.keys(selection.properties).map(key => [key, source])),
-  Object.keys(selection.properties).filter(key => key !== 'deliveryAddressId'));
-const material = object({ selection, sources, deliveryAddress: object({ addressId: id,
-  observedRevision: { type: 'integer', minimum: 1 }, observedUpdatedAt: date, quoteAddressRevision: { type: 'null' },
-  snapshotFingerprint: hash, serviceAreaFingerprint: hash, source: literal('current_client_saved_address') }),
+  Object.keys(selection.properties).filter(key => !['deliveryAddressId', 'deliveryAddressConfirmation'].includes(key)));
+const material = object({ selection, sources, deliveryAddress: { oneOf: [savedAddressEvidence, oneTimeAddressEvidence] },
   quote, catalogVersion: hash, availabilityVersion: hash, identityVersion: hash,
   availability: literal('available_at_observation_not_reserved') },
   ['selection', 'sources', 'quote', 'catalogVersion', 'availabilityVersion', 'identityVersion', 'availability']);
 
+const materialReceipt = { contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION), operationKey: { ...id, maxLength: 128 },
+  execution: literal('not_attested'), freshness: literal('revalidate_before_execution'),
+  retryable: literal(false), nextAction: literal('read_original_material_receipt') };
+const createdTask = object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
+  status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } });
+const creationReceipt = { contractVersion: literal(AI_TASK_DRAFT_VERSION), creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
+  execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') };
+const accountingObservation = { contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
+  meaning: literal('ai_invocation_not_business_payment'), observedAt: date, execution: literal('not_authorized_by_accounting'),
+  retryable: literal(false), nextAction: literal('read_original_accounting') };
+const recordedAccount = { oneOf: [
+  object({ status: literal('settled'), usageRecorded: literal(true), dispatched: { type: 'boolean' } }),
+  object({ status: { enum: ['reserved', 'released', 'pending_reconciliation'] }, usageRecorded: literal(false), dispatched: { type: 'boolean' } })] };
+
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiBookingSourceVersion: bookingSourceVersion,
   AiClientOrderMaterialRequest: object({ operationKey: { ...id, maxLength: 128 }, orderId: id }),
-  AiClientOrderMaterialReceipt: object({ contractVersion: literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
-    operationKey: { ...id, maxLength: 128 }, state: { enum: ['observed', 'unknown'] },
-    materialRef: { anyOf: [uuid, { type: 'null' }] }, materialHash: { anyOf: [hash, { type: 'null' }] },
-    expiresAt: { anyOf: [date, { type: 'null' }] }, execution: literal('not_attested'),
-    freshness: literal('revalidate_before_execution'), retryable: literal(false), nextAction: literal('read_original_material_receipt') }),
-  AiClientTaskCreationReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION),
-    creationKey: { ...id, maxLength: 128 }, materialRef: uuid, state: { enum: ['observed', 'unknown'] },
-    inputRef: { anyOf: [uuid, { type: 'null' }] }, inputHash: { anyOf: [hash, { type: 'null' }] },
-    task: { anyOf: [object({ taskId: { ...id, maxLength: 36 }, runId: { ...id, maxLength: 36 },
-      status: { enum: [...AI_TASK_STATUSES_DRAFT] }, revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, replayed: { type: 'boolean' } }), { type: 'null' }] },
-    execution: literal('not_attested'), retryable: literal(false), nextAction: literal('read_original_task_creation') }),
+  // A claimed observation must carry its original evidence. Unknown input
+  // claims may already be persisted, but they never manufacture a created Task.
+  AiClientOrderMaterialReceipt: { oneOf: [
+    object({ ...materialReceipt, state: literal('observed'), materialRef: uuid, materialHash: hash, expiresAt: date }),
+    object({ ...materialReceipt, state: literal('unknown'), materialRef: { type: 'null' }, materialHash: { type: 'null' }, expiresAt: { type: 'null' } })] },
+  AiClientTaskCreationReceipt: { oneOf: [
+    object({ ...creationReceipt, state: literal('observed'), inputRef: uuid, inputHash: hash, task: createdTask }),
+    object({ ...creationReceipt, state: literal('unknown'), inputRef: { anyOf: [uuid, { type: 'null' }] },
+      inputHash: { anyOf: [hash, { type: 'null' }] }, task: { type: 'null' } })] },
   AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
   AiClientTaskInputSubmissionRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, submission: clientAnswer }),
   AiClientTaskInputReadResponse: { oneOf: [object({ contractVersion: literal(AI_TASK_INPUT_DRAFT_VERSION), state: literal('pending'),
@@ -110,11 +142,9 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
   AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
   AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),
   AiTaskAccountingObservation: { $ref: '#/components/schemas/AiClientTaskAccountingResponse' },
-  AiClientTaskAccountingResponse: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), callId: { ...id, maxLength: 128 },
-    state: { enum: ['observed', 'unknown'] }, account: { anyOf: [object({ status: { enum: ['reserved', 'settled', 'released', 'pending_reconciliation'] },
-      usageRecorded: { type: 'boolean' }, dispatched: { type: 'boolean' } }), { type: 'null' }] },
-    meaning: literal('ai_invocation_not_business_payment'), observedAt: date, execution: literal('not_authorized_by_accounting'),
-    retryable: literal(false), nextAction: literal('read_original_accounting') }),
+  AiClientTaskAccountingResponse: { oneOf: [
+    object({ ...accountingObservation, state: literal('observed'), account: recordedAccount }),
+    object({ ...accountingObservation, state: literal('unknown'), account: { type: 'null' } })] },
   AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
   AiClientOrderExplanationReadRequest: object({ orderId: id, question: { enum: ['status', 'fees'], description: 'Omitted question uses status.' } }, ['orderId']),
@@ -140,6 +170,10 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
   AiKnowledgeTargetBindDraft: object({ authorityId: uuid, operationKey: knowledgeId, sessionId: { type: 'string', minLength: 1, maxLength: 128 },
     expectedRevision: literal(1), confirm: literal('bind_knowledge_upload') }),
   AiBookingSelection: selection,
+  AiBookingOneTimeAddressConfirmation: oneTimeAddressConfirmation,
+  AiBookingSavedAddressEvidence: savedAddressEvidence,
+  AiBookingOneTimeAddressEvidence: oneTimeAddressEvidence,
+  AiBookingAddressEvidence: { oneOf: [savedAddressEvidence, oneTimeAddressEvidence] },
   AiBookingSubmissionAcceptanceRequest: object({ handoffRef: uuid, contactPhone: { type: 'string', maxLength: 32 } }, ['handoffRef']),
   AiBookingAcceptanceReadRequest: object({ handoffRef: uuid, contactPhone: { type: 'string', maxLength: 32 } }, ['handoffRef']),
   AiBookingAcceptanceReadResponse: { oneOf: [
@@ -161,12 +195,33 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
     object({ state: { enum: ['unknown', 'not_observed'] }, orderId: { type: 'null' }, operationKey: id, retryable: literal(false),
       payment: literal('not_inferred'), fulfillment: literal('not_inferred') })
   ] },
-  AiBookingDraft: object({ contractVersion: literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: uuid,
-    audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] }, scope,
-    state: { enum: [...AI_BOOKING_DRAFT_STATES] }, revision: { type: 'integer', minimum: 1 },
-    selectionRevision: { type: 'integer', minimum: 0, maximum: 1 }, inputFingerprint: hash, materialRef: uuid, material,
-    createdAt: date, expiresAt: date, execution: literal('not_submitted'),
-    action: { anyOf: [{ $ref: '#/components/schemas/AiEntryActionDraft' }, { type: 'null' }] } }),
+  AiBookingDraft: {
+    ...object({ contractVersion: literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: uuid,
+      audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] }, scope,
+      state: { enum: [...AI_BOOKING_DRAFT_STATES] }, revision: { type: 'integer', minimum: 1 },
+      selectionRevision: { type: 'integer', minimum: 0, maximum: 1 }, inputFingerprint: hash, materialRef: uuid, material,
+      createdAt: date, expiresAt: date, execution: { enum: ['not_submitted', 'submitted_request_not_business_success'] },
+      action: { anyOf: [{ $ref: '#/components/schemas/AiEntryActionDraft' }, { type: 'null' }] } }),
+    // Keep the shared material property available to its existing source
+    // consumer while closing the state/execution/Action combination.
+    oneOf: [
+      { properties: { state: { enum: AI_BOOKING_DRAFT_STATES.filter(state => state !== 'submitted') }, execution: literal('not_submitted') } },
+      { properties: { state: literal('submitted'), selectionRevision: literal(1),
+        execution: literal('submitted_request_not_business_success'), action: { type: 'null' } } }
+    ]
+  },
+  AiBookingOperationObservationDraft: {
+    ...object({ contractVersion: literal(AI_BOOKING_OPERATION_OBSERVATION_VERSION),
+      operation: { $ref: '#/components/schemas/AiBookingOperationReadResponse' },
+      currentDraft: { anyOf: [object({ state: { enum: [...AI_BOOKING_DRAFT_STATES] }, revision: taskRevision,
+        selectionRevision: { type: 'integer', minimum: 0, maximum: 1 }, expiresAt: date,
+        expiredAtObservation: { type: 'boolean' } }), { type: 'null' }] },
+      observedAt: date, currentUse: literal('not_authorized_by_receipt') }),
+    oneOf: [
+      { properties: { operation: { type: 'object', properties: { state: literal('unknown') } }, currentDraft: { type: 'null' } } },
+      { properties: { operation: { type: 'object', properties: { state: literal('observed') } }, currentDraft: { type: 'object' } } }
+    ]
+  },
   AiBookingHandoff: object({ contractVersion: literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), handoffRef: uuid,
     bookingDraftId: uuid, revision: { type: 'integer', minimum: 1 }, audience: literal('customer'),
     surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] }, scope, expiresAt: date, fields: selection,

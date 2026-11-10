@@ -233,6 +233,9 @@ export class TaskBudgetUsageReader {
     const items = [];
     const observations = [];
     const absentCalls: string[] = [];
+    // Count-key absence is revalidated too, but does not create a second
+    // missing-generation entry or mix the two independently metered calls.
+    const absentCountingCalls: string[] = [];
     const amounts = new Map<string, { unit: 'money' | 'tokens' | 'calls'; currency: string | null; scale: 0 | 6;
       reservedAtoms: bigint; pendingAtoms: bigint; settledAtoms: bigint; releasedReservationAtoms: bigint; settledExcessAtoms: bigint }>();
     const accumulate = (record: BudgetRecord) => {
@@ -268,6 +271,7 @@ export class TaskBudgetUsageReader {
       const counting = countingScene === null ? null : structuredClone(await this.db.aiBudgetReservation.findUnique({ where: {
         scopeId_scopeKind_callId: { scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: countCallId } },
         select: { id: true, scopeId: true, scopeKind: true, actorId: true, callId: true, priceVersion: true } }));
+      if (!counting && countingScene !== null) absentCountingCalls.push(countCallId);
       if (counting) {
         if (counting.scopeId !== before.scopeId || counting.scopeKind !== 'WORKSPACE'
           || counting.actorId !== before.actorId || counting.callId !== countCallId
@@ -314,7 +318,7 @@ export class TaskBudgetUsageReader {
     }
     // No record is not zero consumption. If an original reservation appeared
     // during this read, refuse a stale "not recorded" page rather than hide it.
-    for (const originalCallId of absentCalls) {
+    for (const originalCallId of [...absentCalls, ...absentCountingCalls]) {
       if (await this.db.aiBudgetReservation.findUnique({ where: { scopeId_scopeKind_callId: {
         scopeId: before.scopeId, scopeKind: 'WORKSPACE', callId: originalCallId } }, select: { id: true } }))
         throw new BudgetError('PENDING_RECONCILIATION');

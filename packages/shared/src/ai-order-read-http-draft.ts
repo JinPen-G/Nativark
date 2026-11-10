@@ -1,9 +1,13 @@
 /** Public projections of the existing fixed model/order/answer chain. Original
  * readers own authority and recovery; model text is not a business receipt. */
-import type { AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestReceiptDraft, type AiSceneRequestReadDraft } from './ai-scene-request-draft';
+import type { AiConversationTurnObservationDraft } from './ai-conversation-draft';
 import type { AiSceneOrderFactsObservationDraft, AiTaskSceneObservationDraft } from './ai-task-scene-observation-draft';
 import type { AiOrderReadFactsDraft } from './ai-order-facts-draft';
 import type { AiOrderNextCandidateDraft } from './ai-business-material-draft';
+import { AI_CONTRACT_DRAFT_VERSION } from './ai-native';
+import { AI_ORDER_FACTS_DRAFT_VERSION } from './ai-order-facts-draft';
+import { RentalCoreOrderStatus } from './core';
 import type { AiWorkspaceScope } from './ai-native';
 import { AI_TASK_STATUSES_DRAFT, type AiTaskEventDraft, type AiTaskStatusDraft } from './ai-task-draft';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS, type AiTaskRunnerOutcomeDraft, type AiModelCancellationTransitionReceiptDraft } from './ai-task-recovery-draft';
@@ -167,6 +171,120 @@ AI_ORDER_READ_HTTP_SCHEMAS.AiOrderReadSceneResponseDraft = {
   ...originalScene, properties: { ...originalScene.properties!, handoff: ref('AiOrderNextStepsResponseDraft'), answer: ref('AiOrderReadAnswerResponseDraft') },
   required: [...originalScene.required!, 'handoff']
 };
+
+const orderClosed = (value: unknown, keys: string[]): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
+const orderId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+const orderInteger = (value: unknown, min: number, max: number) => typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
+const orderTime = (v: unknown) => {
+  if (typeof v !== 'string' || v.length < 20 || v.length > 40 || !Number.isFinite(Date.parse(v))) return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.exec(v);
+  if (!match || Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59) return false;
+  const date = new Date(0); date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
+};
+function orderOriginal(value: unknown, query: AiSceneRequestReadDraft, turn: AiConversationTurnObservationDraft): value is Original {
+  if (!orderClosed(value, ['draftVersion', 'inputRef', 'revision', 'contentHash', 'sceneCode', 'sceneVersion', 'requestKey', 'previousInputRef', 'expiresAt', 'createdAt', 'state'])) return false;
+  const uuid = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(v);
+  return value.draftVersion === AI_SCENE_REQUEST_DRAFT_VERSION && value.draftVersion === query.draftVersion
+    && value.inputRef === query.inputRef && uuid(value.inputRef) && orderInteger(value.revision, 1, 4294967294)
+    && typeof value.contentHash === 'string' && /^[a-f0-9]{64}$/u.test(value.contentHash)
+    && value.sceneCode === 'order_explanation' && value.sceneVersion === turn.capabilityVersion
+    && value.requestKey === turn.originalRequestKey && orderId(value.requestKey) && (value.requestKey as string).length <= 128
+    && (value.previousInputRef === null || uuid(value.previousInputRef)) && orderTime(value.expiresAt) && orderTime(value.createdAt)
+    && ['stored', 'expired'].includes(value.state as string);
+}
+/** Closed original preparation only. Published input is not execution authority;
+ * the host must separately recheck Task state and the original admission. */
+export function validateAiOrderReadPreparationDraft(value: unknown, query: AiSceneRequestReadDraft, turn: AiConversationTurnObservationDraft): value is AiOrderReadPreparationResponseDraft {
+  if (!orderClosed(value, ['original', 'preparation', 'observation', 'automaticRetry']) || !orderOriginal(value.original, query, turn)
+    || value.observation !== 'revalidated_not_atomic' || value.automaticRetry !== false
+    || !orderClosed(value.preparation, ['publishedInputs', 'requiredInputs', 'missing', 'planPublished', 'execution'])) return false;
+  const p = value.preparation;
+  if (!orderInteger(p.requiredInputs, 2, 3) || !orderInteger(p.publishedInputs, 0, p.requiredInputs as number)
+    || !Array.isArray(p.missing) || typeof p.planPublished !== 'boolean' || p.execution !== 'not_attested') return false;
+  const refs = ['model_request', 'order_read', ...(p.requiredInputs === 3 ? ['model_answer'] : [])];
+  return JSON.stringify(p.missing) === JSON.stringify(refs.slice(p.publishedInputs as number)) && (!p.planPublished || !p.missing.length);
+}
+/** A valid acknowledgement never authorizes replay. Unknown outcome/absence is
+ * distinct from rollback, and business completion cannot be inferred here. */
+export function validateAiOrderReadStartDraft(value: unknown, query: AiSceneRequestReadDraft, turn: AiConversationTurnObservationDraft): value is AiOrderReadStartResponseDraft {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const aborted = Object.keys(row).length === 1 && Object.hasOwn(row, 'outcome');
+  if (!aborted && (!orderClosed(row, ['original', 'outcome', 'businessExecution']) || !orderOriginal(row.original, query, turn)
+    || row.businessExecution !== 'readonly_not_business_commit')) return false;
+  const outcome = row.outcome;
+  if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) return false;
+  const result = outcome as Record<string, unknown>;
+  if (result.kind === 'not_started') return orderClosed(result, ['kind', 'reason'])
+    && (aborted ? result.reason === 'host_aborted' : ['host_aborted', 'plan_unavailable', 'task_not_runnable', 'lease_held', 'recovery_lease_unavailable'].includes(result.reason as string));
+  if (aborted || !orderClosed(result, ['kind', 'outcome']) || result.kind !== 'run_outcome') return false;
+  const run = result.outcome;
+  if (!run || typeof run !== 'object' || Array.isArray(run)) return false;
+  const r = run as Record<string, unknown>, keys = ['status', 'completedSteps', 'cleanupFailed'];
+  if (!orderInteger(r.completedSteps, 0, 4294967295) || !orderInteger(r.cleanupFailed, 0, 4294967295)) return false;
+  if (r.status === 'failed') return orderClosed(r, [...keys, 'errorCode']) && orderId(r.errorCode);
+  if (r.status === 'unavailable') return Object.keys(r).every(k => [...keys, 'stopReason', 'nextAction'].includes(k))
+    && keys.every(k => k in r) && (r.stopReason === undefined || r.stopReason === 'input_limit_reached')
+    && (r.nextAction === undefined || r.nextAction === 'manual_handoff');
+  return orderClosed(r, keys) && ['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown'].includes(r.status as string);
+}
+
+const orderScope = (v: unknown): v is AiWorkspaceScope => orderClosed(v, ['kind', 'tenantId', 'workspaceId'])
+  && v.kind === 'workspace' && orderId(v.tenantId) && orderId(v.workspaceId);
+const sameOrderScope = (a: AiWorkspaceScope, b: AiWorkspaceScope) => a.tenantId === b.tenantId && a.workspaceId === b.workspaceId;
+function orderFactBody(v: unknown): v is AnswerFacts {
+  if (!orderClosed(v, ['audience', 'scope', 'order', 'paymentEvidence', 'historicalFeeEvidence'])
+    || v.audience !== 'operator' || !orderScope(v.scope) || v.paymentEvidence !== 'not_loaded' || v.historicalFeeEvidence !== 'not_loaded'
+    || !orderClosed(v.order, ['id', 'orderNo', 'status', 'updatedAt', 'startAt', 'originalEndAt', 'effectiveEndAt', 'effectiveEndBasis', 'currency', 'amounts'])) return false;
+  const o = v.order;
+  return orderId(o.id) && typeof o.orderNo === 'string' && o.orderNo.length >= 1 && o.orderNo.length <= 191
+    && Object.values(RentalCoreOrderStatus).includes(o.status as RentalCoreOrderStatus)
+    && ['updatedAt', 'startAt', 'originalEndAt', 'effectiveEndAt'].every(k => orderTime(o[k]))
+    && ['effectiveEndAt', 'endAt_fallback'].includes(o.effectiveEndBasis as string) && typeof o.currency === 'string' && /^[A-Z]{3}$/u.test(o.currency)
+    && orderClosed(o.amounts, ['rental', 'service', 'discount', 'coupon', 'deposit', 'preAuthorization', 'finalPayable'])
+    && Object.values(o.amounts).every(a => a === null || typeof a === 'number' && Number.isFinite(a) && a >= 0 && a <= Number.MAX_SAFE_INTEGER);
+}
+/** Closed original order facts, not a payment receipt or arbitrary scene body. */
+export function validateAiOrderReadFactsDraft(v: unknown, query: AiSceneRequestReadDraft, turn: AiConversationTurnObservationDraft): v is AiOrderReadFactsResponseDraft {
+  if (!turn.task || !orderClosed(v, ['original', 'taskId', 'runId', 'result']) || !orderOriginal(v.original, query, turn)
+    || v.taskId !== turn.task.taskId || v.runId !== turn.task.runId || !v.result || typeof v.result !== 'object' || Array.isArray(v.result)) return false;
+  const r = v.result as Record<string, unknown>;
+  if (r.automaticRetry !== false || r.businessExecution !== 'readonly_not_business_commit') return false;
+  if (!('taskId' in r)) return orderClosed(r, ['status', 'facts', 'automaticRetry', 'businessExecution'])
+    && ['unknown', 'failed', 'candidate_not_executed'].includes(r.status as string) && r.facts === null;
+  const base = ['taskId', 'runId', 'resultId', 'observedAt', 'automaticRetry', 'businessExecution', 'status', 'facts', 'nextAction'];
+  if (r.taskId !== turn.task.taskId || r.runId !== turn.task.runId || !orderId(r.resultId) || !orderTime(r.observedAt)) return false;
+  if (r.status !== 'available') return orderClosed(r, r.status === 'stale' ? [...base, 'modelText'] : base)
+    && r.facts === null && (r.status === 'stale' ? r.nextAction === 'reread_current_facts' && r.modelText === 'not_used_as_business_evidence'
+      : r.status === 'unknown' ? r.nextAction === 'reconcile_original_task' : r.status === 'failed' && r.nextAction === 'manual_review');
+  if (!orderClosed(r, [...base, 'modelText']) || r.nextAction !== 'read_only' || r.modelText !== 'not_used_as_business_evidence'
+    || !orderClosed(r.facts, ['draftVersion', 'contractVersion', 'requestId', 'audience', 'scope', 'observedAt', 'order', 'sources', 'paymentEvidence', 'historicalFeeEvidence'])) return false;
+  const f = r.facts;
+  if (f.draftVersion !== AI_ORDER_FACTS_DRAFT_VERSION || f.contractVersion !== AI_CONTRACT_DRAFT_VERSION || !orderId(f.requestId)
+    || !orderTime(f.observedAt) || !orderFactBody({ audience: f.audience, scope: f.scope, order: f.order, paymentEvidence: f.paymentEvidence, historicalFeeEvidence: f.historicalFeeEvidence })
+    || !Array.isArray(f.sources) || f.sources.length !== 1) return false;
+  const s = f.sources[0];
+  return orderClosed(s, ['scope', 'resourceType', 'resourceId', 'observedAt', 'basis']) && orderScope(s.scope)
+    && sameOrderScope(s.scope, f.scope as AiWorkspaceScope) && s.resourceType === 'order'
+    && s.resourceId === (f.order as AnswerFacts['order']).id && s.observedAt === f.observedAt
+    && orderClosed(s.basis, ['kind']) && s.basis.kind === 'current';
+}
+/** Snapshot-bound answer text only; source facts remain a separately read result. */
+export function validateAiOrderReadAnswerDraft(v: unknown, query: AiSceneRequestReadDraft, turn: AiConversationTurnObservationDraft): v is AiOrderReadAnswerResponseDraft {
+  if (!orderClosed(v, ['original', 'result']) || !orderOriginal(v.original, query, turn) || !v.result || typeof v.result !== 'object' || Array.isArray(v.result)) return false;
+  const r = v.result as Record<string, unknown>;
+  if (r.automaticRetry !== false) return false;
+  if (r.status === 'not_observed') return orderClosed(r, ['status', 'text', 'automaticRetry']) && r.text === null;
+  const base = ['resultId', 'status', 'text', 'automaticRetry', 'businessExecution'];
+  if (!orderId(r.resultId) || r.businessExecution !== 'readonly_not_business_commit') return false;
+  if (r.status !== 'available') return orderClosed(r, r.status === 'stale' ? [...base, 'nextAction'] : base) && r.text === null
+    && (r.status === 'stale' ? r.nextAction === 'new_explicit_request' : ['unknown', 'failed'].includes(r.status as string));
+  return orderClosed(r, [...base, 'originalReadResultId', 'facts', 'snapshotObservedAt', 'textSemantics'])
+    && typeof r.text === 'string' && new TextEncoder().encode(r.text).byteLength <= 131072
+    && orderId(r.originalReadResultId) && orderTime(r.snapshotObservedAt) && orderFactBody(r.facts) && r.textSemantics === 'model_text_not_core_fact';
+}
 
 /** One operation registry for the explicit controller and OpenAPI. It does not
  * register routes or enable execution; request schemas preserve the old wire. */

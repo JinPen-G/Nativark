@@ -26,6 +26,8 @@ import { TenantAppearanceProfileService } from "../client/tenant-appearance-prof
 import { AccountAppearanceService } from "../client/account-appearance.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
+import { resolveUserBusinessLocationScope } from "../../common/business-location-scope";
+import type { OrganizationLocationScope } from "../../common/organization-location-scope";
 import { Prisma } from "@prisma/client";
 import { getRequestIdentity } from "../../common/request-identity";
 
@@ -348,8 +350,9 @@ export class AuthService {
    */
   async resolveAccessContext(
     authorization?: string,
-    options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience } = {}
-  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean; accessSession: { sessionId: string; expiresAt: number } } | undefined> {
+    options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience; businessScope?: boolean } = {}
+  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean;
+    accessSession: { sessionId: string; expiresAt: number }; businessLocationScope?: OrganizationLocationScope } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
@@ -381,8 +384,15 @@ export class AuthService {
     // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
     // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
     const workspaceValid = Boolean(workspaceId) && Boolean(workspaceUser);
+    // Internal business consumers opt into the SAME current organization/location
+    // projection as the Guard. Keep raw role configuration and tenant-wide auth
+    // callers unchanged; this projection is not route/resource authorization.
+    const businessLocationScope = options.businessScope
+      ? await resolveUserBusinessLocationScope(user, workspaceValid ? workspaceId : undefined,
+        user.locationScope ?? { mode: "all", locationIds: [] }, this.prisma) : undefined;
     return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid,
-      accessSession: { sessionId: payload.sid, expiresAt: payload.exp } };
+      accessSession: { sessionId: payload.sid, expiresAt: payload.exp },
+      ...(businessLocationScope ? { businessLocationScope } : {}) };
   }
 
   /** Lock the current authenticated workspace principal before business locks.

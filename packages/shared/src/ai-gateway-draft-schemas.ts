@@ -1,4 +1,4 @@
-import { AI_GATEWAY_DRAFT_VERSION } from "./ai-gateway-draft";
+import { AI_GATEWAY_DRAFT_VERSION, AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION } from "./ai-gateway-draft";
 /** Browser/Node neutral JSON-Schema builders reused by the other owned leaf drafts. */
 export interface AiLeafSchemaDraft {
   [key: string]: unknown;
@@ -32,7 +32,11 @@ export const AI_GATEWAY_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiGatewayIntentDraft: leafClosed({ draftVersion: v, requestId: leafId(), sceneCode: leafId(), messages, requiredFeatures: features, optionalFeatures: features, maxOutputTokens: leafInt(1, 32768) }),
   AiGatewayConfigReferenceDraft: config,
   AiGatewayCapabilitiesDraft: leafClosed({ draftVersion: v, protocol: leafId(), provider: leafText(128), model: leafText(256), configRevision: leafInt(1), features, contextTokens: leafInt(1), maxOutputTokens: leafInt(1), usageAvailability: leafEnum("reported", "estimated_only", "unavailable"), evidence: leafEnum("mock", "live") }),
-  AiGatewayContentDraft: { oneOf: [leafClosed({ kind: leafEnum("text"), text: leafText(32000, 0) }), ...["image", "audio"].map(kind => leafClosed({ kind: leafEnum(kind), attachmentId: leafId(), attachmentRevision: leafInt(1) }))] },
+  AiGatewayToolResultReferenceDraft: leafClosed({ referenceVersion: leafEnum(AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION),
+    taskId: { ...leafId(), maxLength: 36 }, runId: { ...leafId(), maxLength: 36 },
+    modelRegistrationRef: leafId(), toolRegistrationRef: leafId(), callIndex: leafInt(0, 7) }),
+  AiGatewayContentDraft: { oneOf: [leafClosed({ kind: leafEnum("text"), text: leafText(32000, 0) }), ...["image", "audio"].map(kind => leafClosed({ kind: leafEnum(kind), attachmentId: leafId(), attachmentRevision: leafInt(1) })),
+    leafClosed({ kind: leafEnum("tool_result_reference"), reference: leafRef("AiGatewayToolResultReferenceDraft") })] },
   AiGatewayUsageDraft: { oneOf: [leafClosed({ kind: leafEnum("reported"), inputTokens: leafInt(), outputTokens: leafInt() }), leafClosed({ kind: leafEnum("estimated"), inputTokens: leafInt(), outputTokens: leafInt(), methodVersion: leafId() }), unknownUsage] },
   AiGatewayCallDraft: leafClosed({ draftVersion: v, requestId: leafId(), runId: leafId(), stepId: leafId(), sceneCode: leafId(), context: leafRef("AiExecutionContext"), config: leafRef("AiGatewayConfigReferenceDraft"), expectation: leafClosed({ model: leafText(256), configRevision: leafInt(1), requiredFeatures: features, optionalFeatures: features }, ["configRevision", "requiredFeatures", "optionalFeatures"]), messages, authorizedToolRequests: leafList(leafRef("AiOrderExplainRequestDraft"), 32), maxOutputTokens: leafInt(1, 32768), mode: leafEnum("mock", "live") }),
   AiGatewayResultDraft: { oneOf: [leafClosed({ ...base, status: leafEnum("completed"), text: leafText(128000, 0), toolRequests: leafList(leafRef("AiOrderExplainRequestDraft"), 32) }), leafClosed({ ...base, status: leafEnum("failed"), error }), leafClosed({ ...base, usage: unknownUsage, status: leafEnum("unknown"), error: unknownError })] },

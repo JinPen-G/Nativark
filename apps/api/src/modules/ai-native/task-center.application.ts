@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_STATUSES_DRAFT,
-  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft } from '@rental-os/shared';
+  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -27,14 +27,16 @@ import { continueTaskCenterOriginal, taskCenterContinueSchema, type TaskCenterCo
 import { callAiTaskRunnerDependency, AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
+import { recordTaskVisibleObservation, type TaskVisibleObservationDependencies } from './observability/task-visible-observation.service';
 import { validateAiTaskObservation } from './task-contract-validation';
 import { validateAiSceneSourceObservation } from './scenes/scene-observation-contracts';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
-type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
-type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'credentials' | 'usageDb' | 'performanceDb'> & {
+type Request = { headers: { authorization?: unknown }; body?: unknown } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'credentials' | 'usageDb'> & {
   originalDb?: Pick<PrismaClient, 'aiTaskOriginalRequest'>;
   usageDb?: TaskBudgetUsageDb;
+  visibleDb?: TaskVisibleObservationDependencies['db'];
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown>;
     reopenModelSource?(request: Request, value: unknown): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
@@ -44,6 +46,10 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
+  visibleReport: z.custom<AiTaskClientVisibleReportDraft>(value => { try { validateAiTaskObservation('AiTaskClientVisibleReportDraft', value); return true; } catch { return false; } }),
+  performance: z.object({ taskId: id.max(36), usageLimit: z.number().int().min(1).max(20), usageAfter: id.max(36).optional(), includeTaskFinancial: z.boolean().optional() }).strict(),
+  usageSummary: z.object({ taskId: id.max(36) }).strict(),
+  outcomes: z.object({ taskIds: z.array(id.max(36)).min(1).max(50).refine(ids => new Set(ids).size === ids.length) }).strict(),
   list: z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
     status: z.enum(AI_TASK_STATUSES_DRAFT).optional(), sceneCode: id.optional() }).strict(),
   snapshot: z.object({ taskId: id }).strict(),
@@ -215,13 +221,47 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
             original: input.originalInputs, tasks: root.tasks, credentials }, { headers: { authorization: header.data } }, command,
             action as 'input' | 'resumeInput' | 'inputReceipt' | 'continueInput', activeSignal);
         };
-        const result = ['input', 'resumeInput', 'inputReceipt', 'continueInput'].includes(action) ? await originalInput()
+        const clientVisibleSource = async (report: AiTaskClientVisibleReportDraft): Promise<string | null> => {
+              const access = await root.tasks.resolveAccess(report.taskId, 'read_step_terminal');
+              const task = await input.db.aiTask.findFirst({ where: access.where });
+              if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+              if (report.trigger === 'original_model_start') {
+                if (!input.originalDb || (await readOriginalTaskModelProvenance(input.originalDb, task)).inputRef !== report.originKey)
+                  throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+              }
+              if (report.source.kind === 'model_result') {
+                const result = await originalResult({ taskId: report.taskId, resultId: report.source.resultId });
+                if (result.status !== 'available' || result.runId !== report.runId || !result.text?.value.trim())
+                  return null;
+              } else {
+                if (!input.humanApprovals || input.humanApprovals.order.db !== input.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+                const result = await composeTaskCenterApproval(input.humanApprovals, credentials, root.tasks).review({
+                  taskId: report.taskId, runId: report.runId, stepId: report.source.stepId });
+                if (result.review.proposal.payload.proposalId !== report.source.proposalId
+                  || result.review.proposal.payload.revision !== report.source.proposalRevision
+                  || !['pending_confirmation', 'confirmed'].includes(result.review.proposal.status))
+                  return null;
+              }
+              return requestFingerprint({ taskId: report.taskId, runId: report.runId, source: report.source });
+        };
+        const result = action === 'visibleReport' ? await (async () => {
+          if (!input.visibleDb || !Object.is(input.db, input.visibleDb)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return recordTaskVisibleObservation({ db: input.visibleDb, tasks: root.tasks, clock: input.clock,
+            sourceBinding: clientVisibleSource
+          }, command, activeSignal);
+        })() : action === 'performance'  ? await (async () => {
+          if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return root.performance.read(schemas.performance.parse(command), clientVisibleSource);
+        })() : action === 'outcomes' ? await (async () => {
+          if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return root.performance.sample(schemas.outcomes.parse(command));
+        })() : ['input', 'resumeInput', 'inputReceipt', 'continueInput'].includes(action) ? await originalInput()
           : action === 'stop' || action === 'stopReceipt' ? await originalStop() : action === 'continue' ? await continueOriginal() : action === 'business' ? await business() : ['review', 'decision', 'decisionReceipt'].includes(action) ? await approvalAction() : action === 'list' ? await root.list.readPage(command) : action === 'snapshot'
           ? await root.events.readSnapshot(command, true) : action === 'events' ? await root.events.readPage(command)
             : action === 'result' ? await originalResult() : action === 'source' ? await originalSource() : action === 'confirmation'
               ? await new PrismaTaskConfirmationHistoryReader(input.db, root.tasks).read(command) : await (async () => {
               if (!root.usage) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-              try { return await root.usage.read(command); }
+              try { return action === 'usageSummary' ? await root.usage.summary(command) : await root.usage.read(command); }
               catch (error) {
                 if (!(error instanceof BudgetError)) throw error;
                 throw new AiTaskRepositoryError(error.code === 'FORBIDDEN' ? 'AI_ACCESS_DENIED' : error.code === 'INVALID'
@@ -232,7 +272,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return structuredClone(result);
       });
-      if (!['continue', 'resumeInput', 'continueInput'].includes(action)) return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop', signal);
+      if (!['continue', 'resumeInput', 'continueInput'].includes(action)) return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop' || action === 'visibleReport', signal);
       try { return await callAiTaskRunnerDependency(work, 120000, 'task_center_original_continue', signal); }
       catch (error) {
         if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))
@@ -249,6 +289,10 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
     stop: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'stop', signal),
     stopReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'stopReceipt', signal),
     usage: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'usage', signal),
+    usageSummary: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'usageSummary', signal),
+    visibleReport: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'visibleReport', signal),
+    performance: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'performance', signal),
+    outcomes: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'outcomes', signal),
     review: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'review', signal),
     decision: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decision', signal),
     decisionReceipt: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'decisionReceipt', signal),
@@ -270,6 +314,10 @@ export class AiTaskCenterController {
       if (action === 'list') return validateAiTaskObservation('AiTaskMetadataPageDraft', result);
       if (action === 'snapshot') return validateAiTaskObservation('AiTaskSnapshotDraft', result);
       if (action === 'events') return validateAiTaskObservation('AiTaskEventsObservationDraft', result);
+      if (action === 'usageSummary') return validateAiTaskObservation('AiTaskBudgetUsageSummaryDraft', result);
+      if (action === 'visibleReport') return validateAiTaskObservation('AiTaskClientVisibleReceiptDraft', result);
+      if (action === 'performance') return validateAiTaskObservation('AiTaskPerformanceObservationDraft', result);
+      if (action === 'outcomes') return validateAiTaskObservation('AiTaskOutcomeSampleDraft', result);
       return result;
     }),
       action === 'decision' || action === 'decisionReceipt' ? 'read_decision_receipt' : action === 'stop' ? 'read_stop_receipt' : action === 'continue' ? 'read_original_business' : 'reconcile');
@@ -290,6 +338,14 @@ export class AiTaskCenterController {
   stopReceipt(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'stopReceipt'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.usage) @HttpCode(200) @Header('Cache-Control', 'no-store')
   usage(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'usage'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.usageSummary) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  usageSummary(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'usageSummary'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.visibleReport) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  visibleReport(@Req() request: Request, @Body() _value: unknown) { return this.respond(request, request.body, 'visibleReport'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.performance) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  performance(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'performance'); }
+  @Post(AI_TASK_CENTER_HTTP_DRAFT.outcomes) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  outcomes(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'outcomes'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.confirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   confirmation(@Req() request: Request, @Body() value: unknown) { return this.respond(request, value, 'confirmation'); }
   @Post(AI_TASK_CENTER_HTTP_DRAFT.review) @HttpCode(200) @Header('Cache-Control', 'no-store')

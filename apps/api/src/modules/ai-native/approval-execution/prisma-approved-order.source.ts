@@ -28,17 +28,35 @@ const taskSelect = { id: true, scopeId: true, scopeKind: true, scope: true, owne
 const approvalSelect = { id: true, scopeId: true, taskId: true, proposalId: true, proposalRevision: true,
   payloadHash: true, audience: true, actorKind: true, actorId: true, decision: true, issuedAt: true, expiresAt: true } satisfies Prisma.AiApprovalSelect;
 
+export type ApprovedOrderReceiptReference = Omit<ApprovedOrderCommand, 'lease'> & { runId: string };
+type SourceDependencies = Pick<ApprovedOrderCompositionDependencies, 'db' | 'policy' | 'snapshots' | 'toolVersion' | 'clock'>
+  & Partial<Pick<ApprovedOrderCompositionDependencies, 'executionInput' | 'quoteFacts'>>;
+
 export class PrismaApprovedOrderSource {
-  constructor(private readonly dependencies: ApprovedOrderCompositionDependencies) {}
+  constructor(private readonly dependencies: SourceDependencies) {}
 
   async read(command: ApprovedOrderCommand, phase: 'inspect' | 'execute' | 'replay', tx?: Prisma.TransactionClient) {
+    const { lease, ...reference } = command;
+    const value = await this.readOriginal({ ...reference, runId: lease.runId }, phase, tx);
+    return { ...value, input: { ...value.input, lease: structuredClone(lease) } };
+  }
+
+  /** Historical receipt observation has no lease or execution admission. Reuse
+   * exactly the original approval/snapshot/consumption binding, in replay only. */
+  async readCommitted(reference: ApprovedOrderReceiptReference, tx?: Prisma.TransactionClient) {
+    const parsed = approvedOrderCommandSchema.omit({ lease: true }).extend({ runId: id.max(36) }).strict().safeParse(reference);
+    if (!parsed.success) throw deniedOrder();
+    return this.readOriginal(parsed.data, 'replay', tx);
+  }
+
+  private async readOriginal(command: ApprovedOrderReceiptReference, phase: 'inspect' | 'execute' | 'replay', tx?: Prisma.TransactionClient) {
     const d = this.dependencies;
     const now = () => {
       const value = (d.clock ?? (() => new Date()))();
       if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw deniedOrder();
       return value;
     };
-    const { lease: _lease, ...reference } = command;
+    const { runId: _run, ...reference } = command;
     const request: ApprovedOrderPolicyRequest = structuredClone(reference);
     const context = structuredClone(await d.policy.resolve(request, 'read', tx));
     if (!isAiStepExecutionContext(context) || context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
@@ -83,15 +101,15 @@ export class PrismaApprovedOrderSource {
       || actionRow.proposalId !== command.proposalId || actionRow.proposalRevision !== command.proposalRevision
       || actionRow.actionId !== action.actionId || actionRow.requestFingerprint !== action.input.contentHash
       || !actionRow.step || actionRow.step.scopeId !== base.scopeId || actionRow.step.taskId !== base.taskId
-      || actionRow.step.actionId !== action.actionId || actionRow.step.runId !== command.lease.runId
+      || actionRow.step.actionId !== action.actionId || actionRow.step.runId !== command.runId
       || actionRow.step.requestFingerprint !== actionRow.requestFingerprint || actionRow.step.toolCode !== action.toolCode
       || actionRow.step.toolVersion !== action.toolVersion
       || !(version.expiresAt instanceof Date) || version.expiresAt.getTime() !== Date.parse(payload.expiresAt)
       || !(approval.issuedAt instanceof Date) || !(approval.expiresAt instanceof Date)) throw deniedOrder();
     const businessIdempotencyKey = `ai-order:${requestFingerprint([base.scopeId, base.taskId, action.actionId])}`;
-    const input: AiApprovedOrderInput = { context, ...base, actionId: command.actionId, approvalId: command.approvalId,
+    const input: Omit<AiApprovedOrderInput, 'lease'> = { context, ...base, actionId: command.actionId, approvalId: command.approvalId,
       proposalId: command.proposalId, proposalRevision: command.proposalRevision, actionFingerprint: actionRow.requestFingerprint,
-      businessIdempotencyKey, lease: structuredClone(command.lease) };
+      businessIdempotencyKey };
     const consumption = await db.aiApprovalConsumption.findFirst({ where: { ...base, actionId: command.actionId } });
     if (consumption && (consumption.scopeId !== base.scopeId || consumption.taskId !== base.taskId || consumption.actionId !== command.actionId
       || consumption.approvalId !== input.approvalId || consumption.proposalId !== input.proposalId
@@ -127,6 +145,7 @@ export class PrismaApprovedOrderSource {
       const identity = getRequestIdentity();
       if (!identity || identity.isSaasAdmin || identity.userId !== context.actor.userId
         || identity.tenantId !== context.scope.tenantId || identity.workspaceId !== context.scope.workspaceId) throw deniedOrder();
+      if (!d.quoteFacts) throw deniedOrder();
       const quote = await d.quoteFacts.findQuote(context.scope.tenantId, body.quoteId, tx);
       if (!quote) throw deniedOrder();
       const { consumedAt: _at, consumedOrderId: _order, ...immutableQuote } = quote;
@@ -136,13 +155,20 @@ export class PrismaApprovedOrderSource {
     if (operation === 'execute' && d.executionInput) {
       const authorizeInput = async (client: Prisma.TransactionClient) => {
         const authorized = await d.executionInput!.readAuthorized({ context: structuredClone(context), ...base,
-          actionId: action.actionId, runId: command.lease.runId }, client);
+          actionId: action.actionId, runId: command.runId }, client);
         if (requestFingerprint(authorized.body) !== action.input.contentHash
           || requestFingerprint(authorized.body) !== requestFingerprint(body)) throw deniedOrder();
         return authorized.bindingHash;
       };
+      // Standalone observation can run while the same Core action holds the
+      // task/run locks. Serializable SELECTs on another connection self-block;
+      // a consistent non-locking read is not a consumption/execution grant.
+      // The actual Core participant still revalidates using its supplied tx.
+      // This reader includes live Guard/policy and before/after input checks;
+      // use the same finite 15s observation window as original consumption
+      // reads. Transaction expiry is not evidence of no effect or retryability.
       inputBindingHash = tx ? await authorizeInput(tx) : await d.db.$transaction(authorizeInput,
-        { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
+        { isolationLevel: 'RepeatableRead', maxWait: 2500, timeout: 15000 });
     }
     const latest = structuredClone(await d.policy.resolve({ ...reference, action: structuredClone(action) }, operation, tx));
     if (!isAiStepExecutionContext(latest) || orderContextHash(context) !== orderContextHash(latest)) throw deniedOrder();

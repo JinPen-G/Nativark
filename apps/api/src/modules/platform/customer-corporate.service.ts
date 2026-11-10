@@ -38,13 +38,24 @@ export class CustomerCorporateService {
     @Inject(SharedCustomerRepository) private readonly customers: SharedCustomerRepository
   ) {}
 
-  private async requireCorporate(tenantId: string, customerId: string) {
-    const profile = await this.customers.findById(tenantId, customerId);
+  private async requireCorporate(tenantId: string, customerId: string, tx?: Prisma.TransactionClient) {
+    const profile = await this.customers.findById(tenantId, customerId, tx);
     if (!profile) throw new NotFoundException("客户不存在");
     if (profile.customerType !== "corporate") {
       throw new ConflictException("开票资料、合同与授信只适用于企业客户");
     }
     return profile;
+  }
+
+  /** Shared with order submission and the original customer-state writers.
+   * Always lock all role customers in stable order before contracts/invoices. */
+  async lockOrderSubjectCustomers(tenantId: string, customerIds: readonly string[], tx: Prisma.TransactionClient) {
+    for (const customerId of [...new Set(customerIds)].sort()) {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id FROM customer_profiles WHERE tenantId = ${tenantId} AND id = ${customerId} FOR UPDATE
+      `);
+      if (rows.length !== 1 || rows[0].id !== customerId) throw new BadRequestException("订单主体客户不存在");
+    }
   }
 
   // ---------- 开票资料 ----------
@@ -80,6 +91,8 @@ export class CustomerCorporateService {
     const wantDefault = input.isDefault ?? false;
     const id = input.id;
     const saved = await this.prisma.$transaction(async (tx) => {
+      await this.lockOrderSubjectCustomers(tenantId, [customerId], tx);
+      await this.requireCorporate(tenantId, customerId, tx);
       const existing = id
         ? await tx.customerCorporateInvoiceProfile.findFirst({ where: { tenantId, customerId, id } })
         : undefined;
@@ -144,7 +157,7 @@ export class CustomerCorporateService {
           defaultMarker: wantDefault ? "default" : newId
         }
       });
-    }).catch((error: unknown) => {
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }).catch((error: unknown) => {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2002" || error.code === "P2034")
@@ -194,24 +207,23 @@ export class CustomerCorporateService {
       terminatedReason: input.terminatedReason?.trim() || null
     };
     try {
-      if (input.id) {
-        const existing = await this.prisma.customerCorporateContract.findFirst({
-          where: { tenantId, customerId, id: input.id }
-        });
-        if (!existing) throw new NotFoundException("合同不存在");
-        if (!input.expectedRevision) throw new BadRequestException("编辑合同必须携带读取时的版本号");
-        const changed = await this.prisma.customerCorporateContract.updateMany({
-          where: { id: input.id, revision: input.expectedRevision },
-          data: { ...data, revision: { increment: 1 } }
-        });
-        if (changed.count === 0) throw new ConflictException("合同已被其他人修改，请刷新后重试");
-        return this.toContract(
-          await this.prisma.customerCorporateContract.findUniqueOrThrow({ where: { id: input.id } })
-        );
-      }
-      return this.toContract(
-        await this.prisma.customerCorporateContract.create({ data: { tenantId, customerId, ...data } })
-      );
+      const saved = await this.prisma.$transaction(async tx => {
+        await this.lockOrderSubjectCustomers(tenantId, [customerId], tx);
+        await this.requireCorporate(tenantId, customerId, tx);
+        if (input.id) {
+          const existing = await tx.customerCorporateContract.findFirst({ where: { tenantId, customerId, id: input.id } });
+          if (!existing) throw new NotFoundException("合同不存在");
+          if (!input.expectedRevision) throw new BadRequestException("编辑合同必须携带读取时的版本号");
+          const changed = await tx.customerCorporateContract.updateMany({
+            where: { id: input.id, tenantId, customerId, revision: input.expectedRevision },
+            data: { ...data, revision: { increment: 1 } }
+          });
+          if (changed.count === 0) throw new ConflictException("合同已被其他人修改，请刷新后重试");
+          return tx.customerCorporateContract.findUniqueOrThrow({ where: { id: input.id } });
+        }
+        return tx.customerCorporateContract.create({ data: { tenantId, customerId, ...data } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      return this.toContract(saved);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("该合同编号在本租户已存在");
@@ -309,16 +321,20 @@ export class CustomerCorporateService {
     tenantId: string,
     orderCustomerId: string,
     at: string,
-    input: CustomerOrderSubjectInput = {}
+    input: CustomerOrderSubjectInput = {},
+    tx?: Prisma.TransactionClient
   ): Promise<CustomerOrderSubjects> {
     const contractId = input.contractSubjectCustomerId ?? orderCustomerId;
     const payerId = input.payerSubjectCustomerId ?? orderCustomerId;
     const userId = input.userSubjectCustomerId ?? orderCustomerId;
     const when = new Date(at);
+    if (!Number.isFinite(when.getTime())) throw new BadRequestException("订单主体核定时点无效");
+    if (tx) await this.lockOrderSubjectCustomers(tenantId, [orderCustomerId, contractId, payerId, userId], tx);
+    const db = tx ?? this.prisma;
 
     const profiles = new Map<string, Awaited<ReturnType<SharedCustomerRepository["findById"]>>>();
     for (const id of new Set([contractId, payerId, userId])) {
-      const profile = await this.customers.findById(tenantId, id);
+      const profile = await this.customers.findById(tenantId, id, tx);
       // 不区分「不存在」与「属于别的租户」：后者会变成探测他租户客户的信道。
       if (!profile) throw new BadRequestException(`订单主体客户不存在：${id}`);
       if (profile.mergedIntoCustomerId) {
@@ -335,10 +351,10 @@ export class CustomerCorporateService {
     // 指定合同：必须属于签约主体，且在下单时点生效。
     let contractRow: { id: string; contractNo: string } | undefined;
     if (input.contractId) {
-      const row = await this.prisma.customerCorporateContract.findFirst({
-        where: { tenantId, customerId: contractId, id: input.contractId }
-      });
-      if (!row) throw new BadRequestException("指定的企业合同不属于签约主体");
+      const row = tx ? (await tx.$queryRaw<Prisma.CustomerCorporateContractGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM customer_corporate_contracts WHERE tenantId = ${tenantId} AND customerId = ${contractId} AND id = ${input.contractId} FOR UPDATE
+      `))[0] : await db.customerCorporateContract.findFirst({ where: { tenantId, customerId: contractId, id: input.contractId } });
+      if (!row || row.tenantId !== tenantId || row.customerId !== contractId || row.id !== input.contractId) throw new BadRequestException("指定的企业合同不属于签约主体");
       if (row.status !== "active") throw new ConflictException("指定的企业合同当前不是生效状态");
       if (row.effectiveFrom > when || (row.effectiveTo && row.effectiveTo < when)) {
         throw new ConflictException("指定的企业合同在下单时点不在有效期内");
@@ -349,10 +365,10 @@ export class CustomerCorporateService {
     // 指定开票资料：必须属于付款主体——谁付款谁开票，挂到签约主体上会开错票。
     let invoiceRow: { id: string } | undefined;
     if (input.invoiceProfileId) {
-      const row = await this.prisma.customerCorporateInvoiceProfile.findFirst({
-        where: { tenantId, customerId: payerId, id: input.invoiceProfileId }
-      });
-      if (!row) throw new BadRequestException("指定的开票资料不属于付款主体");
+      const row = tx ? (await tx.$queryRaw<Prisma.CustomerCorporateInvoiceProfileGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM customer_corporate_invoice_profiles WHERE tenantId = ${tenantId} AND customerId = ${payerId} AND id = ${input.invoiceProfileId} FOR UPDATE
+      `))[0] : await db.customerCorporateInvoiceProfile.findFirst({ where: { tenantId, customerId: payerId, id: input.invoiceProfileId } });
+      if (!row || row.tenantId !== tenantId || row.customerId !== payerId || row.id !== input.invoiceProfileId) throw new BadRequestException("指定的开票资料不属于付款主体");
       if (row.status !== "active") throw new ConflictException("指定的开票资料已停用");
       invoiceRow = { id: row.id };
     }
@@ -386,10 +402,10 @@ export class CustomerCorporateService {
 
     // 经办人：必须是签约主体自己的授权人，且在下单时点有效。
     if (input.agentId) {
-      const agent = await this.prisma.customerAuthorizedAgent.findFirst({
-        where: { tenantId, id: input.agentId }
-      });
-      if (!agent) throw new BadRequestException("经办人不存在");
+      const agent = tx ? (await tx.$queryRaw<Prisma.CustomerAuthorizedAgentGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM customer_authorized_agents WHERE tenantId = ${tenantId} AND id = ${input.agentId} FOR UPDATE
+      `))[0] : await db.customerAuthorizedAgent.findFirst({ where: { tenantId, id: input.agentId } });
+      if (!agent || agent.tenantId !== tenantId || agent.id !== input.agentId) throw new BadRequestException("经办人不存在");
       if (agent.customerId !== contractId) {
         throw new BadRequestException("经办人必须由签约主体授权，不能使用其他客户的经办人");
       }

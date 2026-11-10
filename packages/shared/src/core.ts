@@ -1565,7 +1565,8 @@ export interface CustomerProfileOrder {
   startAt: string;
   endAt: string;
   effectiveEndAt?: string;
-  finalPayableAmount: number;
+  /** 缺财务读取权限时不返回金额，不能按零显示。 */
+  finalPayableAmount?: number;
   currency: string;
   createdAt: string;
 }
@@ -1652,6 +1653,9 @@ export interface CustomerProfileCorporateRelation {
  * 前端必须按空间分组展示，不能为了“总览”把不同空间的资金/权益相加。
  */
 export interface CustomerProfileOverview {
+  /** 受限分区不得把兼容空数组/分页零值解释为无记录或零余额。旧响应缺省仍是旧完整投影。 */
+  access?: { orders: "available" | "restricted"; orderAmounts: "available" | "restricted";
+    benefits: "available" | "restricted"; qualifications: "available" | "restricted"; audit: "available" | "restricted" };
   profile: SharedCustomerProfile;
   addresses: CustomerProfileAddress[];
   qualificationRevisions: CustomerQualificationRevision[];
@@ -2328,7 +2332,7 @@ export interface CustomerCorporateCreditLedgerEntry {
   customerId: string;
   workspaceId?: string;
   orderId?: string;
-  entryType: "reserve" | "release" | "settle" | "payment" | "payment_allocation" | "adjust";
+  entryType: "reserve" | "release" | "settle" | "payment" | "payment_allocation" | "payment_reversal" | "allocation_reversal" | "adjust";
   amount: number;
   reservedDelta: number;
   receivableDelta: number;
@@ -2368,6 +2372,26 @@ export interface RecordCustomerCorporateCreditPaymentRequest {
   currency?: string;
   reason: string;
   idempotencyKey: string;
+}
+
+/** Full reversal of one original corporate repayment; no external refund is dispatched. */
+export interface ReverseCustomerCorporateCreditPaymentRequest {
+  basisRef: string;
+  reason: string;
+  idempotencyKey: string;
+}
+export interface CustomerCorporateCreditPaymentReversalReceipt {
+  paymentId: string;
+  reversalId: string;
+  customerId: string;
+  amount: number;
+  currency: string;
+  allocations: Array<{ allocationId: string; reversalId: string; orderId: string; workspaceId: string; amount: number }>;
+  basisRef: string;
+  reason: string;
+  idempotencyKey: string;
+  recordedBy: string;
+  recordedAt: string;
 }
 
 export interface CustomerMembershipPlanAssignmentActionRequest {
@@ -2434,7 +2458,7 @@ export interface RentalDeliveryAddressSnapshot {
   longitude?: number;
 }
 
-/** 后台代客建单用的本单收货地址输入。服务端校验并固化为快照，不会替客户修改地址簿。 */
+/** 本单收货地址输入。客户本人报价与后台代客沿各自受控入口交给Core校验、固化快照，不修改地址簿。 */
 export interface RentalDeliveryAddressDraft {
   recipient: string;
   phone: string;
@@ -3799,8 +3823,13 @@ export interface UpdateRentalServiceOccurrenceRequest {
 export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot {
   /** 稳定标识。形如 `order:<订单id>:<serviceId>:<序号>` 或 `extension:<续租id>:<serviceId>:<序号>`。 */
   occurrenceId?: string;
-  /** 来源：下单时约定的服务，还是某一次续租新增/延长出来的。 */
-  origin?: "order" | "extension";
+  /** 来源：原订单、续租或客户确认后的换货追加，不能按服务编号覆盖。 */
+  origin?: "order" | "extension" | "exchange";
+  /** 原不可变换货变更，origin 为 exchange 时给出。 */
+  exchangeId?: string;
+  /** 后台代录客户确认的人员与渠道；不是客户本人在线签署的证明。 */
+  customerConfirmationRecordedBy?: string;
+  customerConfirmationChannel?: "admin_recorded";
   /** 来源续租的 id 与序号（origin 为 extension 时给出），用于界面上显示"第几次续租新增"。 */
   extensionId?: string;
   extensionSequence?: number;
@@ -4002,6 +4031,8 @@ export interface RentalFundingAmountRequest {
   idempotencyKey: string;
   reason: string;
   paymentMethod?: RentalOfflinePaymentMethod;
+  /** 仅线下实收押金退还/抵扣：原实收事件和已完成、绑定本订单的凭证。 */
+  offlineDeposit?: { sourceEventId: string; evidenceFileAssetId: string };
 }
 
 /** MKT-02D：将已批准的增值服务退款写入模拟资金流水并闭合该服务发生项。 */
@@ -4351,6 +4382,9 @@ export interface RentalCustomerCoupon {
 }
 
 export interface RentalQuoteCouponEvaluation {
+  /** Frozen claimed-coupon applicability. [] means all items; legacy absence
+   * carries no evidence about a replacement item's eligibility. */
+  applicableItemGroupIds?: string[];
   couponId: string;
   templateId: string;
   templateCode: string;
@@ -4631,8 +4665,20 @@ export interface RentalQuoteSourceSnapshot {
   audience: 'operator' | 'staff' | 'client';
 }
 
+/** Core 冻结的库存对象依据，不代表预占或当前执行授权；不以时间戳伪造组成版本。 */
+export interface RentalQuoteInventoryBasis {
+  version: 'rental-quote-inventory-1';
+  tenantId: string;
+  workspaceId: string;
+  /** 所选型号与全部直接组成（包括替代候选），按 ID 规范排序；无嵌套套装。 */
+  groups: Array<Pick<RentalItemGroup, 'id' | 'tenantId' | 'categoryCode' | 'code' | 'name'
+    | 'inventoryMode' | 'unit' | 'status' | 'bundleComponents'>>;
+}
+
 export interface RentalQuoteSnapshotV1 {
   sourceSnapshot?: RentalQuoteSourceSnapshot;
+  /** 存量缺失不回填；新提交必须重新准备，原已提交收据读取不受影响。 */
+  inventoryBasis?: RentalQuoteInventoryBasis;
   /** 报价时完整取还检查模板；空数组表示无启用模板，缺省仅表示存量无证据。 */
   inspectionTemplateSnapshots?: RentalInspectionTemplate[];
   /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
@@ -5744,7 +5790,7 @@ export interface RentalOrderFeeReview {
   sourceId?: string;
   /** 规则算出的建议金额；null 表示尚待核定，绝不表示零。退款类落账时取负。 */
   suggestedAmount: number | null;
-  /** 金额待核定的租金退款，服务端冻结的最大应收核减额；批准须显式填认定额。 */
+  /** 金额待核定时服务端冻结的上限：退款为最大核减额，套装逾期为原规则费用上限；缺失不可批准。 */
   maximumAmount?: number;
   /** 逐条依据：应归还/实际归还时间、规则模式与金额构成。客服据此向客户解释。 */
   basis: string[];
@@ -5820,6 +5866,8 @@ export interface RentalAllocation {
     /** 取货后换货产生的分配；归还时仍需按客户持有物回收。 */
     exchangeId?: string;
     exchangeDisposition?: "return_to_warehouse" | "off_shelf";
+    /** Server-stamped physical partial return; absent legacy facts remain unknown. */
+    returnReceipt?: { batchId: string; returnedAt: string; sourceAllocationId: string; orderLineId: string; quantity: number };
   };
 }
 
@@ -6281,6 +6329,8 @@ export interface RentalExtensionPricingSnapshot {
   balanceBasis?: { version: 1; approvedReductionExtensionIds: string[] };
   recalculatedPayableAmount: number;
   recalculatedRentalAmount: number;
+  /** Frozen gross rental by original pricing target; legacy absence is not zero. */
+  rentalLineAmounts?: Record<string, number>;
   recalculatedServiceAmount: number;
   recalculatedDiscountAmount: number;
   /** Original adopted membership evaluations under the recalculated bases; not a new entitlement. */
@@ -6488,6 +6538,22 @@ export interface RentalOrderExchangePricingSegment {
   billableUnits: number;
   billedHours: number;
   amount: number;
+  /** Adopted rental membership only; gross rental stays separate from this
+   * frozen receivable reduction. Absence is not proof of a zero benefit. */
+  membershipBenefit?: RentalMembershipBenefitEvaluation;
+  /** Original reduction rounding basis; repeated splits subtract the already
+   * consumed prefix instead of rounding the rounded tail again. */
+  membershipSplitBasis?: { amount: number; reduction: number; consumedAmount: number; consumedReduction: number };
+  /** Original adopted coupon, with this billed segment's reduction. */
+  couponBenefit?: RentalQuoteCouponEvaluation;
+  couponSplitBasis?: { amount: number; reduction: number; consumedAmount: number; consumedReduction: number };
+  /** Original adopted marketing plan; each segment retains its own reduction. */
+  discountBenefit?: RentalQuoteDiscountEvaluation;
+  discountSplitBasis?: { amount: number; reduction: number; consumedAmount: number; consumedReduction: number };
+  /** Ordered, originally adopted stackable plans. Never mixed with the legacy
+   * single-plan fields; each plan consumes its own fixed/capped budget. */
+  discountLayers?: Array<{ evaluation: RentalQuoteDiscountEvaluation;
+    splitBasis?: { amount: number; reduction: number; consumedAmount: number; consumedReduction: number } }>;
   /** A carried original-price tail still belongs to the same billed blocks;
    * another split subtracts the prior prefix instead of restarting unit rounding. */
   splitBasis?: { startAt: string; endAt: string; amount: number; billableUnits: number; billedHours: number;
@@ -6514,7 +6580,17 @@ export interface RentalOrderExchangeExecutionBasis {
     previousSegments: RentalOrderExchangePricingSegment[]; segments: RentalOrderExchangePricingSegment[];
     /** Exact billed numerator/denominator for overdue; original-price exchange
      * retains its prior basis even when the remaining period is already paid. */
-    overdueBasis: RentalOrderExchangePricingSegment };
+    overdueBasis: RentalOrderExchangePricingSegment;
+    /** Complete adopted-membership net receipt for this line. Legacy absence
+     * cannot authorize new rental benefit arithmetic. */
+    membershipPricing?: { version: 1; originalReduction: number; replacementReduction: number;
+      originalNetAmount: number; replacementNetAmount: number; benefit: RentalMembershipBenefitEvaluation };
+    couponPricing?: { version: 1; originalReduction: number; replacementReduction: number;
+      originalNetAmount: number; replacementNetAmount: number; coupon: RentalQuoteCouponEvaluation };
+    discountPricing?: { version: 1; originalReduction: number; replacementReduction: number;
+      originalNetAmount: number; replacementNetAmount: number; evaluation: RentalQuoteDiscountEvaluation }
+      | { version: 2; originalReduction: number; replacementReduction: number;
+        originalNetAmount: number; replacementNetAmount: number; evaluations: RentalQuoteDiscountEvaluation[] } };
   inspectionTemplateSnapshots: RentalInspectionTemplate[];
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
 }
@@ -6562,6 +6638,12 @@ export interface RentalOrderChangePreview {
     replacementAssetId?: string;
     replacementAssetNo?: string;
     cancelledServiceOccurrenceIds?: string[];
+    /** 本次重新选择的独立服务，原服务与已执行事实不覆盖。 */
+    serviceSnapshots?: RentalQuoteServiceSnapshot[];
+    /** 当前服务金额/条款与原订单版本的确认指纹；不是授权凭据。 */
+    serviceConfirmationHash?: string;
+    /** Frozen pickup requirements and the displayed target/template fingerprint. */
+    pickupInspection?: { required: boolean; confirmationHash: string; templates: RentalInspectionTemplate[] };
     inspectionSnapshot: RentalOrderExchangeInspectionSnapshot;
     executionBasis?: RentalOrderExchangeExecutionBasis;
   };
@@ -6589,6 +6671,12 @@ export interface ApplyRentalOrderChangeRequest {
   exchangeLocationId?: string;
   inspectionSnapshot?: RentalOrderExchangeInspectionSnapshot;
   cancelServiceOccurrenceIds?: string[];
+  /** 只提交选择、数量、地点与时段，价格及条款由服务端重新报价。 */
+  services?: RentalQuoteRequest["services"];
+  /** 新服务必须回传实际展示过的服务端确认指纹。 */
+  serviceConfirmationHash?: string;
+  /** 新物领取检查与换货在原事务内一并提交，不触发整单领取。 */
+  replacementPickupInspection?: RentalExchangePickupInspectionRequest;
   reason: string;
   customerConfirmed: boolean;
   expectedUpdatedAt: string;
@@ -6646,6 +6734,7 @@ export interface PreviewRentalOrderChangeRequest {
   exchangeLocationId?: string;
   inspectionSnapshot?: RentalOrderExchangeInspectionSnapshot;
   cancelServiceOccurrenceIds?: string[];
+  services?: RentalQuoteRequest["services"];
 }
 
 export interface RentalOrderOccupancy {
@@ -6692,6 +6781,17 @@ export interface RentalWorkspaceCustomerBreakdownRow {
   exceptionFeeTotal: number;
 }
 
+/** Submitted observations only; template/target binding comes from the preview. */
+export interface RentalExchangePickupInspectionRequest {
+  templateId: string;
+  templateVersion: string;
+  confirmationHash: string;
+  results: Record<string, unknown>;
+  attachments?: string[];
+  handoverSignatureFileAssetId?: string;
+  customerConfirmed: boolean;
+}
+
 export interface RentalInspectionTemplate {
   id: string;
   tenantId: string;
@@ -6708,6 +6808,28 @@ export interface RentalInspectionTemplate {
   sourceTemplateId?: string;
   /** Read-only projection identifying the replacement-goods change. */
   exchangeId?: string;
+}
+
+/** Narrow frozen evidence from the original Core, not a current template or
+ * inspection result. Returned applicability never grants a business action. */
+export type RentalInspectionTemplateRef = Pick<RentalInspectionTemplate,
+  "id" | "tenantId" | "code" | "stage" | "version" | "enabled">;
+
+export interface RentalOrderInspectionBasisFacts {
+  contractVersion: "rental-order-inspection-basis-1";
+  orderId: string;
+  tenantId: string;
+  workspaceId: string;
+  sourceOrderUpdatedAt: string;
+  originalTemplateRefs: RentalInspectionTemplateRef[];
+  allocations: Array<Pick<RentalAllocation, "id" | "orderLineId" | "itemGroupId" | "status" | "quantity"> & { exchangeId?: string }>;
+  exchanges: Array<{ id: string; type: "post_pickup_exchange"; status: "applied";
+    /** Absence remains missing historical evidence, unlike a saved empty list. */
+    templateRefs?: RentalInspectionTemplateRef[] }>;
+  applicableTemplateRefs: Array<RentalInspectionTemplateRef & {
+    sourceTemplateId: string; allocationIds?: string[]; exchangeId?: string }>;
+  recordResourceCoverage: "not_projected";
+  semantics: "frozen_template_applicability_not_inspection_or_execution_authority";
 }
 
 export interface CreateRentalInspectionRequest {
@@ -6771,6 +6893,9 @@ export interface RentalInspectionRecord {
   templateVersion: string;
   /** Replacement action whose frozen requirements were used for this inspection. */
   exchangeId?: string;
+  /** Server-stamped actual new resources; old-asset returns use returnedItems. */
+  pickupItems?: Array<{ allocationId: string; itemGroupId: string; assetId?: string; quantity: number }>;
+  customerConfirmedAt?: string;
   results: Record<string, unknown>;
   /** 归还检查引用的领取基线；领取记录本身为空。 */
   baselineInspectionId?: string;

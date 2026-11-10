@@ -4,11 +4,12 @@ import type { AiUsageSettingsDraft } from '@rental-os/shared';
 import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
 import { quantityAtoms, sameUnit } from './budget-quantity';
 import { assertPlatformCreditLimit } from './platform-credit-limit';
-import { byokMeterScene } from './byok-usage-meter';
+import { assertByokMeterLimits, byokMeterScene } from './byok-usage-meter';
 import { platformCreditScene } from './platform-credit-policy';
 import { assertBudgetPolicyBinding } from './budget-policy-binding';
 import { assertBudgetSettingsPermit, validateBudgetSettings } from './budget-settings';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { BudgetSettingsOperation } from './budget.ports';
 import { checkedSettingsOperation, budgetSettingsReceiptSchema, settingsOperationId,
   platformBudgetOperationWhere, platformBudgetReceiptSchema } from './budget-settings-operation';
@@ -70,6 +71,8 @@ function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null
 
 /** Prisma adapter for C01. Policy rows are locked in PLATFORM→TENANT→WORKSPACE
  * order; all reservation and ledger writes share one serializable transaction.
+ * Tenant reserve, original mutation and settings CAS all lock the canonical
+ * tenant scope before ordered policies; reverse-order scope waits are forbidden.
  * It is deliberately not registered by AppModule: the composition root must
  * provide an already authorized BudgetAuthority and trusted quote/evidence ports.
  */
@@ -102,6 +105,10 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
+        // A policy CAS changes available capacity too. It must not hold the
+        // policy write lock while waiting for admission's canonical tenant lock.
+        if (settings.scope.kind === 'tenant') await this.lockTenantCapacity(tx, settings.scope.tenantId,
+          key.scopeKind === 'TENANT' ? key.scopeId : undefined);
         if (operation) {
           // Any reused key is observation-only, including a lost COMMIT reply.
           // Do not run another CAS or return today's policy as the old result.
@@ -186,6 +193,18 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       if (error instanceof BudgetError) throw error;
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BudgetError('REVISION_CONFLICT');
       throw new BudgetError('PENDING_RECONCILIATION');
+    }
+  }
+
+  /** Tenant capacity is shared across policy/config versions and units. The
+   * canonical row must be locked before any policy read/write in this transaction;
+   * resolving it by its stored key avoids a SERIALIZABLE shared-lock upgrade. */
+  private async lockTenantCapacity(tx: Tx, tenantId: string, scopeId?: string) {
+    if (scopeId) {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_scopes WHERE id = ${scopeId} FOR UPDATE`);
+    } else {
+      const { scopeKey } = aiPersistenceScopeColumns({ kind: 'tenant', tenantId });
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_scopes WHERE scopeKey = ${scopeKey} AND kind = 'TENANT' FOR UPDATE`);
     }
   }
 
@@ -322,6 +341,13 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     let callbackCompleted = false;
     try {
       const result = structuredClone(await this.db.$transaction(async tx => {
+        if (tenantId) {
+          const tenants = quote.policies.filter(key => key.scopeKind === 'TENANT');
+          if (tenants.length !== 1) throw new BudgetError('UNAVAILABLE');
+          // Both payment modes and original mutations use the SAME first lock.
+          // Scope ownership remains checked below before financial insertion.
+          await this.lockTenantCapacity(tx, tenantId, tenants[0].scopeId);
+        }
         const rows = await this.lockPolicies(tx, quote.policies);
         if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
         if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === consumer.sceneCode)) throw new BudgetError('FORBIDDEN');
@@ -345,6 +371,15 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           return replay;
         }
         const requested = quantityAtoms(quote.quantity);
+        if (quote.association.config.serviceMode === 'tenant_managed'
+          && rows[0].sceneCode === byokMeterScene(command.sceneCode, quote.association)) {
+          const tenant = rows.find(row => row.scopeKind === 'TENANT');
+          if (!tenant || !tenantId || quote.quantity.unit !== 'calls' || requested !== 1n) throw new BudgetError('FORBIDDEN');
+          // Same-key observation above does not need fresh free capacity. Only
+          // a NEW admission checks old calls across config/price/mode versions.
+          await assertByokMeterLimits(tx, { tenantScopeId: tenant.scopeId, tenantId,
+            sceneCode: command.sceneCode, runId: quote.association.runId });
+        }
         if (quote.quantity.unit === 'money' && tenantId) {
           // A tenant-owned provider is usage-only, never platform money billing.
           if (quote.association.config.serviceMode !== 'platform_managed') throw new BudgetError('FORBIDDEN');
@@ -483,6 +518,8 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     let callbackCompleted = false;
     try { return await this.db.$transaction(async tx => {
       await revalidate();
+      if (record.association.scope.kind !== 'platform')
+        await this.lockTenantCapacity(tx, record.association.scope.tenantId);
       const { rows, links } = await this.lockReservationPolicies(tx, record);
       const current = await this.readRecord(tx, record.id, record.association);
       if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind

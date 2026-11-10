@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useSite } from '../../SiteContext';
-import type { AiBookingHandoff } from '../../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingHandoff } from '@rental-os/shared';
 import { createBookingHandoffConsumer, type BookingHandoffHost, type BookingHandoffState, type BookingPageContext } from './booking-handoff';
 
 export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue, children, english }: {

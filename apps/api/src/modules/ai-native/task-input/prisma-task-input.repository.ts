@@ -656,7 +656,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
           || (run.sequence > 1 && (!run.inputReceiptId || !run.resourceOriginRunId))) throw denied();
         await tx.aiRun.create({ data: { id: randomUUID(), scopeId: task.scopeId, taskId: task.id,
           actorKind: current.actorKind, actorId: current.actorId, authorizedAt: current.authorizedAt,
-          sequence: run.sequence + 1, status: 'RUNNING', revision: 1, fencingToken: new Prisma.Decimal(0),
+          // This transaction activates the successor alongside its input receipt;
+          // it does not attest worker acquisition or a model dispatch. Never
+          // fabricate the missing start time of an older already-running row.
+          sequence: run.sequence + 1, status: 'RUNNING', startedAt: this.clock(), revision: 1, fencingToken: new Prisma.Decimal(0),
           leaseOwnerId: null, leaseExpiresAt: null, inputReceiptId: receiptId, resourceOriginRunId: originId } });
       }
       await this.publish(tx, task, current, 'running', 'resume', { requestId: request.id, receiptId });

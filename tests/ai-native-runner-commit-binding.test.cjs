@@ -55,6 +55,49 @@ for (const [name, mutate] of [
   assert.equal(calls, 1); assert.equal(h.state.task.status, 'SUCCEEDED');
 });
 
+test('aggregate recovery exposes both original CAS receipts and rejects incomplete or rewritten chains', async () => {
+  for (const [name, mutate, allowResume] of [
+    ['original chain', null, true],
+    ['missing resume receipt', value => { delete value.resumed; }, true],
+    ['resume task revision', value => { value.resumed.taskRevision++; }, true],
+    ['resume run revision', value => { value.resumed.lease.revision++; }, true],
+    ['resume holder', value => { value.resumed.lease.holderId = 'other-worker'; }, true],
+    ['resume fence', value => { value.resumed.lease.fencingToken = '999'; }, true],
+    ['resume deadline', value => { value.resumed.lease.expiresAt = '2030-01-01T00:00:00Z'; }, true],
+    ['final skipped revision', value => { value.lease.revision++; }, true],
+    ['non-recovery chain', null, false]
+  ]) {
+    const h = setup(); await h.run();
+    Object.assign(h.state.steps[0], { status: 'SUCCEEDED', effect: 'COMMITTED' });
+    h.state.task.status = 'WAITING_EXTERNAL';
+    const taskRevision = h.state.task.revision,
+      lease = { taskId: command.taskId, ...command.lease, revision: h.state.run.revision, expiresAt: h.state.run.leaseExpiresAt.toISOString() };
+    const repository = new AiTaskTransitionRepository(h.db, { resolve: async () => clone(h.state.grant.context) }, () => new Date(h.state.clock));
+    let transitions = 0;
+    const port = createAiTaskRunnerOutcomePort({ commands: { transition: input => clone(input) },
+      tasks: { readMetadata: async () => ({ taskId: command.taskId, status: 'waiting_external', revision: h.state.task.revision }) },
+      transitions: { transition: async input => { transitions++; return repository.transition(input); } } });
+    const never = async () => assert.fail('aggregate acknowledgement observation cannot dispatch, retry, release or rewrite a step');
+    const runner = new AiTaskRunner({ leases: { readMetadata: never, claimRun: never, claimRecoveryRun: never, releaseRun: never },
+      steps: { register: never, start: never, succeed: never, fail: never, pause: never, unknown: never },
+      plan: { resolve: never }, effects: { execute: never }, taskOutcome: { commit: async input => {
+        const result = await port.commit(input); mutate?.(result); return result;
+      } } });
+    const observe = () => runner.commitTaskOutcome({ status: 'succeeded', completedSteps: 1, cleanupFailed: 0 }, lease, taskRevision, allowResume);
+    if (name === 'original chain') {
+      const result = await observe();
+      assert.equal(result.resumed.taskRevision, taskRevision + 1);
+      assert.equal(result.resumed.lease.revision, lease.revision + 1);
+      assert.equal(result.taskRevision, taskRevision + 2);
+      assert.equal(result.lease.revision, lease.revision + 2);
+      assert.equal(result.outcome.status, 'succeeded');
+    } else await assert.rejects(observe(), error => error.code === 'AI_RESULT_UNKNOWN', name);
+    assert.equal(transitions, 2, 'each original FSM transition happened once, never reissued after bad delivery');
+    assert.equal(h.state.task.status, 'SUCCEEDED');
+    assert.deepEqual(h.state.events.slice(-2).map(event => event.payload.data.to), ['running', 'succeeded']);
+  }
+});
+
 function confirmationHarness(mutate = () => {}) {
   const lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 7, fencingToken: '9', expiresAt: '2027-01-01T00:00:00Z' };
   const plan = { registrationRef: 'commit-a', operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION };
@@ -144,6 +187,56 @@ test('runner consumes a synthetic confirmation checkpoint without settling charg
   assert.deepEqual(counts, { reserve: 1, execute: 1, release: 1 });
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].expectedStepRevision, 2);
+});
+
+test('runner refuses a changed lease deadline or skipped revision after a step acknowledgement without dispatch or guessed release', async () => {
+  for (const mutate of [
+    value => { value.lease.expiresAt = '2030-01-01T00:00:00Z'; },
+    value => { value.lease.revision++; }
+  ]) {
+    const h = confirmationHarness(), counts = { starts: 0, reserve: 0, execute: 0, release: 0, unknownAttempts: 0 };
+    const originalReservation = { status: 'RESERVED', chargeIds: ['steps', 'active', 'output'] };
+    const input = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', expectedTaskRevision: 3,
+      expectedRunRevision: 4, expectedFencingToken: '8', leaseMs: 10000 };
+    // The existing confirmation transport double returns the acknowledgement
+    // once. Resources are reserved before start; an uncertain start must stop
+    // execution/cleanup and preserve that original occupancy for recovery.
+    const runner = new AiTaskRunner({
+      leases: {
+        readMetadata: async () => ({ taskId: input.taskId, revision: 3, status: 'running', cancelRequestedAt: null }),
+        claimRun: async () => ({ ...h.lease, revision: 5 }),
+        claimRecoveryRun: async () => assert.fail('not recovery'),
+        releaseRun: async () => { counts.release++; return { released: true, revision: 9 }; }
+      },
+      plan: { resolve: async () => ({ taskId: input.taskId, runId: input.runId, taskRevision: 3, steps: [h.ref.plan],
+        limits: { maxSteps: 1, maxCalls: 1, maxConcurrent: 1, maxTotalMs: 10000, maxStepMs: 1000, maxOutputBytes: 100 } }) },
+      steps: {
+        ...h.ports.steps,
+        register: async () => ({ ...h.ref.registered, stepRevision: 1, taskRevision: 4, runRevision: 6 }),
+        start: async (_ref, lease) => {
+          counts.starts++;
+          const acknowledged = { lease: { ...lease, revision: lease.revision + 1 }, taskRevision: 5 };
+          mutate(acknowledged); return acknowledged;
+        }
+      },
+      effects: { execute: async () => { counts.execute++; return { kind: 'paused', pause: 'confirmation', resultRef: 'receipt-a', outputBytes: 17 }; } },
+      resources: {
+        open: async () => {}, reserve: async () => { counts.reserve++; return { chargeIds: [...originalReservation.chargeIds] }; },
+        record: async () => assert.fail('no settlement from an uncertain acknowledgement'),
+        markUnknown: async () => {
+          counts.unknownAttempts++;
+          // The next CAS tuple was not acknowledged. A failed unknown-marker
+          // write still cannot erase or release the original reserved charges.
+          throw Error('synthetic unknown-marker write remains unacknowledged');
+        }
+      },
+      taskOutcome: { commit: async () => assert.fail('uncertain acknowledgement is not a new task transition') }
+    });
+    await assert.rejects(runner.run(input), error => error.code === 'AI_RESULT_UNKNOWN');
+    assert.deepEqual(counts, { starts: 1, reserve: 1, execute: 0, release: 0, unknownAttempts: 1 });
+    assert.deepEqual(originalReservation, { status: 'RESERVED', chargeIds: ['steps', 'active', 'output'] });
+    assert.equal(h.calls.length, 0, 'no confirmation phase or retry after the uncertain start');
+  }
 });
 
 function confirmationState(from = 'running') {

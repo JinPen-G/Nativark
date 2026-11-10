@@ -1,6 +1,6 @@
 import { AI_QUOTE_SELECTION_DRAFT_VERSION } from './ai-quote-selection-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
-import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from './ai-approval-application-draft-schemas';
+import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, AI_APPROVAL_ORDER_MATERIAL_SCHEMA } from './ai-approval-application-draft-schemas';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from './ai-scene-request-draft';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
@@ -20,6 +20,12 @@ const reference = { draftVersion: version, originalInputRef: uuid, selectionId: 
 const selectionProof = object({ ...reference, taskId: uuid, runId: uuid, inputHash: hash });
 const selectionCreate = object({ draftVersion: version, originalInputRef: uuid, taskId: uuid, runId: uuid,
   selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), order });
+const operationLocator = object({ draftVersion: version, originalInputRef: uuid, taskId: uuid, runId: uuid,
+  selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293), quoteId: id() });
+const clarification = { oneOf: [object({ original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),
+  submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
+object({ original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),
+  reference: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputReceiptReferenceDraft })] };
 const no = { type: 'boolean', const: false }, revision = integer(1, 4294967295);
 const runResult = { oneOf: [
   object({ kind: choice('not_started'), reason: choice('host_aborted', 'plan_unavailable', 'task_not_runnable', 'lease_held',
@@ -67,15 +73,26 @@ export const AI_QUOTE_SELECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft>
     request: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareEligibilityRequestDraft }),
   AiHumanQuoteOrderReprepareRequestDraft: object({ selection: selectionProof,
     command: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareCommandDraft }),
+  AiHumanQuoteOrderRepreparePreparationInputDraft: object({ selection: selectionProof, replacementTaskId: uuid,
+    original: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalApplicationReferenceDraft,
+    operationKey: { ...id(), maxLength: 128 }, intent: choice('inspect', 'change_plan') }),
+  AiHumanQuoteOrderRepreparePreparationDraft: object({ selection: selectionProof, replacement: selectionProof,
+    command: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalReprepareCommandDraft,
+    originalReview: ref('AiApprovalApplicationReviewDraft'), replacementReview: ref('AiApprovalApplicationReviewDraft'),
+    state: choice('read_only'), supersession: choice('not_attempted'), approval: choice('not_granted'), order: choice('not_created') }),
   AiHumanQuoteOrderResultReadRequestDraft: object({ selection: selectionProof, command: object({
     taskId: { ...id(), maxLength: 36 }, proposalId: { ...id(), maxLength: 36 }, approvalId: { ...id(), maxLength: 36 }, actionId: id(),
     proposalRevision: integer(1, 4294967294), reviewedPayloadHash: hash,
     lease: object({ runId: { ...id(), maxLength: 36 }, holderId: id(), revision: integer(1, 4294967294),
       fencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }) }) }),
   AiQuoteSelectionCreateDraft: selectionCreate,
-  AiClarifiedQuoteSelectionRequestDraft: object({ selection: selectionCreate, clarification: object({
-    original: object({ draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: uuid }),
-    submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }) }),
+  AiClarifiedQuoteSelectionRequestDraft: object({ selection: selectionCreate, clarification }),
+  AiQuoteSelectionOperationLocatorDraft: operationLocator,
+  AiClarifiedQuoteSelectionOriginalOperationReadDraft: object({ selection: operationLocator, clarification }),
+  AiClarifiedQuoteSelectionPreparationInputDraft: object({ clarification, selectionKey: { ...id(), maxLength: 128 }, expectedSelectionRevision: integer(0, 4294967293) }),
+  AiClarifiedQuoteSelectionPreparationDraft: object({ selection: selectionCreate, clarification, material: AI_APPROVAL_ORDER_MATERIAL_SCHEMA,
+    quote: object({ id: id(), originalOperation: choice('read_only') }), selectionState: choice('not_saved'), quotation: choice('original_unchanged'),
+    approval: choice('not_granted'), order: choice('not_created'), nextAction: choice('explicit_human_selection_then_original_approval') }),
   AiQuoteSelectionSelectResponseDraft: object({ receipt: ref('AiQuoteSelectionReceiptDraft'), replayed: { type: 'boolean' } }),
   AiQuoteSelectionReconcileResponseDraft: { oneOf: [
     object({ state: choice('not_observed'), retryable: { type: 'boolean', const: false } }),

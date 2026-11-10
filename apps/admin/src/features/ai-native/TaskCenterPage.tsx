@@ -1,3 +1,8 @@
+import { TaskReadPolicy } from './TaskReadPolicy';
+import { OrderHumanHandoff } from './OrderHumanHandoff';
+import { TaskCalendarDraft } from './TaskCalendarDraft';
+import { AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
+import { MemberNameFlow } from './MemberNameFlow';
 /** Owner task observation and explicit human approval/continuation. A cursor
  * grants no execution; original domain services and server configuration do. */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,9 +21,13 @@ import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
 import { readTaskCenterDetail, validateTaskCenterSnapshot } from "./task-center-reader";
 import { TaskUsageObservation } from "./TaskUsageObservation";
+import { TaskRuleDraft } from "./TaskRuleDraft";
+import { AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { TaskHumanApproval } from "./TaskHumanApproval";
 import { TaskCancellation } from "./TaskCancellation";
 import { TaskClarification } from "./TaskClarification";
+import { VisibleObservationHost } from './VisibleObservationHost';
+import { ConversationHistory } from './ConversationHistory';
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -43,6 +52,7 @@ export function TaskCenterPage() {
 function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: string; tenantId: string; workspaceId: string }) {
   const { t } = useLocale();
   const [opened, setOpened] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState<string[]>([]);
   const [status, setStatus] = useState<string>("all");
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [page, setPage] = useState(1);
@@ -155,7 +165,13 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     const code = (follow.error as { response?: { status?: number } })?.response?.status;
     if (code === 401 || code === 403) setOpened(false);
   } }, [query.error, followFailed, originalPage, selected, selectedVisible]);
-  return <section className={styles.stack} aria-label={t("AI 任务观察")}>
+  return <VisibleObservationHost surface="task_center" taskId={selected} current={current}><section className={styles.stack} aria-label={t("AI 任务观察")}>
+    <Accordion value={historyOpen} onValueChange={setHistoryOpen} items={[{ key: 'conversations', title: t('本人对话历史'),
+      content: <ConversationHistory current={current} enabled={historyOpen.includes('conversations') && visible}
+        identity={JSON.stringify([tenantId, workspaceId, useAuthStore.getState().user?.id])} /> },
+      ...(useAuthStore.getState().hasPermission('rental-os:member:view') || useAuthStore.getState().hasPermission('rental-os:member:manage') ? [{
+        key: 'member-name', title: t('会员姓名修改'), content: visible && historyOpen.includes('member-name')
+          ? <MemberNameFlow identity={identity} current={current} onAccessDenied={() => setHistoryOpen([])} /> : null }] : [])]} />
     <div className={styles.toolbar}>
       <Select aria-label={t("任务状态")} value={status} disabled={!opened || query.isFetching}
         options={[{ value: "all", label: t("全部状态") }, ...AI_TASK_STATUSES_DRAFT.map(value => ({ value, label: t(statusLabels[value]) }))]}
@@ -175,6 +191,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         : followTask === selected ? '每3秒更新，最长10分钟；任务结束后停止。' : '仅更新所选任务的状态。')}</span>
     </div>}
     {(followFailed || followError) && <Alert type="warning" title={t('任务状态当前不可读取，已停止跟随并清除详情；请核对权限后重新读取。')} />}
+    {visible && selected && data?.items.some(row => row.taskId === selected && row.sceneCode === 'order_explanation')
+      && useAuthStore.getState().hasPermission('system:params:manage') && <TaskReadPolicy key={`task-read-policy:${identity}:${selected}`}
+        query={{ taskId: selected }} identity={identity} current={current} />}
     {opened && <AiTaskWorkbench translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
       statusLabels={Object.fromEntries((data?.items ?? []).map(row => [row.taskId, t(statusLabels[row.status])]))}
       selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
@@ -186,6 +205,10 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       detailActions={visible && !followFailed && selected && data?.items.some(row => row.taskId === selected) ? <Accordion key={selected}
         defaultOpen={data.items.find(row => row.taskId === selected)?.status === 'waiting_confirmation' ? 0 : data.items.find(row => row.taskId === selected)?.status === 'waiting_input' ? 1 : -1}
         items={[
+          ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'order_explanation'
+            && useAuthStore.getState().hasPermission('rental-os:order:view') ? [{ key: 'order-handoff', title: t('订单人工办理'),
+            content: <OrderHumanHandoff key={`order-handoff:${identity}:${selected}`} query={{ taskId: selected }} identity={identity} current={current}
+              onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
           { key: 'approval', title: t('人工确认'), content: <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
             onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
           { key: 'input', title: t('补充信息'), content: <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
@@ -193,10 +216,18 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
           { key: 'cancel', title: t('取消任务'), content: <TaskCancellation key={`stop:${selected}`} taskId={selected} identity={identity} current={current}
             onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
           { key: 'usage', title: t('用量记录'), content: <TaskUsageObservation key={selected} taskId={selected} current={current}
-            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> }
+            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
+          ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
+            && AI_TASK_RULE_DRAFT_READ_PERMISSIONS.some(permission => useAuthStore.getState().hasPermission(permission)) ? [{
+            key: 'rule-draft', title: t('规则业务草稿'), content: <TaskRuleDraft key={`rule:${selected}`} taskId={selected} identity={identity} current={current}
+              onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
+          ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
+            && AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS.some(permission => useAuthStore.getState().hasPermission(permission)) ? [{
+            key: 'calendar-draft', title: t('日历业务草稿'), content: <TaskCalendarDraft key={`calendar:${selected}`} taskId={selected} identity={identity} current={current}
+              onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : [])
         ]} /> : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
         stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} />}
-  </section>;
+  </section></VisibleObservationHost>;
 }

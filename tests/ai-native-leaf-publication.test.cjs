@@ -10,10 +10,21 @@ const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts
 const { AI_LEAF_COMPONENT_SCHEMAS: published } = require("../apps/api/src/contracts/ai-leaf-components");
 const { aiLeafToOpenApi30: convert } = require("../apps/api/src/contracts/ai-leaf-openapi");
 const { OPENAPI_DOCUMENT, API_CONTRACT_OPERATIONS } = require("../apps/api/src/contracts/openapi-document");
-const leaves = [shared.AI_GATEWAY_DRAFT_SCHEMAS, shared.AI_KNOWLEDGE_DRAFT_SCHEMAS, shared.AI_USAGE_DRAFT_SCHEMAS, shared.AI_EVENTS_DRAFT_SCHEMAS, shared.AI_INSPECTION_DRAFT_SCHEMAS, shared.AI_PROPOSAL_DRAFT_SCHEMAS, shared.AI_ORDER_FACTS_DRAFT_SCHEMAS, shared.AI_TASK_INPUT_DRAFT_SCHEMAS, shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS, shared.AI_QUOTE_SELECTION_DRAFT_SCHEMAS, shared.AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS];
-leaves.push(shared.AI_APPROVED_SETTINGS_DRAFT_SCHEMAS);
-leaves.push(shared.AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS);
-const original = Object.assign({}, ...leaves);
+// Scope and task-observation schemas publish through their original component
+// assemblers, not the leaf assembler. Every other exported AI schema family is
+// covered here; embedded families may overlap only with identical definitions.
+const otherAssemblers = new Set(['AI_SCOPE_DRAFT_SCHEMAS', 'AI_TASK_OBSERVATION_DRAFT_SCHEMAS']);
+const normalizeRefs = value => Array.isArray(value) ? value.map(normalizeRefs)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) =>
+    [key, key === '$ref' && typeof child === 'string' ? child.replace(/^urn:rental:counting:/u, '#/components/schemas/') : normalizeRefs(child)])) : value;
+const families = Object.entries(shared).filter(([name, value]) => name.startsWith('AI_') && name.endsWith('SCHEMAS')
+  && value && typeof value === 'object' && !otherAssemblers.has(name));
+const leaves = families.map(([, value]) => normalizeRefs(value));
+const original = {};
+for (const leaf of leaves) for (const [name, schema] of Object.entries(leaf)) {
+  if (Object.hasOwn(original, name)) assert.deepEqual(original[name], schema, `conflicting shared schema ${name}`);
+  else original[name] = schema;
+}
 // AJV consumes JSON Schema, not OpenAPI 3.0's boolean exclusive-bound spelling.
 function forAjv(value) {
   if (Array.isArray(value)) return value.map(forAjv);
@@ -27,20 +38,208 @@ function forAjv(value) {
   }
   return result;
 }
-const rawValidators = h.validatorsFor(original, base), publishedValidators = h.validatorsFor(forAjv(published), base);
+const dependencies = forAjv(OPENAPI_DOCUMENT.components.schemas);
+const rawDependencies = { ...dependencies, ...forAjv(base),
+  ...forAjv(require('../apps/api/src/contracts/ai-task-draft-schemas').AI_TASK_DRAFT_COMPONENT_SCHEMAS),
+  ...Object.assign({}, ...Object.entries(shared).filter(([name, value]) => name.startsWith('AI_') && name.endsWith('SCHEMAS')
+    && value && typeof value === 'object').map(([, value]) => normalizeRefs(value))) };
+const comparedRaw = { ...original, ...Object.assign({}, ...[...otherAssemblers].map(name => shared[name])) };
+const comparedPublished = Object.fromEntries(Object.keys(comparedRaw).map(name => [name, dependencies[name]]));
+const rawValidators = h.validatorsFor(comparedRaw, rawDependencies), publishedValidators = h.validatorsFor(comparedPublished, dependencies);
 
 test("all leaf types/schemas are available through the unique shared entry and OpenAPI components only", () => {
-  assert.equal(new Set(leaves.flatMap(leaf => Object.keys(leaf))).size, Object.keys(original).length);
+  assert.ok(families.length > 30, 'all current shared contract families must participate');
   assert.deepEqual(Object.keys(published).sort(), Object.keys(original).sort());
+  for (const family of otherAssemblers) for (const [name, schema] of Object.entries(shared[family])) {
+    assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], convert(schema, name), `${family}/${name}`);
+  }
   for (const [name, schema] of Object.entries(published)) {
     assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], schema);
     assert.ok(!Object.hasOwn(base, name), `collision with C01/C02: ${name}`);
   }
-  assert.ok(API_CONTRACT_OPERATIONS.every(row => !/\/ai(?:-native)?\//u.test(row.path)));
+  const inspectRefs = value => {
+    if (!value || typeof value !== 'object') return;
+    if (value.$ref) {
+      const match = /^#\/components\/schemas\/([A-Za-z][A-Za-z0-9_]*)$/u.exec(value.$ref);
+      assert.ok(match && Object.hasOwn(OPENAPI_DOCUMENT.components.schemas, match[1]), `unresolved published reference ${value.$ref}`);
+    }
+    Object.values(value).forEach(inspectRefs);
+  };
+  Object.values(published).forEach(inspectRefs);
+  const aiOperations = API_CONTRACT_OPERATIONS.filter(row => row.path.includes('/ai-native/') || row.path.startsWith('/api/platform/ai/'));
+  assert.ok(aiOperations.length > 0, 'existing AI routes remain explicitly published');
+  for (const row of aiOperations) {
+    const operation = OPENAPI_DOCUMENT.paths[row.path][row.method];
+    assert.ok(operation, `${row.method} ${row.path}`);
+    assert.deepEqual(operation['x-requiredPermissions'], row.permissions);
+    const schemaRef = schema => typeof schema === 'string' ? { $ref: `#/components/schemas/${schema}` } : schema ?? { type: 'object', additionalProperties: true };
+    if (row.requestSchema) assert.deepEqual(operation.requestBody.content['application/json'].schema, schemaRef(row.requestSchema), `request ${row.path}`);
+    const response = operation.responses[String(row.successStatus ?? 200)].content[row.rawResponseContentType ?? 'application/json'].schema;
+    assert.deepEqual(row.rawResponseContentType ? response : response.properties.data, schemaRef(row.responseSchema), `response ${row.path}`);
+    for (const schema of [row.requestSchema, row.responseSchema]) {
+      if (typeof schema === 'string') assert.ok(Object.hasOwn(OPENAPI_DOCUMENT.components.schemas, schema), schema);
+      else inspectRefs(schema);
+    }
+  }
   assert.equal(OPENAPI_DOCUMENT.openapi, "3.0.3");
   const types = `import type { AiGatewayCallDraft, AiKnowledgeSourceDraft, AiUsageRecordDraft, AiBusinessEventDraft, AiInspectionExtractDraft } from "../packages/shared/src";
   const source: AiKnowledgeSourceDraft = { kind: "business_fact", fact: ${JSON.stringify(h.fact)} };`;
   assert.deepEqual(h.compileConsumer(types), []);
+});
+
+test('both mounted customer surfaces publish every inherited method with exact request and response schemas', () => {
+  const http = shared.AI_CLIENT_ENTRY_HTTP_DRAFT;
+  const expected = {
+    readHostCapabilities: ['AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+    prepareOrderMaterial: ['AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
+    readOrderMaterialReceipt: ['AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
+    createTask: ['AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+    readTaskCreation: ['AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+    prepareQuoteParameters: ['AiClientQuotePreparationRequest', 'AiClientQuotePreparationResponse'],
+    readQuotePreparationOperation: ['AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
+    confirmQuoteParameters: ['AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+    readPreparedQuoteOriginal: ['AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+    readTaskSnapshot: ['AiClientTaskReadRequest', 'AiTaskSnapshotDraft'],
+    readTaskEvents: ['AiClientTaskEventsReadRequest', 'AiTaskEventsObservationDraft'],
+    requestTaskCancellation: ['AiClientTaskCancelRequest', 'AiClientTaskCancelReceipt'],
+    readTaskCancellationReceipt: ['AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
+    readTaskCancellationSettlementReceipt: ['AiClientTaskCancelRequest', 'AiClientTaskCancellationObservation'],
+    settleTaskUnstartedCancellation: ['AiClientTaskCancelRequest', 'AiClientTaskUnstartedCancellationReceipt'],
+    reconcileTaskInputCancellation: ['AiClientTaskCancelRequest', 'AiClientTaskInputCancellationReceipt'],
+    readTaskModelResult: ['AiClientTaskReadRequest', 'AiClientTaskModelResultReadResponse'],
+    readTaskInput: ['AiClientTaskReadRequest', 'AiClientTaskInputReadResponse'],
+    submitTaskInput: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskInputSubmissionReceipt'],
+    readTaskInputReceipt: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskInputReceiptReadResponse'],
+    continueTaskInput: ['AiClientTaskInputSubmissionRequest', 'AiClientTaskModelControlResponse'],
+    startTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+    recoverTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+    reconcileTaskModel: ['AiClientTaskReadRequest', 'AiClientTaskModelControlResponse'],
+    readTaskAccounting: ['AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
+    reconcileTaskAccounting: ['AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
+    readOrderExplanation: ['AiClientOrderExplanationReadRequest', 'AiClientOrderExplanationReadResponse'],
+    readSource: ['AiClientSourceReadRequest', 'AiClientSourceReadResponse'],
+    issueAction: ['AiEntryActionRequest', 'AiEntryActionDraft'],
+    createBookingDraft: ['AiBookingActionRequest', 'AiBookingCreateResponse'],
+    chooseBookingDraft: ['AiBookingChoiceRequest', 'AiBookingChoiceResponse'],
+    readBookingDraft: ['AiBookingDraftSelection', 'AiBookingDraft'],
+    handoffBookingDraft: ['AiBookingActionRequest', 'AiBookingHandoffResponse'],
+    readBookingHandoff: ['AiBookingHandoffSelection', 'AiBookingHandoff'],
+    readBookingOperation: ['AiBookingOperationReadRequest', 'AiBookingOperationReadResponse'],
+    readBookingAcceptance: ['AiBookingAcceptanceReadRequest', 'AiBookingAcceptanceReadResponse'],
+    acceptBookingSubmission: ['AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
+    submitAcceptedBooking: ['AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
+    readBookingSubmission: ['AiBookingSubmissionSelection', 'AiBookingSubmissionReceipt'],
+  };
+  // Parse source rather than boot AppModule (which loads environment files).
+  // This proves registration/decorator coverage, not live HTTP authorization.
+  const ts = require('typescript');
+  const readAst = file => ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
+  const source = readAst('apps/api/src/modules/ai-native/scenes/client-entry.controller.ts');
+  const controller = source.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'AiClientEntryController');
+  const methods = {};
+  for (const member of controller.members) for (const decorator of ts.getDecorators(member) ?? []) {
+    const expression = decorator.expression;
+    if (!ts.isCallExpression(expression) || expression.expression.getText(source) !== 'Post') continue;
+    const argument = expression.arguments[0];
+    assert.ok(ts.isPropertyAccessExpression(argument) && argument.expression.getText(source) === 'AI_CLIENT_ENTRY_HTTP_DRAFT');
+    methods[member.name.getText(source)] = http[argument.name.text];
+  }
+  assert.deepEqual(Object.keys(methods).sort(), Object.keys(expected).sort());
+  const mounted = readAst('apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts');
+  const app = fs.readFileSync(path.join(root, 'apps/api/src/app.module.ts'), 'utf8');
+  const registered = /controllers:\s*\[([\s\S]*?)\],\s*providers:/u.exec(app)[1].split(',').map(name => name.trim());
+  for (const [className, prefix] of [['WebsiteClientEntryController', http.authenticatedBasePath], ['WechatClientEntryController', http.authenticatedWechatBasePath]]) {
+    assert.ok(registered.includes(className));
+    const child = mounted.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === className);
+    assert.equal(child.heritageClauses.find(node => node.token === ts.SyntaxKind.ExtendsKeyword).types[0].expression.getText(mounted), 'AiClientEntryController');
+    const decorator = ts.getDecorators(child).find(node => ts.isCallExpression(node.expression) && node.expression.expression.getText(mounted) === 'Controller');
+    assert.equal(http[decorator.expression.arguments[0].name.text], prefix);
+    const rows = API_CONTRACT_OPERATIONS.filter(row => row.path.startsWith(`/api/${prefix}/`));
+    assert.equal(rows.length, Object.keys(expected).length);
+    for (const [method, schemas] of Object.entries(expected)) {
+      const route = `/api/${prefix}/${methods[method]}`, row = rows.find(row => row.path === route && row.method === 'post');
+      assert.ok(row, `${className}.${method}`);
+      assert.deepEqual([row.requestSchema, row.responseSchema], schemas, route);
+      assert.equal(row.authRequired, true);
+      assert.deepEqual(row.permissions, [], 'Client identity must not become operator RBAC');
+      const published = OPENAPI_DOCUMENT.paths[route].post;
+      assert.deepEqual(published.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(published.requestBody.content['application/json'].schema, { $ref: `#/components/schemas/${schemas[0]}` });
+      assert.deepEqual(published.responses['200'].content['application/json'].schema.properties.data, { $ref: `#/components/schemas/${schemas[1]}` });
+    }
+  }
+});
+
+test('all customer cancellation publications retain the original positive uint64 cursor boundary', () => {
+  const max = 18446744073709551615n;
+  const cursors = new Set(['', '0', '01', '-1', '1x', '9007199254740993', String(max), String(max + 1n)]);
+  for (let digits = 1; digits <= 21; digits++) {
+    const power = 10n ** BigInt(digits);
+    for (const value of [power - 1n, power, power + 1n, max - power, max + power]) cursors.add(String(value));
+  }
+  // Exercise both ends of every twenty-digit prefix branch, not just max/max+1.
+  for (let index = 1; index < String(max).length; index++) {
+    const digit = Number(String(max)[index]);
+    if (digit === 0) continue;
+    for (const lower of ['0', String(digit - 1)]) for (const tail of ['0', '9'])
+      cursors.add(String(max).slice(0, index) + lower + tail.repeat(19 - index));
+  }
+  const transition = { taskRevision: 2, observedAt: '2026-11-04T00:00:00Z' };
+  const receipt = { contractVersion: shared.AI_TASK_DRAFT_VERSION, taskId: 'task-a', ...transition,
+    status: 'cancel_requested', cancellation: 'requested_not_rollback', retryable: false, nextAction: 'read_original_task' };
+  const cursorRuntime = shared.aiClientTaskCancelReceiptSchema.shape.cursor;
+  for (const cursor of cursors) {
+    const expected = cursorRuntime.safeParse(cursor).success;
+    const payloads = {
+      AiClientTaskCancelReceipt: { ...receipt, cursor },
+      AiClientTaskInputCancellationReceipt: { ...receipt, cursor, status: 'cancelled',
+        cancellation: 'released_input_wait_settled', externalRollback: 'not_claimed' },
+      AiClientTaskUnstartedCancellationReceipt: { ...receipt, cursor, status: 'cancelled',
+        cancellation: 'unstarted_task_settled', externalRollback: 'not_claimed' },
+      AiClientTaskCancellationObservation: { contractVersion: receipt.contractVersion, taskId: receipt.taskId,
+        expectedRevision: 1, state: 'observed', transition: { ...transition, cursor, status: 'cancel_requested' },
+        execution: 'not_authorized_by_observation', externalRollback: 'not_claimed', retryable: false, nextAction: receipt.nextAction }
+    };
+    for (const [name, payload] of Object.entries(payloads)) {
+      assert.equal(rawValidators[name](payload), expected, `shared ${name} cursor=${cursor}`);
+      assert.equal(publishedValidators[name](payload), expected, `OpenAPI ${name} cursor=${cursor}`);
+    }
+  }
+});
+
+test('receipt state and nullable evidence stay consistent with the original runtime validators', () => {
+  const uuid = '11111111-1111-4111-8111-111111111111', hash = '1'.repeat(64), observedAt = '2026-11-04T00:00:00Z';
+  const check = (name, runtime, value) => {
+    const expected = runtime.safeParse(value).success;
+    assert.equal(rawValidators[name](value), expected, `shared ${name}: ${JSON.stringify(value)}`);
+    assert.equal(publishedValidators[name](value), expected, `OpenAPI ${name}: ${JSON.stringify(value)}`);
+  };
+  for (const state of ['observed', 'unknown']) for (const materialRef of [uuid, null])
+    for (const materialHash of [hash, null]) for (const expiresAt of [observedAt, null]) {
+      check('AiClientOrderMaterialReceipt', shared.aiClientOrderMaterialReceiptSchema, {
+        contractVersion: shared.AI_CLIENT_MATERIAL_RECEIPT_VERSION, operationKey: 'material-key', state,
+        materialRef, materialHash, expiresAt, execution: 'not_attested', freshness: 'revalidate_before_execution',
+        retryable: false, nextAction: 'read_original_material_receipt'
+      });
+    }
+  const taskValue = { taskId: 'task-a', runId: 'run-a', status: 'queued', revision: 1, replayed: false };
+  for (const state of ['observed', 'unknown']) for (const inputRef of [uuid, null])
+    for (const inputHash of [hash, null]) for (const task of [taskValue, null]) {
+      check('AiClientTaskCreationReceipt', shared.aiClientTaskCreationReceiptSchema, {
+        contractVersion: shared.AI_TASK_DRAFT_VERSION, creationKey: 'creation-key', materialRef: uuid, state,
+        inputRef, inputHash, task, execution: 'not_attested', retryable: false, nextAction: 'read_original_task_creation'
+      });
+    }
+  const accounts = [null];
+  for (const status of ['reserved', 'settled', 'released', 'pending_reconciliation'])
+    for (const usageRecorded of [false, true]) for (const dispatched of [false, true]) accounts.push({ status, usageRecorded, dispatched });
+  for (const state of ['observed', 'unknown']) for (const account of accounts) {
+    const value = { contractVersion: shared.AI_TASK_DRAFT_VERSION, callId: 'call-a', state, account,
+      meaning: 'ai_invocation_not_business_payment', observedAt, execution: 'not_authorized_by_accounting',
+      retryable: false, nextAction: 'read_original_accounting' };
+    check('AiClientTaskAccountingResponse', shared.aiClientTaskAccountingResponseSchema, value);
+    check('AiTaskAccountingObservation', shared.aiTaskAccountingObservationSchema, value);
+  }
 });
 
 test("OpenAPI conversion changes keywords without dropping nested constraints or mutating sources", () => {
@@ -70,13 +269,19 @@ test("original and published schemas agree on all nested fixture objects and bou
     if (value && typeof value === "object") Object.values(value).forEach(collect);
   };
   for (const family of ["gateway", "knowledge", "usage", "events", "inspection"]) collect(require(`./fixtures/ai-native/${family}-contracts.cjs`));
+  h.contexts.forEach(collect); collect(h.access); collect(h.unknown); collect(h.denied); collect(h.fact); collect(h.request);
   let accepted = 0;
-  for (const name of Object.keys(original)) for (const value of candidates) {
+  const covered = new Set();
+  for (const name of Object.keys(comparedRaw)) for (const value of candidates) {
     const expected = rawValidators[name](value);
     accepted += Number(expected);
+    if (expected) covered.add(name);
     assert.equal(publishedValidators[name](value), expected, `${name} changed validation behavior`);
   }
   assert.ok(accepted > 50, "matrix must exercise accepted inputs as well as rejections");
+  console.log(JSON.stringify({ publicationSchemas: Object.keys(comparedRaw).length, fixtureAcceptedSchemas: covered.size,
+    schemasWithoutAcceptedFixture: Object.keys(comparedRaw).filter(name => !covered.has(name)),
+    boundary: 'publication coverage is not a valid fixture for every contract' }));
   const raw = { Range: { type: "number", minimum: -1, exclusiveMinimum: 0, maximum: 2, exclusiveMaximum: 1 } };
   const a = h.validatorsFor(raw, {}), b = h.validatorsFor({ Range: forAjv(convert(raw.Range)) }, {});
   for (const value of [-1, 0, Number.EPSILON, 0.5, 1, 2]) assert.equal(b.Range(value), a.Range(value));

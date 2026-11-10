@@ -13,6 +13,7 @@ import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
 import { consumePolledEvents } from "./polling-consumer";
 import { safeDisplayText } from "./safe-display";
+import { VisibleObservationBoundary } from './VisibleObservationBoundary';
 import { ModelText } from "./ModelText";
 import { TaskModelSources, type TaskModelSourceReader } from "./TaskModelSources";
 import type { AiTaskConfirmationHistoryDraft, AiTaskModelObservationDraft } from "@rental-os/shared";
@@ -261,7 +262,11 @@ export function AiTaskWorkbench({
                 action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
               />
             )}
-            {detailSynchronized && typeof currentDetail.modelText === "string" && <ModelText text={currentDetail.modelText} />}
+            {detailSynchronized && typeof currentDetail.modelText === "string" && (currentDetail.modelObservation?.status === 'available'
+              && currentDetail.modelObservation.taskId === taskId ? <VisibleObservationBoundary kind="text"
+                reference={{ taskId, runId: currentDetail.modelObservation.runId, source: { kind: 'model_result', resultId: currentDetail.modelObservation.resultId } }}
+                ready={currentDetail.modelText.trim().length > 0}><ModelText text={currentDetail.modelText} /></VisibleObservationBoundary>
+              : <ModelText text={currentDetail.modelText} />)}
             {detailSynchronized && <Accordion items={[
               { key: 'steps', title: t('执行步骤'), content: <TaskTimeline taskId={taskId} steps={currentDetail.steps} /> },
               ...(readConfirmation && currentDetail.confirmationSteps?.length ? [{ key: 'confirmation', title: t('确认记录'), content: <>{currentDetail.confirmationSteps.slice(0, 20).map(step =>

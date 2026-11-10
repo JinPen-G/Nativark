@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { ModelGatewayError } from './model-gateway.ports';
+import { ModelGatewayError, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema } from './model-gateway.ports';
 import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
 import { ProviderCapabilityService } from './provider-capability.service';
 import type { GatewayInvocationObservation } from './unified-ai-gateway.ports';
@@ -10,8 +10,8 @@ import { capabilityProfileFingerprint, capabilityVerificationSchema } from './ca
 import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
-import { matchesProbeProfile, probeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
-  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, isPlatformProbeContext, TEXT_PROBE_TTL_MS,
+import { matchesProbeProfile, probeUsageSchema, embeddingProbeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
+  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, hasObjectiveProbeMethod, isPlatformProbeContext, TEXT_PROBE_TTL_MS,
   type TextProbeDescriptor, type TextProbeObservation, type TextProbeReceipt } from './text-capability-probe';
 
 export type TextProbeReceiptDb = Pick<PrismaClient, '$transaction' | '$queryRaw' | '$executeRaw' | 'aiGatewayInvocation'
@@ -24,8 +24,10 @@ function receipt(row: StoredReceipt): TextProbeReceipt {
   const observation = row.observation == null ? null : textProbeObservationSchema.parse(decode(row.observation));
   if (row.descriptorHash !== requestFingerprint(descriptor)
     || (observation ? row.observationHash !== requestFingerprint(observation) : row.observationHash !== null)) throw new ModelGatewayError('CONFIG_INVALID');
+  if (observation?.usage && !(textProbeCapability(descriptor.command) === 'embedding' ? embeddingProbeUsageSchema : probeUsageSchema)
+    .safeParse(observation.usage).success) throw new ModelGatewayError('CONFIG_INVALID');
   const prepared = textProbeIntent(descriptor.command.operationId, descriptor.scopeId, textProbeCapability(descriptor.command));
-  if (descriptor.methodVersion !== textProbeMethod(descriptor.command) || descriptor.callId !== prepared.intent.requestId
+  if (descriptor.methodVersion !== textProbeMethod(descriptor.command, descriptor.configuration.protocol) || descriptor.callId !== prepared.intent.requestId
     || descriptor.intentHash !== prepared.intentHash || descriptor.challengeHash !== prepared.challengeHash
     || descriptor.configurationHash !== requestFingerprint(descriptor.configuration)) throw new ModelGatewayError('CONFIG_INVALID');
   return { id: row.id, descriptor, descriptorHash: row.descriptorHash, observation, observationHash: row.observationHash };
@@ -97,21 +99,44 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
     if (terminal) {
       const usage = o.usage;
       if (!usage || admission.status !== 'completed' || !admission.completedAt || reservation.status !== 'settled'
+        || reservation.billingMode !== d.configuration.serviceMode
         || accounting.inputTokens !== BigInt(usage.inputTokens)
-        || accounting.outputTokens !== BigInt(usage.outputTokens)) return null;
+        || accounting.outputTokens !== BigInt(usage.outputTokens)
+        || requestFingerprint(accounting.usageDetails ?? null) !== requestFingerprint(usage.billingDetails ?? null)) return null;
       const usageHash = requestFingerprint({ receiptId: accounting.id, invocationId: invocation.id, admissionId: admission.id,
         reservationId: reservation.id, dispatchToken: o.dispatchId, requestHash: o.requestHash, usage });
       if (accounting.usageHash !== usageHash) return null;
       const entries = await db.aiBudgetLedgerEntry.findMany({ where: { reservationId: reservation.id, scopeId: d.scopeId,
         scopeKind: expectScopeKind, kind: { in: ['settle', 'reconcile'] } }, take: 2 });
       if (entries.length !== 1) return null;
-      const quantity = reservation.unitKind === 'tokens' && reservation.actualTokens === accounting.inputTokens! + accounting.outputTokens!
-        ? { unit: 'tokens', value: Number(reservation.actualTokens) }
-        : reservation.unitKind === 'calls' && reservation.actualCalls === 1 ? { unit: 'calls', value: 1 }
-        : reservation.unitKind === 'money' && reservation.actualMoney !== null && reservation.moneyCurrency
-          ? { unit: 'money', amount: reservation.actualMoney.toFixed(6), currency: reservation.moneyCurrency, scale: 6 } : null;
-      if (!quantity || ('value' in quantity && !Number.isSafeInteger(quantity.value))
-        || entries[0].evidenceHash !== requestFingerprint({ usageHash, priceVersion: invocation.priceVersion, quantity })) return null;
+      const event = entries[0];
+      // A digest cannot replace the original settled quantity. Missing or
+      // contradictory columns are not capability evidence, even with that hash.
+      if (!['settle', 'reconcile'].includes(event.kind) || event.reservationId !== reservation.id
+        || event.scopeId !== d.scopeId || event.scopeKind !== expectScopeKind || event.tenantId !== expectTenantId
+        || event.outputTokens !== null || event.reason !== null) return null;
+      let quantity;
+      if (reservation.unitKind === 'tokens') {
+        const tokens = reservation.actualTokens;
+        if (tokens === null || tokens < 0n || tokens > BigInt(Number.MAX_SAFE_INTEGER)
+          || tokens !== accounting.inputTokens! + accounting.outputTokens! || reservation.actualCalls !== null
+          || reservation.actualMoney !== null || reservation.moneyCurrency !== null || event.inputTokens !== tokens
+          || event.calls !== null || event.moneyAmount !== null || event.moneyCurrency !== null) return null;
+        quantity = { unit: 'tokens', value: Number(tokens) };
+      } else if (reservation.unitKind === 'calls') {
+        if (reservation.actualCalls !== 1 || reservation.actualTokens !== null || reservation.actualMoney !== null
+          || reservation.moneyCurrency !== null || event.calls !== 1 || event.inputTokens !== null
+          || event.moneyAmount !== null || event.moneyCurrency !== null) return null;
+        quantity = { unit: 'calls', value: 1 };
+      } else if (reservation.unitKind === 'money') {
+        const money = reservation.actualMoney;
+        if (reservation.billingMode !== 'platform_managed' || !money || !money.isFinite() || money.isNegative()
+          || money.decimalPlaces() > 6 || !/^[A-Z]{3}$/u.test(reservation.moneyCurrency ?? '')
+          || reservation.actualTokens !== null || reservation.actualCalls !== null || !event.moneyAmount?.eq(money)
+          || event.moneyCurrency !== reservation.moneyCurrency || event.inputTokens !== null || event.calls !== null) return null;
+        quantity = { unit: 'money', amount: money.toFixed(6), currency: reservation.moneyCurrency!, scale: 6 };
+      } else return null;
+      if (event.evidenceHash !== requestFingerprint({ usageHash, priceVersion: invocation.priceVersion, quantity })) return null;
     } else if (admission.status !== 'admitted' || reservation.status !== 'reserved') return null;
     return { accounting, invocation, reservation, admission };
   }
@@ -131,8 +156,15 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       || capabilityProfileFingerprint(input.route.profile) !== row.descriptor.profileFingerprint
       || typeof input.result.text !== 'string' || input.result.text.length > 256) throw new ModelGatewayError('CONFIG_INVALID');
     const now = this.clock(), prepared = textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, textProbeCapability(row.descriptor.command));
-    const usage = probeUsageSchema.safeParse(input.result.usage);
-    let observedText = input.result.text, structuredMatched = true;
+    const usage = (textProbeCapability(row.descriptor.command) === 'embedding' ? embeddingProbeUsageSchema : probeUsageSchema).safeParse(input.result.usage);
+    const reasoning = textProbeCapability(row.descriptor.command) === 'reasoning'
+      ? modelReasoningEvidenceSchema.safeParse(input.result.reasoningEvidence) : undefined;
+    const embedding = textProbeCapability(row.descriptor.command) === 'embedding'
+      ? modelEmbeddingEvidenceSchema.safeParse(input.result.embeddingEvidence) : undefined;
+    const embeddingInput = prepared.intent.messages.map(message => message.content.map(part => part.kind === 'text' ? part.text : '').join(''));
+    let observedText = input.result.text, structuredMatched = (reasoning === undefined || reasoning.success
+      && usage.success && reasoning.data.reasoningTokens <= usage.data.outputTokens)
+      && (embedding === undefined || embedding.success && usage.success && embedding.data.inputHash === requestFingerprint(embeddingInput));
     if (textProbeCapability(row.descriptor.command) === 'tools') {
       const requests = input.result.toolRequests;
       structuredMatched = Array.isArray(requests) && requests.length === 1 && requests.every(isGatewayOrderExplainRequest)
@@ -155,6 +187,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
           && input.delivery.deltaBytes === Buffer.byteLength(prepared.expected, 'utf8')
           && input.delivery.deltaCount > 0 && input.delivery.eventCount === input.delivery.deltaCount + 1),
       usage: usage.success ? usage.data : null, checkedAt: now.toISOString(), expiresAt: new Date(now.getTime() + TEXT_PROBE_TTL_MS).toISOString(),
+      ...(embedding?.success ? { embeddingEvidence: embedding.data } : {}),
+      ...(reasoning?.success ? { reasoningEvidence: reasoning.data } : {}),
       ...(input.delivery?.mode === 'stream' ? { delivery: input.delivery } : {}) });
     await this.db.$transaction(async tx => {
       if (!await this.original(tx, row, observation, false)) throw new ModelGatewayError('ACCOUNTING_PENDING');
@@ -167,12 +201,13 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async verify(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
     if (!proof.success || proof.data.evidence !== 'live'
-      || !['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
+      || !hasObjectiveProbeMethod(input.capability, input.profile.protocol) || !input.profile.allowedCapabilities.includes(input.capability)
+      || proof.data.capability !== input.capability || input.source !== 'connection_test'
       || typeof input.details?.receiptId !== 'string') return false;
     const row = await this.read(input.details.receiptId), now = this.clock();
     if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)
       || input.capability !== textProbeCapability(row.descriptor.command)
-      || proof.data.methodVersion !== textProbeMethod(row.descriptor.command)) return false;
+      || proof.data.methodVersion !== textProbeMethod(row.descriptor.command, input.profile.protocol)) return false;
     const o = row.observation;
     if (o.transport !== 'node_https' || !o.matched || !o.usage
       || proof.data.profileFingerprint !== row.descriptor.profileFingerprint
@@ -180,6 +215,17 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       || input.expiresAt?.toISOString() !== o.expiresAt || Date.parse(o.checkedAt) > now.getTime()
       || Date.parse(o.expiresAt) <= now.getTime() || Date.parse(o.expiresAt) - Date.parse(o.checkedAt) !== TEXT_PROBE_TTL_MS
       || o.responseHash !== textDigest(textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, textProbeCapability(row.descriptor.command)).expected)) return false;
+    if (input.capability === 'embedding') {
+      const evidence = modelEmbeddingEvidenceSchema.safeParse(o.embeddingEvidence);
+      const prepared = textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, 'embedding');
+      const originalInput = prepared.intent.messages.map(message => message.content.map(part => part.kind === 'text' ? part.text : '').join(''));
+      if (!evidence.success || !embeddingProbeUsageSchema.safeParse(o.usage).success
+        || evidence.data.inputHash !== requestFingerprint(originalInput)) return false;
+    } else if (o.embeddingEvidence !== undefined) return false;
+    if (input.capability === 'reasoning') {
+      const reasoning = modelReasoningEvidenceSchema.safeParse(o.reasoningEvidence);
+      if (!reasoning.success || reasoning.data.reasoningTokens > o.usage.outputTokens) return false;
+    } else if (o.reasoningEvidence !== undefined) return false;
     if (input.capability === 'streaming' && (!o.delivery || o.delivery.deltaCount < 1
       || o.delivery.eventCount !== o.delivery.deltaCount + 1 || o.delivery.deltaHash !== o.responseHash
       || o.delivery.deltaBytes !== Buffer.byteLength(textProbeIntent(row.descriptor.command.operationId,

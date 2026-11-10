@@ -16,7 +16,7 @@ import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmati
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
@@ -34,6 +34,9 @@ export type TaskOrderHostDependencies = ControlledApprovedOrderDependencies & {
   runnerClock?: AiTaskRunnerClock;
 };
 
+/** Hosts the original order-only runner, including already-published plans.
+ * Every action keeps its own human approval, Core transaction and receipt;
+ * no plan-wide rollback, automatic compensation, policy seed or new grant. */
 export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
   const task = taskSchema.parse(structuredClone(input.task));
   const orders = composeControlledApprovedOrder(input);
@@ -54,16 +57,41 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
     }
   };
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
+    const selectedOrder = input.selectedOrder;
     if (lease.taskId !== task.taskId || lease.runId !== task.runId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    if (input.selectedOrder && (input.selectedOrder.taskId !== task.taskId || input.selectedOrder.runId !== task.runId)) {
+    if (selectedOrder && (selectedOrder.taskId !== task.taskId || selectedOrder.runId !== task.runId)) {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    const order = input.selectedOrder ? await input.selectedOrder.read() : task.order;
+    const order = selectedOrder ? await selectedOrder.read() : task.order;
+    if (order === undefined && selectedOrder === undefined) {
+      // Host an already-published order-only plan; never synthesize inputs or
+      // approvals from its IDs. Each action retains its own Core transaction,
+      // confirmation and result. A failed successor cannot roll back ancestors.
+      const access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+      const owner = await input.db.aiTask.findFirst({ where: access.where });
+      if (!owner) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const key = { scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId };
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (!saved) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const plan = aiTaskRunPlanSchema.parse(saved.payload);
+      if (Object.entries(key).some(([name, value]) => saved[name as keyof typeof saved] !== value)
+        || plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+        || plan.taskRevision > taskRevision || plan.steps.length === 0 || plan.steps[0].registrationRef !== task.registrationRef
+        || requestFingerprint(plan.limits) !== requestFingerprint(task.limits)
+        || plan.steps.some(step => step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+          || step.operation !== 'idempotent')) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      await orders.source.authorize(plan, lease);
+      const latest = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (!latest || latest.planHash !== saved.planHash || requestFingerprint(latest.payload) !== saved.planHash)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return;
+    }
     if (!order || typeof order !== 'object' || Array.isArray(order)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.source.publishOrderInput({ taskId: task.taskId, registrationRef: task.registrationRef,
       expectedTaskRevision: taskRevision, lease, input: structuredClone(order) });
-    if (input.selectedOrder) {
-      if (requestFingerprint(await input.selectedOrder.read()) !== requestFingerprint(order)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (selectedOrder) {
+      if (requestFingerprint(await selectedOrder.read()) !== requestFingerprint(order)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
       const owner = await input.db.aiTask.findFirst({ where: access.where });
       if (!owner) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -83,6 +111,9 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
       steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }],
       limits: structuredClone(task.limits) }, lease);
   };
+  if (task.order !== undefined || input.selectedOrder) withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
+    steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }],
+    limits: task.limits, bindingHash: requestFingerprint({ task, selected: !!input.selectedOrder }) });
   const registrations = new AiStepRegistrationRepository(input.db, orders.source, input.clock, undefined,
     { resolve: command => authorization.authority.resolve(command.taskId, 'read_step_terminal') });
   const transitions = new AiStepTransitionRepository(input.db,

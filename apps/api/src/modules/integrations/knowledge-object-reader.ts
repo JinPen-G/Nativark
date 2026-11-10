@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { assertOutboundUrl } from '../../common/outbound-url';
 import type { TenantIntegrationService } from './tenant-integration.service';
 import { s3ObjectReadRequest } from './inspection-object-reader';
+import { frozenFileContentHash } from './file-content-binding';
 
 export type KnowledgeObjectReference = { tenantId: string; workspaceId: string; documentId: string; fileAssetId: string };
 /** Server-injected bounded, DNS-pinned signed GET. No ambient fetch fallback. */
@@ -72,7 +73,10 @@ export class TenantKnowledgeObjectReader {
       }
       const config = structuredClone(await wait(this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible')));
       if (!config) throw unavailable();
-      const objectKey = upload && metadata.fileUploadVersion === 2 ? `${asset.storageKey}.pending-upload` : asset.storageKey;
+      const frozenHash = upload ? undefined : frozenFileContentHash(asset, config);
+      if (!upload && (!frozenHash || metadata.knowledgeContentHash !== frozenHash)) throw unavailable();
+      if (upload && metadata.fileUploadVersion !== 2) throw unavailable();
+      const objectKey = upload ? `${asset.storageKey}.pending-upload` : asset.storageKey;
       const request = s3ObjectReadRequest(config, objectKey, this.clock());
       const url = await wait(this.egress(request.url, '知识正文对象地址', { allowQuery: false }));
       if (control.signal.aborted) throw unavailable();
@@ -108,8 +112,7 @@ export class TenantKnowledgeObjectReader {
         || JSON.stringify(config) !== JSON.stringify(currentConfig) || control.signal.aborted) throw unavailable();
       const bytes = Buffer.concat(chunks, total);
       const contentHash = createHash('sha256').update(bytes).digest('hex');
-      if (!upload && (typeof metadata.knowledgeContentHash !== 'string'
-        || !/^[a-f0-9]{64}$/u.test(metadata.knowledgeContentHash) || metadata.knowledgeContentHash !== contentHash)) throw unavailable();
+      if (!upload && contentHash !== frozenHash) throw unavailable();
       return { mediaType, bytes, contentHash };
     } finally {
       control.abort(); clearTimeout(timer); signal?.removeEventListener('abort', abort);

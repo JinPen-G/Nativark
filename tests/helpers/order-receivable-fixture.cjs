@@ -64,7 +64,11 @@ function receivableFixture() {
       const row = { ...data, occurredAt: new Date(1793400000000 + sequence++), createdAt: new Date() }; db.rows.push(row); return row;
     }
   };
-  db.operationLog = { findUnique: async () => null };
+  db.logs = [];
+  db.operationLog = { findUnique: async ({ where }) => db.logs.find(row => row.id === where.id) ?? null,
+    findFirst: async ({ where }) => db.logs.find(row => row.tenantId === where.tenantId && row.action === where.action
+      && (where.AND ?? []).every(clause => row.detail[clause.detail.path.slice(2)] === clause.detail.equals)) ?? null,
+    create: async ({ data }) => { if (db.failOperationLog) throw Error('audit unavailable'); db.logs.push(data); return data; } };
   db.businessWorkspace = { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === workspaceId
     ? { id: workspaceId, runMode: 'production' } : null };
   db.workspaceMember = { findFirst: async ({ where }) => where.userId === 'operator' && where.workspaceId === workspaceId
@@ -78,7 +82,12 @@ function receivableFixture() {
     }
     if (query.sql.includes('FROM customer_corporate_credits')) return db.credit
       && query.values.includes(db.credit.tenantId) && query.values.includes(db.credit.customerId) ? [{ id: db.credit.id }] : [];
-    if (query.sql.includes('FROM customer_corporate_credit_ledger')) return db.rows.filter(row => query.values.includes(row.tenantId) && query.values.includes(row.customerId)).slice(0, 501);
+    if (query.sql.includes('FROM customer_corporate_credit_ledger')) {
+      const cursor = query.sql.includes('AND id >') ? query.values.at(-1) : undefined;
+      return db.rows.filter(row => query.values.includes(row.tenantId) && query.values.includes(row.customerId)
+        && (cursor === undefined || row.id > cursor)).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+        .slice(0, query.sql.includes('LIMIT 500 ') ? 500 : 501);
+    }
     if (query.sql.includes('FROM rental_funding_events')) return db.events.filter(row => [row.tenantId, row.workspaceId, row.orderId].every(value => query.values.includes(value)));
     if (query.sql.includes('FROM rental_payment_intents')) return db.intents.filter(row => [row.tenantId, row.workspaceId, row.orderId].every(value => query.values.includes(value)));
     if (query.sql.includes('FROM rental_offline_payment_registrations')) return db.registrations.filter(row => row.status === 'confirmed'
@@ -87,7 +96,7 @@ function receivableFixture() {
     throw Error(`Unexpected receivable fixture SQL: ${query.sql}`);
   };
   db.$transaction = async callback => {
-    const snapshots = ['events', 'rows', 'intents', 'refunds', 'webhooks'].map(key => [key, db[key].map(row => ({ ...row }))]);
+    const snapshots = ['events', 'rows', 'intents', 'refunds', 'webhooks', 'logs'].map(key => [key, db[key].map(row => ({ ...row }))]);
     try { return await callback(db); }
     catch (error) { for (const [key, rows] of snapshots) db[key] = rows; throw error; }
   };

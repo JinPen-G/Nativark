@@ -20,6 +20,7 @@ import { FileBusinessAccessService } from "../files/file-business-access.service
 import { OperationLogService } from "../../common/operation-log.service";
 import { getRequestIdentity } from "../../common/request-identity";
 import { createAliyunOssV4Url } from "./aliyun-oss-v4";
+import { fileStorageLocationHash, frozenFileContentHash } from "./file-content-binding";
 import { aiRetentionObjectHash } from "../ai-native/privacy/retention-binding";
 import { AI_RETENTION_POLICY } from "../ai-native/privacy/retention-policy";
 import { KnowledgeCommitUnknownError } from '../ai-native/knowledge/knowledge-errors';
@@ -41,6 +42,10 @@ export interface FileBusinessOwner {
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
+// Separate cleanup receipts leave completed uploads terminal. Once DELETE is
+// claimed, a lost result permits only HEAD observation of this original staging key.
+const COMPLETED_STAGING_PENDING = "completed_staging_pending";
+const COMPLETED_STAGING_UNKNOWN = "completed_staging_unknown";
 
 const text = (value: unknown, name: string) => {
   const result = String(value ?? "").trim();
@@ -448,13 +453,70 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   }
 
   private retentionLocationHash(config: TenantIntegrationRuntimeConfig) {
-    return requestFingerprint([config.id, config.provider, config.settings.bucket ?? null,
-      config.settings.endpoint ?? null, config.settings.region ?? null, config.settings.forcePathStyle ?? null]);
+    return fileStorageLocationHash(config);
+  }
+
+  /** Reclaim only the staging object proved by a completed freeze receipt.
+   * cleanupError holds the fixed pending/unknown marker; the upload remains
+   * completed and its active evidence is never invalidated by cleanup failure. */
+  private async cleanupCompletedStagingObjects(tenantId: string, limit: number): Promise<FileUploadCleanupSummary> {
+    const now = new Date(), staleBefore = new Date(now.getTime() - 10 * 60 * 1000);
+    const rows = structuredClone(await this.prisma.fileUploadSession.findMany({
+      where: { tenantId, status: "completed", expiresAt: { lte: now }, OR: [
+        { cleanupError: COMPLETED_STAGING_PENDING },
+        { cleanupError: COMPLETED_STAGING_UNKNOWN, lastCleanupAt: { lte: staleBefore } }
+      ] },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }], take: Math.max(1, Math.min(limit, 100))
+    }));
+    const summary: FileUploadCleanupSummary = { scanned: rows.length, invalidated: 0, deletedObjects: 0, cleanupPending: 0, sessionIds: [] };
+    for (const row of rows) {
+      try {
+        const asset = await this.prisma.fileAsset.findFirst({ where: { id: row.fileAssetId, tenantId } });
+        const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never, { requireLiveTest: false });
+        const metadata = asset?.metadata as JsonRecord | null;
+        const staging = metadata?.stagingStorageKey;
+        if (!asset || !config || row.provider === "local_mock" || config.provider !== row.provider
+          || asset.storageProvider !== row.provider || asset.storageKey !== row.storageKey
+          || !["active", "delete_pending", "delete_in_progress", "deleted"].includes(asset.status)
+          || !row.completedAt || typeof staging !== "string" || !frozenFileContentHash(asset, config)) {
+          throw new ConflictException("已完成上传缺少原临时对象与存储位置依据，不能清理");
+        }
+        // Persist uncertainty before external DELETE. A lost claim acknowledgement
+        // must not become a second DELETE; later owners only observe this key.
+        const claimed = await this.prisma.$transaction(async tx => {
+          const current = await tx.fileAsset.findFirst({ where: { id: asset.id, tenantId } });
+          if (requestFingerprint(current) !== requestFingerprint(asset)) throw new ConflictException("原文件清理依据已变化");
+          return tx.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
+            updatedAt: row.updatedAt, storageKey: row.storageKey, provider: row.provider, fileAssetId: asset.id,
+            cleanupError: row.cleanupError, expiresAt: row.expiresAt, completedAt: row.completedAt },
+            data: { cleanupError: COMPLETED_STAGING_UNKNOWN, cleanupAttempts: { increment: 1 }, lastCleanupAt: now } });
+        });
+        if (claimed.count !== 1) continue;
+        summary.sessionIds.push(row.id);
+        const key = this.pendingObjectKey(staging);
+        const method = row.cleanupError === COMPLETED_STAGING_PENDING ? "DELETE" : "HEAD";
+        const signed = this.presign(config, method, key, "application/octet-stream", new Date(now.getTime() + 60_000));
+        const response = await this.objectRequest(signed.url, { method, headers: signed.headers });
+        const absent = method === "DELETE" ? response.ok || response.status === 404 : response.status === 404;
+        if (!absent) throw new ServiceUnavailableException("原临时对象清理结果尚未证实");
+        const recorded = await this.prisma.fileUploadSession.updateMany({ where: { id: row.id, tenantId, status: "completed",
+          storageKey: row.storageKey, fileAssetId: asset.id, cleanupError: COMPLETED_STAGING_UNKNOWN,
+          lastCleanupAt: now }, data: { cleanupError: null } });
+        if (recorded.count !== 1) throw new ConflictException("原临时对象清理收据已变化");
+        summary.deletedObjects += 1;
+      } catch {
+        // Do not overwrite the original marker with provider errors or credentials.
+        // Missing evidence stays unavailable; uncertain deletion stays HEAD-only.
+        summary.cleanupPending += 1;
+      }
+    }
+    return summary;
   }
 
   /**
-   * 过期上传会话的可重复清理。先把会话抢占为 cleanup_in_progress，再删除对象，
-   * 最后把元数据置为 failed；对象删除失败会保留 cleanupError，下一次运维执行可重试。
+   * 未完成的过期上传先抢占 cleanup_in_progress，再删临时对象并标记 failed。
+   * 已完成上传另读原冻结收据回收临时对象，保持 completed/正式证据不变；
+   * freeze_pending 不进入任何过期清理，未知冻结仍只能核对原结果。
    */
   async cleanupExpiredUploadSessions(tenantId: string, limit = 50): Promise<FileUploadCleanupSummary> {
     const now = new Date();
@@ -525,14 +587,18 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       if (deleted) deletedObjects += 1;
       else cleanupPending += 1;
     }
+    const completed = await this.cleanupCompletedStagingObjects(tenantId, limit);
+    deletedObjects += completed.deletedObjects;
+    cleanupPending += completed.cleanupPending;
+    sessionIds.push(...completed.sessionIds);
     await this.operationLog?.record({
       tenantId,
       action: "file.upload.cleanup-expired",
       targetType: "file-upload-session",
       detail: "清理过期文件上传会话",
-      metadata: { scanned: rows.length, invalidated, deletedObjects, cleanupPending }
+      metadata: { scanned: rows.length + completed.scanned, invalidated, deletedObjects, cleanupPending }
     });
-    return { scanned: rows.length, invalidated, deletedObjects, cleanupPending, sessionIds };
+    return { scanned: rows.length + completed.scanned, invalidated, deletedObjects, cleanupPending, sessionIds };
   }
 
   /**
@@ -845,7 +911,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           ...(knowledgeInput || frozen ? { updatedAt: session.updatedAt, fileAssetId: asset.id,
             provider: asset.storageProvider, storageKey: asset.storageKey } : {}) },
         data: { status: "completed", completedAt: new Date(), failureReason: null,
-          ...(frozen ? { storageKey: frozen.storageKey } : {}) }
+          ...(frozen ? { storageKey: frozen.storageKey, cleanupError: COMPLETED_STAGING_PENDING } : {}) }
       });
       if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
       const assetClaim = await tx.fileAsset.updateMany({
@@ -912,9 +978,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
     if (!config) throw new ServiceUnavailableException("文件平台已停用，无法生成下载地址");
     const contentMetadata = asset.metadata as JsonRecord | null;
-    if (contentMetadata?.fileUploadVersion === 2 && (contentMetadata.fileContentVersion !== 1
-      || contentMetadata.contentHash !== asset.checksum || !/^[a-f0-9]{64}$/u.test(asset.checksum ?? "")
-      || contentMetadata.storageLocationHash !== this.retentionLocationHash(config))) {
+    if (contentMetadata?.fileUploadVersion === 2 && !frozenFileContentHash(asset, config)) {
       throw new ConflictException("正式文件内容版本或原存储位置无法核实");
     }
     await recheck();
@@ -1209,7 +1273,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   private async deleteObject(config: TenantIntegrationRuntimeConfig, storageKey: string, at: Date) {
     const expiresAt = new Date(at.getTime() + 5 * 60 * 1000);
     const signed = this.presign(config, "DELETE", storageKey, "application/octet-stream", expiresAt);
-    const response = await fetchWithTimeout(signed.url, { method: "DELETE", headers: signed.headers });
+    const response = await this.objectRequest(signed.url, { method: "DELETE", headers: signed.headers });
     return response.status === 404 || response.ok;
   }
 

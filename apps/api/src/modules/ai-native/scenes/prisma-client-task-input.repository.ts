@@ -5,15 +5,16 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialScope } from './prisma-client-scene-material.repository';
 import type { AiClientTaskDb } from './client-task.authority';
+import { clientSqlInitialRevisionSchema, clientSqlPolicyRevisionSchema } from './client-sql-revisions';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const clientTaskCommandSchema = aiClientTaskReadRequestSchema;
 const inputSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
   channel: z.enum(['wechat_miniprogram', 'app', 'web']), principalKind: z.enum(['personal', 'corporate']), principalHash: hash,
-  creationKey: id.max(128), materialRef: z.string().uuid(), materialInputHash: hash, materialHash: hash, materialRevision: z.literal(1),
-  bindingHash: hash, policyId: z.string().uuid(), policyRevision: z.number().int().min(1).max(4294967294), policyHash: hash,
-  sceneCode: id.max(128), sceneVersion: id.max(64), inputHash: hash, revision: z.literal(1),
+  creationKey: id.max(128), materialRef: z.string().uuid(), materialInputHash: hash, materialHash: hash, materialRevision: clientSqlInitialRevisionSchema,
+  bindingHash: hash, policyId: z.string().uuid(), policyRevision: clientSqlPolicyRevisionSchema, policyHash: hash,
+  sceneCode: id.max(128), sceneVersion: id.max(64), inputHash: hash, revision: clientSqlInitialRevisionSchema,
   dispatchState: z.literal('UNKNOWN'), createdAt: z.date(), expiresAt: z.date() }).strict();
 export type AiClientTaskInput = z.infer<typeof inputSchema>;
 export const clientTaskInputHash = (row: Omit<AiClientTaskInput, 'inputHash'>) => {

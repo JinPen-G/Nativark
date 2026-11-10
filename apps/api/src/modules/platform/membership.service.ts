@@ -40,7 +40,7 @@ import { hashPassword } from "../../common/password";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository, type CustomerProfileUpdateData } from "./shared-customer.repository";
 import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
-import { getRequestDataScope, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 import { lockActiveCategoryBinding } from "../rental-core/category-active-write";
 
 const mask = (value?: string) => {
@@ -613,6 +613,36 @@ export class MembershipService {
     if (!order) throw new NotFoundException("会员不存在或不在当前账号的数据范围内");
   }
 
+  /** Minimal name-edit discovery under the original personal-member list ACL.
+   * Tenant member master data is shared; booking/order visibility is a separate
+   * responsibility. Never load accounts, qualifications, contacts or orders. */
+  async listPersonalProfileCandidatesPage(tenantId: string, input: { limit: number; name?: string; customerId?: string; cursor?: string }) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['limit', 'name', 'customerId', 'cursor'].includes(key))
+      || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50
+      || [input.customerId, input.cursor].some(value => value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,191}$/u.test(value)))
+      || input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 191))
+      throw new BadRequestException('普通资料候选查询参数无效');
+    const identity = getRequestIdentity();
+    if (!identity?.userId || identity.tenantId !== tenantId || !identity.workspaceId || identity.isSaasAdmin || identity.staffApi)
+      throw new ForbiddenException('普通资料候选缺少当前营运范围');
+    const actorId = identity.userId, workspaceId = identity.workspaceId;
+    const rows = await this.prisma.customerProfile.findMany({
+      where: { tenantId, customerType: 'personal', mergedIntoCustomerId: null, membership: { isNot: null },
+        ...(input.customerId ? { id: input.customerId } : {}), ...(input.cursor ? { AND: [{ id: { lt: input.cursor } }] } : {}),
+        ...(input.name ? { name: { contains: input.name.trim() } } : {}) },
+      select: { id: true, name: true, phoneMasked: true, membership: { select: { status: true } } },
+      take: input.limit + 1, orderBy: { id: 'desc' }
+    });
+    const current = getRequestIdentity();
+    if (current?.userId !== actorId || current.tenantId !== tenantId || current.workspaceId !== workspaceId || current.isSaasAdmin || current.staffApi)
+      throw new ForbiddenException('普通资料候选读取期间范围变化');
+    const page = rows.slice(0, input.limit);
+    if (page.some(row => !row.membership)) throw new ConflictException('普通资料候选会员关联不可用');
+    return { rows: page.map(row => ({ customerId: row.id, name: row.name, phoneMasked: row.phoneMasked,
+      membershipStatus: row.membership!.status as PersonalMembershipMember['membershipStatus'] })), truncated: rows.length > input.limit,
+      ...(rows.length > input.limit ? { nextCursor: page[page.length - 1].id } : {}) };
+  }
+
   async listPersonalMembers(tenantId: string): Promise<PersonalMembershipMember[]> {
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId, customerType: "personal", membership: { isNot: null } },
@@ -901,6 +931,12 @@ export class MembershipService {
     };
   }
 
+  /** Opening needs the tenant's plan count, not plan/version/benefit contents.
+   * Same tenant-only population as listPlans, including drafts/empty plans. */
+  async countPlans(tenantId: string): Promise<number> {
+    return this.prisma.customerMembershipPlan.count({ where: { tenantId } });
+  }
+
   async listPlans(tenantId: string): Promise<CustomerMembershipPlan[]> {
     const rows = await this.prisma.customerMembershipPlan.findMany({
       where: { tenantId }, include: { versions: { orderBy: { version: "desc" } } }, orderBy: [{ targetType: "asc" }, { code: "asc" }]
@@ -1097,7 +1133,18 @@ export class MembershipService {
     tx?: Prisma.TransactionClient
   ): Promise<RentalMembershipSnapshot> {
     const db = tx ?? this.prisma;
-    if (tx) await this.lockBookingCustomers(tenantId, personalCustomerId, input?.corporateCustomerId, tx);
+    if (tx) {
+      await this.lockBookingCustomers(tenantId, personalCustomerId, input?.corporateCustomerId, tx);
+      // Qualification-type writers serialize on this workspace. Acquire their
+      // mutex before reading target capability acceptance, not afterwards at
+      // inventory admission. This order remains customers -> workspace -> stock.
+      const workspace = (await tx.$queryRaw<Array<{ id: string; status: string }>>(Prisma.sql`
+        SELECT id, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE
+      `))[0];
+      // WorkspaceStatus.ACTIVE is mapped to 'active' in MySQL. Raw SQL does
+      // not apply Prisma's enum projection; frozen/disabled must still reject.
+      if (!workspace || workspace.id !== workspaceId || workspace.status !== 'active') throw new ConflictException("经营空间不可用，不能核定新业务资格");
+    }
     await this.requireWorkspace(tenantId, workspaceId, tx);
     const personal = await this.requireCustomer(tenantId, personalCustomerId, "personal", tx);
     const personalLink = await this.requireMembership(tenantId, personalCustomerId, tx);
@@ -1105,7 +1152,10 @@ export class MembershipService {
       db.customerQualificationRef.findMany({
         where: { tenantId, customerId: personalCustomerId }, include: { currentRevision: true }, orderBy: { qualificationType: "asc" }
       }),
-      db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
+      tx ? tx.$queryRaw<Prisma.CustomerMembershipQualificationTypeGetPayload<object>[]>(Prisma.sql`
+        SELECT * FROM customer_membership_qualification_types
+        WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND status = 'enabled' LOCK IN SHARE MODE
+      `) : db.customerMembershipQualificationType.findMany({ where: { tenantId, workspaceId, status: "enabled" } })
     ]);
     const qualifications = qualificationRows.filter((row) => {
       const revision = row.currentRevision;

@@ -450,6 +450,27 @@ void (async () => {
     assert.equal(journal.readServiceExecutionReference(storage, reference.scope, reference.orderId).blocked, true);
     rows.set(storedKey, JSON.stringify(reference));
     journal.clearServiceExecutionReference(storage, reference); assert.equal(rows.size, 0);
+    const returnJournal = {};
+    new Function("exports", "require", ts.transpileModule(fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/return-operation-reference.ts"), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(returnJournal, name => {
+        assert.match(name, /settings-operation-reference$/); return helpers;
+      });
+    const payload = { items: [{ allocationId: "actual-allocation", quantity: 1 }] };
+    for (const kind of ["partial", "inspection"]) {
+      const original = await returnJournal.retainReturnOperation(storage, reference.scope, "order", kind, payload);
+      const retry = await returnJournal.retainReturnOperation(storage, reference.scope, "order", kind, structuredClone(payload));
+      assert.equal(retry.key, original.key, "lost responses and reloads retain the original batch");
+      await assert.rejects(returnJournal.retainReturnOperation(storage, reference.scope, "order",
+        kind === "partial" ? "inspection" : "partial", payload), /不能切换归还入口/);
+      await assert.rejects(returnJournal.retainReturnOperation(storage, reference.scope, "order", kind,
+        { items: [{ allocationId: "actual-allocation", quantity: 2 }] }), /原归还批次/);
+      returnJournal.clearReturnOperation(storage, original);
+      const next = await returnJournal.retainReturnOperation(storage, reference.scope, "order", kind, payload);
+      assert.notEqual(next.key, original.key, "only a confirmed receipt permits the next real batch");
+      returnJournal.clearReturnOperation(storage, next);
+    }
+    await assert.rejects(returnJournal.retainReturnOperation(undefined, reference.scope, "order", "partial", payload));
+    assert.equal(rows.size, 0);
     const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), "utf8");
     assert.match(source, /retainServiceExecutionReference\(serviceReferenceStorage\(\), command.reference\)/);
     assert.match(source, /command.reference.orderId, command.reference.occurrenceId, command.data, command.reference.key/);

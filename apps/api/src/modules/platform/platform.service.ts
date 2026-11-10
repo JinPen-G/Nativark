@@ -19,6 +19,7 @@ import {
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   RecordCustomerCorporateCreditPaymentRequest,
+  ReverseCustomerCorporateCreditPaymentRequest,
   RecordCustomerCorporateCreditMaturityRequest,
   SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
@@ -2604,6 +2605,18 @@ export class PlatformService {
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     if (getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined) throw new ForbiddenException("读取债权到期依据须当前完整空间财务范围");
     return this.requireCustomerCorporateSettlement().readMaturity(tenantId, customerId, ledgerId, requireRequestWorkspaceId());
+  }
+
+  readCustomerCreditPaymentReversal(customerId: string, paymentId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.requireCustomerCorporateSettlement().readPaymentReversal(currentUser?.tenantId ?? requireRequestTenantId(), customerId, paymentId);
+  }
+
+  reverseCustomerCreditPayment(customerId: string, paymentId: string, input: ReverseCustomerCorporateCreditPaymentRequest,
+    currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporateSettlement().reversePayment(tenantId, customerId, paymentId, input);
   }
 
   recordCustomerCreditPayment(

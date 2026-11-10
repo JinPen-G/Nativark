@@ -60,5 +60,19 @@ const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-cor
   dependentReturns = [row];
   const inspected = await repository.listInspections("tenant", "order", tx);
   assert.equal(inspected[0].id, "pickup", "事务内检查查询不能回退到根 Prisma 客户端");
+  const pickupItems = [{ allocationId: 'replacement-allocation', itemGroupId: 'replacement-model', assetId: 'replacement-asset', quantity: 1 }];
+  let inserted;
+  tx.rentalInspectionRecord.create = async ({ data }) => { inserted = { ...data }; return inserted; };
+  await repository.insertInspection({ id: 'replacement-pickup', tenantId: 'tenant', orderId: 'order', stage: 'pickup',
+    templateId: 'pickup-template', templateCode: 'PICKUP', templateVersion: '2', exchangeId: 'exchange-original',
+    pickupItems, customerConfirmedAt: '2026-11-01T00:00:00Z', results: { usage_reading: 100 },
+    usageReadings: [{ fieldCode: 'usage_reading', current: 100 }], exceptions: [], attachments: [], operator: 'operator',
+    createdAt: '2026-11-01T00:00:00Z' }, tx);
+  dependentReturns = [inserted];
+  const [savedPickup] = await repository.listInspections('tenant', 'order', tx);
+  assert.deepEqual(savedPickup.pickupItems, pickupItems); assert.equal(savedPickup.exchangeId, 'exchange-original');
+  assert.equal(savedPickup.customerConfirmedAt, '2026-11-01T00:00:00Z');
+  assert.equal(savedPickup.results.__r1InspectionMeta, undefined);
+  assert.deepEqual(savedPickup.usageReadings, [{ fieldCode: 'usage_reading', current: 100 }]);
   console.log("usage reading validation passed: optional blanks, finite readings, nonnegative delta, immutable originals, correction history and dependent baseline guard");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

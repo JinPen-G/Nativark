@@ -36,5 +36,22 @@ for (const decision of ['approved', 'rejected']) test(`actual approval repositor
   const principal = { scopeId: 'scope-a', actorKind: 'user', actorId: 'server-user', audience: 'staff' };
   const first = await repository.decide(command, principal);
   assert.deepEqual(await repository.decide(command, principal), first); assert.equal(writes, 1);
+  const original = structuredClone(row);
+  // A matching payload/decision is not the same original approval receipt.
+  for (const [field, value] of [['taskId', 'other-task'], ['audience', 'OPERATOR'],
+    ['expiresAt', new Date(Date.parse(req.payload.expiresAt) - 1000)],
+    ['issuedAt', new Date('2100-01-01T00:00:00.000Z')]]) {
+    row = { ...structuredClone(original), [field]: value };
+    await assert.rejects(repository.decide(command, principal), error => error.code === 'CONFLICT');
+    assert.equal(writes, 1, 'inconsistent receipt must not cause another approval');
+    assert.equal(row[field] instanceof Date ? row[field].toISOString() : row[field], value instanceof Date ? value.toISOString() : value);
+  }
+  row = original;
+  assert.deepEqual(await repository.decide(command, principal), first);
+  const readVersion = tx.aiProposalVersion.findFirst;
+  tx.aiProposalVersion.findFirst = async () => ({ ...await readVersion(), expiresAt: new Date(Date.parse(req.payload.expiresAt) - 1000) });
+  await assert.rejects(repository.decide(command, principal), error => error.code === 'CONFLICT');
+  assert.equal(writes, 1);
+  tx.aiProposalVersion.findFirst = readVersion;
   await assert.rejects(repository.decide({ ...command, decision: decision === 'approved' ? 'rejected' : 'approved' }, principal), error => error.code === 'CONFLICT');
 });

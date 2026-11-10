@@ -13,6 +13,31 @@ export function byokMeterScene(sceneCode: string, association: AiUsageAssociatio
 /** Operational abuse limits, not a supplier fee or tenant money allowance.
  * These limits grant no tool, task, capability, subscription or dispatch rights. */
 export const BYOK_METER_LIMITS = Object.freeze({ totalCalls: 4294967295, maxConcurrent: 4, maxCallsPerRun: 32 });
+/** Versioned policy metadata must not version away original capacity. Admission
+ * holds this canonical tenant lock inside its existing financial transaction;
+ * counts use original scene/Run attribution, not a config/price namespace.
+ * These are invocation counts, never a sum of money, tokens or task resources. */
+export async function assertByokMeterLimits(tx: Pick<Prisma.TransactionClient, 'aiScope' | '$queryRaw' | 'aiBudgetReservation'>,
+  input: { tenantScopeId: string; tenantId: string; sceneCode: string; runId: string }) {
+  const scope = await tx.aiScope.findUnique({ where: { id: input.tenantScopeId },
+    select: { id: true, kind: true, tenantId: true, workspaceId: true } });
+  if (!scope || scope.id !== input.tenantScopeId || scope.kind !== 'TENANT'
+    || scope.tenantId !== input.tenantId || scope.workspaceId !== null) throw new BudgetError('FORBIDDEN');
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_scopes WHERE id = ${input.tenantScopeId} FOR UPDATE`);
+  const where = { tenantId: input.tenantId, sceneCode: input.sceneCode,
+    status: { in: ['reserved', 'pending_reconciliation', 'settled'] } };
+  // Expiry, profile rotation and mode changes do not prove non-consumption.
+  // Old monetary reservations also occupy an invocation slot, without turning
+  // their amounts into a BYOK fee. Only proven released calls leave capacity.
+  const [total, concurrent, runCalls] = await Promise.all([
+    tx.aiBudgetReservation.count({ where }),
+    tx.aiBudgetReservation.count({ where: { ...where, status: { in: ['reserved', 'pending_reconciliation'] } } }),
+    tx.aiBudgetReservation.count({ where: { ...where, runId: input.runId } })
+  ]);
+  if (![total, concurrent, runCalls].every(value => Number.isSafeInteger(value) && value >= 0)) throw new BudgetError('UNAVAILABLE');
+  if (total >= BYOK_METER_LIMITS.totalCalls || concurrent >= BYOK_METER_LIMITS.maxConcurrent
+    || runCalls >= BYOK_METER_LIMITS.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
+}
 export async function ensureByokMeterPolicy(db: Pick<Prisma.TransactionClient, 'aiBudgetPolicy'>,
   key: { scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; sceneCode: string },
   association: AiUsageAssociationDraft, sceneCode: string, entitled: boolean) {

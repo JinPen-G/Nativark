@@ -24,7 +24,10 @@ const identity = ({ authorizedAt: _at, requestId: _id, ...context }: AiExecution
  */
 export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthority {
   protected readonly modelStep: boolean = false;
-  protected get startEffect(): 'none' | 'possible' { return this.modelStep ? 'possible' : 'none'; }
+  /** Specialized effect authorities may opt into a durable POSSIBLE marker.
+   * This does not add their tools to the readonly ceiling or grant execution. */
+  protected get possibleEffect(): boolean { return this.modelStep; }
+  protected get startEffect(): 'none' | 'possible' { return this.possibleEffect ? 'possible' : 'none'; }
   protected async additionalEvidence(_step: AiStep, _artifact: AiTaskResultArtifact | null,
     _charges: AiTaskExecutionCharge[], _context: AiExecutionContext): Promise<unknown> { return null; }
   protected accepts(step: AiStep, operation: string) {
@@ -43,7 +46,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     // the transition has already CAS-incremented the run revision, so a
     // separate snapshot would see the pre-transition lease and falsely deny.
     const db = tx ?? this.db;
-    if (!command?.lease || !['start', 'result_observed', ...(this.modelStep ? ['result_unknown'] : [])].includes(command.reason)) throw unavailable();
+    if (!command?.lease || !['start', 'result_observed', ...(this.possibleEffect ? ['result_unknown'] : [])].includes(command.reason)) throw unavailable();
     const context = structuredClone(await this.authorization.resolve(command.taskId, 'transition_task'));
     const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
     const task = await db.aiTask.findFirst({ where: access.where });
@@ -65,7 +68,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     const matching = plan.steps.filter(p => step.actionId === `ai-action-${requestFingerprint({
       version: 'ai-step-registration-1', scope: access.scope, taskId: key.taskId, registrationRef: p.registrationRef })}`);
     if (matching.length !== 1 || !this.accepts(step, matching[0].operation) || matching[0].toolCode !== step.toolCode
-      || matching[0].toolVersion !== step.toolVersion || step.effect !== (this.modelStep && command.reason !== 'start' ? 'POSSIBLE' : 'NONE')) throw unavailable();
+      || matching[0].toolVersion !== step.toolVersion || step.effect !== (this.possibleEffect && command.reason !== 'start' ? 'POSSIBLE' : 'NONE')) throw unavailable();
     const lease = { taskId: key.taskId, ...command.lease, expiresAt: run.leaseExpiresAt.toISOString() };
     const original = command.reason !== 'start' && this.plans.resolveOriginal
       ? structuredClone(await this.plans.resolveOriginal({ taskId: task.id, registrationRef: matching[0].registrationRef,
@@ -91,7 +94,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     const previous: AiStepStateDraft = { stepId: step.id, runId: step.runId, sequence: step.sequence, revision: step.revision,
       toolCode: step.toolCode as AiStepStateDraft['toolCode'], toolVersion: step.toolVersion, actionId: step.actionId,
       requestFingerprint: step.requestFingerprint, outcome: command.reason === 'start' ? { status: 'pending', effect: 'none' }
-        : { status: 'running', effect: this.modelStep ? 'possible' : 'none' } };
+        : { status: 'running', effect: this.possibleEffect ? 'possible' : 'none' } };
     if (step.status !== (command.reason === 'start' ? 'PENDING' : 'RUNNING') || step.resultRef !== null || step.errorCode !== null) throw denied();
     let resultRef: string | null = null;
     let resultBinding: unknown = null;
@@ -116,7 +119,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
         || BigInt(artifactFence) > BigInt(currentFence)
         || (artifactFence === currentFence && artifact.leaseOwnerId !== run.leaseOwnerId)) throw denied();
       const bytes = Buffer.byteLength(JSON.stringify(artifact.payload), 'utf8');
-      const startedMarker = this.modelStep && command.reason === 'result_unknown' && artifact.outcome === 'RUNNING';
+      const startedMarker = this.possibleEffect && command.reason === 'result_unknown' && artifact.outcome === 'RUNNING';
       if (requestFingerprint(artifact.payload) !== artifact.contentHash
         || (startedMarker ? artifact.contentHash !== requestFingerprint({}) || artifact.outputBytes !== 0n || artifact.activeMs !== 0n
           : BigInt(bytes) !== artifact.outputBytes)
@@ -138,12 +141,12 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
         code: 'AI_RESULT_UNKNOWN', message: '模型调用结果待核对，不自动重新派发。', retryable: false, nextAction: 'reconcile', missingFields: [] } }
         : artifact.outcome === 'SUCCEEDED' ? { status: 'succeeded', effect: 'none', facts: [] }
         : { status: 'failed', effect: 'none', error: { code: artifact.errorCode as Exclude<AiErrorCode, 'AI_RESULT_UNKNOWN'>,
-          message: this.modelStep ? '模型步骤未完成，请通过人工入口处理。' : '只读步骤未完成，请通过人工入口处理。',
+          message: this.possibleEffect ? '模型步骤未完成，请通过人工入口处理。' : '只读步骤未完成，请通过人工入口处理。',
           retryable: false, nextAction: 'manual', missingFields: [] } };
     }
     const current = structuredClone(await this.authorization.resolve(command.taskId, 'transition_task'));
     if (identity(context) !== identity(current) || run.leaseExpiresAt <= this.wall() || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
-    return { context: current, transitionAllowed: true, authorizationKey: `persisted-${this.modelStep ? 'model' : 'readonly'}-${requestFingerprint({
+    return { context: current, transitionAllowed: true, authorizationKey: `persisted-${this.possibleEffect ? 'model' : 'readonly'}-${requestFingerprint({
       planHash: saved.planHash, authorityHash: proof.authorityHash, policyVersion: proof.policyVersion, resultBinding })}`, taskId: key.taskId,
       evidenceId: command.evidenceId, evidenceRevision: step.revision, expiresAt: new Date(Math.min(run.leaseExpiresAt.getTime(), Date.parse(proof.expiresAt))).toISOString(),
       reason: command.reason, previous, next: { ...previous, revision: previous.revision + 1, outcome }, previousResultRef: null, resultRef };

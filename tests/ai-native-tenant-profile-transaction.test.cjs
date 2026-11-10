@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+const { AI_CONTRACT_DRAFT_VERSION } = require('@rental-os/shared');
 const { createPersistedTenantModelConfiguration, createScopeBoundTenantModelConnection } = require('../apps/api/src/modules/ai-native/tenant-model-config.composition');
 const { SecretBox } = require('../apps/api/src/common/secret-box');
 const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
@@ -60,7 +61,9 @@ function harness() {
   const authorize = async requested => {
     if (!state.authorized || !matches(requested, context) || Object.keys(requested).length !== 3) throw Error('synthetic authority denied');
   };
-  const secrets = new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-only' : 'production' });
+  // Keep production-strength validation active; unrelated config keys are absent.
+  const secrets = new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY'
+    ? 'synthetic-encryption-only-0123456789' : key === 'NODE_ENV' ? 'production' : undefined });
   const service = () => createPersistedTenantModelConfiguration({ db, authorize, secrets });
   return { state, db, service, authorize, secrets };
 }
@@ -155,7 +158,10 @@ test('platform switch retains exact ciphertext, disables BYOK and moves both rev
   await h.service().changeMode(context, { mode: 'tenant_managed', expectedRevision: 2 });
   assert.equal(h.state.profiles[0].enabled, true); assert.equal(h.state.profiles[0].configRevision, 3);
   assert.equal(h.state.configurations[0].revision, 3);
-  const scopes = { resolveRoutingScopes: async () => ({ context: { actor: { kind: 'user', userId: context.actorId }, scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId } },
+  const scopes = { resolveRoutingScopes: async () => ({ context: {
+    contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: 'synthetic-model-route', authorizedAt: new Date().toISOString(), audience: 'operator',
+    actor: { kind: 'user', userId: context.actorId }, scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId },
+    access: { permissions: ['ai:use'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } },
     configurationScope: { id: h.state.scope.id, kind: 'TENANT', tenantId: context.tenantId } }) };
   const resolver = createScopeBoundTenantModelConnection(h.service(), scopes);
   await assert.rejects(resolver.resolve(context, old), code('CONFIG_INVALID'));
@@ -174,7 +180,15 @@ test('clear and disabled configuration stop DEFAULT Profile without granting any
 test('Profile write and transaction commit failures roll back configuration and Profile together', async () => {
   for (const failure of ['profile', 'commit']) {
     const h = harness(); h.state.fail = failure;
-    await assert.rejects(h.service().save(context, settings), /synthetic/);
+    if (failure === 'profile') {
+      await assert.rejects(h.service().save(context, settings), /synthetic/);
+    } else {
+      // A discarded fixture draft is not proof of rollback to the caller after
+      // the callback reached COMMIT. Keep that response unknown, never retry.
+      await assert.rejects(h.service().save(context, settings), error => error.code === 'AI_RESULT_UNKNOWN'
+        && error.retryable === false && error.nextAction === 'reconcile');
+    }
+    assert.equal(h.state.calls.length, 1, 'an uncertain COMMIT never retries the transaction');
     assert.equal(h.state.configurations.length, 0); assert.equal(h.state.profiles.length, 0);
   }
 });

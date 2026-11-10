@@ -92,6 +92,182 @@ test('versioned text challenge and unregistered probe cannot grant dispatch or l
   assert.equal(sent, 0);
 });
 
+test('eight-kind selection keeps missing objective methods unverified without executable descriptors or text fallback', async () => {
+  const { AI_CAPABILITY_PROBE_KINDS_DRAFT: kinds } = require('@rental-os/shared');
+  const { textProbeCommandSchema, textProbeDescriptorSchema, textProbePreparation, textProbeIntent,
+    textProbeMethod, textProbeRequirements } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  assert.deepEqual(kinds, ['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools', 'embedding', 'reasoning']);
+  for (const capability of kinds) assert.equal(textProbeCommandSchema.safeParse({ operationId: 'probe',
+    profileKey: 'default', profileFingerprint: 'a'.repeat(64), capability }).success, true);
+  for (const capability of kinds.slice(0, 6)) assert.deepEqual(textProbePreparation('probe', 'scope', capability), textProbeIntent('probe', 'scope', capability));
+  assert.deepEqual(textProbePreparation('probe', 'scope'), textProbeIntent('probe', 'scope', 'text'));
+  assert.equal(textProbeCommandSchema.safeParse({ operationId: 'probe', profileKey: 'default',
+    profileFingerprint: 'a'.repeat(64), capability: 'arbitrary' }).success, false);
+  let reads = 0;
+  const neverRead = async () => { reads++; assert.fail('no objective method cannot consume fabricated live receipts or ledger rows'); };
+  const verifier = new PrismaTextCapabilityReceiptRepository({ $queryRaw: neverRead, $transaction: neverRead });
+  for (const capability of ['embedding', 'reasoning']) {
+    const command = { operationId: 'probe', profileKey: 'default', profileFingerprint: 'a'.repeat(64), capability };
+    const prepared = textProbePreparation(command.operationId, 'scope', capability);
+    assert.equal(prepared.intent, null); assert.equal(prepared.expected, null);
+    assert.equal(textProbeMethod(command), `${capability}-unavailable-1`);
+    assert.deepEqual(textProbeRequirements(command), capability === 'reasoning' ? ['text', 'reasoning'] : [capability]);
+    assert.notEqual(prepared.intentHash, textProbeIntent('probe', 'scope').intentHash);
+    assert.notEqual(prepared.intentHash, textProbePreparation('another-probe', 'scope', capability).intentHash);
+    if (capability === 'embedding') {
+      const { prepareGatewayEmbeddingProbeIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+      assert.throws(() => prepareGatewayEmbeddingProbeIntent(textProbeIntent('probe', 'scope', capability).intent,
+        { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }), { code: 'CAPABILITY_UNSUPPORTED' });
+    }
+    else {
+      const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+      // A native template is not a grant to use it on an ordinary text scene.
+      assert.throws(() => prepareGatewayTextIntent(textProbeIntent('probe', 'scope', capability).intent,
+        { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }, 'invoke'), { code: 'CAPABILITY_UNSUPPORTED' });
+    }
+    const descriptor = { command, context, scopeId: 'scope', profileId: profile.id, methodVersion: 'text-echo-1',
+      callId: 'old-text-call', intentHash: prepared.intentHash, challengeHash: prepared.challengeHash,
+      profileFingerprint: command.profileFingerprint, configuration: {}, configurationHash: 'a'.repeat(64), stepId: 'step', runId: 'run' };
+    assert.equal(textProbeDescriptorSchema.safeParse(descriptor).success, false);
+    assert.equal(textProbeDescriptorSchema.safeParse({ ...descriptor, methodVersion: textProbeMethod(command) }).success, false);
+    assert.equal(await verifier.verify({ profile, capability, status: 'supported', source: 'connection_test',
+      evidenceHash: 'a'.repeat(64), checkedAt: new Date('2026-11-07T00:00:00Z'), expiresAt: new Date('2026-11-07T01:00:00Z'),
+      details: { receiptId: 'forged-live-receipt', verification: { evidence: 'live', methodVersion: textProbeMethod(command),
+        capability, profileFingerprint: 'a'.repeat(64) } } }), false);
+  }
+  assert.equal(reads, 0);
+  // Explicit platform attribution uses the production authority/application;
+  // Guard/profile/DB ports here are offline substitutes, not native authorization.
+  const { PlatformCapabilityProbeAuthority } = require('../apps/api/src/modules/ai-native/platform-capability-probe/platform-probe.authority');
+  const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const selected = { ...profile, id: 'platform-profile', scopeId: 'platform-scope', scopeKind: 'PLATFORM',
+    serviceMode: 'platform_managed', allowedCapabilities: ['text'] };
+  const platformContext = { actorId: context.actorId, scopeKind: 'platform' };
+  let revoked = false, reserveAttempts = 0;
+  const authorityFor = command => new PlatformCapabilityProbeAuthority({ profileId: selected.id,
+    management: { manage: async () => { if (revoked) throw new ModelGatewayError('FORBIDDEN'); } },
+    profiles: { get: async () => structuredClone(selected) },
+    scopes: { resolveRoutingScopes: async () => ({ context: { actor: { kind: 'saas_admin', userId: context.actorId },
+      audience: 'operator', scope: { kind: 'platform' }, requestId: 'platform-request', authorizedAt: '2026-11-07T00:00:00Z' },
+      consumerScope: { id: selected.scopeId, kind: 'PLATFORM' }, configurationScope: { id: selected.scopeId, kind: 'PLATFORM' } }) },
+    bindings: { resolveForReserve: async () => { reserveAttempts++; assert.fail('no platform reserve for absent methods'); } }
+  }, platformContext, command);
+  const app = probeApplicationWithBoundaryPorts();
+  app.input = { ...app.input, identity: { currentRequest: async () => ({ context: platformContext, binding: 'platform-binding' }),
+    authority: (_context, command) => authorityFor(command) } };
+  for (const capability of ['embedding', 'reasoning']) {
+    const command = { operationId: `platform-${capability}`, profileKey: selected.profileKey,
+      profileFingerprint: capabilityProfileFingerprint(selected), capability };
+    const prepared = await app.prepareCurrent(command);
+    assert.equal(prepared.intent, null); assert.equal(prepared.configuration.consumerScope.kind, 'platform');
+    assert.equal(Object.hasOwn(prepared.configuration, 'tenantId'), false);
+    assert.equal((await app.reconcileCurrent(command)).reason, capability === 'embedding' ? 'capability_not_enabled' : 'objective_method_unavailable');
+    assert.equal((await app.preflightCurrent(command)).allowed, false);
+    const held = { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' },
+      priceVersion: 'price', expiresAt: new Date('2026-11-07T01:00:00Z') };
+    assert.equal((await app.runHeldCurrent(command, held)).status, 'unverified');
+    await assert.rejects(app.prepareHeldInvocationCurrent(command, held), { code: 'CAPABILITY_UNSUPPORTED' });
+    const authority = authorityFor(command), route = await authority.resolve(platformContext, textProbeRequirements(command));
+    await assert.rejects(authority.authorizeDispatch({ actorId: context.actorId }, {}, route.route), { code: 'CAPABILITY_UNSUPPORTED' });
+    revoked = true;
+    try { await assert.rejects(app.reconcileCurrent(command), { code: 'FORBIDDEN' }); }
+    finally { revoked = false; }
+  }
+  assert.equal(reserveAttempts, 0);
+});
+
+test('Responses reasoning channel requires native items and original counters, never a final text echo', async () => {
+  const { ResponsesAdapter, AnthropicMessagesAdapter } = require('../apps/api/src/modules/ai-native/native-messages.adapter');
+  const { textProbeIntent, textProbePreparation, REASONING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { ModelGatewayError, modelAdapterSupportsCapabilities, modelRequestSchema } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+  const prepared = textProbeIntent('native-reasoning', 'scope', 'reasoning');
+  assert.deepEqual(textProbePreparation('native-reasoning', 'scope', 'reasoning', 'openai_responses'), prepared);
+  assert.equal(textProbePreparation('native-reasoning', 'scope', 'reasoning', 'openai_chat_completions').intent, null);
+  assert.equal(prepared.intent.requiredFeatures.includes('reasoning'), true);
+  assert.equal(prepared.intent.messages[0].content[0].text.includes('PROBE_'), false);
+  let payload = { status: 'completed', output: [{ type: 'reasoning', id: 'reasoning-1', summary: [{ text: 'unexported synthetic thought' }] },
+    { type: 'message', id: 'answer', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: prepared.expected }] }],
+    usage: { input_tokens: 5, output_tokens: 7, total_tokens: 12, output_tokens_details: { reasoning_tokens: 4 } } };
+  const sent = [], recorded = [];
+  const adapter = new ResponsesAdapter({ post: async request => { sent.push(JSON.parse(request.body)); return { status: 200, body: JSON.stringify(payload) }; } });
+  const value = { callId: prepared.intent.requestId, model: 'synthetic-reasoning', messages: [{ role: 'user', content: prepared.intent.messages[0].content[0].text }],
+    maxOutputTokens: 32, features: ['reasoning'], signal: new AbortController().signal, recordUsage: async usage => recorded.push(usage) };
+  assert.equal(modelRequestSchema.safeParse({ callId: value.callId, model: value.model, messages: value.messages,
+    maxOutputTokens: value.maxOutputTokens, features: ['reasoning'] }).success, false); // No new grant through the old loose ingress.
+  const result = await adapter.generate(value, 'offline-reasoning-key', { baseUrl: 'https://offline.example/v1' });
+  assert.equal(result.text, prepared.expected); assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 7 });
+  assert.deepEqual(recorded, [{ inputTokens: 5, outputTokens: 7 }]);
+  assert.equal(result.reasoningEvidence.methodVersion, REASONING_PROBE_METHOD); assert.equal(result.reasoningEvidence.reasoningTokens, 4);
+  assert.equal(result.reasoningEvidence.itemCount, 1); assert.match(result.reasoningEvidence.channelHash, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(result).includes('unexported synthetic thought'), false);
+  assert.equal(JSON.stringify(result).includes('reasoning-1'), false); assert.equal(sent.length, 1);
+  assert.equal(modelAdapterSupportsCapabilities(adapter, ['text', 'reasoning']), true);
+  assert.equal(modelAdapterSupportsCapabilities(new AnthropicMessagesAdapter({ post: async () => assert.fail('unsupported codec') }), ['reasoning']), false);
+  const valid = structuredClone(payload);
+  for (const scenario of ['text-only', 'missing-counter', 'counter-conflict']) {
+    payload = structuredClone(valid);
+    if (scenario === 'text-only') payload.output.shift();
+    else if (scenario === 'missing-counter') delete payload.usage.output_tokens_details;
+    else payload.usage.output_tokens_details.reasoning_tokens = 8;
+    await assert.rejects(adapter.generate(value, 'offline-reasoning-key', { baseUrl: 'https://offline.example/v1' }),
+      error => error instanceof ModelGatewayError && error.code === 'INVALID_RESPONSE');
+  }
+  payload = valid;
+  const ordinary = await adapter.generate({ ...value, features: undefined }, 'offline-reasoning-key', { baseUrl: 'https://offline.example/v1' });
+  assert.equal(ordinary.reasoningEvidence, undefined); // Existing text calls do not acquire a reasoning attestation.
+});
+
+test('native embedding probe returns bounded vector evidence and input-only usage, never text JSON or a loose grant', async () => {
+  const { createNativeModelAdapter } = require('../apps/api/src/modules/ai-native/native-model-adapters');
+  const { textProbeIntent, textProbePreparation, EMBEDDING_PROBE_METHOD } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { modelRequestSchema, ModelGatewayError, modelAdapterSupportsCapabilities } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
+  const { prepareGatewayEmbeddingProbeIntent, prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const prepared = textProbeIntent('native-embedding', 'scope', 'embedding');
+  assert.deepEqual(textProbePreparation('native-embedding', 'scope', 'embedding', 'openai_chat_completions'), prepared);
+  assert.equal(textProbePreparation('native-embedding', 'scope', 'embedding', 'openai_responses').intent, null);
+  assert.throws(() => prepareGatewayEmbeddingProbeIntent(prepared.intent, { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }), { code: 'CAPABILITY_UNSUPPORTED' });
+  assert.throws(() => prepareGatewayTextIntent(prepared.intent, { sceneCode: 'ai.capability.text', maxOutputTokens: 32 }, 'invoke'), { code: 'CAPABILITY_UNSUPPORTED' });
+  let payload = { object: 'list', model: 'synthetic-embedding', data: [
+    { object: 'embedding', index: 0, embedding: [0.2, 0.5, 0.7] }, { object: 'embedding', index: 1, embedding: [0.8, -0.1, 0.3] }], usage: { prompt_tokens: 5, total_tokens: 5 } };
+  const sent = [], recorded = [], transport = { post: async request => { assert.equal(request.url.endsWith('/embeddings'), true);
+    sent.push(JSON.parse(request.body)); return { status: 200, body: JSON.stringify(payload) }; } };
+  const adapter = createNativeModelAdapter('openai_chat_completions', { embeddingProbe: true }, transport);
+  assert.equal(modelAdapterSupportsCapabilities(adapter, ['embedding']), true);
+  assert.equal(modelAdapterSupportsCapabilities(adapter, ['text']), false);
+  assert.equal(modelAdapterSupportsCapabilities(adapter, ['embedding', 'text']), false);
+  assert.equal(sent.length, 0); // Local capability rejection must not dispatch.
+  const ordinary = createNativeModelAdapter('openai_chat_completions', {}, transport);
+  assert.equal(ordinary.features.includes('embedding'), false);
+  assert.equal(modelAdapterSupportsCapabilities(ordinary, ['text']), true);
+  assert.throws(() => createNativeModelAdapter('openai_responses', { embeddingProbe: true }, transport), { code: 'CAPABILITY_UNSUPPORTED' });
+  const value = { callId: prepared.intent.requestId, model: payload.model,
+    messages: prepared.intent.messages.map(message => ({ role: message.role, content: message.content[0].text })),
+    maxOutputTokens: 32, features: ['embedding'], signal: new AbortController().signal, recordUsage: async usage => recorded.push(usage) };
+  assert.equal(modelRequestSchema.safeParse({ callId: value.callId, model: value.model, messages: value.messages,
+    maxOutputTokens: 32, features: ['embedding'] }).success, false);
+  const result = await adapter.generate(value, 'offline-embedding-key', { baseUrl: 'https://offline.example/v1' });
+  assert.equal(result.text, ''); assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 0 });
+  assert.deepEqual(recorded, [{ inputTokens: 5, outputTokens: 0 }]);
+  assert.equal(result.embeddingEvidence.methodVersion, EMBEDDING_PROBE_METHOD); assert.equal(result.embeddingEvidence.vectorCount, 2);
+  assert.equal(result.embeddingEvidence.dimensions, 3); assert.equal(result.embeddingEvidence.inputHash, requestFingerprint(value.messages.map(message => message.content)));
+  assert.equal(result.embeddingEvidence.vectorHash, requestFingerprint(payload.data.map(row => row.embedding)));
+  assert.equal(Object.hasOwn(result, 'vectors'), false); assert.equal(Object.hasOwn(sent[0], 'messages'), false);
+  assert.equal(Object.hasOwn(sent[0], 'max_completion_tokens'), false); assert.equal(sent.length, 1);
+  const valid = structuredClone(payload);
+  for (const scenario of ['text-json', 'identical-vectors', 'missing-counter', 'counter-conflict']) {
+    payload = structuredClone(valid);
+    if (scenario === 'text-json') { delete payload.data; payload.choices = [{ message: { content: JSON.stringify(valid.data) } }]; }
+    else if (scenario === 'identical-vectors') payload.data[1].embedding = [...payload.data[0].embedding];
+    else if (scenario === 'missing-counter') delete payload.usage.total_tokens;
+    else payload.usage.total_tokens = 6;
+    await assert.rejects(adapter.generate(value, 'offline-embedding-key', { baseUrl: 'https://offline.example/v1' }),
+      error => error instanceof ModelGatewayError && error.code === 'INVALID_RESPONSE');
+  }
+});
+
 // Construct the real application (including private one-shot execution state).
 // Unreplaced external/database ports fail closed, rather than fake success.
 function probeApplicationWithBoundaryPorts() {
@@ -277,6 +453,16 @@ test('owned probe returns the real public Gateway envelope, not the capability s
   }
 });
 
+test('probe receipt cache usage retains original categories without adding them to input tokens', () => {
+  const { probeUsageSchema } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const original = { inputTokens: 3, outputTokens: 2, billingDetails: { cachedInputTokens: 1, cacheCreationInputTokens: 1 } };
+  assert.equal(probeUsageSchema.safeParse(original).success, true);
+  assert.deepEqual(probeUsageSchema.parse(original), original);
+  assert.equal(probeUsageSchema.safeParse({ ...original, billingDetails: { cachedInputTokens: 3, cacheCreationInputTokens: 1 } }).success, false);
+  assert.equal(probeUsageSchema.safeParse({ ...original, billingDetails: { cachedInputTokens: 1 } }).success, false);
+  assert.deepEqual(probeUsageSchema.parse({ inputTokens: 1, outputTokens: 2 }), { inputTokens: 1, outputTokens: 2 });
+});
+
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
   const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
   const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
@@ -298,7 +484,8 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   const rows = {
     aiGatewayInvocation: { ...common, id: 'invocation', intentHash: descriptor.intentHash, stepFingerprint: requestFingerprint(descriptor.command),
       mode: 'invoke', maxOutputTokens: 32, configuration, configurationHash: descriptor.configurationHash },
-    aiInvocationAdmission: { id: 'admission', ...context, callId: descriptor.callId, requestHash: observation.requestHash,
+    aiInvocationAdmission: { id: 'admission', ...context, scopeKind: 'WORKSPACE', platformDedupKey: null,
+      callId: descriptor.callId, requestHash: observation.requestHash,
       profileId: profile.id, dispatchId: 'dispatch', revokedAt: null, status: 'completed', completedAt: now },
     aiGatewayAccountingReceipt: { id: 'accounting', scopeId: descriptor.scopeId, scopeKind: 'WORKSPACE', taskId: 'task',
       tenantId: context.tenantId, workspaceId: context.workspaceId, invocationId: 'invocation', admissionId: 'admission',
@@ -309,10 +496,16 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   };
   rows.aiGatewayAccountingReceipt.usageHash = requestFingerprint({ receiptId: 'accounting', invocationId: 'invocation', admissionId: 'admission',
     reservationId: 'reservation', dispatchToken: 'dispatch', requestHash: observation.requestHash, usage: observation.usage });
-  let ledger = [{ evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price', quantity: { unit: 'tokens', value: 3 } }) }];
+  // Original Prisma payload, not a bare hash standing in for settlement.
+  rows.aiGatewayAccountingReceipt.usageDetails = null;
+  Object.assign(rows.aiBudgetReservation, { billingMode: profile.serviceMode, actualCalls: null, actualMoney: null, moneyCurrency: null });
+  let ledger = [{ reservationId: 'reservation', scopeId: descriptor.scopeId, scopeKind: 'WORKSPACE', tenantId: context.tenantId,
+    kind: 'settle', inputTokens: 3n, outputTokens: null, calls: null, moneyAmount: null, moneyCurrency: null, reason: null,
+    evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price', quantity: { unit: 'tokens', value: 3 } }) }];
+  const clone = require('./fixtures/ai-native/task-input-store.cjs').clone;
   const db = Object.fromEntries(Object.entries(rows).map(([name, row]) => [name, { findUnique: async ({ where }) =>
-    Object.entries(where).every(([key, value]) => row[key] === value) ? structuredClone(row) : null }]));
-  db.aiBudgetLedgerEntry = { findMany: async () => structuredClone(ledger) };
+    Object.entries(where).every(([key, value]) => row[key] === value) ? clone(row) : null }]));
+  db.aiBudgetLedgerEntry = { findMany: async () => clone(ledger) };
   db.$queryRaw = async query => query.values[0] === stored.id ? [structuredClone(stored)] : [];
   db.$transaction = async operation => operation(db);
   const verifier = new PrismaTextCapabilityReceiptRepository(db, () => now);
@@ -335,6 +528,74 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   const capabilities = createPersistedTextCapabilityEvidence(db, () => now);
   assert.equal((await capabilities.record(input())).status, 'supported');
   assert.equal((await capabilities.preflight(profile, ['text'])).allowed, true);
+  const originalLedger = structuredClone(ledger), originalReservation = structuredClone(rows.aiBudgetReservation);
+  for (const patch of [{ inputTokens: null }, { inputTokens: 4n }, { calls: 1 }, { outputTokens: 2n },
+    { reservationId: 'foreign-reservation' }, { scopeId: 'foreign-scope' }, { tenantId: 'foreign-tenant' }, { reason: 'unknown' }]) {
+    ledger = [{ ...originalLedger[0], ...patch }];
+    assert.equal(await verifier.verify(input()), false, 'a matching hash must not override an inconsistent original ledger payload');
+    assert.equal((await capabilities.preflight(profile, ['text'])).allowed, false);
+  }
+  ledger = originalLedger;
+  for (const patch of [{ actualCalls: 1 }, { actualMoney: new (require('@prisma/client').Prisma.Decimal)('0.000000') }, { moneyCurrency: 'USD' }]) {
+    Object.assign(rows.aiBudgetReservation, originalReservation, patch);
+    assert.equal(await verifier.verify(input()), false, 'a terminal token record must not contain another unit');
+  }
+  Object.assign(rows.aiBudgetReservation, originalReservation);
+  assert.equal(await verifier.verify(input()), true);
+  // Calls remain calls; the original token counters are not another financial quantity.
+  Object.assign(rows.aiBudgetReservation, { unitKind: 'calls', actualTokens: null, actualCalls: 1 });
+  ledger = [{ ...originalLedger[0], inputTokens: null, calls: 1,
+    evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price', quantity: { unit: 'calls', value: 1 } }) }];
+  assert.equal(await verifier.verify(input()), true);
+  ledger[0].calls = null; assert.equal(await verifier.verify(input()), false);
+  Object.assign(rows.aiBudgetReservation, originalReservation); ledger = originalLedger;
+  // Cache categories are part of original inputTokens, never extra tokens or a new price.
+  observation.usage = { inputTokens: 3, outputTokens: 2, billingDetails: { cachedInputTokens: 1, cacheCreationInputTokens: 1 } };
+  stored.observationHash = requestFingerprint(observation);
+  rows.aiGatewayAccountingReceipt.inputTokens = 3n;
+  rows.aiGatewayAccountingReceipt.usageDetails = observation.usage.billingDetails;
+  rows.aiGatewayAccountingReceipt.usageHash = requestFingerprint({ receiptId: 'accounting', invocationId: 'invocation', admissionId: 'admission',
+    reservationId: 'reservation', dispatchToken: 'dispatch', requestHash: observation.requestHash, usage: observation.usage });
+  rows.aiBudgetReservation.actualTokens = 5n;
+  ledger = [{ ...originalLedger[0], inputTokens: 5n,
+    evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price', quantity: { unit: 'tokens', value: 5 } }) }];
+  assert.equal(await verifier.verify(input()), true);
+  rows.aiGatewayAccountingReceipt.usageDetails = { cachedInputTokens: 0, cacheCreationInputTokens: 1 };
+  assert.equal(await verifier.verify(input()), false);
+  rows.aiGatewayAccountingReceipt.usageDetails = null; assert.equal(await verifier.verify(input()), false);
+  rows.aiGatewayAccountingReceipt.usageDetails = observation.usage.billingDetails;
+  // Separate synthetic platform-paid fixture, not a conversion or repricing of
+  // any real tenant call. A recorded zero is still different from missing money.
+  const savedDescriptor = clone(descriptor), savedInvocation = clone(rows.aiGatewayInvocation), savedReservation = clone(rows.aiBudgetReservation);
+  const platformProfile = { ...profile, scopeId: 'synthetic-platform-config', scopeKind: 'PLATFORM', serviceMode: 'platform_managed' };
+  const platformFingerprint = capabilityProfileFingerprint(platformProfile);
+  descriptor.command.profileFingerprint = platformFingerprint; descriptor.profileFingerprint = platformFingerprint;
+  descriptor.configuration = textProbeConfiguration(platformProfile, { kind: 'workspace', tenantId: context.tenantId });
+  descriptor.configurationHash = requestFingerprint(descriptor.configuration); stored.descriptorHash = requestFingerprint(descriptor);
+  Object.assign(rows.aiGatewayInvocation, { configuration: descriptor.configuration, configurationHash: descriptor.configurationHash,
+    stepFingerprint: requestFingerprint(descriptor.command) });
+  Object.assign(rows.aiBudgetReservation, { billingMode: 'platform_managed', unitKind: 'money', actualTokens: null,
+    actualCalls: null, moneyCurrency: 'USD', configurationHash: descriptor.configurationHash });
+  for (const amount of ['0.123456', '0.000000']) {
+    const money = new (require('@prisma/client').Prisma.Decimal)(amount); rows.aiBudgetReservation.actualMoney = money;
+    const event = { ...originalLedger[0], inputTokens: null, moneyAmount: money, moneyCurrency: 'USD',
+      evidenceHash: requestFingerprint({ usageHash: rows.aiGatewayAccountingReceipt.usageHash, priceVersion: 'price',
+        quantity: { unit: 'money', amount, currency: 'USD', scale: 6 } }) };
+    const moneyInput = () => ({ ...input(), profile: platformProfile, details: { receiptId: 'proof', verification: {
+      evidence: 'live', methodVersion: TEXT_PROBE_METHOD, capability: 'text', profileFingerprint: platformFingerprint } } });
+    ledger = [event]; assert.equal(await verifier.verify(moneyInput()), true);
+    for (const patch of [{ moneyAmount: null }, { moneyAmount: new (require('@prisma/client').Prisma.Decimal)('0.999999') },
+      { moneyCurrency: 'EUR' }, { inputTokens: 1n }, { calls: 1 }]) {
+      ledger = [{ ...event, ...patch }]; assert.equal(await verifier.verify(moneyInput()), false);
+    }
+    ledger = [event]; rows.aiBudgetReservation.actualMoney = null;
+    assert.equal(await verifier.verify(moneyInput()), false); rows.aiBudgetReservation.actualMoney = money;
+    rows.aiBudgetReservation.billingMode = 'tenant_managed'; assert.equal(await verifier.verify(moneyInput()), false);
+    rows.aiBudgetReservation.billingMode = 'legacy_unknown'; assert.equal(await verifier.verify(moneyInput()), false);
+    rows.aiBudgetReservation.billingMode = 'platform_managed';
+  }
+  Object.assign(descriptor, savedDescriptor); stored.descriptorHash = requestFingerprint(descriptor);
+  Object.assign(rows.aiGatewayInvocation, savedInvocation); Object.assign(rows.aiBudgetReservation, savedReservation);
   ledger = [];
   assert.equal((await capabilities.preflight(profile, ['text'])).allowed, false);
   rows.aiInvocationAdmission.status = 'unknown';

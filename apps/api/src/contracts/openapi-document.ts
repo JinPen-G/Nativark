@@ -1,3 +1,8 @@
+import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
+import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_CONTRACTS, AI_TASK_RULE_DRAFT_SCHEMAS, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
@@ -10,7 +15,8 @@ import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES, FeatureOwners
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS,
+  AI_ORDER_EXPLANATION_HTTP_V2, AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2 } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
@@ -219,6 +225,11 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...AI_MEMBER_NAME_SCHEMAS,
+  ...AI_TASK_RULE_DRAFT_SCHEMAS,
+  ...AI_TASK_CALENDAR_DRAFT_SCHEMAS,
+  ...AI_TASK_ORDER_HANDOFF_SCHEMAS,
+  ...AI_TASK_READ_POLICY_SCHEMAS,
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
   ...AI_NATIVE_COMPONENT_SCHEMAS,
   ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
@@ -227,6 +238,18 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_CREDIT_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  CustomerProfileOverview: objectOf({ profile: objectSchema, addresses: arrayOf(objectSchema), qualificationRevisions: arrayOf(objectSchema),
+    statusHistory: arrayOf(objectSchema), sensitiveAccess: arrayOf(objectSchema), corporateRelations: arrayOf(objectSchema),
+    membershipPlanAssignments: arrayOf(objectSchema), access: objectOf({ orders: { type: "string", enum: ["available", "restricted"] },
+      orderAmounts: { type: "string", enum: ["available", "restricted"] }, benefits: { type: "string", enum: ["available", "restricted"] },
+      qualifications: { type: "string", enum: ["available", "restricted"] }, audit: { type: "string", enum: ["available", "restricted"] } },
+    ["orders", "orderAmounts", "benefits", "qualifications", "audit"], false),
+    benefits: objectOf({ accounts: arrayOf(objectSchema), rewards: arrayOf(objectSchema), coupons: arrayOf(objectSchema) }),
+    orders: objectOf({ items: arrayOf(objectOf({ id: stringSchema, orderNo: stringSchema, workspaceId: stringSchema,
+      workspaceName: stringSchema, categoryCode: stringSchema, status: stringSchema, relation: arrayOf(stringSchema), startAt: stringSchema,
+      endAt: stringSchema, effectiveEndAt: stringSchema, finalPayableAmount: numberSchema, currency: stringSchema, createdAt: stringSchema },
+    ["id", "orderNo", "workspaceId", "status", "currency"])), page: numberSchema, pageSize: numberSchema, total: numberSchema }) },
+  ["profile", "addresses", "qualificationRevisions", "statusHistory", "corporateRelations", "membershipPlanAssignments", "benefits", "orders"]),
   RentalExtensionBalanceBasis: objectOf({ version: { type: "integer", enum: [1] },
     approvedReductionExtensionIds: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true } },
     ["version", "approvedReductionExtensionIds"], false),
@@ -234,7 +257,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     scope: { type: "string", enum: ["order", "exchange_line"] }, context: objectSchema,
     balanceBasis: { ...ref("RentalExtensionBalanceBasis"), description: "Frozen approved reduction sources actually consumed; absent on legacy receipts. Never infer or backfill from wall-clock timestamps." },
     previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema,
-    recalculatedRentalAmount: numberSchema, recalculatedServiceAmount: numberSchema,
+    recalculatedRentalAmount: numberSchema, rentalLineAmounts: { type: "object", additionalProperties: numberSchema }, recalculatedServiceAmount: numberSchema,
     recalculatedDiscountAmount: numberSchema, recalculatedCouponAmount: numberSchema, totalBillableUnits: numberSchema,
     differenceAmount: numberSchema, fullChargeLines: arrayOf(objectSchema), chargeLines: arrayOf(objectSchema),
     discountEvaluations: arrayOf(objectSchema), couponEvaluation: objectSchema, membershipBenefitEvaluations: arrayOf(objectSchema),
@@ -265,6 +288,16 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       calendars: arrayOf(objectSchema), dayRates: arrayOf(objectSchema) }, ["timeZone", "legacyDayTypeMultipliers", "calendars"]),
     ruleSnapshot: objectSchema, calendarSnapshot: arrayOf(objectSchema), applyMinimumUnits: booleanSchema,
     selectedUnitAmount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, amount: numberSchema,
+    membershipBenefit: objectSchema, couponBenefit: objectSchema, discountBenefit: objectSchema,
+    discountLayers: arrayOf(objectOf({ evaluation: objectSchema,
+      splitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+        ["amount", "reduction", "consumedAmount", "consumedReduction"]) }, ["evaluation"])),
+    discountSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
+    couponSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
+    membershipSplitBasis: objectOf({ amount: numberSchema, reduction: numberSchema, consumedAmount: numberSchema, consumedReduction: numberSchema },
+      ["amount", "reduction", "consumedAmount", "consumedReduction"]),
     splitBasis: objectOf({ startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
       amount: numberSchema, billableUnits: numberSchema, billedHours: numberSchema, applyMinimumUnits: booleanSchema,
       consumedAmount: numberSchema, consumedUnits: numberSchema, consumedHours: numberSchema },
@@ -279,7 +312,22 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     inspectionTemplateSnapshots: arrayOf(objectSchema), capabilitySnapshot: arrayOf(objectSchema),
     linePricing: objectOf({ version: { type: "integer", enum: [1] }, orderLineId: stringSchema,
       originalAmount: numberSchema, replacementAmount: numberSchema, previousSegments: arrayOf("RentalExchangePricingSegment"),
-      segments: arrayOf("RentalExchangePricingSegment"), overdueBasis: ref("RentalExchangePricingSegment") },
+      segments: arrayOf("RentalExchangePricingSegment"), overdueBasis: ref("RentalExchangePricingSegment"),
+      membershipPricing: objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+        replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, benefit: objectSchema },
+      ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "benefit"]),
+      couponPricing: objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+        replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, coupon: objectSchema },
+      ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "coupon"]),
+      discountPricing: { oneOf: [
+        objectOf({ version: { type: "integer", enum: [1] }, originalReduction: numberSchema,
+          replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema, evaluation: objectSchema },
+        ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "evaluation"]),
+        objectOf({ version: { type: "integer", enum: [2] }, originalReduction: numberSchema,
+          replacementReduction: numberSchema, originalNetAmount: numberSchema, replacementNetAmount: numberSchema,
+          evaluations: { type: "array", items: objectSchema, minItems: 2 } },
+        ["version", "originalReduction", "replacementReduction", "originalNetAmount", "replacementNetAmount", "evaluations"])
+      ] } },
     ["version", "orderLineId", "originalAmount", "replacementAmount", "previousSegments", "segments", "overdueBasis"]) },
   ["effectiveFrom", "priceBasis", "categoryCode", "pricingStrategies", "rateSnapshot", "ruleSnapshot", "calendarSnapshot", "inspectionTemplateSnapshots"]),
   RentalOrderChangeRecord: objectOf({ id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
@@ -287,10 +335,42 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     diff: objectOf({ exchange: objectOf({ executionBasis: ref("RentalExchangeExecutionBasis") }) }),
     refundAmount: numberSchema, additionalAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema,
     idempotencyKey: stringSchema, requestedBy: stringSchema, appliedBy: stringSchema, requestedAt: stringSchema, appliedAt: stringSchema, createdAt: stringSchema }),
+  RentalExchangeServiceOption: objectOf({ id: stringSchema, tenantId: stringSchema, categoryCode: stringSchema,
+    code: stringSchema, name: stringSchema, serviceType: stringSchema, billingUnit: stringSchema, price: numberSchema,
+    minimumQuantity: numberSchema, maximumQuantity: numberSchema, coverageLimit: numberSchema, deductible: numberSchema,
+    termsVersion: stringSchema, terms: stringSchema, applicableItemGroupIds: arrayOf(stringSchema),
+    applicableFulfillmentModes: arrayOf(stringSchema), applicableLocationIds: arrayOf(stringSchema), customerScope: stringSchema,
+    selectionMode: stringSchema, mandatoryRule: objectSchema, insuranceProviderStatus: stringSchema, insuranceProviderName: stringSchema,
+    requiresCapacity: booleanSchema, status: stringSchema, version: stringSchema, createdAt: stringSchema, updatedAt: stringSchema },
+  ["id", "tenantId", "categoryCode", "code", "name", "serviceType", "billingUnit", "price", "termsVersion", "terms",
+    "applicableItemGroupIds", "applicableFulfillmentModes", "applicableLocationIds", "requiresCapacity", "status", "version"]),
+  RentalExchangeServiceOptions: arrayOf("RentalExchangeServiceOption"),
+  RentalExchangeServiceSelection: objectOf({ serviceId: stringSchema, quantity: { type: "integer", minimum: 1 },
+    scheduledStartAt: { type: "string", format: "date-time" }, scheduledEndAt: { type: "string", format: "date-time" },
+    serviceLocationId: stringSchema }, ["serviceId", "quantity", "scheduledStartAt", "scheduledEndAt", "serviceLocationId"], false),
+  RentalExchangePickupInspectionRequest: objectOf({ templateId: stringSchema, templateVersion: stringSchema,
+    confirmationHash: { type: "string", pattern: "^[a-f0-9]{64}$" }, results: objectSchema,
+    attachments: { type: "array", items: stringSchema, maxItems: 50 }, handoverSignatureFileAssetId: stringSchema,
+    customerConfirmed: booleanSchema }, ["templateId", "templateVersion", "confirmationHash", "results", "customerConfirmed"], false),
+  RentalExchangePickupInspectionRequirements: objectOf({ required: booleanSchema, confirmationHash: stringSchema,
+    templates: arrayOf(objectSchema) }, ["required", "confirmationHash", "templates"]),
+  RentalPostPickupExchangeRequest: objectOf({ type: { type: "string", enum: ["post_pickup_exchange"] }, orderLineId: stringSchema,
+    allocationId: stringSchema, replacementItemGroupId: stringSchema, replacementAssetId: stringSchema, replacementPricingGroupId: stringSchema,
+    priceBasis: { type: "string", enum: ["original_order_price", "replacement_current_price"] },
+    originalDisposition: { type: "string", enum: ["return_to_warehouse", "off_shelf"] }, exchangeLocationId: stringSchema,
+    cancelServiceOccurrenceIds: arrayOf(stringSchema), services: { type: "array", items: ref("RentalExchangeServiceSelection"), maxItems: 20 },
+    serviceConfirmationHash: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Required when confirming new services; never an authorization credential." },
+    inspectionSnapshot: objectSchema, reason: stringSchema, customerConfirmed: booleanSchema, expectedUpdatedAt: stringSchema },
+  ["type", "orderLineId", "allocationId", "replacementItemGroupId"]),
+  RentalPostPickupExchangeApplyRequest: { allOf: [ref("RentalPostPickupExchangeRequest"), {
+    type: "object", properties: { replacementPickupInspection: ref("RentalExchangePickupInspectionRequest") },
+    required: ["reason", "customerConfirmed", "expectedUpdatedAt", "inspectionSnapshot"] }] },
   RentalPostPickupExchangePreview: objectOf({ orderId: stringSchema, type: { type: "string", enum: ["post_pickup_exchange"] },
     beforePayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema,
     additionalAmount: numberSchema, refundAmount: numberSchema, depositDelta: numberSchema, preAuthDelta: numberSchema, currency: stringSchema,
     exchange: objectOf({ orderLineId: stringSchema, allocationId: stringSchema, originalAmount: numberSchema, replacementAmount: numberSchema,
+      serviceSnapshots: arrayOf("AiExtensionServiceSnapshotDraft"), serviceConfirmationHash: stringSchema,
+      pickupInspection: ref("RentalExchangePickupInspectionRequirements"),
       executionBasis: ref("RentalExchangeExecutionBasis") }), pricingSnapshot: objectOf({ scope: { type: "string", enum: ["exchange_line"] },
       fullChargeLines: arrayOf(objectSchema), previousPayableAmount: numberSchema, recalculatedPayableAmount: numberSchema, differenceAmount: numberSchema }) }),
   RentalPostPickupExchangeResult: objectOf({ order: objectSchema, change: ref("RentalOrderChangeRecord") }, ["order", "change"]),
@@ -303,6 +383,12 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     idempotencyKey: stringSchema, reason: stringSchema, operator: stringSchema, failureCode: stringSchema,
     at: { type: "string", format: "date-time" }, createdAt: { type: "string", format: "date-time" } },
     ["id", "tenantId", "workspaceId", "orderId", "instrument", "action", "amount", "balanceAfter", "provider", "idempotencyKey", "reason", "at", "createdAt"]),
+  RentalFundingAmountRequest: objectOf({ instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+    amount: { type: "number", minimum: 0.01 }, idempotencyKey: stringSchema, reason: stringSchema,
+    paymentMethod: { type: "string", enum: ["offline_cash", "offline_transfer"] },
+    offlineDeposit: objectOf({ sourceEventId: { type: "string", minLength: 1, maxLength: 191 },
+      evidenceFileAssetId: { type: "string", minLength: 1, maxLength: 191 } }, ["sourceEventId", "evidenceFileAssetId"]) },
+    ["instrument", "amount", "idempotencyKey", "reason"]),
   RentalFundingBalance: objectOf({ orderId: stringSchema, balanceBasis: { type: "string", enum: ["real", "simulated"] },
     simulationAllowed: booleanSchema,
     rental: objectOf({ payable: numberSchema, collected: numberSchema, refunded: numberSchema, securityCaptured: numberSchema,
@@ -335,6 +421,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     dueAt: { type: "string", format: "date-time" }, basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema,
     recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
     ["ledgerId", "orderId", "currency", "dueAt", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
+  ReverseCustomerCorporateCreditPaymentRequest: objectOf({ basisRef: { type: "string", minLength: 1, maxLength: 191 },
+    reason: { type: "string", minLength: 1, maxLength: 500 }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["basisRef", "reason", "idempotencyKey"], false),
+  CustomerCorporateCreditPaymentReversalReceipt: objectOf({ paymentId: stringSchema, reversalId: stringSchema, customerId: stringSchema,
+    amount: numberSchema, currency: stringSchema, allocations: arrayOf(objectOf({ allocationId: stringSchema, reversalId: stringSchema,
+      orderId: stringSchema, workspaceId: stringSchema, amount: numberSchema }, ["allocationId", "reversalId", "orderId", "workspaceId", "amount"], false)),
+    basisRef: stringSchema, reason: stringSchema, idempotencyKey: stringSchema, recordedBy: stringSchema, recordedAt: { type: "string", format: "date-time" } },
+    ["paymentId", "reversalId", "customerId", "amount", "currency", "allocations", "basisRef", "reason", "idempotencyKey", "recordedBy", "recordedAt"], false),
   RentalOperationLockRequest: {
     oneOf: [
       { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
@@ -1743,31 +1837,64 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["locationId", "startAt", "endAt", "lines"]
   ),
-  ClientQuoteRequest: objectOf(
+  ClientQuoteDeliveryAddressDraft: objectOf(
     {
-      bookingIdentity: objectSchema,
-      fulfillmentMode: stringSchema,
-      fulfillmentLocationId: stringSchema,
-      returnLocationId: stringSchema,
-      startAt: { type: "string", format: "date-time" },
-      endAt: { type: "string", format: "date-time" },
-      pricingPlanId: stringSchema,
-      discountPlanId: stringSchema,
-      customerCouponId: stringSchema,
-      lines: arrayOf(objectSchema),
-      services: arrayOf(objectSchema),
-      deliveryAddressId: stringSchema
+      recipient: { type: "string", minLength: 1, maxLength: 120 },
+      phone: { type: "string", minLength: 1, maxLength: 40, pattern: "^\\+?[0-9][0-9\\s()-]{5,38}$" },
+      countryCode: { type: "string", maxLength: 8 },
+      province: { type: "string", minLength: 1, maxLength: 100 },
+      city: { type: "string", minLength: 1, maxLength: 100 },
+      district: { type: "string", maxLength: 100 },
+      detail: { type: "string", minLength: 1, maxLength: 500 },
+      postalCode: { type: "string", maxLength: 20 }
     },
-    ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"]
+    ["recipient", "phone", "province", "city", "detail"], false
   ),
+  ClientQuoteRequest: {
+    ...objectOf(
+      {
+        bookingIdentity: objectSchema,
+        fulfillmentMode: stringSchema,
+        fulfillmentLocationId: stringSchema,
+        returnLocationId: stringSchema,
+        startAt: { type: "string", format: "date-time" },
+        endAt: { type: "string", format: "date-time" },
+        pricingPlanId: stringSchema,
+        discountPlanId: stringSchema,
+        customerCouponId: stringSchema,
+        lines: arrayOf(objectSchema),
+        services: arrayOf(objectSchema),
+        deliveryAddressId: stringSchema,
+        deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft")
+      },
+      ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"], false
+    ),
+    not: { type: "object", properties: { deliveryAddressId: stringSchema,
+      deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft") },
+      required: ["deliveryAddressId", "deliveryAddressDraft"] }
+  },
   RentalQuoteSourceSnapshot: objectOf({
     version: { type: 'string', enum: ['rental-quote-source-1'], readOnly: true },
     tenantId: stringSchema, workspaceId: stringSchema,
     actor: objectOf({ kind: { type: 'string', enum: ['user', 'customer'] }, id: stringSchema }, ['kind', 'id'], false),
     audience: { type: 'string', enum: ['operator', 'staff', 'client'] }
   }, ['version', 'tenantId', 'workspaceId', 'actor', 'audience'], false),
+  RentalQuoteInventoryBasis: objectOf({
+    version: { type: 'string', enum: ['rental-quote-inventory-1'], readOnly: true },
+    tenantId: stringSchema, workspaceId: stringSchema,
+    groups: { ...arrayOf(objectOf({
+      id: stringSchema, tenantId: stringSchema, categoryCode: stringSchema, code: stringSchema, name: stringSchema,
+      inventoryMode: { type: 'string', enum: ['serialized', 'quantity', 'consumable', 'bundle'] },
+      unit: stringSchema, status: { type: 'string', enum: ['enabled', 'disabled'] },
+      bundleComponents: { ...arrayOf(objectOf({ itemGroupId: stringSchema, itemGroupCode: stringSchema,
+        itemGroupName: stringSchema, quantity: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        optional: { type: 'boolean' }, substitutionGroup: stringSchema
+      }, ['itemGroupId', 'itemGroupCode', 'itemGroupName', 'quantity', 'optional'], false)), maxItems: 256 }
+    }, ['id', 'tenantId', 'categoryCode', 'code', 'name', 'inventoryMode', 'unit', 'status', 'bundleComponents'], false)), minItems: 1, maxItems: 100 }
+  }, ['version', 'tenantId', 'workspaceId', 'groups'], false),
   RentalQuoteSnapshot: objectOf({
     id: stringSchema, tenantId: stringSchema, quoteNo: stringSchema, request: objectSchema,
+    inventoryBasis: { ...ref('RentalQuoteInventoryBasis'), readOnly: true, description: 'Core-owned inventory composition; not a reservation or authorization. Legacy records omit it.' },
     sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true,
       description: 'Server-derived provenance, never authorization. Legacy records may omit it; own-scope access then fails closed.' },
     deliveryAddressSnapshot: objectSchema, rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
@@ -2087,7 +2214,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers", "Platform", "listSharedCustomers", "List tenant shared customers", ["rental-os:member:view"]),
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register a tenant member using the shared review policy", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["rental-os:member:view"]),
-  backlogOperation("get", "/api/platform/customers/{customerId}/profile", "Platform", "getCustomerProfileOverview", "Get the categorized customer profile overview including addresses, qualifications, benefits and order summaries", ["rental-os:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/profile", "Platform", "getCustomerProfileOverview", "Read shared customer facts and current workspace partitions; restricted sections are explicit, order amounts require financial permission", ["rental-os:member:view"], true, undefined, "CustomerProfileOverview"),
   backlogOperation("get", "/api/platform/customers/{customerId}/identity-verifications", "Platform", "customerIdentityVerifications", "List append-only customer identity verification records; requires member-view and sensitive-data reveal permissions", ["rental-os:customer:reveal-sensitive"], true, undefined, "CustomerIdentityVerificationList"),
   backlogOperation("post", "/api/platform/customers/{customerId}/identity-verifications", "Platform", "saveCustomerIdentityVerification", "Record an identity verification decision with tenant/customer-bound evidence and reviewer attribution; requires member-manage and sensitive-data reveal permissions", ["rental-os:member:manage"], true, "SaveCustomerIdentityVerificationRequest", "CustomerIdentityVerificationSummary"),
   backlogOperation("put", "/api/platform/customers/{customerId}/addresses", "Platform", "saveCustomerProfileAddress", "Create or update a customer delivery address; the response keeps the phone masked", ["rental-os:member:manage"]),
@@ -2111,6 +2238,8 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("put", "/api/platform/customers/{customerId}/credit", "Platform", "saveCustomerCredit", "Set corporate credit limit and settlement terms", ["rental-os:corporate:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/account", "Platform", "getCustomerCreditAccount", "Read shared credit balances only with current corporate permission and complete financial read authority in every original ledger workspace; unauthorized portions are never shown as zero", ["rental-os:corporate:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/credit/ledger", "Platform", "listCustomerCreditLedger", "Read the append-only corporate ledger only with complete financial read authority in every original workspace; missing legacy binding refuses the complete view", ["rental-os:corporate:view"]),
+  { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/payments/{paymentId}/reverse", "Platform", "customerCreditPaymentReversal", "Read the original repayment reversal receipt under complete original workspace financial authority; null is no confirmed receipt and never a permission to resend", ["rental-os:corporate:view", "rental-os:corporate:manage"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditPaymentReversalReceipt"), { type: "null" }] } },
+  backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments/{paymentId}/reverse", "Platform", "reverseCustomerCreditPayment", "Reverse the exact original corporate repayment and all its allocations atomically with a durable source receipt; restores debt without dispatching an external refund; requires corporate manage and complete finance manage access to every original workspace", ["rental-os:corporate:manage"], true, "ReverseCustomerCorporateCreditPaymentRequest", "CustomerCorporateCreditPaymentReversalReceipt"),
   backlogOperation("post", "/api/platform/customers/{customerId}/credit/payments", "Platform", "recordCustomerCreditPayment", "Record an idempotent corporate payment with current corporate manage and full finance manage authority in every original workspace; never omit unauthorized debts or change FIFO to bypass scope", ["rental-os:corporate:manage"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/credit/maturities", "Platform", "recordCustomerCreditMaturity", "Record the original debt maturity explicitly determined by finance under current corporate and full original-workspace financial management authority", ["rental-os:corporate:manage"], true, "RecordCustomerCorporateCreditMaturityRequest", "CustomerCorporateCreditMaturityReceipt"),
   { ...backlogOperation("get", "/api/platform/customers/{customerId}/credit/maturities/{ledgerId}", "Platform", "readCustomerCreditMaturity", "Read the immutable original maturity receipt with current corporate and full original-workspace financial read authority", ["rental-os:corporate:view"]), responseSchema: { oneOf: [ref("CustomerCorporateCreditMaturityReceipt"), { type: "null" }] } },
@@ -2187,6 +2316,32 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
+    permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
+    authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
+    requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
+  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`, tag: 'AI Native', operationId: `aiTaskRuleDraft_${action}`,
+    permissions: action === 'save' || action === 'review' ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    summary: action === 'save' ? 'Explicit human save of a reviewed original rule draft. No publication. Unknown: read the same original operation.'
+      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned rule proposal or full Core candidate review.',
+    requestSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].response })),
+  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`, tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`,
+    permissions: action === 'save' || action === 'review' ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS],
+    summary: action === 'save' ? 'Explicit human save of a reviewed original calendar draft. No publication. Unknown: read the same original operation.'
+      : action === 'operation' ? 'Read original calendar draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned calendar proposal or full Core candidate review.',
+    requestSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].response })),
+  { method: 'post', path: `/api/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`, tag: 'AI Native', authRequired: true,
+    operationId: 'aiTaskOrderHandoff_read', permissions: ['rental-os:order:view'],
+    summary: 'Locate the owned original order Task and reread current order facts and manual reference. No model, business execution or approval.',
+    requestSchema: 'AiTaskOrderHandoffQuery', responseSchema: 'AiTaskOrderHandoffResponse' },
+  ...(['inspect', 'enable', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
+    operationId: `aiTaskReadPolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Explicit same-owner original manager read-policy CAS and original receipts. Never model/Core execution authorization.',
+    requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
   ...AI_CREDIT_OPERATIONS,
   ...DESKTOP_BUSINESS_OPERATIONS,
   { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
@@ -2206,6 +2361,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskCancelReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskInputCancellationReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot, 'AiClientTaskReadRequest', 'AiTaskSnapshotDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents, 'AiClientTaskEventsReadRequest', 'AiTaskEventsObservationDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation, 'AiClientOrderExplanationReadRequest', 'AiClientOrderExplanationReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readSource, 'AiClientSourceReadRequest', 'AiClientSourceReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskModelResult, 'AiClientTaskReadRequest', 'AiClientTaskModelResultReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInput, 'AiClientTaskReadRequest', 'AiClientTaskInputReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput, 'AiClientTaskInputSubmissionRequest', 'AiClientTaskInputSubmissionReceipt'],
@@ -2219,6 +2384,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskUnstartedCancellationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskAccounting, 'AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskAccounting, 'AiClientTaskAccountingRequest', 'AiClientTaskAccountingResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction, 'AiEntryActionRequest', 'AiEntryActionDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft, 'AiBookingActionRequest', 'AiBookingCreateResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.chooseBookingDraft, 'AiBookingChoiceRequest', 'AiBookingChoiceResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft, 'AiBookingDraftSelection', 'AiBookingDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft, 'AiBookingActionRequest', 'AiBookingHandoffResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingHandoff, 'AiBookingHandoffSelection', 'AiBookingHandoff'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation, 'AiBookingOperationReadRequest', 'AiBookingOperationReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance, 'AiBookingAcceptanceReadRequest', 'AiBookingAcceptanceReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission, 'AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking, 'AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
@@ -2298,6 +2470,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `staffInspection_${operation.replace(/-/gu, '_')}`, permissions: ['rental-os:order:view'],
     summary: 'Original staff/order/location and stage action authorization is rechecked. Manual work and recognition require separate server opt-ins. Input preparation, saved candidate evidence, human adoption, Core submission and draft linkage are separate facts. An unknown write is observed by its original key, never automatically resent; read-only receipt observation does not repair linkage.',
     requestSchema: contract.request, responseSchema: contract.response
+  })),
+  ...Object.entries(AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2).map(([name, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_ORDER_EXPLANATION_HTTP_V2.basePath}/${AI_ORDER_EXPLANATION_HTTP_V2[name as keyof typeof AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2]}`,
+    tag: 'AI Native', operationId: `originalOrderExplanationV2_${name}`, permissions: ['rental-os:order:view'],
+    requestSchema: contract.request, responseSchema: contract.response, successStatus: contract.successStatus,
+    summary: 'Opt-in read-only v2 original-order publication. Current owner, resource Guard and independent finance scope are rechecked. Original v1 requests/model hashes remain unchanged. Sources are current observations, not execution authority or reconstructed historical/provider results.'
   })),
   ...Object.entries(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(([name, contract]) => ({
     method: 'post' as const, path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]
@@ -2434,6 +2612,19 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       runId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
       stepId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'runId', 'stepId'], false),
     responseSchema: 'AiTaskConfirmationHistoryDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.usageSummary}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalUsageSummary', summary: 'Read the current owner original task ledger summary with bounded coverage, separate units/currencies and unknown amounts. No provider bill, new dispatch, release or settlement.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId'], false),
+    responseSchema: 'AiTaskBudgetUsageSummaryDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.visibleReport}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterClientVisibleReport', summary: 'Record original owner/browser timing diagnostics after current source checks. Client reports are not business facts or authorization, execution, accounting, release or SLO evidence.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskClientVisibleReportDraft', responseSchema: 'AiTaskClientVisibleReceiptDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.performance}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalPerformance', summary: 'Read original task/run clocks, bounded recorded model/tool observations and budget refusals. Missing first visible text/card remains unrecorded; no SLO verdict, dispatch or settlement.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskPerformanceReadDraft', responseSchema: 'AiTaskPerformanceObservationDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.outcomes}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOutcomeSample', summary: 'Read an explicit authorized scene/version task sample and original human takeover receipts. Pending tasks do not become failures; no SLO verdict, model call, lease or business execution.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskOutcomeSampleReadDraft', responseSchema: 'AiTaskOutcomeSampleDraft' },
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.usage}`,
     tag: 'AI Native', operationId: 'aiTaskCenterOriginalUsage', summary: 'Current owner original ledger page, not provider invoice or proof of business success. No new-execution gate, dispatch or settlement.',
     permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
@@ -2505,7 +2696,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS]}`,
     tag: 'AI Native', operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
     permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
-    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
+    summary: name === 'prepareSelection' ? 'Read the exact original clarified Core quote, full human selection material and current Core stock. Original answer payload or exact receipt key only; no answer resubmission, quote rebuild, selection save, runner, approval or order. Current Guard and original ownership remain required.'
+      : name === 'readOriginalOperation' ? 'Read the exact original scoped selection by its original key and original human answer reference. The server verifies its own frozen order payload and full quote/selection fingerprint; clients retain no customer/order body. Missing records never grant replay. No new selection, model, approval, lease, settlement or Core write.'
+      : 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
     method: 'post' as const,
@@ -3681,12 +3874,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Apply a confirmed pre-pickup whole-line cancellation", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange/services", tag: "RentalCore", operationId: "rentalOrderExchangeServiceOptions",
+    summary: "Read current exchange service options under original order visibility and operation permission", permissions: ["rental-os:order:operate"], responseSchema: "RentalExchangeServiceOptions"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange/preview", tag: "RentalCore", operationId: "previewRentalOrderPostPickupExchange",
-    summary: "Preview remaining-period exchange pricing without repricing performed rental", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalPostPickupExchangePreview"
+    summary: "Preview remaining-period exchange and independently selected services without reserving capacity", permissions: ["rental-os:order:operate"], requestSchema: "RentalPostPickupExchangeRequest", responseSchema: "RentalPostPickupExchangePreview"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange", tag: "RentalCore", operationId: "applyRentalOrderPostPickupExchange",
-    summary: "Apply remaining-period exchange, freeze stable line pricing and handover evidence, defer settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "RentalPostPickupExchangeResult"
+    summary: "Apply customer-confirmed exchange, append services and atomically confirm capacity, defer settlement", permissions: ["rental-os:order:operate"], requestSchema: "RentalPostPickupExchangeApplyRequest", responseSchema: "RentalPostPickupExchangeResult"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
@@ -3869,8 +4066,8 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/orders/{orderId}/funding-events", "RentalBusiness", "listRentalOrderFundingEventsV1", "List order cash/security events and balances, with separately reconciled original corporate allocations", ["rental-os:order:view", "rental-os:order:settle"], true, undefined, "RentalFundingBalance"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/initiate", "RentalBusiness", "initiateRentalOrderFundingV1", "Initiate a deposit collection or pre-auth freeze (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/append", "RentalBusiness", "appendRentalOrderFundingV1", "Append to a deposit or pre-auth (mock)", ["rental-os:order:settle"]),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/capture", "RentalBusiness", "captureRentalOrderFundingV1", "Capture/deduct from a deposit or pre-auth (mock)", ["rental-os:order:settle"]),
-  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/refund", "RentalBusiness", "refundRentalOrderFundingV1", "Refund a deposit (mock)", ["rental-os:order:settle"]),
+  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/capture", "RentalBusiness", "captureRentalOrderFundingV1", "Capture a deposit against original offline evidence, or simulate an eligible security capture", ["rental-os:order:settle"], true, "RentalFundingAmountRequest", "RentalFundingEvent"),
+  backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/refund", "RentalBusiness", "refundRentalOrderFundingV1", "Confirm original offline deposit refund, or simulate an eligible refund", ["rental-os:order:settle"], true, "RentalFundingAmountRequest", "RentalFundingEvent"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/release", "RentalBusiness", "releaseRentalOrderFundingV1", "Release a pre-auth freeze (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/fail", "RentalBusiness", "failRentalOrderFundingV1", "Record a failed deposit/pre-auth funding action (mock)", ["rental-os:order:settle"]),
   backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents", "Payments", "listRentalPaymentIntents", "List real payment intents for an order", ["rental-os:finance:view", "rental-os:finance:reconcile"]),

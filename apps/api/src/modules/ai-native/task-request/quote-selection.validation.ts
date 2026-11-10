@@ -1,8 +1,9 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReadDraft,
-  type AiClarifiedQuoteSelectionRequestDraft, type AiQuoteSelectionProofDraft,
-  type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft, type AiQuoteSelectionReceiptDraft } from '@rental-os/shared';
+  type AiClarifiedQuoteSelectionRequestDraft, type AiClarifiedQuoteSelectionPreparationDraft, type AiQuoteSelectionProofDraft,
+  type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft, type AiQuoteSelectionReceiptDraft,
+  type AiHumanQuoteOrderRepreparePreparationDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from './original-request.validation';
 import { HttpException } from '@nestjs/common';
@@ -24,6 +25,8 @@ const read = ajv.compile<AiQuoteSelectionReadDraft>(AI_QUOTE_SELECTION_DRAFT_SCH
 const proof = ajv.compile<AiQuoteSelectionProofRequest>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiQuoteSelectionProofRequest);
 const clarified = ajv.compile<AiClarifiedQuoteSelectionRequestDraft>(AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiClarifiedQuoteSelectionRequestDraft);
 type QuoteSelectionResponses = { AiQuoteSelectionSelectResponseDraft: AiQuoteSelectionSelectResponseDraft;
+  AiHumanQuoteOrderRepreparePreparationDraft: AiHumanQuoteOrderRepreparePreparationDraft;
+  AiClarifiedQuoteSelectionPreparationDraft: AiClarifiedQuoteSelectionPreparationDraft;
   AiQuoteSelectionReconcileResponseDraft: AiQuoteSelectionReconcileResponseDraft;
   AiQuoteSelectionReceiptDraft: AiQuoteSelectionReceiptDraft;
   AiSelectedQuoteTaskRunDraft: AiSelectedQuoteTaskRunDraft;
@@ -39,6 +42,8 @@ type QuoteSelectionResponses = { AiQuoteSelectionSelectResponseDraft: AiQuoteSel
   AiTaskMetadataPageDraft: AiTaskMetadataPageDraft;
   AiTaskEventsObservationDraft: AiTaskEventPageDraft | AiTaskEventResetDraft };
 const responseNames = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionReconcileResponseDraft', 'AiQuoteSelectionReceiptDraft',
+  'AiHumanQuoteOrderRepreparePreparationDraft',
+  'AiClarifiedQuoteSelectionPreparationDraft',
   'AiSelectedQuoteTaskRunDraft', 'AiSelectedQuoteTaskConfirmationDraft', 'AiSelectedQuoteTaskRecoveryDraft', 'AiSelectedQuoteTaskResultDraft',
   'AiSelectedQuoteTaskCancelResponseDraft', 'AiHumanQuoteOrderDecisionResponseDraft', 'AiHumanQuoteOrderReprepareResponseDraft',
   'AiApprovalApplicationReviewDraft', 'AiApprovalApplicationReceiptDraft', 'AiApprovalReprepareEligibilityDraft',

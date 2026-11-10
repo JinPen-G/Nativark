@@ -44,10 +44,12 @@ const inScope = (changes, fn) => runWithRequestIdentity({ ...operatorIdentity, .
 function matches(row, where = {}) {
   return Object.entries(where).every(([key, value]) => {
     if (value === undefined) return true;
+    if (value instanceof Date) return row[key] instanceof Date && row[key].getTime() === value.getTime();
     if (key === "AND") return value.every(clause => matches(row, clause));
     if (key === "OR") return value.some(clause => matches(row, clause));
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if ("in" in value) return value.in.includes(row[key]);
+      if ("lte" in value) return row[key] != null && row[key] <= value.lte;
       if ("not" in value) return row[key] !== value.not;
       if ("some" in value) return (row[key] ?? []).some(item => matches(item, value.some));
       return matches(row[key] ?? {}, value);
@@ -138,7 +140,7 @@ const prisma = {
       if (!where && select?.tenantId) {
         return [...new Set([...sessions.values()].map((row) => row.tenantId))].sort().map((id) => ({ tenantId: id }));
       }
-      return [...sessions.values()].filter((row) => row.tenantId === where.tenantId && row.expiresAt <= where.expiresAt.lte && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError))).slice(0, 100);
+      return [...sessions.values()].filter(row => matches(row, where)).slice(0, 100);
     },
     create: async ({ data }) => {
       const row = { ...data, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
@@ -152,12 +154,7 @@ const prisma = {
     },
     updateMany: async ({ where, data }) => {
       const row = sessions.get(where.id);
-      const allowed = row
-        && row.tenantId === where.tenantId
-        && (!where.status || row.status === where.status)
-        && (!where.storageKey || row.storageKey === where.storageKey)
-        && (!where.updatedAt || row.updatedAt.getTime() === where.updatedAt.getTime())
-        && (where.status || row.status === "pending_upload" || (row.status === "failed" && row.cleanupError));
+      const allowed = row && matches(row, where);
       if (!allowed) return { count: 0 };
       Object.assign(row, data, { updatedAt: new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
       return { count: 1 };
@@ -605,6 +602,8 @@ void runWithRequestIdentity(operatorIdentity, async () => {
         objectBytes.set(key, Buffer.from(init.body)); if (afterPut) await afterPut(key);
         return new Response(null, { status: 200 });
       }
+      if (init.method === 'DELETE') { objectBytes.delete(key); return new Response(null, { status: 204 }); }
+      if (init.method === 'HEAD') return new Response(null, { status: objectBytes.has(key) ? 200 : 404 });
       const bytes = objectBytes.get(key);
       if (!bytes) return new Response(null, { status: 404 });
       const copy = Buffer.from(bytes); if (afterRead) await afterRead(key);
@@ -696,6 +695,90 @@ void runWithRequestIdentity(operatorIdentity, async () => {
     assert.equal(assets.get(revoked.fileAssetId).status, 'pending_upload', '撤销原业务范围不能激活证据');
     assert.equal((await runtime.createUploadSession(tenantId, { ...input, sizeBytes: 4, idempotencyKey: 'immutable-original' }, owner)).uploadUrl, undefined);
     console.log('expired original grants and invalid length remain closed; revoked ownership never activates file');
+
+    // Completed staging cleanup never changes the original completed/active
+    // evidence and never consumes an uncertain freeze as a failed upload.
+    const cleanable = sessions.get(original.sessionId);
+    assert.equal(cleanable.cleanupError, 'completed_staging_pending');
+    const deletesBeforeExpiry = requests.filter(row => row.method === 'DELETE').length;
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(requests.some(row => row.method === 'DELETE' && row.key === pendingKey), false, 'live original PUT must expire before staging reclamation');
+    cleanable.expiresAt = new Date(Date.now() - 1000);
+    const metadataBeforeCleanup = structuredClone(completedAsset.metadata);
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(requests.filter(row => row.method === 'DELETE' && row.key === pendingKey).length, 1);
+    assert.equal(objectBytes.has(pendingKey), false); assert.equal(objectBytes.get(completedKey).toString(), 'AAAA');
+    assert.equal(cleanable.status, 'completed'); assert.equal(cleanable.cleanupError, null);
+    assert.equal(completedAsset.status, 'active'); assert.deepEqual(completedAsset.metadata, metadataBeforeCleanup);
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(requests.filter(row => row.method === 'DELETE' && row.key === pendingKey).length, 1, 'recorded cleanup is not sent again');
+    assert.ok(requests.filter(row => row.method === 'DELETE').length > deletesBeforeExpiry);
+    assert.equal(requests.some(row => row.method === 'DELETE' && row.key === completedKey), false);
+    assert.equal(requests.some(row => row.method === 'DELETE' && row.key === commitLostKey), false, 'unknown freeze is never staging cleanup');
+
+    const cleanupUnknown = await create('immutable-cleanup-unknown');
+    const cleanupUnknownKey = decodeURIComponent(new URL(cleanupUnknown.uploadUrl).pathname).replace(/^\//, '');
+    objectBytes.set(cleanupUnknownKey, Buffer.from('HHHH'));
+    await runtime.completeUpload(tenantId, cleanupUnknown.sessionId, {}, owner);
+    const cleanupUnknownSession = sessions.get(cleanupUnknown.sessionId);
+    cleanupUnknownSession.expiresAt = new Date(Date.now() - 1000);
+    const objectFixture = runtime.objectRequest;
+    let loseDelete = true;
+    runtime.objectRequest = async (url, init) => {
+      const response = await objectFixture(url, init);
+      if (init.method === 'DELETE' && loseDelete) { loseDelete = false; throw Error('DELETE acknowledgement lost'); }
+      return response;
+    };
+    const unknownCleanup = await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(unknownCleanup.cleanupPending, 1); assert.equal(cleanupUnknownSession.cleanupError, 'completed_staging_unknown');
+    assert.equal(cleanupUnknownSession.status, 'completed');
+    cleanupUnknownSession.lastCleanupAt = new Date(Date.now() - 11 * 60 * 1000);
+    const deleteCount = requests.filter(row => row.method === 'DELETE' && row.key === cleanupUnknownKey).length;
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(cleanupUnknownSession.cleanupError, null);
+    assert.equal(requests.filter(row => row.method === 'DELETE' && row.key === cleanupUnknownKey).length, deleteCount);
+    assert.ok(requests.some(row => row.method === 'HEAD' && row.key === cleanupUnknownKey));
+    runtime.objectRequest = objectFixture;
+
+    const claimUnknown = await create('immutable-cleanup-claim-lost');
+    const claimUnknownKey = decodeURIComponent(new URL(claimUnknown.uploadUrl).pathname).replace(/^\//, '');
+    objectBytes.set(claimUnknownKey, Buffer.from('IIII'));
+    await runtime.completeUpload(tenantId, claimUnknown.sessionId, {}, owner);
+    const claimSession = sessions.get(claimUnknown.sessionId); claimSession.expiresAt = new Date(Date.now() - 1000);
+    let loseClaim = true;
+    prisma.$transaction = async work => { const result = await originalTransaction(work);
+      if (loseClaim && result?.count === 1) { loseClaim = false; throw Error('cleanup COMMIT acknowledgement lost'); } return result; };
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100); prisma.$transaction = originalTransaction;
+    assert.equal(claimSession.cleanupError, 'completed_staging_unknown');
+    claimSession.lastCleanupAt = new Date(Date.now() - 11 * 60 * 1000);
+    await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(requests.some(row => row.method === 'DELETE' && row.key === claimUnknownKey), false, 'uncertain claim cannot authorize a later DELETE');
+    assert.equal(claimSession.cleanupError, 'completed_staging_unknown', 'HEAD 200 never proves deletion');
+    assert.equal(assets.get(claimUnknown.fileAssetId).status, 'active');
+
+    // An old completed row, a changed location or a forged staging path cannot
+    // be promoted to trusted evidence by this maintenance entry.
+    const cleanupBlocked = await create('immutable-cleanup-blocked');
+    const blockedKey = decodeURIComponent(new URL(cleanupBlocked.uploadUrl).pathname).replace(/^\//, '');
+    objectBytes.set(blockedKey, Buffer.from('JJJJ'));
+    await runtime.completeUpload(tenantId, cleanupBlocked.sessionId, {}, owner);
+    const blockedSession = sessions.get(cleanupBlocked.sessionId), blockedAsset = assets.get(cleanupBlocked.fileAssetId);
+    blockedSession.expiresAt = new Date(Date.now() - 1000);
+    const blockedMetadata = structuredClone(blockedAsset.metadata), oldBucket = fileConfig.settings.bucket;
+    fileConfig.settings.bucket = 'changed-files'; await runtime.cleanupCompletedStagingObjects(tenantId, 100); fileConfig.settings.bucket = oldBucket;
+    assert.equal(blockedSession.cleanupError, 'completed_staging_pending');
+    blockedAsset.metadata.stagingStorageKey = 'another/original'; await runtime.cleanupCompletedStagingObjects(tenantId, 100);
+    assert.equal(requests.some(row => row.method === 'DELETE' && row.key === blockedKey), false);
+    blockedAsset.metadata = blockedMetadata;
+    const legacy = { ...blockedSession, id: 'legacy-completed', fileAssetId: 'legacy-file', cleanupError: null };
+    sessions.set(legacy.id, legacy); assets.set(legacy.fileAssetId, { ...blockedAsset, id: legacy.fileAssetId, metadata: { uploadMode: 'provider' } });
+    const integrated = await runtime.cleanupExpiredUploadSessions(tenantId);
+    assert.equal(integrated.sessionIds.includes(legacy.id), false);
+    assert.equal(legacy.status, 'completed'); assert.equal(blockedAsset.status, 'active');
+    assert.equal(blockedSession.cleanupError, null); assert.equal(objectBytes.has(blockedKey), false);
+    assert.equal(sessions.get(commitLost.sessionId).status, 'freeze_pending');
+    assert.equal(objectBytes.get(completedKey).toString(), 'AAAA');
+    console.log('completed staging cleanup waits for original expiry, preserves evidence and observes uncertain DELETE/COMMIT without resending');
     runtime.objectRequest = originalObjectRequest; fileConfig = undefined;
   }
   console.log("file storage lifecycle tests passed");

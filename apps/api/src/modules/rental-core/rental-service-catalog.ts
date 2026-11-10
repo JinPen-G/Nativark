@@ -2,9 +2,11 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import type {
   RentalFulfillmentMode,
   RentalQuoteServiceSnapshot,
+  RentalOrderServiceOccurrence,
   RentalServiceMandatoryRule,
   RentalValueAddedService
 } from "@rental-os/shared";
+import { createHash } from "node:crypto";
 import { businessDayIndex } from "./rental-business-day";
 
 /**
@@ -40,6 +42,88 @@ export interface RentalServiceContext {
 }
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+/** Revalidate retained promises against replacement goods, without repricing or
+ * manufacturing a new service. A newly triggered requirement needs a separately
+ * confirmed service occurrence; historical optional terms cannot become mandatory. */
+export function assertExchangeServices(services: RentalValueAddedService[], ctx: Omit<RentalServiceContext, "selections">,
+  occurrences: RentalOrderServiceOccurrence[], cancelledIds: readonly string[]): RentalOrderServiceOccurrence[] {
+  const retained = occurrences.filter(row => !row.occurrenceId || !cancelledIds.includes(row.occurrenceId))
+    .filter(row => !["cancelled", "failed", "no_show"].includes(row.executionStatus ?? "not_started"));
+  if (retained.some(row => !row.occurrenceId || row.workspaceId !== ctx.workspaceId
+    || !Number.isInteger(row.quantity) || row.quantity < 1)) {
+    throw new ConflictException("原服务发生项缺少稳定来源或数量，不能猜测换货履约依据");
+  }
+  for (const row of retained.filter(row => row.executionStatus !== "completed")) {
+    const service = services.find(value => value.id === row.serviceId);
+    // 停用禁止新报价，不抹去原订单已锁定的服务承诺。
+    if (!service || !eligibilityOf({ ...service, status: "enabled" }, { ...ctx, selections: [] }, [row.serviceLocationId]).eligible
+      || !Number.isFinite(Date.parse(row.scheduledStartAt)) || !Number.isFinite(Date.parse(row.scheduledEndAt))
+      || Date.parse(row.scheduledEndAt) <= Date.parse(row.scheduledStartAt)
+      || !Array.isArray(row.applicableItemGroupIds)
+      || row.applicableItemGroupIds.length && !row.applicableItemGroupIds.some(id => ctx.itemGroupIds.includes(id))) {
+      throw new ConflictException(`服务「${row.serviceName}」不适用于替换商品，须先确认服务变更`);
+    }
+  }
+  for (const service of services.filter(row => row.status === "enabled" && row.selectionMode === "mandatory")) {
+    if (!eligibilityOf(service, { ...ctx, selections: [] }).eligible) continue;
+    const hit = mandatoryRuleHit(service.mandatoryRule, ctx);
+    if (!hit) continue;
+    const requiredGroups = ctx.itemGroupIds.filter(id => !service.applicableItemGroupIds.length || service.applicableItemGroupIds.includes(id));
+    const covered = retained.some(row => row.serviceId === service.id && row.requiredByRule && row.executionStatus !== "completed"
+      && Boolean(row.serviceVersion) && Boolean(row.termsVersion)
+      && Array.isArray(row.applicableItemGroupIds)
+      && (!row.applicableItemGroupIds.length || requiredGroups.every(id => row.applicableItemGroupIds!.includes(id)))
+      && Number.isFinite(Date.parse(row.scheduledStartAt)) && Number.isFinite(Date.parse(row.scheduledEndAt))
+      && Date.parse(row.scheduledStartAt) < Date.parse(ctx.endAt) && Date.parse(row.scheduledEndAt) > Date.parse(ctx.startAt));
+    if (!covered) throw new ConflictException(`替换商品按业务规则要求服务「${service.name}」（${hit}），须先选择并确认服务，不能直接换货`);
+  }
+  return retained.filter(row => row.executionStatus !== "completed");
+}
+
+/** 换货服务只给显式新增项取当前价；原发生项仍按原金额、条款及容量收据保留。 */
+export function resolveExchangeServices(services: RentalValueAddedService[], ctx: Omit<RentalServiceContext, "selections">,
+  occurrences: RentalOrderServiceOccurrence[], cancelledIds: readonly string[], selections: RentalServiceContext["selections"]) {
+  if (new Set(cancelledIds).size !== cancelledIds.length) throw new ConflictException("换货服务取消不可重复");
+  for (const occurrenceId of cancelledIds) {
+    const row = occurrences.find(value => value.occurrenceId === occurrenceId);
+    if (!row || (row.executionStatus ?? "not_started") !== "not_started" || row.refundStatus && row.refundStatus !== "none") {
+      throw new ConflictException("换货服务缺少可取消的原发生项");
+    }
+    if (row.requiresCapacity && !row.reservationKey) throw new ConflictException("原服务缺少容量预留依据，不能安全取消");
+  }
+  for (const selection of selections) {
+    // 明确新时段才能确认同一承诺；默认取两次试算墙钟会让确认指纹变成另一项服务。
+    if (!selection.scheduledStartAt || !selection.scheduledEndAt || !selection.serviceLocationId
+      || !ctx.locationIds.includes(selection.serviceLocationId)
+      || Date.parse(selection.scheduledStartAt) < Date.parse(ctx.startAt) || Date.parse(selection.scheduledEndAt) > Date.parse(ctx.endAt)) {
+      throw new ConflictException("换货新增服务必须明确剩余租期内的地点和时段，不能追溯保障原事件");
+    }
+    if (occurrences.some(row => row.serviceId === selection.serviceId && !cancelledIds.includes(row.occurrenceId ?? "")
+      && !["cancelled", "failed", "no_show"].includes(row.executionStatus ?? "not_started")
+      // 已完成安装/作业不是待履约承诺；保障即使完成购买仍按原有效期防重复。
+      && (row.executionStatus !== "completed" || ["damage_waiver", "insurance"].includes(row.serviceType))
+      && (!row.applicableItemGroupIds?.length || row.applicableItemGroupIds.some(id => ctx.itemGroupIds.includes(id)))
+      && Date.parse(row.scheduledStartAt) < Date.parse(selection.scheduledEndAt!)
+      && Date.parse(row.scheduledEndAt) > Date.parse(selection.scheduledStartAt!))) {
+      throw new ConflictException("同一服务的原承诺仍覆盖所选时段，不能重复收费或占容量");
+    }
+  }
+  // 未新增的强制项由原发生项承接；最终统一判据不能只看新报价漏选。
+  const selectedIds = new Set(selections.map(row => row.serviceId));
+  const resolved = resolveQuoteServices(services.map(row => selectedIds.has(row.id) ? row : { ...row, selectionMode: "optional" }),
+    { ...ctx, selections });
+  const incoming = resolved.snapshots.map((row, index) => ({ ...row, occurrenceId: `exchange-preview:${index}`, executionStatus: "not_started" as const }));
+  assertExchangeServices(services, ctx, [...occurrences, ...incoming], cancelledIds);
+  return resolved;
+}
+
+/** 确认指纹绑定本订单版本、替换对象、取消项和全部新服务正文，不授予操作权限。 */
+export function exchangeServiceConfirmationHash(binding: { orderId: string; expectedUpdatedAt: string; orderLineId: string;
+  replacementItemGroupId: string; cancelledIds: readonly string[] }, snapshots: RentalQuoteServiceSnapshot[]): string {
+  return createHash("sha256").update(JSON.stringify({ ...binding, cancelledIds: [...binding.cancelledIds].sort(),
+    services: [...snapshots].sort((a, b) => a.serviceId.localeCompare(b.serviceId)) })).digest("hex");
+}
 
 /**
  * 计费单位数。自然日与夜用与商品取价**同一个日界口径**（营业时区日序号），

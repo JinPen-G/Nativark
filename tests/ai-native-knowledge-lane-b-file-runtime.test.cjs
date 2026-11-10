@@ -239,6 +239,12 @@ test('first creation uses original upload receipt then real create parse index p
   await assert.rejects(f.api.management.create(h.draft({ attachmentId: a.fileAssetId })), { code: 'unavailable' });
   const { bound } = await completed(f, t); assert.equal(bound.attachmentId, a.fileAssetId);
   const draft = h.draft({ attachmentId: bound.attachmentId });
+  const frozenAsset = f.db.state.assets.get(bound.attachmentId), originalMetadata = structuredClone(frozenAsset.metadata);
+  for (const changed of [{ fileContentVersion: undefined }, { contentHash: '0'.repeat(64) }, { stagingStorageKey: 'foreign/original' }]) {
+    frozenAsset.metadata = { ...originalMetadata, ...changed };
+    await assert.rejects(f.api.management.prepareCreate(draft), { code: 'unavailable' });
+  }
+  frozenAsset.metadata = originalMetadata;
   assert.equal((await f.api.management.prepareCreate(draft)).status, 'ready_to_create');
   await f.api.management.create(draft);
   assert.equal((await f.api.management.create(draft)).revision, 1);
@@ -460,6 +466,21 @@ test('knowledge byte source bounds overflow and abort without waiting for provid
   const f = fileFixture(), { bound } = await completed(f, t); f.allowDocument(bound.attachmentId);
   await f.api.management.create(h.draft({ attachmentId: bound.attachmentId }));
   const ref = { tenantId: 'tenant-1', workspaceId: 'space-1', documentId: 'doc-1', fileAssetId: bound.attachmentId };
+  const asset = f.db.state.assets.get(bound.attachmentId), originalMetadata = structuredClone(asset.metadata);
+  const sealedReader = new TenantKnowledgeObjectReader(f.db, f.integrations, f.objectIO.transport, f.objectIO.egress);
+  const readsBefore = f.reads();
+  for (const changed of [{ fileContentVersion: undefined }, { contentHash: '0'.repeat(64) }, { stagingStorageKey: 'other/original' }, { storageLocationHash: 'changed' }]) {
+    asset.metadata = { ...originalMetadata, ...changed };
+    await assert.rejects(sealedReader.read(ref, 262144));
+  }
+  asset.metadata = originalMetadata;
+  const originalStorageKey = asset.storageKey, upload = [...f.db.state.uploads.values()][0];
+  asset.storageKey = originalMetadata.stagingStorageKey; upload.storageKey = asset.storageKey;
+  await assert.rejects(sealedReader.read(ref, 262144));
+  asset.storageKey = originalStorageKey; upload.storageKey = originalStorageKey;
+  const oldBucket = f.config.settings.bucket; f.config.settings.bucket = 'another-bucket';
+  await assert.rejects(sealedReader.read(ref, 262144)); f.config.settings.bucket = oldBucket;
+  assert.equal(f.reads(), readsBefore, 'missing original freeze or changed location fails before object transport');
   let cancelled = 0;
   const source = new ReadableStream({ pull(controller) { controller.enqueue(Buffer.alloc(f.text.length + 1)); }, cancel() { cancelled++; return new Promise(() => {}); } }, { highWaterMark: 0 });
   const reader = new TenantKnowledgeObjectReader(f.db, f.integrations, async () => new Response(source, { headers: { 'content-type': 'text/plain', 'content-length': String(f.text.length) } }), f.objectIO.egress);

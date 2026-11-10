@@ -338,12 +338,32 @@ export class RentalBusinessController {
   @Post("rule-versions/:version/publish") async publishRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: PublishRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.publishRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version, body, req.user.displayName)); }
   @Post("rule-versions/:version/void") async voidRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: VoidRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.voidRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version, body.reason, req.user.displayName)); }
 
-  // RULE-01B：押金/预授权模拟资金事件（需求 4.4.7、4.6.3）。只记录资金事实，不改订单状态机。
+  // 资金事实入口：模拟仍受演练门约束；线下退押/抵扣须显式原实收与凭证。
   @Get("orders/:orderId/funding-events") fundingEvents(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string) { return this.funding.listEvents(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId); }
   @Post("orders/:orderId/funding-events/initiate") @HttpCode(201) async initiateFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: InitiateRentalFundingDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "initiate", idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
   @Post("orders/:orderId/funding-events/append") @HttpCode(201) async appendFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "append", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
-  @Post("orders/:orderId/funding-events/capture") @HttpCode(201) async captureFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "capture", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
-  @Post("orders/:orderId/funding-events/refund") @HttpCode(201) async refundFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "refund", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/capture") @HttpCode(201) async captureFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) {
+    return this.depositDisposition(req, orderId, body, "capture");
+  }
+  @Post("orders/:orderId/funding-events/refund") @HttpCode(201) async refundFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) {
+    return this.depositDisposition(req, orderId, body, "refund");
+  }
+  private async depositDisposition(req: AuthenticatedRequest, orderId: string, body: RentalFundingAmountDto, action: "refund" | "capture") {
+    const tenantId = req.user.tenantId, workspaceId = this.core.resolveWorkspaceId(tenantId);
+    if (body.offlineDeposit) {
+      if (body.instrument !== "deposit" || !req.user.id) throw new BadRequestException("线下处置必须绑定押金及当前操作人");
+      await this.core.getOrder(tenantId, orderId);
+      const result = await this.funding.recordOfflineDepositDisposition(tenantId, workspaceId, orderId, {
+        ...body, ...body.offlineDeposit, action,
+        paymentMethod: action === "refund" ? this.core.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) : undefined
+      }, { id: req.user.id, name: req.user.displayName });
+      return this.committed(tenantId, result);
+    }
+    return this.committed(tenantId, await this.funding.recordEvent(tenantId, workspaceId, orderId, {
+      instrument: body.instrument, action, amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason,
+      paymentMethod: action === "refund" ? this.core.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) : undefined
+    }, req.user.displayName));
+  }
   @Post("orders/:orderId/funding-events/release") @HttpCode(201) async releaseFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingReleaseDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: "preauthorization", action: "release", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
   @Post("orders/:orderId/funding-events/fail") @HttpCode(201) async failFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingFailureDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "fail", amount: 0, idempotencyKey: body.idempotencyKey, reason: body.reason, failureCode: body.failureCode, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
 

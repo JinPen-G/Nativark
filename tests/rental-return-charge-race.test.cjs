@@ -49,6 +49,7 @@ function controller({ locked = LOCKED, extensions = [] } = {}) {
   instance.service = {
     getOrder: async () => STALE(),
     listInspectionTemplates: () => [TEMPLATE],
+    listOrderChanges: async () => [],
     resolveWorkspaceId: () => "ws_1",
     listInspections: async () => [],
     listOrderExtensions: async (_tenantId, orderId) => { seen.lockedFor.push(`extensions:${orderId}`); return extensions; },
@@ -64,7 +65,7 @@ function controller({ locked = LOCKED, extensions = [] } = {}) {
   };
   instance.business = {
     effectiveRuleAt: () => ({ config: { fulfillment: { evidenceRequired: false } } }),
-    getQuote: () => ({ id: "quote_1" }),
+    loadQuote: async () => ({ id: "quote_1" }),
     calculateOverdueCharge: (_tenantId, _context, _quote, returnedAt, dueAt, outstanding) => {
       seen.overdue.push({ returnedAt, dueAt, outstanding });
       return dueAt === EXTENDED_END ? 0 : 20;
@@ -82,7 +83,7 @@ function controller({ locked = LOCKED, extensions = [] } = {}) {
   return { instance, seen };
 }
 
-const req = () => ({ user: { tenantId: "tenant_1", displayName: "运营" }, headers: { "idempotency-key": "key-1" } });
+const req = () => ({ user: { tenantId: "tenant_1", displayName: "运营", permissions: ["rental-os:order:pickup", "rental-os:order:return"] }, headers: { "idempotency-key": "key-1" } });
 
 void (async () => {
 

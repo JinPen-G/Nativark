@@ -37,6 +37,29 @@ test('real human rejection -> new formal input/plan -> atomic prepare -> new hum
   assert.equal(h.state.records.aiApproval.length, 2);
 });
 
+test('recorded rejected runner result permits reprepare only with the exact bound rejection receipt', async () => {
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  for (const damaged of [false, true]) {
+    const h = await reprepareHarness();
+    await h.root.approvals.decide('task-a', { ...h.review, decision: 'reject' });
+    const step = h.state.records.aiStep.find(row => row.taskId === 'task-a');
+    Object.assign(step, { status: 'FAILED', effect: 'NONE', resultRef: 'rejected-phase' });
+    h.state.records.aiTask.find(row => row.id === 'task-a').status = 'FAILED';
+    const approval = h.state.records.aiApproval[0];
+    const payload = { version: 'approved-order-wait-1', effectState: 'rejected', decision: 'rejected', decisionRef: approval.id,
+      proposal: h.review, binding: { scopeId: step.scopeId, taskId: step.taskId, runId: step.runId, stepId: step.id,
+        actionId: step.actionId, fingerprint: step.requestFingerprint } };
+    h.state.records.aiTaskExecutionPhaseReceipt.push({ id: 'rejected-phase', scopeId: step.scopeId, taskId: step.taskId,
+      runId: step.runId, stepId: step.id, kind: 'failed', errorCode: 'AI_APPROVAL_REJECTED', businessResultRef: null,
+      decisionRef: damaged ? 'other-approval' : approval.id, proposalId: h.review.proposalId, proposalRevision: h.review.proposalRevision,
+      reviewedPayloadHash: h.review.reviewedPayloadHash, payload, contentHash: requestFingerprint(payload) });
+    h.command.reason = 'rejected';
+    if (damaged) await assert.rejects(h.compose().application.reprepare('task-a', h.command), error => error.code === 'AI_RESULT_UNKNOWN');
+    else assert.equal((await h.compose().application.reprepare('task-a', h.command)).state, 'prepared');
+    assert.equal(h.state.records.rentalOrder.length, 0);
+  }
+});
+
 test('expired original requires distinct valid replacement and a fresh pending proposal', async () => {
   const h = await reprepareHarness({ decisionExpiresAt: new Date(Date.now() + 30000).toISOString() });
   h.state.clock = new Date(Date.now() + 60000);

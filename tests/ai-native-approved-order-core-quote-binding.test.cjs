@@ -25,6 +25,15 @@ test('Core original quote storage keeps exact scoped operation through replay an
       create: args => tx.rentalQuote.create({ ...args,
         data: Object.fromEntries(Object.entries(args.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v])) }) },
     $queryRaw: async query => {
+      if (query.sql.includes('rental_bundle_components')) {
+        const root = b.core.listItemGroups('tenant_001').find(row => query.values.includes(row.id));
+        return (root?.bundleComponents ?? []).map(part => ({ componentItemGroupId: part.itemGroupId, quantity: part.quantity,
+          optional: Boolean(part.optional), substitutionGroup: part.substitutionGroup ?? null, code: part.itemGroupCode,
+          name: part.itemGroupName, tenantId: 'tenant_001', workspaceId: 'workspace-a' }));
+      }
+      if (query.sql.includes('rental_item_groups')) return b.core.listItemGroups('tenant_001')
+        .filter(row => query.values.includes(row.id)).map(row => ({ ...row, workspaceId: 'workspace-a',
+          createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) }));
       if (query.sql.includes('rental_fulfillment_locations')) return b.core.listLocations('tenant_001').map(row => ({ ...row, tenantId: 'tenant_001', workspaceId: 'workspace-a' }));
       if (query.sql.includes('rental_fulfillment_operators')) return b.core.listOperators('tenant_001').map(row => ({ ...row, tenantId: 'tenant_001', workspaceId: 'workspace-a' }));
       return [{ id: 'workspace-a', status: 'ACTIVE', categoryVersionId: null, categoryAdoptionRevision: 0 }];
@@ -64,6 +73,9 @@ test('Core original quote storage keeps exact scoped operation through replay an
     await repository.upsertQuote({ ...recovered, consumedAt: '2026-11-01T00:00:00Z', consumedOrderId: 'original-order' });
     assert.equal((await restarted.findQuoteForOriginalOperation('tenant_001', original)).consumedOrderId, 'original-order');
     await assert.rejects(repository.upsertQuote({ ...recovered, payableAmount: recovered.payableAmount + 1 }), e => e.getStatus() === 409);
+    await assert.rejects(repository.upsertQuote({ ...recovered, inventoryBasis: {
+      ...recovered.inventoryBasis, workspaceId: 'invented-space' } }), e => e.getStatus() === 409);
+    await assert.rejects(repository.upsertQuote({ ...recovered, inventoryBasis: undefined }), e => e.getStatus() === 409);
     const next = { ...original, key: 'c'.repeat(64) };
     const first = { ...recovered, id: 'quote-race-a', quoteNo: 'quote-race-a' };
     const second = { ...recovered, id: 'quote-race-b', quoteNo: 'quote-race-b' };
@@ -122,4 +134,73 @@ test('Core confirmation binds the delivery snapshot inside the quote consumption
   assert.equal((await create()).replayed, true);
   assert.equal(h.state.records.rentalOrder.length, 1);
   assert.equal(h.state.records.rentalOrderIdempotencyRecord.length, 1);
+});
+
+// Actual Core preparation and lock-time validation, with declared in-memory
+// transport only. Native SQL/lock timing is tested in the owned database driver.
+test('Core freezes kit targets and rejects changed composition, missing legacy evidence and cross-space evidence', async () => {
+  const b = await require('./fixtures/ai-native/lane-a-business-consumption.cjs').setup('camping');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { assertRentalInventoryBasis } = require('../apps/api/src/modules/rental-core/rental-quote-inventory-basis');
+  await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a', userId: 'synthetic-user',
+    audience: 'operator', dataScope: 'all', isSaasAdmin: false }, async () => {
+    const groups = b.core.listItemGroups('tenant_001'), kit = groups.find(row => row.inventoryMode === 'bundle');
+    assert.ok(kit && kit.bundleComponents.length);
+    b.facts.listAssets = async () => groups.flatMap(group => Array.from({ length: 4 }, (_, index) => ({
+      id: group.id + '-asset-' + index, itemGroupId: group.id, locationId: b.location.id, status: 'available' })));
+    b.facts.listStockBalances = async () => groups.map(group => ({ itemGroupId: group.id, locationId: b.location.id,
+      onHandQuantity: 100, maintenanceQuantity: 0 }));
+    const context = { ...b.quoteConfiguration, category: await b.core.getWorkspaceCategory('tenant_001') };
+    const request = { customerType: 'personal', customerId: 'customer-a', startAt: b.candidate.start, endAt: b.candidate.end,
+      fulfillmentMode: b.candidate.fulfillmentMode, fulfillmentLocationId: b.location.id,
+      lines: [{ itemGroupId: kit.id, quantity: 1, pricingUnit: 'day_24h' }] };
+    request.lines[0].pricingGroupId = b.core.listPricingGroups('tenant_001').find(row => row.memberItemGroupIds.includes(kit.id)).id;
+    const rates = await b.business.listSpaceRatesAt('tenant_001', context, request.startAt);
+    const rate = rates.find(row => (row.pricingGroupId ?? row.itemGroupId) === request.lines[0].pricingGroupId);
+    assert.ok(rate); request.lines[0].pricingUnit = rate.unit;
+    const normal = await b.core.resolvePricingGroupQuoteRequest('tenant_001', request);
+    const quoted = await b.business.createQuote('tenant_001', context, normal);
+    assert.ok(quoted.inventoryBasis); assert.equal(quoted.inventoryBasis.version, 'rental-quote-inventory-1');
+    const body = { ...quoted.request, quoteId: quoted.id, customerName: 'Synthetic customer' };
+    const order = await b.core.prepareOrder('tenant_001', body, 'Synthetic operator', quoted);
+    assert.deepEqual(order.reservations.map(row => [row.itemGroupId, row.quantity]).sort(),
+      kit.bundleComponents.filter(row => !row.optional).map(row => [row.itemGroupId, row.quantity]).sort());
+    const original = structuredClone(quoted.inventoryBasis), tx = {};
+    await assertRentalInventoryBasis(b.core.configStore, 'tenant_001', 'workspace-a', quoted.request.lines, original, tx);
+    const changed = structuredClone(groups);
+    changed.find(row => row.id === kit.id).bundleComponents[0].quantity += 1;
+    b.core.configStore.listItemGroupsPage = async (_tenant, _workspace, query, presentedTx) => {
+      assert.equal(presentedTx, tx);
+      return { rows: changed.filter(row => row.id === query.itemGroupId), truncated: false,
+        source: 'persisted_workspace_configuration', configurationVersion: 'not-a-business-version' };
+    };
+    let inventoryLocks = 0; b.facts.lockInventoryTargets = async () => { inventoryLocks++; };
+    const availability = { locationId: b.location.id, startAt: body.startAt, endAt: body.endAt, lines: body.lines };
+    await assert.rejects(b.core.assertAvailabilityWithLocks('tenant_001', availability, tx, quoted.ruleSnapshot, quoted),
+      error => error.getStatus?.() === 409 && /组成已变化/u.test(error.message));
+    assert.equal(inventoryLocks, 0); assert.deepEqual(quoted.inventoryBasis, original);
+    await assert.rejects(b.core.prepareOrder('tenant_001', body, 'Synthetic operator', { ...quoted, inventoryBasis: undefined }),
+      error => error.getStatus?.() === 409);
+    await assert.rejects(b.core.prepareOrder('tenant_001', body, 'Synthetic operator', {
+      ...quoted, inventoryBasis: { ...original, workspaceId: 'another-space' } }), error => error.getStatus?.() === 409);
+    const unchanged = structuredClone(groups).reverse();
+    for (const row of unchanged) { row.updatedAt = '2099-01-01T00:00:00Z'; row.bundleComponents.reverse(); }
+    b.core.configStore.listItemGroupsPage = async (_tenant, _workspace, query) => ({ rows: unchanged.filter(row => row.id === query.itemGroupId),
+      truncated: false, source: 'persisted_workspace_configuration', configurationVersion: 'changed-timestamp-only' });
+    await assertRentalInventoryBasis(b.core.configStore, 'tenant_001', 'workspace-a', quoted.request.lines, original, tx);
+  });
+});
+
+test('Core same-key receipt replay precedes missing inventory evidence and current object changes', async () => {
+  const h = await require('./fixtures/ai-native/approved-order-composition.cjs').approvedOrderHarness();
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const create = () => runWithRequestIdentity({ tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'operator-a',
+    audience: 'operator', dataScope: 'all', isSaasAdmin: false }, () => h.dependencies.confirmation.createOrder('tenant-a', h.body,
+      'Synthetic operator', { category: { code: 'camera' } }, 'original-inventory-replay'));
+  const first = await create();
+  h.dependencies.core.prepareOrder = async () => { throw Error('must not prepare an already committed operation'); };
+  h.dependencies.core.assertAvailabilityWithLocks = async () => { throw Error('must not retry committed inventory'); };
+  const replay = await create();
+  assert.equal(replay.replayed, true); assert.equal(replay.order.id, first.order.id);
+  assert.equal(h.state.records.rentalOrder.length, 1); assert.equal(h.state.records.rentalOrderIdempotencyRecord.length, 1);
 });

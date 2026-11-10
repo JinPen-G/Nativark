@@ -158,6 +158,33 @@ test("mixed completed steps allow partial completion without inventing business 
   assert.deepEqual(Object.keys(only(state, "steps.read").select).sort(), ["actionId", "effect", "id", "revision", "runId", "sequence", "status"]);
 });
 
+test('held run lifecycle records its own terminal outcome without rewriting completed ancestors', async () => {
+  for (const fixture of [
+    { to: 'succeeded', steps: [step('SUCCEEDED')], runStatus: 'SUCCEEDED' },
+    { to: 'partially_succeeded', steps: [{ ...step('SUCCEEDED'), runId: 'earlier-run' },
+      { ...step('FAILED', 'NONE', 2), sequence: 1 }], runStatus: 'FAILED' },
+    { to: 'partially_succeeded', steps: [{ ...step('FAILED'), runId: 'earlier-run' },
+      { ...step('SUCCEEDED', 'NONE', 2), sequence: 1 }], runStatus: 'SUCCEEDED' },
+    { to: 'partially_succeeded', steps: [step('SUCCEEDED'), step('FAILED', 'NONE', 2)], runStatus: 'PARTIALLY_SUCCEEDED' },
+    { to: 'cancelled', steps: [step('SUCCEEDED'), step('PENDING', 'NONE', 2)], runStatus: 'CANCELLED' }
+  ]) {
+    const { state, repository } = setup(); state.steps = fixture.steps;
+    if (fixture.to === 'cancelled') { state.task.status = 'CANCEL_REQUESTED'; state.task.cancelRequestedAt = now; }
+    const before = structuredClone(state.steps);
+    await repository.transition({ ...command, to: fixture.to,
+      reason: fixture.to === 'cancelled' ? 'cancel_settled' : 'completed' });
+    const mutation = only(state, 'lease.update');
+    assert.equal(mutation.where.id, 'run-1'); assert.equal(mutation.data.status, fixture.runStatus);
+    assert.deepEqual(mutation.data.endedAt, now); assert.equal('startedAt' in mutation.data, false);
+    assert.deepEqual(state.steps, before, 'run finalization cannot rewrite original step results or ancestor runs');
+  }
+  const { state, repository } = setup(); state.task.status = 'QUEUED';
+  await repository.transition({ ...command, to: 'running', reason: 'start' });
+  const activation = only(state, 'lease.update').data;
+  assert.equal(activation.status, 'RUNNING'); assert.deepEqual(activation.startedAt, now);
+  assert.equal('endedAt' in activation, false);
+});
+
 test("protocol, aggregate cap, revision and cursor overflow are rejected before publication", async () => {
   for (const setupCase of [
     state => { state.task.contractVersion = "old"; },

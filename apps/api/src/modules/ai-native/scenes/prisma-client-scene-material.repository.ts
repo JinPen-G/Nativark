@@ -1,12 +1,13 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const rowSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
   channel: z.enum(['wechat_miniprogram', 'app', 'web']), principalKind: z.enum(['personal', 'corporate']),
   principalHash: hash, bindingHash: hash, publicationHash: hash, operationKey: id, inputHash: hash, materialHash: hash,
-  command: z.unknown(), material: z.unknown(), publication: z.unknown(), revision: z.literal(1),
+  command: z.unknown(), material: z.unknown(), publication: z.unknown(), revision: clientSqlInitialRevisionSchema,
   createdAt: z.date(), expiresAt: z.date() }).strict();
 export type AiClientSceneMaterial = z.infer<typeof rowSchema>;
 export type AiClientMaterialScope = Pick<AiClientSceneMaterial, 'tenantId' | 'workspaceId' | 'channel' | 'principalHash' | 'principalKind'>;
@@ -77,11 +78,13 @@ export class PrismaClientSceneMaterialRepository {
     return row;
   }
 
-  async save(value: AiClientSceneMaterial) {
+  /** The optional original transaction couples submission-attempt persistence
+   * to its Draft terminal. It does not commit independently or execute Core. */
+  async save(value: AiClientSceneMaterial, transaction?: Prisma.TransactionClient) {
     const row = this.decode(structuredClone(value), value);
     let attempted = false;
     try {
-      return await this.db.$transaction(async tx => {
+      const persist = async (tx: Prisma.TransactionClient) => {
         const existing = await this.findOperation(row, row.operationKey, tx, true);
         if (existing) {
           if (existing.inputHash !== row.inputHash) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
@@ -96,7 +99,9 @@ export class PrismaClientSceneMaterialRepository {
             ${JSON.stringify(row.command)}, ${JSON.stringify(row.material)}, ${JSON.stringify(row.publication)},
             ${row.revision}, ${row.createdAt}, ${row.expiresAt})`);
         return { row, replayed: false };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      };
+      return transaction ? await persist(transaction) : await this.db.$transaction(persist,
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiClientMaterialError) throw error;
       throw new AiClientMaterialError(attempted ? 'AI_CLIENT_RESULT_UNKNOWN' : 'AI_CLIENT_STORAGE_UNAVAILABLE');

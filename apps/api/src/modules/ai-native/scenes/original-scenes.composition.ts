@@ -7,7 +7,7 @@ import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody } from '@rental-os/shared';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody, type AiExecutionContext } from '@rental-os/shared';
 import { AiCurrentOriginalRequestAuthority, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
@@ -19,24 +19,27 @@ export type AiOriginalSceneDependencies = PersistedTaskAuthorizationDependencies
 };
 
 export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
-  const tools = composeAiAuthorizedBusinessTools(input), clock = input.clock ?? (() => new Date());
+  const tools = composeAiAuthorizedBusinessTools({ ...input, openingVersionFields: input.db }), clock = input.clock ?? (() => new Date());
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
-  const prepare = (body: AiSceneRequestBody, requestKey: string) => {
+  const prepare = (body: AiSceneRequestBody, requestKey: string, expectedContext?: AiExecutionContext) => {
     switch (body.sceneCode) {
-      case 'order_explanation': return tools.scenes.prepareOrderExplanation({ requestKey, ...body.input });
-      case 'opening_diagnosis': return tools.scenes.prepareOpeningDiagnosis({ requestKey, ...body.input });
-      case 'quote_clarification': return tools.scenes.prepareQuoteClarification({ requestKey, ...body.input });
+      case 'order_explanation': return tools.scenes.prepareOrderExplanation({ requestKey, ...body.input }, expectedContext);
+      case 'opening_diagnosis': return tools.scenes.prepareOpeningDiagnosis({ requestKey, ...body.input }, expectedContext);
+      case 'quote_clarification': return tools.scenes.prepareQuoteClarification({ requestKey, ...body.input }, expectedContext);
     }
   };
   const authority = new AiCurrentOriginalRequestAuthority(input.db, { ...input, authorizeResources: async body => {
     if (body.sceneCode === 'order_explanation') {
       return new AiOrderRouteContextAuthority(input.guard, input.credentials, body.input.orderId, clock).withOrderRead(async context => {
-        await prepare(body, 'resource-check');
+        // Resource authorization validates the strict original parent under
+        // current Guard/ALS, not a complete history/payment explanation. Full
+        // preparation belongs only to the actual material consumption below.
+        await tools.order(body.input.orderId).read(context);
         return context;
       });
     }
     return routes.withRead(body.sceneCode === 'opening_diagnosis' ? 'opening' : 'quote_context', {}, async context => {
-      await prepare(body, 'resource-check');
+      await prepare(body, 'resource-check', context);
       return context;
     });
   } }, clock);
@@ -63,7 +66,8 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     prepareOrderManualHandoff: facts.prepareOrderManualHandoff.bind(facts),
     previewOrderExtension: facts.previewOrderExtension.bind(facts),
     readQuoteCatalog: facts.readQuoteCatalog.bind(facts),
-    reopenOrderCitation: facts.reopenOrderCitation.bind(facts), prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
+    reopenOrderCitation: facts.reopenOrderCitation.bind(facts), reopenOrderCitationV2: facts.reopenOrderCitationV2.bind(facts),
+    prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
     reviewQuote: facts.reviewQuote.bind(facts),
     confirmQuote: facts.confirmQuote.bind(facts), readQuoteReceipt: facts.readQuoteReceipt.bind(facts),
     compareOriginalQuotes: facts.compareOriginalQuotes.bind(facts),
@@ -75,8 +79,10 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
       const parsed = originalRequestReferenceSchema.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const ref = freezeOriginalInput(parsed.data), original = await requests.read(ref);
-      await requests.resolve(original.receipt.sceneCode, ref.inputRef);
-      const prepared = await prepare(original.request, original.receipt.requestKey);
+      const grant = await requests.resolve(original.receipt.sceneCode, ref.inputRef);
+      // A closing grant cannot retrospectively bind a preparation made by a
+      // different principal. Carry this current server binding into its sources.
+      const prepared = await prepare(original.request, original.receipt.requestKey, grant.context);
       await requests.resolve(original.receipt.sceneCode, ref.inputRef);
       const material = prepared.payload.materials;
       return freezeOriginalInput({ original: original.receipt, material, materialHash: requestFingerprint(material),

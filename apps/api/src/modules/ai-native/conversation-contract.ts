@@ -9,7 +9,7 @@ import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   type AiConversationUnstartedCloseDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { parseOriginalRequest, originalBody } from './task-request/original-request.validation';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT,
+import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft,
   type AiConversationOperationObservationDraft, type AiConversationAdmissionResponseDraft,
   type AiConversationObservationDraft, type AiConversationListResponseDraft, type AiConversationTurnPageDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -66,8 +66,7 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
       if (!('conversationId' in command) || result.conversationId !== command.conversationId) throw Error();
       if ('items' in result && 'limit' in command && result.items.length > command.limit) throw Error();
     } else if (action === 'list') {
-      const result = copy as AiConversationListResponseDraft;
-      if (!('status' in command) || result.items.length > command.limit || result.items.some(row => row.status !== command.status)) throw Error();
+      if (!('status' in command) || !validateAiConversationListResponseDraft(copy, command)) throw Error();
     }
     return copy;
   } catch { /* damaged observations never escape with internal content */ }

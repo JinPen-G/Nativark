@@ -48,8 +48,27 @@ test('commit ack loss preserves facts and a later request recovers without anoth
   assert.equal(h.state.orders.length, 1); assert.equal((await h.run()).replayed, true); assert.equal(h.state.effects, 1);
 });
 test('expired business idempotency record does not permit repeating a consumed action', async () => {
-  const h = harness(); await h.run(); h.state.key = null;
-  assert.equal((await h.run()).replayed, true); assert.equal(h.state.effects, 1);
+  const h = harness();
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { identity } = require('./fixtures/ai-native/authorization-baseline.cjs');
+  // This old Core double predates quote ACL and transaction-owned numbering.
+  // Transport its declared tenant and synthetic ALS without weakening either
+  // the production guard or the original consumed-action replay assertions.
+  const readQuote = h.service.businessFacts.findQuote;
+  h.service.businessFacts.findQuote = async (...args) => ({ ...await readQuote(...args), tenantId: 'tenant-1' });
+  h.service.core.bindOrderCreationFulfillment = async (tenantId, order, tx) => {
+    assert.equal(tenantId, 'tenant-1'); assert.equal(order.id, 'order-1'); assert.ok(tx.state);
+  };
+  h.service.coreFacts.allocateOrderNumber = async (tenantId, _at, _zone, tx) => {
+    assert.equal(tenantId, 'tenant-1'); assert.ok(tx.state.approval);
+    return 'synthetic-order-number';
+  };
+  await assert.rejects(h.run(), error => error.getStatus?.() === 403);
+  assert.equal(h.state.effects, 0, 'missing authenticated quote identity must still refuse creation');
+  const run = () => runWithRequestIdentity(identity({ tenantId: 'tenant-1', workspaceId: 'workspace-1',
+    userId: 'operator-1', audience: 'operator', permissions: ['rental-os:order:create', 'rental-os:order:view'] }), h.run);
+  await run(); h.state.key = null;
+  assert.equal((await run()).replayed, true); assert.equal(h.state.effects, 1);
 });
 test('revocation after commit suppresses output without undoing committed facts', async () => {
   const h = harness({ revokeAfterCommit: true }); await assert.rejects(h.run(), /revoked/u);

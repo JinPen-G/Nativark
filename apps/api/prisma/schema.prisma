@@ -317,6 +317,7 @@ model BusinessWorkspace {
   clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
   businessStateSnapshot             RentalBusinessStateSnapshot?
+  approvedProfileChanges            CustomerApprovedProfileChange[]
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
   rentalCouponTemplates             RentalCouponTemplate[]
   rentalFulfillmentLocations        RentalFulfillmentLocation[]
@@ -621,6 +622,7 @@ model AiGatewayInvocation {
   run               AiRun    @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   executionCharges  AiTaskExecutionCharge[]
   accountingReceipts AiGatewayAccountingReceipt[]
+  toolCallBindings   AiGatewayToolCallBinding[]
 
   @@unique([scopeId, taskId, id], map: "ai_gateway_invocations_scope_task_id")
   @@unique([scopeId, callId], map: "ai_gateway_invocations_scope_call_key")
@@ -628,6 +630,30 @@ model AiGatewayInvocation {
   @@index([scopeId, taskId, runId], map: "ai_gateway_invocations_task_run_idx")
   @@index([scopeId, createdAt, id], map: "ai_gateway_invocations_created_idx")
   @@map("ai_gateway_invocations")
+}
+
+/// Private protocol-call binding, not financial usage or a public tool grant.
+/// Native IDs/arguments are encrypted; a completed original Task/Step and current
+/// business authorization remain necessary before a successor can read it.
+model AiGatewayToolCallBinding {
+  scopeId           String   @db.VarChar(36)
+  taskId            String   @db.VarChar(36)
+  invocationId      String   @db.VarChar(36)
+  callIndex         Int      @db.UnsignedTinyInt
+  runId             String   @db.VarChar(36)
+  stepId            String   @db.VarChar(36)
+  actionId          String   @db.VarChar(191)
+  stepFingerprint   String   @db.Char(64)
+  actorId           String   @db.VarChar(191)
+  configurationHash String   @db.Char(64)
+  inputHash         String   @db.Char(64)
+  bindingHash       String   @db.Char(64)
+  encryptedPayload  String   @db.Text
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  invocation        AiGatewayInvocation @relation(fields: [scopeId, taskId, invocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_gateway_tool_calls_invocation_fkey")
+  @@id([scopeId, taskId, invocationId, callIndex])
+  @@index([scopeId, taskId, runId, stepId], map: "ai_gateway_tool_calls_step_idx")
+  @@map("ai_gateway_tool_call_bindings")
 }
 
 model AiGatewayAccountingReceipt {
@@ -732,11 +758,73 @@ model AiTaskExecutionCharge {
   phaseSteps           AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseStepsCharge")
   phaseActiveMs        AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseActiveCharge")
   phaseOutputBytes     AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseOutputCharge")
+  runPreparations      AiTaskRunPreparation[]
+  runOverheads         AiTaskRunOverhead[]
 
   @@id([scopeId, taskId, chargeId])
   @@index([scopeId, taskId, status], map: "ai_task_execution_charges_status_idx")
   @@index([scopeId, taskId, runId], map: "ai_task_execution_charges_run_idx")
   @@map("ai_task_execution_charges")
+}
+
+/// Original Run preparation definition/measurement, not an executable plan or resource ledger.
+/// An incomplete marker never permits re-publication or a guessed zero measurement.
+model AiTaskRunPreparation {
+  scopeId           String @db.VarChar(36)
+  taskId            String @db.VarChar(36)
+  id                String @db.VarChar(36)
+  runId             String @db.VarChar(36)
+  definition        Json
+  definitionHash    String @db.Char(64)
+  authorityHash     String @db.Char(64)
+  policyVersion     String @db.VarChar(64)
+  expiresAt         DateTime @db.DateTime(3)
+  leaseOwnerId      String @db.VarChar(191)
+  fencingToken      Decimal @db.Decimal(20, 0)
+  runRevision       Int @db.UnsignedInt
+  chargeId          String? @db.VarChar(36)
+  requestFingerprint String? @db.Char(64)
+  startedAt         DateTime @db.DateTime(3)
+  completedAt       DateTime? @db.DateTime(3)
+  activeMs          BigInt? @db.UnsignedBigInt
+  prepared          Boolean @default(false)
+  planHash          String? @db.Char(64)
+  measurementHash   String? @db.Char(64)
+  run               AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  charge            AiTaskExecutionCharge? @relation(fields: [scopeId, taskId, chargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, runId, fencingToken], map: "ai_task_run_preparations_generation_key")
+  @@index([scopeId, taskId, runId], map: "ai_task_run_preparations_run_idx")
+  @@map("ai_task_run_preparations")
+}
+
+/// Server-only orchestration time evidence linked to the original ACTIVE_MS charge.
+/// No business result, plan, dispatch grant, counters or financial amounts are stored here.
+model AiTaskRunOverhead {
+  scopeId            String @db.VarChar(36)
+  taskId             String @db.VarChar(36)
+  id                 String @db.VarChar(36)
+  runId              String @db.VarChar(36)
+  segment            String @db.VarChar(191)
+  originHash         String @db.Char(64)
+  policyHash         String @db.Char(64)
+  leaseOwnerId       String @db.VarChar(191)
+  fencingToken       Decimal @db.Decimal(20, 0)
+  runRevision        Int @db.UnsignedInt
+  expiresAt          DateTime @db.DateTime(3)
+  startedAt          DateTime @db.DateTime(3)
+  completedAt        DateTime? @db.DateTime(3)
+  chargeId           String? @db.VarChar(36)
+  requestFingerprint String? @db.Char(64)
+  activeMs           BigInt? @db.UnsignedBigInt
+  measurementHash    String? @db.Char(64)
+  run                AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  charge             AiTaskExecutionCharge? @relation(fields: [scopeId, taskId, chargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([scopeId, taskId, id])
+  @@index([scopeId, taskId, runId], map: "ai_task_run_overheads_run_idx")
+  @@map("ai_task_run_overheads")
 }
 
 /// Immutable server-authorized execution plan. No automatic plans for old runs.
@@ -2240,6 +2328,8 @@ model CustomerProfile {
   /// CUSTOMER-01A：本主档已被合并进哪个主档。非空即终态，不得再产生新业务。
   /// 权威事实在 customer_merge_mappings，这里冗余一份供高频判定，避免漏查映射表。
   mergedIntoCustomerId String?
+  /// 普通画像共享版本。唯一主档写入口为每次普通字段写入递增，不能以 updatedAt/姓名 hash 冒充 CAS。
+  ordinaryRevision     Int      @default(1) @db.UnsignedInt
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -2268,6 +2358,7 @@ model CustomerProfile {
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
   identityVerifications          CustomerIdentityVerification[]
+  approvedProfileChanges         CustomerApprovedProfileChange[]
 
   /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
   /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
@@ -2280,6 +2371,53 @@ model CustomerProfile {
   @@index([tenantId, status], map: "customer_profiles_tenant_status_idx")
   @@index([tenantId, createdInWorkspaceId, createdByUserId], map: "customer_profiles_creator_scope_idx")
   @@map("customer_profiles")
+}
+
+/// 只追加普通姓名变更；不包含手机号、身份、资质或企业关系，也不授予写入权限。
+model CustomerApprovedProfileChange {
+  id           String @id @default(uuid()) @db.VarChar(36)
+  tenantId     String
+  workspaceId  String
+  customerId   String
+  actorId      String @db.VarChar(191)
+  changeKey    String @db.VarChar(128)
+  baseRevision Int    @db.UnsignedInt
+  beforeName   String @db.VarChar(191)
+  afterName    String @db.VarChar(191)
+  changeHash   String @db.Char(64)
+  expiresAt    DateTime @db.DateTime(3)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+  customer     CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "customer_profile_change_customer_fk")
+  workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "customer_profile_change_workspace_fk")
+  operations   CustomerApprovedProfileOperation[]
+
+  @@unique([tenantId, customerId, actorId, changeKey], map: "customer_profile_change_key")
+  @@unique([tenantId, workspaceId, customerId, id, changeHash], map: "customer_profile_change_binding")
+  @@map("customer_approved_profile_changes")
+}
+
+/// 原普通姓名提交收据，与业务 CAS 和原批准单次消费同事务保存；只读核对不重做。
+model CustomerApprovedProfileOperation {
+  id             String @id @default(uuid()) @db.VarChar(36)
+  tenantId       String
+  workspaceId    String
+  customerId     String
+  actorId        String @db.VarChar(191)
+  operationKey   String @db.VarChar(191)
+  commandHash    String @db.Char(64)
+  changeId       String @db.VarChar(36)
+  changeHash     String @db.Char(64)
+  baseRevision   Int    @db.UnsignedInt
+  resultRevision Int    @db.UnsignedInt
+  resultName     String @db.VarChar(191)
+  resultHash     String @db.Char(64)
+  approvalRef    Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  change CustomerApprovedProfileChange @relation(fields: [tenantId, workspaceId, customerId, changeId, changeHash], references: [tenantId, workspaceId, customerId, id, changeHash], onDelete: Restrict, onUpdate: Restrict, map: "customer_profile_operation_change_fk")
+
+  @@unique([tenantId, customerId, operationKey], map: "customer_profile_operation_key")
+  @@unique([tenantId, customerId, changeId], map: "customer_profile_change_once")
+  @@map("customer_approved_profile_operations")
 }
 
 /// F17：实名结论的只追加审核记录。证件原文不入库；凭证影像通过文件服务保存并按客户权限下载。
@@ -5581,6 +5719,8 @@ model RentalNotificationTemplate {
 model RentalQuote {
   /// 当前可信创建主体及空间来源；存量无证据不回填，不从报价DTO取值。
   sourceSnapshot                Json?
+  /// Core 冻结的商品模式、单位和套装组成；存量无证据不回填。
+  inventoryBasis                Json?
   /// 原报价配送地址与逐行租金；回源不得从当前地址/费率重建。
   deliveryAddressSnapshot       Json?
   rentalLineAmounts             Json?
@@ -6384,6 +6524,22 @@ model AiScope {
   @@map("ai_scopes")
 }
 
+/// Immutable standalone B02 scope provenance. Never used by current scope/role
+/// resolution, routing or business authorization; retain the exact old key/time.
+model AiLegacyB02Scope {
+  id              String      @id @db.VarChar(36)
+  kind            AiScopeKind
+  scopeKey        String      @db.VarChar(512)
+  tenantId        String?     @db.VarChar(191)
+  workspaceId     String?     @db.VarChar(191)
+  createdAt       DateTime    @db.DateTime(3)
+  updatedAt       DateTime    @db.DateTime(3)
+  sourceSqlSha256 String      @db.Char(64)
+
+  @@index([tenantId, workspaceId], map: "ai_legacy_b02_scopes_owner")
+  @@map("ai_legacy_b02_scopes")
+}
+
 /// Owner IDs are audit references, not permanent authorization; AIN-04 resolves the live subject.
 model AiTask {
   id                  String          @id @default(uuid()) @db.VarChar(36)
@@ -6462,6 +6618,8 @@ model AiRun {
   gatewayInvocations AiGatewayInvocation[]
   executionCharges   AiTaskExecutionCharge[]
   executionPlan      AiTaskRunPlan?
+  preparations       AiTaskRunPreparation[]
+  overheads          AiTaskRunOverhead[]
   actionInputs       AiTaskActionInput[]
   quoteSelections    AiTaskQuoteSelection[]
   executionPhases    AiTaskExecutionPhaseStart[]

@@ -3,11 +3,11 @@ import { z } from 'zod';
 import type { ClientApiService } from '../../client/client-api.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { composeGuardedClientOriginalQuotes } from '../client-quote-original.composition';
+import { AiClientQuoteResultUnknownError, composeGuardedClientOriginalQuotes } from '../client-quote-original.composition';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiClientPolicyAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
-import { PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { AiClientMaterialError, PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -23,7 +23,9 @@ const canonical = (value: unknown) => JSON.parse(JSON.stringify(value)) as unkno
  * request referencing the exact stored material hash. A scene/HTTP host must
  * expose confirm only to that authenticated human, never to model dispatch.
  * Existing client material storage and independent policy/entitlement gates
- * are reused. No task, approval, financial ledger or session database is added. */
+ * are reused. An acknowledged first confirmation attempt permits one original
+ * quote dispatch; subsequent requests only observe that original receipt.
+ * No task, approval, financial ledger or session database is added. */
 export function composeClientOriginalQuotePreparation(input: {
   enabled?: boolean; guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: { current(): Promise<{ authorization: string; ip?: string }> };
@@ -79,6 +81,40 @@ export function composeClientOriginalQuotePreparation(input: {
     preparation: 'normalized_parameters' as const, eligibility: 'not_attested' as const,
     quotePersistence: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
     humanAction: 'explicit_confirmation_required' as const });
+  const observeOriginal = async (value: unknown) => {
+    const { bound, row, permission } = await load(value, 'read');
+    const result = await quotes.readOriginal({ reference: `${row.id}:${row.materialHash}` });
+    // Core/Guard reads may wait after the initial read grant. Close the SAME
+    // persisted source and independent read policy before delivering history;
+    // neither current execution gates nor an expired material can replace it.
+    const latest = await repository.findSource(bound.scope, row.id);
+    if (!latest || requestFingerprint(canonical(latest)) !== requestFingerprint(canonical(row))) throw stale();
+    const closing = await grant(bound, 'read');
+    if (permission.policy.expiresAt <= clock() || closing.policy.expiresAt <= clock()
+      || requestFingerprint(canonical(closing.policy)) !== requestFingerprint(canonical(permission.policy))) throw denied();
+    await check(bound);
+    return { ...result, source: { materialRef: row.id, materialHash: row.materialHash } };
+  };
+  const attemptBasis = (row: AiClientSceneMaterial, material: ReturnType<typeof decode>) => ({
+    command: { kind: 'quote_confirmation_attempt', materialRef: row.id, materialHash: row.materialHash },
+    material: { version: 'client-prequote-confirmation-1', sourceInputHash: material.inputHash }
+  });
+  const assertAttempt = (attempt: AiClientSceneMaterial, row: AiClientSceneMaterial, material: ReturnType<typeof decode>) => {
+    const basis = attemptBasis(row, material);
+    if (attempt.bindingHash !== row.bindingHash || attempt.publicationHash !== row.publicationHash
+      || requestFingerprint(canonical(attempt.publication)) !== requestFingerprint(canonical(row.publication))
+      || requestFingerprint(attempt.command) !== requestFingerprint(basis.command)
+      || requestFingerprint(attempt.material) !== requestFingerprint(basis.material)
+      || attempt.inputHash !== requestFingerprint(basis.command) || attempt.materialHash !== requestFingerprint(basis.material)
+      || attempt.expiresAt.getTime() !== row.expiresAt.getTime()) throw stale();
+  };
+  const observedConfirmation = async (value: unknown) => {
+    const read = await observeOriginal(value);
+    if (read.state !== 'observed' || !read.quote) throw new AiClientQuoteResultUnknownError();
+    return { quote: read.quote, quotePersistence: 'saved' as const, inventoryReservation: 'not_attempted' as const,
+      orderExecution: 'not_attempted' as const, retryable: false as const, source: read.source,
+      confirmation: 'parameters_only_not_order_approval' as const };
+  };
   return Object.freeze({
     /** Observe an uncertain material INSERT without attempting another write.
      * Absence is unknown, not evidence that preparation did not commit. */
@@ -131,6 +167,15 @@ export function composeClientOriginalQuotePreparation(input: {
     },
     async confirm(value: unknown) {
       const { bound, row, material, permission } = await load(value, 'execute');
+      const operationKey = `quote-confirmation:${row.id}`;
+      const prior = await repository.findOperation(bound.scope, operationKey);
+      if (prior) {
+        assertAttempt(prior, row, material);
+        return observedConfirmation(value);
+      }
+      // Pre-existing original quotes remain readable without manufacturing a
+      // new attempt or reentering the writer after an upgrade/restart.
+      if ((await observeOriginal(value)).state === 'observed') return observedConfirmation(value);
       const currentParameters = await quotes.prepare({ input: material.input });
       if (currentParameters.inputHash !== material.inputHash || currentParameters.configurationHash !== material.configurationHash) throw stale();
       await check(bound);
@@ -140,6 +185,25 @@ export function composeClientOriginalQuotePreparation(input: {
       // A material that expired during those waits cannot initiate the R1 quote
       // write, even if its content and current policy are otherwise unchanged.
       if (!latest || requestFingerprint(latest) !== requestFingerprint(row) || latest.expiresAt <= clock()) throw stale();
+      const basis = attemptBasis(row, material);
+      let saved: Awaited<ReturnType<typeof repository.save>>;
+      try {
+        saved = await repository.save({ ...row, id: randomUUID(), operationKey,
+          inputHash: requestFingerprint(basis.command), materialHash: requestFingerprint(basis.material),
+          command: basis.command, material: basis.material, createdAt: clock() });
+      } catch (error) {
+        if (error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN') throw new AiClientQuoteResultUnknownError();
+        throw error;
+      }
+      assertAttempt(saved.row, row, material);
+      // Only the acknowledged first INSERT may enter the original R1 writer.
+      // A replay, lost acknowledgement, timeout or missing Core receipt grants
+      // observation only; never infer rollback or dispatch another quote.
+      if (saved.replayed) return observedConfirmation(value);
+      const closingSource = await repository.findSource(bound.scope, row.id);
+      if (!closingSource || requestFingerprint(canonical(closingSource)) !== requestFingerprint(canonical(row))) throw stale();
+      await check(bound);
+      if ((await grant(bound, 'execute')).policyHash !== permission.policyHash || row.expiresAt <= clock()) throw stale();
       const result = await quotes.create({ reference: `${row.id}:${row.materialHash}`, input: material.input,
         prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } });
       await check(bound);
@@ -147,11 +211,6 @@ export function composeClientOriginalQuotePreparation(input: {
       return { ...result, source: { materialRef: row.id, materialHash: row.materialHash },
         confirmation: 'parameters_only_not_order_approval' as const };
     },
-    async readOriginal(value: unknown) {
-      const { bound, row } = await load(value, 'read');
-      const result = await quotes.readOriginal({ reference: `${row.id}:${row.materialHash}` });
-      await check(bound);
-      return { ...result, source: { materialRef: row.id, materialHash: row.materialHash } };
-    },
+    readOriginal: observeOriginal,
   });
 }

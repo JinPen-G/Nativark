@@ -9,15 +9,15 @@ const { composeAiOriginalScenes } = require('../../../apps/api/src/modules/ai-na
 const { AI_SCENE_REQUEST_DRAFT_VERSION } = require('../../../packages/shared/src/ai-scene-request-draft');
 const { order } = require('./authorization-baseline.cjs');
 
-exports.setup = async (extraTables = {}, withMembership = false) => {
-  const b = await businessSetup('camera', withMembership), tenantId = 'tenant_001';
+exports.setup = async (extraTables = {}, withMembership = false, categoryCode = 'camera') => {
+  const b = await businessSetup(categoryCode, withMembership), tenantId = 'tenant_001';
   const scope = { id: 'scope-a', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId, workspaceId: 'workspace-a' }) };
   const tenant = clone(b.h.state.tenant[0]); tenant.id = tenantId; tenant.subscription.tenantId = tenantId;
   const sceneCodes = ['order_explanation', 'opening_diagnosis', 'quote_clarification'];
   const policies = sceneCodes.map(sceneCode => ({ scopeId: scope.id, sceneCode, sceneVersion: '1', revision: 1, enabled: true,
     allowedTools: [], limits: {}, expiresAt: new Date('2027-01-01T00:00:00Z') }));
-  const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTaskActionInput: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
-    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
+  const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTaskActionInput: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskExecutionCharge: [],
+    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], aiTenantModelConfiguration: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
   { aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']], aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
   const decorate = client => {
     const findTask = client.aiTask.findFirst.bind(client.aiTask), findSteps = client.aiStep.findMany.bind(client.aiStep);
@@ -45,6 +45,20 @@ exports.setup = async (extraTables = {}, withMembership = false) => {
     if (table === 'aiTask') Object.assign(args.data, { scope: clone(scope), archivedAt: null, resultRef: null });
   };
   b.facts.findOrder = async (_tenantId, id) => id === 'order-a' ? order({ tenantId }) : null;
+  // The formal Core reader now consumes scoped persisted-source ports. Expose
+  // the SAME synthetic order and its explicitly empty lifecycle sample; this
+  // neither substitutes authorization nor models a real SQL snapshot.
+  b.facts.readOrderFacts = async (owner, workspaceId, orderId) => {
+    if (workspaceId !== 'workspace-a') return undefined;
+    const row = await b.facts.findOrder(owner, orderId);
+    return row ? { ...row, workspaceId: 'workspace-a' } : undefined;
+  };
+  b.facts.readOrderExplanationState = async (owner, workspaceId, orderId) => {
+    const row = await b.facts.readOrderFacts(owner, workspaceId, orderId);
+    return row ? { tenantId: owner, workspaceId, orderId, sourceOrderUpdatedAt: row.updatedAt,
+      allocations: [], changes: [], extensions: [], truncated: { changes: false, extensions: false },
+      semantics: 'recorded_lifecycle_not_financial_or_action_eligibility' } : undefined;
+  };
   const guard = new ApiAuthGuard(b.h.authorization.auth, undefined, undefined, undefined, {
     rentalOrder: { findFirst: async ({ where }) => where.id === 'order-a' ? { id: 'order-a' } : null }
   });

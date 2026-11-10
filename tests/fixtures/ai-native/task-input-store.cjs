@@ -26,6 +26,7 @@ function matches(value, where) {
     }
     if (key === 'not') return !matches(value, rule);
     if (key === 'gt') return value !== null && value !== undefined && value > rule;
+    if (key === 'lt') return value !== null && value !== undefined && value < rule;
     if (key === 'lte') return value !== null && value !== undefined && value <= rule;
     if (key === 'some') return Array.isArray(value) && value.some(r => matches(r, rule));
     return matches(value?.[key], rule);
@@ -34,18 +35,21 @@ function matches(value, where) {
 const unique = {
   aiTask: [['id']], aiRun: [['id']], aiStep: [['scopeId', 'taskId', 'actionId'], ['scopeId', 'taskId', 'runId', 'sequence']],
   aiTaskRunPlan: [['scopeId', 'taskId', 'runId']],
+  aiTaskRunPreparation: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'fencingToken']],
   aiTaskResultArtifact: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'stepId', 'fencingToken']],
   aiTaskExecutionBudget: [['scopeId', 'taskId']], aiTaskExecutionCharge: [['scopeId', 'taskId', 'chargeId']],
   aiTaskEvent: [['scopeId', 'taskId', 'cursor']],
   aiBudgetReservation: [['scopeId', 'scopeKind', 'idempotencyKey']],
   aiBudgetAllocation: [['policyId', 'reservationId']], aiBudgetLedgerEntry: [['reservationId', 'eventKey']],
-  aiGatewayAccountingReceipt: [['invocationId'], ['reservationId'], ['admissionId']]
+  aiGatewayAccountingReceipt: [['invocationId'], ['reservationId'], ['admissionId']],
+  customerApprovedProfileChange: [['id'], ['tenantId', 'customerId', 'actorId', 'changeKey']],
+  customerApprovedProfileOperation: [['id'], ['tenantId', 'customerId', 'operationKey'], ['tenantId', 'customerId', 'changeId']]
 };
 
 // Serialized Prisma-shaped transaction double with rollback and lost COMMIT replies; not MySQL.
 function createTaskInputStore(initial, constraints = {}) {
-  const state = clone({ aiTaskQuoteSelection: [], ...initial }), trace = [];
-  const control = { beforeRead: null, beforeWrite: null, beforeCommit: null, loseReply: false };
+  const state = clone({ aiTaskQuoteSelection: [], aiTaskRunPreparation: [], aiTaskRunOverhead: [], ...initial }), trace = [];
+  const control = { beforeRead: null, beforeWrite: null, beforeCommit: null, loseReply: false, settingsSchemaDefaults: false };
   const moneyColumns = { aiBudgetReservation: ['reservedMoney', 'actualMoney'], aiBudgetLedgerEntry: ['moneyAmount'] };
   const hydrateMoney = (name, row) => {
     for (const key of moneyColumns[name] ?? []) if (row[key] !== null && row[key] !== undefined) row[key] = new Prisma.Decimal(row[key]);
@@ -59,9 +63,11 @@ function createTaskInputStore(initial, constraints = {}) {
       out.task = task ? { ...clone(task), scope: clone(data.aiScope?.find(scope => scope.id === task.scopeId) ?? task.scope),
         runs: data.aiRun.filter(r => r.taskId === task.id).map(r => ({
         ...clone(r), steps: data.aiStep.filter(s => s.runId === r.id),
+        executionCharges: data.aiTaskExecutionCharge.filter(c => c.runId === r.id),
         executionPlan: data.aiTaskRunPlan.find(p => p.runId === r.id) ?? null
       })) } : null;
       out.steps = data.aiStep.filter(s => s.runId === row.id);
+      out.executionCharges = data.aiTaskExecutionCharge.filter(c => c.runId === row.id);
       out.executionPlan = data.aiTaskRunPlan.find(p => p.runId === row.id) ?? null;
     }
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
@@ -92,7 +98,9 @@ function createTaskInputStore(initial, constraints = {}) {
         for (const keys of constraints[name] ?? unique[name] ?? [['scopeId', 'taskId', 'id']]) {
           if (keys.every(k => value[k] !== undefined) && rows().some(row => keys.every(k => String(row[k]) === String(value[k])))) throw Error(`synthetic unique ${name}`);
         }
-        const row = { ...(!['aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt'].includes(name) ? { revision: 1 } : {}),
+        const row = { ...(!['aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
+          'customerApprovedProfileChange', 'customerApprovedProfileOperation'].includes(name)
+          && !(control.settingsSchemaDefaults && ['rentalApprovedSettingsChange', 'rentalApprovedSettingsOperation'].includes(name)) ? { revision: 1 } : {}),
           createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
         // Prisma schema defaults, applied only when the real service inserts its receipt.
         if (name === 'rentalOrderIdempotencyRecord') {
@@ -117,6 +125,13 @@ function createTaskInputStore(initial, constraints = {}) {
           row.id ??= require('node:crypto').randomUUID(); row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
           for (const field of ['inputTokens', 'outputTokens', 'usageHash']) row[field] ??= null;
         }
+        if (name === 'aiTaskRunOverhead') {
+          for (const field of ['chargeId', 'requestFingerprint', 'completedAt', 'activeMs', 'measurementHash']) row[field] ??= null;
+        }
+        if (name === 'aiTaskRunPreparation') {
+          row.prepared ??= false;
+          for (const field of ['chargeId', 'requestFingerprint', 'completedAt', 'activeMs', 'planHash', 'measurementHash']) row[field] ??= null;
+        }
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
         hydrateMoney(name, row);
         rows().push(row); return hydrate(row);
@@ -138,14 +153,21 @@ function createTaskInputStore(initial, constraints = {}) {
             }
           }
           let result = [...groups.values()];
-          for (const order of [...(args.orderBy ?? [])].reverse()) {
+          for (const order of [...(Array.isArray(args.orderBy) ? args.orderBy : args.orderBy ? [args.orderBy] : [])].reverse()) {
             const [field, direction] = Object.entries(order)[0];
             result.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
           }
           return result.slice(0, args.take);
         },
         findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
-          const row=selected(args.where ?? {})[0]; return hydrate(row && (args.select || args.include) ? related(row,name,data) : row, args.select); },
+          // Prisma applies ordering before selecting the first record. In
+          // particular, a new held preparation must not read an older phase.
+          let found = selected(args.where ?? {});
+          for (const order of [...(Array.isArray(args.orderBy) ? args.orderBy : args.orderBy ? [args.orderBy] : [])].reverse()) {
+            const [field, direction] = Object.entries(order)[0];
+            found = found.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
+          }
+          const row = found[0]; return hydrate(row && (args.select || args.include) ? related(row,name,data) : row, args.select); },
         findUnique: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
           const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
           return hydrate(selected(where)[0], args.select); },
@@ -186,6 +208,14 @@ function createTaskInputStore(initial, constraints = {}) {
     return {
       $queryRaw: async sql => {
         const text = sql.sql ?? '', values = sql.values ?? [];
+        if (text.includes('FROM business_workspaces')) {
+          if (!Array.isArray(data.businessWorkspace)) throw Error('workspace lock facts not configured');
+          // Raw SQL returns the schema's mapped enum value, not Prisma's
+          // ACTIVE/FROZEN/DISABLED projection. Preserve unavailable states.
+          const statuses = { ACTIVE: 'active', FROZEN: 'frozen', DISABLED: 'disabled' };
+          return clone(data.businessWorkspace.filter(row => row.tenantId === values[0] && row.id === values[1]))
+            .map(row => ({ ...row, status: statuses[row.status] ?? row.status }));
+        }
         if (text.includes('FROM ai_client_task_policies')) {
           if (!Array.isArray(data.aiClientTaskPolicy)) throw Error('client policy table not configured');
           const keys = ['tenantId', 'workspaceId', 'channel', 'customerType', 'sceneCode', 'sceneVersion'];

@@ -1,6 +1,7 @@
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   type AiTaskEventDraft, type AiTaskStatusDraft, type AiStepStatusDraft } from './ai-task-draft';
-import type { AiSceneRequestReadDraft, AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
+import { validateAiSceneRequestReceiptDraft, type AiSceneRequestReadDraft, type AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
+import type { AiConversationTurnObservationDraft } from './ai-conversation-draft';
 import { AI_ERROR_CODES, type AiErrorCode } from './ai-native';
 import type { AiTaskInputContractDraft, AiTaskInputSavedReceiptDraft, AiTaskInputReceiptObservationDraft } from './ai-task-input-draft';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
@@ -57,6 +58,32 @@ export interface AiSceneModelStartResponseDraft {
   runId: string;
   execution: AiSceneModelExecutionDraft;
   businessExecution: 'not_inferred_from_model_result';
+}
+/** Browser-side check of the existing model-start response. It grants no
+ * retry, lease or business authority, even for a valid not-started outcome. */
+export function validateAiSceneModelStartDraft(value: unknown, query: AiSceneRequestReadDraft,
+  turn: AiConversationTurnObservationDraft): value is AiSceneModelStartResponseDraft {
+  const closed = (v: unknown, keys: string[]): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+    && Object.keys(v).length === keys.length && Object.keys(v).every(key => keys.includes(key));
+  const id = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(v);
+  const integer = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 4294967295;
+  if (!turn.task || !closed(value, ['original', 'taskId', 'runId', 'execution', 'businessExecution'])
+    || !validateAiSceneRequestReceiptDraft(value.original, query, turn) || value.taskId !== turn.task.taskId
+    || value.runId !== turn.task.runId || value.businessExecution !== 'not_inferred_from_model_result') return false;
+  const execution = value.execution;
+  if (closed(execution, ['kind', 'reason'])) return execution.kind === 'not_started'
+    && ['host_aborted', 'plan_unavailable', 'task_not_runnable', 'lease_held', 'recovery_lease_unavailable'].includes(execution.reason as string);
+  if (!closed(execution, ['kind', 'outcome']) && !(closed(execution, ['kind', 'outcome', 'takeover', 'businessExecution'])
+    && execution.takeover === 'same_owner_recovery_only' && execution.businessExecution === 'not_inferred_from_model_result')) return false;
+  if (execution.kind !== 'run_outcome' || !execution.outcome || typeof execution.outcome !== 'object' || Array.isArray(execution.outcome)) return false;
+  const outcome = execution.outcome as Record<string, unknown>, keys = ['status', 'completedSteps', 'cleanupFailed'];
+  if (!integer(outcome.completedSteps) || !integer(outcome.cleanupFailed)) return false;
+  if (outcome.status === 'failed') return closed(outcome, [...keys, 'errorCode']) && id(outcome.errorCode);
+  if (outcome.status === 'unavailable') return keys.every(key => Object.hasOwn(outcome, key))
+    && Object.keys(outcome).every(key => [...keys, 'stopReason', 'nextAction'].includes(key))
+    && (outcome.stopReason === undefined || outcome.stopReason === 'input_limit_reached')
+    && (outcome.nextAction === undefined || outcome.nextAction === 'manual_handoff');
+  return closed(outcome, keys) && ['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown'].includes(outcome.status as string);
 }
 export type AiModelCancellationTransitionReceiptDraft = {
   event: Extract<AiTaskEventDraft, { type: 'task.transition' }>;

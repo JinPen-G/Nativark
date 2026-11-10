@@ -3,18 +3,26 @@
  * Missing timestamps and samples remain explicitly unmeasured. */
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
-import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, type AiExecutionContext, type AiTaskPerformanceObservationDraft } from '@rental-os/shared';
+import { AI_TASK_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
+  type AiExecutionContext, type AiTaskPerformanceObservationDraft, type AiTaskOutcomeSampleDraft, type AiTaskStatusDraft, type AiTaskClientVisibleReportDraft, type AiTaskClientVisibleObservationDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { TaskBudgetUsageReader } from '../budget/task-budget-usage.reader';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { gatewayBudgetDenialLogId, gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
+import { CLIENT_VISIBLE_LOG_ACTION, parseClientVisibleLog } from './task-visible-observation.service';
+import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
-  | 'aiGatewayInvocation' | 'operationLog'>;
+  | 'aiGatewayInvocation' | 'operationLog'> & Partial<Pick<PrismaClient, '$transaction'>>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional(), includeTaskFinancial: z.boolean().optional() }).strict();
+const sampleSchema = z.object({ taskIds: z.array(id).min(1).max(50)
+  .refine(ids => new Set(ids).size === ids.length) }).strict();
+const takeoverSampleDetail = z.object({ receiptVersion: z.literal('original-run-takeover-1'), taskId: id, runId: id,
+  taskRevision: z.number().int().min(1).max(4294967294), runRevision: z.number().int().min(2).max(4294967294),
+  previousFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), purpose: z.literal('recovery_only') }).passthrough();
 const taskSelect = { id: true, scopeId: true, sceneCode: true, sceneVersion: true, status: true, revision: true,
   eventCursor: true, createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const runSelect = { id: true, scopeId: true, taskId: true, actorKind: true, actorId: true, sequence: true,
@@ -44,7 +52,107 @@ export class TaskPerformanceReader {
   constructor(private readonly db: Db, private readonly actions: Pick<AiTaskRepositoryAuthority, 'resolve'>,
     private readonly usage: Pick<TaskBudgetUsageReader, 'read'> & Partial<Pick<TaskBudgetUsageReader, 'summary'>>, private readonly clock: () => Date = () => new Date()) {}
 
-  async read(value: unknown): Promise<AiTaskPerformanceObservationDraft> {
+  /** A caller-selected original sample, never a whole-tenant rate inferred
+   * from one page. Each task and its independent takeover receipt need current
+   * authority. Pending tasks do not become failures; SLO is not evaluated. */
+  async sample(value: unknown): Promise<AiTaskOutcomeSampleDraft> {
+    const parsed = sampleSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const now = this.clock(); time(now);
+    const authorize = async (taskId: string, operation: 'read_metadata' | 'read_step_terminal') => {
+      try {
+        const context = structuredClone(await this.actions.resolve(taskId, operation));
+        aiTaskAccessFromContext(context, taskId, now);
+        return context;
+      } catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
+    };
+    const db = this.db, transaction = db.$transaction;
+    if (typeof transaction !== 'function') throw unavailable();
+    const takeovers = new PrismaTaskTakeoverRepository({ aiTask: db.aiTask, aiRun: db.aiRun,
+      operationLog: db.operationLog, $transaction: transaction.bind(db) }, this.actions, this.clock);
+    type Item = { task: Prisma.AiTaskGetPayload<{ select: typeof taskSelect }>; status: AiTaskStatusDraft;
+      context: AiExecutionContext; access: ReturnType<typeof aiTaskAccessFromContext>;
+      logs: Awaited<ReturnType<typeof db.operationLog.findMany>>; takeover: boolean };
+    const items: Item[] = [];
+    let sampleIdentity: string | undefined;
+    try {
+      for (const taskId of parsed.data.taskIds) {
+        const context = await authorize(taskId, 'read_metadata');
+        if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+          || !['operator', 'staff'].includes(context.audience)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const stable = identity(context);
+        if (sampleIdentity !== undefined && stable !== sampleIdentity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        sampleIdentity = stable;
+        const access = aiTaskAccessFromContext(context, taskId, now);
+        const task = structuredClone(await db.aiTask.findFirst({ where: access.where, select: taskSelect }));
+        const status = task && AI_TASK_STATUSES_DRAFT.find(status => status === task.status.toLowerCase());
+        if (!task || task.id !== taskId || !status || !revision(task.revision) || !task.scopeId
+          || time(task.createdAt) > time(now) || time(task.updatedAt) < time(task.createdAt)) throw unavailable();
+        if (items.length && (task.scopeId !== items[0].task.scopeId || task.sceneCode !== items[0].task.sceneCode
+          || task.sceneVersion !== items[0].task.sceneVersion)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        // Metadata permission cannot stand in for the original receipt's read
+        // permission, even when the scoped receipt query finds no row.
+        if (identity(await authorize(taskId, 'read_step_terminal')) !== stable)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const logs = structuredClone(await db.operationLog.findMany({ where: { tenantId: context.scope.tenantId,
+          workspaceId: context.scope.workspaceId, userId: access.actorId, action: 'ai_task_run_takeover',
+          detail: { path: '$.taskId', equals: taskId }, createdAt: { lte: now } },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 2 }));
+        if (logs.length > 2 || new Set(logs.map(row => row.id)).size !== logs.length) throw unavailable();
+        let takeover = false;
+        for (const row of logs) {
+          const detail = takeoverSampleDetail.safeParse(row.detail);
+          if (!detail.success || row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+            || row.userId !== access.actorId || row.action !== 'ai_task_run_takeover' || detail.data.taskId !== taskId
+            || time(row.createdAt) > time(now)) throw unavailable();
+          const observed = await takeovers.readReceipt({ taskId, runId: detail.data.runId,
+            expectedTaskRevision: detail.data.taskRevision, expectedRunRevision: detail.data.runRevision - 1,
+            expectedFencingToken: detail.data.previousFencingToken });
+          if (observed.status !== 'observed' || observed.receiptId !== row.id) throw unavailable();
+          takeover = true;
+        }
+        items.push({ task, status, context, access, logs, takeover });
+      }
+      for (const item of items) {
+        if (identity(await authorize(item.task.id, 'read_metadata')) !== sampleIdentity
+          || identity(await authorize(item.task.id, 'read_step_terminal')) !== sampleIdentity)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const current = await db.aiTask.findFirst({ where: item.access.where, select: taskSelect });
+        const scope = item.context.scope;
+        if (scope.kind !== 'workspace') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const latest = await db.operationLog.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+          userId: item.access.actorId, action: 'ai_task_run_takeover', detail: { path: '$.taskId', equals: item.task.id },
+          createdAt: { lte: now } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 2 });
+        if (!isDeepStrictEqual(current, item.task) || !isDeepStrictEqual(latest, item.logs))
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
+      // A later sample read may revoke an earlier task's authority. Close all
+      // current grants after the final storage await, without using old access
+      // as a cached permission or manufacturing an atomic snapshot.
+      for (const item of items) {
+        if (identity(await authorize(item.task.id, 'read_metadata')) !== sampleIdentity
+          || identity(await authorize(item.task.id, 'read_step_terminal')) !== sampleIdentity)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      const counts = Object.fromEntries(AI_TASK_STATUSES_DRAFT.map(status => [status, 0])) as Record<AiTaskStatusDraft, number>;
+      for (const item of items) counts[item.status]++;
+      const total = items.length, terminal = items.filter(item => AI_TASK_TERMINAL_STATUSES_DRAFT.includes(item.status)).length;
+      const takeoverCount = items.filter(item => item.takeover).length;
+      return { version: 'task-outcome-sample-1', observedAt: now.toISOString(), sceneCode: items[0].task.sceneCode,
+        sceneVersion: items[0].task.sceneVersion, taskIds: [...parsed.data.taskIds], sampleSize: total, statusCounts: counts,
+        successRate: { state: terminal === total ? 'recorded' : 'pending', succeeded: counts.succeeded,
+          terminal, total, percent: terminal === total ? (100 * counts.succeeded / total).toFixed(2) : null },
+        takeoverRate: { tasksWithReceipt: takeoverCount, total, percent: (100 * takeoverCount / total).toFixed(2),
+          basis: 'original_same_owner_takeover_receipts' },
+        coverage: 'requested_authorized_one_owner_workspace_scene_version',
+        consistency: 'revalidated_reads_not_atomic_snapshot', slo: 'not_evaluated', execution: 'read_only_no_lease_or_model' };
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+  }
+
+  async read(value: unknown, clientSourceBinding?: (value: AiTaskClientVisibleReportDraft) => Promise<string | null>): Promise<AiTaskPerformanceObservationDraft> {
     const parsed = commandSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data, before = structuredClone(await this.actions.resolve(command.taskId, 'read_metadata'));
@@ -57,6 +165,39 @@ export class TaskPerformanceReader {
       if (!task || task.id !== command.taskId || !revision(task.revision) || !task.scopeId
         || !AI_TASK_STATUSES_DRAFT.some(status => status === task.status.toLowerCase())) throw unavailable();
       uint(task.eventCursor);
+      // A missing current original-source port cannot certify browser reports.
+      // Source denials/errors propagate; only explicit unavailable/null remains
+      // unrecorded. These are client diagnostics, never business/SLO evidence.
+      const visibleNow = this.clock(); time(visibleNow);
+      if (clientSourceBinding) {
+        const visibleContext = await this.actions.resolve(command.taskId, 'read_step_terminal');
+        aiTaskAccessFromContext(visibleContext, command.taskId, visibleNow);
+        if (identity(visibleContext) !== identity(before)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      const readVisibleLogs = () => clientSourceBinding ? this.db.operationLog.findMany({ where: {
+        tenantId: before.scope.kind === 'workspace' ? before.scope.tenantId : '',
+        workspaceId: before.scope.kind === 'workspace' ? before.scope.workspaceId : '', userId: access.actorId,
+        action: CLIENT_VISIBLE_LOG_ACTION, detail: { path: '$.report.taskId', equals: task.id }, createdAt: { lte: visibleNow } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 21 }) : Promise.resolve([]);
+      const visibleLogs = structuredClone(await readVisibleLogs());
+      if (visibleLogs.length > 21 || new Set(visibleLogs.map(row => row.id)).size !== visibleLogs.length) throw unavailable();
+      const clientItems: Array<AiTaskClientVisibleReportDraft & { recordedAt: string }> = [];
+      const sourceChecks: Array<{ report: AiTaskClientVisibleReportDraft; binding: string | null }> = [];
+      for (const row of visibleLogs.slice(0, 20)) {
+        const detail = parseClientVisibleLog(row.detail), report = detail.report;
+        if (report.taskId !== task.id || row.action !== CLIENT_VISIBLE_LOG_ACTION || row.userId !== access.actorId
+          || before.scope.kind !== 'workspace' || row.tenantId !== before.scope.tenantId || row.workspaceId !== before.scope.workspaceId
+          || time(row.createdAt) > time(visibleNow)) throw unavailable();
+        const currentBinding = await clientSourceBinding!(report);
+        sourceChecks.push({ report, binding: currentBinding });
+        if (currentBinding !== null) {
+          if (currentBinding !== detail.sourceBinding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          clientItems.push({ ...report, recordedAt: row.createdAt.toISOString() });
+        }
+      }
+      const clientVisible: AiTaskClientVisibleObservationDraft = clientItems.length ? { state: 'client_reported',
+        observations: clientItems, truncated: visibleLogs.length > 20, coverage: 'original_host_reports_not_task_or_tenant_rate',
+        evaluation: 'not_slo_evidence', currentDisplay: 'not_asserted' } : { state: 'not_recorded' };
       const related = { scopeId: task.scopeId, taskId: task.id, task: { is: access.where } };
       const readInvocations = () => this.db.aiGatewayInvocation.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
         actorId: access.actorId, run: { is: { ...related, actorKind: access.actorKind, actorId: access.actorId } } },
@@ -227,9 +368,12 @@ export class TaskPerformanceReader {
       if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
         || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
         || !isDeepStrictEqual(await readActiveTime(), charges) || !isDeepStrictEqual(await readInvocations(), invocations)
-        || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs) || !isDeepStrictEqual(await readDenials(), denials)) {
+        || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs) || !isDeepStrictEqual(await readDenials(), denials)
+        || !isDeepStrictEqual(await readVisibleLogs(), visibleLogs)) {
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
+      for (const item of sourceChecks) if (await clientSourceBinding!(item.report) !== item.binding)
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       const after = await this.actions.resolve(command.taskId, 'read_metadata'), now = this.clock();
       if (identity(before) !== identity(after)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       if (time(now) < time(task.createdAt) || time(task.updatedAt) > time(now)) throw unavailable();
@@ -260,7 +404,9 @@ export class TaskPerformanceReader {
         modelDelivery: { items: modelItems, unobservedInWindow: visibleInvocations.length - modelItems.length,
           truncated: invocations.length > 50, coverage: 'completed_gateway_observations_only' },
         budgetAdmission: { denials: denialItems, truncated: invocations.length > 50, coverage: 'recorded_rejections_only' },
-        measurements: { firstToken: 'not_recorded', firstCard: 'not_recorded',
+        clientVisible,
+        measurements: { firstToken: clientItems.some(item => item.kind === 'text') ? 'client_reported' : 'not_recorded',
+          firstCard: clientItems.some(item => item.kind === 'card') ? 'client_reported' : 'not_recorded',
           modelLatency: modelItems.length ? 'gateway_transport_wall_time_only' : 'not_recorded',
           toolLatency: [...activeTimes.values()].some(item => item.recordedMs !== null) ? 'resource_active_time_only' : 'not_recorded',
           rates: 'not_computed', slo: 'not_evaluated' },

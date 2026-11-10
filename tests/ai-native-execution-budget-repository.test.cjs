@@ -8,6 +8,8 @@ const { PrismaTaskExecutionBudgetRepository } = require('../apps/api/src/modules
 const { PrismaTaskExecutionScopeAuthority } = require('../apps/api/src/modules/ai-native/runner/prisma-task-execution-scope.authority');
 const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
 const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
+const { AiTaskExecutionBudgetError } = require('../apps/api/src/modules/ai-native/task-execution-budget.ports');
+const { AiTaskRunnerPreReservationLimitError } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.service');
 const { createPersistentAiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.module');
 const { PrismaTaskResourceRecoverySource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-resource-recovery.source');
 const apiRequire = require('node:module').createRequire(require('node:path').resolve(__dirname, '../apps/api/package.json'));
@@ -35,10 +37,12 @@ function equal(left, right) {
 function matches(row, where) {
   return Object.entries(where).every(([key, value]) => {
     if (key === 'AND') return value.every(clause => matches(row, clause));
+    if (key === 'OR') return value.some(clause => matches(row, clause));
     if (value && typeof value === 'object' && 'is' in value) return matches(row[key], value.is);
     if (key === 'fencingToken') return String(row[key]) === String(value);
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       if ('gt' in value) return row[key] > value.gt;
+      if ('in' in value) return value.in.some(item => equal(row[key], item));
       if ('increment' in value || 'decrement' in value) return true;
       if ('scopeId' in value || 'taskId' in value) return matches(row, value);
     }
@@ -46,15 +50,19 @@ function matches(row, where) {
   });
 }
 function delegates(state) {
+  // Transaction state stays cloneable; Prisma read results retain Decimal APIs.
+  const read = row => { if (!row) return null; const value = clone(row);
+    if (value.fencingToken !== undefined) value.fencingToken = new Prisma.Decimal(value.fencingToken);
+    return value; };
   const delegate = name => ({
     findUnique: async ({ where }) => {
       const row = state[name].find(item => Object.values(where)[0] && typeof Object.values(where)[0] === 'object'
         ? matches(item, Object.values(where)[0]) : matches(item, where));
-      return row ? clone(row) : null;
+      return read(row);
     },
-    findFirst: async ({ where }) => { const row = state[name].find(item => matches(item, where)); return row ? clone(row) : null; },
-    findMany: async ({ where, take }) => state[name].filter(item => matches(item, where)).slice(0, take).map(clone),
-    create: async ({ data }) => { const row = { ...clone(data), revision: data.revision ?? 1 }; state[name].push(row); return clone(row); },
+    findFirst: async ({ where }) => { const row = state[name].find(item => matches(item, where)); return read(row); },
+    findMany: async ({ where, take }) => state[name].filter(item => matches(item, where)).slice(0, take).map(read),
+    create: async ({ data }) => { const row = { ...clone(data), revision: data.revision ?? 1 }; state[name].push(row); return read(row); },
     updateMany: async ({ where, data }) => {
       const row = state[name].find(item => matches(item, where)); if (!row) return { count: 0 };
       for (const [key, value] of Object.entries(data)) {
@@ -239,7 +247,8 @@ test('authority changes during policy wait cannot use the old owner or write a c
 function runnerHarness(options = {}) {
   const h = harness(), trace = [], measured = { steps: 1n, active_ms: 10n, output_bytes: 12n };
   let taskRevision = 1;
-  const currentLease = () => ({ ...lease, revision: h.state.aiRun[0].revision, expiresAt: h.state.aiRun[0].leaseExpiresAt.toISOString() });
+  const currentLease = () => ({ ...lease, revision: h.state.aiRun[0].revision, fencingToken: h.state.aiRun[0].fencingToken,
+    expiresAt: h.state.aiRun[0].leaseExpiresAt.toISOString() });
   const source = {
     charges: async (_step, held) => ({ modelCall: false, requests: ['steps', 'active_ms', 'output_bytes'].map(resource => ({ taskId: held.taskId, lease: held, resource, chargeId: `charge-${resource}`, amount: resource === 'steps' ? 1n : resource === 'active_ms' ? 100n : 50n, target: stepTarget })) }),
     settlements: async (ticket, _step, held) => {
@@ -257,15 +266,253 @@ function runnerHarness(options = {}) {
   };
   const commit = async () => { h.state.aiRun[0].revision++; return { lease: currentLease(), taskRevision: ++taskRevision }; };
   const gate = new PersistentTaskRunnerResourceGate(h.source, source);
+  const claim = async input => {
+    assert.equal(input.expectedRunRevision, h.state.aiRun[0].revision);
+    assert.equal(input.expectedFencingToken, h.state.aiRun[0].fencingToken);
+    h.state.aiRun[0].revision++; h.state.aiRun[0].fencingToken = String(BigInt(h.state.aiRun[0].fencingToken) + 1n);
+    return currentLease();
+  };
   const runner = createPersistentAiTaskRunner({
-    resources: gate,
-    leases: { readMetadata: async () => ({ taskId: 'task-1', status: 'running', revision: taskRevision, cancelRequestedAt: null }), claimRun: async () => currentLease(), claimRecoveryRun: async () => ({ ...currentLease(), purpose: 'recovery_only' }), releaseRun: async () => { trace.push('release'); return { released: true, revision: h.state.aiRun[0].revision + 1 }; } },
+    resources: gate, clock: { now: () => now.getTime(), setTimeout, clearTimeout },
+    leases: { readMetadata: async () => ({ taskId: 'task-1', status: 'running', revision: taskRevision, cancelRequestedAt: null }), claimRun: claim, claimRecoveryRun: async input => ({ ...await claim(input), purpose: 'recovery_only' }), releaseRun: async () => { trace.push('release'); return { released: true, revision: h.state.aiRun[0].revision + 1 }; } },
     steps: { register: async () => ({ stepId: 'step-1', runId: 'run-1', sequence: 1, stepRevision: h.state.aiStep[0].revision ?? 1, taskRevision, replayed: ['UNKNOWN', 'SUCCEEDED'].includes(h.state.aiStep[0].status), existingStatus: h.state.aiStep[0].status?.toLowerCase() ?? 'pending' }), start: async () => { if (options.startFailure) throw new Error('synthetic_start_failure'); h.state.aiStep[0].status = 'RUNNING'; return commit(); }, succeed: async () => { trace.push('durable_result'); h.state.aiStep[0].status = 'SUCCEEDED'; return commit(); }, fail: commit, pause: commit, unknown: async () => { trace.push('durable_unknown'); h.state.aiStep[0].status = 'UNKNOWN'; return commit(); } },
     plan: { resolve: async () => ({ taskId: 'task-1', runId: 'run-1', taskRevision, steps: [{ registrationRef: 'registration-1', operation: options.unknown ? 'external_unknown' : 'readonly', toolCode: 'orders.read', toolVersion: '1' }], limits: { maxSteps: 2, maxCalls: 2, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 100, maxConcurrent: 1 } }) },
     effects: { execute: async () => { trace.push('effect'); return { kind: options.unknown ? 'unknown' : 'succeeded', resultRef: 'result-1', outputBytes: 12 }; }, reconcile: async () => { trace.push('reconcile'); return { kind: 'succeeded', resultRef: 'result-1', outputBytes: 12 }; } }
   });
-  return { ...h, runner, gate, trace, input: { taskId: 'task-1', runId: 'run-1', holderId: 'holder-1', expectedTaskRevision: 1, expectedRunRevision: 1, expectedFencingToken: '8', leaseMs: 1000 } };
+  return { ...h, runner, gate, trace, get input() { return { taskId: 'task-1', runId: 'run-1', holderId: 'holder-1',
+    expectedTaskRevision: taskRevision, expectedRunRevision: h.state.aiRun[0].revision, expectedFencingToken: h.state.aiRun[0].fencingToken, leaseMs: 1000 }; } };
 }
+
+test('one step atomically reserves original steps time and output before execution', async () => {
+  const h = harness(); await h.source.initialize('task-1', lease);
+  const inputs = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource,
+    chargeId: `batch-${resource}`, amount: resource === 'steps' ? 1n : policy.limits[resource] }));
+  let transactions = 0, authorities = 0;
+  const transaction = h.db.$transaction, resolve = h.scopeSource.resolve;
+  h.db.$transaction = (...args) => { transactions++; return transaction(...args); };
+  h.scopeSource.resolve = (...args) => { authorities++; return resolve(...args); };
+  const receipts = await h.source.reserveStep(inputs);
+  assert.equal(transactions, 1); assert.equal(authorities, 3);
+  assert.deepEqual(receipts.map(row => row.charge.chargeId), inputs.map(row => row.chargeId));
+  assert.ok(receipts.every(row => !row.replayed && row.charge.status === 'reserved'));
+  assert.deepEqual(receipts[0].budget.reserved, { steps: 1n, active_ms: 1000n, output_bytes: 100n, calls: 0n });
+  assert.equal((await h.make().reserveStep(inputs)).every(row => row.replayed), true);
+  assert.equal(h.state.aiTaskExecutionCharge.length, 3);
+});
+
+test('atomic step rejects malformed or mixed bindings without reserving anything', async () => {
+  for (const change of [rows => rows.pop(), rows => { rows[1].resource = 'steps'; },
+    rows => { rows[1].chargeId = rows[0].chargeId; }, rows => { rows[1].lease = { ...lease, revision: 2 }; },
+    rows => { rows[1].target = { ...stepTarget, stepId: 'step-other' }; },
+    rows => { rows[1].target = { ...stepTarget, actionId: 'action-other' }; },
+    rows => { rows[1].target = { ...stepTarget, stepFingerprint: 'd'.repeat(64) }; },
+    rows => { rows[1].taskId = 'task-other'; rows[1].lease = { ...lease, taskId: 'task-other' }; },
+    rows => { rows[1].amount = 1n << 64n; }, rows => { rows[1].resource = 'calls'; },
+    rows => { rows[0].amount = 2n; }, rows => { rows[2].target = { ...stepTarget, gatewayInvocationId: 'invocation-1' }; }]) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    const inputs = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `batch-${resource}` }));
+    change(inputs);
+    await assert.rejects(h.source.reserveStep(inputs), error => error.code === 'AI_INVALID_INPUT');
+    assert.equal(h.state.aiTaskExecutionCharge.length, 0);
+  }
+});
+
+test('atomic step rolls back the whole group on quota write failure or final revocation', async () => {
+  for (const mode of ['quota', 'write', 'charge_write', 'revoked', 'expired', 'expiry_during_write', 'fence_during_write', 'policy_changed']) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    const inputs = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource,
+      chargeId: `batch-${resource}`, amount: resource === 'output_bytes' && mode === 'quota' ? 101n : 1n }));
+    if (mode === 'write') h.control.failAfter = 'aiTaskExecutionBudget.updateMany';
+    if (mode === 'charge_write') h.control.failAfter = 'aiTaskExecutionCharge.create';
+    if (mode === 'expired') h.state.aiRun[0].leaseExpiresAt = new Date(now.getTime() - 1);
+    if (mode === 'policy_changed') h.state.aiTaskExecutionBudget[0].policyFingerprint = 'd'.repeat(64);
+    if (mode === 'expiry_during_write' || mode === 'fence_during_write') {
+      const transaction = h.db.$transaction;
+      h.db.$transaction = fn => transaction(async tx => {
+        const update = tx.aiTaskExecutionBudget.updateMany;
+        tx.aiTaskExecutionBudget.updateMany = async args => {
+          const result = await update(args);
+          await tx.aiRun.updateMany({ where: { id: 'run-1' }, data: mode === 'expiry_during_write'
+            ? { leaseExpiresAt: new Date(now.getTime() - 1) } : { fencingToken: '10', leaseOwnerId: 'other-holder' } });
+          return result;
+        };
+        return fn(tx);
+      });
+    }
+    if (mode === 'revoked') { let reads = 0; h.scopeSource.resolve = async () => ({ scopeId: 'scope-1',
+      bindingKey: ++reads < 3 ? 'owner-user-1' : 'revoked', taskWhere: { id: 'task-1', ownerId: 'user-1' } }); }
+    await assert.rejects(h.source.reserveStep(inputs));
+    assert.equal(h.state.aiTaskExecutionCharge.length, 0);
+    assert.deepEqual(Object.fromEntries(['Steps', 'ActiveMs', 'OutputBytes', 'Calls'].map(name => [name, h.state.aiTaskExecutionBudget[0][`reserved${name}`]])),
+      { Steps: 0n, ActiveMs: 0n, OutputBytes: 0n, Calls: 0n });
+    if (mode === 'expired' || mode === 'policy_changed') await assert.rejects(h.make().load('task-1', lease));
+    else assert.deepEqual((await h.make().load('task-1', lease)).reserved, { steps: 0n, active_ms: 0n, output_bytes: 0n, calls: 0n });
+  }
+});
+
+test('atomic step lost reply and partial old group never grant a new dispatch', async () => {
+  const inputs = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `batch-${resource}` }));
+  const lost = harness(); await lost.source.initialize('task-1', lease); lost.control.loseReply = true;
+  await assert.rejects(lost.source.reserveStep(inputs), /synthetic_commit_reply_lost/);
+  assert.equal(lost.state.aiTaskExecutionCharge.length, 3);
+  assert.ok((await lost.make().reserveStep(inputs)).every(row => row.replayed));
+  const partial = harness(); await partial.source.initialize('task-1', lease); await partial.source.reserve(inputs[0]);
+  await assert.rejects(partial.source.reserveStep(inputs), error => error.code === 'AI_RESULT_UNKNOWN');
+  assert.equal(partial.state.aiTaskExecutionCharge.length, 1);
+  const unknown = harness(); await unknown.source.initialize('task-1', lease);
+  const gate = new PersistentTaskRunnerResourceGate(unknown.source, { charges: async () => ({ modelCall: false, requests: inputs }), settlements: async () => [] });
+  unknown.control.loseReply = true;
+  await assert.rejects(gate.reserve({ registered: { stepId: 'step-1' } }, lease), error => error.code === 'AI_RESULT_UNKNOWN');
+  assert.equal(unknown.state.aiTaskExecutionCharge.length, 3);
+  assert.ok(unknown.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'));
+  assert.deepEqual(unknown.state.aiTaskExecutionCharge.map(row => row.chargeId), inputs.map(row => row.chargeId));
+  assert.deepEqual((await unknown.make().load('task-1', lease)).reserved, { steps: 1n, active_ms: 1n, output_bytes: 1n, calls: 0n });
+});
+
+test('atomic groups serialize the last remaining allowance across repository instances', async () => {
+  const h = harness(); await h.source.initialize('task-1', lease);
+  const requests = ['output_bytes', 'steps', 'active_ms'].map(resource => ({ ...chargeRequest, resource,
+    chargeId: `batch-${resource}`, amount: resource === 'steps' ? 1n : policy.limits[resource] }));
+  const otherTarget = { ...stepTarget, stepId: 'step-2', actionId: 'action-2', stepFingerprint: 'd'.repeat(64) };
+  h.state.aiStep.push({ ...h.state.aiStep[0], id: otherTarget.stepId, actionId: otherTarget.actionId, requestFingerprint: otherTarget.stepFingerprint });
+  const results = await Promise.allSettled([h.source.reserveStep(requests), h.make().reserveStep(requests.map(row => ({ ...row,
+    chargeId: `other-${row.resource}`, target: otherTarget })))]);
+  assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(results.find(row => row.status === 'rejected').reason.code, 'AI_RUN_LIMIT');
+  assert.deepEqual(results.find(row => row.status === 'fulfilled').value.map(row => row.charge.resource), requests.map(row => row.resource));
+  assert.equal(h.state.aiTaskExecutionCharge.length, 3);
+  assert.deepEqual((await h.make().load('task-1', lease)).reserved, { steps: 1n, active_ms: 1000n, output_bytes: 100n, calls: 0n });
+});
+
+test('resource gate rejects replayed or malformed atomic receipts and preserves the original committed group', async () => {
+  for (const change of [rows => rows.pop(), rows => { rows[1] = null; }, rows => { rows[1].replayed = true; },
+    rows => { rows[1].charge.chargeId = 'other-charge'; }, rows => { rows[1].charge.amount = 2n; },
+    rows => { rows[1].charge.status = 'recorded'; }, rows => { rows[1].charge.resource = 'calls'; }]) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    const requests = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `batch-${resource}` }));
+    const reserve = h.source.reserveStep.bind(h.source); let committed;
+    h.source.reserveStep = async inputs => { const receipts = await reserve(inputs); committed = clone(h.state); change(receipts); return receipts; };
+    const gate = new PersistentTaskRunnerResourceGate(h.source, { charges: async () => ({ modelCall: false, requests }), settlements: async () => [] });
+    await assert.rejects(gate.reserve({ registered: { stepId: 'step-1' } }, lease), error => error.code === 'AI_RESULT_UNKNOWN');
+    assert.equal(h.state.aiTaskExecutionCharge.length, 3);
+    assert.ok(h.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'));
+    assert.deepEqual(h.state, committed, 'invalid acknowledgement cannot rewrite the original committed group');
+    assert.deepEqual(h.state.aiTaskExecutionCharge.map(row => row.chargeId), requests.map(row => row.chargeId));
+  }
+});
+
+test('atomic admission failure preserves every prior charge and budget byte for byte', async () => {
+  for (const atomic of [true, false]) for (const count of [1, 2, 3]) for (const status of ['RESERVED', 'UNKNOWN', 'RECORDED']) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    if (!atomic) h.source.reserveStep = undefined;
+    const requests = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `prior-${resource}` }));
+    for (const request of requests.slice(0, count)) {
+      await h.source.reserve(request);
+      if (status === 'UNKNOWN') await h.source.markUnknown({ taskId: 'task-1', lease, chargeId: request.chargeId, reason: 'original_unknown' });
+      if (status === 'RECORDED') {
+        h.evidence.current = { scopeId: 'scope-1', taskId: 'task-1', runId: 'run-1', chargeId: request.chargeId,
+          requestFingerprint: chargeFingerprint(request), resource: request.resource, actualAmount: 0n,
+          evidenceHash: 'b'.repeat(64), evidenceRef: `evidence-${request.resource}`, dispatchToken: null, gatewayInvocationId: null };
+        await h.source.record({ taskId: 'task-1', lease, chargeId: request.chargeId, evidenceRef: h.evidence.current.evidenceRef });
+      }
+    }
+    const before = clone(h.state); let unknownWrites = 0;
+    const markUnknown = h.source.markUnknown.bind(h.source);
+    h.source.markUnknown = async input => { unknownWrites++; return markUnknown(input); };
+    const gate = new PersistentTaskRunnerResourceGate(h.source, { charges: async () => ({ modelCall: false, requests }), settlements: async () => [] });
+    await assert.rejects(gate.reserve({ registered: { stepId: 'step-1' } }, lease), error => error.code === 'AI_RESULT_UNKNOWN');
+    assert.deepEqual(h.state, before, `${count} prior ${status} charges must not become this attempt's mutations`);
+    assert.equal(unknownWrites, 0);
+    requests[2].amount = 2n;
+    await assert.rejects(gate.reserve({ registered: { stepId: 'step-1' } }, lease));
+    assert.deepEqual(h.state, before, 'conflicting or incomplete original group must remain unchanged');
+    assert.equal(unknownWrites, 0);
+  }
+});
+
+test('atomic admission lost acknowledgement blocks runner start and never releases or mutates the original group', async () => {
+  const h = runnerHarness();
+  const reserveStep = h.source.reserveStep.bind(h.source); let committed;
+  h.source.reserveStep = async inputs => {
+    const receipts = await reserveStep(inputs); committed = clone(h.state);
+    throw Error('synthetic_atomic_reply_lost');
+  };
+  await assert.rejects(h.runner.run(h.input), error => error.code === 'AI_RESULT_UNKNOWN');
+  assert.deepEqual(h.state, committed);
+  assert.equal(h.trace.includes('effect'), false);
+  assert.equal(h.trace.includes('release'), false);
+  assert.ok(h.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'));
+  assert.deepEqual(Object.fromEntries(['Steps', 'ActiveMs', 'OutputBytes', 'Calls'].map(name => [name, h.state.aiTaskExecutionBudget[0][`reserved${name}`]])),
+    { Steps: 1n, ActiveMs: 100n, OutputBytes: 50n, Calls: 0n });
+});
+
+test('atomic base admission leaves model calls deferred and optional ports on the original path', async () => {
+  for (const atomic of [true, false]) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    const requests = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `base-${resource}` }));
+    let single = 0, batch = 0, model = 0;
+    const reserve = h.source.reserve.bind(h.source), reserveStep = h.source.reserveStep.bind(h.source);
+    h.source.reserve = async input => { single++; return reserve(input); };
+    h.source.reserveStep = atomic ? async inputs => { batch++; return reserveStep(inputs); } : undefined;
+    const gate = new PersistentTaskRunnerResourceGate(h.source, {
+      charges: async () => ({ modelCall: true, deferredModelCall: true, requests }), settlements: async () => [],
+      modelCharge: async () => { model++; return { ...chargeRequest, chargeId: 'generation-calls', resource: 'calls',
+        target: { ...stepTarget, gatewayInvocationId: 'invocation-1' } }; }
+    });
+    const step = { registered: { stepId: 'step-1' } }, ticket = await gate.reserve(step, lease);
+    assert.equal(ticket.modelPending, true); assert.equal(model, 0); assert.equal(single, atomic ? 0 : 3); assert.equal(batch, atomic ? 1 : 0);
+    assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 0n);
+    const ready = await gate.beforeExecute(ticket, step, lease);
+    assert.equal(ready.chargeIds.length, 4); assert.equal(model, 1); assert.equal(single, atomic ? 1 : 4);
+    assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 1n);
+  }
+});
+
+test('only acknowledged write-free atomic limit is a known runner admission denial', async () => {
+  for (const mode of ['acknowledged', 'lost_denial_reply', 'unproven_limit']) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    h.state.aiTaskExecutionBudget[0].consumedSteps = policy.limits.steps;
+    const before = clone(h.state), reserveStep = h.source.reserveStep.bind(h.source);
+    h.source.reserveStep = async inputs => {
+      if (mode === 'unproven_limit') throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
+      h.control.loseReply = mode === 'lost_denial_reply';
+      return reserveStep(inputs);
+    };
+    const requests = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `denied-${resource}` }));
+    const gate = new PersistentTaskRunnerResourceGate(h.source, { charges: async () => ({ modelCall: false, requests }), settlements: async () => [] });
+    await assert.rejects(gate.reserve({ registered: { stepId: 'step-1' } }, lease), error => mode === 'acknowledged'
+      ? error instanceof AiTaskRunnerPreReservationLimitError : error.code === 'AI_RESULT_UNKNOWN');
+    assert.deepEqual(h.state, before, 'a denied admission cannot rewrite original counters or charges');
+  }
+});
+
+test('deferred model admission preserves replayed or unacknowledged calls outside the issued ticket', async () => {
+  for (const mode of ['replayed', 'lost_reply', 'malformed_reply']) {
+    const h = harness(); await h.source.initialize('task-1', lease);
+    const requests = ['steps', 'active_ms', 'output_bytes'].map(resource => ({ ...chargeRequest, resource, chargeId: `base-${resource}` }));
+    const call = { ...chargeRequest, chargeId: 'original-call', resource: 'calls', target: { ...stepTarget, gatewayInvocationId: 'invocation-1' } };
+    let dispatches = 0, committedCall;
+    const gate = new PersistentTaskRunnerResourceGate(h.source, {
+      charges: async () => ({ modelCall: true, deferredModelCall: true, requests }), settlements: async () => [],
+      modelCharge: async () => call, prepareModelDispatch: async () => { dispatches++; return []; }
+    });
+    const step = { registered: { stepId: 'step-1' } }, ticket = await gate.reserve(step, lease);
+    if (mode === 'replayed') await h.source.reserve(call);
+    const reserve = h.source.reserve.bind(h.source);
+    h.source.reserve = async input => {
+      const receipt = await reserve(input); committedCall = clone(h.state.aiTaskExecutionCharge.find(row => row.chargeId === call.chargeId));
+      if (mode === 'lost_reply') throw new Error('synthetic_call_reply_lost');
+      if (mode === 'malformed_reply') receipt.charge.amount = 2n;
+      return receipt;
+    };
+    await assert.rejects(gate.beforeExecute(ticket, step, lease), error => error.code === 'AI_RESULT_UNKNOWN');
+    assert.deepEqual(h.state.aiTaskExecutionCharge.find(row => row.chargeId === call.chargeId), committedCall);
+    assert.ok(h.state.aiTaskExecutionCharge.filter(row => ticket.chargeIds.includes(row.chargeId)).every(row => row.status === 'UNKNOWN'));
+    assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 1n);
+    assert.deepEqual(ticket, { chargeIds: requests.map(row => row.chargeId), modelPending: true });
+    assert.equal(dispatches, 0);
+  }
+});
 
 test('actual runner, resource gate and Prisma adapter record only after persisted step result', async () => {
   const h = runnerHarness();

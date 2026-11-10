@@ -1,11 +1,10 @@
 import type { CreateRentalOrderRequest } from './core';
-import type { AiSceneRequestReadDraft } from './ai-scene-request-draft';
-import type { AiTaskInputSubmissionDraft } from './ai-task-input-draft';
+import type { AiSceneRequestReadDraft, AiSceneModelAnswerQueryDraft } from './ai-scene-request-draft';
 import type { AiTaskRunnerOutcomeDraft } from './ai-task-recovery-draft';
 import type { AiTaskConfirmationHistoryDraft } from './ai-task-confirmation-history-draft';
 import type { AiTaskEventDraft } from './ai-task-draft';
 import type { AiApprovalRecordDraft } from './ai-proposal-draft';
-import type { AiApprovalApplicationReviewDraft, AiApprovalReprepareReceiptDraft, AiApprovalApplicationReferenceDraft,
+import type { AiApprovalApplicationReviewDraft, AiApprovalOrderMaterialDraft, AiApprovalReprepareReceiptDraft, AiApprovalApplicationReferenceDraft,
   AiApprovalApplicationDecisionDraft, AiApprovalReprepareEligibilityRequestDraft, AiApprovalReprepareCommandDraft } from './ai-approval-application-draft';
 
 export const AI_QUOTE_SELECTION_DRAFT_VERSION = 'ain-quote-selection-draft-1' as const;
@@ -16,17 +15,37 @@ export const AI_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
 /** Explicit handoff of the exact clarified quote to its unplanned successor.
  * Selection still does not start the order runner or grant human approval. */
 export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
-  basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/clarified`, select: 'select', readOperation: 'operation'
+  basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/clarified`, prepareSelection: 'prepare', select: 'select', readOperation: 'operation', readOriginalOperation: 'original-operation'
 } as const);
 export interface AiClarifiedQuoteSelectionRequestDraft {
   selection: AiQuoteSelectionCreateDraft;
-  clarification: { original: AiSceneRequestReadDraft; submission: AiTaskInputSubmissionDraft };
+  clarification: AiSceneModelAnswerQueryDraft;
+}
+/** Original Core quote and current stock, read only. The exact receipt key may
+ * reopen a saved human answer; neither form submits answers or grants approval. */
+export interface AiClarifiedQuoteSelectionPreparationInputDraft {
+  clarification: AiSceneModelAnswerQueryDraft; selectionKey: string; expectedSelectionRevision: number;
+}
+export interface AiClarifiedQuoteSelectionPreparationDraft {
+  selection: AiQuoteSelectionCreateDraft; clarification: AiSceneModelAnswerQueryDraft; material: AiApprovalOrderMaterialDraft;
+  quote: { id: string; originalOperation: 'read_only' }; selectionState: 'not_saved'; quotation: 'original_unchanged';
+  approval: 'not_granted'; order: 'not_created'; nextAction: 'explicit_human_selection_then_original_approval';
+}
+/** Exact original key only. The server reconstructs its own frozen selection;
+ * this locator supplies no customer/address/order payload or execution grant. */
+export interface AiQuoteSelectionOperationLocatorDraft {
+  draftVersion: typeof AI_QUOTE_SELECTION_DRAFT_VERSION; originalInputRef: string; taskId: string; runId: string;
+  selectionKey: string; expectedSelectionRevision: number; quoteId: string;
+}
+export interface AiClarifiedQuoteSelectionOriginalOperationReadDraft {
+  selection: AiQuoteSelectionOperationLocatorDraft; clarification: AiSceneModelAnswerQueryDraft;
 }
 /** Human review/decision transport only. Core execution remains runner-owned. */
 export const AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/approval`,
   readSelectedProposal: 'review', decideSelectedProposal: 'decide', readSelectedDecisionReceipt: 'decision-receipt',
   readSelectedOrderResult: 'order-result', readSelectedReprepareEligibility: 'reprepare-eligibility',
+  readSelectedRepreparePreparation: 'reprepare-preparation',
   reprepareSelectedProposal: 'reprepare', readSelectedReprepareReceipt: 'reprepare-receipt'
 } as const);
 export const AI_SELECTED_QUOTE_TASK_HTTP_DRAFT = Object.freeze({
@@ -47,6 +66,18 @@ export interface AiHumanQuoteOrderReviewRequestDraft extends AiSelectedQuoteTask
 export interface AiHumanQuoteOrderDecisionRequestDraft extends AiSelectedQuoteTaskRequestDraft { proposal: AiApprovalApplicationDecisionDraft }
 export interface AiHumanQuoteOrderReprepareEligibilityRequestDraft extends AiSelectedQuoteTaskRequestDraft { request: AiApprovalReprepareEligibilityRequestDraft }
 export interface AiHumanQuoteOrderReprepareRequestDraft extends AiSelectedQuoteTaskRequestDraft { command: AiApprovalReprepareCommandDraft }
+/** Server locates the new normal-run selection/input/plan from the owned task.
+ * The human never supplies Step/ActionInput/plan hashes or a lease. */
+export interface AiHumanQuoteOrderRepreparePreparationInputDraft extends AiSelectedQuoteTaskRequestDraft {
+  original: AiApprovalApplicationReferenceDraft; replacementTaskId: string;
+  operationKey: string; intent: 'inspect' | 'change_plan';
+}
+export interface AiHumanQuoteOrderRepreparePreparationDraft {
+  selection: AiQuoteSelectionProofDraft; replacement: AiQuoteSelectionProofDraft;
+  command: AiApprovalReprepareCommandDraft; originalReview: AiApprovalApplicationReviewDraft;
+  replacementReview: AiApprovalApplicationReviewDraft;
+  state: 'read_only'; supersession: 'not_attempted'; approval: 'not_granted'; order: 'not_created';
+}
 /** Legacy original-result locator. Its phase coordinates must match the stored
  * approval consumption; they never grant a lease, submission or replay. New
  * callers should use the task result read with the selection reference only. */
@@ -91,6 +122,8 @@ export const AI_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
   reconcile: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
 } as const);
 export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
+  readOriginalOperation: { request: 'AiClarifiedQuoteSelectionOriginalOperationReadDraft', response: 'AiQuoteSelectionReconcileResponseDraft' },
+  prepareSelection: { request: 'AiClarifiedQuoteSelectionPreparationInputDraft', response: 'AiClarifiedQuoteSelectionPreparationDraft' },
   select: { request: 'AiClarifiedQuoteSelectionRequestDraft', response: 'AiQuoteSelectionSelectResponseDraft' },
   readOperation: { request: 'AiClarifiedQuoteSelectionRequestDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
 } as const);
@@ -113,6 +146,7 @@ export const AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS = Object.freeze({
   decideSelectedProposal: { request: 'AiHumanQuoteOrderDecisionRequestDraft', response: 'AiHumanQuoteOrderDecisionResponseDraft' },
   readSelectedDecisionReceipt: { request: 'AiHumanQuoteOrderDecisionRequestDraft', response: 'AiApprovalApplicationReceiptDraft' },
   readSelectedReprepareEligibility: { request: 'AiHumanQuoteOrderReprepareEligibilityRequestDraft', response: 'AiApprovalReprepareEligibilityDraft' },
+  readSelectedRepreparePreparation: { request: 'AiHumanQuoteOrderRepreparePreparationInputDraft', response: 'AiHumanQuoteOrderRepreparePreparationDraft' },
   reprepareSelectedProposal: { request: 'AiHumanQuoteOrderReprepareRequestDraft', response: 'AiHumanQuoteOrderReprepareResponseDraft' },
   readSelectedReprepareReceipt: { request: 'AiHumanQuoteOrderReprepareRequestDraft', response: 'AiHumanQuoteOrderReprepareResponseDraft' }
 } as const);

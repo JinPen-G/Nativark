@@ -927,14 +927,26 @@ export class CustomerOperationsService {
   ): Promise<CustomerProfileOverview> {
     if (!workspaceId || !user?.isActive || user.isSaasAdmin || user.tenantId !== tenantId
       || getRequestWorkspaceId() !== workspaceId) throw new ForbiddenException("查看会员经营资料需要已授权的经营空间");
-    const hasPermission = (code: string) => Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(code));
-    if (!hasPermission("rental-os:order:view")) throw new ForbiddenException("经营资料中的订单摘要需要当前空间订单查看权限；共享主档请使用客户详情入口");
-    // 权益账户/奖励目前没有订单或地点归属，不能借可见客户开放其空间总账。
+    const identity = getRequestIdentity();
+    if (identity?.tenantId !== tenantId || identity.userId !== user.id || !getRequestDataScope()) {
+      throw new ForbiddenException("会员经营投影缺少当前已验证的租户、账号或数据范围");
+    }
+    const requestLocations = getRequestLocationIds();
+    if (user.dataScope !== getRequestDataScope() || user.locationScope?.mode === "selected"
+      && (requestLocations === undefined || requestLocations.some(id => !user.locationScope!.locationIds.includes(id)))) {
+      throw new ForbiddenException("会员经营数据范围已变化，须重新核对当前请求授权");
+    }
+    const hasPermission = (code: string) => Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(code))
+      && (identity.permissions === undefined || identity.isPlatformAdmin === true || identity.permissions.includes("*") || identity.permissions.includes(code));
+    if (!hasPermission("rental-os:member:view")) throw new ForbiddenException("客户资料需要当前会员查看权限");
+    // 无订单/地点归属的权益与审计不可裁剪为本人事实；仅订单使用已有数据库谓词。
     const restricted = user.dataScope !== "all" || user.locationScope?.mode === "selected"
       || getRequestDataScope() !== "all" || getRequestLocationIds() !== undefined;
-    if (restricted || !hasPermission("rental-os:marketing:manage") || !hasPermission("rental-os:finance:view")) {
-      throw new ForbiddenException("完整经营资料需要当前空间全范围订单、行销与财务权限；共享主档仍可独立读取");
-    }
+    const canReadOrders = hasPermission("rental-os:order:view");
+    const canReadAmounts = canReadOrders && hasPermission("rental-os:finance:view");
+    const canReadBenefits = !restricted && hasPermission("rental-os:marketing:manage") && hasPermission("rental-os:finance:view");
+    const canReadQualifications = !restricted;
+    const canReadAudit = !restricted;
     const profile = await this.getCustomerDetail(tenantId, workspaceId, customerId, user);
     const page = Math.max(1, Math.floor(query.page ?? 1));
     const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
@@ -985,13 +997,13 @@ export class CustomerOperationsService {
         where: { tenantId, customerId, status: "active" },
         orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
       }),
-      this.prisma.customerQualificationRevision.findMany({
+      canReadQualifications ? this.prisma.customerQualificationRevision.findMany({
         where: { tenantId, workspaceId, customerId },
         orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }]
-      }),
-      this.operations.listStatusHistory(tenantId, customerId, workspaceId, locationIds === undefined),
-      this.prisma.rentalOrder.count({ where: orderWhere }),
-      this.prisma.rentalOrder.findMany({
+      }) : Promise.resolve([]),
+      canReadAudit ? this.operations.listStatusHistory(tenantId, customerId, workspaceId, true) : Promise.resolve([]),
+      canReadOrders ? this.prisma.rentalOrder.count({ where: orderWhere }) : Promise.resolve(0),
+      canReadOrders ? this.prisma.rentalOrder.findMany({
         where: orderWhere,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * pageSize,
@@ -1010,29 +1022,29 @@ export class CustomerOperationsService {
           startAt: true,
           endAt: true,
           effectiveEndAt: true,
-          finalPayableAmount: true,
+          finalPayableAmount: canReadAmounts,
           currency: true,
           createdAt: true,
           workspace: { select: { id: true, name: true } }
         }
-      }),
-      this.prisma.rentalBenefitAccount.findMany({
+      }) : Promise.resolve([]),
+      canReadBenefits ? this.prisma.rentalBenefitAccount.findMany({
         where: { tenantId, workspaceId, customerId },
         orderBy: [{ updatedAt: "desc" }],
         include: { workspace: { select: { id: true, name: true, categoryCode: true } } }
-      }),
-      this.prisma.rentalRewardLedgerEntry.findMany({
+      }) : Promise.resolve([]),
+      canReadBenefits ? this.prisma.rentalRewardLedgerEntry.findMany({
         where: { tenantId, workspaceId, customerId },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 200,
         include: { workspace: { select: { id: true, name: true } } }
-      }),
-      this.prisma.rentalCustomerCoupon.findMany({
+      }) : Promise.resolve([]),
+      canReadBenefits ? this.prisma.rentalCustomerCoupon.findMany({
         where: { tenantId, workspaceId, customerId },
         orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
         take: 200,
         include: { workspace: { select: { id: true, name: true } } }
-      }),
+      }) : Promise.resolve([]),
       this.prisma.customerMembershipPlanAssignment.findMany({
         where: { tenantId, customerId },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -1046,13 +1058,16 @@ export class CustomerOperationsService {
           personalCustomer: { select: { id: true, name: true } }
         }
       }),
-      this.canReveal(user) && locationIds === undefined
+      this.canReveal(user) && canReadAudit
         ? this.operations.listSensitiveAccess(tenantId, customerId, workspaceId)
         : Promise.resolve(undefined),
       readCustomerInsights(this.prisma, orderWhere)
     ]);
 
     return {
+      access: { orders: canReadOrders ? "available" : "restricted", orderAmounts: canReadAmounts ? "available" : "restricted",
+        benefits: canReadBenefits ? "available" : "restricted", qualifications: canReadQualifications ? "available" : "restricted",
+        audit: canReadAudit ? "available" : "restricted" },
       profile,
       addresses: addresses.map((row) => ({
         id: row.id,
@@ -1188,7 +1203,7 @@ export class CustomerOperationsService {
             startAt: row.startAt.toISOString(),
             endAt: row.endAt.toISOString(),
             effectiveEndAt: row.effectiveEndAt?.toISOString(),
-            finalPayableAmount: Number(row.finalPayableAmount),
+            ...(canReadAmounts ? { finalPayableAmount: Number(row.finalPayableAmount) } : {}),
             currency: row.currency,
             createdAt: row.createdAt.toISOString()
           };

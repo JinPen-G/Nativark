@@ -41,7 +41,7 @@ export type AiTaskApplicationResumeResult = {
 type Dependencies = {
   db: Pick<PrismaClient, '$transaction'>;
   tasks: Pick<AiTaskRepository, 'resolveAccess'>;
-  runner: Pick<AiTaskRunner, 'run' | 'recover'> & Partial<Pick<AiTaskRunner, 'runPrepared' | 'continueConfirmation'>>;
+  runner: Pick<AiTaskRunner, 'run' | 'recover'> & Partial<Pick<AiTaskRunner, 'runPrepared' | 'continueConfirmation' | 'continuePending'>>;
   prepare?: AiTaskHeldPreparation;
   inputs: Pick<PrismaTaskInputRepository, 'submit' | 'readPending'>;
   recovery: AiTaskRecoverySnapshotSource;
@@ -284,9 +284,12 @@ export class PrismaTaskApplication {
     }
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (candidate.kind === 'not_started') return candidate;
-    return { kind: 'run_outcome', outcome: this.prepare
-      ? await this.deps.runner.runPrepared!(candidate.claim, this.prepare, signal)
-      : await this.deps.runner.run(candidate.claim, signal) };
+    // Only this explicit start command selects PENDING continuation from a
+    // server-read original identity. Ordinary workers and reconcile do not.
+    return { kind: 'run_outcome', outcome: candidate.pendingStart && typeof this.deps.runner.continuePending === 'function'
+      ? await this.deps.runner.continuePending(candidate.claim, signal, this.prepare)
+      : this.prepare ? await this.deps.runner.runPrepared!(candidate.claim, this.prepare, signal)
+        : await this.deps.runner.run(candidate.claim, signal) };
   }
 
   private async startCandidate(input: z.infer<typeof requestSchema>, signal?: AbortSignal) {
@@ -312,6 +315,7 @@ export class PrismaTaskApplication {
         const saved = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key },
           select: { scopeId: true, taskId: true, runId: true, planHash: true, payload: true } });
         if (!saved && !this.prepare) return { kind: 'not_started', reason: 'plan_unavailable' } as const;
+        let pendingStart = false;
         if (saved) {
         const plan = aiTaskRunPlanSchema.parse(saved.payload);
         if (saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
@@ -319,12 +323,15 @@ export class PrismaTaskApplication {
           throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         }
         if (!plan.steps.length) return { kind: 'not_started', reason: 'plan_unavailable' } as const;
+        const steps = await tx.aiStep.findMany({ where: key, take: 2 });
+        pendingStart = task.status === 'RUNNING' && steps.length === 1 && steps[0].status === 'PENDING'
+          && steps[0].effect === 'NONE' && steps[0].resultRef === null;
         }
         const fencingToken = run.fencingToken.toFixed(0);
         if (!/^(0|[1-9][0-9]{0,19})$/u.test(fencingToken) || !run.fencingToken.equals(fencingToken)) {
           throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         }
-        return { kind: 'candidate', claim: { ...input, ...this.host, expectedTaskRevision: revision.parse(task.revision),
+        return { kind: 'candidate', pendingStart, claim: { ...input, ...this.host, expectedTaskRevision: revision.parse(task.revision),
           expectedRunRevision: revision.parse(run.revision), expectedFencingToken: fencingToken } } as const;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 }), false, signal);
     } catch (error) {

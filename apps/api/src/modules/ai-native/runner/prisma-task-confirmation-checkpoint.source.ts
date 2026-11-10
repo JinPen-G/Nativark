@@ -4,7 +4,7 @@ import { AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskConfirmationCheckpointSource } from '../ai-task-transition.repository';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
-import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority, type AiConfirmationTool } from './prisma-task-run-evidence.repository';
+import { aiTaskRunPlanSchema, aiTaskConfirmationPhaseVersion, type AiTaskPlanEvidenceAuthority, type AiConfirmationTool } from './prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), shortId = id.max(36);
@@ -16,7 +16,7 @@ const bindingSchema = z.object({ scopeId: shortId, taskId: shortId, runId: short
   actionId: id, inputRef: shortId, fingerprint: hash }).strict();
 const proposalSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: shortId,
   proposalRevision: revision, reviewedPayloadHash: hash }).strict();
-export const waitingPayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1']), binding: bindingSchema,
+export const waitingPayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1', 'approved-profile-wait-1']), binding: bindingSchema,
   presentedLease: leaseSchema, effectState: z.literal('awaiting_decision'), proposal: proposalSchema }).strict();
 const startSchema = z.object({ scopeId: shortId, taskId: shortId, id: shortId, runId: shortId, stepId: shortId,
   originalArtifactId: shortId, inputRef: shortId, stepsChargeId: shortId, activeMsChargeId: shortId, outputBytesChargeId: shortId,
@@ -45,11 +45,14 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     private readonly clock: () => Date = () => new Date(),
     private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
     if (typeof waiting?.readWaiting !== 'function' || typeof plans?.authorize !== 'function'
-        || !['rental.order.commit', 'tenant.notifications.commit'].includes(confirmationTool)) throw unavailable();
+        || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(confirmationTool)) throw unavailable();
   }
 
   async read(value: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient) {
-    return (await this.readPhase(value, tx, false)).proof;
+    const result = await this.readPhase(value, tx, false);
+    return { ...result.proof, ...(result.decision ? {
+      decisionRef: result.decision.approvalId, decision: result.decision.decision
+    } : {}) };
   }
 
   async readDecision(value: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient) {
@@ -69,7 +72,7 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     const rawStart = await phaseReader(tx, 'aiTaskExecutionPhaseStart')({ where: { ...key, id: receipt.phaseId } });
     if (!rawStart) throw unavailable();
     const start = startSchema.parse(rawStart), payload = receipt.payload;
-    if (payload.version !== (this.confirmationTool === 'rental.order.commit' ? 'approved-order-wait-1' : 'approved-settings-wait-1')) throw denied();
+    if (payload.version !== aiTaskConfirmationPhaseVersion(this.confirmationTool)) throw denied();
     const boundStep = await tx.aiStep.findFirst({ where: { scopeId, taskId, runId, id: stepId } });
     if (!boundStep || boundStep.toolCode !== this.confirmationTool) throw denied();
     const now = this.clock();
@@ -126,7 +129,12 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     const authority = await authorize();
     const waiting = await this.waiting.readWaiting({ taskId, runId, stepId, actionId: start.actionId, inputRef: start.inputRef,
       fingerprint: start.stepFingerprint, lease: structuredClone(input.lease) }, tx);
-    if (waiting.kind !== 'waiting_reference' || (continuation ? waiting.receipt.kind !== 'recorded' : waiting.receipt.kind !== 'absent')
+    // A durable human decision may arrive between the phase receipt and task
+    // pause. Publishing that checkpoint still grants no business execution;
+    // the task transaction verifies the exact decision row, while continuation
+    // independently requires its current plan/resource authority.
+    if (waiting.kind !== 'waiting_reference' || (continuation ? waiting.receipt.kind !== 'recorded'
+      : waiting.receipt.kind !== 'absent' && waiting.receipt.kind !== 'recorded')
       || requestFingerprint(waiting.binding) !== requestFingerprint(payload.binding)
       || requestFingerprint(waiting.proposal) !== requestFingerprint(payload.proposal) || await authorize() !== authority) throw denied();
     const proof = { ...key, checkpointRef: receipt.id, phaseId: start.id, kind: 'confirmation' as const, actionId: start.actionId,

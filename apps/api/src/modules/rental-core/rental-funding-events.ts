@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
+import { roundMoney, sumMoney } from './rental-money';
 import type {
   RentalFundingAction,
   RentalFundingEvent,
@@ -17,17 +18,18 @@ import type {
  * 失败(fail)只记事实、不动余额（需求 4.6.3：失败必须独立记录）。
  */
 
-const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const money = roundMoney;
 
 /** 仅归一化有原确认关系的历史 mock；方式、备注或幂等键本身不是实款证据。 */
-export function resolveOfflineFundingEvents(
-  events: readonly RentalFundingEvent[],
+export function resolveOfflineFundingEvents<T extends Pick<RentalFundingEvent,
+  'id' | 'tenantId' | 'workspaceId' | 'orderId' | 'instrument' | 'action' | 'amount' | 'provider' | 'paymentMethod' | 'idempotencyKey'>>(
+  events: readonly T[],
   registrations: readonly {
     id: string; tenantId: string; workspaceId: string; orderId: string;
     status: string; fundingEventId: string | null; instrument: string; amount: unknown;
     paymentMethod: string; confirmedAt: Date | null; confirmedBy: string | null;
   }[]
-): RentalFundingEvent[] {
+): T[] {
   const confirmed = new Map(registrations.filter(row => row.status === "confirmed" && row.confirmedAt && row.confirmedBy && row.fundingEventId)
     .map(row => [row.fundingEventId, row]));
   return events.map(event => {
@@ -40,7 +42,7 @@ export function resolveOfflineFundingEvents(
   });
 }
 
-export function isRealFundingEvent(event: RentalFundingEvent): boolean {
+export function isRealFundingEvent(event: Pick<RentalFundingEvent, 'provider'>): boolean {
   return ["offline", "alipay", "wechat_pay", "stripe"].includes(event.provider);
 }
 
@@ -109,7 +111,7 @@ export function assertActionApplies(instrument: RentalFundingInstrument, action:
 }
 
 /** 从只追加事件流推导两条账的当前余额。事件顺序无关——各分量按动作求和。 */
-export function deriveFundingLedgers(events: readonly RentalFundingEvent[]): FundingLedgers {
+export function deriveFundingLedgers(events: readonly Pick<RentalFundingEvent, 'instrument' | 'action' | 'amount'>[]): FundingLedgers {
   const deposit: DepositLedger = { collected: 0, captured: 0, refunded: 0, balance: 0 };
   const preauth: PreauthLedger = { frozen: 0, captured: 0, released: 0, balance: 0 };
   for (const event of events) {
@@ -190,9 +192,9 @@ export function nextBalanceAfter(
 }
 
 /** 应付与实收严格分离；负余额表示尚欠客户退款，不得当成已结清。 */
-export function rentalPaymentBalance(payable: number, events: readonly RentalFundingEvent[]) {
-  const collected = money(events.filter(e => e.instrument === "rental" && ["initiate", "append"].includes(e.action)).reduce((sum, e) => sum + e.amount, 0));
-  const refunded = money(events.filter(e => e.instrument === "rental" && e.action === "refund").reduce((sum, e) => sum + e.amount, 0));
-  const securityCaptured = money(events.filter(e => e.instrument !== "rental" && e.action === "capture").reduce((sum, e) => sum + e.amount, 0));
-  return { payable, collected, refunded, securityCaptured, balance: money(payable - collected + refunded - securityCaptured) };
+export function rentalPaymentBalance(payable: number, events: readonly Pick<RentalFundingEvent, 'instrument' | 'action' | 'amount'>[]) {
+  const collected = sumMoney(events.filter(e => e.instrument === "rental" && ["initiate", "append"].includes(e.action)).map(e => e.amount));
+  const refunded = sumMoney(events.filter(e => e.instrument === "rental" && e.action === "refund").map(e => e.amount));
+  const securityCaptured = sumMoney(events.filter(e => e.instrument !== "rental" && e.action === "capture").map(e => e.amount));
+  return { payable, collected, refunded, securityCaptured, balance: sumMoney([payable, -collected, refunded, -securityCaptured]) };
 }

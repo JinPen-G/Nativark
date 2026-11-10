@@ -10,7 +10,7 @@ import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.sourc
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
 import { PrismaTextProbeStepEvidenceAuthority } from './prisma-text-probe-step-evidence.authority';
-import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
+import { textProbeCommandSchema, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { PrismaTextCapabilityReceiptRepository } from './prisma-text-capability-receipt.repository';
 import { PrismaTaskRecoverySnapshotRepository } from './runner/prisma-task-recovery-snapshot.repository';
 import type { TextCapabilityProbeApplication } from './text-capability-probe.application';
@@ -26,6 +26,7 @@ import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-orig
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
 import type { AiTaskActionPolicyMutation } from './prisma-task-action-policy.repository';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { withAiTaskHeldPreparationDefinition } from './runner/ai-task-runner.service';
 import { composePersistedTaskAccountingRecovery } from './task-model-gateway.composition';
 import { presentTaskBudgetUsageRecord } from './budget/task-budget-usage.reader';
 import { BudgetError } from './budget/budget.ports';
@@ -72,7 +73,7 @@ export function composeTextCapabilityProbeTask(input: TextCapabilityProbeTaskCom
     || typeof input.probe?.prepare !== 'function' || typeof input.financialEvidence?.readDispatch !== 'function') throw unavailable();
   const clock = input.clock ?? (() => new Date());
   const root = createRoot(input, task, clock);
-  const application = root.createApplication(input.host, async ({ lease, taskRevision, signal }) => {
+  const application = root.createApplication(input.host, withAiTaskHeldPreparationDefinition(async ({ lease, taskRevision, signal }) => {
     if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw unavailable();
     await root.source.publishProbeInput({ taskId: task.taskId, registrationRef: task.registrationRef,
       expectedTaskRevision: taskRevision, lease, input: structuredClone(task.command) });
@@ -80,7 +81,9 @@ export function composeTextCapabilityProbeTask(input: TextCapabilityProbeTaskCom
     await root.plans.savePlan({ taskId: task.taskId, runId: lease.runId, taskRevision,
       steps: [{ registrationRef: task.registrationRef, operation: 'external_unknown',
         toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }], limits: structuredClone(task.limits) }, lease);
-  });
+  }, { taskId: task.taskId, runId: task.runId, steps: [{ registrationRef: task.registrationRef,
+    operation: 'external_unknown', toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }],
+    limits: task.limits, bindingHash: requestFingerprint(task) }));
   return Object.freeze({ ...root, application,
     // Request only: no fabricated cancelled outcome, refund or replacement run.
     // Current task action policy, owner/scope and revision are checked by the
@@ -259,6 +262,9 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       ? { scopeKind: 'platform' as const }
       : { tenantId: (context.scope as { tenantId: string }).tenantId, workspaceId: (context.scope as { workspaceId: string }).workspaceId };
     const taskId = history.task.taskId, runId = history.run.runId;
+    // The template locates only the original operation. A legacy unavailable
+    // selection still has no invocation/receipt below; absence is unknown, never
+    // unsent/rolled-back evidence or a right to release or replace that call.
     const callId = textProbeIntent(original.command.operationId, original.owner.scopeId, textProbeCapability(original.command)).intent.requestId;
     const invocation = structuredClone(await observe(() => input.db.aiGatewayInvocation.findUnique({ where: {
       scopeId_callId: { scopeId: original.owner.scopeId, callId } }, select: { id: true, scopeId: true,
@@ -412,7 +418,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
             ? { actorId: context.actor.kind === 'saas_admin' ? context.actor.userId : '', scopeKind: 'platform' }
             : { actorId: context.actor.kind === 'user' ? context.actor.userId : '',
               tenantId: (context.scope as { tenantId: string }).tenantId, workspaceId: (context.scope as { workspaceId: string }).workspaceId })
-          || requestFingerprint({ ...textProbeIntent(original.command.operationId, stored.scopeId, textProbeCapability(original.command)), configuration: d.configuration }) !== original.preparationHash) throw unavailable();
+          || requestFingerprint({ ...textProbePreparation(original.command.operationId, stored.scopeId, textProbeCapability(original.command), d.configuration.protocol), configuration: d.configuration }) !== original.preparationHash) throw unavailable();
         configurationRevision = z.number().int().min(1).max(4294967295).parse(d.configuration.configRevision);
         const o = receipt.observation;
         if (o) observation = { receiptId: receipt.id, methodVersion: d.methodVersion,
@@ -443,6 +449,12 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     async startOriginal(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
       const { task, root } = await observe(() => originalTask(structuredClone(value)), signal);
+      if (!hasObjectiveProbeMethod(textProbeCapability(task.command))
+        && (!['reasoning', 'embedding'].includes(textProbeCapability(task.command))
+          || (await observe(() => input.probe.prepareCurrent(structuredClone(task.command)), signal)).intent === null)) {
+        await observe(() => input.probe.reconcileCurrent(structuredClone(task.command)), signal);
+        return { kind: 'not_started', reason: 'task_not_runnable' } as const;
+      }
       return root.application.start({ taskId: task.taskId, runId: task.runId }, signal);
     },
     async inspectOriginal(value: unknown) {
@@ -459,6 +471,14 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     async reconcileOriginal(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
       const { task, root } = await observe(() => originalTask(structuredClone(value)), signal);
+      // Check method availability before any recovery claim; recovery remains
+      // original-key observation, never a substitute execution of another kind.
+      if (!hasObjectiveProbeMethod(textProbeCapability(task.command))
+        && (!['reasoning', 'embedding'].includes(textProbeCapability(task.command))
+          || (await observe(() => input.probe.prepareCurrent(structuredClone(task.command)), signal)).intent === null)) {
+        await observe(() => input.probe.reconcileCurrent(structuredClone(task.command)), signal);
+        return { kind: 'not_started', reason: 'task_not_runnable' } as const;
+      }
       const before = await observe(() => root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'), signal);
       const snapshot = await observe(() => root.recovery.read({ taskId: task.taskId, runId: task.runId }), signal);
       const verifyReader = async () => {

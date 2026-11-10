@@ -47,10 +47,22 @@ export class PrismaAiApprovalRepository implements AiApprovalRepository {
       return await this.db.$transaction(async (tx: Tx) => {
         const proposal = await tx.aiProposal.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, id: input.proposalId }, select: { stateRevision: true, currentRevision: true, status: true } });
         const version = await tx.aiProposalVersion.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, proposalId: input.proposalId, revision: input.proposalRevision }, select: { payloadHash: true, expiresAt: true } });
-        if (!proposal || proposal.stateRevision < 1 || !version || version.payloadHash !== input.reviewedPayloadHash || version.expiresAt <= issuedAt) throw new AiApprovalRepositoryError('CONFLICT');
+        if (!proposal || proposal.stateRevision < 1 || !version || version.payloadHash !== input.reviewedPayloadHash
+          || !(version.expiresAt instanceof Date) || version.expiresAt.getTime() !== expiresAt.getTime()
+          || version.expiresAt <= issuedAt) throw new AiApprovalRepositoryError('CONFLICT');
         const existing = await tx.aiApproval.findFirst({ where: { scopeId: input.scopeId, proposalId: input.proposalId, proposalRevision: input.proposalRevision, actorKind: principal.actorKind.toUpperCase() as AiActorKind, actorId: principal.actorId }, select: approvalSelect });
         if (existing) {
-          if (existing.payloadHash !== input.reviewedPayloadHash || existing.decision.toLowerCase() !== input.decision
+          // The unique actor/decision key omits audience and receipt dates.
+          // Replay must preserve the full original binding, never repair a row
+          // or create another approval because a matching hash was found.
+          const binding = { scopeId: input.scopeId, taskId: input.taskId, proposalId: input.proposalId,
+            proposalRevision: input.proposalRevision, actorKind: principal.actorKind.toUpperCase(),
+            actorId: principal.actorId, audience: principal.audience.toUpperCase() };
+          if (Object.entries(binding).some(([key, value]) => existing[key as keyof typeof existing] !== value)
+            || existing.payloadHash !== input.reviewedPayloadHash || existing.decision.toLowerCase() !== input.decision
+            || !(existing.issuedAt instanceof Date) || !Number.isFinite(existing.issuedAt.getTime())
+            || !(existing.expiresAt instanceof Date) || existing.expiresAt.getTime() !== expiresAt.getTime()
+            || existing.issuedAt >= existing.expiresAt || existing.issuedAt > issuedAt
             || proposal.currentRevision !== input.proposalRevision || proposal.status !== (input.decision === 'approved' ? 'CONFIRMED' : 'CANCELLED')) throw new AiApprovalRepositoryError('CONFLICT');
           return project(existing);
         }

@@ -4,6 +4,9 @@
  */
 import type {
   TenantReadinessStatus,
+  RentalDocumentType,
+  RentalDocumentRenderResult,
+  RentalDocumentSnapshotSummary,
   BookingMemberOption,
   CustomerMembershipBookingOption,
   CustomerProfileAddress,
@@ -353,6 +356,9 @@ export const rentalCoreApi = {
   manageAllocations: (id: string, data: ManageRentalAllocationRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/assignments`, { method: "post", data }),
   operationLock: (id: string, action: "acquire" | "release", token?: string) => request<{ token?: string; expiresAt?: string }>(`/rental/v1/orders/${id}/operation-lock`, { method: "post", data: { action, token } }),
   substituteBundleComponent: (id: string, data: SubstituteRentalBundleComponentRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/substitute-bundle-component`, { method: "post", data }),
+  orderDocument: (id: string, type: RentalDocumentType) => request<RentalDocumentRenderResult>(`/rental/v1/orders/${id}/documents/${type}`),
+  orderDocumentVersions: (id: string, type: RentalDocumentType) => request<RentalDocumentSnapshotSummary[]>(`/rental/v1/orders/${id}/documents/${type}/versions`),
+  orderDocumentVersion: (id: string, type: RentalDocumentType, snapshotId: string) => request<RentalDocumentRenderResult>(`/rental/v1/orders/${id}/documents/${type}/versions/${encodeURIComponent(snapshotId)}`),
   partialReturnOrder: (id: string, data: PartialReturnRentalOrderRequest, token?: string) => request<RentalOrder>(`/rental/v1/orders/${id}/partial-return`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),
   cancelOrder: (id: string, data: { reason: string; weatherException?: boolean }) => request<RentalOrder>(`/rental/v1/orders/${id}/cancel`, { method: "post", data }),
   handoverOrder: (id: string, stage: "pickup" | "return", token?: string) => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post", headers: token ? { "X-Operation-Token": token } : undefined }),
@@ -365,6 +371,7 @@ export const rentalCoreApi = {
     request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/partial-cancel/preview`, { method: "post", data }),
   applyPartialLineCancellation: (id: string, data: ApplyRentalOrderChangeRequest) =>
     request<{ order: RentalOrder; change: RentalOrderChange }>(`/rental/v1/orders/${id}/changes/partial-cancel`, { method: "post", data }),
+  exchangeServiceOptions: (id: string) => request<RentalValueAddedService[]>(`/rental/v1/orders/${id}/changes/post-pickup-exchange/services`),
   previewPostPickupExchange: (id: string, data: PreviewRentalOrderChangeRequest) =>
     request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/post-pickup-exchange/preview`, { method: "post", data }),
   applyPostPickupExchange: (id: string, data: ApplyRentalOrderChangeRequest) =>

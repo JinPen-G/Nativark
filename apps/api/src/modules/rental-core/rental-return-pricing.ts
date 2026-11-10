@@ -28,6 +28,7 @@ export function returnPricingSlices(tenantId: string, workspaceId: string, quote
   }) : returnable.map(allocation => ({ allocation, quantity: allocation.quantity }));
   if (items && new Set(items.map(row => row.allocationId)).size !== items.length) throw new ConflictException("归还计价分配不可重复");
   const originalQuantities: Record<string, number> = {};
+  const wholeBundles = new Set<string>();
   const replacements = new Map<string, { basis: RentalOrderExchangeExecutionBasis; change: RentalOrderChange; line: RentalOrder["lines"][number]; quantity: number }>();
   for (const { allocation, quantity } of selected) {
     const line = order.lines.find(row => row.id === allocation.orderLineId);
@@ -37,7 +38,15 @@ export function returnPricingSlices(tenantId: string, workspaceId: string, quote
       if (!quote.request.lines.some(row => (row.pricingGroupId ?? row.itemGroupId) === target)) {
         throw new ConflictException("归还商品已变更但缺少原换货计价来源");
       }
-      originalQuantities[target] = (originalQuantities[target] ?? 0) + quantity;
+      if (line.inventoryMode === 'bundle') {
+        if (items || order.allocations.some(row => row.orderLineId === line.id && row.status === 'returned')) {
+          throw new ConflictException('套装组件分批缺少冻结租金分摊，须按原归还批次人工核价');
+        }
+        if (!wholeBundles.has(line.id)) {
+          originalQuantities[target] = (originalQuantities[target] ?? 0) + line.quantity - (line.cancelledQuantity ?? 0);
+          wholeBundles.add(line.id);
+        }
+      } else originalQuantities[target] = (originalQuantities[target] ?? 0) + quantity;
       continue;
     }
     const change = changes.find(row => row.id === allocation.metadata?.exchangeId);

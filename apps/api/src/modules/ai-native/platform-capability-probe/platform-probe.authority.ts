@@ -6,10 +6,10 @@ import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { gatewayRoutingBinding } from '../gateway-routing.service';
 import { ModelGatewayError, type GatewayContext, type ModelProtocolRequest } from '../model-gateway.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
-import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttachmentResolver } from '../gateway-intent';
+import { prepareGatewayTextIntent, prepareGatewayIntent, prepareGatewayEmbeddingProbeIntent, type GatewayMediaAttachmentResolver } from '../gateway-intent';
 import { visionCapabilityChallenge } from '../vision-capability-challenge';
 import { audioCapabilityChallenge } from '../audio-capability-challenge';
-import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements,
+import { textProbeCommandSchema, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, probeContextSchema, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
@@ -86,13 +86,16 @@ export class PlatformCapabilityProbeAuthority {
     if (!profile || !profile.enabled || profile.disabledAt || profile.serviceMode !== 'platform_managed'
       || profile.scopeId !== scope.id || profile.scopeKind !== 'PLATFORM'
       || profile.id !== d.profileId
-      || !textProbeRequirements(this.command).every(value => profile.allowedCapabilities.includes(value))
+      // Metadata-only unverified is not a grant to use an absent capability.
+      // Keep current Guard/ownership checks and reject executable intent below.
+      || !['embedding', 'reasoning'].includes(textProbeCapability(this.command))
+        && !textProbeRequirements(this.command).every(value => profile.allowedCapabilities.includes(value))
       || capabilityProfileFingerprint(profile) !== this.command.profileFingerprint) throw new ModelGatewayError('CONFIG_INVALID');
-    const prepared = textProbeIntent(this.command.operationId, resolved.consumerScope.id, textProbeCapability(this.command));
+    const prepared = textProbePreparation(this.command.operationId, resolved.consumerScope.id, textProbeCapability(this.command), textProbeExecutionProtocol(this.command, profile));
     const required = textProbeRequirements(this.command);
     return { context: c, consumerScope: resolved.consumerScope,
       selection: { mode: 'platform_managed' as const, revision: profile.configRevision },
-      scene: 'chat', requiredCapabilities: required,
+      scene: textProbeRouteScene(this.command), requiredCapabilities: required,
       route: { profile, scope, role: profile.role,
         preflight: { allowed: false, required, missing: required, stale: [] },
         probe: { purpose: 'capability_text_probe', operationId: this.command.operationId,
@@ -113,11 +116,15 @@ export class PlatformCapabilityProbeAuthority {
   async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
     if (mode !== textProbeMode(this.command)) throw new ModelGatewayError('FORBIDDEN');
     const current = await this.resolve(this.platformContext(context), textProbeRequirements(this.command));
+    if (!canExecuteTextProbe(this.command, current.route.profile)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
-    const expected = ['vision', 'audio'].includes(textProbeCapability(this.command))
+    const expected = textProbeCapability(this.command) === 'embedding'
+      ? prepareGatewayEmbeddingProbeIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32, embeddingProbe: true }).request
+      : ['vision', 'audio'].includes(textProbeCapability(this.command))
       ? (await prepareGatewayIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode,
         { actorId: this.context.actorId }, this.media, signal)).request
       : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32,
+        ...(textProbeCapability(this.command) === 'reasoning' ? { reasoningChannel: true } : {}),
         ...(textProbeCapability(this.command) === 'structured_output' ? { structuredOutput: true } : {}),
         ...(textProbeCapability(this.command) === 'tools' ? { orderExplainTool: true } : {}) }, mode).request;
     if (requestFingerprint(request) !== requestFingerprint({ ...expected, model: current.route.profile.model })

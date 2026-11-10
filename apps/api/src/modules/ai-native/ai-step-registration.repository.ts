@@ -48,6 +48,12 @@ type Step = Prisma.AiStepGetPayload<{ select: typeof stepSelect }>;
 const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
 const denied = () => new AiTaskRepositoryError("AI_ACCESS_DENIED");
 
+/** A trusted frozen plan/input has no registration to observe yet. This is
+ * never an insertion grant or proof that an external action can be retried. */
+export class AiStepOriginalRegistrationUnavailableError extends AiTaskRepositoryError {
+  constructor() { super('AI_RESOURCE_UNAVAILABLE'); }
+}
+
 /** The original registration may be durable. Neither retry nor lease cleanup
  * may infer rollback from the missing transaction acknowledgement. */
 export class AiStepRegistrationCommitUnknownError extends Error {
@@ -83,7 +89,10 @@ export class AiStepRegistrationRepository {
       // This namespace identifies one AI logical action. It is NOT the Core business idempotency key.
       const actionId = aiStepActionId(access.scope, input.taskId, input.registrationRef);
       return { grant, access, actionId, digest: requestFingerprint({ ...evidence, authorization }) };
-    } catch { throw denied(); }
+    } catch (error) {
+      if (originalOnly && error instanceof AiStepOriginalRegistrationUnavailableError) throw error;
+      throw denied();
+    }
   }
 
   async register(value: unknown, existingOnly = false) {
@@ -111,7 +120,7 @@ export class AiStepRegistrationRepository {
           return { stepId: existing.id, runId: existing.runId, sequence: existing.sequence, stepRevision: existing.revision,
             taskRevision: task.revision, replayed: true as const, event: null, runRevision: null };
         }
-        if (existingOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (existingOnly) throw new AiStepOriginalRegistrationUnavailableError();
         if (!["QUEUED", "RUNNING"].includes(task.status) || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
         writeAttempted = true;

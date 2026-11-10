@@ -31,6 +31,7 @@ function coreFixture(order) {
   service.lockedOrder = async () => order;
   service.resolveWorkspaceId = () => 'w';
   service.configStore = {};
+  service.businessConfigStore = { readServicesForExchange: async () => [] };
   require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([service], 't', 'w', {
     locations: [{ id: 'loc', name: 'Original location', status: 'enabled', capabilities: ['pickup', 'return'], operatorId: 'op' }],
     operators: [{ id: 'op', status: 'enabled', type: 'self_operated' }]
@@ -63,10 +64,25 @@ test('partial quantity return remaps inspection and quarantine to returned alloc
   assert.ok(returned); assert.notEqual(returned.id, 'alloc');
   assert.equal(order.allocations.find(row => row.id === 'alloc').quantity, 2);
   assert.equal(returned.metadata.reservationId, 'reservation');
+  assert.deepEqual(returned.metadata.returnReceipt, { batchId: 'batch-1', returnedAt: captured.inspections[0].createdAt,
+    sourceAllocationId: 'alloc', orderLineId: 'line', quantity: 1 });
   assert.equal(captured.inspections[0].returnedItems[0].allocationId, returned.id);
   assert.equal(captured.inspections[0].exceptions[0].allocationId, returned.id);
   assert.equal(captured.dispositions.length, 1); assert.equal(captured.dispositions[0].status, 'blocked');
   assert.equal(captured.quarantines[0].quantity, 1);
+}));
+
+test('direct partial returns preserve independent server batch times on split quantity allocations', async () => inScope(async () => {
+  const order = orderFixture(); order.ruleSnapshot.fulfillment.returnBufferMinutes = 0;
+  const { service, captured } = coreFixture(order);
+  const first = '2026-11-01T12:00:00Z', second = '2026-11-02T12:00:00Z';
+  await service.partialReturnOrder('t', 'o', { batchNo: 'one', items: [{ allocationId: 'alloc', quantity: 1 }] }, {},
+    { overdue: { amount: 0, returnedAt: first } });
+  await service.partialReturnOrder('t', 'o', { batchNo: 'two', items: [{ allocationId: 'alloc', quantity: 1 }] }, {},
+    { overdue: { amount: 0, returnedAt: second } });
+  const receipts = order.allocations.filter(row => row.status === 'returned').map(row => row.metadata.returnReceipt);
+  assert.deepEqual(receipts.map(row => [row.batchId, row.returnedAt, row.quantity]), [['one', first, 1], ['two', second, 1]]);
+  assert.equal(order.allocations.find(row => row.id === 'alloc').quantity, 1); assert.equal(captured.writes, 2);
 }));
 
 test('exchange creates original inspection and blocked old-goods disposition with a real work order', async () => inScope(async () => {
@@ -85,7 +101,7 @@ test('exchange creates original inspection and blocked old-goods disposition wit
   const replacement = { ...structuredClone(source), itemGroupId: 'new' };
   const priced = { currency: order.currency, differenceAmount: 0, depositDelta: 0, preAuthDelta: 0, exchange: {
     ...input, originalAmount: 100, replacementAmount: 100, executionBasis: { effectiveFrom, priceBasis: input.priceBasis,
-      ruleSnapshot: order.ruleSnapshot, categoryVersionId: 'v1', capabilitySnapshot: [], linePricing: {
+      ruleSnapshot: order.ruleSnapshot, categoryVersionId: 'v1', capabilitySnapshot: [], inspectionTemplateSnapshots: [], linePricing: {
         version: 1, orderLineId: 'line', originalAmount: 100, replacementAmount: 100,
         previousSegments: [source], segments: [replacement], overdueBasis: replacement }
     }
@@ -270,6 +286,60 @@ test('work-order creation rechecks the original disposition under the same order
       assert.ok(trace.indexOf('asset') < trace.indexOf('disposition'));
       assert.ok(trace.indexOf('disposition') < trace.indexOf('work'));
     }
+  }
+}));
+
+test('disposition upsert replays the locked terminal fact and rejects a changed original source', async () => inScope(async () => {
+  const at = new Date('2026-11-01T00:00:00Z');
+  const original = { id: 'd', tenantId: 't', workspaceId: 'w', orderId: 'o', assetId: 'a', itemGroupId: 'g', locationId: 'loc',
+    inspectionId: 'inspection', returnBatchKey: 'batch', dedupeKey: 'batch:reservation:allocation', quantity: 1,
+    restoredQuantity: 1, status: 'restored', receivedAt: at, bufferUntil: at, restoredAt: at, createdAt: at, updatedAt: at };
+  const input = { ...original, id: 'retry-d', status: 'buffered', restoredQuantity: 0,
+    receivedAt: at.toISOString(), bufferUntil: at.toISOString(), createdAt: at.toISOString(), updatedAt: at.toISOString() };
+  for (const patch of [{}, { tenantId: 'other' }, { orderId: 'other' }, { assetId: 'other' }, { itemGroupId: 'other' },
+    { locationId: 'other' }, { inspectionId: 'other' }, { returnBatchKey: 'other' }, { quantity: 2 }]) {
+    let writes = 0; const trace = [];
+    const locked = { ...original, ...patch };
+    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+      $queryRaw: async query => {
+        if (/rental_orders/.test(query.sql)) { trace.push('order'); return [{ id: 'o', workspaceId: 'w' }]; }
+        if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
+        if (/rental_assets/.test(query.sql)) { trace.push('asset'); return [{ id: 'a', assetNo: 'A', status: 'maintenance', locationId: 'loc' }]; }
+        assert.match(query.sql, /rental_stock_dispositions[\s\S]*dedupeKey = \?[\s\S]*FOR UPDATE/);
+        trace.push('disposition'); return [locked];
+      }, rentalStockDisposition: { findUnique: async () => { throw Error('must not use a pre-lock snapshot'); },
+        upsert: async () => { writes++; throw Error('must not rewrite a terminal original'); } } };
+    const call = () => new RentalCoreFactRepository({}).upsertStockDisposition(input, tx);
+    if (Object.keys(patch).length) await assert.rejects(call(), /幂等来源/);
+    else { const result = await call(); assert.equal(result.id, 'd'); assert.equal(result.status, 'restored'); assert.equal(result.restoredQuantity, 1); }
+    assert.equal(writes, 0); assert.ok(trace.indexOf('order') < trace.indexOf('asset'));
+    assert.ok(trace.indexOf('asset') < trace.indexOf('disposition'));
+  }
+}));
+
+test('work upsert replays the locked completed fact without adopting changed resource provenance', async () => inScope(async () => {
+  const at = new Date('2026-11-01T00:00:00Z');
+  const original = { id: 'work', tenantId: 't', workspaceId: 'w', orderId: 'o', dispositionId: 'd', assetId: 'a',
+    itemGroupId: 'g', locationId: 'loc', inspectionId: 'inspection', type: 'repair', quantity: 1, status: 'completed',
+    workNo: 'WO', reason: '原养护', result: '已完成', attachments: [], createdBy: 'operator', createdAt: at, updatedAt: at };
+  const input = { ...original, id: 'retry-work', status: 'pending', createdAt: at.toISOString(), updatedAt: at.toISOString() };
+  for (const patch of [{}, { tenantId: 'other' }, { orderId: 'other' }, { assetId: 'other' }, { itemGroupId: 'other' },
+    { locationId: 'other' }, { inspectionId: 'other' }, { quantity: 2 }]) {
+    let writes = 0;
+    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+      $queryRaw: async query => {
+        if (/rental_orders/.test(query.sql)) return [{ id: 'o', workspaceId: 'w' }];
+        if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
+        if (/rental_assets/.test(query.sql)) return [{ id: 'a', assetNo: 'A', status: 'maintenance', locationId: 'loc' }];
+        if (/rental_stock_dispositions/.test(query.sql)) return [{ orderId: 'o', assetId: 'a', itemGroupId: 'g', locationId: 'loc', status: 'buffered' }];
+        assert.match(query.sql, /SELECT \* FROM rental_work_orders[\s\S]*FOR UPDATE/); return [{ ...original, ...patch }];
+      }, rentalWorkOrder: { findUnique: async () => { throw Error('must not use a pre-lock snapshot'); },
+        create: async () => { writes++; throw Error('must not create a second work order'); } },
+      rentalAsset: { updateMany: async () => { writes++; throw Error('replay must not change asset state'); } } };
+    const call = () => new RentalCoreFactRepository({}).upsertWorkOrder(input, tx);
+    if (Object.keys(patch).length) await assert.rejects(call(), /幂等来源/);
+    else { const result = await call(); assert.equal(result.id, 'work'); assert.equal(result.status, 'completed'); assert.equal(result.result, '已完成'); }
+    assert.equal(writes, 0);
   }
 }));
 

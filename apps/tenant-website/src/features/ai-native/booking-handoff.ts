@@ -1,6 +1,6 @@
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
-  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse } from '../../../../../packages/shared/src/ai-booking-draft';
-import type { RentalQuoteSnapshotV1 } from '../../../../../packages/shared/src';
+  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse } from '@rental-os/shared';
+import type { RentalQuoteSnapshotV1 } from '@rental-os/shared';
 
 export function normalizeBookingAcceptanceObservation(value: AiBookingAcceptanceReadResponse, handoffRef: string): AiBookingAcceptanceReadResponse {
   const id = (x: unknown) => typeof x === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(x);

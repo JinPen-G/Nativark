@@ -12,11 +12,12 @@ import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
+import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
 import type { SubscriptionService } from '../../subscription/subscription.service';
 import { BudgetError } from '../budget/budget.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiScopeResolutionError } from '../ai-scope.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
@@ -44,6 +45,10 @@ import { createPersistedTenantModelConfiguration, createScopeBoundTenantModelCon
 import { createAuthorizedPlatformModelConfiguration } from '../platform-model-config.composition';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { CountTokensGatewayPricingEvidenceSource } from './input-count-tokens.composition';
+import type { AiExecutionContext, AiGatewayToolResultReferenceDraft } from '@rental-os/shared';
+import { taskModelIdentity, type TaskModelPolicy } from '../model-input/task-model-input';
+import { nativeToolResultReferenceSchema, resolvedNativeToolResultSchema,
+  type NativeToolResultResolver } from '../model-input/native-tool-result.ports';
 
 export type InputCountingRequestAction = 'count' | 'observeCountKey' | 'readCountReceipt'
   | 'publishInputBound' | 'readInputBound' | 'readPublication' | 'usagePage' | 'usageSummary'
@@ -62,7 +67,24 @@ export interface InputCountingServerConfiguration {
    * a silent default here could make the counted serialization diverge from
    * the dispatch serialization with no fail-safe able to detect it. */
   toolPolicy: { orderExplainTool?: { name: string; version: typeof AI_TOOL_DRAFT_VERSION } };
+  /** Original server scene registration, not a detected provider capability. */
+  nativeToolResults?: boolean;
   timeoutMs?: number;
+}
+export interface InputCountingNativeSourceRequest {
+  reference: AiGatewayToolResultReferenceDraft;
+  db: InputCountingRequestDependencies['db'];
+  guard: InputCountingRequestDependencies['guard'];
+  /** Request-local identity wrapper, not the singleton Auth dependency. */
+  auth: InputCountingRequestDependencies['auth'];
+  /** Current request session port for the original business Guard/ALS read.
+   * Server-only; expires with the call and is never model or HTTP body data. */
+  credentials: AiOrderRouteCredentialSource;
+  execution: { authorize(taskId: string): Promise<AiExecutionContext> };
+  /** Original read/action authority, distinct from new execution admission. */
+  taskAuthority: Pick<AiTaskRepositoryAuthority, 'resolve'>;
+  scenePolicy: TaskModelPolicy;
+  clock: () => Date;
 }
 export interface InputCountingRequestDependencies {
   db: CountTokensServiceDb & InputCountingFrozenReaderDb & ConstructorParameters<typeof TaskBudgetUsageReader>[0]
@@ -86,7 +108,79 @@ export interface InputCountingRequestDependencies {
   /** Omit only on an original-receipt host; absence never enables new dispatch
    * or pricing publication. Original settlement uses its stored price basis. */
   configuration?: InputCountingServerConfiguration;
+  /** Build the original Task/Core resolver inside this request, after the
+   * frozen invocation identifies its task/reference. Never a singleton bound
+   * to another request, body material, default adapter or dispatch operation. */
+  nativeToolResultsForRequest?: (input: InputCountingNativeSourceRequest) => NativeToolResultResolver | Promise<NativeToolResultResolver>;
   clock?: () => Date;
+}
+
+/** Request-local bridge to the existing private resolver. Its caller supplies
+ * only server dependencies; original selectors come from the frozen reader.
+ * Creation is lazy and occurs once, with no retry after a failed dependency. */
+export function composeRequestNativeCountingSource(input: {
+  create: NonNullable<InputCountingRequestDependencies['nativeToolResultsForRequest']>;
+  request: Omit<InputCountingNativeSourceRequest, 'reference'>;
+  task: { id(): string | undefined; resolve(): Promise<AiExecutionContext> };
+  active(): boolean;
+}): NativeToolResultResolver {
+  if (typeof input?.create !== 'function' || input.request?.scenePolicy.nativeToolResults !== true
+    || input.request.scenePolicy.orderExplainTool !== true || typeof input.task?.id !== 'function'
+    || typeof input.task.resolve !== 'function' || typeof input.active !== 'function'
+    || typeof input.request.taskAuthority?.resolve !== 'function'
+    || typeof input.request.credentials?.current !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  const request = { ...input.request, scenePolicy: Object.freeze(structuredClone(input.request.scenePolicy)) };
+  let originalReference: string | undefined, source: Promise<NativeToolResultResolver> | undefined;
+  const check = async (context: Parameters<NativeToolResultResolver['resolve']>[0],
+    reference: AiGatewayToolResultReferenceDraft, signal: AbortSignal) => {
+    const open = () => {
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (!input.active() || !input.task.id() || reference.taskId !== input.task.id()) throw new ModelGatewayError('FORBIDDEN');
+    };
+    open();
+    const current = await input.task.resolve(); open();
+    const { actorKind: _, ...principal } = gatewayBudgetPrincipal(current);
+    if (hash(context) !== hash(principal)) throw new ModelGatewayError('FORBIDDEN');
+    return taskModelIdentity(current);
+  };
+  const reference = (value: unknown) => {
+    const parsed = nativeToolResultReferenceSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    return parsed.data;
+  };
+  return {
+    async resolve(context, value, signal) {
+      context = structuredClone(context);
+      const selected = reference(value), before = await check(context, selected, signal), key = hash(selected);
+      if (originalReference !== undefined && originalReference !== key) throw new ModelGatewayError('FORBIDDEN');
+      if (!source) {
+        originalReference = key;
+        source = Promise.resolve().then(async () => {
+          if (await check(context, selected, signal) !== before) throw new ModelGatewayError('FORBIDDEN');
+          return input.create({ ...request, scenePolicy: structuredClone(request.scenePolicy), reference: structuredClone(selected) });
+        });
+      }
+      const resolver = await source;
+      if (await check(context, selected, signal) !== before) throw new ModelGatewayError('FORBIDDEN');
+      if (typeof resolver?.resolve !== 'function' || typeof resolver.assertCurrent !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      const result = resolvedNativeToolResultSchema.safeParse(structuredClone(await resolver.resolve(context, selected, signal)));
+      if (!result.success || hash(result.data.reference) !== key) throw new ModelGatewayError('INVALID_RESPONSE');
+      if (await check(context, selected, signal) !== before) throw new ModelGatewayError('FORBIDDEN');
+      return result.data;
+    },
+    async assertCurrent(context, value, signal) {
+      context = structuredClone(context);
+      const material = resolvedNativeToolResultSchema.safeParse(structuredClone(value));
+      if (!material.success) throw new ModelGatewayError('INVALID_REQUEST');
+      const selected = reference(material.data.reference), before = await check(context, selected, signal);
+      if (!source || originalReference !== hash(selected)) throw new ModelGatewayError('FORBIDDEN');
+      const resolver = await source;
+      if (typeof resolver?.resolve !== 'function' || typeof resolver.assertCurrent !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+      if (await check(context, selected, signal) !== before) throw new ModelGatewayError('FORBIDDEN');
+      await resolver.assertCurrent(context, material.data, signal);
+      if (await check(context, selected, signal) !== before) throw new ModelGatewayError('FORBIDDEN');
+    }
+  };
 }
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const actions: readonly InputCountingRequestAction[] = ['count', 'observeCountKey', 'readCountReceipt',
@@ -103,6 +197,7 @@ export class InputCountingRequestFactory {
       || server.resolvers !== undefined && (typeof server.resolvers.platform?.resolve !== 'function'
         || typeof server.resolvers.tenant?.resolve !== 'function')
       || server.transport !== undefined && typeof server.transport.post !== 'function'
+      || server.nativeToolResultsForRequest !== undefined && typeof server.nativeToolResultsForRequest !== 'function'
       || server.connectionConfiguration !== undefined && (server.resolvers !== undefined
         || !Object.is(server.connectionConfiguration.db, server.db)
         || typeof server.connectionConfiguration.secrets?.encrypt !== 'function' || typeof server.connectionConfiguration.secrets?.decrypt !== 'function'
@@ -111,7 +206,9 @@ export class InputCountingRequestFactory {
         || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u).safeParse(server.configuration.countingPriceVersion).success
         || !server.configuration.toolPolicy || typeof server.configuration.toolPolicy !== 'object'
         || !Number.isSafeInteger(server.configuration.sceneMaxOutputTokens)
-        || server.configuration.sceneMaxOutputTokens < 1 || server.configuration.sceneMaxOutputTokens > 32768)
+        || server.configuration.sceneMaxOutputTokens < 1 || server.configuration.sceneMaxOutputTokens > 32768
+        || server.configuration.nativeToolResults !== undefined && typeof server.configuration.nativeToolResults !== 'boolean'
+        || server.configuration.nativeToolResults === true && !server.configuration.toolPolicy.orderExplainTool)
       || server.clock !== undefined && typeof server.clock !== 'function') throw new BudgetError('UNAVAILABLE');
     this.server = Object.freeze({ ...server,
       ...(server.configuration ? { configuration: Object.freeze({ ...structuredClone(server.configuration),
@@ -135,7 +232,7 @@ export class InputCountingRequestFactory {
     const close = () => { active = false; };
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
-    const credentials = { current: async () => { if (!active) throw denied(); return { ...credential }; } };
+    const credentials = Object.freeze({ current: async () => { if (!active) throw denied(); return { ...credential }; } });
     const auth: InputCountingRequestDependencies['auth'] = { resolveAccessContext: async (authorization, options) => {
       if (!active || authorization !== credential.authorization || options?.audience !== 'operator') throw denied();
       const access = structuredClone(await server.auth.resolveAccessContext(authorization, options));
@@ -177,17 +274,33 @@ export class InputCountingRequestFactory {
           if (!active) throw denied();
           return current;
         } };
-        const frozen = configuration && action === 'count' ? new InputCountingFrozenInputReader({ db: server.db,
+        const scenePolicy: TaskModelPolicy | undefined = configuration ? {
+          sceneCode: configuration.sceneCode, maxOutputTokens: configuration.sceneMaxOutputTokens,
+          ...(configuration.toolPolicy.orderExplainTool ? { orderExplainTool: true } : {}),
+          ...(configuration.nativeToolResults === true ? { nativeToolResults: true } : {})
+        } : undefined;
+        const frozen = scenePolicy && action === 'count' ? new InputCountingFrozenInputReader({ db: server.db,
           execution: { authorize: async (taskId: string) => {
             if (originalTaskId !== undefined && originalTaskId !== taskId) throw denied();
             const context = await taskAuthorization.execution.authorize(taskId);
             if (!active) throw denied();
             originalTaskId = taskId;
             return context;
-          } },
-          scenePolicy: { sceneCode: configuration.sceneCode,
-            maxOutputTokens: configuration.sceneMaxOutputTokens,
-            ...(configuration.toolPolicy.orderExplainTool ? { orderExplainTool: true } : {}) }, clock }) : undefined;
+          } }, scenePolicy, clock }) : undefined;
+        const nativeToolResults = action === 'count' && scenePolicy?.nativeToolResults === true && server.nativeToolResultsForRequest
+          ? composeRequestNativeCountingSource({ create: server.nativeToolResultsForRequest,
+            request: { db: server.db, auth, guard, credentials, scenePolicy, clock,
+              execution: { authorize: async taskId => {
+                if (taskId !== originalTaskId) throw denied();
+                return invocation.resolve();
+              } },
+              taskAuthority: { resolve: async (taskId, action) => {
+                if (!active || taskId !== originalTaskId) throw denied();
+                const current = await taskAuthorization.authority.resolve(taskId, action);
+                if (!active) throw denied();
+                return current;
+              } } }, task: { id: () => originalTaskId, resolve: invocation.resolve }, active: () => active })
+          : undefined;
         let resolvers = server.resolvers;
         if (action === 'count' && server.connectionConfiguration) {
           const connection = server.connectionConfiguration;
@@ -231,7 +344,7 @@ export class InputCountingRequestFactory {
           db: server.db as unknown as Parameters<typeof createPersistedBudgetSubsystem>[0]['db'],
           subscriptions: server.subscriptions, authorization: countingAuthorization, quotes, evidence, clock });
         const service = new InputCountTokensService({ db: server.db, scopes: countingAuthorization.scopes,
-          authorization: countingAuthorization, budget, frozen,
+          authorization: countingAuthorization, budget, frozen, nativeToolResults,
           resolvers, transport: server.transport ?? (resolvers ? createNativeModelEgressTransport() : undefined),
           policyOptions: configuration?.toolPolicy,
           sceneCode: configuration?.sceneCode, countingPriceVersion: configuration?.countingPriceVersion,

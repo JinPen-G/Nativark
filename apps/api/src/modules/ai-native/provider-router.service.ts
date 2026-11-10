@@ -14,7 +14,7 @@ const scopeSchema = z.discriminatedUnion('kind', [platform,
   z.object({ id: id.max(36), kind: z.literal('WORKSPACE'), tenantId: id, workspaceId: id }).strict()
 ]);
 const inputSchema = z.object({ consumerScope: scopeSchema, configurationScope: scopeSchema, mode: z.enum(['platform_managed', 'tenant_managed']),
-  scene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']), requiredCapabilities: capabilities.refine(v => v.length > 0) }).strict();
+  scene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning', 'embedding']), requiredCapabilities: capabilities.refine(v => v.length > 0) }).strict();
 const profileSchema = z.object({ id: id.max(36), scopeId: id.max(36), scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']),
   profileKey: id.max(64), role: z.enum(['DEFAULT', 'REASONING', 'VISION', 'EMBEDDING']), serviceMode: z.enum(['platform_managed', 'tenant_managed']),
   protocol: id.max(64), provider: z.string().min(1).max(128), model: z.string().min(1).max(256), credentialRef: id,
@@ -24,7 +24,8 @@ const roleFor = (scene: AiRouteScene): AiProviderProfileRole => {
   switch (scene) {
     case 'builder': case 'reasoning': return 'REASONING';
     case 'vision': return 'VISION';
-    // Answer generation is not vector generation. Embedding needs a separate explicit scene.
+    case 'embedding': return 'EMBEDDING';
+    // Knowledge answers remain text generation; they never select a vector route.
     case 'knowledge': case 'chat': return 'DEFAULT';
   }
 };

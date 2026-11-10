@@ -124,6 +124,12 @@ async function completedArtifactBeforeStepCommit() {
   await runSettled(h, root); h.storeControl.beforeWrite = null;
   assert.deepEqual(h.executions, ['input-clarify']); assert.equal(h.state.aiStep[0].status, 'RUNNING');
   assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, true);
+  // An uncertain step acknowledgement deliberately keeps the live holder.
+  // Only expiry permits reclaiming its lease; it does not prove rollback or
+  // authorize re-executing the tool. Recovery still consumes the original artifact.
+  assert.equal(h.state.aiRun[0].leaseOwnerId, 'worker-a');
+  await assert.rejects(root.runner.run({ ...h.claim(), recovery: true }), error => error.code === 'AI_REVISION_CONFLICT');
+  h.control.now = new Date(h.state.aiRun[0].leaseExpiresAt);
   return { h, root };
 }
 

@@ -207,6 +207,7 @@ function QualificationTab({ revisions, canManage, onQualification }: { revisions
 function BenefitsTab({ overview }: { overview: CustomerProfileOverview }) {
   const { t } = useLocale();
   const { dateTime, dateOnly } = useProfileDates();
+  if (overview.access?.benefits === "restricted") return <Alert type="info" showIcon title={t("积分与权益分区受限")} description={t("当前范围或财务/行销权限不足，未返回余额和流水；不代表余额为零。")} />;
   if (!overview.benefits.accounts.length && !overview.benefits.rewards.length && !overview.benefits.coupons.length) return <Empty description={t("暂无积分与权益记录")} />;
   return <>
     {overview.benefits.accounts.map((account: CustomerProfileBenefitAccount) => <section key={account.workspaceId}>
@@ -243,6 +244,7 @@ function BenefitsTab({ overview }: { overview: CustomerProfileOverview }) {
 function OrdersTab({ overview, canViewOrders, onPageChange, onOpenOrder }: { overview: CustomerProfileOverview; canViewOrders: boolean; onPageChange: (page: number, pageSize: number) => void; onOpenOrder: (orderId: string) => void }) {
   const { t } = useLocale();
   const { dateTime } = useProfileDates();
+  if (overview.access?.orders === "restricted") return <Alert type="info" showIcon title={t("历史订单分区受限")} description={t("当前空间缺少订单查看权限，未返回订单数量或记录。")} />;
   return <Table<CustomerProfileOrder> size="small" rowKey="id" dataSource={overview.orders.items} scroll={{ x: 980 }} pagination={{ current: overview.orders.page, pageSize: overview.orders.pageSize, total: overview.orders.total, showSizeChanger: true, onChange: onPageChange }} columns={[
     { title: t("订单号"), dataIndex: "orderNo" },
     { title: t("经营空间"), dataIndex: "workspaceName" },
@@ -250,7 +252,8 @@ function OrdersTab({ overview, canViewOrders, onPageChange, onOpenOrder }: { ove
     { title: t("关联身份"), render: (_, row) => <Space wrap>{row.relation.map((item) => <Tag key={item}>{t(relationLabel[item] ?? item)}</Tag>)}</Space> },
     { title: t("订单状态"), dataIndex: "status", render: (value) => <Tag color={statusColor(value)}>{t(statusLabel[value] ?? value)}</Tag> },
     { title: t("租期"), render: (_, row) => `${dateTime(row.startAt)} ~ ${dateTime(row.effectiveEndAt ?? row.endAt)}` },
-    { title: t("应收"), render: (_, row) => money(row.finalPayableAmount, row.currency) },
+    { title: t("应收"), render: (_, row) => overview.access?.orderAmounts === "restricted" ? t("财务信息受限")
+      : row.finalPayableAmount === undefined ? "—" : money(row.finalPayableAmount, row.currency) },
     { title: t("创建时间"), dataIndex: "createdAt", render: dateTime },
     ...(canViewOrders ? [{ title: t("操作"), key: "action", fixed: "right" as const, render: (_: unknown, row: CustomerProfileOrder) => <Button type="link" onClick={() => onOpenOrder(row.id)}>{t("查看订单")}</Button> }] : [])
   ]} />;
@@ -259,6 +262,7 @@ function OrdersTab({ overview, canViewOrders, onPageChange, onOpenOrder }: { ove
 function AuditTab({ overview, canReveal }: { overview: CustomerProfileOverview; canReveal: boolean }) {
   const { t } = useLocale();
   const { dateTime } = useProfileDates();
+  if (overview.access?.audit === "restricted") return <Alert type="info" showIcon title={t("状态与审计分区受限")} description={t("当前数据范围不能读取完整空间审计，未返回其他地点或账号的记录。")} />;
   if (canReveal && !overview.statusHistory.length && !overview.sensitiveAccess?.length) return <Empty description={t("暂无状态或访问记录")} />;
   return <>
     {Boolean(overview.statusHistory.length) && <ListSection title={t("状态历史")} style={{ marginTop: "var(--rental-layout-section-gap)" }}><Table size="small" rowKey="id" dataSource={overview.statusHistory} pagination={{ defaultPageSize: 20 }} columns={[
@@ -323,7 +327,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
     await queryClient.invalidateQueries({ queryKey: ["membership-personal"] });
   };
   const saveAddress = useMutation({
-    mutationFn: (values: AddressForm) => customerApi.saveAddress(customerId!, { ...values, id: addressTarget?.id, revision: addressTarget?.revision }),
+    mutationFn: (values: AddressForm) => customerApi.saveAddress(customerId!, { ...values, phone: addressTarget && !values.phone?.trim() ? undefined : values.phone?.trim(), id: addressTarget?.id, revision: addressTarget?.revision }),
     onSuccess: async () => { await refresh(); addressDialog.dismiss(); message.success(t("地址已保存")); },
     onError: (error: Error) => message.error(error.message || t("地址保存失败"))
   });
@@ -392,7 +396,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
     { key: "basic", label: t("基础资料"), children: current && <ProfileSummary overview={current} /> },
     { key: "account", label: t("账号与会员"), children: current && <AccountTab overview={current} /> },
     { key: "address", label: current && current.addresses.length > 0 ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={editable} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutateAsync(address)} /> },
-    { key: "qualification", label: current && current.qualificationRevisions.length > 0 ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && <QualificationTab revisions={current.qualificationRevisions} canManage={editable} onQualification={onQualification} /> },
+    { key: "qualification", label: current && current.qualificationRevisions.length > 0 ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && (current.access?.qualifications === "restricted" ? <Alert type="info" showIcon title={t("资质历史分区受限")} /> : <QualificationTab revisions={current.qualificationRevisions} canManage={editable} onQualification={onQualification} />) },
     ...(canViewIdentity ? [{
       key: "identity",
       label: t("实名认证"),
@@ -438,7 +442,7 @@ export function CustomerProfileDetails({ customerId, canManage, canView, canReve
       </Space>
     }] : []),
     { key: "benefits", label: t("积分与权益"), children: current && <BenefitsTab overview={current} /> },
-    { key: "orders", label: current ? `${t("历史订单")} (${current.orders.total})` : t("历史订单"), children: current && <OrdersTab overview={current} canViewOrders={canViewOrders} onPageChange={(page, pageSize) => { setOrderPage(page); setOrderPageSize(pageSize); }} onOpenOrder={(orderId) => navigate(`/rental/orders/${orderId}`)} /> },
+    { key: "orders", label: current && current.access?.orders !== "restricted" ? `${t("历史订单")} (${current.orders.total})` : t("历史订单"), children: current && <OrdersTab overview={current} canViewOrders={canViewOrders} onPageChange={(page, pageSize) => { setOrderPage(page); setOrderPageSize(pageSize); }} onOpenOrder={(orderId) => navigate(`/rental/orders/${orderId}`)} /> },
     { key: "audit", label: t("状态与审计"), children: current && <AuditTab overview={current} canReveal={canReveal} /> }
   ];
   function openAddressEditor(address?: CustomerProfileAddress) {

@@ -11,7 +11,8 @@ import type { AiTaskRunnerTaskMetadata } from './ai-task-runner.ports';
  */
 export class PersistedPlanResourcePolicySource implements AiTaskExecutionPolicySource {
   constructor(private readonly tasks: Pick<AiTaskRepository, 'readMetadata'>,
-    private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'> & Partial<Pick<PrismaTaskRunEvidenceRepository, 'resourceOrigin'>>) {
+    private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'> & Partial<Pick<PrismaTaskRunEvidenceRepository, 'resourceOrigin'>>,
+    private readonly preparation?: import('./task-run-preparation.ports').AiTaskPreparationPolicySource) {
     if (typeof tasks?.readMetadata !== 'function' || typeof plans?.resolve !== 'function') {
       throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     }
@@ -29,11 +30,13 @@ export class PersistedPlanResourcePolicySource implements AiTaskExecutionPolicyS
   private async read(taskId: string, presented: AiTaskExecutionLease, reconciliation: boolean) {
     const lease = structuredClone(presented);
     if (!lease || lease.taskId !== taskId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    const prepared = await this.preparation?.resourcePolicy(taskId, { ...lease, expiresAt: '' } as AiTaskExecutionLease, reconciliation);
+    if (prepared) return prepared;
     const metadata = structuredClone(await this.tasks.readMetadata(taskId));
     if (metadata.taskId !== taskId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const current = structuredClone(await this.plans.resolve(metadata as AiTaskRunnerTaskMetadata, { ...lease, expiresAt: '' }, reconciliation));
+    const current = structuredClone(await this.plans.resolve(metadata as AiTaskRunnerTaskMetadata, { ...lease, expiresAt: '' }, reconciliation, reconciliation));
     if (current.taskId !== taskId || current.runId !== lease.runId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const plan = this.plans.resourceOrigin ? await this.plans.resourceOrigin(current, { ...lease, expiresAt: '' }) : current;
+    const plan = this.plans.resourceOrigin ? await this.plans.resourceOrigin(current, { ...lease, expiresAt: '' }, reconciliation) : current;
     const bounds = [plan.limits.maxSteps, plan.limits.maxCalls, plan.limits.maxTotalMs, plan.limits.maxOutputBytes];
     if (bounds.some(value => !Number.isSafeInteger(value) || value <= 0)) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
     const limits = { steps: BigInt(bounds[0]), calls: BigInt(bounds[1]), active_ms: BigInt(bounds[2]), output_bytes: BigInt(bounds[3]) };
