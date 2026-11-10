@@ -7,10 +7,10 @@ import type { Prisma } from '@prisma/client';
 import type { AuthService } from './auth.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpPlatformIdentity } from './original-mcp-platform-management';
-import type { RegisteredPublicClient } from '@rental-os/mcp-server/public-client-authorization';
-import type { OriginalPublicClientManagement, PrismaPublicClientRegistry, captureRegisteredPublicClient, capturePublicClientRegistrationReceipt } from '@rental-os/mcp-server/prisma-public-client-registry';
+import type { RegisteredPublicClient } from '@rental-os/mcp-server/public-client-authorization' with { 'resolution-mode': 'import' };
+import type { OriginalPublicClientManagement, PrismaPublicClientRegistry, captureRegisteredPublicClient, capturePublicClientRegistrationReceipt } from '@rental-os/mcp-server/prisma-public-client-registry' with { 'resolution-mode': 'import' };
 
-import type { PublicClientRegistrationReview, PublicClientRegistrationReviewSource } from '@rental-os/mcp-server/prisma-public-client-review';
+import type { PublicClientRegistrationReview, PublicClientRegistrationReviewSource } from '@rental-os/mcp-server/prisma-public-client-review' with { 'resolution-mode': 'import' };
 // Compatibility names for the same formal source, not private duplicate contracts.
 export type OriginalMcpPublicClientReview = PublicClientRegistrationReview;
 export type OriginalMcpPublicClientReviewSource = PublicClientRegistrationReviewSource<Prisma.TransactionClient>;

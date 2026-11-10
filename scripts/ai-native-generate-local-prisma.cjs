@@ -61,6 +61,16 @@ function generationEnvironment(temporary, audit, childTemp) {
   const env = {};
   for (const key of ["PATH", "SystemRoot", "WINDIR"]) if (process.env[key]) env[key] = process.env[key];
   const preload = name => path.join(root, "tests/fixtures/ai-native", name).replace(/\\/gu, "/");
+  // The CLI otherwise looks for a second engine copy in its own package and
+  // tries to download it. Use the locked engines inside this isolated copy.
+  if (process.platform === "win32") {
+    const engines = path.join(temporary, "node_modules", "@prisma", "engines");
+    env.PRISMA_QUERY_ENGINE_LIBRARY = path.join(engines, "query_engine-windows.dll.node");
+    env.PRISMA_SCHEMA_ENGINE_BINARY = path.join(engines, "schema-engine-windows.exe");
+    for (const file of [env.PRISMA_QUERY_ENGINE_LIBRARY, env.PRISMA_SCHEMA_ENGINE_BINARY]) {
+      if (!fs.existsSync(file)) throw new Error(`Prepare the locked Prisma engine before offline generation: ${path.basename(file)}`);
+    }
+  }
   return Object.assign(env, { DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: temporary,
     HOME: temporary, USERPROFILE: temporary, APPDATA: temporary, LOCALAPPDATA: temporary, TEMP: childTemp, TMP: childTemp, TMPDIR: childTemp,
     XDG_CACHE_HOME: childTemp, npm_config_cache: childTemp, V8_COMPILE_CACHE_CACHE_DIR: childTemp, NODE_COMPILE_CACHE: childTemp,

@@ -9,8 +9,8 @@ import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpPlatformAdmissionManagement } from './original-mcp-platform-management';
 import { createOriginalMcpWorkspaceAdmissionManagement } from './original-mcp-workspace-management';
-import type { createMcpAdmissionControlPlane, McpAdmissionControlPlane, McpAdmissionControlPlaneConfig, OriginalMcpAdmissionControlPlaneDependencies } from '@rental-os/mcp-server/admission-control-plane';
-import type { captureOAuthAdmissionTarget, OriginalOAuthAdmissionManagement } from '@rental-os/mcp-server/prisma-oauth-admission-store';
+import type { createMcpAdmissionControlPlane, McpAdmissionControlPlane, McpAdmissionControlPlaneConfig, OriginalMcpAdmissionControlPlaneDependencies } from '@rental-os/mcp-server/admission-control-plane' with { 'resolution-mode': 'import' };
+import type { captureOAuthAdmissionTarget, OriginalOAuthAdmissionManagement } from '@rental-os/mcp-server/prisma-oauth-admission-store' with { 'resolution-mode': 'import' };
 export interface OriginalMcpAdmissionPackageExports {
   createMcpAdmissionControlPlane: typeof createMcpAdmissionControlPlane;
   captureOAuthAdmissionTarget: typeof captureOAuthAdmissionTarget;
