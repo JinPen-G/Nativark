@@ -1,0 +1,47 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
+  <nav-bar title="本单换货费用申请"></nav-bar>
+  <view class="section">
+    <view class="card">
+      <view class="subtitle">{{order ? order.orderNo : '核对本人原订单'}}</view>
+      <view class="notice notice--neutral mt-12">仅申请企业费用批准。候选不预占库存，批准不确认商户检查、不收付款、不执行换货；本页不计算费用，原服务生成的申请金额在订单费用进度中核对。</view>
+      <view wx:if="{{loading}}" class="muted mt-12">正在读取本人原订单…</view>
+      <view wx:if="{{error}}" class="notice notice--danger mt-12">{{error}}</view>
+      <view wx:if="{{notice}}" class="notice notice--neutral mt-12">{{notice}}</view>
+      <button class="btn btn--outline btn--block mt-12" bindtap="load" disabled="{{busy}}">重新读取原订单</button>
+    </view>
+  </view>
+  <view wx:if="{{pending}}" class="section section--tight">
+    <view class="card">
+      <view class="subtitle">原申请结果待核对</view>
+      <view class="notice notice--warning mt-12">未读到原结果不等于未提交，不能重发。{{closing ? '原结束请求已派发，只能核对原收据。' : '若不再申请，可独立请求永久封闭原申请键。'}}</view>
+      <button class="btn btn--secondary btn--block mt-12" bindtap="onRecover" disabled="{{busy}}">核对原申请与结束收据</button>
+      <block wx:if="{{!closing}}">
+        <textarea class="field__input mt-12" placeholder="独立结束原申请的原因" maxlength="500" value="{{closureReason}}" bindinput="onClosureReason" disabled="{{busy}}"></textarea>
+        <button class="btn btn--secondary btn--block mt-12" bindtap="onCloseRequest" disabled="{{busy || !closureReason}}">请求结束原申请</button>
+      </block>
+    </view>
+  </view>
+  <view wx:elif="{{order &amp;&amp; !loading}}" class="section section--tight">
+    <view class="card">
+      <view wx:if="{{order.status !== 'renting'}}" class="notice notice--warning">原订单当前不能新申请换货费用。历史未知申请仍可按原键核对。</view>
+      <block wx:else>
+        <view class="subtitle">选择本次替换</view>
+        <button class="btn btn--secondary btn--block mt-12" bindtap="onReadChoices" disabled="{{busy}}">读取当前受控候选</button>
+        <block wx:if="{{choices}}">
+          <view class="muted small mt-12">仅显示原服务允许的已领取整行与替换商品，申请时会重新核对原订单修订和可用性。</view>
+          <view class="field mt-16"><view class="field__label">已领取整行</view><picker range="{{lineLabels}}" value="{{lineIndex}}" bindchange="onLine" disabled="{{busy}}"><view class="field__picker"><text>{{lineIndex >= 0 ? lineLabels[lineIndex] : '选择已领取整行'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker></view>
+          <view wx:if="{{allocationId}}" class="field mt-16"><view class="field__label">替换商品</view><picker range="{{replacementLabels}}" value="{{replacementIndex}}" bindchange="onReplacement" disabled="{{busy}}"><view class="field__picker"><text>{{replacementIndex >= 0 ? replacementLabels[replacementIndex] : '选择替换商品'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker></view>
+          <block wx:if="{{replacementId}}">
+            <view wx:if="{{serialized}}" class="field mt-16"><view class="field__label">替换资产</view><picker range="{{assetLabels}}" value="{{assetIndex}}" bindchange="onAsset" disabled="{{busy}}"><view class="field__picker"><text>{{assetIndex >= 0 ? assetLabels[assetIndex] : '选择可用资产'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker><view wx:if="{{!assetLabels.length}}" class="muted small mt-8">当前没有可用资产，不能提交。</view></view>
+            <view class="field mt-16"><view class="field__label">计费规格</view><picker range="{{pricingLabels}}" value="{{pricingIndex}}" bindchange="onPricing" disabled="{{busy}}"><view class="field__picker"><text>{{pricingLabels[pricingIndex]}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker></view>
+            <view class="field mt-16"><view class="field__label">价格依据</view><picker range="{{priceLabels}}" value="{{priceIndex}}" bindchange="onPrice" disabled="{{busy}}"><view class="field__picker"><text>{{priceLabels[priceIndex]}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker></view>
+            <textarea class="field__input mt-16" placeholder="本次换货用途及申请原因" maxlength="500" value="{{reason}}" bindinput="onReason" disabled="{{busy}}"></textarea>
+            <button class="btn btn--primary btn--block mt-16" bindtap="onRequest" disabled="{{busy || pending || !canRequest || !reason || error}}">申请本次换货费用批准</button>
+          </block>
+          <view wx:if="{{!lineLabels.length}}" class="muted mt-12">当前没有可申请的已领取整行。</view>
+        </block>
+      </block>
+    </view>
+  </view>
+</view>

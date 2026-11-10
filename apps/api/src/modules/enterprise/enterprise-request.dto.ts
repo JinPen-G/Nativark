@@ -1,7 +1,22 @@
 import { Type } from "class-transformer";
-import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import type { CreateEnterpriseRentalHandoffRequest, ReviewEnterpriseRentalHandoffRequest, WithdrawEnterpriseRentalHandoffRequest } from "@rental-os/shared";
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, EnterpriseDisclosure, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
 import { RentalCategoryCode, ENTERPRISE_PORTAL_ACTIONS, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest } from "@rental-os/shared";
+export class ReviewEnterpriseRentalHandoffRequestDto implements ReviewEnterpriseRentalHandoffRequest {
+  @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
+  @IsInt() @Min(1) @Max(1) expectedRevision!: number;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(8000) materialKey!: string;
+  @IsIn([true]) confirm!: true;
+}
+export class WithdrawEnterpriseRentalHandoffRequestDto implements WithdrawEnterpriseRentalHandoffRequest {
+  @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
+  @IsInt() @Min(1) @Max(1) expectedRevision!: number;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(8000) materialKey!: string;
+  @IsIn([true]) confirm!: true;
+}
 export class EnterpriseManagementProposalDto implements EnterpriseManagementProposal {
   @IsOptional() @IsString() @MaxLength(191) legalName?: string;
   @IsOptional() @IsString() @MaxLength(1000) registeredAddress?: string;
@@ -87,6 +102,13 @@ export class EnterpriseApplicationInputDto implements EnterpriseApplicationInput
   @IsString() @IsNotEmpty() @MaxLength(191) agreementVersion!: string;
   @IsOptional() @IsBoolean() agreementAcknowledged?: boolean;
   @IsOptional() @IsString() @MaxLength(191) existingCorporateCustomerId?: string;
+}
+export class CreateEnterpriseRentalHandoffRequestDto implements CreateEnterpriseRentalHandoffRequest {
+  @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
+  @IsInt() @Min(0) @Max(0) expectedRevision!: number;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(4000) materialKey!: string;
+  @IsIn([true]) confirm!: true;
 }
 export class EnterpriseChangeRequestDto implements EnterpriseChangeRequest {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
@@ -179,6 +201,9 @@ export class SaveEnterpriseScopePolicyRequestDto implements SaveEnterpriseScopeP
   @IsInt() @Min(0) expectedRevision!: number;
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsDefined() @ValidateNested() @Type(() => EnterpriseScopePolicyInputDto) policy!: EnterpriseScopePolicyInputDto;
+  @ValidateIf((_, value) => value !== undefined) @IsString() @MaxLength(24)
+  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u) @IsISO8601({ strict: true, strictSeparator: true })
+  expectedMembershipUpdatedAt?: string;
 }
 export class DecideEnterpriseTransferRequestDto implements DecideEnterpriseTransferRequest {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;

@@ -5,9 +5,6 @@ import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '
 import {
   RentalCoreOrderStatus,
   type RentalOrderChangePreview,
-  type RentalOrderExchangeInspectionSnapshot,
-  type RentalOrderExchangeDisposition,
-  type RentalOrderExchangePriceBasis,
   type RentalOrderExtension
 } from "@rental-os/shared";
 import { createHash } from "node:crypto";
@@ -82,6 +79,10 @@ import {
 } from "./rental-config-request.dto";
 import { renderOperationReportCsv } from "./rental-workspace-report.csv";
 import { RENTAL_PENDING_PAYMENT_TIMEOUT_REASON, RentalCoreService } from "./rental-core.service";
+import { RentalExchangePreviewService } from "./rental-exchange-preview.service";
+import { RentalExchangeInspectionPreparationService } from "./rental-exchange-inspection-preparation.service";
+import { PrepareRentalExchangeInspectionDto, RentalExchangeInspectionRequirementsDto, CreateRentalExchangeInspectionMediaDto } from "./rental-exchange-inspection-preparation.dto";
+import { RentalExchangeInspectionMediaService } from "./rental-exchange-inspection-media.service";
 import { RentalAllocationService } from "./rental-allocation.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
@@ -233,7 +234,10 @@ export class RentalCoreController {
     private readonly operationLogs: OperationLogService,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly memberships?: MembershipService,
-    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant,
+    @Optional() private readonly exchangePreview?: RentalExchangePreviewService,
+    @Optional() private readonly exchangeInspections?: RentalExchangeInspectionPreparationService,
+    @Optional() private readonly exchangeInspectionMedia?: RentalExchangeInspectionMediaService
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
@@ -664,140 +668,8 @@ export class RentalCoreController {
     body: PreviewRentalOrderChangeDto,
     tx?: Prisma.TransactionClient
   ): Promise<{ order: RentalOrder; preview: RentalOrderChangePreview }> {
-    if (!tx) return this.prisma.$transaction((transaction) => this.pricePostPickupExchange(tenantId, orderId, body, transaction));
-    const order = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
-    if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理取货后换货");
-    const orderLineId = body.orderLineId?.trim();
-    const allocationId = body.allocationId?.trim();
-    const replacementItemGroupId = body.replacementItemGroupId?.trim();
-    if (!orderLineId || !allocationId || !replacementItemGroupId) throw new BadRequestException("换货必须选择订单行、已领取分配项和新商品");
-    const line = order.lines.find((row) => row.id === orderLineId);
-    const allocation = order.allocations.find((row) => row.id === allocationId);
-    if (!line || !allocation || allocation.orderLineId !== line.id || allocation.status !== "picked_up") {
-      throw new ConflictException("所选商品已归还、已换过或不属于当前订单");
-    }
-    const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
-    if (allocation.quantity !== activeQuantity) throw new ConflictException("本轮只能整行换货，不能拆换部分数量");
-    if (["consumable", "bundle"].includes(line.inventoryMode)) throw new ConflictException("一次性耗材和套装暂不支持取货后换货");
-
-    const context = (await this.context(tenantId));
-    const replacementGroup = context.groups.find((row) => row.id === replacementItemGroupId);
-    if (!replacementGroup || replacementGroup.status !== "enabled") throw new ConflictException("换货目标商品不存在或已停用");
-    if (replacementGroup.inventoryMode !== line.inventoryMode) throw new ConflictException("换货前后库存方式必须一致");
-    const priceBasis: RentalOrderExchangePriceBasis = body.priceBasis ?? "original_order_price";
-    const originalDisposition: RentalOrderExchangeDisposition = body.originalDisposition ?? "return_to_warehouse";
-    const exchangeLocationId = body.exchangeLocationId?.trim() || order.fulfillmentLocationId;
-    if (exchangeLocationId !== order.fulfillmentLocationId) throw new ConflictException("首期换货必须在订单领取地点办理");
-    const replacementAssetId = body.replacementAssetId?.trim();
-    if (replacementGroup.inventoryMode === "serialized" && !replacementAssetId) throw new BadRequestException("序列化商品换货必须选择具体资产");
-    if (replacementGroup.inventoryMode !== "serialized" && replacementAssetId) throw new BadRequestException("数量库存换货不能提交序列化资产");
-    const candidates = replacementGroup.inventoryMode === "serialized"
-      ? await this.allocation.exchangeAssetCandidates(tenantId, order, replacementGroup.id, exchangeLocationId, tx)
-      : [];
-    const selectedCandidate = replacementAssetId ? candidates.find((row) => row.assetId === replacementAssetId) : undefined;
-    if (replacementAssetId && (!selectedCandidate || !selectedCandidate.available)) {
-      throw new ConflictException(selectedCandidate?.reason ?? "换货目标资产当前不可用或与租期缓冲冲突");
-    }
-
-    const cancelledServiceOccurrenceIds = [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
-    const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
-    const previousChanges = await this.service.listOrderChanges(tenantId, orderId, tx);
-    const appliedAt = new Date().toISOString();
-    const quoted = await this.business.quotePostPickupExchange(tenantId, context, {
-      order,
-      previousExtensions,
-      previousChanges,
-      tx,
-      orderLineId,
-      replacementItemGroupId,
-      replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
-      priceBasis,
-      exchangeCancelledServiceOccurrenceIds: cancelledServiceOccurrenceIds,
-      services: body.services,
-      appliedAt,
-      fulfillmentMode: order.fulfillmentMode,
-      locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
-      customerType: order.customerType
-    });
-    const newServices = quoted.priced.serviceSnapshots ?? [];
-    if (newServices.some(row => row.requiresCapacity)) {
-      if (!this.serviceCapacities) throw new ConflictException("换货服务容量组件未就绪，不能只报价收费");
-      await this.serviceCapacities.assertAvailableForExchange(tenantId, orderId, newServices,
-        (order.serviceSnapshots ?? []).filter(row => cancelledServiceOccurrenceIds.includes(row.occurrenceId ?? "")), tx);
-    }
-    const beforePayableAmount = order.finalPayableAmount;
-    const recalculatedPayableAmount = quoted.priced.pricingSnapshot?.recalculatedPayableAmount ?? beforePayableAmount;
-    const differenceAmount = roundMoney(recalculatedPayableAmount - beforePayableAmount);
-    const inspectionSnapshot: RentalOrderExchangeInspectionSnapshot = body.inspectionSnapshot ?? { customerConfirmed: false };
-    const cancelledServices = cancelledServiceOccurrenceIds.map((occurrenceId) => {
-      const occurrence = (order.serviceSnapshots ?? []).find((row) => row.occurrenceId === occurrenceId);
-      if (!occurrence) throw new ConflictException("要取消的服务发生项不属于当前订单");
-      return {
-        occurrenceId,
-        serviceName: occurrence.serviceName,
-        quantity: occurrence.quantity,
-        refundAmount: serviceCancellationAmounts(occurrence, occurrence.quantity).refundAmount
-      };
-    });
-    const pricingSnapshot = quoted.priced.pricingSnapshot
-      ? { ...quoted.priced.pricingSnapshot, previousPayableAmount: beforePayableAmount, recalculatedPayableAmount, differenceAmount }
-      : undefined;
-    const currentVersion = quoted.currentVersion && "version" in quoted.currentVersion ? String(quoted.currentVersion.version) : undefined;
-    const executionBasis = await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced,
-      { itemGroupId: replacementGroup.id, fulfillmentMode: order.fulfillmentMode });
-    const pickupInspection = exchangePickupInspectionRequirements({ orderId, expectedUpdatedAt: order.updatedAt,
-      orderLineId, allocationId, replacementItemGroupId, replacementAssetId, locationId: exchangeLocationId, basis: executionBasis });
-    const preview: RentalOrderChangePreview = {
-      orderId: order.id,
-      type: "post_pickup_exchange",
-      expectedUpdatedAt: order.updatedAt,
-      cancelledLineIds: [],
-      cancelledItems: [],
-      cancelledServices,
-      remainingLineIds: [line.id],
-      beforePayableAmount,
-      recalculatedPayableAmount,
-      differenceAmount,
-      additionalAmount: Math.max(0, differenceAmount),
-      refundAmount: Math.max(0, -differenceAmount),
-      depositDelta: quoted.priced.depositDelta,
-      preAuthDelta: quoted.priced.preAuthDelta,
-      currency: quoted.priced.currency,
-      pricingSnapshot,
-      resourceRelease: [{ lineId: line.id, itemGroupName: line.itemGroupName, quantity: allocation.quantity }],
-      serviceResourceRelease: cancelledServices.map((row) => ({ occurrenceId: row.occurrenceId, serviceName: row.serviceName, quantity: row.quantity })),
-      exchange: {
-        orderLineId,
-        allocationId,
-        originalItemGroupId: line.itemGroupId,
-        originalItemGroupName: line.itemGroupName,
-        replacementItemGroupId: replacementGroup.id,
-        replacementItemGroupName: replacementGroup.name,
-        replacementPricingGroupId: quoted.replacementPricingGroupId,
-        priceBasis,
-        originalDisposition,
-        originalAmount: quoted.originalAmount,
-        replacementAmount: quoted.replacementAmount,
-        differenceAmount,
-        originalPriceVersion: quoted.priced.linePricing.previousSegments.at(-1)?.source.priceVersion ?? quoted.priced.priceVersion,
-        replacementPriceVersion: currentVersion ?? quoted.priced.priceVersion,
-        replacementAssetId,
-        replacementAssetNo: selectedCandidate?.assetNo,
-        cancelledServiceOccurrenceIds,
-        serviceSnapshots: newServices,
-        serviceConfirmationHash: exchangeServiceConfirmationHash({ orderId, expectedUpdatedAt: order.updatedAt, orderLineId,
-          replacementItemGroupId, cancelledIds: cancelledServiceOccurrenceIds }, newServices),
-        inspectionSnapshot,
-        pickupInspection,
-        executionBasis
-      },
-      warnings: [
-        "换货差额不在确认时立即收款，统一在归还结算时处理",
-        ...(differenceAmount < 0 ? ["本次形成负差额，归还结算前需完成退款审核"] : []),
-        ...(originalDisposition === "off_shelf" ? ["原商品下架，不释放数量库存或序列化资产"] : ["原商品返回仓库并释放原占用"])
-      ]
-    };
-    return { order, preview };
+    if (!this.exchangePreview) throw new ConflictException("原换货试算服务未装配，不能执行变更");
+    return this.exchangePreview.preview(tenantId, orderId, body, tx);
   }
 
   private async priceLineCancellation(tenantId: string, orderId: string, body: PreviewRentalOrderChangeDto, tx?: Prisma.TransactionClient) {
@@ -1903,6 +1775,50 @@ export class RentalCoreController {
     return this.prisma.$transaction(tx => this.service.exchangeServiceOptions(req.user.tenantId, id, tx));
   }
 
+  private inspectionPreparationService() {
+    if (!this.exchangeInspections) throw new ConflictException("原换货检查准备服务未装配");
+    return this.exchangeInspections;
+  }
+  private operatorAuthorization(req: AuthenticatedRequest): string | undefined {
+    return typeof req.headers?.authorization === "string" ? req.headers.authorization : undefined;
+  }
+  private inspectionMediaService() {
+    if (!this.exchangeInspectionMedia) throw new ConflictException("专用换货影像服务未装配");
+    return this.exchangeInspectionMedia;
+  }
+  @Post("orders/:id/exchange-inspection/media/requirements")
+  exchangeInspectionMediaRequirements(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalExchangeInspectionRequirementsDto) {
+    return this.inspectionMediaService().requirements(this.operatorAuthorization(req), req.user, id, body);
+  }
+  @Post("orders/:id/exchange-inspection/media/uploads")
+  createExchangeInspectionMedia(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalExchangeInspectionMediaDto) {
+    return this.inspectionMediaService().create(this.operatorAuthorization(req), req.user, id, body);
+  }
+  @Get("orders/:id/exchange-inspection/media/operations/:key")
+  originalExchangeInspectionMedia(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("key") key: string) {
+    return this.inspectionMediaService().original(this.operatorAuthorization(req), req.user, id, key);
+  }
+  @Post("orders/:id/exchange-inspection/media/operations/:key/complete")
+  completeExchangeInspectionMedia(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("key") key: string) {
+    return this.inspectionMediaService().complete(this.operatorAuthorization(req), req.user, id, key);
+  }
+  @Post("orders/:id/exchange-inspection/requirements")
+  exchangeInspectionRequirements(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalExchangeInspectionRequirementsDto) {
+    return this.inspectionPreparationService().requirements(this.operatorAuthorization(req), req.user, id, body);
+  }
+  @Post("orders/:id/exchange-inspection/preparations")
+  prepareExchangeInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PrepareRentalExchangeInspectionDto) {
+    return this.inspectionPreparationService().prepare(this.operatorAuthorization(req), req.user, id, body);
+  }
+  @Get("orders/:id/exchange-inspection/preparations/:preparationId")
+  readExchangeInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("preparationId") preparationId: string) {
+    return this.inspectionPreparationService().read(this.operatorAuthorization(req), req.user, id, preparationId);
+  }
+  @Get("orders/:id/exchange-inspection/operations/:key")
+  originalExchangeInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("key") key: string) {
+    return this.inspectionPreparationService().original(this.operatorAuthorization(req), req.user, id, key);
+  }
+
   @Post("orders/:id/changes/post-pickup-exchange/preview")
   async previewPostPickupExchange(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
     if (body.type !== "post_pickup_exchange") throw new BadRequestException("换货试算请求类型必须是 post_pickup_exchange");
@@ -2995,8 +2911,4 @@ export class RentalCoreController {
     });
     return this.committed(tenantId, result);
   }
-}
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

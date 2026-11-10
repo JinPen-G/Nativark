@@ -96,15 +96,27 @@ function ExtensionDecision({ row, reviewMode, english, operation, closureOperati
 }
 export function EnterpriseExtensionApprovalsPage() {
   const context = useEnterprise(), { locale } = useLocale(), english = locale === "en-US";
+  const [requestClosureReason, setRequestClosureReason] = useState(""), [requestClosureConfirmed, setRequestClosureConfirmed] = useState(false), [requestClosed, setRequestClosed] = useState(false);
   const [mode, setMode] = useState("mine"), [selected, setSelected] = useState("");
   const [form] = Form.useForm<{ orderId: string; newEndAt: dayjs.Dayjs; reason: string }>();
   const operation = useOriginalWorkflowOperation(`extension-approvals:${mode}`), closureOperation = useOriginalWorkflowOperation(`extension-closure:${mode}`);
   const canReview = Boolean(context.entry?.corporates.find(c => c.corporateCustomerId === context.selectedCorporateId)?.actions.includes("approvals:review"));
   const path = mode === "review" ? `/enterprise/corporates/${encodeURIComponent(context.selectedCorporateId)}/extension-approvals` : "/enterprise/my-extension-approvals";
   const rows = useQuery({ queryKey: ["enterprise-extension-approvals", context.identity, mode], enabled: Boolean(context.session && (mode !== "review" || canReview)), queryFn: ({ signal }) => operation.read<EnterpriseExtensionApprovalView[]>(path, signal) });
-  useEffect(() => { setMode("mine"); setSelected(""); form.resetFields(); }, [context.identity]);
+  useEffect(() => { setMode("mine"); setSelected(""); form.resetFields(); setRequestClosureReason(""); setRequestClosureConfirmed(false); setRequestClosed(false); }, [context.identity]);
   const refresh = async () => { await rows.refetch({ throwOnError: true }); operation.assertCurrent(); };
   const row = !rows.error && (mode !== "review" || canReview) ? rows.data?.find(r => r.id === selected) : undefined;
+  const finishRequestRecovery = async (original: EnterpriseExtensionRequestOriginalResult) => {
+    operation.assertCurrent();
+    if (original.state === "closed") { setRequestClosed(true); setSelected(""); form.resetFields(); }
+    else if (original.state === "observed") { setRequestClosed(false); setSelected(original.approval.id); }
+    else throw new Error("原申请仍待核对");
+    setRequestClosureConfirmed(false); setRequestClosureReason(""); await refresh();
+  };
+  const closeRequest = () => {
+    if (!requestClosureConfirmed || !requestClosureReason.trim() || mode !== "mine") throw new Error("须本人独立确认原申请键");
+    return operation.closeExtensionRequest(requestClosureReason, finishRequestRecovery);
+  };
   const recover = async (receipt?: EnterpriseOperationResult, originalPath?: string) => {
     if (originalPath === "/enterprise/extension-approvals" && operation.pending?.originalTarget) {
       const orderId = operation.pending.originalTarget;
@@ -142,7 +154,14 @@ export function EnterpriseExtensionApprovalsPage() {
       { title: english ? "Actions" : "操作", key: "actions", render: (_, r) => <ActionButton disabled={operation.busy || rows.isFetching} intent="review" label={english ? "Review this extension" : "核对本条续租"} onAction={async () => { operation.assertCurrent(); setSelected(r.id); }} /> },
     ]} />}
     {row && <ExtensionDecision key={JSON.stringify([context.identity, mode, row.id, row.revision, row.state, row.preview])} row={row} reviewMode={mode === "review"} english={english} operation={operation} closureOperation={closureOperation} refresh={refresh} unavailable={rows.isFetching} />}
-    {operation.pending && <ActionButton disabled={operation.busy} intent="review" label={english ? "Read original operation" : "核对原续租操作"} onAction={() => operation.recover(recover)} />}
+    {operation.pending && <ActionButton disabled={operation.busy} intent="review" label={english ? "Read original operation" : "核对原续租操作"} onAction={() => operation.pending?.path === "/enterprise/extension-approvals" && operation.pending.originalTarget ? operation.recoverExtensionRequest(finishRequestRecovery) : operation.recover(recover)} />}
+    {mode === "mine" && operation.pending?.path === "/enterprise/extension-approvals" && operation.pending.originalTarget && !operation.pending.closureKey && <>
+      <Alert type="warning" title={english ? "Seal the original request key, not a rental" : "封闭原申请键，不取消租赁"} description={english ? "If the application already exists, only recover it. Otherwise permanently block this request key; any new application requires a new preview and explicit action." : "申请已成立时只恢复原申请；否则永久阻断该原申请键。新申请须重新试算并明确发起。"} />
+      <Input.TextArea aria-label={english ? "Original request closure reason" : "原申请结束原因"} value={requestClosureReason} maxLength={500} disabled={operation.busy} onChange={event => setRequestClosureReason(event.target.value)} />
+      <Checkbox checked={requestClosureConfirmed} disabled={operation.busy} onChange={event => setRequestClosureConfirmed(event.target.checked)}>{english ? "I independently confirm closure of this original request key" : "我独立确认结束本条原申请键"}</Checkbox>
+      <ActionButton disabled={operation.busy || !requestClosureConfirmed || !requestClosureReason.trim()} intent="confirm" label={english ? "Request original application closure" : "请求受控结束原申请"} onAction={closeRequest} />
+    </>}
+    {requestClosed && <Alert type="info" title={english ? "Original request key sealed; no existing request or extension was cancelled" : "原申请键已封闭，未取消已成立申请或续租"} />}
     {closureOperation.pending && <ActionButton disabled={closureOperation.busy} intent="review" label={english ? "Read original closure" : "核对原结束请求"} onAction={() => closureOperation.recover(async (receipt, path) => {
       const original = receipt ?? await closureOperation.read<EnterpriseOperationResult>(`/enterprise/operations/${encodeURIComponent(closureOperation.pending!.key)}`);
       const id = original.result?.approvalId;

@@ -25,6 +25,7 @@ import type {
   TBoxDeviceSummary
 } from "@rental-os/shared";
 import { requireRequestTenantId } from "../../common/request-identity";
+import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { IntegrationsRepository } from "./integrations.repository";
 import { FileBusinessAccessService } from "../files/file-business-access.service";
 
@@ -253,6 +254,7 @@ export class IntegrationsService {
     const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
     const candidates = this.memoryFilesForTenant(tenantId)
       .filter((file) => {
+        if (file.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) return false;
         if (query.businessModule && file.businessModule !== query.businessModule) {
           return false;
         }
@@ -276,6 +278,7 @@ export class IntegrationsService {
   }
 
   async createFile(input: CreateFileAssetRequest) {
+    if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("不能直接登记专用换货影像");
     // 该接口只登记开发/演示用的模拟文件元数据，不是实际的对象存储上传。
     // 生产环境禁止它生成 local_mock active 资产，避免未配置真实文件平台时
     // 把“已生成元数据”误读成“文件已上传并可用”。真实业务必须走

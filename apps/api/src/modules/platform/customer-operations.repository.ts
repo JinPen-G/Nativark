@@ -30,6 +30,8 @@ export interface CustomerStatusHistoryInput {
   operator?: string;
   approver?: string;
   at: string;
+  /** Internal original status transaction only; never supplied by a client DTO. */
+  captureEnterpriseRecipients?: boolean;
 }
 
 export interface CustomerSensitiveAccessInput {
@@ -187,7 +189,7 @@ export class CustomerOperationsRepository {
     input: CustomerStatusHistoryInput,
     tx?: CustomerTx
   ): Promise<void> {
-    await this.db(tx).customerStatusHistoryEntry.create({
+    const recorded = await this.db(tx).customerStatusHistoryEntry.create({
       data: {
         tenantId,
         customerId: input.customerId,
@@ -200,8 +202,55 @@ export class CustomerOperationsRepository {
         operator: input.operator ?? null,
         approver: input.approver ?? null,
         at: new Date(input.at)
-      }
+      },
+      select: { id: true }
     });
+    if (input.captureEnterpriseRecipients === true && input.scope === "membership" && input.action !== "merge") {
+      if (!tx || tx === (this.prisma as unknown as CustomerTx) || typeof recorded?.id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(recorded.id)) {
+        console.warn("Corporate status recipient capture unavailable: original transaction/history reference required");
+      } else {
+        await this.captureCorporateStatusRecipients(tenantId, recorded.id, tx);
+      }
+    }
+  }
+
+  /** One InnoDB statement captures all bounded recipients or none. Prisma/MySQL
+   * cannot prepare SAVEPOINT; never emulate one with partial inserts or retries. */
+  private async captureCorporateStatusRecipients(tenantId: string, historyId: string, tx: CustomerTx): Promise<void> {
+    try {
+      const count = await tx.$executeRaw`
+        INSERT INTO enterprise_corporate_status_recipients
+          (tenantId,historyId,corporateCustomerId,recipientCustomerId,membershipId,membershipUpdatedAt,capturedAt)
+        SELECT batch.tenantId,batch.historyId,batch.corporateCustomerId,batch.recipientCustomerId,batch.membershipId,batch.membershipUpdatedAt,NOW(3)
+        FROM (
+          SELECT bounded.*,COUNT(*) OVER () AS recipientCount
+          FROM (
+            SELECT h.tenantId,h.id AS historyId,h.customerId AS corporateCustomerId,m.personalCustomerId AS recipientCustomerId,m.id AS membershipId,m.updatedAt AS membershipUpdatedAt
+            FROM customer_status_history h
+            JOIN Tenant t ON t.id=h.tenantId AND t.status='ACTIVE'
+            JOIN customer_profiles c ON c.tenantId=h.tenantId AND c.id=h.customerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL
+            JOIN customer_corporate_memberships m ON m.tenantId=h.tenantId AND m.corporateCustomerId=h.customerId
+            JOIN customer_profiles p ON p.tenantId=m.tenantId AND p.id=m.personalCustomerId AND p.customerType='personal' AND p.status='active' AND p.mergedIntoCustomerId IS NULL
+            JOIN customer_accounts a ON a.tenantId=p.tenantId AND a.customerId=p.id AND a.status='active'
+            JOIN customer_memberships pm ON pm.tenantId=p.tenantId AND pm.customerId=p.id AND pm.status='active'
+            WHERE h.tenantId=${tenantId} AND h.id=${historyId} AND h.scope='membership' AND h.workspaceId IS NULL AND h.action<>'merge'
+              AND m.role IN ('admin','employee') AND m.status='active' AND m.effectiveFrom<=NOW(3) AND (m.effectiveTo IS NULL OR m.effectiveTo>NOW(3))
+              AND (EXISTS (SELECT 1 FROM enterprise_corporate_portals portal WHERE portal.tenantId=m.tenantId AND portal.corporateCustomerId=m.corporateCustomerId)
+                OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))
+            ORDER BY m.id LIMIT 201
+          ) bounded
+        ) batch
+        WHERE batch.recipientCount<=200`;
+      if (!Number.isSafeInteger(count) || count < 0 || count > 200) throw new Error("Corporate status recipient capture out of bounds");
+    } catch (error) {
+      // Only these InnoDB errors roll back the failed statement, not the original
+      // status transaction. Deadlock, timeout, connection loss and unknown errors
+      // propagate: they must never look like a committed safety action.
+      const statementOnly = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2010" &&
+        ["1146", "1054", "1452", "1062"].includes(String(error.meta?.code));
+      if (!statementOnly) throw error;
+      console.warn("Corporate status recipient capture unavailable; original status action continues without a message capture");
+    }
   }
 
   /**

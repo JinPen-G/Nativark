@@ -8,6 +8,8 @@ import { siteRepository } from '../data/siteRepository';
 import { Img } from '../components/Img';
 import { customerOrderFacts } from '../features/ai-native/customer-order-facts';
 import { EnterpriseExtensionApproval } from '../components/EnterpriseExtensionApproval';
+import { EnterpriseExchangeProgress } from '../components/EnterpriseExchangeProgress';
+import { EnterpriseExchangeRequest } from '../components/EnterpriseExchangeRequest';
 
 const money = (amount: unknown, currency = 'CNY') => `${currency === 'CNY' ? '¥' : ''}${Number(amount ?? 0)}`;
 
@@ -128,6 +130,8 @@ export function OrderDetailPage() {
         <p className="mock-note">{t('paySettleNote')}</p>
       </div>
       {orderId && <EnterpriseExtensionApproval key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
+      {orderId && <EnterpriseExchangeRequest key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} allowNewRequest={order.status === 'renting'} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
+      {orderId && <EnterpriseExchangeProgress key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
       <Link className="button button-dark" to={href('/products')}>{t('continueExplore')}</Link>
     </div>;
   }

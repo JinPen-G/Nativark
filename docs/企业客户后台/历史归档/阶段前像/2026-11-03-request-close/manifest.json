@@ -1,0 +1,23 @@
+{
+  "stage": "unknown-extension-request-controlled-closure",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "file": "企业客户后台-开发记录.md",
+      "bytes": 45520,
+      "sha256": "8e6bdb0799389751fbc30ea145e2e1f18fbb0267db48e78f4c5abe868999243f"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "file": "企业客户后台-协作接续.md",
+      "bytes": 7779,
+      "sha256": "860b7ce402b81ec446cb902ae0a1e8101a18249e6f995d1fb3af13367a0d5b6b"
+    },
+    {
+      "source": "apps/enterprise-portal/README.md",
+      "file": "README.md",
+      "bytes": 9317,
+      "sha256": "6f1065c551123166bf37087433bfed0b568712451e704c8593a25090d81dea9f"
+    }
+  ]
+}

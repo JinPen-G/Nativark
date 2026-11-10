@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
 import type {
   AdapterLogSummary,
@@ -67,7 +68,8 @@ export class IntegrationsRepository {
       businessType: query.businessType,
       businessId: query.businessId,
       uploadScene: query.uploadScene,
-      status: query.status
+      status: query.status,
+      NOT: { uploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE }
     };
     const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
     const rows = await this.prisma.fileAsset.findMany({
@@ -82,6 +84,7 @@ export class IntegrationsRepository {
     input: CreateFileAssetRequest,
     tenantId = requireRequestTenantId()
   ): Promise<FileAssetSummary> {
+    if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("不能直接登记专用换货影像");
     const fileId = `file_${cryptoRandomId()}`;
     const fileExt = input.fileName.includes(".")
       ? input.fileName.split(".").pop()

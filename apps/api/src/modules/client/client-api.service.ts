@@ -32,6 +32,7 @@ import {
   type ClientCorporateIdentityListResponse,
   type ClientCreateQuoteRequest,
   type ClientFulfillmentView,
+  type EnterpriseRentalHandoffMaterial,
   type ClientMembershipAssignmentView,
   type ClientMembershipBenefitsResponse,
   type ClientMembershipPlansResponse,
@@ -59,6 +60,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { MembershipService } from "../platform/membership.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalCoreFactRepository } from "../rental-core/rental-core-fact.repository";
 import { RentalCategoryResolver } from "../rental-core/rental-category-resolver.service";
 import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
 import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
@@ -131,7 +133,8 @@ export class ClientApiService {
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
     @Optional() private readonly wechat?: ClientWechatAuthService,
-    private readonly categoryResolver?: RentalCategoryResolver
+    private readonly categoryResolver?: RentalCategoryResolver,
+    @Optional() private readonly handoffFacts?: RentalCoreFactRepository
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
@@ -1580,6 +1583,60 @@ export class ClientApiService {
       effectiveEndAt: order.effectiveEndAt,
       allocations: order.allocations?.map((row) => ({ id: row.id, orderLineId: row.orderLineId, quantity: row.quantity, status: row.status, assetNo: row.assetNo })) ?? []
     };
+  }
+
+  /** Original own enterprise-order basis for a later handoff request. No current
+   * member/grant lookup, request creation, subject mutation or financial projection. */
+  async rentalHandoffMaterial(context: ClientRequestContext, orderId: string, tx?: Prisma.TransactionClient): Promise<EnterpriseRentalHandoffMaterial> {
+    const reference = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(value);
+    const utc = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)
+      && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+    if (!reference(orderId)) throw new BadRequestException("原订单引用无效");
+    const expected = { tenantId: context.tenantId, workspaceId: context.workspaceId, workspaceCode: context.workspaceCode, customerId: context.customerId };
+    const assertScope = () => {
+      const identity = getRequestIdentity();
+      if (context.customerType !== "personal" || !reference(expected.tenantId) || !reference(expected.workspaceId) || !reference(expected.workspaceCode) || !reference(expected.customerId)
+        || !identity || identity.tenantId !== expected.tenantId || identity.workspaceId !== expected.workspaceId || identity.userId !== expected.customerId
+        || identity.isSaasAdmin !== false || identity.staffApi === true || identity.dataScope !== undefined
+        || context.tenantId !== expected.tenantId || context.workspaceId !== expected.workspaceId || context.workspaceCode !== expected.workspaceCode || context.customerId !== expected.customerId) throw new ForbiddenException("交接原材料须在当前客户和服务核对");
+    };
+    assertScope();
+    const persisted = await (tx ?? this.prisma).rentalOrder.findFirst({ where: { tenantId: expected.tenantId, workspaceId: expected.workspaceId, id: orderId },
+      select: { id: true, tenantId: true, workspaceId: true, customerId: true, orderNo: true, status: true, updatedAt: true, membershipSnapshot: true,
+        contractSubjectCustomerId: true, payerSubjectCustomerId: true, userSubjectCustomerId: true } });
+    assertScope();
+    if (!persisted || persisted.id !== orderId || persisted.tenantId !== expected.tenantId || persisted.workspaceId !== expected.workspaceId || !this.clientOwnsOrder(context, persisted)) throw new NotFoundException("本人原订单不存在");
+    const snapshot = persisted.membershipSnapshot as unknown as RentalMembershipSnapshot | null;
+    const membershipUpdatedAt = snapshot?.enterpriseBasis?.membershipUpdatedAt;
+    const updatedAt = persisted.updatedAt.toISOString();
+    if (!snapshot || snapshot.bookingIdentity !== "enterprise_employee" || snapshot.personalCustomerId !== expected.customerId
+      || !reference(snapshot.corporateCustomerId) || !reference(snapshot.corporateMembershipId) || !utc(snapshot.resolvedAt)
+      || typeof snapshot.enterpriseContractAndPayer !== "boolean" || membershipUpdatedAt !== undefined && !utc(membershipUpdatedAt)
+      || !utc(updatedAt) || !persisted.orderNo?.trim()) throw new ConflictException("原订单企业或关系依据缺失，不能用今天的成员资料补历史");
+    const originalKey = (order: { id: string; tenantId: string; customerId?: string | null; orderNo: string; status: unknown; updatedAt: string; membershipSnapshot?: unknown; contractSubjectCustomerId?: string | null; payerSubjectCustomerId?: string | null; userSubjectCustomerId?: string | null }) => {
+      const basis = order.membershipSnapshot as RentalMembershipSnapshot | null;
+      return JSON.stringify([order.id, order.tenantId, order.customerId, order.orderNo, String(order.status).toLowerCase(), order.updatedAt,
+        basis?.bookingIdentity, basis?.personalCustomerId, basis?.corporateCustomerId, basis?.corporateMembershipId, basis?.resolvedAt, basis?.enterpriseContractAndPayer, basis?.enterpriseBasis?.membershipUpdatedAt ?? null,
+        order.contractSubjectCustomerId ?? null, order.payerSubjectCustomerId ?? null, order.userSubjectCustomerId ?? null]);
+    };
+    // A request already holds the order lock: use the original Core repository's
+    // tx-bound scope/visibility/decoder, never getOrder's root connection. Root
+    // reads can exhaust a one-connection pool or combine different revisions.
+    if (tx && !this.handoffFacts) throw new ServiceUnavailableException("原事务订单读取未装配");
+    const coreOrder = tx ? await this.handoffFacts!.findOrder(expected.tenantId, orderId, tx) : await this.assertClientOrder(context, orderId);
+    assertScope();
+    if (!coreOrder || coreOrder.id !== orderId || !this.clientOwnsOrder(context, coreOrder)) throw new NotFoundException("本人原订单不存在");
+    if (originalKey(coreOrder) !== originalKey({ ...persisted, updatedAt })) throw new ConflictException("原订单依据读取期间已变化，请重新核对");
+    const legacy = [persisted.contractSubjectCustomerId, persisted.payerSubjectCustomerId, persisted.userSubjectCustomerId].every(value => value === null);
+    const originalId = (value: string | null) => legacy ? persisted.customerId : value;
+    const responsibility = (value: string | null): "personal" | "corporate" | "unavailable" => {
+      const id = originalId(value); return id === expected.customerId ? "personal" : id === snapshot.corporateCustomerId ? "corporate" : "unavailable";
+    };
+    return { orderId, orderNo: persisted.orderNo, orderUpdatedAt: updatedAt, workspaceCode: expected.workspaceCode,
+      corporateCustomerId: snapshot.corporateCustomerId, corporateMembershipId: snapshot.corporateMembershipId, membershipResolvedAt: snapshot.resolvedAt,
+      membershipUpdatedAt: membershipUpdatedAt ?? null, enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer,
+      subjects: { contract: responsibility(persisted.contractSubjectCustomerId), payer: responsibility(persisted.payerSubjectCustomerId), user: originalId(persisted.userSubjectCustomerId) === expected.customerId ? "self" : "unavailable" },
+      subjectBasis: legacy ? "legacy_customer_fallback" : "recorded_columns", scope: "current_workspace_original_own_order", readOnly: true };
   }
 
   /**

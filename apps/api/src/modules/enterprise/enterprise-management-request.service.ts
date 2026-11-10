@@ -3,7 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { RentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
+import { RentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
@@ -59,7 +59,7 @@ export class EnterpriseManagementRequestService {
       membershipStatus: company.membership!.status, profileRevision: JSON.stringify([company.updatedAt.toISOString(), company.corporateProfile?.updatedAt.toISOString() ?? null]), creditRevision, merchantPolicyRevision,
       requestTypes: permitted ? [...requestTypes] : [], unavailable: ["formal_bills", "payment_proof", "bill_dispute", "contract_files"] };
   }
-  private validate(input: SaveEnterpriseManagementRequest) {
+  private validate(input: Pick<SaveEnterpriseManagementRequest, "requestType" | "objectRevision" | "proposal" | "evidenceFileIds" | "submit">) {
     if (!requestTypes.includes(input.requestType) || !input.objectRevision?.trim() || input.objectRevision.length > 191 || typeof input.submit !== "boolean"
       || !input.proposal || Array.isArray(input.proposal) || !Array.isArray(input.evidenceFileIds) || input.evidenceFileIds.length > 10
       || new Set(input.evidenceFileIds).size !== input.evidenceFileIds.length || input.evidenceFileIds.some(id => typeof id !== "string" || !id || id.length > 191)) throw new BadRequestException("申请对象、修订与材料无效");
@@ -105,9 +105,61 @@ export class EnterpriseManagementRequestService {
       const id = previous?.id ?? randomUUID(), revision = (previous?.revision ?? 0) + 1, state = input.submit ? "pending" : "draft";
       const payload = JSON.stringify({ requestType: input.requestType, objectRevision: input.objectRevision, proposal: input.proposal, evidenceFileIds: input.evidenceFileIds, reason: input.reason.trim() });
       if (previous) await tx.$executeRaw`UPDATE enterprise_workflow_requests SET state=${state},revision=${revision},payload=${payload},updatedAt=NOW(3) WHERE tenantId=${context.tenantId} AND id=${id}`;
-      else await tx.$executeRaw`INSERT INTO enterprise_workflow_requests (tenantId,id,kind,applicantCustomerId,corporateCustomerId,state,revision,payload) VALUES (${context.tenantId},${id},'finance_request',${context.customerId},${corporateId},${state},${revision},${payload})`;
+      else await tx.$executeRaw`INSERT INTO enterprise_workflow_requests (tenantId,id,kind,applicantCustomerId,corporateCustomerId,state,revision,payload,updatedAt) VALUES (${context.tenantId},${id},'finance_request',${context.customerId},${corporateId},${state},${revision},${payload},NOW(3))`;
       return { id, state, revision, effect: "review_only_no_business_change" as const };
     }, async tx => { await this.commands.customer(context, tx); await this.access.requireAction(context, corporateId, "requests:manage", tx); });
+  }
+  /** Own receipt recovery does not need today's management grant or enterprise state.
+   * Only the linked original save result is projected, never current material or a later decision. */
+  async readSave(context: ClientRequestContext, corporateId: string, key: string): Promise<EnterpriseOperationResult> {
+    if (typeof corporateId !== "string" || !corporateId.trim() || corporateId.length > 191
+      || typeof key !== "string" || !key.trim() || key.length > 128) throw new BadRequestException("原管理申请企业或保存操作键无效");
+    const tx = this.prisma as unknown as Prisma.TransactionClient;
+    await this.commands.customer(context, tx, false);
+    const receipts = await tx.$queryRaw<Array<{ managementSaveKey: string; managementSaveResult: string | Record<string, unknown>; requestId: string | null; corporateCustomerId: string | null }>>`
+      SELECT o.operationKey AS managementSaveKey,o.result AS managementSaveResult,w.id AS requestId,w.corporateCustomerId
+      FROM enterprise_portal_operations o
+      LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId
+        AND w.id=JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.id'))
+        AND w.corporateCustomerId=${corporateId} AND w.applicantCustomerId=${context.customerId} AND w.kind='finance_request'
+      WHERE o.tenantId=${context.tenantId} AND o.operationKey=${key} AND o.actorUserId=${`customer:${context.customerId}`}
+        AND o.target=${`management-request.save:${corporateId}`}`;
+    await this.commands.customer(context, tx, false);
+    const receipt = receipts[0]; if (!receipt) return { state: "not_recorded" };
+    const unavailable = () => new ConflictException("原管理申请保存收据或对象关联无法精确核对，保留原引用");
+    let result: Record<string, unknown>;
+    try {
+      const value = enterpriseJson(receipt.managementSaveResult);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable();
+      result = value;
+    } catch { throw unavailable(); }
+    if (receipts.length !== 1 || receipt.managementSaveKey !== key || receipt.corporateCustomerId !== corporateId
+      || typeof result.id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(result.id) || receipt.requestId !== result.id
+      || typeof result.state !== "string" || !["draft", "pending"].includes(result.state)
+      || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 1
+      || result.effect !== "review_only_no_business_change") throw unavailable();
+    return { state: "committed", result: { corporateCustomerId: corporateId, id: result.id, state: result.state, revision: result.revision, effect: "review_only_no_business_change" } };
+  }
+  /** Exact own feedback is independent of the bounded list and today's enterprise grant.
+   * Current request material is not a command receipt and never unlocks an unknown K. */
+  async detail(context: ClientRequestContext, id: string): Promise<EnterpriseManagementRequestView> {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new BadRequestException("原本人管理申请引用无效");
+    const tx = this.prisma as unknown as Prisma.TransactionClient;
+    await this.commands.customer(context, tx, false);
+    const rows = await this.prisma.$queryRaw<Row[]>`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND id=${id} AND applicantCustomerId=${context.customerId} AND kind='finance_request'`;
+    await this.commands.customer(context, tx, false);
+    if (!rows.length) throw new NotFoundException("本人原管理申请不存在");
+    const unavailable = () => new ConflictException("原本人管理申请反馈或材料无法核对");
+    try {
+      const row = rows[0], view = this.view(row);
+      if (rows.length !== 1 || view.id !== id || view.applicantCustomerId !== context.customerId || typeof view.corporateCustomerId !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(view.corporateCustomerId)
+        || !["draft", "pending", "supplement_required", "approved", "rejected", "withdrawn"].includes(view.state) || !Number.isSafeInteger(view.revision) || view.revision < 1
+        || typeof view.reason !== "string" || !view.reason.trim() || view.reason.length > 500 || view.decisionReason !== null && (typeof view.decisionReason !== "string" || view.decisionReason.length > 500)) throw unavailable();
+      // Validation-only projection: this shape is never sent to execute/submit, and
+      // carries no operation key or claim about original submission/payment history.
+      const proposal = this.validate({ requestType: view.requestType, objectRevision: view.objectRevision, proposal: view.proposal, evidenceFileIds: view.evidenceFileIds, submit: false });
+      return { ...view, proposal: Object.fromEntries(Object.entries(proposal).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value])), evidenceFileIds: [...view.evidenceFileIds] };
+    } catch { throw unavailable(); }
   }
   async mine(context: ClientRequestContext): Promise<EnterpriseManagementRequestView[]> {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
@@ -125,6 +177,31 @@ export class EnterpriseManagementRequestService {
       await tx.$executeRaw`UPDATE enterprise_workflow_requests SET state='withdrawn',revision=revision+1,updatedAt=NOW(3) WHERE tenantId=${context.tenantId} AND id=${id}`;
       return { id, state: "withdrawn", revision: row.revision + 1 };
     }, tx => this.commands.customer(context, tx, false));
+  }
+  /** Withdrawal recovery follows the original owner/request/K, never today's state or grants. */
+  async readWithdrawal(context: ClientRequestContext, id: string, key: string): Promise<EnterpriseOperationResult> {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(id) || typeof key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(key)) throw new BadRequestException("原管理申请或撤回操作键无效");
+    const tx = this.prisma as unknown as Prisma.TransactionClient;
+    await this.commands.customer(context, tx, false);
+    const rows = await tx.$queryRaw<Array<{ requestId: string | null; managementWithdrawalKey: string; withdrawalResult: string | Record<string, unknown> }>>`
+      SELECT w.id AS requestId,o.operationKey AS managementWithdrawalKey,o.result AS withdrawalResult
+      FROM enterprise_portal_operations o
+      LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId AND w.id=${id}
+        AND w.applicantCustomerId=${context.customerId} AND w.kind='finance_request'
+      WHERE o.tenantId=${context.tenantId} AND o.operationKey=${key}
+        AND o.actorUserId=${`customer:${context.customerId}`} AND o.target=${`management-request.withdraw:${id}`}`;
+    await this.commands.customer(context, tx, false);
+    const row = rows[0]; if (!row) return { state: "not_recorded" };
+    const unavailable = () => new ConflictException("原管理申请撤回收据缺少精确本人、对象或修订，保留原引用");
+    if (rows.length !== 1 || row.requestId !== id || row.managementWithdrawalKey !== key) throw unavailable();
+    let result: Record<string, unknown>;
+    try {
+      const value = enterpriseJson(row.withdrawalResult);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable();
+      result = value;
+    } catch { throw unavailable(); }
+    if (result.id !== id || result.state !== "withdrawn" || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 2) throw unavailable();
+    return { state: "committed", result: { id, state: "withdrawn", revision: result.revision } };
   }
   async evidenceOwner(user: SystemUserRow, id: string, fileId: string) {
     const { tenantId } = this.merchant(user);
@@ -151,6 +228,34 @@ export class EnterpriseManagementRequestService {
     this.merchant(user);
     for (const row of rows) this.merchant(user, enterpriseJson(row.payload).requestType);
     return rows.map(row => this.view(row));
+  }
+  /** Read this operator's original review only. The immutable stored request type
+   * selects today's finance guard; missing type evidence fails closed, never rebases a result. */
+  async readReview(user: SystemUserRow, id: string, key: string): Promise<EnterpriseOperationResult> {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(id) || typeof key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(key)) throw new BadRequestException("原商户审核申请或操作键无效");
+    const before = this.merchant(user), { tenantId, actor } = before;
+    const rows = await this.prisma.$queryRaw<Array<{ managementReviewKey: string; reviewResult: string | Record<string, unknown>; requestId: string | null; corporateCustomerId: string | null; requestType: EnterpriseManagementRequestType | null }>>`
+      SELECT o.operationKey AS managementReviewKey,o.result AS reviewResult,w.id AS requestId,w.corporateCustomerId,
+        JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(w.payload),w.payload,'{}'),'$.requestType')) AS requestType
+      FROM enterprise_portal_operations o
+      LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId AND w.id=${id} AND w.kind='finance_request'
+      WHERE o.tenantId=${tenantId} AND o.operationKey=${key} AND o.actorUserId=${actor} AND o.target=${`management-request.review:${id}`}`;
+    const current = this.merchant(user);
+    if (current.tenantId !== before.tenantId || current.actor !== before.actor) throw new ForbiddenException("原审核读取身份已变化");
+    const row = rows[0]; if (!row) return { state: "not_recorded" };
+    const unavailable = () => new ConflictException("原商户审核收据、申请或类别无法精确核对，保留原引用");
+    if (rows.length !== 1 || row.managementReviewKey !== key || row.requestId !== id || typeof row.corporateCustomerId !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(row.corporateCustomerId)
+      || !row.requestType || !requestTypes.includes(row.requestType)) throw unavailable();
+    this.merchant(user, row.requestType);
+    let result: Record<string, unknown>;
+    try {
+      const value = enterpriseJson(row.reviewResult);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable();
+      result = value;
+    } catch { throw unavailable(); }
+    if (result.id !== id || typeof result.state !== "string" || !["approved", "rejected", "supplement_required"].includes(result.state)
+      || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 2 || result.effect !== "review_only_no_business_change") throw unavailable();
+    return { state: "committed", result: { corporateCustomerId: row.corporateCustomerId, requestType: row.requestType, id, state: result.state, revision: result.revision, effect: "review_only_no_business_change" } };
   }
   async review(user: SystemUserRow, id: string, input: ReviewEnterpriseManagementRequest) {
     if (!["approve", "reject", "supplement"].includes(input.decision)) throw new BadRequestException("处理决定无效");

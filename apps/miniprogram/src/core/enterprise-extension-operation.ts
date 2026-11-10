@@ -1,7 +1,7 @@
 /** Original extension-command references only: no request body or credentials.
  * Unknown requests never dispatch again; session generations isolate late replies. */
-import type { EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
-import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionRequestOriginal, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution } from "../api/enterprise";
+import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches, type EnterpriseExtensionRecoveryResult, type EnterpriseExtensionApprovalView, type RequestEnterpriseExtensionApproval, type SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionRequestOriginal, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution, closeEnterpriseExtensionRequest } from "../api/enterprise";
 import { PUBLIC_CONFIG } from "../config/public";
 import { newKey } from "./keys";
 import { contextVersion, currentServiceCode, currentSession } from "./session";
@@ -17,14 +17,14 @@ export function enterpriseExtensionOperation(orderId: string, assertView: () => 
     if (value === "" || value === undefined || value === null) return undefined;
     if (!value || typeof value !== "object" || Object.keys(value).some(key => !["key", "orderId", "approvalId", "closureKey", "kind"].includes(key))
       || typeof value.key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.key) || value.orderId !== orderId || !["request", "submit"].includes(value.kind)
-      || value.closureKey !== undefined && (value.kind !== "submit" || typeof value.closureKey !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.closureKey))
+      || value.closureKey !== undefined && (value.closureKey === value.key || typeof value.closureKey !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.closureKey))
       || value.kind === "submit" && typeof value.approvalId !== "string"
       || value.approvalId !== undefined && (typeof value.approvalId !== "string" || !value.approvalId || value.approvalId.length > 191)) throw new Error("原续租操作引用不可读取，不能重发");
     return value as Reference;
   };
   const clear = (reference: Reference) => {
     current(); const saved = read();
-    if (saved && saved.key !== reference.key) throw new Error("原续租操作引用已变化，不能覆盖其他请求");
+    if (saved && JSON.stringify(saved) !== JSON.stringify(reference)) throw new Error("原续租操作引用已变化，不能覆盖其他请求");
     wx.removeStorageSync(storageKey); if (wx.getStorageSync(storageKey)) throw new Error("原操作引用尚未清除，只能回读");
   };
   const result = async (id: string) => {
@@ -35,11 +35,17 @@ export function enterpriseExtensionOperation(orderId: string, assertView: () => 
       || value.original.state === "closed" && (value.approval.state !== "closed" || !value.approval.closedOperationKey)) throw new Error("原续租批准结果引用不一致");
     return value;
   };
-  const recover = async (): Promise<EnterpriseExtensionOriginalResult | undefined> => {
+  const recover = async (): Promise<EnterpriseExtensionRecoveryResult | undefined> => {
     const original = read(); if (!original) return;
     if (original.kind === "request") {
       const recovered = await readEnterpriseExtensionRequestOriginal(orderId, original.key); current();
-      if (recovered.state !== "observed" || recovered.retryable !== false || recovered.approval.orderId !== orderId || recovered.approval.applicantCustomerId !== customerId || !recovered.approval.id) throw new Error("原续租申请尚待精确核对，不能重发");
+      if (!enterpriseExtensionRequestMatches(recovered, orderId, original.key, customerId, service)) throw new Error("原续租申请尚待精确核对，不能重发");
+      if (original.closureKey) {
+        const closed = await readEnterpriseOperation(original.closureKey); current();
+        if (closed.state !== "committed" || !enterpriseExtensionRequestClosureMatches(recovered, closed.result, original.key, original.closureKey)) throw new Error("原申请结束收据尚待核对，不能重发");
+      }
+      if (recovered.state === "closed") { clear(original); return recovered; }
+      if (recovered.state !== "observed") throw new Error("原申请仍待核对");
       const value = await result(recovered.approval.id);
       clear(original); return value;
     }
@@ -80,6 +86,14 @@ export function enterpriseExtensionOperation(orderId: string, assertView: () => 
     current(); return recover();
   };
   return { current, pending: read, recover, result,
+    async closeRequest(reason: string) {
+      const original = read();
+      if (!original || original.kind !== "request" || original.closureKey || !reason.trim()) throw new Error("仅本人原未决申请可明确请求结束");
+      const reference = { ...original, closureKey: newKey("enterprise-request-close") };
+      writeRequiredStorage(storageKey, reference); current();
+      await closeEnterpriseExtensionRequest(orderId, original.key, { operationKey: reference.closureKey, expectedRevision: 0, reason, confirm: true });
+      current(); return recover();
+    },
     async close(approval: EnterpriseExtensionApprovalView, reason: string) {
       const original = read();
       if (!original || original.kind !== "submit" || original.approvalId !== approval.id || original.closureKey || !reason.trim()) throw new Error("仅本人原未决提交可明确请求结束");

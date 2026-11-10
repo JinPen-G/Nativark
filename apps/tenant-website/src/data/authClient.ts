@@ -10,7 +10,7 @@ import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBoo
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
-import type { ClientMembershipSessionResponse, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
 export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
@@ -149,8 +149,17 @@ export const sessionApi = {
   enterpriseApprovals() { return authedJson<EnterpriseBookingApprovalView[]>('/enterprise/my-approvals'); },
   enterpriseCommand<T>(path: string, payload: unknown) { return authedJson<T>(`/enterprise/${path}`, { method: 'POST', body: JSON.stringify(payload) }); },
   enterpriseOperation(key: string) { return authedJson<{ state: string; result?: Record<string, unknown> }>(`/enterprise/operations/${encodeURIComponent(key)}`); },
+  enterpriseExchangeChoices(orderId: string, query: EnterpriseExchangeChoicesQuery = {}) { const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined) as [string, string][]); return authedJson<EnterpriseExchangeChoices>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-choices?${search}`); },
+  requestEnterpriseExchangeApproval(input: RequestEnterpriseExchangeApproval) { return authedJson(`/enterprise/exchange-approvals`, { method: 'POST', body: JSON.stringify(input) }); },
+  enterpriseExchangeRequestOriginal(orderId: string, key: string) { return authedJson<EnterpriseExchangeRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-request-operations/${encodeURIComponent(key)}`); },
+  closeEnterpriseExchangeRequest(orderId: string, key: string, input: CloseEnterpriseExchangeRequest) { return authedJson<EnterpriseExchangeRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-request-operations/${encodeURIComponent(key)}/close`, { method: 'POST', body: JSON.stringify(input) }); },
+  originalExchangeOrder(orderId: string) { return authedJson<ClientOrderView>(`/orders/${encodeURIComponent(orderId)}`); },
+  confirmEnterpriseExchangeExpense(id: string, input: ConfirmEnterpriseExchangeExpense) { return authedJson(`/enterprise/exchange-approvals/${encodeURIComponent(id)}/expense-confirmation`, { method: 'POST', body: JSON.stringify(input) }); },
+  enterpriseExchangeConfirmation(id: string) { return authedJson<EnterpriseExchangeConfirmationResult>(`/enterprise/exchange-approvals/${encodeURIComponent(id)}/expense-confirmation`); },
+  enterpriseOrderExchangeApprovals(orderId: string) { return authedJson<EnterpriseExchangeApprovalView[]>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-approvals`); },
   enterpriseExtensionEligibility(orderId: string) { return authedJson<EnterpriseExtensionEligibility>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-eligibility`); },
   enterpriseExtensionRequestOriginal(orderId: string, key: string) { return authedJson<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}`); },
+  closeEnterpriseExtensionRequest(orderId: string, key: string, input: CloseEnterpriseExtensionRequest) { return authedJson<EnterpriseExtensionRequestOriginalResult>(`/enterprise/orders/${encodeURIComponent(orderId)}/extension-request-operations/${encodeURIComponent(key)}/close`, { method: 'POST', body: JSON.stringify(input) }); },
   enterpriseExtensionApprovals() { return authedJson<EnterpriseExtensionApprovalView[]>('/enterprise/my-extension-approvals'); },
   enterpriseExtensionResult(id: string) { return authedJson<EnterpriseExtensionOriginalResult>(`/enterprise/extension-approvals/${encodeURIComponent(id)}/result`); },
   enterpriseApprovalResult(id: string) { return authedJson<EnterpriseApprovalOriginalResult>(`/enterprise/approvals/${encodeURIComponent(id)}/result`); },

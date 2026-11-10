@@ -3,7 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { RentalCategoryCode } from "@rental-os/shared";
-import type { EnterpriseBookingBasis, EnterpriseScopePolicy, EnterpriseScopePolicyView, RentalBookingIdentityInput, RentalQuoteSnapshotV1, RentalOrder, EnterpriseOwnRentalPolicy, SaveEnterpriseScopePolicyRequest, SystemUserRow } from "@rental-os/shared";
+import type { EnterpriseBookingBasis, EnterpriseScopePolicy, EnterpriseScopePolicySaved, EnterpriseScopePolicyView, RentalBookingIdentityInput, RentalQuoteSnapshotV1, RentalOrder, EnterpriseOwnRentalPolicy, EnterpriseOperationResult, SaveEnterpriseScopePolicyRequest, SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestIdentity } from "../../common/request-identity";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
@@ -49,7 +49,9 @@ export class EnterprisePolicyService {
     const company = await db.customerProfile.findFirst({ where: { tenantId, id: corporateId, customerType: "corporate", status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }, select: { id: true } });
     if (!company) throw new ForbiddenException("当前企业会员不可用");
   }
-  private async persist(tenantId: string, corporateId: string, scopeKey: string, input: SaveEnterpriseScopePolicyRequest, tx: Prisma.TransactionClient) {
+  private async persist(tenantId: string, corporateId: string, scopeKey: string, input: SaveEnterpriseScopePolicyRequest, tx: Prisma.TransactionClient): Promise<EnterpriseScopePolicySaved> {
+    const employeeScope = scopeKey.startsWith("member:");
+    if (!employeeScope && input.expectedMembershipUpdatedAt !== undefined) throw new BadRequestException("企业或商户政策不接收员工关系修订");
     this.validate(input.policy);
     const rows = await this.rows(tenantId, corporateId, tx), prior = rows.find(r => r.scopeKey === scopeKey);
     if ((prior?.revision ?? 0) !== input.expectedRevision) throw this.commands.conflict();
@@ -75,10 +77,24 @@ export class EnterprisePolicyService {
         throw new ForbiddenException("企业/员工政策只能收窄商户上限，不能改写商户告知或放松审批");
       }
     }
-    const member = scopeKey.startsWith("member:") ? await tx.customerCorporateMembership.findFirst({ where: { tenantId, corporateCustomerId: corporateId, id: scopeKey.slice(7), status: "active" }, select: { updatedAt: true } }) : null;
-    if (scopeKey.startsWith("member:") && !member) throw new ForbiddenException("员工关系不可用");
-    await tx.$executeRaw`INSERT INTO enterprise_scope_policies (tenantId,corporateCustomerId,scopeKey,revision,policy,membershipUpdatedAt) VALUES (${tenantId},${corporateId},${scopeKey},${input.expectedRevision + 1},${JSON.stringify(input.policy)},${member?.updatedAt ?? null}) ON DUPLICATE KEY UPDATE revision=VALUES(revision),policy=VALUES(policy),membershipUpdatedAt=VALUES(membershipUpdatedAt)`;
-    return { scopeKey, revision: input.expectedRevision + 1, policy: input.policy };
+    const member = employeeScope ? await tx.customerCorporateMembership.findFirst({ where: { tenantId, corporateCustomerId: corporateId, id: scopeKey.slice(7), status: "active",
+      // Reuse member/admin target identity conditions, not rental qualifications.
+      // A restored relation cannot bind new policy to a frozen or merged person.
+      personalCustomer: { is: { tenantId, customerType: "personal", status: "active", mergedIntoCustomerId: null,
+        account: { is: { status: "active" } }, membership: { is: { status: "active" } } } }
+    }, select: { updatedAt: true } }) : null;
+    let membershipUpdatedAt: Date | null = null;
+    if (employeeScope) {
+      const expected = input.expectedMembershipUpdatedAt;
+      // This runs only after execute has checked the original receipt, under its
+      // existing exclusive Tenant fence. A replay cannot report a new pre-write CAS refusal.
+      if (typeof expected !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(expected)
+        || !Number.isFinite(Date.parse(expected)) || new Date(expected).toISOString() !== expected || !member
+        || !(member.updatedAt instanceof Date) || !Number.isFinite(member.updatedAt.getTime()) || member.updatedAt.toISOString() !== expected) throw this.commands.conflict();
+      membershipUpdatedAt = new Date(expected);
+    }
+    await tx.$executeRaw`INSERT INTO enterprise_scope_policies (tenantId,corporateCustomerId,scopeKey,revision,policy,membershipUpdatedAt) VALUES (${tenantId},${corporateId},${scopeKey},${input.expectedRevision + 1},${JSON.stringify(input.policy)},${membershipUpdatedAt}) ON DUPLICATE KEY UPDATE revision=VALUES(revision),policy=VALUES(policy),membershipUpdatedAt=VALUES(membershipUpdatedAt)`;
+    return { scopeKey, revision: input.expectedRevision + 1, policy: input.policy, ...(membershipUpdatedAt ? { membershipUpdatedAt: membershipUpdatedAt.toISOString() } : {}) };
   }
   async merchantSave(user: SystemUserRow, corporateId: string, input: SaveEnterpriseScopePolicyRequest) {
     const { tenantId, actor } = this.commands.operator(user, "rental-os:corporate:manage");
@@ -88,10 +104,57 @@ export class EnterprisePolicyService {
     });
   }
   async companySave(context: ClientRequestContext, corporateId: string, input: SaveEnterpriseScopePolicyRequest, membershipId?: string) {
+    if (membershipId !== undefined && (typeof membershipId !== "string" || !membershipId.trim() || membershipId.length > 191)) throw new BadRequestException("员工关系引用无效");
     return this.commands.execute(context.tenantId, `customer:${context.customerId}`, "policy.company", `${corporateId}:${membershipId ?? "company"}`, input, async tx => {
-      if (membershipId && !await tx.customerCorporateMembership.findFirst({ where: { tenantId: context.tenantId, id: membershipId, corporateCustomerId: corporateId, status: "active" }, select: { id: true } })) throw new ForbiddenException("成员不属于当前企业");
-      return this.persist(context.tenantId, corporateId, membershipId ? `member:${membershipId}` : "company", input, tx);
+      if (membershipId !== undefined && !await tx.customerCorporateMembership.findFirst({ where: { tenantId: context.tenantId, id: membershipId, corporateCustomerId: corporateId, status: "active" }, select: { id: true } })) throw this.commands.conflict();
+      return this.persist(context.tenantId, corporateId, membershipId !== undefined ? `member:${membershipId}` : "company", input, tx);
     }, async tx => { await this.commands.customer(context, tx); await this.access.requireAction(context, corporateId, "policy:manage", tx); });
+  }
+  /** Receipt-first own recovery does not require today's management grant and never
+   * projects current limits, member payment authority or the historical policy body. */
+  async readCompanySave(context: ClientRequestContext, corporateId: string, key: string, membershipId?: string): Promise<EnterpriseOperationResult> {
+    if (typeof corporateId !== "string" || !corporateId.trim() || corporateId.length > 191 || typeof key !== "string" || !key.trim() || key.length > 128
+      || membershipId !== undefined && (typeof membershipId !== "string" || !membershipId.trim() || membershipId.length > 191)) throw new BadRequestException("原政策企业、员工或操作键无效");
+    const tx = this.prisma as unknown as Prisma.TransactionClient, scopeKey = membershipId === undefined ? "company" : `member:${membershipId}`;
+    await this.commands.customer(context, tx, false);
+    const receipts = await tx.$queryRaw<Array<{ operationKey: string; result: string | { scopeKey: string; revision: number; policy: EnterpriseScopePolicy }; scopeKey: string | null }>>`
+      SELECT o.operationKey,o.result,p.scopeKey FROM enterprise_portal_operations o
+      LEFT JOIN enterprise_scope_policies p ON p.tenantId=o.tenantId AND p.corporateCustomerId=${corporateId} AND p.scopeKey=${scopeKey}
+      WHERE o.tenantId=${context.tenantId} AND o.operationKey=${key} AND o.actorUserId=${`customer:${context.customerId}`}
+        AND o.target=${`policy.company:${corporateId}:${membershipId ?? "company"}`}`;
+    if (!receipts[0]) { await this.commands.customer(context, tx, false); return { state: "not_recorded" }; }
+    const unavailable = () => new ConflictException("原政策保存收据或对象关联无法精确核对，保留原引用");
+    let revision: number;
+    try {
+      const result = enterpriseJson(receipts[0].result);
+      if (receipts[0].operationKey !== key || receipts[0].scopeKey !== scopeKey || !result || typeof result !== "object" || Array.isArray(result)
+        || result.scopeKey !== scopeKey || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 1) throw unavailable();
+      this.validate(result.policy); revision = result.revision;
+    } catch { throw unavailable(); }
+    await this.commands.customer(context, tx, false);
+    return { state: "committed", result: { corporateCustomerId: corporateId, scopeKey, revision } };
+  }
+  /** Operator-owned original save evidence only. Current merchant management
+   * permission remains required; today's policy/body/enterprise status is not replay evidence. */
+  async readMerchantSave(user: SystemUserRow, corporateId: string, key: string): Promise<EnterpriseOperationResult> {
+    if (typeof corporateId !== "string" || !corporateId.trim() || corporateId.length > 191
+      || typeof key !== "string" || !key.trim() || key.length > 128) throw new BadRequestException("原商户政策企业或操作键无效");
+    const { tenantId, actor } = this.commands.operator(user, "rental-os:corporate:manage");
+    const receipts = await this.prisma.$queryRaw<Array<{ operationKey: string; result: string | { scopeKey: string; revision: number; policy: EnterpriseScopePolicy }; scopeKey: string | null }>>`
+      SELECT o.operationKey,o.result,p.scopeKey FROM enterprise_portal_operations o
+      LEFT JOIN enterprise_scope_policies p ON p.tenantId=o.tenantId AND p.corporateCustomerId=${corporateId} AND p.scopeKey='merchant'
+      WHERE o.tenantId=${tenantId} AND o.operationKey=${key} AND o.actorUserId=${actor} AND o.target=${`policy.merchant:${corporateId}`}`;
+    if (!receipts[0]) { this.commands.operator(user, "rental-os:corporate:manage"); return { state: "not_recorded" }; }
+    const unavailable = () => new ConflictException("原商户政策保存收据或对象关联无法精确核对，保留原引用");
+    let revision: number;
+    try {
+      const result = enterpriseJson(receipts[0].result);
+      if (receipts[0].operationKey !== key || receipts[0].scopeKey !== "merchant" || !result || typeof result !== "object" || Array.isArray(result)
+        || result.scopeKey !== "merchant" || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 1) throw unavailable();
+      this.validate(result.policy); revision = result.revision;
+    } catch { throw unavailable(); }
+    this.commands.operator(user, "rental-os:corporate:manage");
+    return { state: "committed", result: { corporateCustomerId: corporateId, scopeKey: "merchant", revision } };
   }
   private async view(tenantId: string, corporateId: string, membershipId: string | undefined, db: PolicyDb, merchantView = false): Promise<EnterpriseScopePolicyView> {
     const rows = await this.rows(tenantId, corporateId, db);

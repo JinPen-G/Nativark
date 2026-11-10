@@ -55,6 +55,7 @@ function currentCreditScope() {
 import { EnterprisePortalConfiguration } from "./EnterprisePortalConfiguration";
 import { EnterpriseApplications } from "./EnterpriseApplications";
 import { EnterpriseManagementRequests } from "./EnterpriseManagementRequests";
+import { EnterpriseRentalHandoffs } from "./EnterpriseRentalHandoffs";
 import { EnterpriseRentalPolicy } from "./EnterpriseRentalPolicy";
 
 const relationMeta: Record<string, { text: string; color: string }> = { active: { text: "有效", color: "success" }, suspended: { text: "暂停", color: "warning" }, exited: { text: "已退出", color: "default" } };
@@ -591,6 +592,7 @@ function CorporateMembershipWorkspace({ scope }: { scope: string }) {
       extra={<Button type="primary" disabled={!canManage} onClick={() => openCorporate()}>{t("新增企业会员")}</Button>} />
     <details><summary>{t("企业申请与邀请设置")}</summary><EnterpriseApplications /></details>
     <details><summary>{t("企业资料与调整申请")}</summary><EnterpriseManagementRequests /></details>
+    <details><summary>{t("原租赁交接申请")}</summary><EnterpriseRentalHandoffs /></details>
     <ListSection controls={<ListFilters filter={corporateFilter} placeholder="企业、联系人或手机尾号" options={Object.entries(membershipLabel).map(([value, label]) => ({ value, label }))} />}>
       <Table<CorporateMembershipMember> toolbarNote={false} emptyScene={corporateFilter.keyword || corporateFilter.status ? "search" : "empty"}
         importConfig={corporateImport(t, () => corporates.refetch({ throwOnError: true }))}

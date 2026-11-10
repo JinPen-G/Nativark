@@ -1,6 +1,8 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import type { ClientCatalogResponse, ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
+import type { EnterpriseExchangeApprovalView, ClientCatalogResponse, ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
 import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee } from "../../api/orders";
+import { fetchEnterpriseOrderExchangeApprovals } from "../../api/enterprise";
+import { enterpriseExchangeConfirmation } from "../../core/enterprise-exchange-confirmation";
 import { contractMissing } from "../../contracts/planned";
 import { isDeliveryMode } from "../../core/cart";
 import { loadCatalog } from "../../core/catalogStore";
@@ -14,7 +16,7 @@ import { cachedMerchant } from "../../core/merchant";
 import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { presentOrder, type OrderPresentation } from "../../core/status";
-import { currentServiceCode, isSignedIn, sessionEvents } from "../../core/session";
+import { contextVersion, currentSession, currentServiceCode, isSignedIn, sessionEvents } from "../../core/session";
 import { formatBusinessDateTime, zoneLabel } from "../../core/time";
 import { ROUTES, buildUrl, callPhone, navigate, requireSignIn, toast } from "../../core/ui";
 import { zoneOf, ensureCurrentZone } from "../../core/zones";
@@ -64,6 +66,16 @@ interface OrderData {
   showGuide: boolean;
   servicePhone: string;
   pendingCancelKey: boolean;
+  /** Own expense-request history only; never inspection consent or Core execution. */
+  exchangeLoading: boolean;
+  exchangeLoadError: string;
+  exchangeRequests: Array<{ id: string; items: string; stateLabel: string; tone: string; amount: string; deposit: string; preAuth: string; expires: string; reason: string; confirmedAt: string; canConfirm: boolean }>;
+  exchangeBlocked: boolean;
+  exchangePending: boolean;
+  exchangeConfirming: boolean;
+  showExchangeConsent: boolean;
+  exchangeConsentReason: string;
+  exchangeConsentTarget?: OrderData["exchangeRequests"][number];
   /* MP-11 费用确认与异议 */
   feeAvailable: boolean;
   feeLoadError: string;
@@ -129,6 +141,14 @@ Page({
     showGuide: false,
     servicePhone: "",
     pendingCancelKey: false,
+    exchangeLoading: false,
+    exchangeLoadError: "",
+    exchangeRequests: [],
+    exchangeBlocked: true,
+    exchangePending: false,
+    exchangeConfirming: false,
+    showExchangeConsent: false,
+    exchangeConsentReason: "",
     feeAvailable: false,
     feeLoadError: "",
     feePending: 0,
@@ -157,6 +177,8 @@ Page({
   orderId: "" as string,
   serviceCode: "" as string,
   loadVersion: 0,
+  exchangeLoadVersion: 0,
+  exchangeApprovalRows: [] as EnterpriseExchangeApprovalView[],
   feeInspectionId: "" as string,
   feeExceptionIndex: 0 as number,
   aiOrderFactsActive: false,
@@ -166,8 +188,8 @@ Page({
     this.aiFactsUnsubscribe?.();
     this.aiFactsUnsubscribe = sessionEvents.on(event => {
       if (event.type === "refreshed") return;
-      this.loadVersion++;
-      this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
+      this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
+      this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false, exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
     });
     this.aiOrderFactsActive = true;
     this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
@@ -186,14 +208,14 @@ Page({
   // Default-off lifecycle hooks are intentionally cleanup-only. They do not attach a host,
   // read AI data, or start polling until a server capability is wired in a later release.
   onHide() {
-    this.aiOrderFactsActive = false; this.loadVersion++;
-    this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
+    this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
+    this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false, exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
     this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
   },
 
   onUnload() {
     this.aiFactsUnsubscribe?.(); this.aiFactsUnsubscribe = undefined;
-    this.aiOrderFactsActive = false; this.loadVersion++;
+    this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
     this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();
   },
 
@@ -209,7 +231,8 @@ Page({
 
   async load(): Promise<void> {
     if (!this.orderId || !isSignedIn()) return;
-    const token = ++this.loadVersion;
+    const token = ++this.loadVersion; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
+    this.setData({ exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
     try {
       // 深链接/历史进入：订单属于其他服务时先经服务端切换（保护未提交清单）。
       if (this.serviceCode && currentServiceCode() !== this.serviceCode) {
@@ -237,6 +260,7 @@ Page({
       ]);
       if (token !== this.loadVersion) return;
       this.render(order, funding, fulfillment, extensions, fees, catalog);
+      void this.loadExchangeProgress();
     } catch (error) {
       if (token !== this.loadVersion || isApiError(error, "STALE_CONTEXT")) return;
       if (isApiError(error, "NOT_FOUND")) {
@@ -247,6 +271,89 @@ Page({
       if (this.data.order) toast("刷新失败，已保留已加载的订单信息");
       else this.setData({ view: errorState(error) });
     }
+  },
+
+  /** This reader cannot clear unknown command references or grant new spending. */
+  async loadExchangeProgress(): Promise<void> {
+    const orderId = this.orderId, customerId = currentSession()?.customer.customerId;
+    const service = currentServiceCode(), version = contextVersion(), request = ++this.exchangeLoadVersion;
+    const current = () => this.aiOrderFactsActive && request === this.exchangeLoadVersion && this.orderId === orderId
+      && this.data.view.status === "ready" && this.data.order?.id === orderId && isSignedIn()
+      && contextVersion() === version && currentServiceCode() === service && currentSession()?.customer.customerId === customerId;
+    if (!customerId || !service || currentSession()?.customer.customerType !== "personal" || !current()) return;
+    this.exchangeApprovalRows = [];
+    this.setData({ exchangeLoading: true, exchangeRequests: [], exchangeLoadError: "", exchangeBlocked: true, showExchangeConsent: false, exchangeConsentTarget: undefined, exchangeConsentReason: "" });
+    try {
+      const operation = this.exchangeConsentOperation();
+      this.setData({ exchangePending: Boolean(operation.pending()) });
+      const rows = await fetchEnterpriseOrderExchangeApprovals(orderId);
+      if (!current()) return;
+      if (!Array.isArray(rows) || rows.length > 200 || rows.some(row => row.orderId !== orderId || row.applicantCustomerId !== customerId || !row.workspaceId)) throw new Error("原换货申请与本人订单不匹配");
+      const labels: Record<EnterpriseExchangeApprovalView["state"], string> = { pending: "待企业批准", approved: "已批准，待本人确认费用", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效，不能用原批准执行" };
+      const time = (value: string) => Number.isFinite(Date.parse(value)) ? formatBusinessDateTime(value, this.data.timeZone) : "原时间缺失";
+      const money = (value: number, currency: string) => Number.isFinite(value) && currency ? formatMoney(value, currency) : "原金额缺失";
+      this.exchangeApprovalRows = rows;
+      this.setData({ exchangeBlocked: Boolean(operation.pending()), exchangeRequests: rows.map(row => ({ id: row.id, items: `${row.preview.originalItemGroupName} → ${row.preview.replacementItemGroupName}`,
+        stateLabel: row.state === "approved" && row.employeeConfirmation ? "本人已确认费用，换货未执行" : labels[row.state],
+        tone: ["pending", "approved"].includes(row.state) ? "warning" : "neutral", amount: money(row.preview.additionalAmount, row.preview.currency),
+        deposit: money(row.preview.depositDelta, row.preview.currency), preAuth: money(row.preview.preAuthDelta, row.preview.currency),
+        expires: time(row.expiresAt), reason: row.reason, confirmedAt: row.employeeConfirmation ? time(row.employeeConfirmation.confirmedAt) : "",
+        canConfirm: row.state === "approved" && !row.employeeConfirmation })) });
+    } catch (error) { if (current()) this.setData({ exchangeLoadError: describeError(error).message, exchangeRequests: [] }); }
+    finally { if (current()) this.setData({ exchangeLoading: false }); }
+  },
+
+  exchangeConsentOperation() {
+    const epoch = this.loadVersion, orderId = this.orderId;
+    return enterpriseExchangeConfirmation(orderId, () => {
+      if (!this.aiOrderFactsActive || this.loadVersion !== epoch || this.orderId !== orderId || this.data.view.status !== "ready" || this.data.order?.id !== orderId) throw new Error("原订单页面已变化，确认已隔离");
+    });
+  },
+
+  onOpenExchangeConsent(event: WechatMiniprogram.TouchEvent) {
+    if (!this.aiOrderFactsActive || this.data.view.status !== "ready" || this.data.exchangeBlocked || this.data.exchangeLoading || this.data.exchangeConfirming) return;
+    const id = String(event.currentTarget.dataset.id ?? ""), row = this.exchangeApprovalRows.find(row => row.id === id), target = this.data.exchangeRequests.find(row => row.id === id);
+    if (!row || !target?.canConfirm) return;
+    this.setData({ showExchangeConsent: true, exchangeConsentTarget: target, exchangeConsentReason: "" });
+  },
+  onExchangeConsentReason(event: WechatMiniprogram.Input) {
+    if (!this.data.exchangeConfirming) this.setData({ exchangeConsentReason: String(event.detail.value ?? "").slice(0, 500) });
+  },
+  onCloseExchangeConsent() {
+    if (!this.data.exchangeConfirming) this.setData({ showExchangeConsent: false, exchangeConsentTarget: undefined, exchangeConsentReason: "" });
+  },
+  async onConfirmExchangeExpense() {
+    const target = this.data.exchangeConsentTarget, reason = this.data.exchangeConsentReason.trim();
+    const row = this.exchangeApprovalRows.find(row => row.id === target?.id);
+    if (!this.data.showExchangeConsent || !row || !reason || this.data.exchangeBlocked || this.data.exchangeLoading || this.data.exchangeConfirming) return;
+    const operation = this.exchangeConsentOperation();
+    this.setData({ exchangeConfirming: true, exchangeLoadError: "" });
+    try {
+      operation.current();
+      const answer = await wx.showModal({ title: "确认本次已批准费用", content: `${target!.items}\n新增支出 ${target!.amount}\n押金差额 ${target!.deposit}；预授权差额 ${target!.preAuth}\n仅确认本次费用，不代替商户检查、收付款或换货执行。`, confirmText: "确认费用" });
+      operation.current(); if (!answer.confirm) return;
+      await operation.confirm(row, reason); operation.current();
+      this.setData({ showExchangeConsent: false, exchangeConsentTarget: undefined, exchangeConsentReason: "" });
+      await this.loadExchangeProgress();
+    } catch (error) {
+      try { operation.current(); this.setData({ exchangeLoadError: describeError(error).message }); } catch { /* Keep the durable original for the old identity. */ }
+    } finally {
+      try { operation.current(); const pending = Boolean(operation.pending()); this.setData({ exchangeConfirming: false, exchangePending: pending, exchangeBlocked: pending || Boolean(this.data.exchangeLoadError) }); } catch { /* Lifecycle cleanup owns the visible state. */ }
+    }
+  },
+  async onRecoverExchangeExpense() {
+    if (!this.aiOrderFactsActive || this.data.exchangeConfirming) return;
+    const operation = this.exchangeConsentOperation();
+    this.setData({ exchangeConfirming: true, exchangeLoadError: "" });
+    try { await operation.recover(); operation.current(); await this.loadExchangeProgress(); }
+    catch (error) { try { operation.current(); this.setData({ exchangeLoadError: describeError(error).message }); } catch { /* Do not publish a late old-owner result. */ } }
+    finally { try { operation.current(); const pending = Boolean(operation.pending()); this.setData({ exchangeConfirming: false, exchangePending: pending, exchangeBlocked: pending || Boolean(this.data.exchangeLoadError) }); } catch { /* Lifecycle cleanup owns the visible state. */ } }
+  },
+  onReadExchangeProgress() { if (!this.data.exchangeConfirming) void this.loadExchangeProgress(); },
+  onExchangeRequest() {
+    if (!this.aiOrderFactsActive || this.data.view.status !== "ready" || this.data.order?.id !== this.orderId || this.data.exchangeConfirming) return;
+    if (!requireSignIn(buildUrl(ROUTES.order, { id: this.orderId, service: this.serviceCode }))) return;
+    navigate(buildUrl(ROUTES.exchange, { id: this.orderId, service: currentServiceCode() }));
   },
 
   render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number; loadError: string }, catalog?: ClientCatalogResponse) {

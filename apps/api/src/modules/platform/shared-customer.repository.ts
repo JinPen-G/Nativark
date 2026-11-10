@@ -125,6 +125,21 @@ export class SharedCustomerRepository {
           OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))`;
   }
 
+
+  /** Corporate membership restrictions or master merge invalidate all relationships
+   * of that migrated enterprise under the caller's Tenant → customer transaction.
+   * Personal accounts, the merge survivor and other enterprises are untouched;
+   * restoring a status or retaining a mapping never rebinds old authority. */
+  async invalidateCorporateEnterpriseAuthority(tenantId: string, customerId: string, tx: SharedCustomerTx): Promise<number> {
+    return tx.$executeRaw`
+      UPDATE customer_corporate_memberships m
+      JOIN customer_profiles c ON c.tenantId=m.tenantId AND c.id=m.corporateCustomerId AND c.customerType='corporate'
+      SET m.updatedAt=GREATEST(NOW(3),TIMESTAMPADD(MICROSECOND,1000,m.updatedAt))
+      WHERE m.tenantId=${tenantId} AND m.corporateCustomerId=${customerId}
+        AND (EXISTS (SELECT 1 FROM enterprise_corporate_portals portal WHERE portal.tenantId=m.tenantId AND portal.corporateCustomerId=m.corporateCustomerId)
+          OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))`;
+  }
+
   /** 4 位及以下不再原样返回：原样返回等于把整段值存进“脱敏”列。 */
   private mask(value: string) {
     const trimmed = value.trim();

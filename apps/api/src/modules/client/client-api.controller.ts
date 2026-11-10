@@ -452,6 +452,11 @@ export class ClientApiController {
     return this.api.fulfillment(currentClient(req), id);
   }
 
+  @Get("orders/:id/enterprise-handoff-material")
+  rentalHandoffMaterial(@Req() req: ClientRequest, @Param("id") id: string) {
+    return this.api.rentalHandoffMaterial(currentClient(req), id);
+  }
+
   @Get("orders/:id/documents/:type")
   orderDocument(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string, @Query("snapshotId") snapshotId?: string) {
     return this.api.orderDocument(currentClient(req), id, type, snapshotId);

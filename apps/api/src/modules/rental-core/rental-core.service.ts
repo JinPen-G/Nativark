@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { getRequestUserId, requireRequestUserId } from "../../common/request-identity";
+import { assertInspectionRequiredResults } from "./rental-inspection-result-validation";
 import { optionalUsageReading, usageDelta } from "./rental-usage-reading";
 import { hasWholeEarlyReturnReduction } from "./rental-early-return";
 import { quoteRentalLineSource } from "./rental-quote-line-source";
@@ -3351,6 +3352,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       template = snapshotInspectionTemplate(inspectionCategory, template, order.capabilityRequirementsSnapshot, capabilityRequirementRoots(inspectedLines));
     }
     assertInspectionObservations(template, input.results);
+    assertInspectionRequiredResults(template, input.results);
     if (template.stage === "pickup" && order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货，不能办理取件检查");
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
     if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");

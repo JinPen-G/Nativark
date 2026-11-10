@@ -503,6 +503,9 @@ export class CustomerOperationsService {
           tx
         );
       }
+
+      const customer = await tx.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { customerType: true } });
+      if (!customer) throw new NotFoundException("客户不存在");
       const count = await this.operations.updateMembershipStatus(
         tenantId,
         membership.id,
@@ -520,6 +523,7 @@ export class CustomerOperationsService {
           customerId,
           scope: "membership",
           action: membershipAction(membership.status, input.status),
+          captureEnterpriseRecipients: customer.customerType === "corporate",
           fromStatus: membership.status,
           toStatus: input.status,
           reason,
@@ -529,7 +533,14 @@ export class CustomerOperationsService {
         tx
       );
       if (count && input.status !== "active") {
-        await this.customers.invalidatePersonalEnterpriseAuthority(tenantId, customerId, tx);
+        // The locked server-side master selects the authority owner. Corporate
+        // membership changes revoke this enterprise's relations, not its employees'
+        // personal accounts or their relationships with another enterprise.
+        if (customer.customerType === "corporate") {
+          await this.customers.invalidateCorporateEnterpriseAuthority(tenantId, customerId, tx);
+        } else {
+          await this.customers.invalidatePersonalEnterpriseAuthority(tenantId, customerId, tx);
+        }
       }
       return count;
     });
@@ -828,7 +839,11 @@ export class CustomerOperationsService {
     await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
 
     return this.prisma.$transaction(async (tx) => {
-      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+      // The risk INSERT checks a Tenant FK. Take its shared fence before the customer
+      // gate so a concurrent Tenant→customer merge/status write cannot reverse the order.
+      // This path never upgrades the shared fence to an exclusive authorization lock.
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`;
+      if (!tenants.length || !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
         throw new NotFoundException("客户不存在或不属于当前租户");
       }
       return this.operations.createRiskRecord({

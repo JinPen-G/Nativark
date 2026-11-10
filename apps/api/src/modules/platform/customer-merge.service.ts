@@ -8,6 +8,7 @@ import type {
 } from "@rental-os/shared";
 import { $Enums, Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
+import { assertOtherEnterpriseAdministrator } from "../enterprise/enterprise-administrator-continuity";
 import { deriveFundingLedgers, isRealFundingEvent, rentalPaymentBalance, resolveOfflineFundingEvents } from "../rental-core/rental-funding-events";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
@@ -203,8 +204,30 @@ export class CustomerMergeService {
     };
   }
 
+  /** Only explicitly migrated enterprises whose source still has current management
+   * authority need continuity. Frozen accounts are already unavailable; this is not
+   * a safety-freeze blocker or a transfer of the source's grants to the survivor. */
+  private async assertPersonalMergeAdministratorContinuity(
+    tenantId: string, sourceCustomerId: string, tx: Prisma.TransactionClient
+  ) {
+    const managed = await tx.$queryRaw<Array<{ id: string; corporateCustomerId: string }>>`
+      SELECT m.id,m.corporateCustomerId FROM customer_corporate_memberships m
+      JOIN customer_profiles p ON p.tenantId=m.tenantId AND p.id=m.personalCustomerId AND p.customerType='personal' AND p.status='active' AND p.mergedIntoCustomerId IS NULL
+      JOIN customer_accounts a ON a.tenantId=m.tenantId AND a.customerId=p.id AND a.status='active'
+      JOIN customer_memberships pm ON pm.tenantId=m.tenantId AND pm.customerId=p.id AND pm.status='active'
+      JOIN enterprise_portal_grants entry ON entry.tenantId=m.tenantId AND entry.corporateCustomerId=m.corporateCustomerId AND entry.membershipId=m.id AND entry.membershipUpdatedAt=m.updatedAt AND entry.action='portal:enter'
+      JOIN enterprise_portal_grants manage ON manage.tenantId=m.tenantId AND manage.corporateCustomerId=m.corporateCustomerId AND manage.membershipId=m.id AND manage.membershipUpdatedAt=m.updatedAt AND manage.action='administrators:manage'
+      WHERE m.tenantId=${tenantId} AND m.personalCustomerId=${sourceCustomerId} AND m.role='admin' AND m.status='active'
+        AND m.effectiveFrom<=NOW(3) AND (m.effectiveTo IS NULL OR m.effectiveTo>NOW(3))
+        AND (EXISTS (SELECT 1 FROM enterprise_corporate_portals portal WHERE portal.tenantId=m.tenantId AND portal.corporateCustomerId=m.corporateCustomerId)
+          OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))`;
+    for (const row of managed) {
+      await assertOtherEnterpriseAdministrator(tx, tenantId, row.corporateCustomerId, row.id);
+    }
+  }
+
   /**
-   * 提交人工合并。**一个事务**里完成：写映射、标记被合并方、关闭其登录账号、双方各记一条历史。
+   * 提交人工合并。**一个事务**里完成：复验个人管理员连续性、标记被合并方、撤销被合并企业的关系授权修订、写映射、关闭其登录账号、双方各记一条历史。
    *
    * 刻意**不做**的三件事：
    *   1. 不 UPDATE 任何订单的 customerId 或主体列——历史引用必须继续指向被合并方
@@ -223,6 +246,10 @@ export class CustomerMergeService {
     }
     const at = stamp();
     await this.prisma.$transaction(async (tx) => {
+      // Tenant is the enterprise authorization fence. Acquire it before the original
+      // customer gates, matching member/status writes without upgrading a shared lock.
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
+      if (!tenants.length) throw new NotFoundException("租户不存在");
       // 与订单创建共用主档行锁。按 id 排序依次加锁，避免两路反向合并形成死锁。
       for (const customerId of [input.sourceCustomerId, input.targetCustomerId].sort()) {
         if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
@@ -234,12 +261,28 @@ export class CustomerMergeService {
       if (lockedPreview.blockers.length) {
         throw new ConflictException(`不能合并：${lockedPreview.blockers.map((row) => row.message).join("；")}`);
       }
+      // Resolve the original source type again under both gates; caller fields and
+      // the outside preview cannot choose which authority is being terminated.
+      const source = await this.customers.findById(tenantId, input.sourceCustomerId, tx);
+      if (!source) throw new NotFoundException("待合并的客户不存在");
+      if (source.customerType === "personal") {
+        await this.assertPersonalMergeAdministratorContinuity(tenantId, input.sourceCustomerId, tx);
+      } else if (source.customerType !== "corporate") {
+        throw new ConflictException("客户主体类型无法核实，不能合并");
+      }
       const sourceAccount = await this.operations.findAccountByCustomer(tenantId, input.sourceCustomerId, tx);
       // 以「尚未被合并」为写入条件：并发两路合并同一主档时，后到者更新 0 行并拿到 409，
       // 而不是双双写出映射（唯一键也会挡，但这里先给出可解释的错误）。
       const marked = await this.customers.markMerged(tenantId, input.sourceCustomerId, input.targetCustomerId, tx);
       if (marked === 0) {
         throw new ConflictException("该主档已被合并或正被并发合并，请刷新后重试");
+      }
+      if (source.customerType === "corporate") {
+        // Corporate merge ends this original enterprise's new authority, not its
+        // employees' personal identities. Preserve all grant/policy/approval facts,
+        // but advance migrated relation revisions in the same merge transaction.
+        // The survivor's administrators are never a handoff or grant replacement.
+        await this.customers.invalidateCorporateEnterpriseAuthority(tenantId, input.sourceCustomerId, tx);
       }
       await tx.customerMergeMapping.create({
         data: {

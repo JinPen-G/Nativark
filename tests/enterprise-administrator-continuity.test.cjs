@@ -52,6 +52,7 @@ function load(relative, deps = {}) {
     if (name.startsWith('node:')) return require(name);
     if (name === '@nestjs/common') return common;
     if (name === '@prisma/client') return { Prisma };
+    if (name === 'class-validator') return require(name); // Existing real date validator, not a new authority adapter.
     throw new Error(`Unexpected runtime dependency: ${name}`);
   }, Date: ClockDate, Map, Set, JSON }, { filename: file });
   return exports;

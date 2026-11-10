@@ -7,6 +7,7 @@ export { Select } from "./Select";
 export { Alert } from "./Alert";
 export { EmptyScene } from "./EmptyScene";
 export { ActionButton, SaveButton } from "./ActionButton";
+export { ConfirmAction } from "./ConfirmAction";
 export { App } from "./App";
 export { InfoPopover } from "./InfoPopover";
 export { Table } from "./Table";

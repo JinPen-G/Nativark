@@ -72,7 +72,8 @@ function fixture() {
   const relation = (id, personalCustomerId, corporateCustomerId = 'company', tenantId = 't1') => ({ id, tenantId, personalCustomerId,
     corporateCustomerId, role: 'admin', status: 'active', department: 'Original', employeeNo: '1',
     effectiveFrom: new ClockDate(now - 10000), effectiveTo: null, updatedAt: new ClockDate(now) });
-  const state = { profiles: [person('a'), person('b'), person('company', 'corporate'), person('a', 'personal', 't2')],
+  const state = { profiles: [person('a'), person('b'), person('company', 'corporate'), person('a', 'personal', 't2'),
+    person('second', 'corporate'), person('company', 'corporate', 't2')],
     accounts: [], memberships: [], relations: [relation('ra', 'a'), relation('rb', 'b'), relation('ra2', 'a', 'second'),
       relation('legacy', 'a', 'legacy'), relation('foreign', 'a', 'company', 't2'), relation('policy-only', 'a', 'policy-only'),
       relation('corporate-id', 'company'), relation('wrong-marker', 'a', 'wrong-marker')],
@@ -103,6 +104,8 @@ function fixture() {
   const membership = (id, tenantId = 't1') => state.memberships.find(p => p.customerId === id && p.tenantId === tenantId);
   const eligible = (id, tenantId = 't1') => profile(id, tenantId)?.status === 'active' && !profile(id, tenantId)?.mergedIntoCustomerId
     && account(id, tenantId)?.status === 'active' && membership(id, tenantId)?.status === 'active';
+  const corporateEligible = (id, tenantId = 't1') => profile(id, tenantId)?.customerType === 'corporate'
+    && profile(id, tenantId)?.status === 'active' && !profile(id, tenantId)?.mergedIntoCustomerId && membership(id, tenantId)?.status === 'active';
   const currentGrants = r => state.grants.filter(g => g.tenantId === r.tenantId && g.corporateCustomerId === r.corporateCustomerId
     && g.membershipId === r.id && +g.membershipUpdatedAt === +r.updatedAt);
   const matches = (row, where) => Object.entries(where).every(([k, v]) => row[k] === v);
@@ -115,14 +118,16 @@ function fixture() {
         return profile(values[1], values[0]) ? [{ id: values[1] }] : [];
       }
       if (sql.includes('SELECT m.corporateCustomerId')) {
-        assert.ok(sql.includes('g.membershipUpdatedAt=m.updatedAt'));
-        return state.relations.filter(r => r.tenantId === values[2] && r.personalCustomerId === values[3] && eligible(r.personalCustomerId, r.tenantId))
+        assert.ok(sql.includes('g.membershipUpdatedAt=m.updatedAt') && sql.includes("corporateMember.status='active'") && sql.includes('c.mergedIntoCustomerId IS NULL'));
+        return state.relations.filter(r => r.tenantId === values[2] && r.personalCustomerId === values[3] && eligible(r.personalCustomerId, r.tenantId) && corporateEligible(r.corporateCustomerId, r.tenantId))
           .flatMap(r => currentGrants(r).map(g => ({ corporateCustomerId: r.corporateCustomerId, corporateName: 'Company', membershipId: r.id,
-            role: r.role, action: g.action, tenantRevision: 1, corporateRevision: 1, tenantEnabled: true, corporateEnabled: true })));
+            role: r.role, action: g.action, tenantRevision: 1, corporateRevision: 1, tenantEnabled: true,
+            corporateEnabled: state.portals.some(p => p.tenantId === r.tenantId && p.corporateCustomerId === r.corporateCustomerId && p.enabled) })));
       }
       if (sql.includes('SELECT r.id,r.updatedAt')) {
+        assert.ok(sql.includes("cm.status='active'") && sql.includes("c.customerType='corporate'") && sql.includes('c.mergedIntoCustomerId IS NULL'));
         const r = state.relations.find(r => r.tenantId === values[0] && r.corporateCustomerId === values[1] && r.personalCustomerId === values[2]);
-        return r && eligible(r.personalCustomerId, r.tenantId) ? [{ id: r.id, updatedAt: r.updatedAt }] : [];
+        return r && eligible(r.personalCustomerId, r.tenantId) && corporateEligible(r.corporateCustomerId, r.tenantId) ? [{ id: r.id, updatedAt: r.updatedAt }] : [];
       }
       if (sql.includes('SELECT m.id FROM customer_corporate_memberships')) {
         assert.ok(sql.includes('m.updatedAt=$4') && sql.includes("g.action='approvals:review'") && sql.includes('g.membershipUpdatedAt=m.updatedAt'));
@@ -139,20 +144,28 @@ function fixture() {
     async $executeRaw(strings, ...args) {
       const { sql, values } = sqlParts(strings, ...args); calls.sequence.push(sql);
       assert.ok(tenantLocked && customerLocked, 'invalidation must join the original locked status transaction');
-      for (const predicate of ['UPDATE customer_corporate_memberships m', 'p.tenantId=m.tenantId', 'p.id=m.personalCustomerId', "p.customerType='personal'",
-        'm.tenantId=$0', 'm.personalCustomerId=$1', 'portal.tenantId=m.tenantId', 'portal.corporateCustomerId=m.corporateCustomerId',
-        'policy.tenantId=m.tenantId', 'policy.corporateCustomerId=m.corporateCustomerId', 'GREATEST(NOW(3),TIMESTAMPADD(MICROSECOND,1000,m.updatedAt))']) assert.ok(sql.includes(predicate), predicate);
+      const corporate = sql.includes("c.customerType='corporate'"), owner = corporate ? 'corporateCustomerId' : 'personalCustomerId';
+      const ownerPredicates = corporate ? ['c.tenantId=m.tenantId', 'c.id=m.corporateCustomerId', "c.customerType='corporate'", 'm.corporateCustomerId=$1']
+        : ['p.tenantId=m.tenantId', 'p.id=m.personalCustomerId', "p.customerType='personal'", 'm.personalCustomerId=$1'];
+      for (const predicate of ['UPDATE customer_corporate_memberships m', ...ownerPredicates, 'm.tenantId=$0',
+        'portal.tenantId=m.tenantId', 'portal.corporateCustomerId=m.corporateCustomerId', 'policy.tenantId=m.tenantId',
+        'policy.corporateCustomerId=m.corporateCustomerId', 'GREATEST(NOW(3),TIMESTAMPADD(MICROSECOND,1000,m.updatedAt))']) assert.ok(sql.includes(predicate), predicate);
       assert.ok(!sql.includes('portal.enabled'), 'disabled migrated portals must still invalidate authority');
       assert.match(sql, /SET m\.updatedAt=[\s\S]+ WHERE/); assert.ok(!sql.includes('DELETE') && !sql.includes('INSERT'));
+      if (corporate) assert.ok(!sql.includes('m.role=') && !sql.includes('m.status='), 'freeze must cover every role/status without mutating them');
       calls.invalidations++; if (faults.invalidate) throw new Error('Injected invalidation failure');
       let count = 0;
-      for (const r of state.relations) if (r.tenantId === values[0] && r.personalCustomerId === values[1] && profile(r.personalCustomerId, r.tenantId)?.customerType === 'personal'
+      for (const r of state.relations) if (r.tenantId === values[0] && r[owner] === values[1] && profile(values[1], values[0])?.customerType === (corporate ? 'corporate' : 'personal')
         && (state.portals.some(p => p.tenantId === r.tenantId && p.corporateCustomerId === r.corporateCustomerId)
           || state.policies.some(p => p.tenantId === r.tenantId && p.corporateCustomerId === r.corporateCustomerId))) {
         r.updatedAt = new ClockDate(Math.max(now, +r.updatedAt + 1)); count++;
       }
       return count;
     },
+    customerProfile: { async findFirst({ where, select }) {
+      assert.ok(tenantLocked && customerLocked, 'authority owner must come from the original locked master');
+      assert.equal(select.customerType, true); return copy(state.profiles.find(r => matches(r, where)) ?? null);
+    } },
     customerAccount: {
       async findFirst({ where }) { return copy(state.accounts.find(r => matches(r, where)) ?? null); },
       async updateMany({ where, data }) { assert.ok(customerLocked); calls.sequence.push('account-write'); if (faults.zero) return { count: 0 };
@@ -297,12 +310,101 @@ test('CAS losers, invalid transitions, missing customer and original closure blo
   }
 });
 
-test('corporate status changes preserve their old path; personal suspension/restore competitors never restore old revision', async () => {
+test('unmigrated corporate status preserves legacy relations; personal suspension/restore competitors never restore old revision', async () => {
   const corporate = fixture(), relations = plain(corporate.state.relations);
+  corporate.state.portals = corporate.state.portals.filter(p => p.corporateCustomerId !== 'company');
+  corporate.state.policies = corporate.state.policies.filter(p => p.corporateCustomerId !== 'company');
   await corporate.change('membership', 'suspended', 'company'); assert.deepEqual(plain(corporate.state.relations), relations);
   const f = fixture();
   const results = await Promise.allSettled([f.change('account', 'suspended'), f.change('account', 'active')]);
   assert.equal(results.filter(r => r.status === 'fulfilled').length, 2);
   assert.equal(f.state.accounts[0].status, 'active'); assert.equal(+f.state.relations[0].updatedAt, now + 1);
   await assert.rejects(f.access.requireAction(f.ctx('a'), 'company', 'administrators:manage'), e => e.status === 403);
+});
+
+test('corporate membership suspension revokes the whole migrated enterprise; restoration never revives old authority or approvals', async () => {
+  const f = fixture(); f.state.portals.find(p => p.corporateCustomerId === 'second').enabled = true;
+  const before = plain(f.state), basis = await f.basis(); f.original.basis = basis;
+  f.original.quote.membershipSnapshot.enterpriseBasis = basis; f.extensionRow.basis = basis;
+  await f.access.requireAction(f.ctx('a'), 'company', 'administrators:manage'); await f.bookingCurrent(); await f.extensionCurrent();
+  const start = f.calls.sequence.length;
+  await f.change('membership', 'suspended', 'company', { customerType: 'personal' }); // Caller fields cannot select the authority owner.
+  for (const id of ['a', 'b']) await assert.rejects(f.access.requireAction(f.ctx(id), 'company', 'administrators:manage'), e => e.status === 403);
+  await assert.rejects(f.basis(), e => e.status === 403);
+  await f.change('membership', 'active', 'company');
+  for (const id of ['a', 'b']) await assert.rejects(f.access.requireAction(f.ctx(id), 'company', 'administrators:manage'), e => e.status === 403);
+  for (const current of [f.bookingCurrent, f.extensionCurrent]) await assert.rejects(current(), e => e.status === 403);
+  for (const r of f.state.relations) {
+    const old = before.relations.find(x => x.id === r.id);
+    if (r.tenantId === 't1' && r.corporateCustomerId === 'company') {
+      assert.equal(+r.updatedAt, now + 1); assert.deepEqual(plain({ ...r, updatedAt: old.updatedAt }), old);
+    } else assert.deepEqual(plain(r), old);
+  }
+  for (const key of ['profiles', 'accounts', 'grants', 'policies', 'orders', 'receipts']) assert.deepEqual(plain(f.state[key]), before[key]);
+  await f.access.requireAction(f.ctx('a'), 'second', 'administrators:manage');
+  assert.equal(f.calls.invalidations, 1); assert.equal(f.state.histories.length, 2);
+  assert.ok(f.calls.sequence[start].includes('FROM Tenant') && f.calls.sequence[start + 1].includes('FROM customer_profiles'));
+});
+
+test('corporate restrictive transitions include every relationship role/status and closed-to-pending reopening never rebinds grants', async () => {
+  for (const status of ['suspended', 'risk_restricted', 'exited', 'closed']) {
+    const f = fixture(); f.state.relations[0].role = 'employee'; f.state.relations[1].status = 'exited';
+    const before = plain(f.state); await f.change('membership', status, 'company');
+    for (const r of f.state.relations.filter(r => r.tenantId === 't1' && r.corporateCustomerId === 'company')) {
+      assert.equal(+r.updatedAt, now + 1); assert.equal(r.role, before.relations.find(x => x.id === r.id).role);
+      assert.equal(r.status, before.relations.find(x => x.id === r.id).status);
+    }
+    for (const key of ['accounts', 'grants', 'policies', 'orders', 'receipts']) assert.deepEqual(plain(f.state[key]), before[key]);
+    if (status === 'closed') {
+      await assert.rejects(f.change('membership', 'active', 'company'), e => e.status === 409);
+      await f.change('membership', 'pending_activation', 'company'); await f.change('membership', 'active', 'company');
+      assert.equal(+f.state.relations[0].updatedAt, now + 2); assert.deepEqual(plain(f.state.grants), before.grants);
+    }
+    assert.equal(f.state.histories[0].operator, 'operator'); assert.equal(f.state.histories[0].reason, 'Explicit status decision');
+  }
+});
+
+test('corporate migration is scoped by current tenant and company, including disabled portals or policy-only markers', async () => {
+  for (const mode of ['disabled', 'policy-only', 'legacy', 'foreign-marker']) {
+    const f = fixture();
+    if (mode === 'disabled') f.state.portals.find(p => p.tenantId === 't1' && p.corporateCustomerId === 'company').enabled = false;
+    if (mode !== 'disabled') f.state.portals = f.state.portals.filter(p => p.corporateCustomerId !== 'company');
+    if (mode === 'legacy' || mode === 'foreign-marker') f.state.policies = f.state.policies.filter(p => p.corporateCustomerId !== 'company');
+    if (mode === 'foreign-marker') f.state.portals.push({ tenantId: 't2', corporateCustomerId: 'company', enabled: true });
+    const before = plain(f.state); await f.change('membership', 'suspended', 'company');
+    for (const r of f.state.relations) {
+      const shouldChange = ['disabled', 'policy-only'].includes(mode) && r.tenantId === 't1' && r.corporateCustomerId === 'company';
+      if (shouldChange) assert.equal(+r.updatedAt, now + 1); else assert.deepEqual(plain(r), before.relations.find(x => x.id === r.id));
+    }
+  }
+});
+
+test('corporate status/history/authority fail atomically; CAS, closure checks and missing trusted master cannot revoke or bypass', async () => {
+  for (const fault of ['invalidate', 'history', 'zero', 'close', 'master']) {
+    const f = fixture(), before = plain(f.state);
+    if (fault === 'master') f.db.customerProfile.findFirst = async () => null; else f.faults[fault] = true;
+    const status = fault === 'close' ? 'closed' : 'suspended';
+    await assert.rejects(f.change('membership', status, 'company'), e => fault === 'master' ? e.status === 404
+      : ['zero', 'close'].includes(fault) ? e.status === 409 : /Injected/.test(e.message));
+    assert.deepEqual(plain(f.state), before);
+    if (['zero', 'close', 'master'].includes(fault)) assert.equal(f.calls.invalidations, 0);
+  }
+});
+
+test('corporate account state is not enterprise membership authority; new explicit grants/policies do not resurrect old approvals', async () => {
+  const account = fixture(), originalRelations = plain(account.state.relations);
+  await account.change('account', 'suspended', 'company'); assert.deepEqual(plain(account.state.relations), originalRelations);
+  await account.access.requireAction(account.ctx('a'), 'company', 'administrators:manage');
+  const f = fixture(), oldBasis = await f.basis(); f.original.basis = oldBasis;
+  f.original.quote.membershipSnapshot.enterpriseBasis = oldBasis; f.extensionRow.basis = oldBasis;
+  await f.change('membership', 'suspended', 'company'); await f.change('membership', 'active', 'company');
+  // Independent explicit reauthorization setup; never a consequence of status restoration.
+  for (const r of f.state.relations.filter(r => r.tenantId === 't1' && r.corporateCustomerId === 'company')) {
+    for (const g of f.state.grants.filter(g => g.tenantId === r.tenantId && g.corporateCustomerId === r.corporateCustomerId && g.membershipId === r.id)) g.membershipUpdatedAt = r.updatedAt;
+    const policy = f.state.policies.find(p => p.corporateCustomerId === r.corporateCustomerId && p.scopeKey === `member:${r.id}`);
+    if (policy) { policy.membershipUpdatedAt = r.updatedAt; policy.revision++; }
+  }
+  await f.access.requireAction(f.ctx('a'), 'company', 'administrators:manage');
+  const newBasis = await f.basis(); assert.throws(() => f.policies.assertSameBasis(oldBasis, newBasis), e => e.status === 409);
+  for (const current of [f.bookingCurrent, f.extensionCurrent]) await assert.rejects(current(), e => [403, 409].includes(e.status));
 });

@@ -1,7 +1,7 @@
 /** Additional-spend requests accept intent only, never a client-supplied price or approval binding. */
 import { Type } from "class-transformer";
 import { ArrayMaxSize, IsArray, IsDefined, IsIn, IsInt, IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength, Min, ValidateNested } from "class-validator";
-import type { RequestEnterpriseExtensionApproval, DecideEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval, CloseEnterpriseExtensionExecution } from "@rental-os/shared";
+import type { RequestEnterpriseExtensionApproval, DecideEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval, CloseEnterpriseExtensionExecution, CloseEnterpriseExtensionRequest } from "@rental-os/shared";
 import { ClientQuoteServiceInputDto } from "../client/client-request.dto";
 
 export class EnterpriseExtensionInputDto {
@@ -28,6 +28,12 @@ export class SubmitEnterpriseExtensionApprovalDto implements SubmitEnterpriseExt
   @IsInt() @Min(0) expectedRevision!: number;
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsString() @IsNotEmpty() @MaxLength(191) approvalId!: string;
+  @IsIn([true]) confirm!: true;
+}
+export class CloseEnterpriseExtensionRequestDto implements CloseEnterpriseExtensionRequest {
+  @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
+  @IsInt() @IsIn([0]) expectedRevision!: 0;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsIn([true]) confirm!: true;
 }
 export class CloseEnterpriseExtensionExecutionDto implements CloseEnterpriseExtensionExecution {
