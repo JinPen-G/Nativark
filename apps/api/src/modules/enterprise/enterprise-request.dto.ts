@@ -2,7 +2,7 @@ import { Type } from "class-transformer";
 import type { CreateEnterpriseRentalHandoffRequest, ReviewEnterpriseRentalHandoffRequest, WithdrawEnterpriseRentalHandoffRequest } from "@rental-os/shared";
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, EnterpriseDisclosure, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
-import { RentalCategoryCode, ENTERPRISE_PORTAL_ACTIONS, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest } from "@rental-os/shared";
+import { RENTAL_CATEGORY_CODE_PATTERN, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest } from "@rental-os/shared";
 export class ReviewEnterpriseRentalHandoffRequestDto implements ReviewEnterpriseRentalHandoffRequest {
   @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
   @IsInt() @Min(1) @Max(1) expectedRevision!: number;
@@ -24,7 +24,7 @@ export class EnterpriseManagementProposalDto implements EnterpriseManagementProp
   @IsOptional() @IsString() @MaxLength(32) requestedCreditLimit?: string;
   @IsOptional() @IsIn(["CNY"]) currency?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(200) @ArrayUnique() @IsString({ each: true }) @MaxLength(191, { each: true }) workspaceIds?: string[];
-  @IsOptional() @IsArray() @ArrayMaxSize(200) @ArrayUnique() @IsIn(Object.values(RentalCategoryCode), { each: true }) categoryCodes?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @ArrayUnique() @Matches(RENTAL_CATEGORY_CODE_PATTERN, { each: true }) categoryCodes?: string[];
 }
 export class SaveEnterpriseManagementRequestDto implements SaveEnterpriseManagementRequest {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
@@ -186,7 +186,7 @@ export class TransferEnterpriseAdministratorRequestDto implements TransferEnterp
 }
 export class EnterpriseScopePolicyInputDto implements EnterpriseScopePolicy {
   @IsArray() @ArrayMaxSize(200) @ArrayUnique() @IsString({ each: true }) @MaxLength(191, { each: true }) workspaceIds!: string[];
-  @IsArray() @ArrayMaxSize(200) @ArrayUnique() @IsIn(Object.values(RentalCategoryCode), { each: true }) categoryCodes!: RentalCategoryCode[];
+  @IsArray() @ArrayMaxSize(200) @ArrayUnique() @Matches(RENTAL_CATEGORY_CODE_PATTERN, { each: true }) categoryCodes!: RentalCategoryCode[];
   @IsBoolean() personalPaymentAllowed!: boolean;
   @IsBoolean() enterprisePaymentAllowed!: boolean;
   @IsIn(["per_order", "without_per_order", "unconfigured"]) approvalMode!: EnterpriseScopePolicy["approvalMode"];
