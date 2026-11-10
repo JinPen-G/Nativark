@@ -573,7 +573,9 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
         pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS,
         ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
-    }, { enabled: true, audience: 'operator', host: configuration.host });
+    }, { enabled: true, audience: 'operator', host: configuration.host,
+      inputContinuation: { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+        configuration.enabled && sceneCode === 'quote_clarification' && sceneVersion === '1' } });
     const start: typeof requests.start = async (request, value, signal) => {
       await admission(request, value, undefined, signal);
       return requests.start(request, value, signal);

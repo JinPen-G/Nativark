@@ -8,7 +8,7 @@
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
-检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`，核心提供者/初始准入/规则及日历消费者已上传 `13e1d6189`。核心13个配置token现有真实部署发布来源，见[该阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；[普通用户原读取续期](<AI Native-开发记录.md#ain-original-read-policy-20261111>)已上传 `2d9ce0543`。[关联新材料到新批准/Core订单](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)现已通过实际module、HTTP消费者及原恢复链的独立离线核接，等待输入片另行收口。实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
+检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`，核心提供者/初始准入/规则及日历消费者已上传 `13e1d6189`。核心13个配置token现有真实部署发布来源，见[该阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；[普通用户原读取续期](<AI Native-开发记录.md#ain-original-read-policy-20261111>)已上传 `2d9ce0543`。[关联新材料到新批准/Core订单](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)已上传 `80eeb52f5`；[有效原等待的提交/继续准入](<AI Native-开发记录.md#ain-original-input-admission-20261111>)已通过公开装配读/提交及原应用后继的独立离线核接。实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
 
 原订单人工交接、显式只读政策、首字/首卡宿主，以及原报价再准备、optional runId、订单材料、会员和日历消费者都已进入main。企业成员/门户、MCP/Harness和网站按固定快照核接，文档树已在祖先链。冻结后无新增源码/status差异，七份原稿档案哈希匹配；来源和实际归档位置见[逐树核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)。旧设计、日志和隔离产物不替代运行依赖或业务验收。
 
@@ -21,8 +21,8 @@
 | 位置 | 当前职责 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-15 报价再准备、TaskHumanApproval/任务中心公共消费者、AI 专项契约/装配和四册；负责独立核接、提交推送与每两项合main |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 新材料关联请求11文件及request-bound前片已冻结；继续只读核AIN-15企业签约/付款者的原Core与客户受权接点，由负责人决定下一核心施工范围；request-bound全部写权及总注册/TaskHumanApproval/locale归AI-RD |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 原runner9文件、初始签发2文件及ordinary-read单文件已冻结；继续WAITING_INPUT原等待仍有效、短操作政策过期的专用提交/继续准入，不扩成通用续期 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 新材料关联请求已上传；继续原报价有效确认等待后的明确批准/继续和原再准备准入，拥有task-approval-admission.application.ts/authority.ts两个新文件；公共装配、Controller/shared及四册归AI-RD，不改Core/企业授权 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 原WAITING_INPUT三文件已固定交AI-RD；进入AIN-21/22现有客户核心报价Action与实际消费者缺口核接，先核正式合同/Client Guard/Core原接口，再补已有合同内私有接点；公共契约/注册交AI-RD，不新增Action或企业代客权限 |
 | `D:/工作文件/rental-OS`／`main` | 仅作跨专项整合入口；当前PM处理环境/治理修复，合并串行；各专项开发继续，保留所有已核及未核WIP |
 
 三人的本轮持续目标均已建立为 active。阻塞或完成须立即给出具体入口、原任务号、固定对象与实际结果，由 AI-RD 决定解决者或接续任务。shared 总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule 等跨专项公共文件须与 PM 协调唯一作者；Core交易、资金和品类事实由 Core 专项提供，AI 不重建这些业务权威。
@@ -36,7 +36,7 @@
 3. **原AIN-25：** 真实首字/首卡组件及关闭、重开、React效果重放代码已回收，一组离线宿主冒烟通过；真实浏览器可见性、完整场景、容量/SLO、队列/背压/公平性/告警仍需原门槛。客户端报告不成为经营或计费事实；原11同账与累计资源要求保持。
 4. **其余原任务：** 05→06→07完整供应商/能力/往返及故障前置、12/13～16完整Agent和多角色资料隔离、17～28可靠事件/知识隐私/员工与平台治理/组合灰度及交付缺口均保留，详见[原28项摘要](<AI Native-开发记录.md#原28项当前实施摘要>)和[完整未完原文](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。不重开已有100%条目，不新增Reserved或边缘能力。
 5. **客户与ENTRY：** 当前两端三Action以原证据为准；六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网及真实设备仍需完成。详见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)，不以档案/报告数量或本次局部绿色加分。
-6. **当前核心准入接线：** 初始CAS参加者已接模型明确start、新规则R1准备和新材料关联任务，ordinary-read独立三路由、现有消费者和存储隔离已接回。AI-dev2继续有效WAITING_INPUT原等待在短操作政策过期后的提交/继续，负责人已接原工厂和宿主、类型检查通过，行为链尚在收口；原creation期限与真实wait期限必须区分，不篡改已封存原收据制造夹具。metadata准入不等于Run领取、业务批准或Core执行。
+6. **当前核心准入接线：** 初始CAS参加者已接模型明确start、新规则R1准备和新材料关联任务，ordinary-read独立三路由、现有消费者和存储隔离已接回。有效WAITING_INPUT的明确提交/继续现已完成本片公开装配及原应用核接；真正过期等待不复活，原收据和累计资源保持。下一重点为AI-dev1的原确认等待明确批准/继续及reprepare；负责人已补原CAS漏登记的reprepare_approval，尚不能据此称普通完整审批消费通过。metadata准入不等于Run领取、业务批准或Core执行。
 
 以上保留原任务范围、编号、依赖和验收；恢复功能施工须沿负责人当次授权。每个完整核心切片只做必要定向冒烟和类型检查，跨原G1～G4门槛后维护唯一任务表；未跨档的缺口留记录，不能把合并或档案数量当100%。
 

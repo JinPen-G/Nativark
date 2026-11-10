@@ -6,6 +6,21 @@
 > 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-original-input-admission-20261111"></a>
+## 原等待输入显式准入、提交与继续（2026-11-11）
+
+前一批新材料/Core重新报价19文件已提交并推送 `80eeb52f5e66d64a3397001c674f6f48746ed179`，远端已核。本片沿原AIN-06/07及报价主线，解决原WAITING_INPUT仍有效、短动作政策已过期时普通用户无法提交和继续的问题。[专用准入](../../apps/api/src/modules/ai-native/task-input-admission.application.ts)及[原CAS权威](../../apps/api/src/modules/ai-native/task-input-admission.authority.ts)逐次读取当前Auth/Guard、本人scope、原Task/Run/Step/问题/答案、当前场景发布及真实执行开关；只在原明确动作内签所需最少短政策。提交保存用4项、提交并继续用8项、已保存答案的继续用6项，均不含批准、恢复或接管。原收据只证明原CAS，不据旧收据补写缺失同组政策或授执行权。
+
+负责人在[原公开装配](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)内接入[适配器](../../apps/api/src/modules/ai-native/task-input-admission.composition.ts)，保留同一次请求的凭据生命周期；发布配置由原quote模型factory注入。问题只读工厂先走原pendingReader完整校验，无submissionKey、无政策或wait写入；只读模式不能用于模型执行或答案验证。执行模式仅在服务端内存登记，原PENDING期限不变；及时保存的答案继续沿原收据/原后继，新的问题使用当前有效发布期限，不延长旧等待。移除纯构造中无条件新建窗口校验，真实start和执行source仍核原创建与执行条件。
+
+本片修复了私有原生快照含BigInt时无法生成指纹，以及原readContinuation用成功父Run核旧答案时被模式误拒两处真实问题。BigInt只在本片快照归一化；父Run只作原来源读取，原SUCCEEDED父Run仍不能重新领取或派发。助手首轮类型错误和错误修改已封存收据的夹具失败保留，后者未通过放宽生产校验修复；标准producer的wait期限本就与creation期限相同，没有用自造期限组合冒充标准链。
+
+AI-dev2三份固定blob为 `b739cf68fa80f0a4d36188ac57dd3c9498333491`（application）、`023489ed56cd5af85b84d2e54bc2d007971e5b76`（authority）、`c8a94cc8c6a2402be110d016e67b598e20a37671`（original-scene-model）。负责人独立一组 `node` 标准输入冒烟session `86955`/exit0：标准source产生等待，时钟只推进到短政策过期，原ordinary-read明确启用后，实际 `registerHttpPersistedModel` 提供者完成公开readInput/submitAnswer；执行开关关闭时在政策写入前拒绝。原答案只保存一次，原helper和原应用沿同一receipt继续，模型运输共2次（原1次、合法后继1次）；新等待真正过期后公开提交拒绝、收据/调用不增，原request整行hash及原wait期限保持。正式Gateway仅验证真实构造与提交不调用模型；后继执行使用原明确离线Gateway fixture，未据此声称生产Gateway/供应商完整往返。三根及全部传递依赖strict/noEmit零诊断（session `42219`/exit0），未新增测试文件或扩写旧断言，审计0且临时目录从未创建。
+
+同时核出原再准备已经消费 `reprepare_approval`，原[政策仓储](../../apps/api/src/modules/ai-native/prisma-task-action-policy.repository.ts)的类型/白名单却漏了该操作。现补回既有操作供原CAS读写，不新增Runner工具或改变manager/首次Signer权限；首次Signer仍按原精确集合拒绝额外操作。单组原仓储冒烟exit0：保存提交应答丢失后仅读原mutation，重复CAS与未知操作拒绝，原clear收据有效。普通用户的完整审批准入和再准备消费仍由下一片接入，本片不以手工seed政策当作生产可用。
+
+这是原有效等待主线的生产代码与离线证据。原AIN-06完整供应商/恢复/接管变体及适用真实环境、原AIN-07完整前置与批准消费门槛仍需继续核齐；没有新增整项G4，唯一任务表不加分，待合main批次仍为0。没有真实HTTP/DB/模型/宿主、迁移、安装或部署；两助手已分别转原审批准入和客户核心报价接点。
+
 <a id="ain-linked-requote-consumer-20261111"></a>
 ## 关联新材料请求、Core重新报价与新批准消费者（2026-11-11）
 

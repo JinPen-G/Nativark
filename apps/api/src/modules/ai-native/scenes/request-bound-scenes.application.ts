@@ -7,7 +7,11 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication, type SelectedQuoteTaskConfiguration, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
-import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
+import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, createOriginalScenePendingInputSource,
+  type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies,
+  type OriginalSceneInputWaitMode } from './original-scene-model.composition';
+import { prepareOriginalInputContinuation, type OriginalInputContinuationConfiguration } from '../task-input-admission.composition';
+import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { composeSelectedQuoteStockReview } from './selected-quote-stock-review';
@@ -922,6 +926,16 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       if (!scene) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await scenes.readTaskReceipt(reference.inputRef);
       if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (task.status === 'waiting_input' && original.request.sceneCode === 'quote_clarification') {
+        const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
+        // The original pending reader has already checked the persisted wait,
+        // history and current resource in this read-only factory. It renews no
+        // policy and accepts no submission key or execution mode from the client.
+        const pending = await createOriginalScenePendingInputSource({ db: input.db, scenes,
+          scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
+          clock: input.clock, knowledge }, authorization.tasks, reference);
+        return pending.pending;
+      }
       const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
         scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
         results: { read: command => resultReader(scene.sceneCode).read(command) } });
@@ -1272,12 +1286,17 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
   options: AiSceneRequestOptions & { host: AiTaskApplicationHost;
     clock?: AiOriginalSceneRunDependencies['clock']; monotonic?: AiOriginalSceneRunDependencies['monotonic'];
+    /** Actual standard-host publication and database, never a request option. */
+    inputContinuation?: OriginalInputContinuationConfiguration;
     /** Server configuration only. Absence preserves the original single model. */
     orderReadChain?: { enabled: true; inputSource?: AiTaskInputSource; answerRoundTrip?: true } }) {
   if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
     || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies || 'inputCounting' in dependencies
     || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const { host, clock, monotonic, orderReadChain, ...requestOptions } = options;
+  const { host, clock, monotonic, orderReadChain, inputContinuation, ...requestOptions } = options;
+  if (inputContinuation && (!Object.is(inputContinuation.db, dependencies.db)
+    || typeof inputContinuation.currentRuntimeEnabled !== 'function' || dependencies.scene.code !== 'quote_clarification'))
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
     || orderReadChain.answerRoundTrip !== undefined && orderReadChain.answerRoundTrip !== true
     || dependencies.gatewayScene.orderExplainTool !== true || dependencies.gatewayScene.structuredOutput
@@ -1298,15 +1317,16 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     ...(gateway.adapters === undefined ? {} : { adapters: Object.freeze([...gateway.adapters]) }),
     ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)),
       ...(gateway.inputCounting ? { inputCounting: freezeOriginalInput(structuredClone(gateway.inputCounting)) } : {}) } : {}) });
-  const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
+  const assemble = async (input: typeof sceneDependencies & { credentials: AiTaskCredentialSource }, command: unknown,
+    inputWaitMode?: OriginalSceneInputWaitMode) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
     const parsed = originalRequestReferenceSchema.safeParse(raw);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const reference = freezeOriginalInput(parsed.data), scenes = composeAiOriginalScenes(input);
     const original = await scenes.requests.readHistorical(reference);
-    // Historical chain reads retain current read authority, not a new-effect
-    // grant. start() still resolves the live original policy during preparation.
-    if (!orderReadChain) await scenes.requests.resolve(original.receipt.sceneCode, reference.inputRef);
+    // Construction only observes the current original resource. The real start
+    // and input source retain their own execution checks; requiring a fresh
+    // creation window here would also block historical input/result readers.
     const task = await scenes.readTaskReceipt(reference.inputRef);
     if (task.state !== 'observed' || original.receipt.state === 'revoked'
       || original.request.sceneCode !== input.scene.code || original.receipt.sceneVersion !== input.scene.version) {
@@ -1319,6 +1339,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
       : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
     const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion,
+      ...(inputWaitMode ? { inputWaitMode } : {}),
       ...(persisted.inputCounting ? { inputCounting: persisted.inputCounting } : {}) });
     const orderApplication = orderReadChain ? model.createModelOrderApplication(serverHost, {
       inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
@@ -1353,7 +1374,20 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readPreparation: orderApplication?.readPreparation ?? unsupported,
       resumePrepared: orderApplication?.resumePrepared ?? unsupported,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
-  }, { write: false });
+  };
+  const call = bindRequests(sceneDependencies, requestOptions, assemble, { write: false });
+  const originalInputCall = bindRequests(sceneDependencies, requestOptions, input => input);
+  const callWaiting = <R>(request: AiSceneHttpRequest, value: unknown, intent: TaskInputAdmissionIntent,
+    consume: (app: Awaited<ReturnType<typeof assemble>>, command: unknown) => Promise<R>, signal?: AbortSignal): Promise<R> => {
+    if (!inputContinuation) return call(request, value, consume, { write: true, signal, preflightOnly: true });
+    // Issuance belongs to the explicit write interval, never the binder's pure
+    // construction timeout. The same request credentials survive into the host.
+    return originalInputCall(request, value, async (input, command) => {
+      const mode = await prepareOriginalInputContinuation(input, command, intent, inputContinuation, signal);
+      const app = await waitForTaskApplicationDependency(() => assemble(input, command, mode), false, signal);
+      return consume(app, command);
+    }, { write: true, signal, preflightOnly: true });
+  };
   return Object.freeze({
     readOriginalAccounting: accounting.read,
     releaseOriginalUnsentAccounting: accounting.releaseUnsent,
@@ -1387,13 +1421,13 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.start(command, signal),
         { write: true, signal, preflightOnly: true }),
-    readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readInput(command)),
+    readInput: recoveryReaders.readInput,
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command), { write: true }),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.resume(command, signal), { write: true, signal, preflightOnly: true }),
+      callWaiting(request, value, 'explicit_wait_resume', (app, command) => app.resume(command, signal), signal),
     readAnswer: recoveryReaders.readAnswer,
-    submitAnswer: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.submitAnswer(command), { write: true }),
+    submitAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      callWaiting(request, value, 'explicit_wait_submit', (app, command) => app.submitAnswer(command), signal),
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
@@ -1404,7 +1438,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmClarifiedQuote(command), { write: true }),
     readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readClarifiedQuoteReceipt(command)),
     continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
+      callWaiting(request, value, 'explicit_answer_continue', (app, command) => app.continueAnswer(command, signal), signal),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
