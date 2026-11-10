@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import { RENTAL_CURRENCY_CODES } from "@rental-os/shared";
 import type {
@@ -18,7 +18,9 @@ import type {
   RentalValueAddedService
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
-import type { RentalConfigTx } from "./rental-core-config.repository";
+import { RENTAL_READINESS_FACT_LIMIT, type RentalConfigTx } from "./rental-core-config.repository";
+import { getRequestTenantId, getRequestWorkspaceId } from '../../common/request-identity';
+import { RULE_VERSION_ISSUED_STATUSES, type RuleVersionTimelineEntry } from './rental-rule-version-chain';
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 
@@ -57,8 +59,40 @@ export interface TenantBusinessConfigSnapshot {
  * 业务配置的库侧接口。与核心配置仓储同构：库是事实源，服务层内存副本是写穿缓存，
  * 不连库的单元测试注入吸收式 stub，持久化语义只在 MySQL E2E 验证。
  */
+export interface RentalReadinessBusinessFacts {
+  tenantId: string;
+  workspaceId: string;
+  ruleVersions: RuleVersionTimelineEntry[];
+  publishedCalendarYears: number[];
+  pricedGroupIds: string[];
+  operationsAccounts: number;
+  hasActiveRole: boolean;
+  priceVersion: { sequence: number; effectiveFrom: string } | null;
+}
+
+/** Preserve the original role override semantics without materializing members
+ * or their roleAssignments. Empty legacy roleId follows the original JS test. */
+export async function readRentalReadinessAccountFacts(prisma: Pick<PrismaService, 'workspaceMember'>, tenantId: string, workspaceId: string) {
+  const where = { tenantId, workspaceId, isActive: true, user: { is: { isActive: true } } };
+  const [operationsAccounts, activeRoleAccounts] = await Promise.all([
+    prisma.workspaceMember.count({ where }),
+    prisma.workspaceMember.count({ where: { ...where, OR: [
+      { roleId: { not: null, notIn: [''] }, role: { is: { isActive: true } } },
+      { OR: [{ roleId: null }, { roleId: '' }], user: { is: { OR: [
+        { role: { is: { isActive: true } } },
+        { roleAssignments: { some: { role: { is: { isActive: true } } } } }
+      ] } } }
+    ] } })
+  ]);
+  if (![operationsAccounts, activeRoleAccounts].every(value => Number.isSafeInteger(value) && value >= 0)
+    || activeRoleAccounts > operationsAccounts) throw new ConflictException('开业账号事实无效或读取中变化');
+  return { operationsAccounts, hasActiveRole: activeRoleAccounts > 0 };
+}
+
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
+  /** Opening metadata only; never loads rule config, calendar days or prices. */
+  readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[]): Promise<RentalReadinessBusinessFacts>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -144,6 +178,89 @@ function money(value: number | undefined) {
 @Injectable()
 export class RentalBusinessConfigRepository implements RentalBusinessConfigStore {
   constructor(private readonly prisma: PrismaService) {}
+
+  async readReadinessBusinessFacts(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[]): Promise<RentalReadinessBusinessFacts> {
+    const now = new Date(at), years = [...calendarYears];
+    if (!Number.isFinite(now.getTime()) || years.length < 1 || years.length > 3
+      || years.some(year => !Number.isInteger(year) || year < 1 || year > 9999)
+      || new Set(years).size !== years.length) throw new ConflictException('开业查询时点或营业年度无效');
+    const assertScope = async () => {
+      if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+        || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+        throw new ForbiddenException('开业读取缺少当前租户或经营空间');
+    };
+    await assertScope();
+    const where = { tenantId, workspaceId };
+    type RateReference = { tenantId: string; workspaceId: string; planId: string; ratesType: string;
+      rateIndex: number | null; pricingGroupId: string | null; pricingGroupIdType: string | null;
+      itemGroupId: string | null; itemGroupIdType: string | null };
+    const [rules, calendarCounts, refs, accounts, priceVersion] = await Promise.all([
+      // Two latest issued rows are enough to preserve the original same-time
+      // conflict test. Older rule contents/history are not opening facts.
+      this.prisma.rentalRuleVersion.findMany({ where: { ...where, status: { in: [...RULE_VERSION_ISSUED_STATUSES] }, effectiveFrom: { lte: now } },
+        select: { id: true, tenantId: true, workspaceId: true, version: true, status: true, effectiveFrom: true },
+        orderBy: [{ effectiveFrom: 'desc' }, { id: 'asc' }], take: 2 }),
+      Promise.all(years.map(year => this.prisma.rentalBusinessCalendar.count({ where: { ...where, year, status: 'published' } }))),
+      // JSON_TABLE supplies only ordinality; extract target identifiers, not
+      // monetary fields or full rates JSON. Empty plans still get a sentinel
+      // row, and the global LIMIT bounds both plans and rate references.
+      this.prisma.$queryRaw<RateReference[]>(Prisma.sql`
+        SELECT p.tenantId, p.workspaceId, p.id AS planId, JSON_TYPE(p.rates) AS ratesType,
+          r.rateIndex,
+          JSON_UNQUOTE(JSON_EXTRACT(p.rates, CONCAT('$[', r.rateIndex - 1, '].pricingGroupId'))) AS pricingGroupId,
+          JSON_TYPE(JSON_EXTRACT(p.rates, CONCAT('$[', r.rateIndex - 1, '].pricingGroupId'))) AS pricingGroupIdType,
+          JSON_UNQUOTE(JSON_EXTRACT(p.rates, CONCAT('$[', r.rateIndex - 1, '].itemGroupId'))) AS itemGroupId,
+          JSON_TYPE(JSON_EXTRACT(p.rates, CONCAT('$[', r.rateIndex - 1, '].itemGroupId'))) AS itemGroupIdType
+        FROM rental_pricing_plans AS p
+        LEFT JOIN JSON_TABLE(p.rates, '$[*]' COLUMNS (rateIndex FOR ORDINALITY)) AS r ON TRUE
+        WHERE p.tenantId = ${tenantId} AND p.workspaceId = ${workspaceId} AND p.status = 'enabled'
+        ORDER BY p.id, r.rateIndex LIMIT ${RENTAL_READINESS_FACT_LIMIT + 1}`),
+      readRentalReadinessAccountFacts(this.prisma, tenantId, workspaceId),
+      this.prisma.rentalPriceVersion.findFirst({ where: { ...where, effectiveFrom: { lte: now } },
+        orderBy: [{ effectiveFrom: 'desc' }, { sequence: 'desc' }],
+        select: { tenantId: true, workspaceId: true, sequence: true, effectiveFrom: true } })
+    ]);
+    if (refs.length > RENTAL_READINESS_FACT_LIMIT) throw new ServiceUnavailableException('开业价格引用超出读取上限');
+    const owns = (row: { tenantId: string; workspaceId: string }) => row.tenantId === tenantId && row.workspaceId === workspaceId;
+    if (rules.length > 2 || rules.some(row => !owns(row) || typeof row.id !== 'string' || !row.id
+      || typeof row.version !== 'string' || !row.version || row.version.length > 191
+      || !(RULE_VERSION_ISSUED_STATUSES as readonly string[]).includes(row.status)
+      || !(row.effectiveFrom instanceof Date) || !Number.isFinite(row.effectiveFrom.getTime()) || row.effectiveFrom > now)
+      || new Set(rules.map(row => row.id)).size !== rules.length
+      || calendarCounts.some(value => !Number.isSafeInteger(value) || value < 0)
+      || priceVersion && (!owns(priceVersion) || !Number.isSafeInteger(priceVersion.sequence) || priceVersion.sequence < 1
+        || !(priceVersion.effectiveFrom instanceof Date) || !Number.isFinite(priceVersion.effectiveFrom.getTime()) || priceVersion.effectiveFrom > now))
+      throw new ConflictException('开业业务元数据来源或内容无效');
+    const identifiers = new Set<string>(), seen = new Set<string>();
+    const referenceId = (value: string | null, type: string | null) => {
+      if (type === null || type === 'NULL') return undefined;
+      if (type !== 'STRING' || typeof value !== 'string' || !value || value.length > 191)
+        throw new ConflictException('开业价格引用无效');
+      return value;
+    };
+    for (const row of refs) {
+      const key = `${row.planId}:${row.rateIndex}`;
+      if (!owns(row) || typeof row.planId !== 'string' || !row.planId || row.planId.length > 191
+        || row.ratesType !== 'ARRAY' || seen.has(key)
+        || row.rateIndex !== null && (!Number.isSafeInteger(row.rateIndex) || row.rateIndex < 1))
+        throw new ConflictException('开业价格引用来源或结构无效');
+      seen.add(key);
+      if (row.rateIndex === null) continue;
+      const pricingGroupId = referenceId(row.pricingGroupId, row.pricingGroupIdType);
+      const itemGroupId = referenceId(row.itemGroupId, row.itemGroupIdType);
+      // Same nullish target precedence as the original pricingTargetId; no
+      // amount, price validity or quote algorithm is recalculated here.
+      const target = pricingGroupId ?? itemGroupId;
+      if (!target) throw new ConflictException('开业价格引用缺少目标');
+      identifiers.add(target);
+    }
+    await assertScope();
+    return { tenantId, workspaceId, ruleVersions: rules.map(row => ({ id: row.id, version: row.version,
+      status: row.status as RentalRuleVersion['status'], effectiveFrom: row.effectiveFrom!.toISOString() })),
+      publishedCalendarYears: years.filter((_year, index) => calendarCounts[index] > 0),
+      pricedGroupIds: [...identifiers], ...accounts,
+      priceVersion: priceVersion ? { sequence: priceVersion.sequence, effectiveFrom: priceVersion.effectiveFrom.toISOString() } : null };
+  }
 
   async loadAll(): Promise<TenantBusinessConfigSnapshot[]> {
     const [workspaces, pricing, discounts, services, calendars, rules, templates] = await Promise.all([

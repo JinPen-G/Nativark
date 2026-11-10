@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";
@@ -54,6 +54,7 @@ import {
 } from "./work-order-assignee-scope";
 import {
   getRequestDataScope,
+  getRequestIdentity,
   getRequestLocationIds,
   getRequestStaffLocationIds,
   getRequestUserId,
@@ -70,6 +71,16 @@ export interface ActiveReservationRow {
   startAt: string;
   endAt: string;
 }
+
+/** Bounded read facts for Core availability arithmetic; no asset attributes,
+ * allocation bodies, inventory reservation or initialization writes. */
+export interface RentalAvailabilitySnapshot {
+  reservations: ActiveReservationRow[];
+  assets: Array<Pick<RentalAsset, 'itemGroupId' | 'locationId' | 'status'>>;
+  stocks: Array<Pick<RentalStockBalance, 'itemGroupId' | 'locationId' | 'onHandQuantity' | 'maintenanceQuantity'>>;
+}
+export interface RentalAvailabilitySnapshotQuery { locationId: string; itemGroupIds: string[]; }
+const AVAILABILITY_FACT_LIMIT = 10000;
 
 /** 资产状态变更随订单聚合一起提交，避免出现"订单已推进、资产状态没跟上"的中间态。 */
 export interface AssetStatusChange {
@@ -228,6 +239,7 @@ export interface RentalCoreFactStore {
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[], stockTransfers?: StockReturnTransfer[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
+  readAvailabilitySnapshot?(tenantId: string, workspaceId: string, query: RentalAvailabilitySnapshotQuery, tx?: RentalFactTx): Promise<RentalAvailabilitySnapshot>;
   /**
    * 对该地点下某商品组的资产行加排他锁，供配货使用。
    *
@@ -1257,6 +1269,76 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       quantity: Math.max(0, row.quantity - row.releasedQuantity),
       ...bufferedRentalPeriod(iso(row.startAt), row.status === "FULFILLED" && row.endAt <= now ? "9999-12-30T00:00:00.000Z" : iso(row.endAt), row.order.ruleSnapshot as unknown as RentalRuleConfig)
     }));
+  }
+
+  /** Availability needs complete facts, not a silently truncated inventory.
+   * Read one requested location/dependency set, include a sentinel and refuse
+   * overflow. The original expiry/buffer/overdue rules remain unchanged. */
+  async readAvailabilitySnapshot(tenantId: string, workspaceId: string, value: RentalAvailabilitySnapshotQuery, tx?: RentalFactTx): Promise<RentalAvailabilitySnapshot> {
+    if (tx !== undefined && (!tx || '$transaction' in tx)) throw new ServiceUnavailableException('库存事务读取不可用');
+    const client = tx ?? this.prisma;
+    const query = structuredClone(value), id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
+    if (!query || typeof query !== 'object' || Array.isArray(query)
+      || Object.keys(query).length !== 2 || typeof query.locationId !== 'string' || !id.test(query.locationId)
+      || !Array.isArray(query.itemGroupIds) || !query.itemGroupIds.length || query.itemGroupIds.length > 100
+      || Array.from(query.itemGroupIds).some(value => typeof value !== 'string' || !id.test(value))
+      || new Set(query.itemGroupIds).size !== query.itemGroupIds.length) throw new BadRequestException('库存只读查询参数无效');
+    const identity = structuredClone(getRequestIdentity());
+    if (!identity?.userId || identity.tenantId !== tenantId || identity.isSaasAdmin || identity.isPlatformAdmin
+      || identity.workspaceId !== workspaceId || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
+      throw new ForbiddenException('库存读取缺少当前经营空间');
+    const locations = getRequestLocationIds();
+    if (locations !== undefined && !locations.includes(query.locationId)) throw new ForbiddenException('库存地点不可访问');
+    const where = { tenantId, workspaceId, locationId: query.locationId, itemGroupId: { in: query.itemGroupIds } };
+    const at = new Date();
+    const [reservations, currentAssets, stocks] = await Promise.all([
+      client.rentalReservation.findMany({ where: { ...where, status: { in: ACTIVE_RESERVATION_STATES },
+        OR: [{ expiresAt: null }, { expiresAt: { gte: at } }] },
+        select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, quantity: true, releasedQuantity: true,
+          startAt: true, endAt: true, status: true, order: { select: { tenantId: true, workspaceId: true, ruleSnapshot: true } } },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
+      client.rentalAsset.findMany({ where,
+        select: { id: true, tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, status: true },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
+      client.rentalStockBalance.findMany({ where,
+        select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, onHandQuantity: true, maintenanceQuantity: true },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 })
+    ]);
+    if ([reservations, currentAssets, stocks].some(rows => rows.length > AVAILABILITY_FACT_LIMIT))
+      throw new ServiceUnavailableException('库存事实超出只读上限，不能按部分事实计算可用量');
+    const inScope = (row: { tenantId: string; workspaceId: string; locationId: string; itemGroupId: string }) => row.tenantId === tenantId && row.workspaceId === workspaceId
+      && row.locationId === query.locationId && query.itemGroupIds.includes(row.itemGroupId);
+    if (!currentAssets.every(inScope) || !stocks.every(inScope) || !reservations.every(row => inScope(row)
+      && row.order.tenantId === tenantId && row.order.workspaceId === workspaceId)) throw new ConflictException('库存事实来源变化');
+    let assets = currentAssets;
+    if (identity.dataScope === 'own' && currentAssets.length) {
+      // A return can move an asset without rewriting its historical work orders.
+      // Bound ownership by CURRENT candidate ids, not the work order's old site/group.
+      const candidateIds = currentAssets.map(row => row.id), candidateSet = new Set(candidateIds);
+      if (candidateIds.some(value => typeof value !== 'string' || !id.test(value)) || candidateSet.size !== candidateIds.length)
+        throw new ConflictException('库存资产来源无效');
+      if (!isDeepStrictEqual(identity, getRequestIdentity())) throw new ForbiddenException('库存读取身份或范围变化');
+      const rows = await client.rentalWorkOrder.findMany({
+        where: { tenantId, workspaceId, assetId: { in: candidateIds },
+          OR: [{ createdBy: identity.userId }, { assigneeId: identity.userId }] },
+        select: { tenantId: true, workspaceId: true, assetId: true },
+        distinct: ['assetId'], take: AVAILABILITY_FACT_LIMIT + 1, orderBy: { assetId: 'asc' }
+      });
+      if (rows.length > AVAILABILITY_FACT_LIMIT) throw new ServiceUnavailableException('本人库存读取超出上限');
+      if (!rows.every(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+        && row.assetId !== null && candidateSet.has(row.assetId))) throw new ConflictException('本人库存事实来源变化');
+      const ownedIds = new Set(rows.map(row => row.assetId));
+      assets = currentAssets.filter(row => ownedIds.has(row.id));
+    }
+    if (!isDeepStrictEqual(identity, getRequestIdentity()) || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
+      throw new ForbiddenException('库存读取身份或范围变化');
+    return { reservations: reservations.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId,
+      quantity: Math.max(0, row.quantity - row.releasedQuantity),
+      ...bufferedRentalPeriod(iso(row.startAt), row.status === 'FULFILLED' && row.endAt <= at
+        ? '9999-12-30T00:00:00.000Z' : iso(row.endAt), row.order.ruleSnapshot as unknown as RentalRuleConfig) })),
+      assets: assets.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId, status: lower<RentalAssetStatus>(row.status) })),
+      stocks: stocks.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId,
+        onHandQuantity: row.onHandQuantity, maintenanceQuantity: row.maintenanceQuantity })) };
   }
 
   /** 已被有效分配占住的资产 id，用于配货时排除。 */

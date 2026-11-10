@@ -152,7 +152,7 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
         source: 'persisted_workspace_configuration', configurationVersion: '0'.repeat(64) };
     },
     listLocations: () => [], listOperators: () => [], resolveWorkspaceId: () => 'workspace-a',
-    availability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
+    readAvailability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
       startAt: request.startAt, endAt: request.endAt,
       lines: request.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: line.itemGroupId,
         itemGroupName: line.itemGroupId, inventoryMode: 'quantity', requestedQuantity: line.quantity,

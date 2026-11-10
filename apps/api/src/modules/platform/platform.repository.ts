@@ -234,12 +234,42 @@ export class PlatformRepository {
     };
   }
 
-  async findUserById(id: string): Promise<SystemUserRow | undefined> {
-    const user = await this.prisma.user.findFirst({
+  async findUserById(id: string, transaction?: Prisma.TransactionClient): Promise<SystemUserRow | undefined> {
+    const user = await (transaction ?? this.prisma).user.findFirst({
       where: { id, isActive: true, tenant: { status: PrismaTenantStatus.ACTIVE } },
       include: this.userInclude()
     });
     return user ? this.toUserRow(user) : undefined;
+  }
+
+  /** Original current account/role mapping in the caller's existing transaction.
+   * Explicit workspace must belong to the bound tenant; no session/default-space
+   * fallback. The original authority owns Serializable isolation and grant fences. */
+  async resolveTrustedWorkspacePrincipal(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
+    if (!transaction?.user || !transaction.workspaceMember || !transaction.businessWorkspace) throw new ForbiddenException('可信身份事务未就绪');
+    const tenantUser = await this.findUserById(binding.userId, transaction);
+    if (!tenantUser || tenantUser.tenantId !== binding.tenantId) return undefined;
+    const workspace = await transaction.businessWorkspace.findFirst({
+      where: { id: binding.workspaceId, tenantId: binding.tenantId, status: PrismaWorkspaceStatus.ACTIVE }, select: { id: true }
+    });
+    if (!workspace) return undefined;
+    const user = await this.findWorkspaceScopedUser(binding.userId, binding.workspaceId, tenantUser, transaction);
+    if (!user || user.tenantId !== binding.tenantId) return undefined;
+    return { user, tenantUser, workspaceId: binding.workspaceId, hasWorkspaces: true, workspaceValid: true };
+  }
+
+  /** MCP workspace governance reuses ORIGINAL tenant-wide integration rights.
+   * An all-permissions workspace role is not a tenant management permission.
+   * Identity/session verification remains in original Auth; caller owns the same
+   * Serializable transaction and commit fences, not a model-supplied binding. */
+  async assertTrustedWorkspaceIntegrationManagement(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
+    const actor = await this.assertTenantPermissionInTransaction(transaction, binding.tenantId, binding.userId, 'system:integration:manage');
+    if (!actor.isActive || actor.mustChangePassword !== false || actor.id !== binding.userId || actor.tenantId !== binding.tenantId) {
+      throw new ForbiddenException('缺少当前租户集成管理身份');
+    }
+    const context = await this.resolveTrustedWorkspacePrincipal(binding, transaction);
+    if (!context?.workspaceValid || context.workspaceId !== binding.workspaceId) throw new ForbiddenException('缺少当前经营空间管理范围');
+    return actor;
   }
 
   async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
@@ -262,8 +292,14 @@ export class PlatformRepository {
     });
   }
 
-  async getAuthSession(id: string) {
-    return this.prisma.authSession.findFirst({
+  async getAuthSession(id: string, transaction?: Prisma.TransactionClient) {
+    // Trusted browser consent uses the original session fence, in the caller's
+    // transaction. Normal Web reads retain their original query/behavior.
+    if (transaction) {
+      if (!transaction.authSession || typeof transaction.$queryRaw !== 'function') throw new ForbiddenException('浏览器身份事务未就绪');
+      await transaction.$queryRaw`SELECT id FROM auth_sessions WHERE id = ${id} FOR UPDATE`;
+    }
+    return (transaction ?? this.prisma).authSession.findFirst({
       where: { id, revokedAt: null, expiresAt: { gt: new Date() } },
       include: { user: { include: { tenant: true } } }
     });
@@ -674,10 +710,10 @@ export class PlatformRepository {
    * roleId 一旦存在，就**取代**租户级角色参与权限计算；dataScope 同理。
    * 成员关系没配时沿用租户级默认值（升级兼容层的行为）。
    */
-  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow): Promise<SystemUserRow | undefined> {
-    const base = tenantUser ?? await this.findUserById(userId);
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow, transaction?: Prisma.TransactionClient): Promise<SystemUserRow | undefined> {
+    const base = tenantUser ?? await this.findUserById(userId, transaction);
     if (!base || !workspaceId) return base;
-    const member = await this.prisma.workspaceMember.findFirst({
+    const member = await (transaction ?? this.prisma).workspaceMember.findFirst({
       where: {
         userId,
         workspaceId,

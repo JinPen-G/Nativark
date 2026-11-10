@@ -900,6 +900,12 @@ export class MembershipService {
     };
   }
 
+  /** Opening needs the tenant's plan count, not plan/version/benefit contents.
+   * Same tenant-only population as listPlans, including drafts/empty plans. */
+  async countPlans(tenantId: string): Promise<number> {
+    return this.prisma.customerMembershipPlan.count({ where: { tenantId } });
+  }
+
   async listPlans(tenantId: string): Promise<CustomerMembershipPlan[]> {
     const rows = await this.prisma.customerMembershipPlan.findMany({
       where: { tenantId }, include: { versions: { orderBy: { version: "desc" } } }, orderBy: [{ targetType: "asc" }, { code: "asc" }]

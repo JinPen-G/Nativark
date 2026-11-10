@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import type { AiOpeningReadFactsService, AiRiskReadFactsService, AiDiagnosticReadAuthority } from './diagnostic-read-facts.service';
 import { aiRiskReadInputSchema } from './diagnostic-read-facts.service';
-import type { AiQuoteCoreContextSource } from '../quote-preview.service';
+import type { AiOpeningConfigurationSource } from './opening-configuration.source';
+import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../../rental-core/rental-core-config.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 
 const inputSchema = z.object({ risks: aiRiskReadInputSchema.optional() }).strict();
-const terminologyFields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
+const terminologyFields = RENTAL_OPENING_TERMINOLOGY_FIELDS;
 const differenceSchema = z.object({ expectedVersion: z.string().min(1).max(191),
   changes: z.array(z.object({ field: z.enum(terminologyFields), value: z.string().trim().min(1).max(80) }).strict()).min(1).max(6)
 }).strict();
@@ -22,7 +23,7 @@ const sections: Readonly<Record<string, readonly string[]>> = {
 export class AiOpeningActionListService {
   constructor(private readonly opening: Pick<AiOpeningReadFactsService, 'read'>,
     private readonly risks: Pick<AiRiskReadFactsService, 'read'>,
-    private readonly contexts: AiQuoteCoreContextSource, private readonly authority: AiDiagnosticReadAuthority) {}
+    private readonly contexts: AiOpeningConfigurationSource, private readonly authority: AiDiagnosticReadAuthority) {}
   async read(value: unknown = {}) {
     const input = inputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -52,14 +53,14 @@ export class AiOpeningActionListService {
       // sources. Config inventory modes are not physical stock balances.
       const configuration = {
         products: { source, rows: before.groups.slice(0, 100).map(row => ({ id: row.id, code: row.code,
-          status: row.status, inventoryMode: row.inventoryMode, unit: row.unit })), truncated: before.groups.length > 100 },
+          status: row.status, inventoryMode: row.inventoryMode, unit: row.unit })), truncated: before.truncated.groups },
         pricing: { source, currency: before.settings.pricing.currency, enabledUnits: [...before.settings.pricing.enabledUnits],
           groups: (before.pricingGroups ?? []).slice(0, 100).map(row => ({ id: row.id, code: row.code,
-            status: row.status, version: row.version })), truncated: (before.pricingGroups?.length ?? 0) > 100,
+            status: row.status, version: row.version })), truncated: before.truncated.pricingGroups,
           rates: 'not_projected' as const },
         fulfillment: { source, enabledModes: [...before.settings.fulfillment.enabledModes],
           locations: before.locations.slice(0, 100).map(row => ({ id: row.id, code: row.code,
-            status: row.status, capabilities: [...row.capabilities] })), truncated: before.locations.length > 100 },
+            status: row.status, capabilities: [...row.capabilities] })), truncated: before.truncated.locations },
         inventory: { source, coverage: 'not_loaded' as const, meaning: 'item_modes_are_not_stock_balances' as const }
       };
       return { requestId: authorized.requestId, audience: authorized.audience, scope, observedAt: facts.observedAt,
@@ -69,8 +70,8 @@ export class AiOpeningActionListService {
         sections: facts.items.map(row => ({ key: row.key, title: row.title, required: !row.optional,
           status: row.status === 'unavailable' ? 'source_unavailable' as const
             : row.status === 'ready' ? 'readiness_check_passed' as const
-            : row.key === 'item_groups' && !before.groups.some(group => group.status === 'enabled') ? 'missing_configuration' as const
-            : row.key === 'fulfillment_network' && !before.locations.some(location => location.status === 'enabled') ? 'missing_configuration' as const
+            : row.key === 'item_groups' && before.enabledItemGroupCount === 0 ? 'missing_configuration' as const
+            : row.key === 'fulfillment_network' && before.enabledLocationCount === 0 ? 'missing_configuration' as const
             : Object.prototype.hasOwnProperty.call(sections, row.key) ? 'readiness_unsatisfied' as const : 'unclassified' as const,
           issue: row.status === 'ready' ? undefined : row.missing,
           impact: row.optional ? 'optional_configuration' as const : 'required_readiness_item' as const,
@@ -131,13 +132,17 @@ export class AiOpeningActionListService {
     return this.authority.withRead('opening', { limit: 50 }, async context => {
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const before = structuredClone(await this.contexts.current(context.scope));
-      if (before.profile.configVersion !== requested.expectedVersion) throw new ModelGatewayError('CONFIG_INVALID');
-      const changes = requested.changes.map(row => ({ field: `terminology.${row.field}`, before: before.profile.terminology[row.field],
+      // Non-default workspaces have no independently persisted terminology
+      // source here; never borrow the tenant default profile as their old value.
+      const profile = before.profile;
+      if (!profile) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+      if (profile.configVersion !== requested.expectedVersion) throw new ModelGatewayError('CONFIG_INVALID');
+      const changes = requested.changes.map(row => ({ field: `terminology.${row.field}`, before: profile.terminology[row.field],
         after: row.value, source: { scope: context.scope, resourceType: 'tenant_profile' as const,
-          version: before.profile.configVersion, observedAt: context.authorizedAt },
+          version: profile.configVersion, observedAt: context.authorizedAt },
         impact: 'display_terminology_only_not_business_rules' as const }));
       if (requestFingerprint(before) !== requestFingerprint(await this.contexts.current(context.scope))) throw new ModelGatewayError('CONFIG_INVALID');
-      return { status: 'candidate_only' as const, scope: context.scope, currentVersion: before.profile.configVersion,
+      return { status: 'candidate_only' as const, scope: context.scope, currentVersion: profile.configVersion,
         changes, persistence: 'not_attempted_no_verified_proposal_port' as const,
         publication: 'not_attempted' as const, authorization: 'write_requires_original_permissions_and_approval' as const };
     });

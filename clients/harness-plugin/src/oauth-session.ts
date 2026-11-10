@@ -4,12 +4,29 @@
  * This is not isolation from malicious same-process plugins or OS administrators.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { Client, StreamableHTTPClientTransport, startAuthorization, exchangeAuthorization, refreshAuthorization } from "@modelcontextprotocol/client";
+import { readFileSync } from "node:fs";
+import { Client, StreamableHTTPClientTransport, UnsupportedProtocolVersionError, startAuthorization, exchangeAuthorization, refreshAuthorization } from "@modelcontextprotocol/client";
 import type { AuthorizationServerMetadata, OAuthTokens, Tool, CallToolResult, Prompt } from "@modelcontextprotocol/client";
 import { discoverRentalOAuthMetadata, resolveOAuthClientConfiguration } from "./oauth-discovery.js";
 import type { OAuthClientConfiguration } from "./oauth-discovery.js";
 import type { ConnectionInspectionConfig } from "./connection.js";
 import { boundedDiscoveryResponse } from "./discovery-response.js";
+import type { RentalOAuthRecovery } from "./oauth-recovery.js";
+
+/** Capture this loaded Bundle's version, not the SDK or a claimed authorization identity. */
+function readBundleVersion(): string {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    if (typeof manifest !== "object" || manifest === null || !("name" in manifest)
+      || manifest.name !== "@rental-os/harness-plugin" || !("version" in manifest)
+      || typeof manifest.version !== "string" || !manifest.version.trim()) throw new Error("invalid metadata");
+    return manifest.version;
+  } catch {
+    // Do not echo an unreadable or altered local package's contents into Loader logs.
+    throw new Error("Rental Bundle metadata is unavailable");
+  }
+}
+const bundleVersion = readBundleVersion();
 
 export interface LoginConfiguration {
   enabled: boolean;
@@ -29,9 +46,11 @@ export interface OAuthInteraction {
 }
 
 export type OAuthSessionState = "disconnected" | "connecting" | "connected" | "expired" | "unknown" | "other_session";
-export type OAuthSessionErrorCode = "disabled" | "busy" | "other_session" | "cancelled" | "unavailable" | "unknown";
+export type OAuthSessionErrorCode = "disabled" | "busy" | "other_session" | "cancelled" | "denied" | "unavailable" | "unknown";
+/** Non-secret human feedback; it neither resolves uncertainty nor exposes the server's reply. */
+export type OAuthSessionFailureReason = "protocol_incompatible";
 export class OAuthSessionError extends Error {
-  constructor(readonly code: OAuthSessionErrorCode) {
+  constructor(readonly code: OAuthSessionErrorCode, readonly reason?: OAuthSessionFailureReason) {
     super(`Rental OAuth: ${code}`);
     this.name = "OAuthSessionError";
   }
@@ -121,6 +140,7 @@ export class RentalOAuthSession {
   #pending: Promise<void> | undefined;
   #refreshing: Promise<string> | undefined;
   #unknown = false;
+  #unknownReason: OAuthSessionFailureReason | undefined;
   #invalid = false;
   #closed = false;
   #disconnecting: Promise<DisconnectResult> | undefined;
@@ -131,7 +151,7 @@ export class RentalOAuthSession {
 
   constructor(connection: ConnectionInspectionConfig, oauth: OAuthClientConfiguration, config: LoginConfiguration,
     transport: typeof globalThis.fetch, interaction: OAuthInteraction, onExpiry: (result: DisconnectResult) => void,
-    withdraw: () => void) {
+    withdraw: () => void, readonly recovery: RentalOAuthRecovery) {
     this.#connection = Object.freeze({ ...connection });
     this.#oauth = resolveOAuthClientConfiguration(oauth);
     this.#config = Object.freeze({ ...config });
@@ -143,12 +163,21 @@ export class RentalOAuthSession {
 
   status(owner: object): OAuthSessionState {
     if (this.#owner && owner !== this.#owner) return "other_session";
-    if (this.#unknown) return "unknown";
+    if (this.#unknown || this.recovery.blocked) return "unknown";
     if (this.#pending) return "connecting";
     if (!this.#credential || !this.#client) return "disconnected";
     if (this.#invalid) return "expired";
     if (Date.now() >= this.#credential.deadline || (!this.#credential.refresh && Date.now() >= this.#credential.expiresAt)) return "expired";
     return "connected";
+  }
+
+  /**
+   * Read this instance's observed failure reason without recovering it from a durable marker.
+   * @param owner - Exact bound human-command session, not an Agent or another session.
+   * @returns A coarse reason only while this owner has a current process-local unknown; otherwise undefined.
+   */
+  unknownReason(owner: object): OAuthSessionFailureReason | undefined {
+    return owner === this.#owner && this.#unknown ? this.#unknownReason : undefined;
   }
 
   /** Only the exact bound session can consume the last successfully discovered guidance. */
@@ -166,7 +195,8 @@ export class RentalOAuthSession {
   async login(owner: object, signal: AbortSignal): Promise<void> {
     if (this.#closed || !this.#config.enabled) throw new OAuthSessionError("disabled");
     if (this.#owner && this.#owner !== owner) throw new OAuthSessionError("other_session");
-    if (this.#unknown) throw new OAuthSessionError("unknown");
+    if (this.#unknown || this.recovery.blocked) throw new OAuthSessionError("unknown");
+    if (!this.recovery.available) throw new OAuthSessionError("unavailable");
     if (this.#pending || this.#credential || this.#disconnecting) throw new OAuthSessionError("busy");
     this.#owner = owner;
     const lifetime = this.#lifetime;
@@ -179,9 +209,13 @@ export class RentalOAuthSession {
 
   async #login(signal: AbortSignal): Promise<void> {
     let closeCallback: (() => Promise<void>) | undefined;
+    this.#unknownReason = undefined;
     let redirectUri = this.#oauth.redirectUri;
     let mayHaveGrant = false;
     try {
+      await this.recovery.waitReady(signal);
+      await this.recovery.begin(signal);
+      if (signal.aborted) throw new OAuthSessionError("cancelled");
       const metadata = await discoverRentalOAuthMetadata(this.#connection, this.#oauth, this.#fetch, signal);
       const state = randomBytes(32).toString("base64url");
       if (signal.aborted) throw new OAuthSessionError("cancelled");
@@ -208,8 +242,11 @@ export class RentalOAuthSession {
           consumed = true;
           // A validated access_denied response ends this attempt without code
           // exchange. Other AS errors do not establish the grant's outcome.
-          if (url.searchParams.get("error") === "access_denied") mayHaveGrant = false;
-          deny(new OAuthSessionError("cancelled"));
+          const denied = url.searchParams.get("error") === "access_denied";
+          if (denied) mayHaveGrant = false;
+          // Expose only a fixed reason. Callback disposal and durable settlement
+          // still veto it below; server descriptions/URLs never leave this scope.
+          deny(new OAuthSessionError(denied ? "denied" : "cancelled"));
           return callbackReply(204);
         }
         if (!code || code.length > 4096 || /[\x00-\x20\x7f]/.test(code)) return callbackReply(400);
@@ -245,18 +282,27 @@ export class RentalOAuthSession {
       if (signal.aborted) throw new OAuthSessionError("cancelled");
       this.#credential = this.#admit(tokens, metadata, Date.now() + this.#config.sessionLifetimeMs);
       this.#scheduleExpiry(this.#credential);
-      const client = new Client({ name: "rental-os-harness", version: "0.1.0" }, {
+      const client = new Client({ name: "rental-os-harness", version: bundleVersion }, {
         capabilities: {}, versionNegotiation: { mode: { pin: "2026-07-28" } },
       });
       this.#client = client;
       const lifetime = this.#lifetime.signal;
       const transport = new StreamableHTTPClientTransport(new URL(this.#connection.resourceUrl), {
         // Deliberately omit onUnauthorized: a 401 must not replay a business request.
-        authProvider: { token: () => this.#accessToken(lifetime) },
+        // Refresh belongs to the original request preflight, not this SDK callback
+        // (the SDK resolves headers before combining the per-request signal).
+        authProvider: { token: async () => this.#transportToken(lifetime) },
         onInsufficientScope: "throw", reconnectionScheduler: () => {},
         fetch: (input, init) => this.#resourceFetch(input, init, lifetime),
       });
-      await wait(client.connect(transport, { signal, timeout: this.#connection.timeoutMs }), signal);
+      try {
+        await wait(client.connect(transport, { signal, timeout: this.#connection.timeoutMs }), signal);
+      } catch (error) {
+        // Only a typed rejection from the actual connect operation explains this
+        // failure; cancellation and other SDK failures disclose no inferred reason.
+        if (!signal.aborted && error instanceof UnsupportedProtocolVersionError) this.#unknownReason = "protocol_incompatible";
+        throw error;
+      }
       if (signal.aborted) throw new OAuthSessionError("cancelled");
       this.#instructions = this.#admitInstructions(client.getInstructions());
     } catch (error) {
@@ -264,10 +310,11 @@ export class RentalOAuthSession {
       const client = this.#client;
       this.#client = undefined;
       this.#unknown = mayHaveGrant;
+      if (signal.aborted) this.#unknownReason = undefined;
       if (!mayHaveGrant) this.#owner = undefined;
       try { await client?.close(); }
-      catch { this.#unknown = true; }
-      if (this.#unknown) throw new OAuthSessionError("unknown");
+      catch { this.#unknown = true; this.#unknownReason = undefined; }
+      if (this.#unknown) throw new OAuthSessionError("unknown", this.#unknownReason);
       throw new OAuthSessionError(signal.aborted ? "cancelled" : error instanceof OAuthSessionError ? error.code : "unavailable");
     } finally {
       try { await closeCallback?.(); }
@@ -275,6 +322,7 @@ export class RentalOAuthSession {
         // Callback disposal is part of login completion. A failed command must
         // not leave a connected client; keep known tokens only for revocation.
         this.#unknown = true;
+        this.#unknownReason = undefined;
         this.#instructions = "";
         this.#lifetime.abort();
         this.#withdraw();
@@ -285,6 +333,12 @@ export class RentalOAuthSession {
         try { await client?.close(); }
         catch { this.#unknown = true; }
         throw new OAuthSessionError("unknown");
+      }
+      // An authenticated denial or cancellation before browser dispatch leaves no
+      // possible grant. Connected and uncertain attempts retain the durable marker.
+      if (!this.#unknown && !this.#credential) {
+        try { await this.recovery.settle(AbortSignal.timeout(this.#connection.timeoutMs)); }
+        catch { this.#unknown = true; throw new OAuthSessionError("unknown"); }
       }
     }
   }
@@ -328,6 +382,22 @@ export class RentalOAuthSession {
       }
       return boundedDiscoveryResponse(response, 65_536, signal);
     };
+  }
+
+  #transportToken(signal: AbortSignal): string {
+    const credential = this.#credential;
+    if (signal.aborted || this.#unknown || this.#invalid || this.#closed || !credential
+      || Date.now() >= credential.deadline || Date.now() >= credential.expiresAt) throw new OAuthSessionError("unavailable");
+    return credential.access;
+  }
+
+  /** Prepare credentials before dispatch; refresh and waiting use the original
+   * request's remaining deadline. A cancelled waiter never invokes the SDK later. */
+  async #authorizedRequest<T>(client: Client, signal: AbortSignal, send: () => Promise<T>): Promise<T> {
+    await wait(this.#accessToken(signal), signal);
+    if (signal.aborted || client !== this.#client) throw new OAuthSessionError("unavailable");
+    this.#transportToken(signal);
+    return wait(send(), signal);
   }
 
   async #accessToken(signal: AbortSignal): Promise<string> {
@@ -387,7 +457,8 @@ export class RentalOAuthSession {
     if (!this.#client || this.#pending || this.#unknown) throw new OAuthSessionError("unavailable");
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(this.#connection.timeoutMs)]);
-    const operation = wait(client.discover({ signal: abort, timeout: this.#connection.timeoutMs }), abort).then(result => {
+    const operation = this.#authorizedRequest(client, abort,
+      () => client.discover({ signal: abort, timeout: this.#connection.timeoutMs })).then(result => {
       // Concurrent requests can invalidate the same client without replacing it.
       // Only a still-current connection may publish a successful discovery.
       if (abort.aborted || client !== this.#client || this.status(owner) !== "connected") throw new OAuthSessionError("unavailable");
@@ -407,7 +478,8 @@ export class RentalOAuthSession {
     if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
-    const operation = wait(client.listTools({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+    const operation = this.#authorizedRequest(client, abort,
+      () => client.listTools({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }));
     this.#checks.add(operation);
     try {
       const listed = await operation;
@@ -425,7 +497,8 @@ export class RentalOAuthSession {
     if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
-    const operation = wait(client.listPrompts({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+    const operation = this.#authorizedRequest(client, abort,
+      () => client.listPrompts({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }));
     this.#checks.add(operation);
     try {
       const listed = await operation;
@@ -448,7 +521,8 @@ export class RentalOAuthSession {
     const operation = (async () => {
       const descriptor = (await this.listPrompts(owner, abort)).find(prompt => prompt.name === name);
       if (!descriptor || abort.aborted) throw new OAuthSessionError("unavailable");
-      const result = await wait(client.getPrompt({ name }, { signal: abort, timeout: 15_000 }), abort);
+      const result = await this.#authorizedRequest(client, abort,
+        () => client.getPrompt({ name }, { signal: abort, timeout: 15_000 }));
       if (abort.aborted || client !== this.#client || this.status(owner) !== "connected" || !result.description
         || result.messages.length !== 1 || result.messages[0]?.role !== "user" || result.messages[0].content.type !== "text") throw new OAuthSessionError("unavailable");
       const description = promptGuidance(result.description);
@@ -468,7 +542,8 @@ export class RentalOAuthSession {
     if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
-    const operation = wait(client.listResources({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+    const operation = this.#authorizedRequest(client, abort,
+      () => client.listResources({ cursor: "" }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }));
     this.#checks.add(operation);
     try {
       const listed = await operation;
@@ -495,7 +570,8 @@ export class RentalOAuthSession {
     const operation = (async () => {
       const descriptor = (await this.listResources(owner, abort)).find(item => item.name === name);
       if (!descriptor || abort.aborted) throw new OAuthSessionError("unavailable");
-      const result = await wait(client.readResource({ uri: descriptor.uri }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }), abort);
+      const result = await this.#authorizedRequest(client, abort,
+        () => client.readResource({ uri: descriptor.uri }, { cacheMode: "bypass", signal: abort, timeout: 15_000 }));
       const content = result.contents[0];
       if (abort.aborted || client !== this.#client || this.status(owner) !== "connected" || result.contents.length !== 1
         || !content || content.uri !== descriptor.uri || content.mimeType !== "text/plain" || !("text" in content)
@@ -517,8 +593,9 @@ export class RentalOAuthSession {
     if (this.status(owner) !== "connected" || !this.#client || signal.aborted) throw new OAuthSessionError("unavailable");
     const client = this.#client;
     const abort = AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(Math.min(15_000, this.#connection.timeoutMs))]);
-    const operation = wait(client.callTool({ name: tool.name, arguments: input },
-      { signal: abort, timeout: 15_000, toolDefinition: tool }), abort);
+    const operation = this.#authorizedRequest(client, abort,
+      () => client.callTool({ name: tool.name, arguments: input },
+        { signal: abort, timeout: 15_000, toolDefinition: tool }));
     this.#checks.add(operation);
     try {
       const result = await operation;
@@ -554,11 +631,15 @@ export class RentalOAuthSession {
     // A transport-close failure cannot retain usable local credentials or skip
     // the remote revocation attempt. It still prevents claiming a clean outcome.
     try { await client?.close(); }
-    catch { this.#unknown = true; }
-    const unknown = this.#unknown;
+    catch { this.#unknown = true; this.#unknownReason = undefined; }
+    const unknown = this.#unknown || this.recovery.blocked;
     this.#lifetime = new AbortController();
     if (!credential) {
-      if (!unknown) this.#owner = undefined;
+      if (!unknown) {
+        try { await this.recovery.settle(AbortSignal.timeout(this.#connection.timeoutMs)); }
+        catch { this.#unknown = true; return { remote: "not_confirmed" }; }
+        this.#owner = undefined;
+      }
       return { remote: unknown ? "not_confirmed" : "not_required" };
     }
     const signal = AbortSignal.timeout(this.#connection.timeoutMs);
@@ -578,10 +659,16 @@ export class RentalOAuthSession {
       };
       const confirmed = await wait(revoke(), signal);
       this.#unknown = !confirmed || unknown;
-      if (!this.#unknown) { this.#owner = undefined; this.#invalid = false; }
+      if (!confirmed) this.#unknownReason = undefined;
+      if (!this.#unknown) {
+        await this.recovery.settle(signal);
+        this.#owner = undefined;
+        this.#invalid = false;
+      }
       return { remote: this.#unknown ? "not_confirmed" : "accepted" };
     } catch {
       this.#unknown = true;
+      this.#unknownReason = undefined;
       return { remote: "not_confirmed" };
     }
   }

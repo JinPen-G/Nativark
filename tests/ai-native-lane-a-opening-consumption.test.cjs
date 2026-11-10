@@ -12,8 +12,8 @@ test('actual opening partitions and recheck use current Core/readiness, not the 
   const item = current.sections.find(row => row.key === 'item_groups'); assert.ok(item);
   const still = await tools.openingActions.recheck({ key: item.key });
   assert.equal(still.status, item.status === 'readiness_check_passed' ? 'resolved' : 'still_exists');
-  const original = business.tenantReadiness.bind(business);
-  business.tenantReadiness = async (...args) => {
+  const original = business.readTenantReadiness.bind(business);
+  business.readTenantReadiness = async (...args) => {
     const out = await original(...args); return { ...out, items: out.items.filter(row => row.key !== item.key) };
   };
   assert.equal((await tools.openingActions.recheck({ key: item.key })).status, 'cannot_determine');

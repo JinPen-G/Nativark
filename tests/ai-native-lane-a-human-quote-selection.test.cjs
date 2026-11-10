@@ -154,7 +154,7 @@ test('selected quote task HTTP uses normal runner and current human decision wit
     if (mode === 'approve') {
       const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
       const modelHost = await requestBoundOriginalModelHarness('quote_clarification');
-      dependencies.core.availability = modelHost.requestDependencies.core.availability.bind(modelHost.requestDependencies.core);
+      dependencies.core.readAvailability = modelHost.requestDependencies.core.readAvailability.bind(modelHost.requestDependencies.core);
       dependencies.core.resolvePricingGroupQuoteRequest = modelHost.requestDependencies.core.resolvePricingGroupQuoteRequest.bind(modelHost.requestDependencies.core);
       dependencies.business = modelHost.requestDependencies.business;
       const modelDependencies = { ...modelHost.requestDependencies, ...dependencies };

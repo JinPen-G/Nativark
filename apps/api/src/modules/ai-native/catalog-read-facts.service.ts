@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AI_CONTRACT_DRAFT_VERSION, aiCatalogReadInputSchema, aiCatalogReadProjectionSchema, type AiCatalogReadProjection, type AiExecutionContext } from '@rental-os/shared';
+// Keep existing API-local consumers on the same public runtime/type definitions.
+export { aiCatalogReadInputSchema, aiCatalogReadProjectionSchema } from '@rental-os/shared';
+export type { AiCatalogReadProjection } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const item = z.object({ id, tenantId: id, categoryCode: z.string().min(1).max(64), code: id, name: z.string().min(1).max(191), status: z.enum(['enabled', 'disabled']), unit: z.string().min(1).max(32) }).strict();
-export const aiCatalogReadInputSchema = z.object({ limit: z.number().int().min(1).max(100),
-  cursor: id.optional(), itemGroupId: id.optional(), name: z.string().trim().min(1).max(191).optional() }).strict();
 const input = aiCatalogReadInputSchema;
 
 export type AiCatalogReadAuthority = AiBusinessReadAuthority;
@@ -16,8 +17,6 @@ export type AiCatalogReadAuthority = AiBusinessReadAuthority;
  * shape is retained for older compositions, but read() never calls it. */
 export type AiCatalogReadPort = Pick<RentalCoreService, 'listItemGroupsPage'>
   | (Pick<RentalCoreService, 'listItemGroups'> & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>);
-export interface AiCatalogReadProjection { contractVersion: typeof AI_CONTRACT_DRAFT_VERSION; requestId: string; audience: AiExecutionContext['audience']; scope: AiExecutionContext['scope']; observedAt: string; items: Array<{ id: string; code: string; name: string; categoryCode: string; status: 'enabled' | 'disabled'; unit: string }>;
-  truncated: boolean; nextCursor: string | null; configurationVersion: string; source: 'persisted_workspace_configuration'; }
 
 /** Bounded read-only projection; it does not reserve stock, calculate price or select a customer. */
 export class AiCatalogReadFactsService {
@@ -49,8 +48,12 @@ export class AiCatalogReadFactsService {
     const codes = parsed.map(result => result.data!.code);
     if (new Set(ids).size !== ids.length || new Set(codes).size !== codes.length) throw new ModelGatewayError('INVALID_RESPONSE');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
-    return { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience, scope: context.scope, observedAt: observed.toISOString(), items: parsed.map(result => ({ id: result.data!.id, code: result.data!.code, name: result.data!.name, categoryCode: result.data!.categoryCode, status: result.data!.status, unit: result.data!.unit })),
+    const projection = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience, scope: context.scope, observedAt: observed.toISOString(), items: parsed.map(result => ({ id: result.data!.id, code: result.data!.code, name: result.data!.name, categoryCode: result.data!.categoryCode, status: result.data!.status, unit: result.data!.unit })),
       truncated: page.truncated, nextCursor: page.nextCursor, configurationVersion: page.configurationVersion, source: page.source };
+    // The shared runtime closes the actual original projection, not host release.
+    const validated = aiCatalogReadProjectionSchema.safeParse(projection);
+    if (!validated.success) throw new ModelGatewayError('INVALID_RESPONSE');
+    return validated.data;
     });
   }
 }

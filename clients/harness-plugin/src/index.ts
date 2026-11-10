@@ -18,6 +18,7 @@ import { oauthHostInteraction } from "./oauth-host.js";
 import { RentalMcpTools } from "./mcp-tools.js";
 import { admitModelMaterial, hasRentalMaterial } from "./model-material.js";
 import { RentalMcpPrompts } from "./mcp-prompts.js";
+import { RentalOAuthRecovery } from "./oauth-recovery.js";
 
 /** Loader identity; not an OAuth client ID or authorization grant. */
 export const name = "rental-os";
@@ -117,18 +118,61 @@ export function apply(ctx: Context, config: Config): void {
   const lifetime = new AbortController();
   let tools: RentalMcpTools | undefined;
   let prompts: RentalMcpPrompts | undefined;
+  const recovery = new RentalOAuthRecovery();
   const session = connection && config.oauth && config.login
     ? new RentalOAuthSession(connection, config.oauth, config.login,
       (input, init) => globalThis.fetch(input, init), oauthHostInteraction(ctx, config.login.callbackMode), result => {
         ctx.logger.warn(result.remote === "not_confirmed" ? copy.revokeUnknown : copy.expired);
-      }, () => { tools?.withdraw(); prompts?.withdraw(); }) : undefined;
-  const connectedCopy = () => config.readTools?.length ? tools ? copy.toolsConnected : copy.toolsUnavailable : copy.connected;
+      }, () => { tools?.withdraw(); prompts?.withdraw(); }, recovery) : undefined;
+  if (session && config.login?.enabled) ctx.inject(["storageDomain"], inner => {
+    const opened = recovery.open(inner.storageDomain);
+    inner.effect(() => async () => {
+      const closed = await session.close();
+      if (closed.remote === "not_confirmed") inner.logger.warn(copy.revokeUnknown);
+      await opened.catch((_error: unknown) => {}); // The command reports the blocked journal separately.
+      await recovery.close();
+    });
+    return opened.catch((_error: unknown) => { inner.logger.warn(copy.loginUnknown); });
+  });
+  const connectedCopy = (agent: CommandInvocation["agent"]): string => {
+    if (!config.readTools?.length) return copy.connected;
+    switch (tools?.publication(agent)) {
+      case "published": return copy.toolsConnected;
+      case "empty": return copy.toolsEmpty;
+      default: return copy.toolsUnavailable;
+    }
+  };
+  // A live owner's coarse compatibility reason supplements, never replaces,
+  // the authorization uncertainty or local/remote disconnect distinction.
+  const failureCopy = (owner: object, text: string) => session?.unknownReason(owner) === "protocol_incompatible"
+    ? `${copy.protocolIncompatible}\n${text}` : text;
   let pending: Promise<CommandResult> | undefined;
   let boundScope: CommandInvocation["agent"] | undefined;
   let boundSession: CommandInvocation["agent"]["session"] | undefined;
   // Disconnect withdraws access, not Host history. Keep the size restriction for
   // this Session's remaining lifetime; this marker grants no business authority.
   const materialSessions = new WeakSet<CommandInvocation["agent"]["session"]>();
+  // Connection ownership exists even with no material consumers. Listen from the
+  // live Bundle context: the original Agent's scope is already disposed here.
+  if (session && config.login?.enabled) ctx.inject(["agents"], inner => {
+    inner.on("agent/disposed", ({ agent }) => {
+      if (agent !== boundScope || !boundSession) return;
+      const owner = boundSession;
+      // disconnect withdraws synchronously and owns its async drain; AgentHandle
+      // disposal does not await async event listeners in this Host version.
+      return session.disconnect(owner).then(result => {
+        if (result.remote === "not_confirmed") inner.logger.warn(copy.revokeUnknown);
+        else if (boundScope === agent && boundSession === owner) {
+          boundScope = undefined;
+          boundSession = undefined;
+        }
+      });
+    }, { global: true });
+    inner.effect(() => async () => {
+      const closed = await session.close();
+      if (closed.remote === "not_confirmed") inner.logger.warn(copy.revokeUnknown);
+    });
+  });
   ctx.inject(["llm", "agents"], inner => {
     inner.on("llm/stream", (options, next) => {
       const agent = inner.agents.currentInitiator();
@@ -136,8 +180,8 @@ export function apply(ctx: Context, config: Config): void {
       // restore credentials or the right to fetch current business facts.
       if (hasRentalMaterial(options)) {
         if (agent) materialSessions.add(agent.session);
-        admitModelMaterial(options, copy.materialUnavailable);
-      } else if (agent && materialSessions.has(agent.session)) admitModelMaterial(options, copy.materialUnavailable);
+        admitModelMaterial(options, copy.materialUnavailable, ref => inner.llm.fileRequestText(ref));
+      } else if (agent && materialSessions.has(agent.session)) admitModelMaterial(options, copy.materialUnavailable, ref => inner.llm.fileRequestText(ref));
       return next();
     });
     if (session && (config.readPrompts?.length || config.readResources?.length)) {
@@ -145,13 +189,6 @@ export function apply(ctx: Context, config: Config): void {
         agent => agent === boundScope && agent.session === boundSession,
         selectedSession => materialSessions.add(selectedSession), [...config.readResources ?? []]);
       prompts = consumer;
-      inner.on("agent/disposed", ({ agent }) => {
-        if (agent !== boundScope) return;
-        consumer.withdraw();
-        return session.disconnect(boundSession!).then(result => {
-          if (result.remote === "not_confirmed") inner.logger.warn(copy.revokeUnknown);
-        });
-      }, { global: true });
       inner.effect(() => async () => {
         const drained = consumer.close();
         if (prompts === consumer) prompts = undefined;
@@ -187,13 +224,20 @@ export function apply(ctx: Context, config: Config): void {
     });
   });
 
+  // Command outcomes are human/log-only in the original Host. This notice does
+  // not become model instructions, a consent record or an input filter.
+  const withPrivacyNotice = (handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>) =>
+    async (invocation: CommandInvocation): Promise<CommandResult> => {
+      const result = await handler(invocation);
+      return { ...result, text: [result.text, copy.privacyNotice].filter(Boolean).join("\n\n") };
+    };
   const unregister = ctx.commands.register({
     name: "rental",
     description: copy.description,
     input: { hint: copy.hint, attachments: false },
     // Even rejected arguments must not persist a token pasted after the command.
     recordInput: false,
-    handler(invocation) {
+    handler: withPrivacyNotice(invocation => {
       const action = invocation.rawInput.trim();
       const selectedPrompt = /^prompt ([A-Za-z0-9_-]{1,64})$/.exec(action)?.[1];
       const selectedResource = /^resource ([A-Za-z0-9_-]{1,64})$/.exec(action)?.[1];
@@ -204,10 +248,18 @@ export function apply(ctx: Context, config: Config): void {
       if (lifetime.signal.aborted) return { kind: "error", text: copy.disposed };
       if (!connection) return { kind: "error", text: copy.unconfigured };
       if (action === "" || action === "status") {
-        const state = session?.status(invocation.agent.session);
-        return { kind: "success", text: state === "connected" ? connectedCopy()
-          : state === "connecting" ? copy.connecting : state === "unknown" ? copy.loginUnknown
-            : state === "other_session" ? copy.otherSession : state === "expired" ? copy.expired : copy.configured };
+        const status = (): CommandResult => {
+          const state = session?.status(invocation.agent.session);
+          if (session && config.login?.enabled && !recovery.ready && state !== "unknown") return { kind: "error", text: copy.recoveryUnavailable };
+          return { kind: "success", text: state === "connected" ? connectedCopy(invocation.agent)
+            : state === "connecting" ? copy.connecting : state === "unknown" ? failureCopy(invocation.agent.session, copy.loginUnknown)
+              : state === "other_session" ? copy.otherSession : state === "expired" ? copy.expired : copy.configured };
+        };
+        if (recovery.available && !recovery.ready) {
+          const signal = AbortSignal.any([lifetime.signal, invocation.signal, AbortSignal.timeout(connection.timeoutMs)]);
+          return recovery.waitReady(signal).then(status, status);
+        }
+        return status();
       }
       if (action === "resources" || selectedResource) {
         if (!prompts || !config.readResources?.length) return { kind: "error", text: copy.resourceUnavailable };
@@ -220,40 +272,57 @@ export function apply(ctx: Context, config: Config): void {
       if (action === "login" || action === "disconnect"
         || (action === "check" && session && session.status(invocation.agent.session) !== "disconnected")) {
         if (!session) return { kind: "error", text: copy.loginDisabled };
+        if (action !== "disconnect" && recovery.blocked) return { kind: "error", text: failureCopy(invocation.agent.session, copy.loginUnknown) };
+        if (action !== "disconnect" && !recovery.available) return { kind: "error", text: copy.recoveryUnavailable };
         if (action !== "disconnect" && config.readTools?.length && !tools) return { kind: "error", text: copy.toolsUnavailable };
         if (action !== "disconnect" && config.readPrompts?.length && !prompts) return { kind: "error", text: copy.promptUnavailable };
         if (action !== "disconnect" && config.readResources?.length && !prompts) return { kind: "error", text: copy.resourceUnavailable };
-        if ((tools || prompts) && boundScope && invocation.agent !== boundScope) return { kind: "error", text: copy.otherSession };
+        if (boundScope && (invocation.agent !== boundScope || invocation.agent.session !== boundSession)) return { kind: "error", text: copy.otherSession };
         const owner = invocation.agent;
         const originalSession = owner.session;
         const signal = AbortSignal.any([lifetime.signal, invocation.signal]);
+        const currentAgent = () => {
+          const registry = ctx.get("agents");
+          return !signal.aborted && owner.session === originalSession && (!registry || registry.get(owner.id) === owner);
+        };
+        if (action !== "disconnect" && !currentAgent()) return { kind: "error", text: copy.otherSession };
+        if (action === "login" && !boundScope) {
+          // Capture before discovery/consent so disposal also cancels a pending
+          // exchange; binding only after success leaves that request ownerless.
+          boundScope = owner;
+          boundSession = originalSession;
+        }
         return (action === "login"
           ? session.login(originalSession, signal).then(async (): Promise<CommandResult> => {
-            if (owner.session !== originalSession || signal.aborted) throw new OAuthSessionError("other_session");
-            boundScope = owner;
-            boundSession = originalSession;
+            if (!currentAgent() || session.status(originalSession) !== "connected") throw new OAuthSessionError("other_session");
             materialSessions.add(originalSession);
             await tools?.synchronize(invocation.agent, signal);
-            return { kind: "success", text: connectedCopy() };
+            return { kind: "success", text: connectedCopy(invocation.agent) };
           })
           : action === "check"
-            ? session.check(invocation.agent.session, signal).then(async (): Promise<CommandResult> => {
-              if (tools && invocation.agent !== boundScope) throw new OAuthSessionError("other_session");
+            ? session.check(originalSession, signal).then(async (): Promise<CommandResult> => {
+              if (!currentAgent() || session.status(originalSession) !== "connected") throw new OAuthSessionError("other_session");
               await tools?.synchronize(invocation.agent, signal);
-              return { kind: "success", text: connectedCopy() };
+              return { kind: "success", text: connectedCopy(invocation.agent) };
             })
           : session.disconnect(originalSession).then((result): CommandResult => {
             if (session.status(originalSession) === "disconnected") { boundScope = undefined; boundSession = undefined; }
             return {
               kind: result.remote === "not_confirmed" ? "error" : "success",
-              text: result.remote === "accepted" ? copy.revoked : result.remote === "not_confirmed" ? copy.revokeUnknown : copy.disconnected,
+              text: result.remote === "accepted" ? copy.revoked : result.remote === "not_confirmed"
+                ? failureCopy(originalSession, copy.revokeUnknown) : copy.disconnected,
             };
           }))
           .catch((error: unknown): CommandResult => {
-            if (invocation.agent === boundScope) tools?.withdraw();
+            if (invocation.agent === boundScope) {
+              tools?.withdraw();
+              if (session.status(originalSession) === "disconnected") { boundScope = undefined; boundSession = undefined; }
+            }
             return { kind: "error", text: error instanceof OAuthSessionError
               ? error.code === "other_session" ? copy.otherSession : error.code === "busy" ? copy.busy
-                : error.code === "unknown" ? copy.loginUnknown : error.code === "disabled" ? copy.loginDisabled : copy.loginFailed
+                : error.code === "unknown" || session.status(invocation.agent.session) === "unknown"
+                  ? failureCopy(invocation.agent.session, copy.loginUnknown) : error.code === "disabled" ? copy.loginDisabled
+                    : error.code === "denied" ? copy.loginDenied : copy.loginFailed
               : tools ? copy.toolsUnavailable : copy.loginFailed };
           });
       }
@@ -277,7 +346,7 @@ export function apply(ctx: Context, config: Config): void {
         });
       pending = operation.finally(() => { pending = undefined; });
       return pending;
-    },
+    }),
   });
 
   // Registries also own their disposer. This combined teardown explicitly stops

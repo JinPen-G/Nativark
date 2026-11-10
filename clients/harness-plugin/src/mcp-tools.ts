@@ -70,10 +70,9 @@ export class RentalMcpTools {
       }, { global: true });
       this.#scope.ctx.on("agent/disposed", ({ agent: disposed }) => {
         if (disposed === agent) {
+          // The Bundle owns connection disposal, including OAuth-only sessions.
           this.withdraw();
-          return this.connection.disconnect(session).then(result => {
-            if (result.remote === "not_confirmed") this.ctx.logger.warn(this.failure);
-          });
+          return;
         }
         const child = this.#children.get(disposed);
         if (child) {
@@ -134,6 +133,17 @@ export class RentalMcpTools {
     // Unsupported schemas reject; never drop constraints to fit the Host subset.
     assertSupportedJsonSchema(tool.inputSchema);
     assertSupportedJsonSchema(tool.outputSchema);
+  }
+
+  /** Read the last complete LOCAL registration, not current server business rights.
+   * @param agent - exact live owner and Session; other owners get unavailable.
+   * @returns published, a verified empty generation, or unavailable after withdrawal
+   * or while synchronization is pending. No discovery, refresh or model runs. */
+  publication(agent: Agent): "published" | "empty" | "unavailable" {
+    if (this.#closed || this.#pending || !this.#generation || this.#generation.signal.aborted
+      || this.#agent !== agent || this.#session !== agent.session
+      || this.ctx.get("agents")?.get(agent.id) !== agent || this.connection.status(agent.session) !== "connected") return "unavailable";
+    return this.#names.length === 0 ? "empty" : "published";
   }
 
   /** Owner cancellation precedes this drain, so dependencies survive until calls settle. */

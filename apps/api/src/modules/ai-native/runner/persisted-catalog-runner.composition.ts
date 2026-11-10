@@ -40,12 +40,12 @@ type ReadonlyRunnerDependencies = {
   db: PrismaClient;
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  core: Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
+  core: Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'readAvailability' | 'getOrder'>>;
   memberships?: AiMembershipCandidateReadPort;
   /** Same current Core configuration producer as the original diagnostic
    * composition, supplied by the server host rather than a task payload. */
   diagnosticCore?: ConstructorParameters<typeof AiGuardedQuoteCoreContextSource>[0];
-  business?: Pick<RentalBusinessService, 'tenantReadiness'>;
+  business?: Pick<RentalBusinessService, 'readTenantReadiness'>;
   reports?: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   /** Optional server-owned original request check. It is an additional
    * constraint, never a replacement for Task or business authorization. */
@@ -57,7 +57,7 @@ type ReadonlyRunnerDependencies = {
 export function composePersistedCatalogTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'listItemGroupsPage'> }) {
   return composeReadonly(input, 'rental.catalog.search');
 }
-export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'availability'> }) {
+export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'readAvailability'> }) {
   return composeReadonly(input, 'rental.availability.check');
 }
 /** Explicit server-selected read step. A model candidate alone neither calls
@@ -72,7 +72,7 @@ export function composePersistedMembershipCandidateTaskRunner(input: ReadonlyRun
   return composeReadonly(input, 'membership.customer.resolve');
 }
 export function composePersistedOpeningTaskRunner(input: ReadonlyRunnerDependencies & {
-  diagnosticCore: NonNullable<ReadonlyRunnerDependencies['diagnosticCore']>; business: NonNullable<ReadonlyRunnerDependencies['business']>
+  business: NonNullable<ReadonlyRunnerDependencies['business']>
 }) {
   return composeReadonly(input, 'tenant.opening.diagnose');
 }
@@ -222,17 +222,17 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
   if (typeof input?.guard?.canActivate !== 'function'
     || (tool === 'membership.customer.resolve'
       ? typeof input?.memberships?.listPersonalOptions !== 'function' || typeof input?.memberships?.listPersonalOptionsPage !== 'function'
-      : tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
-        ? !input?.diagnosticCore || (tool === 'tenant.opening.diagnose'
-          ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getBoundedOperationReport) !== 'function'
+      : tool === 'tenant.opening.diagnose' ? typeof input?.business?.readTenantReadiness !== 'function'
+      : tool === 'operations.risks.list'
+        ? !input?.diagnosticCore || typeof input?.reports?.getBoundedOperationReport !== 'function'
         : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroupsPage
-        : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
+        : tool === 'rental.availability.check' ? typeof input?.core?.readAvailability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, input.wall, tool);
   const route = new AiBusinessReadRouteAuthority(input.guard, input.authorization.credentials, input.wall);
   // Validate the real configuration producer without reading configuration or
   // granting a policy during inert construction.
-  if (tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list') {
+  if (tool === 'operations.risks.list') {
     new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, route);
   }
   const commands: AiTaskRunnerRepositoryCommandFactory = {
@@ -260,10 +260,10 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             if (signal.aborted || identity(context) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return read(context);
           }) };
-        const diagnosticContext = tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
+        const diagnosticContext = tool === 'operations.risks.list'
           ? new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, boundAuthority) : undefined;
         const result = tool === 'tenant.opening.diagnose'
-          ? await new AiOpeningReadFactsService(input.business!, diagnosticContext!,
+          ? await new AiOpeningReadFactsService(input.business!,
             new AiDiagnosticRouteAuthority(boundAuthority), input.wall).read(aiOpeningReadInputSchema.parse(stored.input), stored.context)
           : tool === 'operations.risks.list'
             ? await new AiRiskReadFactsService(input.reports!, {
@@ -277,7 +277,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
           ? await new AiCatalogReadFactsService({ listItemGroupsPage: input.core.listItemGroupsPage!.bind(input.core) }, boundAuthority, input.wall)
             .read(aiCatalogReadInputSchema.parse(stored.input))
           : tool === 'rental.availability.check'
-            ? await new AiAvailabilityReadFactsService({ availability: input.core.availability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
+            ? await new AiAvailabilityReadFactsService({ readAvailability: input.core.readAvailability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
             : await new AiOrderReadFactsService({ getOrder: input.core.getOrder!.bind(input.core) },
               new AiOrderRouteContextAuthority(input.guard, input.authorization.credentials,
                 aiPersistedOrderExplainInputSchema.parse(stored.input).input.orderId, input.wall), input.wall).read(stored.context);

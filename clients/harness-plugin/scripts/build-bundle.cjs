@@ -31,6 +31,7 @@ function resolveToolchain(manifest, harnessRoot) {
   const anchors = harnessRoot ? [
     "apps/cli/package.json", "packages/interaction/commands/package.json",
     "packages/mcp/mcp-client/package.json", "packages/bundle/web-app/package.json",
+    "packages/bundle/base/package.json",
   ].map(file => path.join(path.resolve(harnessRoot), file)) : [path.join(pluginRoot, "package.json")];
   const resolvers = anchors.map(file => createRequire(file));
   const locate = name => {

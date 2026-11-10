@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiExecutionContext, RentalCategoryCode, RentalCurrency } from '@rental-os/shared';
-import type { RentalBusinessService, BusinessContext } from '../../rental-core/rental-business.service';
+import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { RentalReportReadLimitError, type RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
@@ -46,18 +46,19 @@ function observed(clock: () => Date) {
 
 /** Internal bounded projection; neither an enabled handler nor an HTTP DTO. */
 export class AiOpeningReadFactsService {
-  constructor(private readonly business: Pick<RentalBusinessService, 'tenantReadiness'>,
-    private readonly context: { current(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<BusinessContext> },
+  constructor(private readonly business: Pick<RentalBusinessService, 'readTenantReadiness'>,
     private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
-    requireMethod(business, 'tenantReadiness'); requireMethod(context, 'current'); requireMethod(authority, 'withRead');
+    requireMethod(business, 'readTenantReadiness'); requireMethod(authority, 'withRead');
   }
   async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiOpeningReadInputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('opening', input.data, async context => {
       assertAiReadContextBinding(context, expectedContext);
-      const scope = workspace(context), businessContext = await this.context.current(scope);
-      const parsed = readiness.safeParse(await this.business.tenantReadiness(scope.tenantId, businessContext));
+      const scope = workspace(context);
+      // Opening does not need a quote context: the business reader obtains
+      // bounded persisted metadata and applies the original nine-item decision.
+      const parsed = readiness.safeParse(await this.business.readTenantReadiness(scope.tenantId));
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId
         || parsed.data.items.length > input.data.limit || new Set(parsed.data.items.map(x => x.key)).size !== parsed.data.items.length)
         throw new ModelGatewayError('INVALID_RESPONSE');

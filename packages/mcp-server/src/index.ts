@@ -11,6 +11,7 @@ import {
   OAuthError,
   OAuthErrorCode,
   requireBearerAuth,
+  readRequestBody,
 } from "@modelcontextprotocol/server";
 
 import { ResourceAuthorizationError } from "./resource-authorization.js";
@@ -20,6 +21,8 @@ export type { ResourceTokenVerifier, VerifiedResourceToken } from "./resource-au
 export { createIntrospectionVerifier } from "./token-introspection.js";
 export type { IntrospectionConfiguration, IntrospectionClientAuthentication } from "./token-introspection.js";
 import { registerReadTools, captureReadTools } from "./read-tools.js";
+import { originalMcpProtocolOperations } from './protocol-traffic.js';
+import type { McpProtocolTraffic } from './protocol-traffic.js';
 import type { McpReadAuthorization, McpReadTools } from "./read-tools.js";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { releasedInstructions } from "./instructions.js";
@@ -45,6 +48,8 @@ export interface ProtectedMcpConfig {
   instructions?: McpInstructionsProvider;
   prompts?: McpPromptsProvider;
   resources?: McpResources;
+  /** Original authenticated discovery-rate producer; never header classification. */
+  protocolTraffic?: McpProtocolTraffic;
 }
 
 export interface ProtectedMcpEndpoint {
@@ -130,7 +135,19 @@ export function createProtectedMcpEndpoint(
   const instructionsProvider = instructions ? Object.freeze({ read: instructions.read.bind(instructions) }) : undefined;
   const promptsProvider = prompts ? Object.freeze({ list: prompts.list.bind(prompts), read: prompts.read.bind(prompts) }) : undefined;
   const resourcesProvider = config.resources ? captureResources(config.resources) : undefined;
-  const boundedOutput = readTools !== undefined || instructionsProvider !== undefined || promptsProvider !== undefined || resourcesProvider !== undefined;
+  if (config.protocolTraffic !== undefined && typeof config.protocolTraffic?.consume !== 'function') throw new TypeError('Original protocol traffic source required');
+  const protocolTraffic = config.protocolTraffic === undefined ? undefined : Object.freeze({ consume:config.protocolTraffic.consume.bind(config.protocolTraffic) });
+  const preparing = new Set<Promise<unknown>>();
+  const prepared = async <T>(work: Promise<T>, signal: AbortSignal): Promise<T> => {
+    preparing.add(work);void work.then(()=>preparing.delete(work),()=>preparing.delete(work));
+    let onAbort=()=>{};
+    try {
+      return await Promise.race([work,new Promise<T>((_resolve,reject)=>{
+        onAbort=()=>reject(new ResourceAuthorizationError('unavailable'));signal.addEventListener('abort',onAbort,{once:true});if(signal.aborted)onAbort();
+      })]);
+    } finally { signal.removeEventListener('abort',onAbort); }
+  };
+  const boundedOutput = readTools !== undefined || instructionsProvider !== undefined || promptsProvider !== undefined || resourcesProvider !== undefined || protocolTraffic !== undefined;
   const handler = createMcpHandler(async context => {
     const authorization = context.authInfo ? identities.get(context.authInfo) : undefined;
     if (context.authInfo && !authorization) throw new ResourceAuthorizationError("unavailable");
@@ -253,10 +270,23 @@ export function createProtectedMcpEndpoint(
       const authorization = identities.get(auth);
       if (!authorization) return noStore(reply(503, "authorization_unavailable"));
       if (!boundedOutput) return noStore(await handler.fetch(request, { authInfo: auth }));
+      // Build the serving Request BEFORE consuming its body. The same raw parsed
+      // object goes back to SDK validation/list/era handling through public options.
       const readRequest = new Request(request, { signal: deadline });
+      let parsedBody: unknown, parsed = false;
+      if (protocolTraffic) {
+        try {
+          const body = await prepared(readRequestBody(readRequest, maxRequestBytes), deadline);
+          if (body.tooLarge) return noStore(reply(413,'request_too_large'));
+          try { parsedBody=JSON.parse(body.text); } catch { return noStore(reply(400,'invalid_request')); }
+          parsed=true;const operations=originalMcpProtocolOperations(parsedBody);
+          if (operations.length) await prepared(protocolTraffic.consume(authorization,operations,deadline),deadline);
+          if (deadline.aborted || closed) throw new ResourceAuthorizationError('unavailable');
+        } catch { return noStore(reply(503,'protocol_traffic_unavailable')); }
+      }
       let releaseAbort: () => void = () => {};
       const serve = async () => {
-        const response = await handler.fetch(readRequest, { authInfo: auth });
+        const response = await handler.fetch(readRequest, { authInfo: auth, ...(parsed ? { parsedBody } : {}) });
         const declared = response.headers.get("content-length");
         if (deadline.aborted || (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > 65_536))) {
           await response.body?.cancel();
@@ -316,7 +346,7 @@ export function createProtectedMcpEndpoint(
       if (closing) return closing;
       closed = true;
       shutdown.abort();
-      closing = handler.close();
+      closing = Promise.all([handler.close(),Promise.allSettled([...preparing])]).then(()=>{});
       return closing;
     },
   };

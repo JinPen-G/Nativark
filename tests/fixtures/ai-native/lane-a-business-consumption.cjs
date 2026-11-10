@@ -15,6 +15,12 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
   const config = stores.createAbsorbingConfigStore();
   config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode, isDefault: true }];
   const facts = stores.createAbsorbingFactStore();
+  // Explicit fixture rows from the original spies, not a bounded SQL emulator.
+  // The real repository's query bounds/ownership have separate assertions.
+  facts.readAvailabilitySnapshot = async () => {
+    const [reservations, assets, stocks] = await Promise.all([facts.activeReservations(), facts.listAssets(), facts.listStockBalances()]);
+    return { reservations, assets, stocks };
+  };
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
   // Declared synthetic pagination endpoint over the SAME seeded synthetic
   // catalog (not a Prisma integrity simulation): deterministic id-ordered
@@ -54,7 +60,28 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
     if (!tx || tenantId !== 'tenant_001') throw Error('synthetic customer lock scope mismatch');
     return [membershipRows.customer, ...membershipRows.corporateCustomers].some(row => row.id === customerId && row.tenantId === tenantId);
   } });
-  const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), businessFacts, config,
+  // Opening tests get declared minimal persisted-source samples, independent
+  // of seeded quote state. These fixtures do not simulate SQL or persistence.
+  config.readReadinessCoreFacts = async () => ({ tenantId: 'tenant_001', workspaceId: 'workspace-a', categoryCode,
+    timeZone: 'Asia/Shanghai', enabledItemGroupCount: 1, serviceableLocationCount: 1,
+    pricingGroups: [{ id: 'opening-pricing-sample', name: 'Synthetic pricing group' }] });
+  const { RENTAL_OPENING_TERMINOLOGY_FIELDS } = require('../../../apps/api/src/modules/rental-core/rental-core-config.repository');
+  const syntheticProfile = core.getProfile('tenant_001'), syntheticSettings = core.getBusinessSettings('tenant_001');
+  const openingConfiguration = { tenantId: 'tenant_001', workspaceId: 'workspace-a', categoryCode,
+    profile: { configVersion: syntheticProfile.configVersion, terminology: Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field => [field, syntheticProfile.terminology[field]])) },
+    settings: { configVersion: syntheticSettings.configVersion, pricing: { currency: syntheticSettings.pricing.currency,
+      enabledUnits: [...syntheticSettings.pricing.enabledUnits], defaultUnit: syntheticSettings.pricing.defaultUnit },
+      fulfillment: { enabledModes: [...syntheticSettings.fulfillment.enabledModes] } },
+    groups: core.listItemGroups('tenant_001').map(({ id, code, status, inventoryMode, unit }) => ({ id, code, status, inventoryMode, unit })),
+    pricingGroups: core.listPricingGroups('tenant_001').map(({ id, code, status, version }) => ({ id, code, status, version })),
+    locations: core.listLocations('tenant_001').map(({ id, code, status, capabilities }) => ({ id, code, status, capabilities })),
+    truncated: { groups: false, pricingGroups: false, locations: false }, enabledItemGroupCount: 1, enabledLocationCount: 1 };
+  config.readOpeningConfigurationFacts = async () => structuredClone(openingConfiguration);
+  const businessConfig = stores.createAbsorbingBusinessConfigStore();
+  businessConfig.readReadinessBusinessFacts = async () => ({ tenantId: 'tenant_001', workspaceId: 'workspace-a',
+    ruleVersions: [], publishedCalendarYears: [], pricedGroupIds: ['opening-pricing-sample'],
+    operationsAccounts: 0, hasActiveRole: false, priceVersion: null });
+  const business = new RentalBusinessService(businessConfig, businessFacts, config,
     undefined,undefined,undefined,undefined,undefined,undefined,withMembership?memberships:undefined);
   await business.onApplicationBootstrap();
   const reports = new RentalWorkspaceReportRepository({ rentalOrder: { groupBy: async () => [], aggregate: async () => ({ _sum: {} }), findMany: async () => [] }, rentalAsset: { groupBy: async () => [] }, rentalStockBalance: { aggregate: async () => ({ _sum: {} }) } });
@@ -68,5 +95,5 @@ exports.setup = async (categoryCode = 'camera', withMembership = false) => {
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name };
   const units = await tools.quote.candidates.prepare(candidate);
   candidate.items[0].pricingUnit = units.clarifications.find(row => row.field === 'items.0.pricingUnit').candidates[0].id;
-  return { h, tools, core, business, businessFacts, candidate, memberships, membershipRows, reports, facts, group, location };
+  return { h, tools, core, business, businessFacts, candidate, memberships, membershipRows, reports, facts, group, location, openingConfiguration };
 };

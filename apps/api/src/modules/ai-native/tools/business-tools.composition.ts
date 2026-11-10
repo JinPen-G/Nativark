@@ -18,6 +18,7 @@ import { AiOrderPaymentFactsService, type AiOrderPaymentReadPort } from './order
 import { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 import { AiOrderNextStepsService } from './order-next-steps.service';
 import { AiOpeningActionListService } from './opening-action-list.service';
+import { AiGuardedOpeningConfigurationSource } from './opening-configuration.source';
 import { AiQuoteBusinessPreparationService } from './quote-business-preparation.service';
 import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -38,11 +39,11 @@ import { z } from 'zod';
 export function composeAiAuthorizedBusinessTools(input: {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiOrderRouteCredentialSource;
-  core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
-    | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
+  core: Pick<RentalCoreService, 'listItemGroups' | 'readAvailability' | 'getOrder' | 'getProfile'
+    | 'getWorkspaceCategory' | 'getBusinessSettings' | 'readOpeningConfiguration' | 'listPricingGroups'
     | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage' | 'queryOrders'>>;
   memberships: AiMembershipCandidateReadPort;
-  business: Pick<RentalBusinessService, 'createQuote' | 'loadQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
+  business: Pick<RentalBusinessService, 'createQuote' | 'loadQuote' | 'readTenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   payments?: AiOrderPaymentReadPort;
   /** Human Core preview only; absence never falls back to AI pricing. */
@@ -70,12 +71,12 @@ export function composeAiAuthorizedBusinessTools(input: {
         getOrder: input.core.getOrder.bind(input.core), listInspectionsPage: input.core.listInspectionsPage.bind(input.core)
       }, new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock, 'inspections'), input.clock) : undefined);
   };
-  if (typeof input.core.availability !== 'function' || typeof input.core.getOrder !== 'function'
+  if (typeof input.core.readAvailability !== 'function' || typeof input.core.getOrder !== 'function'
     || typeof input.memberships?.listPersonalOptions !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const reads = { catalog: new AiCatalogReadFactsService(input.core, routes, input.clock),
     availability: new AiAvailabilityReadFactsService(input.core, routes, input.clock),
     membershipCandidates: new AiMembershipCandidateReadFactsService(input.memberships, routes, input.clock) };
-  const opening = new AiOpeningReadFactsService(input.business, context, diagnostics, input.clock);
+  const opening = new AiOpeningReadFactsService(input.business, diagnostics, input.clock);
   const quote = composeAiGuardedQuoteTools({ core: input.core, business: input.business, routes,
     readers: { catalog: reads.catalog, members: reads.membershipCandidates }, clock: input.clock });
   const quotePreparation = new AiQuoteBusinessPreparationService(quote.candidates, reads.availability, routes,
@@ -86,7 +87,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     category: async scope => (await context.current(scope)).category.code,
     currency: async scope => (await context.current(scope)).settings.pricing.currency
   }, diagnostics, input.clock);
-  const openingActions = new AiOpeningActionListService(opening, risks, context, diagnostics);
+  const openingActions = new AiOpeningActionListService(opening, risks, new AiGuardedOpeningConfigurationSource(input.core, routes), diagnostics);
   const orderPreparation = (serverOrderId: string) => new AiOrderExplanationPreparationService(
     new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
     explanation(serverOrderId), nextSteps(serverOrderId));
@@ -126,9 +127,9 @@ export function composeAiAuthorizedBusinessTools(input: {
     },
     opening, risks,
     openingActions,
-    openingSection: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).readSection(value),
-    openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
-    riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
+    openingSection: (value: unknown) => openingActions.readSection(value),
+    openingSectionDifferences: (value: unknown) => openingActions.prepareSections(value),
+    riskRecheck: (value: unknown) => openingActions.recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
       bookingIdentityOptions: (value: unknown) => reads.membershipCandidates.readBookingOptions(value),
       reconciliationAvailability: () => {
