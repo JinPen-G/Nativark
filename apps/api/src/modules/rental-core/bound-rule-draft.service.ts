@@ -6,10 +6,11 @@
 import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, type PrismaClient, type OperationLog } from '@prisma/client';
 import { z } from 'zod';
+import { isRentalCategoryCode } from '@rental-os/shared';
 import { getRequestIdentity } from '../../common/request-identity';
 import type { BusinessContext, RentalBusinessService } from './rental-business.service';
 import { requestFingerprint } from './rental-idempotency.repository';
-import { lockActiveCategoryBinding } from './category-active-write';
+import { lockCategoryContext } from './category-active-write';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -21,7 +22,7 @@ const normalizationValue = z.union([z.number().int().nonnegative().max(Number.MA
 const normalizations = z.array(z.object({ field: z.enum(['qualification.documentTypes', 'qualification.minimumValidityDays']),
   before: normalizationValue, after: normalizationValue, source: z.literal('original_core_normalization') }).strict()).max(2);
 export const boundRuleDraftCommandSchema = z.object({ targetId: id, version: id, changes,
-  categoryCode: z.enum(['camera', 'camping', 'vehicle', 'construction']), categoryVersion: id,
+  categoryCode: z.string().refine(isRentalCategoryCode), categoryVersion: id,
   changeReason: z.string().trim().min(1).max(500), operationKey: id.max(128), bindingHash: hash }).strict();
 export const boundRuleDraftOperationSchema = boundRuleDraftCommandSchema.extend({ reviewHash: hash }).strict();
 const savedSchema = z.object({ kind: z.literal('rule-bound-draft-1'), receiptId: id, operationKey: id, commandHash: hash,
@@ -59,8 +60,12 @@ export class BoundRuleDraftService {
     const receiptId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
     return { command, intent, scope, receiptId, newDraftId: `br-${digest.slice(0, 32)}`, commandHash: requestFingerprint({ scope, command }) };
   }
-  private async candidate(context: BusinessContext, target: ReturnType<BoundRuleDraftService['target']>, tx: Prisma.TransactionClient) {
+  private async candidate(context: BusinessContext, target: ReturnType<BoundRuleDraftService['target']>, tx: Prisma.TransactionClient,
+    category?: Awaited<ReturnType<typeof lockCategoryContext>>) {
     const { command, scope } = target;
+    const current = category ?? await lockCategoryContext(tx, scope.tenantId, scope.workspaceId, context);
+    if (current.definition.code !== command.categoryCode || current.definition.version !== command.categoryVersion)
+      throw new ConflictException('原规则品类采用已变化');
     const source = await tx.rentalRuleVersion.findFirst({ where: { id: command.targetId, tenantId: scope.tenantId,
       workspaceId: scope.workspaceId, version: command.version } });
     if (!source || source.id !== command.targetId || source.tenantId !== scope.tenantId || source.workspaceId !== scope.workspaceId
@@ -69,7 +74,7 @@ export class BoundRuleDraftService {
       select: { version: true }, orderBy: { version: 'asc' }, take: 1001 });
     if (versions.length > 1000) throw new ServiceUnavailableException('原规则版本集合超出完整读取上限');
     const prepared = this.business.prepareBoundRuleDraft(scope.tenantId, context, source, command.changes, versions, command.changeReason);
-    const reviewHash = requestFingerprint({ scope, command: target.intent,
+    const reviewHash = requestFingerprint({ scope, command: target.intent, categoryBinding: current.binding,
       source: canonical(source), candidateConfigFingerprint: prepared.preview.candidateConfigFingerprint,
       resultVersion: prepared.resultVersion, restoring: prepared.restoring });
     return { source, prepared, reviewHash };
@@ -130,12 +135,13 @@ export class BoundRuleDraftService {
     let result;
     try {
       result = await this.db.$transaction(async tx => {
-        const category = await lockActiveCategoryBinding(tx, tenantId, scope.workspaceId, undefined, command.categoryCode);
+        const category = await lockCategoryContext(tx, tenantId, scope.workspaceId, context);
+        if (category.definition.code !== command.categoryCode) throw new ConflictException('原规则品类采用已变化');
         if (category.definition.version !== command.categoryVersion || context.category.version !== command.categoryVersion)
           throw new ConflictException('原规则品类采用已变化');
         const prior = await tx.operationLog.findUnique({ where: { id: target.receiptId } });
         if (prior) { const receipt = await this.receipt(prior, target, tx); await revalidate(); return { receipt, replayed: true }; }
-        const found = await this.candidate(context, target, tx), { source, prepared } = found;
+        const found = await this.candidate(context, target, tx, category), { source, prepared } = found;
         if (found.reviewHash !== command.reviewHash) throw new ConflictException('规则完整配置或版本集合已变化，请重新核对');
         if (prepared.restoring && await tx.rentalRuleVersion.findFirst({ where: { id: target.newDraftId } })) throw new BoundRuleDraftUnknownError();
         const at = this.clock(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new ConflictException('规则提交时点不可用');
