@@ -362,6 +362,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    */
   private readonly states = new Map<string, TenantRentalState>();
   private readonly businessSettingsRevisions = new Map<string, number>();
+  /** 同空间的读取与发布按调用顺序完成，避免旧响应覆盖已采用的新配置。 */
+  private readonly configurationReadsByWorkspace = new Map<string, Promise<void>>();
   /**
    * 「租户 → 默认经营空间」与「经营空间 → 品类」。
    *
@@ -649,12 +651,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 品类以经营空间为准（需求 3）。
       const categoryCode = snapshot.workspaceCategoryCode;
       if (!categoryCode) continue;
-      // 初始化缺省及术语来自该空间绑定的不可变版本；已持久化的配置随后覆盖缺省。
-      // 已营业的动态品类也必须能重启，不能因有配置就退回四品类静态表。
-      const definition = this.categoryResolver
-        ? (await this.categoryResolver.forWorkspace(snapshot.tenantId, snapshot.workspaceId)).definition
-        : undefined;
-      const seeded = this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId), "CNY", definition);
+      // 这里只承接未装配版本解析器的内存宿主；持久化空间已在上面读取锁定快照。
+      const seeded = this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId), "CNY");
       const base = cached ?? seeded;
       // tenant_rental_profiles 是升级兼容用的租户级档案，只能还原默认空间。
       // 第二空间若直接套用它，会把 workspace 的 camping 等品类重新覆盖成租户
@@ -707,22 +705,29 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但缺少空间配置权威读取器");
       return undefined; // Explicit absorbing/memory stores have no DB authority.
     }
-    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId);
-    if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
-      throw new ConflictException("空间配置快照的作用域或品类不一致");
-    }
-    const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
-    const state = this.states.get(workspaceId) ?? seeded;
-    const profile = snapshot.isDefault && snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
-    const effectiveProfile = { ...structuredClone(profile), categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
-    Object.assign(state, { profile: effectiveProfile,
-      businessSettings: snapshot.businessSettings ? structuredClone(snapshot.businessSettings) : seeded.businessSettings,
-      operators: structuredClone(snapshot.operators), locations: structuredClone(snapshot.locations), itemGroups: structuredClone(snapshot.itemGroups),
-      pricingGroups: structuredClone(snapshot.pricingGroups ?? []), couponTemplates: structuredClone(snapshot.couponTemplates), inspectionTemplates: structuredClone(snapshot.inspectionTemplates),
-      sampleAssets: [], sampleStockBalances: [], sampleFactsEnsured: true, configPersisted: snapshot.hasPersistedConfig });
-    this.categoryByWorkspace.set(workspaceId, snapshot.definition.code); this.tenantByWorkspace.set(workspaceId, tenantId);
-    this.states.set(workspaceId, state);
-    return { ...snapshot, effectiveProfile: structuredClone(effectiveProfile) };
+    const previous = this.configurationReadsByWorkspace.get(workspaceId) ?? Promise.resolve();
+    const reading = previous.catch(() => undefined).then(async () => {
+      const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId);
+      if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
+        throw new ConflictException("空间配置快照的作用域或品类不一致");
+      }
+      const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
+      const state = this.states.get(workspaceId) ?? seeded;
+      const profile = snapshot.isDefault && snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
+      const effectiveProfile = { ...structuredClone(profile), categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
+      Object.assign(state, { profile: effectiveProfile,
+        businessSettings: snapshot.businessSettings ? structuredClone(snapshot.businessSettings) : seeded.businessSettings,
+        operators: structuredClone(snapshot.operators), locations: structuredClone(snapshot.locations), itemGroups: structuredClone(snapshot.itemGroups),
+        pricingGroups: structuredClone(snapshot.pricingGroups ?? []), couponTemplates: structuredClone(snapshot.couponTemplates), inspectionTemplates: structuredClone(snapshot.inspectionTemplates),
+        sampleAssets: [], sampleStockBalances: [], sampleFactsEnsured: true, configPersisted: snapshot.hasPersistedConfig });
+      this.categoryByWorkspace.set(workspaceId, snapshot.definition.code); this.tenantByWorkspace.set(workspaceId, tenantId);
+      this.states.set(workspaceId, state);
+      return { ...snapshot, effectiveProfile: structuredClone(effectiveProfile) };
+    });
+    const settled = reading.then(() => undefined, () => undefined);
+    this.configurationReadsByWorkspace.set(workspaceId, settled);
+    try { return await reading; }
+    finally { if (this.configurationReadsByWorkspace.get(workspaceId) === settled) this.configurationReadsByWorkspace.delete(workspaceId); }
   }
   /** Production business callers consume this single committed combination,
    * instead of independently combining profile/definition/cache getters. */

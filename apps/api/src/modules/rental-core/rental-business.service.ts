@@ -4193,16 +4193,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!context.categoryVersionId || context.categoryAdoptionRevision === undefined) return context;
     if (!this.configStore.loadWorkspaceSnapshot) throw new ServiceUnavailableException("缺少已版本化空间的业务配置权威读取器");
     const workspaceId = this.workspaceOf(tenantId);
-    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId,
-      { categoryVersionId: context.categoryVersionId, adoptionRevision: context.categoryAdoptionRevision });
-    if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
-      throw new ConflictException("业务配置快照的作用域或品类不一致");
-    }
-    const state = this.state(tenantId, context);
-    Object.assign(state, { pricingPlans: structuredClone(snapshot.pricingPlans), discountPlans: structuredClone(snapshot.discountPlans),
-      services: structuredClone(snapshot.services), calendars: structuredClone(snapshot.calendars), ruleVersions: structuredClone(snapshot.ruleVersions),
-      notificationTemplates: structuredClone(snapshot.notificationTemplates), configPersisted: true });
-    return context;
+    const binding = { categoryVersionId: context.categoryVersionId, adoptionRevision: context.categoryAdoptionRevision };
+    // 与启动刷新、默认配置补落共用原队列；失败不阻断后续读取，也不发布旧配置。
+    const reading = this.refreshQueue.catch(() => undefined).then(async () => {
+      const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId, binding);
+      if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
+        throw new ConflictException("业务配置快照的作用域或品类不一致");
+      }
+      const state = this.state(tenantId, context);
+      Object.assign(state, { pricingPlans: structuredClone(snapshot.pricingPlans), discountPlans: structuredClone(snapshot.discountPlans),
+        services: structuredClone(snapshot.services), calendars: structuredClone(snapshot.calendars), ruleVersions: structuredClone(snapshot.ruleVersions),
+        notificationTemplates: structuredClone(snapshot.notificationTemplates), configPersisted: true });
+      return context;
+    });
+    this.refreshQueue = reading.then(() => undefined, () => undefined);
+    return reading;
   }
 
   async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
