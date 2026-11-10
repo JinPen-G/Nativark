@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
+import type { OriginalSettingsStartAdmissionConfiguration } from '../approval-execution/settings-start-admission.composition';
 import { AI_SETTINGS_TASK_HTTP_REQUESTS, AiSettingsTaskController, settingsTaskHttpMethods,
   type SettingsTaskHttpRequests } from './settings-task.controller';
 import { AiOriginalSceneModelController } from './original-scenes.controller';
@@ -23,7 +24,7 @@ export class AiSettingsTaskHttpModule {
    * Do not mount this alongside legacy settings or the individual modules. */
   static registerOriginalLifecycle(dependencies: Parameters<typeof composeRequestBoundSettingsTaskControls>[0],
     options: Parameters<typeof composeRequestBoundSettingsTaskControls>[1],
-    approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration): DynamicModule {
+    admission?: OriginalSettingsApprovalAdmissionConfiguration): DynamicModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule,
@@ -36,9 +37,9 @@ export class AiSettingsTaskHttpModule {
         { provide: AI_SETTINGS_TASK_CREATION_REQUESTS,
           useFactory: () => composeRequestBoundSettingsTaskCreation(server, { enabled: selected.enabled, audience: selected.audience }) },
         { provide: AI_SETTINGS_TASK_CONTROL_REQUESTS,
-          useFactory: () => composeRequestBoundSettingsTaskControls(server, selected) },
+          useFactory: () => composeRequestBoundSettingsTaskControls(server, selected, admission) },
         { provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
-          useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected, approvalAdmission) }
+          useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected, admission) }
       ], exports: [AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS] };
   }
   /** Read-only original-task supply does not require a running model/plan. */
@@ -61,12 +62,13 @@ export class AiSettingsTaskHttpModule {
   /** Separate original-reference producer/start routes. Combine with creation
    * and one persisted consumer, never register competing execution drivers. */
   static registerControls(dependencies: Parameters<typeof composeRequestBoundSettingsTaskControls>[0],
-    options: Parameters<typeof composeRequestBoundSettingsTaskControls>[1]): DynamicModule {
+    options: Parameters<typeof composeRequestBoundSettingsTaskControls>[1],
+    admission?: OriginalSettingsStartAdmissionConfiguration): DynamicModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskControlController],
       providers: [{ provide: AI_SETTINGS_TASK_CONTROL_REQUESTS,
-        useFactory: () => composeRequestBoundSettingsTaskControls(server, selected) }], exports: [AI_SETTINGS_TASK_CONTROL_REQUESTS] };
+        useFactory: () => composeRequestBoundSettingsTaskControls(server, selected, admission) }], exports: [AI_SETTINGS_TASK_CONTROL_REQUESTS] };
   }
   static registerCreation(dependencies: Parameters<typeof composeRequestBoundSettingsTaskCreation>[0],
     options: Parameters<typeof composeRequestBoundSettingsTaskCreation>[1]): DynamicModule {

@@ -8,7 +8,7 @@
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
-检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`，核心提供者/初始准入/规则及日历消费者已上传 `13e1d6189`。核心13个配置token现有真实部署发布来源，见[该阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；[普通用户原读取续期](<AI Native-开发记录.md#ain-original-read-policy-20261111>)已上传 `2d9ce0543`。[关联新材料到新批准/Core订单](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)已上传 `80eeb52f5`；[有效原等待的提交/继续准入](<AI Native-开发记录.md#ain-original-input-admission-20261111>)已上传 `acfa35b4d`；[原选单审批/继续/再准备及实际TaskCenter消费](<AI Native-开发记录.md#ain-quote-approval-policy-consumer-20261111>)已上传 `6bedbdebe`。[通知设置已发布等待的批准/继续](<AI Native-开发记录.md#ain-settings-approval-policy-consumer-20261111>)已上传 `a10993dcd`，普通初次start准入仍待收口。[客户原报价预约HTTP接续和受控mini公共合同运行时](<AI Native-开发记录.md#ain-client-original-quote-booking-http-20261111>)已通过标准factory/Controller/Guard和原Core链独立冒烟，两端实际消费者仍待固定核接。实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
+检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`，核心提供者/初始准入/规则及日历消费者已上传 `13e1d6189`。核心13个配置token现有真实部署发布来源，见[该阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；[普通用户原读取续期](<AI Native-开发记录.md#ain-original-read-policy-20261111>)已上传 `2d9ce0543`。[关联新材料到新批准/Core订单](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)已上传 `80eeb52f5`；[有效原等待的提交/继续准入](<AI Native-开发记录.md#ain-original-input-admission-20261111>)已上传 `acfa35b4d`；[原选单审批/继续/再准备及实际TaskCenter消费](<AI Native-开发记录.md#ain-quote-approval-policy-consumer-20261111>)已上传 `6bedbdebe`。[通知设置已发布等待的批准/继续](<AI Native-开发记录.md#ain-settings-approval-policy-consumer-20261111>)已上传 `a10993dcd`；[普通用户首次start完整服务端生命周期](<AI Native-开发记录.md#ain-settings-initial-lifecycle-20261111>)现已独立核接，后台首次创建消费仍待补齐。[客户原报价预约HTTP接续和受控mini公共合同运行时](<AI Native-开发记录.md#ain-client-original-quote-booking-http-20261111>)已上传 `869fa6e88`，两端消费者的原读恢复问题已退回dev2修复。实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
 
 原订单人工交接、显式只读政策、首字/首卡宿主，以及原报价再准备、optional runId、订单材料、会员和日历消费者都已进入main。企业成员/门户、MCP/Harness和网站按固定快照核接，文档树已在祖先链。冻结后无新增源码/status差异，七份原稿档案哈希匹配；来源和实际归档位置见[逐树核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)。旧设计、日志和隔离产物不替代运行依赖或业务验收。
 
@@ -21,8 +21,8 @@
 | 位置 | 当前职责 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-15 报价再准备、TaskHumanApproval/任务中心公共消费者、AI 专项契约/装配和四册；负责独立核接、提交推送与每两项合main |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | settings等待准入两文件已固定交AI-RD；优先补原change/创建收据到普通用户明确首次start的settings专用准入，先核无其他issuer再在1-2个私有路径施工，不造AiOriginalSceneRequest、不在create/read种政策；会员姓名链读核发现保留随后处理。公共装配/TaskCenter/shared/四册归AI-RD |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 继续AIN-21/22客户本人报价两端消费者：现有四个报价准备/确认/原收据接口后端已装配，补网站/小程序api、session/host及原预约入口；使用现有host快照的allowCreate/bookingDrafts作为尝试入口条件，每步仍由原接口授权，不增Action/能力协议版本或企业代客权限 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | settings首次准入两文件已由AI-RD固定并独立通过原HTTP全生命周期；转会员姓名普通用户入口的member:manage与system:params:manage耦合缺口，先明确私有写入范围，不改已交文件。公共装配/TaskCenter/shared/四册归AI-RD |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 客户两端13文件原稿已固定；优先修两端session及对应报价组件的原读与新动作条件分离、闭合本地定位，收起材料/draft/handoff内部步骤，保留明确业务确认和原键恢复；完成后再续客户澄清/等待输入。其余已交文件由AI-RD持有，不增Action/能力协议版本或企业代客权限 |
 | `D:/工作文件/rental-OS`／`main` | 仅作跨专项整合入口；当前PM处理环境/治理修复，合并串行；各专项开发继续，保留所有已核及未核WIP |
 
 三人的本轮持续目标均已建立为 active。阻塞或完成须立即给出具体入口、原任务号、固定对象与实际结果，由 AI-RD 决定解决者或接续任务。shared 总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule 等跨专项公共文件须与 PM 协调唯一作者；Core交易、资金和品类事实由 Core 专项提供，AI 不重建这些业务权威。
@@ -36,7 +36,7 @@
 3. **原AIN-25：** 真实首字/首卡组件及关闭、重开、React效果重放代码已回收，一组离线宿主冒烟通过；真实浏览器可见性、完整场景、容量/SLO、队列/背压/公平性/告警仍需原门槛。客户端报告不成为经营或计费事实；原11同账与累计资源要求保持。
 4. **其余原任务：** 05→06→07完整供应商/能力/往返及故障前置、12/13～16完整Agent和多角色资料隔离、17～28可靠事件/知识隐私/员工与平台治理/组合灰度及交付缺口均保留，详见[原28项摘要](<AI Native-开发记录.md#原28项当前实施摘要>)和[完整未完原文](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。不重开已有100%条目，不新增Reserved或边缘能力。
 5. **客户与ENTRY：** 原本人报价到booking_quote的标准HTTP桥、正式schema及mini受控runtime已由AI-RD核接，详见[当前阶段](<AI Native-开发记录.md#ain-client-original-quote-booking-http-20261111>)。AI-dev2正在固定网站/小程序的报价准备、确认、原键恢复、草稿选择及原预约页面消费者；Root随后独立核接，未因此宣称完整双端已验收。入口快照不授报价或建单权，unknown只读取原定位，保留普通预约；新桥的操作读取只回材料定位、不回Action。六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网及真实设备仍需原范围。详见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)，不以局部绿色加分。
-6. **当前核心准入接线：** 初始CAS参加者已接模型明确start、新规则R1准备和新材料关联任务；ordinary-read、有效WAITING_INPUT、原选单订单批准/继续/再准备及原notifications确认等待的3/5项准入均已完成相应实际消费核接。TaskCenter明确写动作先核当前本人原来源，随后进入正常政策读取，纯读取不签；真实过期、已消费或unknown不重做。剩余已证实缺口是settings初次start：原controls先读read_metadata，管理configurePolicy不能当普通用户的显式初始issuer。由AI-dev1补原change/创建收据绑定，AI-RD接公开入口；不得据已seed政策的等待夹具声称初始生命周期完成。
+6. **当前核心准入接线：** 初始CAS参加者已接模型明确start、新规则R1准备和新材料关联任务；ordinary-read、有效WAITING_INPUT、原选单订单批准/继续/再准备及原notifications确认等待的3/5项准入均已完成相应实际消费核接。TaskCenter明确写先核当前本人原来源，纯读取不签；真实过期、已消费或unknown不重做。settings首次start现已接原创建/change收据，零预置目标政策的公开Controller/Guard链通过8+3+5 CAS及一次Core设置提交，见[本片记录](<AI Native-开发记录.md#ain-settings-initial-lifecycle-20261111>)。下一缺口是后台原通知变更准备/创建/start消费者，沿既有开业/配置入口接入；会员普通姓名入口由dev1续做，不据服务端片宣布整个AIN-14/16完成。
 
 以上保留原任务范围、编号、依赖和验收；恢复功能施工须沿负责人当次授权。每个完整核心切片只做必要定向冒烟和类型检查，跨原G1～G4门槛后维护唯一任务表；未跨档的缺口留记录，不能把合并或档案数量当100%。
 

@@ -15,6 +15,8 @@ import { prepareOriginalQuoteApprovalAdmission, prepareTaskCenterQuoteApprovalAd
   type OriginalQuoteApprovalAdmissionConfiguration, type TaskCenterQuoteApprovalIntent } from '../task-approval-admission.composition';
 import { prepareOriginalSettingsApprovalAdmission, prepareTaskCenterSettingsApprovalAdmission,
   type OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
+import { prepareOriginalSettingsStartAdmission,
+  type OriginalSettingsStartAdmissionConfiguration } from '../approval-execution/settings-start-admission.composition';
 import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
@@ -420,10 +422,12 @@ export function composeRequestBoundSettingsTaskCreation(
 }
 
 /** Current original creation receipt -> explicit owner policy management/start.
- * No policy seed, caller permission list, lease or direct business commit. */
+ * An explicitly configured initial issuer runs only on start. Creation and
+ * reads do not seed policies; the original host owns leases/business work. */
 export function composeRequestBoundSettingsTaskControls(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
-  options: AiOriginalTaskActionPolicyOptions & { host: AiTaskApplicationHost }) {
+  options: AiOriginalTaskActionPolicyOptions & { host: AiTaskApplicationHost },
+  startAdmission?: OriginalSettingsStartAdmissionConfiguration) {
   if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const templates = freezeOriginalInput(z.array(z.object({
     operation: z.string().refine(value => taskActionPolicyOperations.includes(value)),
@@ -544,6 +548,10 @@ export function composeRequestBoundSettingsTaskControls(
       const parsed = reference.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, parsed.data, async (root, value) => {
+        // The original creation/change receipt authorizes this explicit initial
+        // admission. Keep its possible CAS writes outside the read-only wait.
+        if (startAdmission) await prepareOriginalSettingsStartAdmission(root.input, reference.parse(value),
+          { ...startAdmission, maximumAdmissionMs: Math.min(ttlMs, startAdmission.maximumAdmissionMs ?? ttlMs) }, signal);
         const { found, hostRoot } = await waitForTaskApplicationDependency(async () => {
           const input = reference.parse(value), found = await target(root, request, input, signal);
           const authorization = composePersistedTaskAuthorization(root.input);

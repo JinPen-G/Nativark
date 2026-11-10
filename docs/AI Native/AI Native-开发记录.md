@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-settings-initial-lifecycle-20261111"></a>
+## 原通知任务的普通用户首次启动（2026-11-11）
+
+客户原报价HTTP接续/shared/runtime阶段已提交并推送 `869fa6e88a98fa4d775a48ebf2f5218c69ba3284`，远端已核。本片继续原AIN-14/16：此前原controls.start先要求read_metadata，普通用户只有创建收据而没有初始政策时无法进入。AI-dev1的[初始准入应用](../../apps/api/src/modules/ai-native/approval-execution/settings-start-admission.application.ts)和[CAS权威](../../apps/api/src/modules/ai-native/approval-execution/settings-start-admission.authority.ts)已由负责人固定并独立验证，blob分别为 `4afeff83fbad0f9d4a139a572a1e22533d5fec21`、`47cb0c801a4dcbe492d9767378d76b2a57163487`。只接受原Core变更和创建收据绑定的未动QUEUED/revision1/首Run，核当前本人权限、空执行状态、Core基准、品类及真实发布开关；新政策TTL不超过配置的120秒上限、原变更或发布期限，保留已有更严格权限，claim_run最后签发。
+
+负责人新增[原start适配](../../apps/api/src/modules/ai-native/approval-execution/settings-start-admission.composition.ts)，在现有明确start进入read_metadata之前消费准入，可能写CAS的等待单独有界，不放入只读preflight。标准settings lifecycle模块把原工厂的真实执行开关同样交给初始准入；未在配置中克隆Prisma或函数，没有新增HTTP动作、种政策的读取或自动创建任务。原配置管理、运行器、批准、Core提交及收据职责保持。
+
+负责人一组标准输入冒烟session `85143`/exit0覆盖实际module、Controller、Guard和原settings fixture：目标原Task没有任何预置政策，用户持原公开入口的price:manage而没有system:params:manage；首次start签8个CAS并进入确认等待，真实推进120001ms后批准签3个，再推进120001ms后继续签5个，设置仅写1次、revision由1到2、原批准仅消费1次。关闭运行、伪造changeKey及再次启动已等待Task均拒绝；创建和完成后原收据读取不改变状态。API三根及传递依赖strict/noEmit为0诊断（session `98581`/exit0）。
+
+夹具沿真实创建代码省略手工安装目标政策，内存数据库仅补schema明确的AiTask.resultRef/AiRun.inputReceiptId默认null；没有改生产检查或受控fixture文件。首次完整公开入口组exit1：原底层fixture仅持rules:manage，而原HTTP门槛是price:manage；使用正式价格管理角色后保留全部断言复验通过，没有放宽Guard。首个命令SHA256为 `5968611a69e44b8d0cce0612224c2e7ee3b21e1672a014c6092dbaf5eba7f123`，修正及输出见本对话工具记录。验证审计0、任务临时目录从未创建；Core存储leaf沿原带baseRevision/baseHash检查的离线替身，不代替真实MySQL、浏览器或外部服务验收。
+
+该片补齐普通用户的标准服务端初始生命周期，未声称后台已有完整通知变更创建入口。源码目前只有TaskHumanApproval消费通知差异，尚未找到后台对原prepare-change/create-task/start-original的实际消费，下一步沿现有开业/配置入口接回；其他获准分区和原G4门槛仍未齐，唯一任务表不加分。客户两端13文件已按dev2固定blob核接来源；独立review发现原booking读取被allowCreate/到期动作条件挡住，已退回dev2修复读取与新动作分离、闭合本地定位，并收起内部准备/交接按钮。未将这批未完消费者计为已交付或合main。
+
 <a id="ain-client-original-quote-booking-http-20261111"></a>
 ## 客户原报价预约接续与小程序公共合同运行时（2026-11-11）
 
