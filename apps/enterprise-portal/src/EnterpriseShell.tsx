@@ -30,6 +30,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
     { path: "invites", zh: "邀请管理", en: "Invitations", icon: <GiftOutlined />, action: "invites:manage" }, { path: "join-requests", zh: "加入审核", en: "Join requests", icon: <SafetyCertificateOutlined />, action: "members:manage" },
     { path: "policy", zh: "使用政策", en: "Rental policy", icon: <ControlOutlined />, action: "policy:manage" },
     { path: "approvals", zh: "预约审批", en: "Approvals", icon: <FileSearchOutlined /> },
+    { path: "orders", zh: "企业订单", en: "Orders", icon: <FileSearchOutlined />, action: "orders:read" },
     { path: "exchange-approvals", zh: "换货审批", en: "Exchange approvals", icon: <FileSearchOutlined /> },
     { path: "extension-approvals", zh: "续租审批", en: "Extension approvals", icon: <FileSearchOutlined /> }
   ];

@@ -72,3 +72,104 @@ export interface EnterpriseMembersResponse {
   pageSize: number;
   total: number;
 }
+
+export const ENTERPRISE_ORDER_GROUPS = ["enterprise_paid", "personal_benefit"] as const;
+export type EnterpriseOrderGroup = typeof ENTERPRISE_ORDER_GROUPS[number];
+
+export interface EnterpriseOrdersQuery {
+  group?: EnterpriseOrderGroup;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+export type EnterpriseOrderExportQuery = Pick<EnterpriseOrdersQuery, "group" | "keyword">;
+export const ENTERPRISE_ORDER_EXPORT_LIMIT = 500;
+
+/** Original enterprise responsibility or disclosed personal-payment identity.
+ * Employee names and memberships come from the order snapshot. */
+export interface EnterpriseOrderIndex {
+  orderId: string;
+  orderNo: string;
+  group: EnterpriseOrderGroup;
+  categoryCode: string;
+  status: string;
+  employeeCustomerId: string | null;
+  employeeName: string | null;
+  corporateMembershipId: string | null;
+  startAt: string;
+  endAt: string;
+  effectiveEndAt: string | null;
+  currentReturnAt: string;
+  currency: string | null;
+  payableAmount: number | null;
+  finalPayableAmount: number | null;
+  discountAmount: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnterpriseOrderLineView {
+  lineId: string;
+  itemGroupName: string;
+  pricingGroupName: string | null;
+  quantity: number;
+  cancelledQuantity: number;
+  amount: number | null;
+}
+
+export interface EnterpriseOrderBenefitView {
+  planName: string;
+  type: string;
+  appliesTo: string;
+  appliedAmount: number | null;
+}
+
+export interface EnterpriseOrderDetail extends EnterpriseOrderIndex {
+  corporateName: string | null;
+  fulfillmentMode: string;
+  rentalAmount: number | null;
+  serviceAmount: number | null;
+  fulfillmentAmount: number | null;
+  couponAmount: number | null;
+  adjustmentAmount: number | null;
+  taxAmount: number | null;
+  /** Only contractual targets for enterprise-paid orders. Actual funding has a
+   * separate finance reader and authorization. Personal deposit facts are omitted. */
+  depositAmount: number | null;
+  preAuthAmount: number | null;
+  disclosure: { noticeVersion: string; acknowledgedAt: string } | null;
+  lines: EnterpriseOrderLineView[];
+  chargeLines: Array<{ code: string; name: string; type: string; amount: number | null }>;
+  corporateBenefits: EnterpriseOrderBenefitView[] | null;
+}
+
+export interface EnterpriseOrderReadScope {
+  apiVersion: "v1";
+  tenantCode: string;
+  corporateCustomerId: string;
+  permissionRevision: string;
+  workspaceId: string;
+  workspaceCode: string;
+  workspaceName: string;
+  coverage: "current_workspace_authorized_enterprise_orders";
+}
+
+export interface EnterpriseOrdersResponse extends EnterpriseOrderReadScope {
+  group: EnterpriseOrderGroup;
+  items: EnterpriseOrderIndex[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface EnterpriseOrderDetailResponse extends EnterpriseOrderReadScope {
+  order: EnterpriseOrderDetail;
+}
+
+/** One bounded, complete filtered snapshot delivered under current export grants. */
+export interface EnterpriseOrderExportResponse extends EnterpriseOrderReadScope {
+  group: EnterpriseOrderGroup;
+  items: EnterpriseOrderIndex[];
+  total: number;
+  maxRows: typeof ENTERPRISE_ORDER_EXPORT_LIMIT;
+}

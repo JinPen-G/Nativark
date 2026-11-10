@@ -153,7 +153,7 @@ export class EnterpriseApprovalService {
       await this.orders.assertApprovedExecutionCanClose(context.tenantId, enterpriseJson(row.request), row.executionKey, tx);
       const changed = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='closed',revision=revision+1 WHERE tenantId=${context.tenantId} AND id=${id} AND state='executing' AND executionKey=${row.executionKey}`;
       if (changed !== 1) throw this.commands.conflict();
-      const receiptChanged = await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "closed", retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${row.executionKey} AND actorUserId=${`customer:${context.customerId}`}`;
+      const receiptChanged = await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "closed", retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${row.executionKey} AND actorUserId=${`customer:${context.customerId}`} AND target=${`approval.submit:${row.id}`}`;
       if (receiptChanged !== 1) throw new ConflictException("原执行收据关联缺失，不能发布结束结果");
       return { id, state: "closed", revision: row.revision + 1, retryable: false };
     }, tx => this.commands.customer(context, tx, false));
