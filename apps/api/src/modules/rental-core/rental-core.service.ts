@@ -11,7 +11,7 @@ import { quoteRentalLineSource } from "./rental-quote-line-source";
 import { inventoryBasisGroups, assertRentalInventoryBasis } from "./rental-quote-inventory-basis";
 import { selectDamageWaiver } from "./rental-damage-waiver";
 import { inspectionClosureError } from "./rental-inspection-customer-response";
-import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
+import { readFrozenInspectionTemplates, snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import type { BusinessContext } from "./rental-business.service";
 import { capabilityRequirementRoots, resolveCapabilityRequirements } from "./category-capability-conditions";
 import { validateQuotedCapabilityRequirements } from "./category-capability-facts";
@@ -3392,22 +3392,48 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
 
-  async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder, tx?: RentalFactTx) {
+  async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder, tx?: RentalFactTx,
+    returnAllocationIds?: readonly string[]) {
     const state = this.state(tenantId);
     if (order && order.tenantId !== tenantId) throw new ForbiddenException("订单不属于当前租户");
-    if (order?.inspectionTemplateSnapshots !== undefined) {
-      const originals = order.inspectionTemplateSnapshots.filter((row) => !stage || row.stage === stage);
+    if (order) {
+      if (stage === "return") {
+        const active = (order.allocations ?? []).filter(row => row.status === "picked_up" || row.status === "locked" && row.metadata?.exchangeId);
+        const selected = returnAllocationIds === undefined ? active : active.filter(row => returnAllocationIds.includes(row.id));
+        if (returnAllocationIds !== undefined && (!returnAllocationIds.length || new Set(returnAllocationIds).size !== returnAllocationIds.length
+          || selected.length !== returnAllocationIds.length)) throw new BadRequestException("检查分配项不属于本单可归还资源");
+        // Replacement-only checks use their own recorded change basis. Missing
+        // unrelated original history must not be invented or block this batch.
+        if (selected.length && selected.every(row => row.metadata?.exchangeId)) {
+          if (typeof this.factStore?.listOrderChanges !== "function") throw new ServiceUnavailableException("替换商品检查依据读取端口未装配");
+          const changes = await this.factStore.listOrderChanges(tenantId, order.id, tx);
+          for (const changeId of new Set(selected.map(row => row.metadata!.exchangeId!))) {
+            const change = changes.find(row => row.id === changeId), basis = change && exchangeBasis(change);
+            if (!basis || basis.categoryCode !== order.categoryCode || order.categoryVersionId && !basis.categoryVersionId)
+              throw new ConflictException("替换商品缺少原检查执行依据");
+            readFrozenInspectionTemplates(basis.inspectionTemplateSnapshots, tenantId, order.categoryCode);
+          }
+          return exchangeInspectionTemplates({ ...order, allocations: selected }, [], changes).filter(row => row.stage === "return");
+        }
+      }
+      let frozen: unknown = order.inspectionTemplateSnapshots;
+      if (frozen === undefined) {
+        if (typeof this.factStore?.readQuotedInspectionTemplates !== "function")
+          throw new ServiceUnavailableException("历史检查依据缺失，原报价检查读取端口未装配");
+        const quoted = await this.factStore.readQuotedInspectionTemplates(tenantId, order.id, tx);
+        if (!quoted || quoted.quoteId !== order.quoteId || quoted.categoryCode !== order.categoryCode
+          || quoted.categoryVersionId !== order.categoryVersionId) throw new ConflictException("原订单/报价没有可核对的冻结检查依据");
+        frozen = quoted.templates;
+      }
+      const originals = readFrozenInspectionTemplates(frozen, tenantId, order.categoryCode).filter((row) => !stage || row.stage === stage);
       if (stage === "pickup" || !(order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)) return structuredClone(originals);
       return exchangeInspectionTemplates(order, originals, await this.factStore.listOrderChanges(tenantId, order.id, tx)).filter((row) => !stage || row.stage === stage);
     }
-    const definition = order?.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId)
-      : await this.getWorkspaceCategory(tenantId);
+    const definition = await this.getWorkspaceCategory(tenantId);
     const originals = state.inspectionTemplates
       .filter((row) => !stage || row.stage === stage)
       .map((row) => this.inspectionTemplateForRead(definition, row));
-    if (!order || stage === "pickup" || !(order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)) return originals;
-    return exchangeInspectionTemplates(order, originals, await this.factStore.listOrderChanges(tenantId, order.id, tx)).filter((row) => !stage || row.stage === stage);
+    return originals;
   }
 
   async listInspections(tenantId: string, orderId: string) {
@@ -3533,15 +3559,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    const frozenTemplates = order.inspectionTemplateSnapshots !== undefined || (order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)
-      ? await this.listInspectionTemplates(tenantId, undefined, order, tx) : undefined;
-    const storedTemplate = (frozenTemplates ?? state.inspectionTemplates).find((row) => row.id === input.templateId && row.enabled);
-    const inspectionCategory = order.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx)
-      : await this.getWorkspaceCategory(tenantId);
-    let template = storedTemplate ? (frozenTemplates !== undefined ? structuredClone(storedTemplate) : this.inspectionTemplateForRead(inspectionCategory, storedTemplate)) : undefined;
+    const stage = order.status === RentalCoreOrderStatus.ReadyForPickup ? "pickup" : order.status === RentalCoreOrderStatus.Renting ? "return" : undefined;
+    const frozenTemplates = await this.listInspectionTemplates(tenantId, stage, order, tx, input.returnItems?.map(row => row.allocationId));
+    const storedTemplate = frozenTemplates.find((row) => row.id === input.templateId && row.enabled);
+    let template = storedTemplate ? structuredClone(storedTemplate) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     if (order.capabilityRequirementsSnapshot && !template.exchangeId) {
+      if (!order.categoryVersionId || !this.categoryResolver) throw new ConflictException("历史条件检查缺少原品类执行依据");
+      const inspectionCategory = await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx);
       const requested = input.returnItems?.length ? new Set(input.returnItems.map(item => item.allocationId)) : undefined;
       const inspectedLines = order.lines.filter(line => order.allocations.some(allocation => allocation.orderLineId === line.id &&
         (requested ? requested.has(allocation.id) : template!.allocationIds ? template!.allocationIds.includes(allocation.id)
@@ -3566,6 +3591,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     assertInspectionAllocationScope(template, [...returnableAllocationIds]);
     const replacementChange = template.exchangeId ? (await this.factStore.listOrderChanges(tenantId, order.id, tx)).find((row) => row.id === template.exchangeId) : undefined;
     const replacementBasis = replacementChange && exchangeBasis(replacementChange);
+    if (template.exchangeId && (!replacementBasis || replacementBasis.categoryCode !== order.categoryCode
+      || order.categoryVersionId && !replacementBasis.categoryVersionId)) throw new ConflictException("替换商品缺少原检查执行依据");
     const hookOrder = template.stage === "return" && (template.allocationIds || partialReturnItems) ? {
       ...order,
       lines: order.lines.filter((row) => order.allocations.some((allocation) => returnableAllocationIds.has(allocation.id) && allocation.orderLineId === row.id)),

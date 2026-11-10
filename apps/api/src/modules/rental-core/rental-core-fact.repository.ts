@@ -276,6 +276,7 @@ export interface RentalCoreFactStore {
   readOrderFacts?(tenantId: string, workspaceId: string, orderId: string): Promise<RentalOrderReadFacts | undefined>;
   readOrderExplanationState?: RentalCoreFactRepository['readOrderExplanationState'];
   readOrderInspectionBasis?: RentalCoreFactRepository['readOrderInspectionBasis'];
+  readQuotedInspectionTemplates?: RentalCoreFactRepository['readQuotedInspectionTemplates'];
   /**
    * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
    * 不加锁时确认、配货、取消会各读一份聚合副本、各跑状态机、各整体写回，
@@ -532,6 +533,43 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async readOrderInspectionBasis(tenantId: string, workspaceId: string, orderId: string) {
     return readOrderInspectionBasisInput(this.prisma, tenantId, workspaceId, orderId,
       () => this.requestOrderVisibilityWhere());
+  }
+
+  /** Recover only the original linked quote's frozen checks, under the original
+   * order visibility. Never read current tenant templates or create history. */
+  async readQuotedInspectionTemplates(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    const client = tx ?? this.prisma, workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const parent = await client.rentalOrder.findFirst({
+      where: { id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
+      select: { id: true, tenantId: true, workspaceId: true, quoteId: true, categoryCode: true, categoryVersionId: true, updatedAt: true }
+    });
+    if (!parent) throw new NotFoundException("订单不存在或不可读取原检查依据");
+    if (parent.id !== orderId || parent.tenantId !== tenantId || parent.workspaceId !== workspaceId)
+      throw new ForbiddenException("原检查依据订单不属于当前读取范围");
+    if (!(parent.updatedAt instanceof Date) || !Number.isFinite(parent.updatedAt.getTime()))
+      throw new ConflictException("原检查依据订单修订不可核对");
+    if (!parent.quoteId) return undefined;
+    const rows = await client.$queryRaw<Array<{ orderId: string; tenantId: string; workspaceId: string; quoteId: string;
+      categoryCode: string; categoryVersionId: string | null; templates: unknown }>>(Prisma.sql`
+      SELECT o.id AS orderId, o.tenantId, o.workspaceId, q.id AS quoteId, q.categoryCode, q.categoryVersionId,
+        CASE WHEN JSON_TYPE(q.inspectionTemplateSnapshots) IS NULL OR JSON_TYPE(q.inspectionTemplateSnapshots) = 'NULL' THEN NULL
+          WHEN JSON_TYPE(q.inspectionTemplateSnapshots) = 'ARRAY' AND JSON_LENGTH(q.inspectionTemplateSnapshots) <= 200
+            AND OCTET_LENGTH(CAST(q.inspectionTemplateSnapshots AS CHAR)) <= 1048576 THEN q.inspectionTemplateSnapshots
+          ELSE JSON_OBJECT('readLimitExceeded', TRUE) END AS templates
+      FROM rental_orders AS o JOIN rental_quotes AS q ON q.id = o.quoteId AND q.tenantId = o.tenantId AND q.workspaceId = o.workspaceId
+        AND q.categoryCode = o.categoryCode AND q.categoryVersionId <=> o.categoryVersionId
+      WHERE o.id = ${orderId} AND o.tenantId = ${tenantId} AND o.workspaceId = ${workspaceId}
+        AND o.quoteId = ${parent.quoteId} AND o.updatedAt = ${parent.updatedAt} LIMIT 1`);
+    const row = rows[0];
+    if (rows.length !== 1 || row.orderId !== parent.id || row.tenantId !== tenantId || row.workspaceId !== workspaceId
+      || row.quoteId !== parent.quoteId || row.categoryCode.toLowerCase() !== parent.categoryCode.toLowerCase()
+      || row.categoryVersionId !== parent.categoryVersionId) throw new ConflictException("原报价检查依据关联缺失或读取期间变化");
+    if (row.templates === null || row.templates === undefined) return undefined;
+    let templates = row.templates;
+    if (typeof templates === "string") {
+      try { templates = JSON.parse(templates); } catch { throw new ConflictException("原报价检查快照JSON不可读"); }
+    }
+    return { quoteId: row.quoteId, categoryCode: row.categoryCode.toLowerCase(), categoryVersionId: row.categoryVersionId ?? undefined, templates };
   }
 
   /** Bounded explanation metadata only; no allocations' asset/contact JSON,

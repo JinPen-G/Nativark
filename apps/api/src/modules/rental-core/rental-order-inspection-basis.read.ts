@@ -80,7 +80,21 @@ export async function readOrderInspectionBasisInput(prisma: PrismaService, tenan
     FROM rental_orders o WHERE o.id = ${orderId} AND o.tenantId = ${tenantId} AND o.workspaceId = ${workspaceId}
       AND o.updatedAt = ${before.updatedAt} LIMIT 1`);
   if (originals.length !== 1) throw invalid();
-  const originalTemplateRefs = parseTemplates(originals[0], tenantId);
+  let originalTemplateRefs = parseTemplates(originals[0], tenantId);
+  if (originalTemplateRefs === undefined) {
+    // An order may lack its copied field while the associated immutable quote
+    // still carries it. Recover only same-scope, same-version reference paths;
+    // a malformed existing order snapshot never reaches this fallback.
+    const quoted = await prisma.$queryRaw<TemplateProjection[]>(Prisma.sql`
+      SELECT ${templateProjection(Prisma.sql`q.inspectionTemplateSnapshots`)}
+      FROM rental_orders o JOIN rental_quotes q ON q.id = o.quoteId AND q.tenantId = o.tenantId AND q.workspaceId = o.workspaceId
+        AND q.categoryCode = o.categoryCode AND q.categoryVersionId <=> o.categoryVersionId
+      WHERE o.id = ${orderId} AND o.tenantId = ${tenantId} AND o.workspaceId = ${workspaceId}
+        AND o.updatedAt = ${before.updatedAt}
+        AND (JSON_TYPE(o.inspectionTemplateSnapshots) IS NULL OR JSON_TYPE(o.inspectionTemplateSnapshots) = 'NULL') LIMIT 1`);
+    if (quoted.length > 1) throw invalid();
+    if (quoted.length) originalTemplateRefs = parseTemplates(quoted[0], tenantId);
+  }
   if (!originalTemplateRefs) throw new ServiceUnavailableException("订单缺少冻结检查模板，不能套用当前配置");
   const metadata = rows.length ? await prisma.$queryRaw<Array<{ id: string; updatedAt: Date;
     metadataType: string | null; exchangeType: string | null; exchangeId: unknown }>>(Prisma.sql`
