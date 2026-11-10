@@ -158,7 +158,7 @@ export interface RentalConfigStore {
   }>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
-  upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization): Promise<void>;
+  upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding): Promise<void>;
   readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null>;
   upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number>;
   /** preserveStatus carries an omitted edit field into the writer's lock; the
@@ -797,11 +797,11 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       locations: locations.map(row => this.toLocation(row)), couponTemplates: coupons.map(row => this.toCouponTemplate(row)), operators: [], inspectionTemplates: [], hasPersistedConfig: Boolean(settings) };
   }
 
-  async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization): Promise<void> {
+  async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding): Promise<void> {
     // The opening-policy lock must live through profile and workspace creation.
     // Autocommit SELECT FOR UPDATE would release it before the protected write.
     if (!tx) {
-      await this.prisma.$transaction((client) => this.upsertProfile(profile, client, initialization), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      await this.prisma.$transaction((client) => this.upsertProfile(profile, client, initialization, expectedBinding), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       return;
     }
     const data = {
@@ -825,13 +825,22 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const requestWorkspaceId = getRequestWorkspaceId();
     const isDefaultWorkspaceWrite = !requestWorkspaceId || requestWorkspaceId === `ws_${profile.tenantId}`;
     if (initialization?.categoryVersionId && !isDefaultWorkspaceWrite) throw new ConflictException("初始化选版只适用于新建默认空间");
+    if (expectedBinding) {
+      // 普通设置保存与采用共用空间锁，旧页面不能在新版生效后覆盖档案。
+      // 已有绑定不再进入新空间政策/成员初始化，避免持空间锁后反向获取政策锁。
+      const workspaceId = await resolveScopeWorkspaceId(tx, profile.tenantId);
+      const { definition } = await lockActiveCategoryBinding(tx, profile.tenantId, workspaceId, expectedBinding, profile.categoryCode);
+      if (profile.configVersion !== definition.version || profile.capabilities.some(code => !definition.defaultCapabilities.includes(code))) {
+        throw new ConflictException("经营档案与当前采用品类版本不一致，请刷新后重新保存");
+      }
+    }
     if (isDefaultWorkspaceWrite) {
       await this.db(tx).tenantRentalProfile.upsert({
         where: { tenantId: profile.tenantId },
         create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
         update: data
       });
-      await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx, initialization);
+      if (!expectedBinding) await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx, initialization);
       return;
     }
     // 非默认空间：确保档案存在（懒加载租户可能还没有），但绝不改既有品类。
@@ -915,9 +924,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         }
       });
     }
-    // 首次创建的判定用 upsert 的返回值：createdAt === updatedAt 说明这次是 create。
-    const isFreshWorkspace = workspace.createdAt.getTime() === workspace.updatedAt.getTime();
-    if (!isFreshWorkspace) return;
+    // 未编辑过的旧空间也可能保留相等的创建/更新时间，不能据此重新授予成员资格。
+    // 品类身份锁覆盖前面的存在性读取与创建；只为本事务首次建立的空间补成员。
+    if (existingWorkspace) return;
     const users = await client.user.findMany({ where: { tenantId }, select: { id: true, isActive: true } });
     for (const user of users) {
       await client.workspaceMember.upsert({

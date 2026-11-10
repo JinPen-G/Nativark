@@ -576,7 +576,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 走内存；到阶段 3 事实落库后就会立刻炸：资产和订单行的外键指向并不存在的商品组行。
    */
   private async factContext(tenantId: string) {
-    await this.refreshCommittedWorkspace(tenantId);
+    const committed = await this.refreshCommittedWorkspace(tenantId);
+    if (committed && !committed.businessSettings) throw new ConflictException("经营设置尚未持久化，不能通过业务访问重新初始化空间");
     const workspaceId = this.workspaceOf(tenantId);
     const state = this.state(tenantId);
     let initialization = this.initializationByWorkspace.get(workspaceId);
@@ -630,11 +631,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async onApplicationBootstrap() {
     // 先建「租户 → 默认空间」「空间 → 品类」两张表：state() 是同步的，
     // 无会话路径（快照回填、seed）需要它们才能解析空间。
-    for (const workspace of await this.configStore.listWorkspaces()) {
+    const workspaces = await this.configStore.listWorkspaces();
+    for (const workspace of workspaces) {
       this.categoryByWorkspace.set(workspace.id, workspace.categoryCode);
       this.tenantByWorkspace.set(workspace.id, workspace.tenantId);
       if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
     }
+    if (this.configStore.loadWorkspaceSnapshot) {
+      // 启动与采用后的读取使用同一锁定快照；不能先读旧配置，再单独拼接新绑定正文。
+      // 原快照里的样本与缺省值不回填当前配置，合法空集也必须覆盖旧缓存。
+      for (const workspace of workspaces) await this.loadCommittedWorkspace(workspace.tenantId, workspace.id);
+      return;
+    }
+    if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但启动缺少空间配置权威读取器");
     for (const snapshot of await this.configStore.loadAll()) {
       const cached = this.states.get(snapshot.workspaceId);
       // 品类以经营空间为准（需求 3）。
@@ -690,11 +699,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * never republishes snapshots or creates sample facts; old contexts hold their
    * own detached arrays/definition when a later adoption advances the cache. */
   async refreshCommittedWorkspace(tenantId: string) {
+    return this.loadCommittedWorkspace(tenantId, this.workspaceOf(tenantId));
+  }
+
+  private async loadCommittedWorkspace(tenantId: string, workspaceId: string) {
     if (!this.configStore?.loadWorkspaceSnapshot) {
       if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但缺少空间配置权威读取器");
       return undefined; // Explicit absorbing/memory stores have no DB authority.
     }
-    const workspaceId = this.workspaceOf(tenantId);
     const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId);
     if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
       throw new ConflictException("空间配置快照的作用域或品类不一致");
@@ -1201,8 +1213,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
+    const { definition, binding } = await this.categoryWriteContext(tenantId, input.categoryCode);
     const state = this.state(tenantId);
-    const definition = await this.effectiveCategory(tenantId, input.categoryCode);
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
     if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
     const allowed = new Set(definition.defaultCapabilities);
@@ -1225,7 +1237,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
     // 先写库，成功后再落缓存：库写失败时缓存保持原状，
     // 不留只存在于当前进程的幽灵配置。
-    await this.configStore.upsertProfile(nextProfile);
+    await this.configStore.upsertProfile(nextProfile, undefined, undefined, binding);
     state.profile = nextProfile;
     return state.profile;
   }

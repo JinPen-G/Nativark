@@ -4,6 +4,16 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="core-resume-20261110"></a>
+
+## Core恢复研发与原CLOSE核实入口（2026-11-10）
+
+负责人通过PM正式下发Core研发；唯一树`D:/工作文件/rental-OS/worktree/rental-core`、分支`codex/rental-core`、开工及实际远端SHA为`859ad9abdccd017de3dd24bf7767ffb16a311a7a`，开工工作区/暂存区干净，无merge/cherry-pick。持续目标主线为CAT-GOV全部收口，原CLOSE十二项单独核实及必要接点单独交付，不移转任务或进度。本轮前像由该Git提交保全；旧树目录删除不再接续。
+
+首片修复品类初始化/当前配置链，证据唯一见[品类治理阶段](品类治理/品类治理-开发记录.md#core-resume-20261110)，不作为CLOSE结项。当前无本树独立依赖及运行产物，共同工具链由PM协调；禁止新增/扩写测试脚本，仅既有定向冒烟、短命令及必要类型检查。
+
+原CLOSE表保持2026-10-18口径，本轮尚未逐项完成现状复核，不把“待验收”写为实现齐全。对企业当前ECP-07/08及后续09/10，先核[批准订单事务](../../apps/api/src/modules/rental-core/approved-order-transaction.ports.ts)、[Core订单服务](../../apps/api/src/modules/rental-core/rental-core.service.ts)、[企业债权](../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)与[资金服务](../../apps/api/src/modules/rental-core/rental-funding.service.ts)的正式读取/消费边界；企业/AI内部实现归原作者，共同入口由PM协调。真正缺端口时只交最小正式接点，不另建账本。非关键路径CLOSE继续沿原依赖，真实DB/供应商/宿主结果本轮未验。
+
 ## 1. 既有基线与未完成分类
 
 原任务登记：MONEY/CORP/INSPECTION/NOTICE/QUARANTINE为“待验收”，USAGE/WAIVER为“进行中”，NONRETURN/OFFRENT/VEHICLE-AFTER/GUARANTEE/SAFETY为“未完成”。这些是2026-10-18原记录，不是本次重验结果；原任务未提供可靠百分比，不估分。
