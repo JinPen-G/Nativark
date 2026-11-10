@@ -10,10 +10,10 @@ import { createOriginalMcpClientReviewManagement } from './original-mcp-client-r
 import type { OriginalClientReviewVerificationSource } from './original-mcp-client-review-management';
 import { createOriginalMcpNoticeReviewManagement } from './original-mcp-notice-review-management';
 import type { OriginalNoticeReviewVerificationSource } from './original-mcp-notice-review-management';
-import type { createMcpReviewControlPlane, McpReviewControlPlane, McpReviewControlPlaneConfig, OriginalMcpReviewControlPlaneDependencies } from '@rental-os/mcp-server/review-control-plane';
-import type { publicClientReviewRegistrationHash } from '@rental-os/mcp-server/prisma-public-client-review';
-import type { oauthNoticeCandidateHash, oauthNoticeScopeKey } from '@rental-os/mcp-server/prisma-oauth-notice-review';
-import type { captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store';
+import type { createMcpReviewControlPlane, McpReviewControlPlane, McpReviewControlPlaneConfig, OriginalMcpReviewControlPlaneDependencies } from '@rental-os/mcp-server/review-control-plane' with { 'resolution-mode': 'import' };
+import type { publicClientReviewRegistrationHash } from '@rental-os/mcp-server/prisma-public-client-review' with { 'resolution-mode': 'import' };
+import type { oauthNoticeCandidateHash, oauthNoticeScopeKey } from '@rental-os/mcp-server/prisma-oauth-notice-review' with { 'resolution-mode': 'import' };
+import type { captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store' with { 'resolution-mode': 'import' };
 export interface OriginalMcpReviewPackageExports {
   createMcpReviewControlPlane: typeof createMcpReviewControlPlane;
   publicClientReviewRegistrationHash: typeof publicClientReviewRegistrationHash;

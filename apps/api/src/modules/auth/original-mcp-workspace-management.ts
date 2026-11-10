@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
 import type { AuthService } from './auth.service';
 import type { PlatformService } from '../platform/platform.service';
-import type { OriginalOAuthAdmissionManagement } from '@rental-os/mcp-server/prisma-oauth-admission-store';
+import type { OriginalOAuthAdmissionManagement } from '@rental-os/mcp-server/prisma-oauth-admission-store' with { 'resolution-mode': 'import' };
 import type { OperationLogService } from '../../common/operation-log.service';
 
 const unavailable = () => new Error('Original MCP workspace management unavailable');

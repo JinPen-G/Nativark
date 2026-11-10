@@ -10,9 +10,9 @@ import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpPlatformIdentity, createOriginalMcpPlatformManagement } from './original-mcp-platform-management';
 import { createOriginalMcpBrowserIdentity } from './original-mcp-browser-identity';
 import { createOriginalMcpWorkspaceManagement } from './original-mcp-workspace-management';
-import type { OAuthAdmissionTarget } from '@rental-os/mcp-server/prisma-oauth-admission-store';
-import type { OAuthConsentPolicy, captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store';
-import type { OAuthNoticeReviewer, OriginalOAuthNoticeReviewManagement, oauthNoticeCandidateHash, oauthNoticeScopeKey } from '@rental-os/mcp-server/prisma-oauth-notice-review';
+import type { OAuthAdmissionTarget } from '@rental-os/mcp-server/prisma-oauth-admission-store' with { 'resolution-mode': 'import' };
+import type { OAuthConsentPolicy, captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store' with { 'resolution-mode': 'import' };
+import type { OAuthNoticeReviewer, OriginalOAuthNoticeReviewManagement, oauthNoticeCandidateHash, oauthNoticeScopeKey } from '@rental-os/mcp-server/prisma-oauth-notice-review' with { 'resolution-mode': 'import' };
 export interface OriginalNoticeReviewVerificationEvidence {
   kind: 'satisfied' | 'not_required'; reference: string; revision: number; expiresAt: number;
   userId: string; tenantId: string; workspaceId: string | null; sessionId: string; candidateHash: string;

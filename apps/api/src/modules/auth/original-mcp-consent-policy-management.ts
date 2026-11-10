@@ -9,10 +9,10 @@ import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpPlatformManagement, createOriginalMcpPlatformIdentity } from './original-mcp-platform-management';
 import { createOriginalMcpWorkspaceManagement } from './original-mcp-workspace-management';
-import type { OAuthAdmissionTarget } from '@rental-os/mcp-server/prisma-oauth-admission-store';
-import type { captureOAuthConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-consent-review';
+import type { OAuthAdmissionTarget } from '@rental-os/mcp-server/prisma-oauth-admission-store' with { 'resolution-mode': 'import' };
+import type { captureOAuthConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-consent-review' with { 'resolution-mode': 'import' };
 import type { OAuthConsentPolicy, PrismaOAuthConsentPolicyStore, OriginalOAuthConsentPolicyManagement, OriginalOAuthConsentPolicyReviewSource,
-  captureOAuthConsentPolicyReceipt, captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store';
+  captureOAuthConsentPolicyReceipt, captureOAuthConsentPolicyTarget } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store' with { 'resolution-mode': 'import' };
 const unavailable = () => new Error('Original MCP consent policy management unavailable');
 function fields(value: unknown, names: readonly string[], closed = true): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw unavailable();
