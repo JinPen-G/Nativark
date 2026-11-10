@@ -713,8 +713,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
       const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
       const state = this.states.get(workspaceId) ?? seeded;
-      const profile = snapshot.isDefault && snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
-      const effectiveProfile = { ...structuredClone(profile), categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
+      const profile = snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
+      const effectiveProfile = { ...structuredClone(profile), terminology: {
+        ...snapshot.definition.terminology, ...profile.terminology,
+        navigationLabels: { ...snapshot.definition.terminology.navigationLabels, ...profile.terminology.navigationLabels }
+      }, categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
       Object.assign(state, { profile: effectiveProfile,
         businessSettings: snapshot.businessSettings ? structuredClone(snapshot.businessSettings) : seeded.businessSettings,
         operators: structuredClone(snapshot.operators), locations: structuredClone(snapshot.locations), itemGroups: structuredClone(snapshot.itemGroups),
@@ -1223,13 +1226,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
     if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
     const allowed = new Set(definition.defaultCapabilities);
-    const capabilities = (input.capabilities ?? definition.defaultCapabilities).filter((item) => allowed.has(item));
+    const capabilities = (input.capabilities ?? state.profile.capabilities).filter((item) => allowed.has(item));
     const nextProfile = {
       ...state.profile,
       categoryCode: input.categoryCode,
       capabilities,
       terminology: {
         ...definition.terminology,
+        ...state.profile.terminology,
         ...input.terminology,
         navigationLabels: {
           ...definition.terminology.navigationLabels,
