@@ -1,5 +1,5 @@
 import { rentalCategoryStorageCode } from "./category-identity";
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";

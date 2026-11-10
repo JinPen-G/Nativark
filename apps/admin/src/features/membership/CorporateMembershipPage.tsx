@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, DataTableRowActions, DataTableStatus, DataTableText, DatePicker, Modal, Select, Tabs } from "@/components/ui";
+import { Button, DataTableRowActions, DataTableStatus, DataTableText, DatePicker, Drawer, Modal, Select, Tabs } from "@/components/ui";
 import { BadgeCheck, Landmark, Users } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RecordDetailLayout, RecordFacts } from "@/components/RecordDetailLayout";

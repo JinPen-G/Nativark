@@ -4,13 +4,13 @@
  * receipt reconciliation can record capability evidence or settle the original
  * ledger. Only an exact original operation receipt clears its unknown marker;
  * current financial balances never grant execution or permit replay. */
-import type { AiTextCapabilityPrepareRequestDraft, AiTextCapabilityHttpResponsesDraft,
+import type { AiTextCapabilityHttpResponsesDraft,
   AiTaskStopQueryDraft, AiTaskStopObservationDraft, AiTextCapabilityAccountingResponseDraft,
   AiTextCapabilityAccountingOperationResponseDraft } from '@rental-os/shared';
 import type { CapabilityProbeAction, aiCapabilityProbeApi } from '@/api/aiCapabilityProbe';
 import { isUsageQuantity } from './usage-quantity';
 
-type Capability = NonNullable<AiTextCapabilityPrepareRequestDraft['capability']>;
+type Capability = (typeof PROBE_CAPABILITIES)[number];
 export const PROBE_TASK_ACTIONS = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run',
   'release_run', 'transition_task', 'request_input'] as const;
 export type ConnectionCheck = { state: 'supported' | 'unsupported' | 'pending' | 'stale'; checkedAt: string | null };
