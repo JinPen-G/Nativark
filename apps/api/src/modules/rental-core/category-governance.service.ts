@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+/** Rental definition drafts, immutable publication and separate adoption policy.
+ * Writes reuse original platform identity/permission reads in one transaction;
+ * tenant business facts and production enablement remain outside this service. */
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P, RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, isRentalCategoryCode,
@@ -14,6 +17,8 @@ import { categoryScopeAllows } from "./category-governance-policy";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
 import { categoryCreationTemplates, composeCategoryCreation } from "./category-creation-templates";
 import { requestFingerprint } from "./rental-idempotency.repository";
+import { AuthService } from "../auth/auth.service";
+import { PlatformRepository } from "../platform/platform.repository";
 
 export function assertCategoryGovernancePermission(user: SystemUserRow | undefined, permission: string) {
   if (!user?.isSaasAdmin || !(user.permissions.includes(permission) || user.permissions.includes("*"))) {
@@ -61,7 +66,41 @@ const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(va
 
 @Injectable()
 export class CategoryGovernanceService {
-  constructor(private readonly prisma: PrismaService, private readonly hooks: CapabilityHookRuntime) {}
+  constructor(private readonly prisma: PrismaService, private readonly hooks: CapabilityHookRuntime,
+    @Optional() private readonly auth?: AuthService, @Optional() private readonly principals?: PlatformRepository) {}
+
+  /** Original signed platform session and permission mapping under Serializable.
+   * Identity/role reads precede category locks and are checked again before return.
+   * No bearer token is stored, no workspace grant is inferred, and no write retries. */
+  private async platformTransaction<T>(user: SystemUserRow, permission: string, authorization: string | undefined,
+    run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    assertCategoryGovernancePermission(user, permission);
+    if (!this.auth || !this.principals) throw new ServiceUnavailableException("平台品类事务缺少原身份复核接点");
+    const auth = this.auth, principals = this.principals;
+    const signal = AbortSignal.timeout(30000);
+    try {
+      return await this.prisma.$transaction(async tx => {
+        const before = await auth.resolveTrustedPlatformBrowserPrincipal(authorization, tx, signal);
+        if (!before || before.userId !== user.id || before.tenantId !== user.tenantId) throw new UnauthorizedException("当前平台会话与品类操作人不一致");
+        assertCategoryGovernancePermission(await principals.findUserById(before.userId, tx), permission);
+        if (signal.aborted || before.expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("平台会话已到期，品类写入未获准");
+        const result = await run(tx);
+        const after = await auth.resolveTrustedPlatformBrowserPrincipal(authorization, tx, signal);
+        if (!after || after.userId !== before.userId || after.tenantId !== before.tenantId ||
+            after.sessionId !== before.sessionId || after.expiresAt !== before.expiresAt ||
+            user.id !== before.userId || user.tenantId !== before.tenantId) throw new UnauthorizedException("平台会话在品类操作期间变化，请核对原结果");
+        assertCategoryGovernancePermission(await principals.findUserById(before.userId, tx), permission);
+        // Permission reads may wait too; expiry must be checked after the last await.
+        if (signal.aborted || after.expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("平台会话已到期，请核对原品类操作结果");
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 30000 });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new ConflictException("平台身份或品类请求发生并发冲突，请保留原输入核对原结果");
+      }
+      throw error;
+    }
+  }
   private dynamicCreationEnabled() {
     return process.env.NODE_ENV !== "production" && process.env.RENTAL_CATEGORY_DYNAMIC_CREATION === "true";
   }
@@ -98,23 +137,22 @@ export class CategoryGovernanceService {
     if (expectedHash && expectedHash !== after.requestHash) throw new ConflictException("原操作键已用于不同新品类输入，请先核对原收据");
     return after.version;
   }
-  async readCreationReceipt(key: string, user: SystemUserRow): Promise<RentalCategoryCreationReceipt> {
-    assertCategoryGovernancePermission(user, P.edit);
-    const version = await this.creationReceipt(this.prisma, user, key);
-    return version ? { outcome: "created", version } : { outcome: "unknown" };
+  async readCreationReceipt(key: string, user: SystemUserRow, authorization?: string): Promise<RentalCategoryCreationReceipt> {
+    return this.platformTransaction<RentalCategoryCreationReceipt>(user, P.edit, authorization, async tx => {
+      const version = await this.creationReceipt(tx, user, key);
+      return version ? { outcome: "created", version } : { outcome: "unknown" };
+    });
   }
-  async createCategory(input: CreateRentalCategoryRequest, user: SystemUserRow) {
+  async createCategory(input: CreateRentalCategoryRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
     categoryIdentity(input.code);
     if (!input.reason?.trim() || input.reason.length > 512) throw new BadRequestException("请填写创建原因");
     const requestHash = requestFingerprint(input);
-    const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
-    if (replay) return replay;
-    if (!this.dynamicCreationEnabled()) throw new ServiceUnavailableException("动态品类创建尚未开放");
     try {
-      return await this.prisma.$transaction(async tx => {
+      return await this.platformTransaction(user, P.edit, authorization, async tx => {
         const replay = await this.creationReceipt(tx, user, input.idempotencyKey, requestHash);
         if (replay) return replay;
+        if (!this.dynamicCreationEnabled()) throw new ServiceUnavailableException("动态品类创建尚未开放");
         const source = await this.creationSource(tx, input);
         const composed = composeCategoryCreation(source.definition, input);
         if (composed.definitionHash !== input.expectedDefinitionHash) throw new ConflictException("创建内容与已核对预览不同，请重新预览");
@@ -136,7 +174,8 @@ export class CategoryGovernanceService {
       });
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
-        const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
+        const replay = await this.platformTransaction(user, P.edit, authorization,
+          tx => this.creationReceipt(tx, user, input.idempotencyKey, requestHash));
         if (replay) return replay;
         throw new ConflictException("品类编码或原操作键已被并发占用，请核对原收据");
       }
@@ -204,10 +243,10 @@ export class CategoryGovernanceService {
     return rows.filter((row) => row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId))
       .map((row) => ({ id: row.id, versionLabel: row.versionLabel, operation: op }));
   }
-  async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow) {
+  async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
     const categoryCode = categoryIdentity(code);
-    try { return await this.prisma.$transaction(async (tx) => {
+    try { return await this.platformTransaction(user, P.edit, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       const source = await this.version(tx, categoryCode, input.sourceVersionId);
       if (!["published", "legacy_baseline"].includes(source.status)) throw new ConflictException("只能从同品类已发布版本复制新草稿");
@@ -222,11 +261,11 @@ export class CategoryGovernanceService {
       throw error;
     }
   }
-  async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow) {
+  async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
     if (!CATEGORY_DRAFT_SECTIONS.includes(section)) throw new BadRequestException("未知草稿页签");
     const categoryCode = categoryIdentity(code);
-    return this.prisma.$transaction(async (tx) => {
+    return this.platformTransaction(user, P.edit, authorization, async (tx) => {
       const row = await this.version(tx, categoryCode, id);
       if (row.status !== "draft" || row.revision !== input.expectedRevision) throw new ConflictException("草稿已变更或不是可编辑状态，请刷新后核对");
       const definition = patchCategorySection(row.definition, section, input.values);
@@ -270,10 +309,10 @@ export class CategoryGovernanceService {
       }))), itemFields: body?.businessModel?.assetFields ?? [], inspectionFields: body?.businessModel?.defaults?.inspectionFields ?? [],
       affectedSpaces: await this.prisma.businessWorkspace.count({ where: { categoryCode: row.categoryCode } }) };
   }
-  async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow) {
+  async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.publish);
     const categoryCode = categoryIdentity(code);
-    return this.prisma.$transaction(async (tx) => {
+    return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${categoryCode.toLowerCase()} FOR UPDATE`);
       const row = await this.version(tx, categoryCode, id);
@@ -294,9 +333,9 @@ export class CategoryGovernanceService {
       return this.version(tx, categoryCode, id);
     });
   }
-  async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow) {
+  async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
-    return this.prisma.$transaction(async (tx) => {
+    return this.platformTransaction(user, P.edit, authorization, async (tx) => {
       const categoryCode = categoryIdentity(code);
       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, categoryCode, revision: input.expectedRevision, status: "draft" }, data: { status: "archived", revision: { increment: 1 } } });
       if (changed.count !== 1) throw new ConflictException("只能归档当前修订的未发布草稿");
@@ -304,10 +343,10 @@ export class CategoryGovernanceService {
       return this.version(tx, categoryCode, id);
     });
   }
-  async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow) {
+  async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.opening);
     const categoryCode = categoryIdentity(code);
-    return this.prisma.$transaction(async (tx) => {
+    return this.platformTransaction(user, P.opening, authorization, async (tx) => {
       const category = await this.lockedCategory(tx, categoryCode);
       if (category.openingRevision !== input.expectedRevision) throw new ConflictException("品类开通政策已变更");
       await this.tenants(tx, input.scope, input.tenantIds);
@@ -326,10 +365,10 @@ export class CategoryGovernanceService {
       return after;
     });
   }
-  async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow) {
+  async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.publish);
     const categoryCode = categoryIdentity(code);
-    return this.prisma.$transaction(async (tx) => {
+    return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       const row = await this.version(tx, categoryCode, id);
       if (!["published", "legacy_baseline"].includes(row.status) || !row.policy) throw new ConflictException("只能维护已发布版本的独立采用政策");
