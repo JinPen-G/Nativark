@@ -4,6 +4,17 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '任务读取权限': 'Task read access',
+  '按当前业务权限重新核对这项任务。不会启动模型或执行业务。': 'Recheck this task using your current business permissions. No model or business operation is started.',
+  '上次请求尚未确认，请继续核对原结果；不会重复提交。': 'The previous request is unconfirmed. Check its original result; it will not be submitted again.',
+  '核对上次读取请求': 'Check the previous read request',
+  '检查任务读取权限': 'Check task read access',
+  '当前可以读取这项任务。': 'This task is currently readable.',
+  '需要重新确认当前任务读取权限。': 'Current task read access needs confirmation.',
+  '确认继续读取': 'Confirm continued reading',
+  '按刚核对的当前业务权限继续读取这项任务？不会开始模型或业务操作。': 'Continue reading this task using the current permissions just checked? No model or business operation is started.',
+  '原读取请求已核对。': 'The original read request has been checked.',
+  '当前任务或业务访问权限已变化，请重新核对。': 'The task or business access has changed. Check again.',
   '新的规则准备': 'Prepare a new rule proposal',
   '明确发起关联的新规则准备。原诊断保持不变；本步只保存 AI 提案，Core 草稿与发布另行确认。': 'Start a linked rule proposal. The original diagnosis is preserved; this step saves only an AI proposal. Saving and publishing the Core draft require separate confirmation.',
   '核对原规则准备结果': 'Check the original rule preparation',

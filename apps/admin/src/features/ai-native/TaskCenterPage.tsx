@@ -52,6 +52,7 @@ export function TaskCenterPage() {
 function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: string; tenantId: string; workspaceId: string }) {
   const { t } = useLocale();
   const [opened, setOpened] = useState(false);
+  const [readAccessEpoch, setReadAccessEpoch] = useState(0);
   const [historyOpen, setHistoryOpen] = useState<string[]>([]);
   const [status, setStatus] = useState<string>("all");
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
@@ -191,10 +192,11 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         : followTask === selected ? '每3秒更新，最长10分钟；任务结束后停止。' : '仅更新所选任务的状态。')}</span>
     </div>}
     {(followFailed || followError) && <Alert type="warning" title={t('任务状态当前不可读取，已停止跟随并清除详情；请核对权限后重新读取。')} />}
-    {visible && selected && data?.items.some(row => row.taskId === selected && row.sceneCode === 'order_explanation')
-      && useAuthStore.getState().hasPermission('system:params:manage') && <TaskReadPolicy key={`task-read-policy:${identity}:${selected}`}
-        query={{ taskId: selected }} identity={identity} current={current} />}
-    {opened && <AiTaskWorkbench translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
+    {visible && selected && data?.items.some(row => row.taskId === selected
+      && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(row.sceneCode)) && <TaskReadPolicy key={`task-read-policy:${identity}:${selected}`}
+        query={{ taskId: selected }} identity={identity} current={current}
+        onAccessChanged={() => { stopFollowing(); setLiveSnapshot(null); setReadAccessEpoch(value => value + 1); }} />}
+    {opened && <AiTaskWorkbench key={`${identity}:${readAccessEpoch}`} translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
       statusLabels={Object.fromEntries((data?.items ?? []).map(row => [row.taskId, t(statusLabels[row.status])]))}
       selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
       onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}

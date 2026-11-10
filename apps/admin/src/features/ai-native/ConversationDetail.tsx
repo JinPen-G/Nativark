@@ -82,6 +82,7 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
         && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(turn.capabilityCode)
         && turn.material === 'retained' && turn.task && !('creation' in turn))
         .map(turn => <TaskReadPolicy key={`read-policy:${identity}:${turn.turnId}`} query={{ taskId: turn.task!.taskId, runId: turn.task!.runId }} identity={identity}
+          onAccessChanged={() => setResultEpochs(previous => ({ ...previous, [turn.turnId]: (previous[turn.turnId] ?? 0) + 1 }))}
           current={() => !document.hidden && scope.current.conversationId === conversationId
             && scope.current.capabilityCode === capabilityCode && scope.current.current()} />)}
       {detail.turns.items.filter(turn => capabilityCode === 'opening_diagnosis' && turn.capabilityCode === capabilityCode

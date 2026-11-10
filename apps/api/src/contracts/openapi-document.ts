@@ -1,4 +1,5 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
@@ -2356,6 +2357,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
     operationId: `aiTaskReadPolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Explicit same-owner original manager read-policy CAS and original receipts. Never model/Core execution authorization.',
+    requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
+  ...(['inspect', 'enable', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_ORIGINAL_READ_POLICY_HTTP.basePath}/${AI_TASK_ORIGINAL_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
+    operationId: `aiTaskOriginalReadPolicy_${action}`, permissions: [...AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS],
+    summary: action === 'enable' ? 'Explicit renewal of three owned-task read policies under current original business and resource authorization. No model or Core execution.'
+      : action === 'operation' ? 'Read original renewal receipts, including after expiry or new-execution shutdown. No writes or retries.'
+      : 'Inspect owned-task read access through current original resource Guards, independently of new-model publication.',
     requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
   ...AI_CREDIT_OPERATIONS,
   ...DESKTOP_BUSINESS_OPERATIONS,

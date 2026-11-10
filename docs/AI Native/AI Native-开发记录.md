@@ -6,6 +6,17 @@
 > 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-original-read-policy-20261111"></a>
+## 普通用户原任务读取续期与实际消费者（2026-11-11）
+
+前一批27文件已提交并推送为 `13e1d6189a83b857f3b12d1055d41924afd9cfda`，远端已核。继续核接AI-dev2的[普通读取参加者](../../apps/api/src/modules/ai-native/task-original-read-policy.application.ts)，固定blob `5216b2f3e3758255e09854385c3833d8f2d53dbc`。新 `original-task-read-policies` 的inspect/enable/operation复用原shared闭合协议，明确enable才可更新三项原读取政策；当前Auth、完整scope、本人Task/真实Run、原input及业务资源Guard逐次重验，既有更严格权限保留。创建窗口过期或新模型关闭不等于失去合法历史读权，原文本已抹除且缺必要资源依据时仍不可用。
+
+负责人已接原provider/AppModule、3条Guard/OpenAPI和现有前端API/session。[TaskReadPolicy](../../apps/admin/src/features/ai-native/TaskReadPolicy.tsx)普通用户走原业务读权路径，拥有原管理权限的用户继续原manager路径；两个存储命名空间独立，原未知定位保留。任务中心和原会话均可在明确核对后重读，旧详情在权限核对后撤回。真正的snapshot/operation读取不隐式写政策；已有读取权限有效时，普通流程不重复启用。该入口不签claim/resume/approval，不恢复已过期等待或批准。
+
+独立验证使用当前Controller、实际Auth/Guard/OriginalRequest/PolicyRepository及当前前端API、原session，既有serialized内存DB/资源/clock和明确HTTP宿主。用户仅持 `rental-os:order:view`，无 `system:params:manage`；原输入过期一小时、plan.enabled=false。实际调用inspect→enable→operation：inspect无写，3条读取政策及3条原CAS收据；服务器完成后模拟丢HTTP应答，第二次enable在客户端被拒，dispose→activate后仅读原operation、清已确认定位；Task仍QUEUED，Step=0。原manager路由仍要求system:params:manage。单组 `node` 标准输入冒烟exit0、audit0、临时目录不存在。
+
+API3根及后台14根含声明的noEmit传递检查均exit0。为让两助手继续施工，验证只在进程内将其后续报价/等待输入活动文件读为固定 `13e1d6189` 依赖，工作区未覆盖；本片当前源码真实加载。Prisma仍只读使用已核主API生成物，不安装/复制/生成，不写测试脚本；这些证据不是实际HTTP、浏览器、MySQL锁、生产Auth或整项G4验收。未知组结果仍只按原收据核对，不自动补写未观察兄弟操作。当前原任务未跨档，任务表不加分；等待输入/批准的执行政策续期另由原受控入口收口。
+
 <a id="ain-runtime-publication-20261111"></a>
 ## 核心发布配置生产提供者与原规则准备接点（2026-11-11）
 

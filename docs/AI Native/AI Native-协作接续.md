@@ -8,7 +8,7 @@
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
-检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`。核心13个配置token现有真实部署发布来源，原规则列表桥和已审材料hash接点已补，见[本阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
+检查点已上传为 `dac1c9d65`，固定main环境/治理修复同步为 `d7929c439`，核心提供者/初始准入/规则及日历消费者已上传 `13e1d6189`。核心13个配置token现有真实部署发布来源，见[该阶段记录](<AI Native-开发记录.md#ain-runtime-publication-20261111>)；[普通用户原读取续期](<AI Native-开发记录.md#ain-original-read-policy-20261111>)已接回原前端并通过本片离线链。实际部署配置未启用。main当前由PM处理独立休息播放器，不改其AppShell/locale/管理后台四册或启停在用服务。
 
 原订单人工交接、显式只读政策、首字/首卡宿主，以及原报价再准备、optional runId、订单材料、会员和日历消费者都已进入main。企业成员/门户、MCP/Harness和网站按固定快照核接，文档树已在祖先链。冻结后无新增源码/status差异，七份原稿档案哈希匹配；来源和实际归档位置见[逐树核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)。旧设计、日志和隔离产物不替代运行依赖或业务验收。
 
@@ -32,11 +32,11 @@
 ## 后续核心入口及未完项
 
 1. **原AIN-15报价再准备：** 后端只读定位和[会话WIP](../../apps/admin/src/features/ai-native/quote-reprepare-session.ts)已保留、类型通过；服务端原再准备→新批准→Core单次订单→丢失应答原收据链通过本次离线冒烟。仍缺新材料发起、完整前端选择/对比及其端到端消费。不要让用户手填Step/ActionInput/planHash；unknown只核原操作，不换键重发。入口和前像在`output/ain-human-reprepare-locator-core-20261110/`，前置正向链见[原报价选单阶段](<AI Native-开发记录.md#ain-conversation-quote-selection-core-20261109>)。
-2. **原AIN-13/ENTRY-05人工交接及只读政策：** 新代码已合回，完整消费者行为尚未独立收口。仅显式管理员配置原read_metadata/read_events/read_step_terminal政策，不自动种政策、不授模型或Core执行；保留原CAS、TTL、当前权限及三项独立原收据，部分/unknown不得重发。侧树原验证结果与候选均在主树成果档案内，不能借作者的绿色替代主树验收。
+2. **原AIN-13/ENTRY-05人工交接及只读政策：** 订单v2事实/来源消费者已核接，ordinary-read现在允许当前本人按原业务资源读权明确续期三项读取政策，原manager管理路径保持独立。创建过期/执行关闭不挡合法原读；无必要资源依据仍拒绝。没有在读取时自动种政策或授模型/Core执行；原CAS、TTL、三项独立收据及partial/unknown不重发保持。本片原Controller→实际API/session链已独立验证，真实浏览器与整项门槛仍未代验。
 3. **原AIN-25：** 真实首字/首卡组件及关闭、重开、React效果重放代码已回收，一组离线宿主冒烟通过；真实浏览器可见性、完整场景、容量/SLO、队列/背压/公平性/告警仍需原门槛。客户端报告不成为经营或计费事实；原11同账与累计资源要求保持。
 4. **其余原任务：** 05→06→07完整供应商/能力/往返及故障前置、12/13～16完整Agent和多角色资料隔离、17～28可靠事件/知识隐私/员工与平台治理/组合灰度及交付缺口均保留，详见[原28项摘要](<AI Native-开发记录.md#原28项当前实施摘要>)和[完整未完原文](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。不重开已有100%条目，不新增Reserved或边缘能力。
 5. **客户与ENTRY：** 当前两端三Action以原证据为准；六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网及真实设备仍需完成。详见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)，不以档案/报告数量或本次局部绿色加分。
-6. **当前核心准入接线：** 原发布政策/本人/业务权限的专用CAS参加者已接模型明确start及新规则R1准备，规则真实消费者已独立通过原操作恢复的离线闭环。ordinary-read单文件已交付，负责人下一步接独立三路由/现有读取消费者和新storage命名空间；原manager管理入口不降权。完整新材料报价关联入口、已有任务合法观察接线与等待后继续仍待收口，metadata准入不等于Run领取、业务批准或Core执行。
+6. **当前核心准入接线：** 初始CAS参加者已接模型明确start及新规则R1准备，ordinary-read独立三路由、现有消费者和存储隔离已接回。剩余重点是AI-dev1的新材料报价关联入口，以及AI-dev2的有效WAITING_INPUT原等待在短操作政策过期后的提交/继续；原creation期限与真实wait期限必须区分。负责人接总契约与原宿主，metadata准入不等于Run领取、业务批准或Core执行。
 
 以上保留原任务范围、编号、依赖和验收；恢复功能施工须沿负责人当次授权。每个完整核心切片只做必要定向冒烟和类型检查，跨原G1～G4门槛后维护唯一任务表；未跨档的缺口留记录，不能把合并或档案数量当100%。
 
